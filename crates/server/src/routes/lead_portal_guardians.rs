@@ -26,6 +26,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
+use super::lead_portal_intake::PORTAL_LEAD_SQL;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::auth::{password, password_policy};
@@ -99,21 +100,21 @@ pub(crate) async fn has_other_active_links(
     user_id: Uuid,
     lead_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
+    sqlx::query_scalar(&format!(
         r#"SELECT EXISTS(
                    SELECT 1 FROM patient_assignments
                    WHERE user_id = $1 AND revoked_at IS NULL
                )
                OR EXISTS(
-                   SELECT 1 FROM leads
-                   WHERE portal_user_id = $1 AND id <> $2
-                     AND qualification_status <> 'deleted'
+                   SELECT 1 FROM leads l
+                   WHERE l.portal_user_id = $1 AND l.id <> $2 AND {PORTAL_LEAD_SQL}
                )
                OR EXISTS(
-                   SELECT 1 FROM lead_portal_access
-                   WHERE user_id = $1 AND lead_id <> $2 AND revoked_at IS NULL
+                   SELECT 1 FROM lead_portal_access a JOIN leads l ON l.id = a.lead_id
+                   WHERE a.user_id = $1 AND a.lead_id <> $2 AND a.revoked_at IS NULL
+                     AND {PORTAL_LEAD_SQL}
                )"#,
-    )
+    ))
     .bind(user_id)
     .bind(lead_id)
     .fetch_one(&mut **tx)
@@ -358,8 +359,11 @@ async fn issue_guardian_access(
         r#"SELECT id, role, is_active, name,
                   EXISTS(SELECT 1 FROM patient_assignments pa
                          WHERE pa.user_id = users.id AND pa.revoked_at IS NULL) AS has_patient,
-                  EXISTS(SELECT 1 FROM lead_portal_access a WHERE a.user_id = users.id)
-                      AS was_guardian
+                  EXISTS(SELECT 1 FROM audit_log a
+                         WHERE a.action = 'revoke_lead_guardian_access'
+                           AND a.context ->> 'portal_user_id' = users.id::text
+                           AND a.context ->> 'login_deactivated' = 'true'
+                           AND a.created_at >= users.updated_at) AS deactivated_by_guardian_revoke
            FROM users
            WHERE lower(btrim(email)) = $1
            FOR UPDATE"#,
@@ -426,7 +430,9 @@ async fn issue_guardian_access(
             }
             if account.try_get::<bool, _>("is_active").unwrap_or(false) {
                 (user_id, None, false, false)
-            } else if account.try_get::<bool, _>("was_guardian").unwrap_or(false)
+            } else if account
+                .try_get::<bool, _>("deactivated_by_guardian_revoke")
+                .unwrap_or(false)
                 && !account.try_get::<bool, _>("has_patient").unwrap_or(true)
             {
                 // A parent's login switched off when its last access was
@@ -482,6 +488,12 @@ async fn issue_guardian_access(
         }
         Err(error) => return internal(error, "link guardian"),
     };
+    if let Err(error) =
+        crate::routes::lead_payer_link::revoke_for_cabinet_payer(&mut tx, lead_id, auth.user_id)
+            .await
+    {
+        return internal(error, "revoke payer link after guardian access");
+    }
     let reused = !created && !reactivated;
     if let Err(error) = audit::write_in_transaction(
         &mut tx,
@@ -606,13 +618,20 @@ async fn reset_guardian_password(
     .execute(&state.db)
     .await;
     crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
-    state.audit_sender.try_send(audit::domain_event(
+    let audit_event = audit::domain_event(
         "reset_lead_guardian_password",
         Some(auth.user_id),
         "lead",
         Some(lead_id),
         json!({ "access_id": access_id, "portal_user_id": user_id, "sessions_revoked": true }),
-    ));
+    );
+    let mut audit_conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => return internal(error, "audit password reset"),
+    };
+    if let Err(error) = audit::write_in_transaction(&mut audit_conn, &audit_event).await {
+        return internal(error, "audit password reset");
+    }
     Json(json!({
         "access_id": access_id,
         "user_id": user_id,

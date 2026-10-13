@@ -136,6 +136,124 @@ async fn scope_languages(state: &AppState, row: &PgRow) -> Result<Vec<String>, R
     }
 }
 
+/// Client signers of a minor must be exactly the legal representatives
+/// required by custody. A payer/agency role cannot substitute for a parent.
+fn minor_clients_valid(required: &[String], expected: usize, clients: &[&str]) -> bool {
+    let normalize = |value: &str| value.trim().to_ascii_lowercase();
+    let required: std::collections::BTreeSet<String> = required
+        .iter()
+        .map(|value| normalize(value))
+        .filter(|value| !value.is_empty())
+        .collect();
+    let clients: std::collections::BTreeSet<String> =
+        clients.iter().map(|value| normalize(value)).collect();
+    required.len() == expected && expected > 0 && clients == required
+}
+
+async fn validate_minor_clients(
+    state: &AppState,
+    row: &PgRow,
+    signers: &[Signer],
+) -> Result<(), Response> {
+    // Payer-only and agency-only packages do not sign on the patient's behalf.
+    if !signers
+        .iter()
+        .any(|signer| matches!(signer.role.as_str(), "client" | "minor"))
+    {
+        return Ok(());
+    }
+    let patient_id: Option<Uuid> = row.get("patient_id");
+    let lead_id = match row.get::<Option<Uuid>, _>("lead_id") {
+        Some(id) => Some(id),
+        None => sqlx::query_scalar::<_, Uuid>("SELECT id FROM leads WHERE converted_patient_id = $1 OR prospect_patient_id = $1 ORDER BY created_at DESC LIMIT 1")
+            .bind(patient_id).fetch_optional(&state.db).await.map_err(db_error)?,
+    };
+    let clients: Vec<&str> = signers
+        .iter()
+        .filter(|signer| signer.role == "client")
+        .map(|signer| signer.email.as_str())
+        .collect();
+    let mut conn = state.db.acquire().await.map_err(db_error)?;
+    let (minor, required, expected) = if let Some(lead_id) = lead_id {
+        let loaded = crate::routes::lead_representatives::load(&mut conn, lead_id)
+            .await
+            .map_err(db_error)?
+            .unwrap_or_default();
+        let representation = loaded.representation;
+        let expected = if representation.answers.custody()
+            == crate::routes::lead_representatives::CUSTODY_JOINT
+        {
+            2
+        } else {
+            1
+        };
+        let required = representation
+            .representatives
+            .iter()
+            .filter(|person| person.slot.is_some())
+            .filter_map(|person| person.email.clone())
+            .collect::<Vec<_>>();
+        (representation.minor, required, expected)
+    } else if let Some(patient_id) = patient_id {
+        let patient = sqlx::query(
+            r#"SELECT p.birth_date, p.intake_profile,
+                COALESCE(CASE WHEN jsonb_typeof(p.intake_profile->'trusted_contacts') = 'array'
+                    THEN p.intake_profile->'trusted_contacts' ELSE '[]'::jsonb END, '[]'::jsonb)
+                || COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                    'email', COALESCE(NULLIF(btrim(pr.email), ''), rp.email),
+                    'relation', pr.relation_type))
+                    FROM patient_relations pr LEFT JOIN patients rp ON rp.id = pr.related_patient_id
+                    WHERE pr.patient_id = p.id AND pr.relation_type IN ('parent', 'guardian')),
+                    '[]'::jsonb) AS guardian_contacts
+                FROM patients p WHERE p.id = $1"#,
+        )
+        .bind(patient_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(db_error)?;
+        if let Some(patient) = patient {
+            let minor = crate::routes::leads::is_minor_on(
+                patient.try_get("birth_date").ok().flatten(),
+                crate::app_time::today(),
+            );
+            let profile: Value = patient
+                .try_get::<Option<Value>, _>("intake_profile")
+                .ok()
+                .flatten()
+                .unwrap_or(Value::Null);
+            let contacts: Value = patient.get("guardian_contacts");
+            let required = contacts
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|person| {
+                    crate::routes::leads::is_parent_or_guardian_relation(
+                        person["relation"].as_str(),
+                    )
+                })
+                .filter_map(|person| person["email"].as_str().map(str::to_string))
+                .collect::<Vec<_>>();
+            let expected = if profile["custody"]
+                .as_str()
+                .is_some_and(|value| matches!(value, "sole_parent" | "guardian"))
+            {
+                1
+            } else {
+                2
+            };
+            (minor, required, expected)
+        } else {
+            (false, Vec::new(), 0)
+        }
+    } else {
+        (false, Vec::new(), 0)
+    };
+    if minor && !minor_clients_valid(&required, expected, &clients) {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error":"minor_signers_required", "code":"minor_signers_required", "message":"Include all legal representatives required by custody as client signers, using their recorded email addresses."}))).into_response());
+    }
+    Ok(())
+}
+
 pub(super) async fn create_request(
     state: &AppState,
     auth: &AuthUser,
@@ -197,6 +315,7 @@ pub(super) async fn create_request(
     policy
         .validate(&signers)
         .map_err(|code| error(StatusCode::UNPROCESSABLE_ENTITY, code))?;
+    validate_minor_clients(state, &rows[0], &signers).await?;
     // The consent form declares the choice of the person who made it in the
     // cabinet (for a minor the parent or guardian, QA 2026-10-12 A2-06): that
     // person signs it.
@@ -376,6 +495,19 @@ pub(super) async fn create_request(
     // Hold the documents while committing the outbox; confirm none changed
     // during reading/scanning and none went out for signature meanwhile.
     let mut tx = state.db.begin().await.map_err(db_error)?;
+    // Serialize creating an invitation with saving a newer own choice. The
+    // cabinet locks the lead first and then invalidates open requests.
+    let scope_leads: Vec<Uuid> = members
+        .iter()
+        .filter_map(|member| member.row.get::<Option<Uuid>, _>("lead_id"))
+        .collect();
+    let scope_patients: Vec<Uuid> = members
+        .iter()
+        .filter_map(|member| member.row.get::<Option<Uuid>, _>("patient_id"))
+        .collect();
+    sqlx::query("SELECT id FROM leads WHERE id = ANY($1) OR prospect_patient_id = ANY($2) OR converted_patient_id = ANY($2) ORDER BY id FOR UPDATE")
+        .bind(&scope_leads).bind(&scope_patients).fetch_all(&mut *tx).await.map_err(db_error)?;
+
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(connection::CONFIG_LOCK)
         .execute(&mut *tx)
@@ -397,7 +529,9 @@ pub(super) async fn create_request(
         let id: Uuid = member.row.get("id");
         let current = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1 FOR UPDATE")
             .bind(id).fetch_one(&mut *tx).await.map_err(db_error)?;
-        if eligibility(&current).is_some() || context(&current) != context(&member.row) {
+        if current_eligibility(state, &current).await?.is_some()
+            || context(&current) != context(&member.row)
+        {
             return Err(document_error(
                 StatusCode::CONFLICT,
                 if index == 0 {
@@ -527,9 +661,19 @@ pub(super) async fn create_request(
             ) => (None, "error", Some(reason)),
             Err(reason) => (None, "submission_unknown", Some(reason)),
         };
-        if let Err(e) = sqlx::query("UPDATE document_signature_requests SET provider_request_id=$2,status=$3,last_error=$4,lease_until=NULL,next_poll_at=now(),updated_at=now() WHERE id=$1 AND status='submitting'")
+        match sqlx::query("UPDATE document_signature_requests SET provider_request_id=$2,status=$3,last_error=$4,lease_until=NULL,next_poll_at=now(),updated_at=now() WHERE id=$1 AND status='submitting'")
             .bind(request_id).bind(remote).bind(status).bind(reason).execute(&state.db).await {
-            tracing::error!(error=%e,request_id=%request_id,"Could not persist signature submission outcome");
+            Err(e) => tracing::error!(error=%e,request_id=%request_id,"Could not persist signature submission outcome"),
+            Ok(updated) if updated.rows_affected() == 0 => {
+                // Consent may have changed during the provider call. The local
+                // request stays invalid; withdraw the invitation just created.
+                if let Some(remote) = remote {
+                    let invalidated: bool = sqlx::query_scalar("SELECT last_error = 'consent_choice_changed' FROM document_signature_requests WHERE id=$1")
+                        .bind(request_id).fetch_optional(&state.db).await.ok().flatten().unwrap_or(false);
+                    if invalidated { let _ = provider.withdraw(remote).await; }
+                }
+            }
+            Ok(_) => {}
         }
     });
     Ok(request_id)
@@ -683,4 +827,30 @@ pub(super) async fn candidates(
             "max_message_chars": 500,
         },
     })))
+}
+
+#[cfg(test)]
+mod minor_signer_tests {
+    use super::minor_clients_valid;
+    #[test]
+    fn only_all_required_guardians_can_sign_for_a_minor() {
+        let required = vec!["first@example.com".into(), "second@example.com".into()];
+        assert!(minor_clients_valid(
+            &required,
+            2,
+            &["FIRST@example.com", "second@example.com"]
+        ));
+        assert!(!minor_clients_valid(&required, 2, &["first@example.com"]));
+        assert!(!minor_clients_valid(
+            &required,
+            2,
+            &["first@example.com", "outsider@example.com"]
+        ));
+        assert!(!minor_clients_valid(&[], 2, &["outsider@example.com"]));
+        assert!(minor_clients_valid(
+            &required[..1],
+            1,
+            &["first@example.com"]
+        ));
+    }
 }

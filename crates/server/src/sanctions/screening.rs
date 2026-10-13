@@ -857,9 +857,40 @@ pub fn recipient_subjects(
         return Vec::new();
     }
     let answered_pays = row.get("recipient_is_payer").and_then(Value::as_bool) == Some(true);
-    let third_party_payer = payer_rows
-        .iter()
-        .any(|payer| json_text(payer, "payer_kind") == "third_party");
+    let recipient_organisation = json_text(row, "recipient_type") == RECIPIENT_TYPE_ORGANISATION;
+    let recipient_name = if recipient_organisation {
+        json_text(row, "organisation_name")
+    } else {
+        format!(
+            "{} {}",
+            json_text(row, "first_name"),
+            json_text(row, "last_name")
+        )
+    };
+    let third_party_payer = payer_rows.iter().any(|payer| {
+        let payer_type = json_text(payer, "payer_type");
+        let organisation = matches!(
+            payer_type.as_str(),
+            "company" | "organisation" | "insurance"
+        );
+        let payer_name = if organisation {
+            json_text(payer, "organisation_name")
+        } else {
+            format!(
+                "{} {}",
+                json_text(payer, "first_name"),
+                json_text(payer, "last_name")
+            )
+        };
+        json_text(payer, "payer_kind") == "third_party"
+            && !json_text(row, "recipient_type").is_empty()
+            && recipient_organisation == organisation
+            && !recipient_name.trim().is_empty()
+            && (recipient_organisation
+                || (!json_text(row, "first_name").is_empty()
+                    && !json_text(row, "last_name").is_empty()))
+            && crate::routes::lead_invoice_recipient::same_name(&recipient_name, &payer_name)
+    });
     if answered_pays && third_party_payer {
         return Vec::new();
     }
@@ -2727,6 +2758,17 @@ mod tests {
         // recipient is not screened as payer, so it is screened here.
         assert_eq!(
             recipient_subjects(lead_id, Some(&pays), &[json!({ "payer_kind": "self" })]).len(),
+            1
+        );
+        let mut different = pays.clone();
+        different["first_name"] = json!("Another");
+        assert_eq!(
+            recipient_subjects(
+                lead_id,
+                Some(&different),
+                std::slice::from_ref(&third_party_payer)
+            )
+            .len(),
             1
         );
         // A recipient who does not pay stays a subject next to another payer.

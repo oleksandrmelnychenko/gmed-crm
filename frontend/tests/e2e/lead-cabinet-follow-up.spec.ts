@@ -188,7 +188,10 @@ function recompute(request: LeadRequestMock) {
       ];
     }
     if (block === "B") {
-      missing.B = ["payment_background", "relationship_since"].filter((key) => !filled(id[key]));
+      missing.B = payer?.payer_kind === "third_party" ? [
+        ...["payment_background", "relationship_since"].filter((key) => !filled(id[key])),
+        ...(request.follow_up.relationship_proof_documents.length ? [] : ["relationship_proof_upload"]),
+      ] : [];
     }
     if (block === "C") {
       const billing = request.billing;
@@ -274,6 +277,11 @@ async function setup(page: Page, prepare?: (request: LeadRequestMock) => void) {
       calls.personalData.push(patch);
       Object.assign(request.personal_data, patch);
       return answer();
+    }
+    if (method === "POST" && path === `${base}/consent`) {
+      const body = req.postDataJSON() as { purpose: keyof typeof request.consents; version: string };
+      request.consents[body.purpose].given_at = "2026-10-07T09:00:00Z";
+      return route.fulfill({ json: { purpose: body.purpose, version: body.version, given_at: request.consents[body.purpose].given_at } });
     }
     if (method === "POST" && path === `${base}/identification`) {
       const patch = req.postDataJSON() as Json;
@@ -468,6 +476,10 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await tab(page, "documents").click();
     const reason = page.getByRole("textbox", { name: "Grund der Anfrage" });
     await expect(reason).toBeVisible();
+    await expect(reason).toBeDisabled();
+    await page.getByTestId("lead-request-health-consent").getByRole("checkbox").click();
+    await expect(page.getByTestId("lead-request-health-consent").getByRole("checkbox")).toBeChecked();
+    await expect(reason).toBeEnabled();
     await reason.fill("Zweitmeinung zur Knie-OP");
     await expect.poll(() => calls.identification.at(-1)).toEqual({ request_reason: "Zweitmeinung zur Knie-OP" });
     // Nothing of the identity document's data was ever sent.
@@ -517,9 +529,15 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await payer.getByRole("textbox", { name: "E-Mail" }).fill("buchhaltung@example.com");
     await expect(stepMissing).not.toContainText("Zahler: E-Mail");
 
-    // Back to a private person: the organisation mask goes with what was typed in it.
+    // Switching a named organisation to a person keeps the stored payer until
+    // the new person's minimum identity is entered (A-H1).
     await choose(page, payer.getByRole("combobox", { name: "Wer ist der Zahler?" }), "Eine Privatperson");
     await expect(payer.getByRole("textbox", { name: "Rechtsform" })).toHaveCount(0);
+    expect(calls.payer.at(-1)).toHaveProperty("organisation_legal_form", "GmbH");
+    await payer.locator('input[id$="payer_first_name"]').fill("Alex");
+    await payer.locator('input[id$="payer_last_name"]').fill("Example");
+    await choose(page, payer.getByRole("combobox", { name: "Wohnsitzland", exact: true }), "Deutschland");
+    await payer.locator('input[id$="payer_city"]').fill("Berlin");
     await expect.poll(() => calls.payer.at(-1)).not.toHaveProperty("organisation_legal_form");
     expect(calls.payer.at(-1)).toMatchObject({ payer_type: "person" });
   });
@@ -560,7 +578,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await page.getByTestId("lead-request-follow-up-submit").click();
     await expect(followUp).toContainText("Bitte ergänzen Sie zuerst die noch offenen Angaben.");
     await expect(page.getByTestId("lead-request-follow-up-A-missing")).toContainText("Nachweise zur Herkunft der Mittel");
-    await expect(page.getByTestId("lead-request-follow-up-B-missing")).toContainText("Seit wann besteht die Beziehung?");
+    await expect(page.getByTestId("lead-request-follow-up-B-missing")).toHaveCount(0);
     await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toBeVisible();
 
     // Block A: one source from the list, the words, profession, sector and a proof.
@@ -585,27 +603,18 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(page.getByTestId("lead-request-funds-proof-list")).toContainText("kontoauszug.pdf");
     await expect(page.getByTestId("lead-request-follow-up-A-missing")).toHaveCount(0);
 
-    // Block B: why the payer pays, since when, and a proof (optional).
+    // A self-payer has nothing to answer in staff-requested block B.
     const blockB = page.getByTestId("lead-request-follow-up-B");
-    // No relationship of the family named: no certificate as the example (QA 2026-10-10).
-    await expect(blockB).toContainText("Zum Beispiel ein Dokument, aus dem die Beziehung hervorgeht");
-    await expect(blockB).not.toContainText("Heirats- oder Geburtsurkunde");
-    await blockB.getByRole("textbox", { name: "Warum übernimmt diese Person bzw. Organisation die Kosten?" }).fill("Familie");
-    await blockB.getByRole("textbox", { name: "Seit wann besteht die Beziehung?" }).fill("2010");
-    await expect
-      .poll(() => Object.assign({}, ...calls.identification))
-      .toEqual({ payment_background: "Familie", relationship_since: "2010" });
-    await page.locator("#lead-request-relationship-proof-files").setInputFiles({
-      name: "heiratsurkunde.pdf",
-      mimeType: "application/pdf",
-      buffer: Buffer.from("%PDF-1.4\n%%EOF\n"),
-    });
-    await expect(page.getByTestId("lead-request-relationship-proof-list")).toContainText("heiratsurkunde.pdf");
+    await expect(blockB).toContainText("Hier sind keine weiteren Angaben erforderlich.");
+    await expect(blockB.getByRole("textbox")).toHaveCount(0);
+    await expect(blockB.locator('input[type="file"]')).toHaveCount(0);
+    expect(calls.relationshipProofs).toBe(0);
     await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toHaveCount(0);
 
     await page.getByTestId("lead-request-follow-up-submit").click();
     await expect(page.getByTestId("lead-request-follow-up-answered")).toContainText("Ihre Angaben werden geprüft.");
     expect(calls.followUpSubmits).toBe(2);
+    await expect(page.getByTestId("lead-request-follow-up-submit")).toBeDisabled();
 
     // The summary: the neutral notice for every request alike, and the answers.
     await tab(page, "send").click();
@@ -619,6 +628,26 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(page.getByTestId("lead-request-summary-follow_up")).toContainText("Einkommen");
     await expect(page.getByTestId("lead-request-summary-request")).toContainText("Zweitmeinung zur Knie-OP");
     expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
+  });
+
+  test("third-party block B asks only its required relationship fields and proof", async ({ page }) => {
+    const { calls } = await setup(page, (request) => {
+      sentWithBlocks(["B"])(request);
+      request.payer = { ...request.payer, payer_kind: "third_party", payer_type: "person", relationship: "other" };
+    });
+    await page.goto("/");
+    const blockB = page.getByTestId("lead-request-follow-up-B");
+    await expect(blockB).toBeVisible();
+    await expect(blockB).toContainText("Zum Beispiel ein Dokument, aus dem die Beziehung hervorgeht");
+    await blockB.getByRole("textbox", { name: "Warum übernimmt diese Person bzw. Organisation die Kosten?" }).fill("Unterstützung");
+    await blockB.getByRole("textbox", { name: "Seit wann besteht die Beziehung?" }).fill("2010");
+    await page.locator("#lead-request-relationship-proof-files").setInputFiles({ name: "beziehung.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") });
+    await expect.poll(() => calls.relationshipProofs).toBe(1);
+    await expect.poll(() => Object.assign({}, ...calls.identification)).toEqual({ payment_background: "Unterstützung", relationship_since: "2010" });
+    await expect(page.getByTestId("lead-request-follow-up-submit")).toBeEnabled();
+    await page.getByTestId("lead-request-follow-up-submit").click();
+    await expect(page.getByTestId("lead-request-follow-up-submit")).toBeDisabled();
+    expect(Object.assign({}, ...calls.identification)).toEqual({ payment_background: "Unterstützung", relationship_since: "2010" });
   });
 
   test("blocks C and I: the payment route with its extras, and a new copy of the identity document", async ({ page }) => {

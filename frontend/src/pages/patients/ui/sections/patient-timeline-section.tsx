@@ -1,11 +1,11 @@
-import { Search } from "lucide-react";
+import { ChevronRight, History, Search } from "lucide-react";
 
 import { DataTablePager } from "@/components/data-table/data-table-pager";
 import { WritableScope } from "@/components/read-only-scope";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
 import { TabsContent } from "@/components/ui/tabs";
 import {
   EmptyCell,
@@ -15,7 +15,6 @@ import {
   localizeTimelineCategory,
   localizeTimelineEntityType,
   localizeTimelineSource,
-  timelineEntityTypeBadgeClass,
 } from "@/lib/timeline-labels";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -117,7 +116,6 @@ export function PatientTimelineTab({
   statusColors,
   statusLabel,
   formatDateTime,
-  timelineEntityDotClass,
   timelineAccess,
   patientId,
   onTimelineEntityFilterChange,
@@ -151,17 +149,17 @@ export function PatientTimelineTab({
           {l("patients_no_timeline_events_have_been_recorded_for_this_patient_y")}
         </EmptyCell>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
           {/* Filters and search are reading: usable on a read-only patient. */}
           <WritableScope>
-          <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+          <div className="relative z-30 flex flex-wrap items-center gap-2 border-b border-border/70 bg-card px-3 py-3">
             <NativeComboboxSelect
               // Remount when counts arrive so the trigger label re-derives
               // ("Все · 0" would otherwise stick after the async load).
               key={`entity-${timelineTotal}`}
               value={timelineEntityFilter}
               onChange={(event) => onTimelineEntityFilterChange(event.target.value ?? "all")}
-              className="h-8 w-[190px] shrink-0 rounded-lg bg-field text-[13px]"
+              className="h-8 w-full rounded-lg bg-field text-[13px] sm:w-[190px]"
             >
               <option value="all">
                 {l("patients_all")} · {timelineEntityTotal}
@@ -177,7 +175,7 @@ export function PatientTimelineTab({
               onChange={(event) =>
                 onTimelineRangeFilterChange((event.target.value as PatientTimelineRangeFilter) ?? "all")
               }
-              className="h-8 w-[150px] shrink-0 rounded-lg bg-field text-[13px]"
+              className="h-8 w-full rounded-lg bg-field text-[13px] sm:w-[150px]"
             >
               {localizedTimelineRangeOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -188,7 +186,7 @@ export function PatientTimelineTab({
             <NativeComboboxSelect
               value={timelineCategoryFilter}
               onChange={(event) => onTimelineCategoryFilterChange(event.target.value ?? "all")}
-              className="h-8 w-[190px] shrink-0 rounded-lg bg-field text-[13px]"
+              className="h-8 w-full rounded-lg bg-field text-[13px] sm:w-[190px]"
             >
               <option value="all">{l("patients_all_categories")}</option>
               {timelineCategoryOptions.map((category) => (
@@ -200,7 +198,7 @@ export function PatientTimelineTab({
             <NativeComboboxSelect
               value={timelineSourceFilter}
               onChange={(event) => onTimelineSourceFilterChange(event.target.value ?? "all")}
-              className="h-8 w-[180px] shrink-0 rounded-lg bg-field text-[13px]"
+              className="h-8 w-full rounded-lg bg-field text-[13px] sm:w-[180px]"
             >
               <option value="all">{l("patients_all_sources")}</option>
               {timelineSourceOptions.map((source) => (
@@ -209,7 +207,7 @@ export function PatientTimelineTab({
                 </option>
               ))}
             </NativeComboboxSelect>
-            <div className="relative min-w-[180px] flex-1 sm:max-w-xs">
+            <div className="relative min-w-0 basis-full sm:min-w-[180px] sm:flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={timelineSearch}
@@ -248,13 +246,15 @@ export function PatientTimelineTab({
               </EmptyCell>
             </div>
           ) : (
-            <div className="space-y-0">
+            <div className="space-y-5 bg-muted/40 p-3 sm:p-4">
               {groupedTimeline.map((group) => (
-                <div key={group.key}>
-                  <div className="flex items-center gap-2 border-b border-border/60 bg-muted/25 px-3 py-1.5">
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                <section key={group.key} className="space-y-2" aria-label={group.label}>
+                  <div className="flex items-center gap-2 px-1">
+                    <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-primary" />
+                    <h3 className="font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
                       {group.label}
-                    </span>
+                    </h3>
+                    <span className="h-px flex-1 bg-border" aria-hidden="true" />
                   </div>
                   {group.items.map((item) => {
                     const route = resolvePatientTimelineRoute(item, {
@@ -281,48 +281,41 @@ export function PatientTimelineTab({
                           }
                         }}
                         className={cn(
-                          "flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-2 text-left transition-colors last:border-b-0",
-                          route ? "cursor-pointer hover:bg-muted/30" : "cursor-default",
+                          "flex w-full min-w-0 items-start gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left shadow-xs transition-colors sm:px-4",
+                          route ? "cursor-pointer hover:border-primary/40 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40" : "cursor-default",
                         )}
                       >
-                        <span
-                          className={cn(
-                            "size-2 shrink-0 rounded-full",
-                            timelineEntityDotClass(item.entity_type),
-                          )}
-                        />
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "min-w-[92px] shrink-0 justify-center whitespace-nowrap rounded-full font-mono text-[10px]",
-                            timelineEntityTypeBadgeClass(item.entity_type),
-                          )}
-                        >
-                          {localizeTimelineEntityType(item.entity_type, l)}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "min-w-[110px] shrink-0 justify-center whitespace-nowrap rounded-full font-mono text-[10px]",
-                            statusColors[item.status] ?? "border-border/60 bg-muted/25 text-muted-foreground",
-                          )}
-                        >
-                          {labels.status}
-                        </Badge>
-                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                          {labels.title}
+                        <span className="hidden size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground sm:flex">
+                          <History className="size-4" aria-hidden="true" />
                         </span>
-                        <span className="hidden shrink-0 truncate text-xs text-muted-foreground lg:block lg:max-w-[260px]">
-                          {labels.category}
-                          {labels.source ? ` · ${labels.source}` : ""}
-                        </span>
-                        <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
-                          {formatDateTime(item.happened_at)}
-                        </span>
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                            <p className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground">
+                              {labels.title}
+                            </p>
+                            <time dateTime={item.happened_at} className="shrink-0 font-mono text-[11px] leading-5 tabular-nums text-muted-foreground">
+                              {formatDateTime(item.happened_at)}
+                            </time>
+                          </div>
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+                            <StatusChip className="text-[11px] leading-4">
+                              {localizeTimelineEntityType(item.entity_type, l)}
+                            </StatusChip>
+                            <StatusChip className={cn("text-[11px] leading-4", statusColors[item.status])}>
+                              {labels.status}
+                            </StatusChip>
+                            {(labels.category || labels.source) ? (
+                              <span className="min-w-0 break-words text-xs leading-5 text-muted-foreground">
+                                {[labels.category, labels.source].filter(Boolean).join(" · ")}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                        {route ? <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
                       </button>
                     );
                   })}
-                </div>
+                </section>
               ))}
             </div>
           )}

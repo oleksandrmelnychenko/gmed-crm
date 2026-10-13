@@ -34,7 +34,16 @@ export function errorBody(error: unknown): Record<string, unknown> | null {
   return error instanceof ApiRequestError && error.body ? (error.body as Record<string, unknown>) : null;
 }
 
-export function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown, text?: LeadRequestText): string {
+  if (text) {
+    const body = errorBody(error);
+    const code = typeof body?.code === "string" ? body.code : error instanceof ApiRequestError ? error.code : undefined;
+    if (code === "health_consent_required") return text.healthConsentRequired;
+    if (code === "dob_staff_only") return text.dobStaffOnly;
+    if (code === "lead_request_guardian_only") return text.guardianOnly;
+    if (error instanceof ApiRequestError && error.status === 413) return text.errors.file_too_large;
+    return (code && text.errors[code]) || text.errors.request_failed;
+  }
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -355,7 +364,7 @@ export function ConsentCheckbox({
         onChange(withConsent(null));
       }
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(errorMessage(cause, text));
     } finally {
       setBusy(false);
     }
@@ -374,7 +383,7 @@ export function ConsentCheckbox({
         <span className="space-y-1">
           <span className="block leading-snug">{label}</span>
           {privacyLink ? (
-            <a href="/legal#privacy" target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
+            <a href={`/legal?lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
               {text.privacyLink}
             </a>
           ) : null}
@@ -475,7 +484,7 @@ export function FileUploadField({
         nextErrors.push(
           errorBody(cause)?.code === "inquiry_consent_required"
             ? text.identityUploadNeedsConsent
-            : `${file.name}: ${errorMessage(cause)}`,
+            : `${file.name}: ${errorMessage(cause, text)}`,
         );
       }
     }
@@ -532,7 +541,7 @@ export function FileUploadField({
         testId={`${testId}-list`}
         onRemove={(documentId) => {
           setErrors([]);
-          void remove(documentId).catch((cause: unknown) => setErrors([errorMessage(cause)]));
+          void remove(documentId).catch((cause: unknown) => setErrors([errorMessage(cause, text)]));
         }}
       />
     </div>

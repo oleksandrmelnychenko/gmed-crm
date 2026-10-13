@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   CalendarClock,
+  CircleAlert,
   Check,
   ChevronRight,
   ClipboardCheck,
@@ -16,6 +17,7 @@ import { StaffLink } from "@/components/staff-link";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { apiFetch } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
@@ -78,14 +80,14 @@ function StageBlock({
   return (
     <section
       className={cn(
-        "rounded-xl border bg-card p-3.5",
+        "overflow-hidden rounded-xl border bg-card shadow-sm",
         current ? "border-primary/40 ring-1 ring-primary/10" : "border-border/50",
       )}
     >
-      <header className="flex flex-wrap items-center justify-between gap-2">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <AdminSectionTitle><Icon className="mr-1.5 inline size-3.5 text-muted-foreground" aria-hidden />{pipelineStageLabel(stage.key, lang)}</AdminSectionTitle>
-          <StatusBadge
+          <StatusChip
             tone={
               stage.state === "done"
                 ? "success"
@@ -95,17 +97,19 @@ function StageBlock({
             }
           >
             {pipelineStateLabel(stage.state, lang)}
-          </StatusBadge>
+          </StatusChip>
         </div>
         {action}
       </header>
-      <div className="space-y-2.5 pt-3 text-[13px] leading-5">
+      <div className="space-y-3 p-4 text-[13px] leading-5">
         {stage.missing.length > 0 ? (
-          <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-amber-700 dark:text-amber-300">
+          <ul className="flex flex-wrap gap-2">
             {stage.missing.map((reason) => (
-              <li key={reason} className="flex items-start gap-2">
-                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" />
-                {pipelineMissingLabel(reason, lang)}
+              <li key={reason} className="max-w-full">
+                <StatusChip tone="warning">
+                  <CircleAlert aria-hidden />
+                  {pipelineMissingLabel(reason, lang)}
+                </StatusChip>
               </li>
             ))}
           </ul>
@@ -118,9 +122,9 @@ function StageBlock({
 
 function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="min-w-0 px-3 py-1.5 sm:border-l sm:border-border/60 first:sm:border-l-0">
-      <div className="text-[11.5px] leading-4 text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate font-mono text-base font-semibold leading-tight tabular-nums text-foreground">{value}</div>
+    <div className="min-w-0 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5">
+      <div className="font-mono text-[11px] uppercase tracking-[0.04em] leading-4 text-muted-foreground">{label}</div>
+      <div className="mt-1 break-words font-mono text-sm font-semibold leading-5 tabular-nums text-foreground">{value}</div>
     </div>
   );
 }
@@ -178,8 +182,8 @@ export function OrderPipelinePanel({
   const medical = pipeline.medical;
 
   return (
-    <div className="space-y-3">
-      <ol className="grid gap-2 sm:grid-cols-5">
+    <div className="@container space-y-3 rounded-xl bg-muted/50 p-3 sm:p-4">
+      <ol className="grid gap-2 @[32rem]:grid-cols-3 @[56rem]:grid-cols-5">
         {pipeline.stages.map((stage, index) => (
           <li
             key={stage.key}
@@ -203,7 +207,7 @@ export function OrderPipelinePanel({
                 index + 1
               )}
             </span>
-            <span className="min-w-0 truncate">{pipelineStageLabel(stage.key, lang)}</span>
+            <span className="min-w-0 break-words">{pipelineStageLabel(stage.key, lang)}</span>
           </li>
         ))}
       </ol>
@@ -229,7 +233,7 @@ export function OrderPipelinePanel({
           </p>
         ) : (
           <>
-            <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="grid gap-2 @[24rem]:grid-cols-2 @[36rem]:grid-cols-3 @[64rem]:grid-cols-6">
               <Fact label={tx("Кейс", "Fall")} value={medical.case_code ?? "—"} />
               <Fact
                 label={tx("Анамнез", "Anamnese")}
@@ -359,7 +363,7 @@ export function OrderPipelinePanel({
         current={current === "execution"}
         action={openSection("execution", tx("Выполнение", "Durchführung"))}
       >
-        <div className="grid gap-2 sm:grid-cols-4">
+        <div className="grid gap-2 @[24rem]:grid-cols-2 @[48rem]:grid-cols-4">
           <Fact label={tx("Запланировано", "Geplant")} value={pipeline.services.planned} />
           <Fact label={tx("Оказано", "Erbracht")} value={pipeline.services.delivered} />
           <Fact label={tx("Подтверждено", "Freigegeben")} value={pipeline.services.approved} />
@@ -381,7 +385,7 @@ export function OrderPipelinePanel({
           </StaffLink>
         }
       >
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2 @[24rem]:grid-cols-2">
           <Fact label={tx("Счетов", "Rechnungen")} value={pipeline.invoices.total} />
           <Fact label={tx("Не оплачено", "Offen")} value={pipeline.invoices.open} />
         </div>

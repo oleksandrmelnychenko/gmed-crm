@@ -35,7 +35,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use chrono::{DateTime, SecondsFormat, SubsecRound, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::{PgConnection, Postgres, Row, Transaction};
@@ -1316,10 +1316,13 @@ async fn cost_estimate_consent(
         );
     };
     let next = if body.consent {
-        // The precision the database keeps.
-        declaration
-            .cost_estimate_consent_at
-            .or_else(|| Some(Utc::now().trunc_subsecs(6)))
+        match declaration.cost_estimate_consent_at {
+            Some(at) => Some(at),
+            None => match intake::portal_update_time(&mut tx).await {
+                Ok(at) => Some(at),
+                Err(error) => return intake::internal(error, "read cost estimate consent time"),
+            },
+        }
     } else {
         None
     };

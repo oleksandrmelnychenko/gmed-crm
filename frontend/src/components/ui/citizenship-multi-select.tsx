@@ -30,6 +30,7 @@ export function CitizenshipMultiSelect({
   id,
   invalid = false,
   lang: displayLang,
+  maxItems,
 }: {
   value: readonly string[];
   onChange: (next: string[]) => void;
@@ -40,6 +41,7 @@ export function CitizenshipMultiSelect({
   invalid?: boolean;
   /** Language of the country names; defaults to the UI language. */
   lang?: string;
+  maxItems?: number;
 }) {
   const { t, lang: uiLang } = useLang();
   const lang = displayLang ?? uiLang;
@@ -49,6 +51,7 @@ export function CitizenshipMultiSelect({
 
   const toggle = (code: string) => {
     if (!code) return;
+    if (!selected.includes(code) && maxItems !== undefined && selected.length >= maxItems) return;
     onChange(
       selected.includes(code)
         ? selected.filter((item) => item !== code)
@@ -92,7 +95,7 @@ export function CitizenshipMultiSelect({
         onChange={(event) => toggle(event.target.value)}
         className="h-7 w-auto min-w-[10rem] flex-1 border-0 bg-transparent px-2 shadow-none hover:bg-transparent focus-visible:ring-0 data-placeholder:text-muted-foreground"
         aria-invalid={invalid || undefined}
-        disabled={disabled}
+        disabled={disabled || (maxItems !== undefined && selected.length >= maxItems)}
         selectedValues={selected}
         showValueIndicator={false}
         hidePlaceholderOption

@@ -293,13 +293,28 @@ export function payerFitsFlow(
   const thirdParty = payer.payer_kind === "third_party";
   if (flow.recipient === "self" && flow.isPayer === "yes") return !thirdParty || parentPays;
   if (flow.recipient === "self" && flow.isPayer === "no") return thirdParty && !parentPays;
-  if (flow.recipient === "third_party" && flow.isPayer === "yes") return thirdParty;
+  if (flow.recipient === "third_party" && flow.isPayer === "yes") {
+    const organisation = payer.payer_type != null && payer.payer_type !== "person";
+    const completeName = recipient.type === "organisation" ? Boolean(recipient.organisation_name.trim())
+      : Boolean(recipient.first_name.trim() && recipient.last_name.trim());
+    return thirdParty && Boolean(recipient.type) && completeName
+      && (recipient.type === "organisation") === organisation && sameName(payerName(payer), recipientName(recipient));
+  }
   if (flow.recipient === "third_party" && flow.isPayer === "no") {
     if (!thirdParty) return true;
     const name = recipientName(recipient);
     return !name || !sameName(payerName(payer), name);
   }
   return false;
+}
+
+/** A complete recipient identity is needed before it can replace the payer. */
+export function recipientPayerReady(recipient: RecipientDraft): boolean {
+  const named = recipient.type === "organisation"
+    ? Boolean(recipient.organisation_name.trim() && recipient.legal_form.trim() && recipient.contact_name.trim())
+    : recipient.type === "person" && Boolean(recipient.first_name.trim() && recipient.last_name.trim()
+      && recipient.relationship_kind && (recipient.relationship_kind !== "other" || recipient.relationship.trim()) && recipient.phone.trim());
+  return named && Boolean(recipient.country && recipient.street.trim() && recipient.zip.trim() && recipient.city.trim() && recipient.email.trim());
 }
 
 /** Keys of step 3's recipient in `progress.missing_for_submit`. */

@@ -1,11 +1,9 @@
 ﻿import { LoaderCircle, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { AdminSheetScaffold } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { PatientSheetScaffold } from "@/pages/patients/ui/shared/patient-sheet-scaffold";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 
 import { Banner } from "./primitives";
 
@@ -25,6 +23,7 @@ type CaseItemEditSheetProps = {
   onDelete?: () => void | Promise<void>;
   children: ReactNode;
   width?: "default" | "wide";
+  presentation?: "sheet" | "dialog";
 };
 
 export function CaseItemEditSheet({
@@ -43,6 +42,7 @@ export function CaseItemEditSheet({
   onDelete,
   children,
   width = "default",
+  presentation = "sheet",
 }: CaseItemEditSheetProps) {
   const { t } = useLang();
   const defaultSubmit =
@@ -51,68 +51,62 @@ export function CaseItemEditSheet({
       : t.cases_workspace_item_submit_edit;
 
   return (
-    <Sheet dirty={dirty} requireChanges={mode === "edit"} open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        className={cn(
-          "w-full border-l border-border p-0",
-          width === "wide" ? "sm:max-w-[720px]" : "sm:max-w-[520px]",
-        )}
-      >
-        <div className="flex h-full min-h-0 flex-col">
-          <AdminSheetScaffold
-            title={title}
-            description={description}
-            headerClassName="px-5 py-4"
-            bodyClassName="space-y-4 px-5 py-4"
-            footer={
-              <div className="shrink-0 border-t border-border bg-muted/25 px-5 py-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    {mode === "edit" && onDelete ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50"
-                        onClick={() => void onDelete()}
-                        disabled={busy || !canDelete}
-                      >
-                        <Trash2 className="size-4" />
-                        {t.cases_workspace_item_remove}
-                      </Button>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-lg"
-                      onClick={() => onOpenChange(false)}
-                      disabled={busy}
-                    >
-                      {t.common_cancel}
-                    </Button>
-                    <Button
-                      type="button"
-                      className="h-9 rounded-lg"
-                      requireChanges={mode === "edit"}
-                      disabled={busy || !canSubmit}
-                      onClick={() => void onSubmit()}
-                    >
-                      {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                      {submitLabel ?? defaultSubmit}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            }
-          >
-            {error ? <Banner tone="error">{error}</Banner> : null}
-            {children}
-          </AdminSheetScaffold>
+    <PatientSheetScaffold
+      dirty={dirty}
+      requireChanges={mode === "edit"}
+      open={open}
+      onOpenChange={onOpenChange}
+      presentation={presentation}
+      title={title}
+      description={description}
+      maxWidthClassName={presentation === "dialog"
+        ? width === "wide" ? "sm:max-w-[760px]" : "sm:max-w-[560px]"
+        : width === "wide" ? "sm:max-w-[720px]" : "sm:max-w-[520px]"}
+      footer={
+        <div className="w-full">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              {mode === "edit" && onDelete ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50"
+                  onClick={() => void onDelete()}
+                  disabled={busy || !canDelete}
+                >
+                  <Trash2 className="size-4" />
+                  {t.cases_workspace_item_remove}
+                </Button>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg"
+                onClick={() => onOpenChange(false)}
+                disabled={busy}
+              >
+                {t.common_cancel}
+              </Button>
+              <Button
+                type="button"
+                className="h-9 rounded-lg"
+                requireChanges={mode === "edit"}
+                disabled={busy || !canSubmit}
+                onClick={() => void onSubmit()}
+              >
+                {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {submitLabel ?? defaultSubmit}
+              </Button>
+            </div>
+          </div>
         </div>
-      </SheetContent>
-    </Sheet>
+      }
+    >
+      {error ? <Banner tone="error">{error}</Banner> : null}
+      {children}
+    </PatientSheetScaffold>
   );
 }

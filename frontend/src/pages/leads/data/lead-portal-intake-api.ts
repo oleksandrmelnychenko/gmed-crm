@@ -359,6 +359,7 @@ export type LeadEnhancedDetailsAsks = {
  * "Why the third party pays" is `identification.payment_background`.
  */
 export type LeadPortalEnhancedDetails = {
+  missing: string[];
   required: boolean;
   check_required: boolean;
   asks: LeadEnhancedDetailsAsks;
@@ -447,6 +448,7 @@ export function normalizeLeadPortalEnhancedDetails(value: unknown): LeadPortalEn
     : [];
   const single = textOrNull(answers.funds_source);
   return {
+    missing: Array.isArray(raw.missing) ? raw.missing.filter((item): item is string => typeof item === "string") : [],
     required: raw.required === true,
     check_required: raw.check_required === true,
     asks: {

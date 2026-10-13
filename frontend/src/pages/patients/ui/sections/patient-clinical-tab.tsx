@@ -870,6 +870,7 @@ function ClinicalSection<T extends { id?: string | null }>({
   rowClassName,
   headerAction,
   editorClassName,
+  editorHasSections = false,
 }: {
   title: string;
   count?: ReactNode;
@@ -891,6 +892,7 @@ function ClinicalSection<T extends { id?: string | null }>({
   rowClassName?: string;
   headerAction?: ReactNode;
   editorClassName?: string;
+  editorHasSections?: boolean;
 }) {
   const [list, setList] = useState<T[]>(items);
   const [editing, setEditing] = useState<{ index: number | null; draft: T } | null>(null);
@@ -1027,6 +1029,7 @@ function ClinicalSection<T extends { id?: string | null }>({
         ) : null}
 
         <PatientSheetScaffold
+          presentation="dialog"
           open={Boolean(editing)}
           onOpenChange={(open) => {
             if (!open) setEditing(null);
@@ -1062,7 +1065,11 @@ function ClinicalSection<T extends { id?: string | null }>({
             </>
           }
         >
-          {editing ? form(editing.draft, set) : null}
+          {editing ? (
+            editorHasSections
+              ? form(editing.draft, set)
+              : <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">{form(editing.draft, set)}</section>
+          ) : null}
         </PatientSheetScaffold>
       </div>
     </section>
@@ -1151,71 +1158,72 @@ function MedicationHoldDialog({
         if (!open && !busy) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-md">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <DialogHeader>
-            <DialogTitle>{tx("На холд", "Auf Hold")}</DialogTitle>
+      <DialogContent overlayClassName="bg-black/40" className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[560px] sm:pb-0">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
+            <DialogTitle className="text-[15px] font-semibold">{tx("На холд", "Auf Hold")}</DialogTitle>
             <DialogDescription>
               {medicationName || tx("Медикамент", "Medikament")}
             </DialogDescription>
           </DialogHeader>
 
-          {draft ? (
-            <div className="space-y-3">
-              <CheckboxField
-                label={tx("Пациент не принимает препарат", "Patient nimmt das Medikament nicht")}
-                checked={draft.on_hold}
-                onChange={(checked) =>
-                  onChange({
-                    on_hold: checked,
-                    hold_from: checked ? (draft.hold_from ?? appDateKey()) : null,
-                    hold_until: checked ? draft.hold_until : null,
-                    hold_note: checked ? draft.hold_note : null,
-                  })
-                }
-              />
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted px-3 py-3 sm:px-4">
+            {draft ? (
+              <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                <CheckboxField
+                  label={tx("Пациент не принимает препарат", "Patient nimmt das Medikament nicht")}
+                  checked={draft.on_hold}
+                  onChange={(checked) =>
+                    onChange({
+                      on_hold: checked,
+                      hold_from: checked ? (draft.hold_from ?? appDateKey()) : null,
+                      hold_until: checked ? draft.hold_until : null,
+                      hold_note: checked ? draft.hold_note : null,
+                    })
+                  }
+                />
 
-              {draft.on_hold ? (
-                <div className="grid gap-3">
-                  <Field label={tx("Не принимает с", "Pausiert seit")}>
-                    <Input
-                      type="date"
-                      value={draft.hold_from ?? ""}
-                      onChange={(event) => onChange({ hold_from: event.target.value || null })}
-                      className={inputClass}
-                    />
-                  </Field>
-                  <Field label={tx("До какого числа", "Bis wann")}>
-                    <Input
-                      type="date"
-                      min={draft.hold_from ?? undefined}
-                      value={draft.hold_until ?? ""}
-                      onChange={(event) => onChange({ hold_until: event.target.value || null })}
-                      className={inputClass}
-                    />
-                  </Field>
-                  <Field label={tx("Заметка", "Notiz")}>
-                    <textarea
-                      value={draft.hold_note ?? ""}
-                      onChange={(event) => onChange({ hold_note: blankToNull(event.target.value) })}
-                      className={cn(inputClass, "h-24 resize-y py-2")}
-                      placeholder={tx("Причина паузы", "Grund der Pause")}
-                    />
-                  </Field>
-                  {!holdRangeValid ? (
-                    <p role="alert" className="text-xs text-destructive">
-                      {tx(
-                        "Дата окончания холда не может быть раньше даты начала.",
-                        "Das Hold-Ende darf nicht vor dem Beginn liegen.",
-                      )}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          <DialogFooter>
+                {draft.on_hold ? (
+                  <div className="grid gap-3">
+                    <Field label={tx("Не принимает с", "Pausiert seit")}>
+                      <Input
+                        type="date"
+                        value={draft.hold_from ?? ""}
+                        onChange={(event) => onChange({ hold_from: event.target.value || null })}
+                        className={inputClass}
+                      />
+                    </Field>
+                    <Field label={tx("До какого числа", "Bis wann")}>
+                      <Input
+                        type="date"
+                        min={draft.hold_from ?? undefined}
+                        value={draft.hold_until ?? ""}
+                        onChange={(event) => onChange({ hold_until: event.target.value || null })}
+                        className={inputClass}
+                      />
+                    </Field>
+                    <Field label={tx("Заметка", "Notiz")}>
+                      <textarea
+                        value={draft.hold_note ?? ""}
+                        onChange={(event) => onChange({ hold_note: blankToNull(event.target.value) })}
+                        className={cn(inputClass, "h-24 resize-y py-2")}
+                        placeholder={tx("Причина паузы", "Grund der Pause")}
+                      />
+                    </Field>
+                    {!holdRangeValid ? (
+                      <p role="alert" className="text-xs text-destructive">
+                        {tx(
+                          "Дата окончания холда не может быть раньше даты начала.",
+                          "Das Hold-Ende darf nicht vor dem Beginn liegen.",
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-t border-border/50 bg-card px-4 py-3">
             <Button
               type="button"
               size="sm"
@@ -1548,6 +1556,7 @@ export function PatientRecommendationsSection({
         ) : null}
 
         <PatientSheetScaffold
+          presentation="dialog"
           open={Boolean(editing)}
           onOpenChange={(open) => {
             if (!open) setEditing(null);
@@ -1582,7 +1591,7 @@ export function PatientRecommendationsSection({
           }
         >
           {editing ? (
-            <div className="space-y-2">
+            <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
               <Field label={tx("Заголовок", "Titel")}>
                 <Input
                   value={editing.title}
@@ -3603,6 +3612,7 @@ export function PatientClinicalTab({
       <ClinicalSection<ClinicalMedication>
         title={tx("Медикаменты", "Medikation")}
         editorClassName={MEDICATION_EDITOR_CLASS_NAME}
+        editorHasSections
         headerAction={canManage ? (
           <MedicationBmpImportAction
             patientId={patientId}

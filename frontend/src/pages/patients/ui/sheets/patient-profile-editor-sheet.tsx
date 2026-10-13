@@ -502,7 +502,7 @@ function PatientProfileEditorFormSections({
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex min-w-0 items-center gap-2">
-                          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--brand)]/10 text-[var(--brand)]">
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                             {contact.contactKind === "email" ? (
                               <Mail className="size-4" />
                             ) : (
@@ -1267,7 +1267,7 @@ function PatientProfileEditorSheetContent({
   );
 
   return (
-    <PatientSheetScaffold requireChanges dirty={dirty}
+    <PatientSheetScaffold presentation="dialog" requireChanges dirty={dirty}
       open={open}
       onOpenChange={onOpenChange}
       width="detail-wide"
@@ -1281,7 +1281,6 @@ function PatientProfileEditorSheetContent({
         </span>
       ) : undefined}
       headerClassName="border-b border-border"
-      bodyClassName="bg-muted/10"
       footerError={saveError ? <div className="max-h-24 overflow-y-auto break-words">{saveError}</div> : undefined}
       footer={
         form ? (

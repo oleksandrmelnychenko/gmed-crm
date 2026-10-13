@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, ChevronDown, Clock3, Info } from "lucide-react";
 
-import { StatusBadge } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
@@ -104,7 +104,7 @@ function SummaryLine({
 
 function GroupHeading({ children }: { children: ReactNode }) {
   return (
-    <p className="px-3.5 pb-1 pt-2.5 text-[11px] font-medium uppercase text-muted-foreground">
+    <p className="px-3.5 pb-2 pt-3 text-xs font-semibold text-foreground">
       {children}
     </p>
   );
@@ -145,7 +145,7 @@ function OpenLeadLink({ leadId, onOpenLead, tx }: { leadId: string; onOpenLead: 
 
 // A long label wraps on a phone instead of widening the card (the wizard's
 // identification block does the same).
-const IDENTIFICATION_LABEL_CLASS = "h-auto min-h-5 max-w-full shrink justify-start rounded-[10px] text-left leading-4 whitespace-normal";
+const IDENTIFICATION_LABEL_CLASS = "h-auto min-h-6 max-w-full shrink justify-start text-left leading-4 whitespace-normal";
 
 function LoadedCard({
   summary,
@@ -287,7 +287,7 @@ function LoadedCard({
         />
       ) : null}
       {identification ? (
-        <div data-testid={`${TEST_ID}-identification`}>
+        <div className="bg-muted/40" data-testid={`${TEST_ID}-identification`}>
           {/* The § 12 GwG route (QES plus a payment from the person's own
               account) is a check of its own, next to the identity document
               ticked in the legal status (QA B-17, 2026-10-11). */}
@@ -295,17 +295,11 @@ function LoadedCard({
             "Идентификация по GwG: КЭП и платёж с собственного счёта",
             "GwG-Identifizierung: QES und Zahlung vom eigenen Konto",
           )}</GroupHeading>
-          <p className="px-3.5 pb-1.5 text-[11px] leading-4 text-muted-foreground">
-            {tx(
-              "Отдельно от проверки удостоверения личности в правовом статусе.",
-              "Unabhängig von der Prüfung des Ausweisdokuments im Rechtsstatus.",
-            )}
-          </p>
           <ul className="space-y-2 px-3.5 pb-2.5">
             {identificationRows.map((row) => (
               <li
                 key={row.subject}
-                className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5"
+                className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3"
                 data-testid={`${TEST_ID}-identification-${row.subject}`}
               >
                 <span className="w-full min-w-0 break-words text-[13px] font-medium text-foreground">
@@ -313,10 +307,16 @@ function LoadedCard({
                   {row.detail ? <span className="font-normal text-muted-foreground">{` · ${row.detail}`}</span> : null}
                 </span>
                 <span className="inline-flex min-w-0 max-w-full" data-tone={row.signature.tone}>
-                  <StatusBadge tone={row.signature.tone} className={IDENTIFICATION_LABEL_CLASS}>{row.signature.text}</StatusBadge>
+                  <StatusChip tone={row.signature.tone === "success" ? "success" : row.signature.tone === "info" ? "info" : "warning"} className={IDENTIFICATION_LABEL_CLASS}>
+                    {row.signature.tone === "success" ? <CheckCircle2 aria-hidden="true" /> : <Clock3 aria-hidden="true" />}
+                    {row.signature.text}
+                  </StatusChip>
                 </span>
                 <span className="inline-flex min-w-0 max-w-full" data-tone={row.payment.tone}>
-                  <StatusBadge tone={row.payment.tone} className={IDENTIFICATION_LABEL_CLASS}>{row.payment.text}</StatusBadge>
+                  <StatusChip tone={row.payment.tone === "success" ? "success" : "warning"} className={IDENTIFICATION_LABEL_CLASS}>
+                    {row.payment.tone === "success" ? <CheckCircle2 aria-hidden="true" /> : <Clock3 aria-hidden="true" />}
+                    {row.payment.text}
+                  </StatusChip>
                 </span>
                 {row.note ? <Warning testId={`${TEST_ID}-identification-note-${row.subject}`}>{row.note}</Warning> : null}
               </li>
@@ -324,14 +324,27 @@ function LoadedCard({
           </ul>
         </div>
       ) : null}
-      <div className="space-y-1 px-3.5 py-2.5" data-testid={`${TEST_ID}-footer`}>
+      <div className="space-y-2 px-3.5 py-2.5" data-testid={`${TEST_ID}-footer`}>
         {source ? (
           <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5 text-muted-foreground">
             <span className="break-words">{conversionNote(source, tx)}</span>
             {canOpenLead ? <OpenLeadLink leadId={source.lead_id} onOpenLead={onOpenLead} tx={tx} /> : null}
           </p>
         ) : null}
-        <p className="text-xs leading-5 text-muted-foreground">{payerChangedElsewhereNote(tx)}</p>
+        <details className="group text-xs text-muted-foreground">
+          <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 [&::-webkit-details-marker]:hidden">
+            <Info className="size-3.5" aria-hidden="true" />
+            {tx("О данных плательщика", "Hinweise zu den Zahlerdaten")}
+            <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          <div className="mt-2 space-y-1 rounded-lg border border-border bg-muted/40 px-3 py-2 leading-5">
+            {identification ? <p>{tx(
+              "Отдельно от проверки удостоверения личности в правовом статусе.",
+              "Unabhängig von der Prüfung des Ausweisdokuments im Rechtsstatus.",
+            )}</p> : null}
+            <p>{payerChangedElsewhereNote(tx)}</p>
+          </div>
+        </details>
       </div>
     </SummaryCard>
   );

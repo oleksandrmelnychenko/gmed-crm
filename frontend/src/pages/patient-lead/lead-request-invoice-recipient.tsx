@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
@@ -21,6 +23,8 @@ import {
   costEstimateConsentAsked,
   draftFromPayer,
   payerAnswer,
+  payerIdentityKey,
+  unansweredPayerDraft,
   payerDraftFromRecipient,
   recipientPayerExtras,
   withPayerChoice,
@@ -55,6 +59,7 @@ import {
   payerPartyOf,
   recipientFieldOf,
   recipientPatch,
+  recipientPayerReady,
   recipientValue,
   withRecipientAnswer,
   withRecipientRelationship,
@@ -251,6 +256,7 @@ export function InvoiceRecipientSection({
                       disabled={locked}
                       onChange={() => {
                         setPartyChoice(null);
+                        if (identification && third && organisation && recipientPays) identification.set("payment_background", "");
                         update((current) => withRecipientAnswer(current, answer));
                       }}
                     />
@@ -274,7 +280,10 @@ export function InvoiceRecipientSection({
                   className={selectClass}
                   value={draft.type}
                   disabled={lockedParty}
-                  onChange={(event) => update((current) => withRecipientType(current, event.target.value))}
+                  onChange={(event) => {
+                    if (identification && organisation && event.target.value !== "organisation" && recipientPays) identification.set("payment_background", "");
+                    update((current) => withRecipientType(current, event.target.value));
+                  }}
                 >
                   <option value="">{text.choose}</option>
                   {RECIPIENT_TYPES.map((type) => (
@@ -488,6 +497,7 @@ export function InvoiceRecipientSection({
       ) : flow.isPayer === "yes" && third && !draft.type ? null : flow.isPayer === "yes" && third ? (
         // Ticked by default: the recipient is named as payer once it is a person or an organisation.
         <RecipientPayer
+          key={JSON.stringify([draft.type, draft.first_name, draft.last_name, draft.organisation_name])}
           request={request}
           text={text}
           lang={lang}
@@ -536,7 +546,7 @@ function PatientSidePayer({
 }) {
   const guardian = request.access_kind === "guardian";
   const template = guardian ? (request.payer_self_template ?? null) : null;
-  if (guardian && !template) {
+  if (guardian && (!template || request.payer?.payer_kind === "self")) {
     // A parent's login without own data on file names the parent who pays.
     return (
       <PayerSection
@@ -547,7 +557,7 @@ function PatientSidePayer({
         enqueue={enqueue}
         onChange={onChange}
         onSaveState={onSaveState}
-        choices={["person"]}
+        choices={template ? ["guardian"] : ["person"]}
       />
     );
   }
@@ -613,7 +623,8 @@ function RecipientPayer({
     recipient,
     payerAnswer(request.payer, template) === "guardian",
   );
-  const [base] = useState<PayerDraft>(() => draftFromPayer(request.payer));
+  const [base] = useState<PayerDraft>(() => fits ? draftFromPayer(request.payer) : unansweredPayerDraft(request.payer));
+  const [replacementConfirmed, setReplacementConfirmed] = useState(false);
   const [extras, setExtras] = useState<RecipientPayerExtras>(() => recipientPayerExtras(fits ? request.payer : null));
   const [messengerSameAsPhone, setMessengerSameAsPhone] = useState(
     () => Boolean(extras.messenger) && extras.messenger === recipient.phone,
@@ -627,16 +638,23 @@ function RecipientPayer({
       }),
     [base, extras, messengerSameAsPhone, recipient],
   );
-  const { fieldError } = usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
+  const replacementPending = Boolean(request.payer) && !fits && !replacementConfirmed;
+  const readyToReplace = recipientPayerReady(recipient);
+  const sameIdentity = fits && payerIdentityKey(draftFromPayer(request.payer)) === payerIdentityKey(draft);
+  const { fieldError } = usePayerAutosave({ request, draft, enqueue, onChange, onSaveState, enabled: !replacementPending && (fits || readyToReplace) });
   const organisation = recipient.type === "organisation";
   const payerType = organisation ? "organisation" : "person";
   const errorFor = (field: string) => (fieldError === field ? text.invalidField : undefined);
   const set = <K extends keyof RecipientPayerExtras>(field: K, value: RecipientPayerExtras[K]) =>
-    setExtras((current) => ({ ...current, [field]: value }));
+    setExtras((current) => ({ ...current, [field]: value, ...(field === "date_of_birth" && value !== current.date_of_birth ? { contact_consent: false } : {}) }));
 
   return (
     <Section title={text.recipient.payerExtrasBlock}>
       <div className="space-y-3" data-testid="lead-request-recipient-payer">
+        {replacementPending ? <div className="space-y-3" data-testid="lead-request-payer-replacement">
+          <StatusChip tone="warning">{text.recipient.replacePayerHint}</StatusChip>
+          <Button type="button" disabled={!readyToReplace} onClick={() => setReplacementConfirmed(true)}>{text.recipient.confirmPayerChange}</Button>
+        </div> : null}
         <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
           {organisation ? (
             <LabeledField
@@ -706,12 +724,12 @@ function RecipientPayer({
           text={text}
           guardian={guardian}
           checked={extras.contact_consent}
-          consentAt={request.payer?.contact_consent_at ?? null}
+          consentAt={sameIdentity ? request.payer?.contact_consent_at ?? null : null}
           error={errorFor("payer_contact_consent")}
           onChange={(checked) => set("contact_consent", checked)}
         />
         {/* Saved on its own, about the third party the server has stored. */}
-        {costEstimateConsentAsked(request, false) ? (
+        {sameIdentity && costEstimateConsentAsked(request, false) ? (
           <CostEstimateConsent request={request} text={text} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />
         ) : null}
         {fieldError === "payer" ? (

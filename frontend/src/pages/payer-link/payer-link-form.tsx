@@ -508,7 +508,7 @@ function DraftForm({
   let content;
   switch (step) {
     case "privacy":
-      content = <PrivacyStep questionnaire={questionnaire} text={text} busy={consentBusy} error={consentError} onConsent={consent} />;
+      content = <PrivacyStep questionnaire={questionnaire} text={text} lang={lang} busy={consentBusy} error={consentError} onConsent={consent} />;
       break;
     case "details":
       content = <DetailsStep context={context} email={questionnaire.email} />;

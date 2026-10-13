@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
-import { Banner, Section } from "@/components/ui-shell";
+import { StatusChip } from "@/components/ui/status-chip";
+import { ComplianceSection } from "@/pages/admin/ui/compliance-section";
+import { Banner } from "@/components/ui-shell";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { fetchPatientRecipients, type PatientRecipient } from "@/pages/admin/data/admin-api";
@@ -52,7 +53,7 @@ export function PatientRecipientsSection({ patientId }: { patientId: string }) {
   if (!patientId) return null;
 
   return (
-    <Section title={l("recipients_title")}>
+    <ComplianceSection title={l("recipients_title")}>
       <p className="text-xs text-muted-foreground">{l("recipients_intro")}</p>
       {error ? <Banner tone="error">{error}</Banner> : null}
       <div className="space-y-2" data-testid="patient-recipients">
@@ -64,11 +65,11 @@ export function PatientRecipientsSection({ patientId }: { patientId: string }) {
             key={`${recipient.kind}-${recipient.recipient}-${recipient.since ?? index}`}
             className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card p-3 text-sm"
           >
-            <Badge className="bg-slate-500/15 text-slate-700">{l(`recipients_kind_${recipient.kind}`)}</Badge>
-            <span className="font-medium">{recipient.recipient}</span>
+            <StatusChip tone="neutral">{l(`recipients_kind_${recipient.kind}`)}</StatusChip>
+            <span className="min-w-0 break-words font-medium">{recipient.recipient}</span>
             {recipient.detail ? <span className="text-xs text-muted-foreground">{detailLabel(recipient)}</span> : null}
             {recipient.subject ? <span className="text-xs text-muted-foreground">· {recipient.subject}</span> : null}
-            <span className="ml-auto text-xs text-muted-foreground">
+            <span className="min-w-0 break-words text-xs text-muted-foreground sm:ml-auto">
               {day(recipient.since)}
               {recipient.until ? ` → ${day(recipient.until)}` : ""}
               {recipient.contact ? ` · ${recipient.contact}` : ""}
@@ -76,6 +77,6 @@ export function PatientRecipientsSection({ patientId }: { patientId: string }) {
           </div>
         ))}
       </div>
-    </Section>
+    </ComplianceSection>
   );
 }

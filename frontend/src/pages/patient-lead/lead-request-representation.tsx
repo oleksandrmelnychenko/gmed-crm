@@ -6,6 +6,8 @@ import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
+import { nameNeedsLatinSpelling, suggestPassportSpelling } from "./name-transliteration";
 import { inputClass, selectClass, tokens } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
@@ -19,6 +21,7 @@ import {
   withdrawLeadDocument,
   type Custody,
   type LeadRequest,
+  type LeadRequestPersonalData,
   type LeadRequestDocument,
   type LeadRequestRepresentative,
   type RepresentativeSlot,
@@ -344,7 +347,7 @@ function RepresentativeUpload({
         nextErrors.push(
           errorBody(cause)?.code === "inquiry_consent_required"
             ? text.identityUploadNeedsConsent
-            : `${file.name}: ${errorMessage(cause)}`,
+            : `${file.name}: ${errorMessage(cause, text)}`,
         );
       }
     }
@@ -357,7 +360,7 @@ function RepresentativeUpload({
     try {
       onChange(await enqueue(() => withdrawLeadDocument(request.lead_id, documentId)));
     } catch (cause) {
-      setErrors([errorMessage(cause)]);
+      setErrors([errorMessage(cause, text)]);
     }
   }
 
@@ -424,6 +427,7 @@ function RepresentativeUpload({
  */
 function RepresentativeBlock({
   request,
+  childAddress,
   slot,
   person,
   custody,
@@ -439,6 +443,7 @@ function RepresentativeBlock({
   isShown,
 }: {
   request: LeadRequest;
+  childAddress?: Pick<LeadRequestPersonalData, "street_address" | "zip_code" | "city" | "country">;
   slot: RepresentativeSlot;
   /** The person on the server; `null` until the first save of this form has created it. */
   person: LeadRequestRepresentative | null;
@@ -490,6 +495,7 @@ function RepresentativeBlock({
     const invalid = Boolean(form.errorFor(field));
     return {
       id: fieldId(field),
+      disabled: request.access_kind === "guardian" && Boolean(person) && !person?.mine && ["first_name", "last_name", "date_of_birth"].includes(field),
       "aria-invalid": invalid || undefined,
       "aria-describedby": invalid ? `${fieldId(field)}-error` : undefined,
     };
@@ -554,7 +560,7 @@ function RepresentativeBlock({
       onRemoved(slot);
     } catch (cause) {
       form.setRemoved(false);
-      setRemoveError(errorBody(cause)?.code === "representative_in_use" ? text.representativeInUse : errorMessage(cause));
+      setRemoveError(errorBody(cause)?.code === "representative_in_use" ? text.representativeInUse : errorMessage(cause, text));
     } finally {
       setRemoving(false);
     }
@@ -589,6 +595,18 @@ function RepresentativeBlock({
         ) : null}
       </div>
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="sm:col-span-2 lg:col-span-3">
+          <StatusChip tone="warning" className="whitespace-normal">{text.namePassportHint}</StatusChip>
+          {(["first_name", "last_name"] as const).map((field) => {
+            const suggestion = suggestPassportSpelling(form.draft[field], lang);
+            return nameNeedsLatinSpelling(form.draft[field]) ? (
+              <div key={field} className="mt-2 text-xs text-amber-900">
+                {text.namePassportCorrection}
+                {suggestion && !control(field).disabled ? <Button type="button" size="sm" variant="outline" className="ml-2" onClick={() => form.set(field, suggestion)}>{suggestion}</Button> : null}
+              </div>
+            ) : null;
+          })}
+        </div>
         {asked("first_name") ? <LabeledField {...labeled("first_name")}>{textInput("first_name", 100)}</LabeledField> : null}
         {asked("last_name") ? <LabeledField {...labeled("last_name")}>{textInput("last_name", 100)}</LabeledField> : null}
         {asked("date_of_birth") ? (
@@ -602,6 +620,7 @@ function RepresentativeBlock({
           <LabeledField {...labeled("citizenships")}>
             <CitizenshipMultiSelect
               id={fieldId("citizenships")}
+              maxItems={5}
               value={form.draft.citizenships}
               lang={lang}
               placeholder={text.citizenshipsPlaceholder}
@@ -618,8 +637,8 @@ function RepresentativeBlock({
               variant="outline"
               size="sm"
               className="h-auto min-h-8 whitespace-normal py-1.5 text-left"
-              disabled={!hasChildAddress(request.personal_data)}
-              onClick={() => form.update((current) => withChildAddress(current, request.personal_data))}
+              disabled={!hasChildAddress(childAddress ?? request.personal_data)}
+              onClick={() => form.update((current) => withChildAddress(current, childAddress ?? request.personal_data))}
             >
               {text.copyChildAddress}
             </Button>
@@ -701,6 +720,7 @@ function RepresentativeBlock({
  */
 export function RepresentationSection({
   request,
+  childAddress,
   text,
   lang,
   enqueue,
@@ -710,6 +730,7 @@ export function RepresentationSection({
   stepMissing = [],
 }: {
   request: LeadRequest;
+  childAddress?: Pick<LeadRequestPersonalData, "street_address" | "zip_code" | "city" | "country">;
   text: LeadRequestText;
   lang: string;
   enqueue: RequestQueue;
@@ -846,9 +867,10 @@ export function RepresentationSection({
     <RepresentativeBlock
       key={`${slot}-${generations[slot] ?? 0}`}
       request={request}
+      childAddress={childAddress}
       slot={slot}
       person={representativeInSlot(representation, slot)}
-      custody={minor ? draft.custody : null}
+      custody={minor ? draft.custody || null : null}
       fields={fieldsOf(slot)}
       uploads={whole(slot)}
       text={text}
@@ -892,6 +914,7 @@ export function RepresentationSection({
                 if (custody && custody !== draft.custody) change({ ...draft, custody });
               }}
             >
+              <option value="">{text.choose}</option>
               {CUSTODIES.map((value) => (
                 <option key={value} value={value}>
                   {text.custodyOptions[value]}
@@ -908,7 +931,7 @@ export function RepresentationSection({
               className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
               data-testid="lead-request-representative-on-file"
             >
-              {representativeOnFileNote(text, representativeName(person) || "—", draft.custody)}
+              {representativeOnFileNote(text, representativeName(person) || "—", draft.custody || null)}
             </p>
           ))}
           {shown.map(block)}

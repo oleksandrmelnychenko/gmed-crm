@@ -64,6 +64,10 @@ export function payerLinkRevokeReasonLabel(reason: string | null | undefined, tx
       return tx("отозвана сотрудником", "von GMED widerrufen");
     case "payer_changed":
       return tx("плательщик изменён", "Zahler geändert");
+    case "consent_withdrawn":
+      return tx("согласие на контакт с плательщиком отозвано", "Einverständnis zur Kontaktaufnahme mit dem Zahler widerrufen");
+    case "payer_has_cabinet_login":
+      return tx("плательщику открыт доступ в кабинет", "Portalzugang für den Zahler eingerichtet");
     case "email_changed":
       return tx("изменён e-mail плательщика", "E-Mail des Zahlers geändert");
     case "lead_converted":
@@ -192,8 +196,8 @@ export function payerLinkBlockedReasonText(reason: string | null | undefined, tx
   switch (reason) {
     case "request_not_submitted":
       return tx(
-        "Ссылку можно отправить, когда пациент отправит заявку в кабинете",
-        "Der Link kann gesendet werden, sobald der Patient die Anfrage im Portal gesendet hat",
+        "Пациенту нужно отправить актуальную заявку из кабинета. После изменения плательщика или согласия заявку нужно отправить повторно",
+        "Der Patient muss die aktuelle Anfrage im Portal absenden. Nach einer Änderung des Zahlers oder Einverständnisses ist ein erneutes Absenden erforderlich",
       );
     case "no_third_party":
       return tx(

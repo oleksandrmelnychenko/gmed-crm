@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { CheckCircle2, Clock3, ShieldCheck } from "lucide-react";
 
 import { QrCodeImage } from "@/components/qr-code-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
 import { Banner, PageHeader, Section } from "@/components/ui-shell";
 import { apiFetch, clearApiCache, refreshAuthSession } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -14,6 +16,10 @@ type Enrolment = { secret: string; otpauth_uri: string; issuer: string; account:
 
 export function fetchTotpStatus() {
   return apiFetch<TotpStatus>("/me/totp", { cache: "no-store" });
+}
+
+function TwoFactorContent({ embedded, title, children }: { embedded: boolean; title: string; children: ReactNode }) {
+  return embedded ? <div className="space-y-3">{children}</div> : <Section title={title}>{children}</Section>;
 }
 
 /**
@@ -40,10 +46,13 @@ export function TwoFactorPage() {
 export function TwoFactorSection({
   onEnrolled,
   hideRequiredBanner = false,
+  embedded = false,
 }: {
   onEnrolled?: () => void;
   /** The enrolment gate says "mandatory" in its intro already (QA E2-07). */
   hideRequiredBanner?: boolean;
+  /** The account card already supplies its section title and frame. */
+  embedded?: boolean;
 } = {}) {
   const { t } = useLang();
   const { refreshUser } = useAuth();
@@ -127,19 +136,19 @@ export function TwoFactorSection({
   return (
     <div className="space-y-4" data-testid="twofactor-section">
       {error ? <Banner tone="error">{error}</Banner> : null}
-      {notice ? <p className="text-sm text-emerald-700">{notice}</p> : null}
+      {notice ? <StatusChip tone="success"><CheckCircle2 aria-hidden="true" />{notice}</StatusChip> : null}
       {status?.required && !status.enrolled && !hideRequiredBanner ? (
         <Banner tone="warning" withIcon>{l("twofactor_required_banner")}</Banner>
       ) : null}
 
-      <Section title={l("twofactor_title")}>
+      <TwoFactorContent embedded={embedded} title={l("twofactor_title")}>
         {status === null ? null : status.enrolled ? (
           <div className="space-y-3" data-testid="twofactor-active">
-            <p className="text-sm">{l("twofactor_status_active")}</p>
+            <StatusChip tone="success"><ShieldCheck aria-hidden="true" />{l("twofactor_status_active")}</StatusChip>
             <p className="text-xs text-muted-foreground">{l("twofactor_disable_hint")}</p>
             <div className="flex flex-wrap items-center gap-2">
               {codeInput}
-              <Button type="button" variant="outline" className="h-9 rounded-lg" disabled={busy || code.trim().length < 6} onClick={() => void disable()}>
+              <Button type="button" variant="outline" className="h-8 rounded-lg text-xs" disabled={busy || code.trim().length < 6} onClick={() => void disable()}>
                 {l("twofactor_disable")}
               </Button>
             </div>
@@ -159,7 +168,7 @@ export function TwoFactorSection({
             </a>
             <p className="text-xs text-muted-foreground">
               {l("twofactor_manual_key")}:{" "}
-              <code className="select-all rounded bg-muted px-1.5 py-0.5 font-mono text-sm tracking-wider">
+              <code className="break-all select-all rounded bg-muted px-1.5 py-0.5 font-mono text-sm tracking-wider">
                 {enrolment.secret.replace(/(.{4})/g, "$1 ").trim()}
               </code>{" "}
               · {enrolment.issuer} · {enrolment.account}
@@ -167,20 +176,21 @@ export function TwoFactorSection({
             <p className="text-sm">{l("twofactor_step_confirm")}</p>
             <div className="flex flex-wrap items-center gap-2">
               {codeInput}
-              <Button type="button" className="h-9 rounded-lg" disabled={busy || code.trim().length < 6} onClick={() => void confirm()}>
+              <Button type="button" className="h-8 rounded-lg text-xs" disabled={busy || code.trim().length < 6} onClick={() => void confirm()}>
                 {l("twofactor_confirm")}
               </Button>
             </div>
           </div>
         ) : (
-          <div className="space-y-3" data-testid="twofactor-inactive">
-            <p className="text-sm">{l("twofactor_status_inactive")}</p>
-            <Button type="button" className="h-9 rounded-lg" disabled={busy} onClick={() => void start()}>
+          <div className="flex flex-wrap items-center justify-between gap-3" data-testid="twofactor-inactive">
+            <StatusChip tone="warning"><Clock3 aria-hidden="true" />{l("twofactor_status_inactive")}</StatusChip>
+            <Button type="button" className="h-8 rounded-lg gap-1.5 text-xs" disabled={busy} onClick={() => void start()}>
+              <ShieldCheck className="size-3.5" aria-hidden="true" />
               {l("twofactor_start")}
             </Button>
           </div>
         )}
-      </Section>
+      </TwoFactorContent>
     </div>
   );
 }

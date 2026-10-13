@@ -874,7 +874,9 @@ pub(crate) async fn resolve_linked_patient_id(
     }
 
     let has_assignment_history = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM patient_assignments WHERE user_id = $1)",
+        "SELECT EXISTS(SELECT 1 FROM patient_assignments WHERE user_id = $1)
+             OR EXISTS(SELECT 1 FROM lead_portal_access WHERE user_id = $1)
+             OR EXISTS(SELECT 1 FROM leads WHERE portal_user_id = $1)",
     )
     .bind(user_id)
     .fetch_one(&mut *tx)

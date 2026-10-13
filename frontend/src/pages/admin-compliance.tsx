@@ -23,11 +23,12 @@ import {
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
-import { Badge } from "@/components/ui/badge";
+import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { ComplianceSection } from "@/pages/admin/ui/compliance-section";
 import { useAuth } from "@/lib/auth";
 import {
   formatEnumLabelFromKeys,
@@ -44,15 +45,12 @@ import {
   EmptyCell,
   Field,
   PageHeader,
-  Section,
   SuccessBanner,
   TabLoader,
   textareaClass,
-  tokens,
 } from "@/components/ui-shell";
 import { ReadOnlyBanner } from "@/components/read-only-scope";
 import { hasCapability } from "@/lib/permissions";
-import { cn } from "@/lib/utils";
 import {
   createPatientPrivacyRequest,
   downloadPatientComplianceExport,
@@ -255,20 +253,20 @@ function privacySourceLabel(
 /** Where a staff member records a request from: the person or GMED itself. */
 type PrivacyRequestSource = "patient_request" | "admin_intake";
 
-function privacyStatusBadgeClass(status: string) {
+function privacyStatusTone(status: string): StatusChipTone {
   switch (status) {
     case "requested":
-      return "bg-amber-500/15 text-amber-700";
+      return "warning";
     case "retention_hold":
-      return "bg-orange-500/15 text-orange-700";
+      return "warning";
     case "approved":
-      return "bg-sky-500/15 text-sky-700";
+      return "info";
     case "rejected":
-      return "bg-slate-500/15 text-slate-700";
+      return "neutral";
     case "completed":
-      return "bg-green-500/15 text-green-700";
+      return "success";
     default:
-      return "bg-slate-500/15 text-slate-700";
+      return "neutral";
   }
 }
 
@@ -925,9 +923,9 @@ function useAdminCompliancePageContent() {
       width: 190,
       render: (record) => (
         <div className="flex min-w-0 items-center gap-1.5">
-          <Badge className={privacyStatusBadgeClass(record.status)}>
+          <StatusChip tone={privacyStatusTone(record.status)}>
             {privacyRecordStatusLabel(record, t, lang)}
-          </Badge>
+          </StatusChip>
           {record.manual_override ? (
             <span className="truncate text-xs text-slate-500">
               {t.compliance_manual_override}
@@ -1026,9 +1024,9 @@ function useAdminCompliancePageContent() {
       width: 190,
       render: (record) => (
         <div className="flex min-w-0 items-center gap-1.5">
-          <Badge className={privacyStatusBadgeClass(record.status)}>
+          <StatusChip tone={privacyStatusTone(record.status)}>
             {privacyRecordStatusLabel(record, t, lang)}
-          </Badge>
+          </StatusChip>
           {record.is_overdue &&
           (record.status === "requested" || record.status === "approved") ? (
             <span className="truncate text-xs font-medium text-red-600">
@@ -1137,7 +1135,7 @@ function useAdminCompliancePageContent() {
             <Button
               type="button"
               variant="outline"
-              className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+              className="h-8 gap-1.5 rounded-lg bg-card px-3 text-xs"
               disabled={privacyQueueLoading}
               onClick={() => void refreshWorkspace()}
             >
@@ -1148,15 +1146,16 @@ function useAdminCompliancePageContent() {
         )}
       />
 
+      <div className="min-w-0 space-y-4 rounded-2xl border border-border/70 bg-muted/40 p-3 sm:p-4" data-testid="compliance-workspace">
       {readOnly ? <ReadOnlyBanner /> : null}
 
       {actionError ? <Banner tone="error">{actionError}</Banner> : null}
 
-      <Section
+      <ComplianceSection
             title={t.compliance_privacy_requests_title}
             accessory={(
               <div
-                className="rounded-full border border-border/60 bg-muted/25 px-3 py-1 text-xs font-medium text-foreground"
+                className="max-w-full break-words rounded-lg border border-border/60 bg-muted/25 px-2.5 py-1.5 text-xs font-medium text-foreground"
                 data-testid="compliance-active-patient"
               >
                 {activePatientLabel}
@@ -1198,7 +1197,7 @@ function useAdminCompliancePageContent() {
                   />
                 </Field>
                 <div className="flex items-end">
-                  <Button type="submit" className="h-9 rounded-lg px-3.5">
+                  <Button type="submit" className="h-8 rounded-lg px-3 text-xs">
                     {uiText("compliance_load_patient", lang)}
                   </Button>
                 </div>
@@ -1208,7 +1207,7 @@ function useAdminCompliancePageContent() {
             {patientError ? <Banner tone="error">{patientError}</Banner> : null}
 
             {readOnly ? null : (
-              <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl p-3.5", tokens.surface.card)}>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 p-3">
                 <div className="space-y-1.5">
                   <p className="text-xs text-muted-foreground">{t.compliance_new_request_hint}</p>
                   {activePatientId && !patientReady ? (
@@ -1219,7 +1218,7 @@ function useAdminCompliancePageContent() {
                 </div>
                 <Button
                   type="button"
-                  className="h-9 rounded-lg px-3.5"
+                  className="h-8 rounded-lg px-3 text-xs"
                   data-testid="compliance-create-request"
                   disabled={privacyCreateBusy || !patientReady}
                   onClick={() => {
@@ -1264,13 +1263,13 @@ function useAdminCompliancePageContent() {
                 />
               )}
             </AdminTableCard>
-          </Section>
+          </ComplianceSection>
 
-          <Section title={t.compliance_export}>
+          <ComplianceSection title={t.compliance_export}>
             {canExportPatientData(user?.role) ? (
               // The export is of the patient loaded above, never of a second
               // picker that could name someone else (QA B3-02).
-              <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl p-3.5", tokens.surface.card)}>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 p-3">
                 <div className="min-w-0 space-y-0.5">
                   <div className="text-xs text-muted-foreground">{t.orders_patient}</div>
                   <div className="text-sm font-medium text-foreground" data-testid="compliance-export-patient">
@@ -1279,7 +1278,7 @@ function useAdminCompliancePageContent() {
                 </div>
                 <Button
                   type="button"
-                  className="h-9 rounded-lg px-3.5"
+                  className="h-8 rounded-lg px-3 text-xs"
                   disabled={!patientReady}
                   onClick={() => void doExport()}
                 >
@@ -1307,12 +1306,16 @@ function useAdminCompliancePageContent() {
                 <SuccessBanner>{exportResult}</SuccessBanner>
               )
             ) : null}
-          </Section>
+          </ComplianceSection>
 
-          <Section title={t.compliance_privacy_review_queue}>
+          <ComplianceSection title={t.compliance_privacy_review_queue} accessory={<StatusChip>{privacyQueue.length}</StatusChip>}>
+            <div className="flex flex-wrap gap-2">
+              <StatusChip tone={privacyCounters.requested ? "warning" : "neutral"}>{t.compliance_stat_requested}: {privacyCounters.requested}</StatusChip>
+              <StatusChip tone={privacyCounters.retentionHold ? "warning" : "neutral"}>{t.compliance_stat_hold}: {privacyCounters.retentionHold}</StatusChip>
+              <StatusChip tone={privacyCounters.approved ? "info" : "neutral"}>{t.compliance_stat_approved}: {privacyCounters.approved}</StatusChip>
+              <StatusChip tone={privacyCounters.overdue ? "error" : "neutral"}>{t.compliance_stat_overdue}: {privacyCounters.overdue}</StatusChip>
+            </div>
             <AdminTableCard
-              description={`${t.compliance_stat_requested} ${privacyCounters.requested} - ${t.compliance_stat_hold} ${privacyCounters.retentionHold} - ${t.compliance_stat_approved} ${privacyCounters.approved} - ${t.compliance_stat_overdue} ${privacyCounters.overdue}`}
-              count={privacyQueue.length}
             >
               {privacyQueueLoading ? (
                 <TabLoader />
@@ -1332,21 +1335,23 @@ function useAdminCompliancePageContent() {
                 />
               )}
             </AdminTableCard>
-          </Section>
+          </ComplianceSection>
 
-          <Sheet
+          <Dialog
             open={privacySheetOpen && privacySheetPatient !== null}
             onOpenChange={(open) => {
               setPrivacySheetOpen(open);
               if (!open) setPrivacySheetPatient(null);
             }}
           >
-            <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+            <DialogContent overlayClassName="bg-black/40" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-0 sm:max-w-[720px]">
               <AdminSheetScaffold
+                headerClassName="border-b border-border bg-card py-3"
+                bodyClassName="bg-muted/35 p-4"
                 title={t.compliance_create_request}
                 description={privacySheetPatient?.label ?? ""}
               >
-                <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                <section className="space-y-4 rounded-xl border border-border bg-card p-4">
                   <AdminSectionTitle>{t.compliance_privacy_requests_title}</AdminSectionTitle>
                   {/* The dialog names the patient the request is filed for (QA B3-02). */}
                   <div
@@ -1400,7 +1405,7 @@ function useAdminCompliancePageContent() {
                   </Field>
                   <Button
                     type="button"
-                    className="h-9 rounded-lg"
+                    className="h-8 rounded-lg text-xs"
                     disabled={privacyCreateBusy || !privacyRequestType || !privacyRequestSource}
                     onClick={() => void handleCreatePrivacyRequest()}
                   >
@@ -1408,35 +1413,37 @@ function useAdminCompliancePageContent() {
                   </Button>
                 </section>
               </AdminSheetScaffold>
-            </SheetContent>
-          </Sheet>
+            </DialogContent>
+          </Dialog>
 
-          <Sheet
+          <Dialog
             open={Boolean(reviewSheetRecord)}
             onOpenChange={(open) => !open && setReviewSheetRecord(null)}
           >
-            <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+            <DialogContent overlayClassName="bg-black/40" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-0 sm:max-w-[720px]">
               {reviewSheetRecord ? (
                 <AdminSheetScaffold
+                headerClassName="border-b border-border bg-card py-3"
+                bodyClassName="bg-muted/35 p-4"
                   title={t.compliance_privacy_review_queue}
                   description={patientLabel(
                     reviewSheetRecord.patient_pid,
                     reviewSheetRecord.patient_name,
                   )}
                 >
-                  <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+                  <section className="space-y-4 rounded-xl border border-border bg-card p-4">
                     <AdminSectionTitle>{t.compliance_privacy_review_queue}</AdminSectionTitle>
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge className={privacyStatusBadgeClass(reviewSheetRecord.status)}>
+                      <StatusChip tone={privacyStatusTone(reviewSheetRecord.status)}>
                         {privacyRecordStatusLabel(reviewSheetRecord, t, lang)}
-                      </Badge>
-                      <Badge className="bg-slate-500/15 text-slate-700">
+                      </StatusChip>
+                      <StatusChip>
                         {privacyRequestTypeLabel(reviewSheetRecord.request_type, t)}
-                      </Badge>
+                      </StatusChip>
                       {reviewSheetRecord.is_overdue ? (
-                        <Badge className="bg-red-500/15 text-red-700">
+                        <StatusChip tone="error">
                           {t.compliance_stat_overdue}
-                        </Badge>
+                        </StatusChip>
                       ) : null}
                     </div>
 
@@ -1575,7 +1582,7 @@ function useAdminCompliancePageContent() {
                             key={action}
                             type="button"
                             variant="outline"
-                            className="h-9 rounded-lg"
+                            className="h-8 rounded-lg text-xs"
                             disabled={privacyActionBusy !== null || !reasonGiven}
                             onClick={async () => {
                               const ok = await handleReviewPrivacyRequest(
@@ -1604,7 +1611,7 @@ function useAdminCompliancePageContent() {
                       <div className="flex flex-wrap gap-2">
                         <Button
                           type="button"
-                          className="h-9 rounded-lg"
+                          className="h-8 rounded-lg text-xs"
                           disabled={privacyActionBusy !== null || retentionBlocksErasure}
                           onClick={async () => {
                             const ok = await handleReviewPrivacyRequest(
@@ -1624,7 +1631,7 @@ function useAdminCompliancePageContent() {
                         <Button
                           type="button"
                           variant="outline"
-                          className="h-9 rounded-lg"
+                          className="h-8 rounded-lg text-xs"
                           disabled={privacyActionBusy !== null}
                           onClick={async () => {
                             const ok = await handleReviewPrivacyRequest(
@@ -1644,7 +1651,7 @@ function useAdminCompliancePageContent() {
                         <Button
                           type="button"
                           variant="outline"
-                          className="h-9 rounded-lg"
+                          className="h-8 rounded-lg text-xs"
                           disabled={privacyActionBusy !== null || !reasonGiven}
                           onClick={async () => {
                             const ok = await handleReviewPrivacyRequest(
@@ -1680,7 +1687,7 @@ function useAdminCompliancePageContent() {
                             ? "destructive"
                             : "outline"
                         }
-                        className="h-9 rounded-lg"
+                        className="h-8 rounded-lg text-xs"
                         disabled={
                           privacyActionBusy !== null || identityMissing || retentionBlocksErasure
                         }
@@ -1706,8 +1713,8 @@ function useAdminCompliancePageContent() {
                   </section>
                 </AdminSheetScaffold>
               ) : null}
-            </SheetContent>
-          </Sheet>
+            </DialogContent>
+          </Dialog>
 
       {/* Consents and recipients of the loaded patient; the revoke dialog
           names that patient (QA B3-02). The CEO Assistant reads them (B3-11). */}
@@ -1727,6 +1734,7 @@ function useAdminCompliancePageContent() {
         canManage={user?.role === "ceo" || user?.role === "it_admin"}
         canView={hasCapability(user, "compliance.view")}
       />
+      </div>
     </div>
   );
 }

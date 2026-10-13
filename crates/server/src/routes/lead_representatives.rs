@@ -613,6 +613,9 @@ pub(crate) async fn load_on(
         r#"SELECT u.document_id, u.kind, u.representative_id, u.created_at, u.reviewed_at,
                   u.uploaded_by, d.original_filename, d.auto_name, d.file_size, d.mime_type,
                   d.patient_id, d.signed_at,
+                  COALESCE(u.kind = 'representative_identity' AND u.created_at <=
+                    (SELECT r.id_data_entered_at FROM lead_representatives r
+                     WHERE r.lead_id = u.lead_id AND r.contact_id = u.representative_id), false) AS identity_in_use,
                   EXISTS(SELECT 1 FROM document_shares s WHERE s.document_id = d.id) AS shared,
                   EXISTS(SELECT 1 FROM document_review_events r WHERE r.document_id = d.id)
                       AS in_review
@@ -782,16 +785,26 @@ pub(crate) fn missing_for_submit(loaded: &Loaded, today: NaiveDate) -> Vec<Strin
     // What the person of a place still lacks; everything while nobody is there.
     let place = |slot: &str, required: &[&str]| -> Vec<String> {
         let person = representation.in_slot(slot);
-        required
+        let mut missing: Vec<_> = required
             .iter()
             .filter(|field| {
                 !person.is_some_and(|person| field_filled(loaded, person, field, today))
             })
             .map(|field| format!("{slot}_{field}"))
-            .collect()
+            .collect();
+        if person.is_some_and(|person| {
+            intake::name_needs_latin_spelling(&person.first_name)
+                || intake::name_needs_latin_spelling(&person.last_name)
+        }) {
+            missing.push(format!("{slot}_name_latin"));
+        }
+        missing
     };
     let mut missing = Vec::new();
     if representation.minor {
+        if representation.answers.custody.is_none() {
+            missing.push("custody".to_string());
+        }
         missing.extend(place(SLOT_REP1, &MINOR_REQUIRED));
         match representation.answers.custody() {
             CUSTODY_JOINT => missing.extend(place(SLOT_REP2, &MINOR_REQUIRED)),
@@ -1410,12 +1423,6 @@ async fn store_row(
                zip = EXCLUDED.zip,
                city = EXCLUDED.city,
                country = EXCLUDED.country,
-               id_document_type = EXCLUDED.id_document_type,
-               id_document_number = EXCLUDED.id_document_number,
-               id_issuing_authority = EXCLUDED.id_issuing_authority,
-               id_issuing_country = EXCLUDED.id_issuing_country,
-               id_issued_on = EXCLUDED.id_issued_on,
-               id_valid_until = EXCLUDED.id_valid_until,
                updated_by = EXCLUDED.updated_by,
                updated_at = now()"#,
     )
@@ -1935,7 +1942,7 @@ pub(crate) async fn update_my_representation(
             // The person of an answer that no longer asks for anybody goes.
             if !next.keeps_adult_role(role, true) {
                 if !loaded.can_remove(person) {
-                    return in_use();
+                    continue;
                 }
                 removed.push(person.id);
             } else if role == ROLE_AUTHORISED_REPRESENTATIVE
@@ -2171,6 +2178,27 @@ pub(crate) async fn upsert_my_representative(
         Ok(next) => next,
         Err(error) => return error.into_response(),
     };
+    if kind == AccessKind::Guardian
+        && known.is_some_and(|person| !person.login_user_ids.contains(&auth.user_id))
+    {
+        let protected_field = if next.first_name != current.first_name {
+            Some("first_name")
+        } else if next.last_name != current.last_name {
+            Some("last_name")
+        } else if next.date_of_birth != current.date_of_birth {
+            Some("date_of_birth")
+        } else {
+            None
+        };
+        if let Some(field) = protected_field {
+            return intake::coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "representative_not_yours",
+                "Only this representative can change their name or date of birth; contact GMED for corrections",
+                json!({ "field": field }),
+            );
+        }
+    }
     if next.email != current.email {
         // The address of a parent with a login is the login: staff change it.
         if known.is_some_and(Representative::has_login) {
@@ -2221,6 +2249,15 @@ pub(crate) async fn upsert_my_representative(
     } else {
         ORIGIN_PORTAL
     };
+    // Keep the payer attached to this same representative when its name,
+    // residence or citizenships are corrected. Match before writing the new
+    // representative, so an identity correction cannot detach the payer.
+    let parent_payer = match lead_payer::load_declaration(&mut tx, lead_id).await {
+        Ok(payer) => payer.filter(|payer| {
+            payer_same_person(representation, Some(payer)) == Some(representative_id)
+        }),
+        Err(error) => return intake::internal(error, "load parent payer"),
+    };
     let mut contacts = loaded.contacts.clone();
     write_entry(
         &mut contacts,
@@ -2230,6 +2267,21 @@ pub(crate) async fn upsert_my_representative(
         patch.sends_address(),
     );
     let written = async {
+        if let Some(mut payer) = parent_payer {
+            payer.first_name = next.first_name.clone();
+            payer.last_name = next.last_name.clone();
+            payer.date_of_birth = next.date_of_birth;
+            payer.place_of_birth = next.birth_place.clone();
+            payer.citizenships = next.citizenships.clone();
+            payer.street = next.street.clone();
+            payer.zip = next.zip.clone();
+            payer.city = next.city.clone();
+            payer.country = next.country.clone();
+            payer.email = next.email.clone();
+            payer.phone = next.phone.clone();
+            lead_payer::adopt_payer_identity(&mut tx, lead_id, &payer, Some(auth.user_id), None)
+                .await?;
+        }
         store_row(
             &mut tx,
             lead_id,
@@ -3006,7 +3058,8 @@ mod tests {
     #[test]
     fn a_minor_needs_both_parents_or_the_one_custodian_or_guardian() {
         // Nobody on file yet: both parents by default.
-        let mut expected = keys(SLOT_REP1, &MINOR_REQUIRED);
+        let mut expected = vec!["custody".to_string()];
+        expected.extend(keys(SLOT_REP1, &MINOR_REQUIRED));
         expected.extend(keys(SLOT_REP2, &MINOR_REQUIRED));
         assert_eq!(
             missing_for_submit(&loaded(true, Answers::default(), Vec::new()), today()),
@@ -3029,7 +3082,12 @@ mod tests {
         both.uploads = vec![upload(2, UPLOAD_IDENTITY)];
         assert_eq!(
             missing_for_submit(&both, today()),
-            vec!["rep1_id_upload", "rep2_citizenships", "rep2_id_valid_until"]
+            vec![
+                "custody",
+                "rep1_id_upload",
+                "rep2_citizenships",
+                "rep2_id_valid_until"
+            ]
         );
 
         // One parent alone: the second place is not asked for, and the proof

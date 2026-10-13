@@ -9,14 +9,8 @@ import { StaffLink } from "@/components/staff-link";
 import { Field, StatusBadge, textareaClass } from "@/components/ui-shell";
 import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -102,19 +96,28 @@ export function SanctionsReasonDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={Boolean(reason)}>
-      <DialogContent className="sm:max-w-[520px]">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          {description ? <DialogDescription>{description}</DialogDescription> : null}
-        </DialogHeader>
-        {children}
-        <form
-          className="grid gap-3"
+      <AdminDialogScaffold
+          title={title}
+          description={description}
+          maxWidthClassName="sm:max-w-[560px]"
           onSubmit={(event) => {
             event.preventDefault();
             void submit();
           }}
-        >
+          footer={(
+            <div className="flex flex-wrap justify-end gap-2 px-4 py-3">
+              <Button type="button" size="sm" variant="outline" onClick={onClose} disabled={busy}>
+                {t.common_cancel}
+              </Button>
+              <Button type="submit" size="sm" variant={destructive ? "destructive" : "default"} disabled={busy || !valid}>
+                {busy ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+                {confirmLabel}
+              </Button>
+            </div>
+          )}
+      >
+        {children}
+        <section className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
           <Field label={t.sanctions_reason} htmlFor={reasonId} required>
             <textarea
               id={reasonId}
@@ -135,17 +138,8 @@ export function SanctionsReasonDialog({
               {error}
             </div>
           ) : null}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
-              {t.common_cancel}
-            </Button>
-            <Button type="submit" variant={destructive ? "destructive" : "default"} disabled={busy || !valid}>
-              {busy ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
-              {confirmLabel}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+        </section>
+      </AdminDialogScaffold>
     </Dialog>
   );
 }

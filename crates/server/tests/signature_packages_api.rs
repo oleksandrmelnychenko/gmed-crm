@@ -1783,6 +1783,15 @@ async fn a_consent_form_without_the_patients_own_choice_is_signed_on_paper_only(
 async fn the_parent_who_chose_must_sign_and_an_incomplete_choice_is_not_signed() {
     let Some(env) = env().await else { return };
     let patient = seed_patient(&env.pool, env.admin_id, "2016-03-03").await;
+    sqlx::query("UPDATE patients SET intake_profile = $2 WHERE id = $1")
+        .bind(patient)
+        .bind(json!({"custody":"joint","trusted_contacts":[
+            {"name":"Anna Beispiel","email":"anna@example.org","relation":"mother"},
+            {"name":"Bernd Beispiel","email":"bernd@example.org","relation":"father"}
+        ]}))
+        .execute(&env.pool)
+        .await
+        .unwrap();
     let child = upload(
         &env,
         patient,
@@ -1801,21 +1810,40 @@ async fn the_parent_who_chose_must_sign_and_an_incomplete_choice_is_not_signed()
     .execute(&env.pool)
     .await
     .unwrap();
+    for signers in [
+        json!([signer("Bernd", "bernd@example.org", "client")]),
+        json!([
+            signer("Anna", "anna@example.org", "client"),
+            signer("Other", "other@example.org", "client")
+        ]),
+    ] {
+        let (status, body) = call(
+            &env.app,
+            "POST",
+            "/api/v1/signature-packages",
+            &env.ceo,
+            Some(json!({"document_ids": [child], "signers": signers})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["error"], "minor_signers_required", "{body}");
+    }
+    // A choice attributed to another person remains refused even when both
+    // valid guardians are present: guardian identity cannot replace the chooser rule.
+    sqlx::query("UPDATE documents SET generated_bindings = jsonb_set(generated_bindings, '{_own_consent_choice,chosen_by_emails}', '[\"other@example.org\"]'::jsonb) WHERE id=$1")
+        .bind(child).execute(&env.pool).await.unwrap();
     let (status, body) = call(
-        &env.app,
-        "POST",
-        "/api/v1/signature-packages",
-        &env.ceo,
-        Some(json!({
-            "document_ids": [child],
-            "signers": [signer("Bernd", "bernd@example.org", "client")],
-        })),
-    )
-    .await;
+        &env.app, "POST", "/api/v1/signature-packages", &env.ceo,
+        Some(json!({"document_ids": [child], "signers": [
+            signer("Anna", "anna@example.org", "client"), signer("Bernd", "bernd@example.org", "client")
+        ]})),
+    ).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["error"], "consent_chooser_must_sign");
     assert_eq!(body["document_id"], child.to_string());
-    // With the mother among the signers (the father may sign as well) it goes out.
+    sqlx::query("UPDATE documents SET generated_bindings = jsonb_set(generated_bindings, '{_own_consent_choice,chosen_by_emails}', '[\"anna@example.org\"]'::jsonb) WHERE id=$1")
+        .bind(child).execute(&env.pool).await.unwrap();
+    // Both legal representatives sign under joint custody.
     send_package(
         &env,
         json!({
@@ -2469,6 +2497,17 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
 async fn qes_of_a_child_consent_form_sets_both_legal_status_items() {
     let Some(env) = env().await else { return };
     let patient = seed_patient(&env.pool, env.admin_id, "2016-03-03").await;
+    // Native patients may name their legal representative through relations,
+    // without a source lead or a trusted-contacts snapshot.
+    sqlx::query(
+        "UPDATE patients SET intake_profile = '{\"custody\":\"sole_parent\"}'::jsonb WHERE id=$1",
+    )
+    .bind(patient)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO patient_relations(patient_id,related_name,relation_type,email) VALUES ($1,'Anna Beispiel','parent','anna@example.org')")
+        .bind(patient).execute(&env.pool).await.unwrap();
     let child = upload(&env, patient, Doc::new("consent_data_release_child", 1)).await;
     let id = send_package(
         &env,

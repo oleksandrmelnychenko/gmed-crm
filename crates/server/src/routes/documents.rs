@@ -3603,6 +3603,14 @@ async fn load_gwg_identification_sheet(
     };
     let mut risk_countries: Vec<String> = Vec::new();
     if subject == GwgSheetSubject::Payer {
+        if super::lead_representatives::payer_same_person(representation, declaration.as_ref())
+            .is_some()
+        {
+            return Err(gwg_sheet_refusal(
+                "payer_is_representative",
+                "The paying parent is identified on their representative sheet",
+            ));
+        }
         let Some(payer) = declaration.as_ref().filter(|declaration| {
             declaration.payer_kind == super::lead_payer::PAYER_KIND_THIRD_PARTY
         }) else {
@@ -16196,11 +16204,42 @@ async fn generate_document(
             };
         }
     }
+    let own_consent_choice = if crate::consent_choices::needs_own_choice(Some(template.id)) {
+        let subject_email = patient_row
+            .try_get::<Option<String>, _>("email")
+            .ok()
+            .flatten();
+        let loaded = match crate::consent_choices::current_for(&state.db, lead_id, patient_id).await
+        {
+            Ok(Some(mut choice)) => crate::consent_choices::describe_chooser(
+                &state.db,
+                &mut choice,
+                &patient_name,
+                subject_email.as_deref(),
+            )
+            .await
+            .map(|()| Some(choice)),
+            other => other,
+        };
+        match loaded {
+            Ok(choice) => choice,
+            Err(error) => {
+                tracing::error!(error = %error, ?patient_id, ?lead_id, "load the own consent choice");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load the consent choice",
+                );
+            }
+        }
+    } else {
+        None
+    };
     // The recipients named in the consent form: the trusted contacts. On the
     // minor's form the parents and the guardian declare themselves, so they
     // are no recipients there (QA 2026-10-12, A2-06).
     let child_consent_form = crate::consent_choices::is_child_form(Some(template.id));
-    if (template.id == "privacy_consents" || child_consent_form)
+    if own_consent_choice.is_none()
+        && (template.id == "privacy_consents" || child_consent_form)
         && bindings
             .extra_release_recipients
             .as_deref()
@@ -16251,6 +16290,9 @@ async fn generate_document(
                 );
             }
         }
+    }
+    if own_consent_choice.is_some() {
+        bindings.extra_release_recipients = None;
     }
     if template.id == "enhanced_due_diligence"
         && let Some(aml) = bindings.aml_enhanced_due_diligence.as_mut()
@@ -16314,36 +16356,6 @@ async fn generate_document(
     // 2026-10-12): the form ticks only those, names who chose (for a minor
     // the parent or guardian, QA 2026-10-12 A2-06) and records the choice,
     // which an electronic signature needs (`crate::consent_choices`).
-    let own_consent_choice = if crate::consent_choices::needs_own_choice(Some(template.id)) {
-        let subject_email = patient_row
-            .try_get::<Option<String>, _>("email")
-            .ok()
-            .flatten();
-        let loaded = match crate::consent_choices::current_for(&state.db, lead_id, patient_id).await
-        {
-            Ok(Some(mut choice)) => crate::consent_choices::describe_chooser(
-                &state.db,
-                &mut choice,
-                &patient_name,
-                subject_email.as_deref(),
-            )
-            .await
-            .map(|()| Some(choice)),
-            other => other,
-        };
-        match loaded {
-            Ok(choice) => choice,
-            Err(error) => {
-                tracing::error!(error = %error, ?patient_id, ?lead_id, "load the own consent choice");
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to load the consent choice",
-                );
-            }
-        }
-    } else {
-        None
-    };
     if let Some(choice) = own_consent_choice.as_ref() {
         generated_bindings_snapshot.get_or_insert_with(|| json!({}))
             [crate::consent_choices::BINDING_KEY] = choice.binding();
@@ -24694,7 +24706,6 @@ struct LeadSelfDisclosure {
     /// `None` until the own-interest question was answered.
     acts_on_own_account: Option<bool>,
     beneficial_owner_name: Option<String>,
-    beneficial_owner_note: Option<String>,
     pep_self: Option<bool>,
     pep_self_details: Option<String>,
     pep_related: Option<bool>,
@@ -25004,8 +25015,6 @@ async fn load_lead_self_disclosure(
         acts_on_own_account: own_account.map(|declaration| declaration.acts_on_own_account),
         beneficial_owner_name: own_account
             .and_then(|declaration| declaration.beneficial_owner_name.clone()),
-        beneficial_owner_note: own_account
-            .and_then(|declaration| declaration.beneficial_owner_note.clone()),
         pep_self: statements.pep_self,
         pep_self_details: statements.pep_self_details,
         pep_related: statements.pep_related,
@@ -25475,16 +25484,13 @@ fn build_lead_self_disclosure_pdf(
             if own {
                 "ja".to_string()
             } else {
-                let owner = [
-                    data.beneficial_owner_name.as_deref(),
-                    data.beneficial_owner_note.as_deref(),
-                ]
-                .into_iter()
-                .flatten()
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>()
-                .join(" – ");
+                let owner = [data.beneficial_owner_name.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .map(str::trim)
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" – ");
                 if owner.is_empty() {
                     "nein".to_string()
                 } else {
@@ -25864,15 +25870,10 @@ fn build_adult_privacy_consents_pdf(
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     let agency_identity = adult_legal_agency_identity(agency);
     let data_system_name = agency.data_system_name.trim();
-    let recipients = bindings
-        .extra_release_recipients
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
     // «[x]» only for what the person chose themselves in the lead cabinet
     // (2026-10-12); without such a choice every box is printed empty and
     // ticked by the person on the printed copy (owner decision 2026-10-11).
-    // Staff bindings never tick a box; staff fill in only the recipients.
+    // Staff bindings neither tick a box nor name its recipients.
     let chosen = own_choice.map(|choice| choice.choices).unwrap_or_default();
 
     adult_legal_document_header(
@@ -25920,15 +25921,21 @@ fn build_adult_privacy_consents_pdf(
         chosen.named_recipients,
         "dass meine personenbezogenen und medizinischen Daten an folgende Personen oder Institutionen übermittelt werden:",
     );
-    // The persons the person named in the cabinet (owner 2026-10-12), then
-    // any staff added.
+    // Only the recipients explicitly chosen in the cabinet are printed.
     let named = own_choice
         .map(|choice| choice.recipient_lines())
-        .unwrap_or_default();
+        .unwrap_or_else(|| {
+            bindings
+                .extra_release_recipients
+                .as_deref()
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_string)
+                .collect()
+        });
     for line in named
         .iter()
         .map(String::as_str)
-        .chain(recipients.into_iter().flat_map(str::lines))
         .map(str::trim)
         .filter(|line| !line.is_empty())
     {
@@ -26185,21 +26192,22 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
             "dass personenbezogene und medizinische Daten von {our} Kind an folgende Personen und/oder Institutionen/Einrichtungen übermittelt werden; insoweit {release_verb} {we_lower} {agency_person} auch von der Schweigepflicht:"
         ),
     );
-    // The persons a parent or the guardian named in the cabinet (owner
-    // 2026-10-12), then any staff added; a blank line when there are none.
+    // Only the recipients explicitly chosen by the parent or guardian; a
+    // blank line remains for the paper form when there are none.
     let named = own_choice
         .map(|choice| choice.recipient_lines())
-        .unwrap_or_default();
-    let lines: Vec<&str> = named
-        .iter()
-        .map(String::as_str)
-        .chain(
+        .unwrap_or_else(|| {
             context
                 .extra_release_recipients
                 .as_deref()
-                .into_iter()
-                .flat_map(str::lines),
-        )
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        });
+    let lines: Vec<&str> = named
+        .iter()
+        .map(String::as_str)
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect();
@@ -34729,8 +34737,7 @@ mod tests {
         legal_agency_block_lines, legal_document_reference, localized_estimate_work_type_sections,
         new_admin_pdf, parse_document_ocr_max_concurrency, parse_document_ocr_timeout_seconds,
         patient_sticker_agency_line, pdf_mm_to_pt, resolve_cost_estimate_lines,
-        single_order_scope_points, tesseract_input_extension, trusted_contact_recipients_binding,
-        valid_tesseract_language_spec,
+        single_order_scope_points, tesseract_input_extension, valid_tesseract_language_spec,
     };
     use super::{GeneratedAppointmentConfirmationContext, build_appointment_confirmation_pdf};
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
@@ -35306,34 +35313,6 @@ mod tests {
     }
 
     #[test]
-    fn trusted_contact_pdf_binding_keeps_people_but_omits_relationships() {
-        let binding = trusted_contact_recipients_binding(&json!([
-            {
-                "name": "Alex Beispiel",
-                "birth_date": "1989-02-03",
-                "email": "alex@example.test",
-                "phone": "+49 30 123",
-                "relation": "Vater"
-            },
-            {
-                "name": "Maria Beispiel",
-                "address": "Hauptstr. 2, Berlin",
-                "relation": "Hut"
-            }
-        ]))
-        .unwrap();
-
-        assert_eq!(binding.lines().count(), 2);
-        assert!(binding.contains("Alex Beispiel, geb. am 03.02.1989"));
-        assert!(binding.contains("E-Mail: alex@example.test"));
-        assert!(binding.contains("Tel.: +49 30 123"));
-        assert!(binding.contains("Maria Beispiel, Adresse: Hauptstr. 2, Berlin"));
-        assert!(!binding.contains("Vater"));
-        assert!(!binding.contains("Hut"));
-        assert!(!binding.contains("Beziehung:"));
-    }
-
-    #[test]
     fn child_consent_uses_legal_chrome_without_relationship_labels() {
         let context = GeneratedConsentContext {
             sole_guardian: false,
@@ -35398,7 +35377,7 @@ mod tests {
             chosen_by_emails: vec!["maria.parent@example.com".into()],
             lead_id: None,
         };
-        let context = GeneratedConsentContext {
+        let mut context = GeneratedConsentContext {
             sole_guardian: true,
             auto_name: "Einverständniserklärung".to_string(),
             document_reference: "EW-20261012-UNITTEST0003".to_string(),
@@ -35437,7 +35416,7 @@ mod tests {
             text.contains("[ ] dass personenbezogene und medizinische Daten von meinem Kind an"),
             "{text}"
         );
-        assert!(text.contains("Oma Beispiel"), "{text}");
+        assert!(!text.contains("Oma Beispiel"), "{text}");
         assert!(text.contains("[x] E-mail"), "{text}");
         assert!(text.contains("[ ] WhatsApp-Messenger"), "{text}");
         assert!(
@@ -35454,6 +35433,28 @@ mod tests {
         );
         // The Schweigepflichtsentbindung stays part of the form (owner 2026-10-12).
         assert!(text.contains("entbinde alle nach § 203 StGB"), "{text}");
+        let selected = context.own_choice.as_mut().unwrap();
+        selected.choices.named_recipients = true;
+        selected.recipients = vec![crate::consent_choices::ConsentRecipient {
+            name: "Chosen Clinic".into(),
+            relation: "clinic".into(),
+            contact: Some("chosen@example.test".into()),
+        }];
+        let selected_text = normalized_pdf_text(&build_consent_pdf(&context).unwrap());
+        assert!(selected_text.contains("Chosen Clinic"), "{selected_text}");
+        assert!(
+            selected_text.contains("chosen@example.test"),
+            "{selected_text}"
+        );
+        assert!(!selected_text.contains("Oma Beispiel"), "{selected_text}");
+        context
+            .own_choice
+            .as_mut()
+            .unwrap()
+            .choices
+            .named_recipients = false;
+        let unchecked = normalized_pdf_text(&build_consent_pdf(&context).unwrap());
+        assert!(!unchecked.contains("Chosen Clinic"), "{unchecked}");
     }
 
     /// QA 2026-10-12 (round 3): the second parent's signature line stood
@@ -35475,13 +35476,19 @@ mod tests {
                 guardian2_name: Some("Ben Muster".to_string()),
                 guardian2_label: None,
                 guardian2_birth_date: NaiveDate::from_ymd_opt(1983, 1, 2),
-                extra_release_recipients: Some(
-                    (0..recipients)
-                        .map(|index| format!("Beispiel Person {index}, geb. am 01.01.1950"))
-                        .collect::<Vec<_>>()
-                        .join("\n"),
+                extra_release_recipients: None,
+                own_choice: Some(
+                    serde_json::from_value(json!({
+                        "id": Uuid::nil(),
+                        "choices": { "named_recipients": true },
+                        "recipients": (0..recipients).map(|index| json!({
+                            "name": format!("Beispiel Person {index}"), "relation": "relative",
+                            "contact": "person@example.test"
+                        })).collect::<Vec<_>>(),
+                        "chosen_at": "2026-10-12T09:00:00Z", "source": "lead_portal"
+                    }))
+                    .unwrap(),
                 ),
-                own_choice: None,
                 agency: legal_test_agency(),
                 generated_at: Utc.with_ymd_and_hms(2026, 10, 12, 9, 10, 0).unwrap(),
             };
@@ -35780,7 +35787,44 @@ mod tests {
             chosen_text.contains("Die Auswahl hat Erika Beispiel am 12.10.2026 um 10:05 Uhr"),
             "{chosen_text}"
         );
+        assert!(!chosen_text.contains("Maria Beispiel, Vertrauenskontakt"));
         assert!(!chosen_text.contains('?'));
+        // Even with a saved selection, neither staff nor legacy contacts are
+        // added. Switching the option off also hides stored recipient data.
+        let mut named = own.clone();
+        named.choices.named_recipients = true;
+        named.recipients = vec![crate::consent_choices::ConsentRecipient {
+            name: "Chosen Adult Recipient".into(),
+            relation: "spouse".into(),
+            contact: Some("chosen@example.test".into()),
+        }];
+        let selected = build_adult_privacy_consents_pdf(
+            &party,
+            &agency,
+            &bindings,
+            "EW-20261012-SELECTED",
+            Some(&named),
+        )
+        .unwrap();
+        let selected_text = normalized_pdf_text(&selected);
+        assert!(
+            selected_text.contains("Chosen Adult Recipient"),
+            "{selected_text}"
+        );
+        assert!(
+            !selected_text.contains("Maria Beispiel, Vertrauenskontakt"),
+            "{selected_text}"
+        );
+        named.choices.named_recipients = false;
+        let unchecked = build_adult_privacy_consents_pdf(
+            &party,
+            &agency,
+            &bindings,
+            "EW-20261012-UNCHECKED",
+            Some(&named),
+        )
+        .unwrap();
+        assert!(!normalized_pdf_text(&unchecked).contains("Chosen Adult Recipient"));
         // A representative's choice is never "meine eigene Auswahl".
         let represented = crate::consent_choices::OwnConsentChoice {
             access_kind: Some("guardian".into()),

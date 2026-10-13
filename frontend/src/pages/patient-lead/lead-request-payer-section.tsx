@@ -40,6 +40,7 @@ import {
   payerContactRequired,
   unansweredPayerDraft,
   withPayerChoice,
+  withPayerField,
   withRelationshipKind,
   type PayerDraft,
   type PayerField,
@@ -74,9 +75,11 @@ export function usePayerAutosave({
   enqueue,
   onChange,
   onSaveState,
+  enabled = true,
 }: {
   request: LeadRequest;
   draft: PayerDraft;
+  enabled?: boolean;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
@@ -97,7 +100,7 @@ export function usePayerAutosave({
   const save = useCallback(
     (snapshot: PayerDraft) => {
       void enqueue(async () => {
-        if (answeredRef.current) return;
+        if (!enabled || answeredRef.current) return;
         // Without the box the consent is left out: the server keeps what it has.
         const withConsent = !snapshot.guardian_pays || serverAsksConsent;
         const input = payerInput(snapshot, typed, withConsent);
@@ -150,7 +153,7 @@ export function usePayerAutosave({
         }
       });
     },
-    [enqueue, onChange, onSaveState, request.lead_id, serverAsksConsent, typed],
+    [enabled, enqueue, onChange, onSaveState, request.lead_id, serverAsksConsent, typed],
   );
 
   useAutosave(draft, save);
@@ -256,7 +259,7 @@ export function PayerSection({
   }
 
   const set = <K extends keyof PayerDraft>(field: K, value: PayerDraft[K]) => {
-    setDraft((current) => ({ ...current, [field]: value }));
+    setDraft((current) => withPayerField(current, field, value));
   };
   const choice = payerChoiceOf(draft);
   const choose = (next: string) => {

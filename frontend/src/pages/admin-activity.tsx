@@ -21,12 +21,8 @@ import {
 import { AdminGuideButton } from "@/components/admin-guide";
 import { AiMark } from "@/components/ui/ai-mark";
 import {
-  ADMIN_INLINE_METRICS_GRID,
-  AdminInlineMetric,
-  AdminSheetScaffold,
   SheetActionsFooter,
   AdminToolbar,
-  AdminTableCard,
 } from "@/components/admin-page-patterns";
 import { DataTablePager } from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -34,10 +30,9 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import {
-  Sheet,
-  SheetContent,
-} from "@/components/ui/sheet";
+import { Dialog } from "@/components/ui/dialog";
+import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
+import { StatusChip } from "@/components/ui/status-chip";
 import { clearApiCache } from "@/lib/api";
 import {
   formatEnumLabelFromKeys,
@@ -59,7 +54,6 @@ import {
   Banner,
   EmptyCell,
   PageHeader,
-  StatusBadge,
   TabLoader,
   tokens,
 } from "@/components/ui-shell";
@@ -84,7 +78,10 @@ function isRedactedContext(context: Record<string, unknown> | null): boolean {
 }
 
 function actorLabel(
-  activity: Pick<ActivityRow, "user_name" | "actor_role" | "action" | "entity_type">,
+  activity: Pick<
+    ActivityRow,
+    "user_name" | "actor_role" | "action" | "entity_type"
+  >,
   translations: Translations,
 ): string {
   return activityActorLabel(activity, translations);
@@ -205,10 +202,14 @@ const ADMIN_ACTIVITY_REALTIME_EVENTS = [
 ] as const;
 
 export function actionTone(action: string) {
-  if (action.endsWith(".medication_ai_analysis_ready")) return "success" as const;
-  if (action.endsWith(".medication_ai_analysis_failed")) return "error" as const;
-  if (action.endsWith(".medication_ai_analysis_requested")) return "brand" as const;
-  if (action.endsWith(".medication_evidence_review_created")) return "success" as const;
+  if (action.endsWith(".medication_ai_analysis_ready"))
+    return "success" as const;
+  if (action.endsWith(".medication_ai_analysis_failed"))
+    return "error" as const;
+  if (action.endsWith(".medication_ai_analysis_requested"))
+    return "brand" as const;
+  if (action.endsWith(".medication_evidence_review_created"))
+    return "success" as const;
   switch (action) {
     case "login":
     case "login_success":
@@ -260,16 +261,23 @@ const EXACT_ACTION_LABEL_KEYS = {
   token_theft_detected: "activity_action_token_theft_detected",
   refresh_token_theft: "activity_action_token_theft_detected",
   refresh_family_revoked: "activity_action_refresh_family_revoked",
-  preview_medication_evidence_review: "activity_action_preview_medication_evidence_review",
-  create_medication_evidence_review: "activity_action_create_medication_evidence_review",
-  read_medication_evidence_review: "activity_action_read_medication_evidence_review",
-  medication_evidence_review_created: "activity_action_medication_evidence_review_created",
-  create_medication_ai_analysis: "activity_action_create_medication_ai_analysis",
+  preview_medication_evidence_review:
+    "activity_action_preview_medication_evidence_review",
+  create_medication_evidence_review:
+    "activity_action_create_medication_evidence_review",
+  read_medication_evidence_review:
+    "activity_action_read_medication_evidence_review",
+  medication_evidence_review_created:
+    "activity_action_medication_evidence_review_created",
+  create_medication_ai_analysis:
+    "activity_action_create_medication_ai_analysis",
   read_medication_ai_analysis: "activity_action_read_medication_ai_analysis",
   retry_medication_ai_analysis: "activity_action_retry_medication_ai_analysis",
-  medication_ai_analysis_requested: "activity_action_medication_ai_analysis_requested",
+  medication_ai_analysis_requested:
+    "activity_action_medication_ai_analysis_requested",
   medication_ai_analysis_ready: "activity_action_medication_ai_analysis_ready",
-  medication_ai_analysis_failed: "activity_action_medication_ai_analysis_failed",
+  medication_ai_analysis_failed:
+    "activity_action_medication_ai_analysis_failed",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
 type ActivityView = "activity" | "security" | "technical" | "access";
@@ -296,7 +304,9 @@ export const ACCESS_ACTIONS = new Set([
   "update_staff_user_access",
 ]);
 
-export function isAccessActivity(activity: Pick<ActivityRow, "action">): boolean {
+export function isAccessActivity(
+  activity: Pick<ActivityRow, "action">,
+): boolean {
   return ACCESS_ACTIONS.has(activity.action);
 }
 
@@ -334,14 +344,20 @@ const SECURITY_ACTIONS = new Set([
 ]);
 
 function isSecurityActivity(activity: ActivityRow): boolean {
-  return activity.entity_type === "auth"
-    || activity.entity_type === "security"
-    || activity.entity_type === "session"
-    || SECURITY_ACTIONS.has(activity.action);
+  return (
+    activity.entity_type === "auth" ||
+    activity.entity_type === "security" ||
+    activity.entity_type === "session" ||
+    SECURITY_ACTIONS.has(activity.action)
+  );
 }
 
-function filterLegacyActivity(items: ActivityRow[], view: ActivityView): ActivityRow[] {
-  if (view === "technical") return items.filter((item) => item.action === "http_request");
+function filterLegacyActivity(
+  items: ActivityRow[],
+  view: ActivityView,
+): ActivityRow[] {
+  if (view === "technical")
+    return items.filter((item) => item.action === "http_request");
   if (view === "security") return items.filter(isSecurityActivity);
   if (view === "access") return items.filter(isAccessActivity);
   return items.filter((item) => item.action !== "http_request");
@@ -415,10 +431,13 @@ const ACTIVITY_EVENT_LABEL_KEYS = {
   maintenance_toggled: "activity_event_maintenance_toggled",
   medication_expiry_confirmed: "activity_event_medication_expiry_confirmed",
   medication_expiry_flagged: "activity_event_medication_expiry_flagged",
-  medication_evidence_review_created: "activity_action_medication_evidence_review_created",
-  medication_ai_analysis_requested: "activity_action_medication_ai_analysis_requested",
+  medication_evidence_review_created:
+    "activity_action_medication_evidence_review_created",
+  medication_ai_analysis_requested:
+    "activity_action_medication_ai_analysis_requested",
   medication_ai_analysis_ready: "activity_action_medication_ai_analysis_ready",
-  medication_ai_analysis_failed: "activity_action_medication_ai_analysis_failed",
+  medication_ai_analysis_failed:
+    "activity_action_medication_ai_analysis_failed",
   mfa_toggled: "activity_event_mfa_toggled",
   overdue_marked: "activity_event_overdue_marked",
   password_reset: "activity_event_password_reset",
@@ -454,12 +473,22 @@ export function isAiActivityAction(action: string): boolean {
  * label (`catalogs/audit-activity.ts`, QA E-14); a code added later is shown
  * humanised instead of "unknown value".
  */
-export function actionLabel(action: string, translations: Translations): string {
+export function actionLabel(
+  action: string,
+  translations: Translations,
+): string {
   if (!action) return translations.common_not_set;
   if (action === "http_request") return translations.activity_http_request;
 
-  const exact = formatEnumLabelFromKeys(action, EXACT_ACTION_LABEL_KEYS, translations);
-  if (exact !== translations.common_unknown_value && exact !== translations.common_unknown) {
+  const exact = formatEnumLabelFromKeys(
+    action,
+    EXACT_ACTION_LABEL_KEYS,
+    translations,
+  );
+  if (
+    exact !== translations.common_unknown_value &&
+    exact !== translations.common_unknown
+  ) {
     return exact;
   }
   // Status changes of records and accounts (privacy, documents, signatures,
@@ -470,7 +499,11 @@ export function actionLabel(action: string, translations: Translations): string 
 
   const [entityKey, eventKey] = action.split(".");
   const entityLabel = entityKey
-    ? formatEnumLabelFromKeys(entityKey, ACTIVITY_ENTITY_LABEL_KEYS, translations)
+    ? formatEnumLabelFromKeys(
+        entityKey,
+        ACTIVITY_ENTITY_LABEL_KEYS,
+        translations,
+      )
     : translations.common_not_set;
   const eventLabel = eventKey
     ? formatEnumLabelFromKeys(eventKey, ACTIVITY_EVENT_LABEL_KEYS, translations)
@@ -495,10 +528,18 @@ function ActivityActionBadge({
   translations: Translations;
 }) {
   return (
-    <StatusBadge tone={actionTone(action)}>
-      {isAiActivityAction(action) ? <AiMark className="size-3" aria-hidden="true" /> : null}
+    <StatusChip
+      tone={
+        actionTone(action) === "brand"
+          ? "info"
+          : (actionTone(action) as "success" | "warning" | "error" | "neutral")
+      }
+    >
+      {isAiActivityAction(action) ? (
+        <AiMark className="size-3" aria-hidden="true" />
+      ) : null}
       {actionLabel(action, translations)}
-    </StatusBadge>
+    </StatusChip>
   );
 }
 
@@ -512,23 +553,31 @@ function contextSummary(
   const method = typeof context.method === "string" ? context.method : "";
   const route = typeof context.route === "string" ? context.route : "";
   const status = typeof context.status === "number" ? context.status : null;
-  const latency = typeof context.latency_ms === "number" ? context.latency_ms : null;
+  const latency =
+    typeof context.latency_ms === "number" ? context.latency_ms : null;
 
   if (action === "http_request") {
-    return [
-      method && route ? `${method} ${route}` : route || method,
-      status !== null ? `${translations.activity_technical_status} ${status}` : "",
-      latency !== null ? `${latency} ms` : "",
-    ]
-      .filter(Boolean)
-      .join(" · ") || "\u2014";
+    return (
+      [
+        method && route ? `${method} ${route}` : route || method,
+        status !== null
+          ? `${translations.activity_technical_status} ${status}`
+          : "",
+        latency !== null ? `${latency} ms` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ") || "\u2014"
+    );
   }
 
   // Known keys with translated labels and formatted values (QA E2-03).
   return activityContextSummary(context, translations);
 }
 
-function entityTechnicalValue(entityType: string | null, entityId: unknown): string {
+function entityTechnicalValue(
+  entityType: string | null,
+  entityId: unknown,
+): string {
   const entity = entityType ?? "";
   let idStr = "";
   if (typeof entityId === "string") {
@@ -540,13 +589,26 @@ function entityTechnicalValue(entityType: string | null, entityId: unknown): str
   return entity ? `${entity} ${idStr}\u2026` : idStr;
 }
 
-export function entityTypeLabel(entityType: string | null, translations: Translations): string {
+export function entityTypeLabel(
+  entityType: string | null,
+  translations: Translations,
+): string {
   if (!entityType) return translations.common_not_set;
-  const known = formatEnumLabelFromKeys(entityType, ACTIVITY_ENTITY_LABEL_KEYS, translations);
-  if (known !== translations.common_unknown_value && known !== translations.common_unknown) {
+  const known = formatEnumLabelFromKeys(
+    entityType,
+    ACTIVITY_ENTITY_LABEL_KEYS,
+    translations,
+  );
+  if (
+    known !== translations.common_unknown_value &&
+    known !== translations.common_unknown
+  ) {
     return known;
   }
-  return translations.uiText?.[`activity_entity_${entityType}`] ?? humanizeAuditCode(entityType);
+  return (
+    translations.uiText?.[`activity_entity_${entityType}`] ??
+    humanizeAuditCode(entityType)
+  );
 }
 
 /** At most this many codes per list go to the server (the URL stays short). */
@@ -570,11 +632,14 @@ export function activityLabelMatches(
   ]);
   const entityTypes = new Set<string>(Object.keys(ACTIVITY_ENTITY_LABEL_KEYS));
   for (const key of Object.keys(translations.uiText ?? {})) {
-    if (key.startsWith("activity_action_")) actionCodes.add(key.slice("activity_action_".length));
-    else if (key.startsWith("activity_entity_")) entityTypes.add(key.slice("activity_entity_".length));
+    if (key.startsWith("activity_action_"))
+      actionCodes.add(key.slice("activity_action_".length));
+    else if (key.startsWith("activity_entity_"))
+      entityTypes.add(key.slice("activity_entity_".length));
   }
   const matches = (label: string, code: string) =>
-    label.toLocaleLowerCase().includes(needle) && !code.toLocaleLowerCase().includes(needle);
+    label.toLocaleLowerCase().includes(needle) &&
+    !code.toLocaleLowerCase().includes(needle);
   return {
     actions: [...actionCodes]
       .filter((code) => matches(actionLabel(code, translations), code))
@@ -644,7 +709,9 @@ function ActivityContextDetails({
           ))}
         </dl>
       ) : (
-        <p className="text-xs text-muted-foreground">{t.uiText.activity_context_empty}</p>
+        <p className="text-xs text-muted-foreground">
+          {t.uiText.activity_context_empty}
+        </p>
       )}
       {hasRaw ? (
         <details className="rounded-lg border border-border/50 bg-card/60">
@@ -673,40 +740,56 @@ type AdminActivityMetricsProps = {
   t: Translations;
 };
 
-function AdminActivityMetrics({
-  metrics,
-  t,
-}: AdminActivityMetricsProps) {
+function AdminActivityMetrics({ metrics, t }: AdminActivityMetricsProps) {
+  const cards = [
+    {
+      label: t.activity_metric_events_24h,
+      value: metrics.activity24h,
+      icon: Activity,
+    },
+    {
+      label: t.activity_metric_users_24h,
+      value: metrics.activeUsers24h,
+      icon: UsersRound,
+    },
+    {
+      label: t.activity_metric_changes_24h,
+      value: metrics.changes24h,
+      icon: Database,
+    },
+    {
+      label: t.activity_metric_security_24h,
+      value: metrics.security24h,
+      icon: ShieldAlert,
+    },
+  ];
   return (
-    <div className={ADMIN_INLINE_METRICS_GRID}>
-      <AdminInlineMetric
-        icon={Activity}
-        tone="sky"
-        label={t.activity_metric_events_24h}
-        value={metrics.activity24h}
-        description={t.activity_metric_window_24h}
-      />
-      <AdminInlineMetric
-        icon={UsersRound}
-        tone="emerald"
-        label={t.activity_metric_users_24h}
-        value={metrics.activeUsers24h}
-        description={t.activity_metric_window_24h}
-      />
-      <AdminInlineMetric
-        icon={Database}
-        tone="amber"
-        label={t.activity_metric_changes_24h}
-        value={metrics.changes24h}
-        description={t.activity_metric_window_24h}
-      />
-      <AdminInlineMetric
-        icon={ShieldAlert}
-        tone="slate"
-        label={t.activity_metric_security_24h}
-        value={metrics.security24h}
-        description={t.activity_metric_window_24h}
-      />
+    <div
+      data-testid="activity-metrics"
+      className="grid min-w-0 grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-4"
+    >
+      {cards.map(({ label, value, icon: Icon }) => (
+        <article
+          key={label}
+          className="min-w-0 rounded-xl border border-border/70 bg-card p-3.5"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-mono text-[10.5px] font-medium uppercase leading-4 tracking-[0.03em] text-muted-foreground">
+              {label}
+            </p>
+            <Icon
+              className="size-4 shrink-0 text-muted-foreground"
+              aria-hidden
+            />
+          </div>
+          <p className="mt-2 font-mono text-xl font-semibold tabular-nums">
+            {value}
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {t.activity_metric_window_24h}
+          </p>
+        </article>
+      ))}
     </div>
   );
 }
@@ -727,84 +810,119 @@ function AdminActivityDetailSheet({
   onOpenChange,
 }: AdminActivityDetailSheetProps) {
   return (
-    <Sheet open={detailOpen} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
-        <AdminSheetScaffold
-          title={selectedActivity ? actionLabel(selectedActivity.action, t) : t.activity_details}
-          description={
-            selectedActivity
-              ? `${actorLabel(selectedActivity, t)} · ${formatAdminDateTime(selectedActivity.created_at, lang)}`
-              : t.activity_subtitle
-          }
-          footer={(
-            <SheetActionsFooter>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg"
-                onClick={() => onOpenChange(false)}
+    <Dialog open={detailOpen} onOpenChange={onOpenChange}>
+      <AdminDialogScaffold
+        maxWidthClassName="sm:w-[calc(100vw-2rem)] sm:max-w-[800px]"
+        title={
+          selectedActivity
+            ? actionLabel(selectedActivity.action, t)
+            : t.activity_details
+        }
+        description={
+          selectedActivity
+            ? `${actorLabel(selectedActivity, t)} · ${formatAdminDateTime(selectedActivity.created_at, lang)}`
+            : t.activity_subtitle
+        }
+        footer={
+          <SheetActionsFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg"
+              onClick={() => onOpenChange(false)}
+            >
+              {t.common_cancel}
+            </Button>
+          </SheetActionsFooter>
+        }
+      >
+        {selectedActivity ? (
+          <>
+            <section className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3.5">
+              <h3
+                className={cn(
+                  tokens.text.sectionTitle,
+                  "inline-flex items-center gap-2",
+                )}
               >
-                {t.common_cancel}
-              </Button>
-            </SheetActionsFooter>
-          )}
-        >
-          {selectedActivity ? (
-            <>
-              <section className={`space-y-2.5 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
-                <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                  <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
-                  <span>{t.activity_details}</span>
-                </h3>
+                <span
+                  aria-hidden
+                  className="size-1.5 rounded-full bg-[var(--brand)]"
+                />
+                <span>{t.activity_details}</span>
+              </h3>
 
-                <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                    <p className="text-[11.5px] text-muted-foreground">{t.activity_user}</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">
-                      {actorLabel(selectedActivity, t)}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {selectedActivity.user_email || "-"}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                    <p className="text-[11.5px] text-muted-foreground">{t.activity_action}</p>
-                    <div className="mt-1">
-                      <ActivityActionBadge
-                        action={selectedActivity.action}
-                        translations={t}
-                      />
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                    <p className="text-[11.5px] text-muted-foreground">{t.activity_entity}</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">
-                      {entityDisplay(selectedActivity.entity_type, selectedActivity.entity_id, t) || "-"}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
-                    <p className="text-[11.5px] text-muted-foreground">{t.activity_time}</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">
-                      {formatAdminDateTime(selectedActivity.created_at, lang) || "-"}
-                    </p>
+              <div className="grid min-w-0 gap-2.5 sm:grid-cols-2">
+                <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
+                  <p className="text-[11.5px] text-muted-foreground">
+                    {t.activity_user}
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {actorLabel(selectedActivity, t)}
+                  </p>
+                  <p className="mt-1 break-words text-xs text-muted-foreground">
+                    {selectedActivity.user_email || "-"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
+                  <p className="text-[11.5px] text-muted-foreground">
+                    {t.activity_action}
+                  </p>
+                  <div className="mt-1">
+                    <ActivityActionBadge
+                      action={selectedActivity.action}
+                      translations={t}
+                    />
                   </div>
                 </div>
-              </section>
+                <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
+                  <p className="text-[11.5px] text-muted-foreground">
+                    {t.activity_entity}
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {entityDisplay(
+                      selectedActivity.entity_type,
+                      selectedActivity.entity_id,
+                      t,
+                    ) || "-"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
+                  <p className="text-[11.5px] text-muted-foreground">
+                    {t.activity_time}
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {formatAdminDateTime(selectedActivity.created_at, lang) ||
+                      "-"}
+                  </p>
+                </div>
+              </div>
+            </section>
 
-              <section className={`space-y-2.5 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
-                <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
-                  <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
-                  <span>{t.activity_details}</span>
-                </h3>
-                <ActivityContextDetails context={selectedActivity.context} t={t} />
-              </section>
-            </>
-          ) : (
-            <EmptyCell>{t.activity_subtitle}</EmptyCell>
-          )}
-        </AdminSheetScaffold>
-      </SheetContent>
-    </Sheet>
+            <section className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3.5">
+              <h3
+                className={cn(
+                  tokens.text.sectionTitle,
+                  "inline-flex items-center gap-2",
+                )}
+              >
+                <span
+                  aria-hidden
+                  className="size-1.5 rounded-full bg-[var(--brand)]"
+                />
+                <span>{t.activity_details}</span>
+              </h3>
+              <ActivityContextDetails
+                context={selectedActivity.context}
+                t={t}
+              />
+            </section>
+          </>
+        ) : (
+          <EmptyCell>{t.activity_subtitle}</EmptyCell>
+        )}
+      </AdminDialogScaffold>
+    </Dialog>
   );
 }
 
@@ -842,8 +960,8 @@ function AdminActivityToolbarSection({
   onSearchChange,
 }: AdminActivityToolbarSectionProps) {
   return (
-    <AdminToolbar className="grid grid-cols-1 items-end gap-2 rounded-none border-0 bg-transparent p-0 shadow-none sm:grid-cols-2 xl:grid-cols-[minmax(200px,1.2fr)_minmax(190px,1fr)_150px_150px_100px_auto]">
-      <div className="relative w-full">
+    <AdminToolbar className="grid min-w-0 grid-cols-1 items-end gap-3 rounded-none border-0 bg-transparent p-0 shadow-none sm:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_140px_140px_90px_auto]">
+      <div className="relative min-w-0 w-full">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
         <Input
           type="text"
@@ -953,18 +1071,19 @@ function AdminActivityViewSelector({
     { icon: KeyRound, label: t.activity_view_access, value: "access" },
     { icon: Settings2, label: t.activity_view_technical, value: "technical" },
   ];
-  const hint = view === "technical"
-    ? t.activity_view_technical_hint
-    : view === "security"
-      ? t.activity_view_security_hint
-      : view === "access"
-        ? t.activity_view_access_hint
-        : t.activity_view_activity_hint;
+  const hint =
+    view === "technical"
+      ? t.activity_view_technical_hint
+      : view === "security"
+        ? t.activity_view_security_hint
+        : view === "access"
+          ? t.activity_view_access_hint
+          : t.activity_view_activity_hint;
 
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-      <div className="space-y-2">
-        <div className="inline-flex overflow-hidden rounded-lg border border-border/70 bg-muted/30 p-0.5">
+      <div className="min-w-0 space-y-2">
+        <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted p-1 sm:inline-flex">
           {options.map((option) => {
             const Icon = option.icon;
             return (
@@ -974,9 +1093,9 @@ function AdminActivityViewSelector({
                 aria-pressed={view === option.value}
                 onClick={() => onChange(option.value)}
                 className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                  "inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                   view === option.value
-                    ? "bg-background text-foreground shadow-sm"
+                    ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -989,12 +1108,22 @@ function AdminActivityViewSelector({
         <p className="text-xs text-muted-foreground">{hint}</p>
       </div>
 
-      <div className="shrink-0 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">{t.activity_retention}:</span>{" "}
+      <div className="min-w-0 rounded-lg border border-border/50 bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground lg:max-w-[300px]">
+        <span className="font-medium text-foreground">
+          {t.activity_retention}:
+        </span>{" "}
         {t.activity_retention_technical}{" "}
-        {new Intl.NumberFormat(lang, { style: "unit", unit: "day", unitDisplay: "long" }).format(retention.technicalDays)} ·{" "}
-        {t.activity_retention_meaningful}{" "}
-        {new Intl.NumberFormat(lang, { style: "unit", unit: "day", unitDisplay: "long" }).format(retention.meaningfulDays)}
+        {new Intl.NumberFormat(lang, {
+          style: "unit",
+          unit: "day",
+          unitDisplay: "long",
+        }).format(retention.technicalDays)}{" "}
+        · {t.activity_retention_meaningful}{" "}
+        {new Intl.NumberFormat(lang, {
+          style: "unit",
+          unit: "day",
+          unitDisplay: "long",
+        }).format(retention.meaningfulDays)}
       </div>
     </section>
   );
@@ -1152,64 +1281,68 @@ export function AdminActivityPage() {
     [],
   );
 
-  const loadData = useCallback(async (params: AdminActivityLoadParams) => {
-    dispatchActivityState({ loading: true, error: "" });
-    try {
-      // The search also finds rows by the labels shown in the table (QA E3-01).
-      const labelMatches = activityLabelMatches(params.search, t);
-      const data = await fetchAdminActivity<ActivityRow>({
-        action: params.action,
-        dateFrom: params.dateFrom,
-        dateTo: params.dateTo,
-        limit: params.limit,
-        offset: params.offset,
-        search: params.search,
-        searchActions: labelMatches.actions,
-        searchEntities: labelMatches.entities,
-        ...activityViewQuery(params.view),
-      });
-      const legacyResponse = data.view === undefined;
-      const visibleItems = legacyResponse
-        ? filterLegacyActivity(data.items, params.view)
-        : data.items;
-      startTransition(() =>
+  const loadData = useCallback(
+    async (params: AdminActivityLoadParams) => {
+      dispatchActivityState({ loading: true, error: "" });
+      try {
+        // The search also finds rows by the labels shown in the table (QA E3-01).
+        const labelMatches = activityLabelMatches(params.search, t);
+        const data = await fetchAdminActivity<ActivityRow>({
+          action: params.action,
+          dateFrom: params.dateFrom,
+          dateTo: params.dateTo,
+          limit: params.limit,
+          offset: params.offset,
+          search: params.search,
+          searchActions: labelMatches.actions,
+          searchEntities: labelMatches.entities,
+          ...activityViewQuery(params.view),
+        });
+        const legacyResponse = data.view === undefined;
+        const visibleItems = legacyResponse
+          ? filterLegacyActivity(data.items, params.view)
+          : data.items;
+        startTransition(() =>
+          dispatchActivityState({
+            activities: visibleItems,
+            error: "",
+            hasMore: legacyResponse ? false : data.has_more,
+            loading: false,
+            offset: data.offset,
+            pageSize: data.limit,
+            metrics: data.summary
+              ? {
+                  activity24h: data.summary.activity_24h,
+                  activeUsers24h: data.summary.active_users_24h,
+                  changes24h: data.summary.changes_24h,
+                  security24h: data.summary.security_24h,
+                  technical24h: data.summary.technical_24h,
+                }
+              : EMPTY_ACTIVITY_METRICS,
+            retention: data.retention
+              ? {
+                  technicalDays: data.retention.technical_days,
+                  meaningfulDays: data.retention.meaningful_days,
+                }
+              : { technicalDays: 3, meaningfulDays: 365 },
+            selectedIndex: null,
+            total: legacyResponse ? visibleItems.length : data.total,
+          }),
+        );
+      } catch (loadError) {
         dispatchActivityState({
-          activities: visibleItems,
-          error: "",
-          hasMore: legacyResponse ? false : data.has_more,
+          activities: [],
+          error:
+            loadError instanceof Error ? loadError.message : t.common_error,
+          hasMore: false,
           loading: false,
-          offset: data.offset,
-          pageSize: data.limit,
-          metrics: data.summary
-            ? {
-                activity24h: data.summary.activity_24h,
-                activeUsers24h: data.summary.active_users_24h,
-                changes24h: data.summary.changes_24h,
-                security24h: data.summary.security_24h,
-                technical24h: data.summary.technical_24h,
-              }
-            : EMPTY_ACTIVITY_METRICS,
-          retention: data.retention
-            ? {
-                technicalDays: data.retention.technical_days,
-                meaningfulDays: data.retention.meaningful_days,
-              }
-            : { technicalDays: 3, meaningfulDays: 365 },
           selectedIndex: null,
-          total: legacyResponse ? visibleItems.length : data.total,
-        }),
-      );
-    } catch (loadError) {
-      dispatchActivityState({
-        activities: [],
-        error: loadError instanceof Error ? loadError.message : t.common_error,
-        hasMore: false,
-        loading: false,
-        selectedIndex: null,
-        total: 0,
-      });
-    }
-  }, [t]);
+          total: 0,
+        });
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     void loadData({
@@ -1221,20 +1354,33 @@ export function AdminActivityPage() {
       search: deferredSearch,
       view,
     });
-  }, [dateFrom, dateTo, deferredSearch, filterAction, loadData, offset, pageSize, view]);
+  }, [
+    dateFrom,
+    dateTo,
+    deferredSearch,
+    filterAction,
+    loadData,
+    offset,
+    pageSize,
+    view,
+  ]);
 
-  useDebouncedRealtimeSubscription(ADMIN_ACTIVITY_REALTIME_EVENTS, () => {
-    clearApiCache("/admin/activity");
-    void loadData({
-      action: filterAction,
-      dateFrom,
-      dateTo,
-      limit: pageSize,
-      offset,
-      search: deferredSearch,
-      view,
-    });
-  }, 300);
+  useDebouncedRealtimeSubscription(
+    ADMIN_ACTIVITY_REALTIME_EVENTS,
+    () => {
+      clearApiCache("/admin/activity");
+      void loadData({
+        action: filterAction,
+        dateFrom,
+        dateTo,
+        limit: pageSize,
+        offset,
+        search: deferredSearch,
+        view,
+      });
+    },
+    300,
+  );
 
   const actionOptions = useMemo(() => {
     const values = new Set<string>([
@@ -1246,94 +1392,102 @@ export function AdminActivityPage() {
   }, [activities]);
 
   const selectedActivity =
-    selectedIndex !== null ? activities[selectedIndex] ?? null : null;
+    selectedIndex !== null ? (activities[selectedIndex] ?? null) : null;
   const selectedActivityId = selectedActivity?.id ?? null;
 
-  const columns = useMemo<ColumnDef<ActivityRow>[]>(() => [
-    {
-      id: "created_at",
-      label: t.activity_time,
-      accessor: (activity) => activity.created_at,
-      width: 170,
-      render: (activity) => (
-        <span className="font-mono text-xs text-foreground whitespace-nowrap">
-          {formatAdminDateTime(activity.created_at, lang)}
-        </span>
-      ),
-    },
-    {
-      id: "user",
-      label: t.activity_user,
-      accessor: (activity) => `${activity.user_name} ${activity.user_email}`,
-      width: 260,
-      render: (activity) => (
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground">
-            {activityInitials(actorLabel(activity, t))}
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-xs font-medium text-foreground">
-              {actorLabel(activity, t)}
-            </div>
-            <div className="truncate text-[11px] text-foreground">
-              {activity.user_email || "—"}
-            </div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: "action",
-      label: t.activity_action,
-      accessor: (activity) => activity.action,
-      width: 180,
-      render: (activity) => (
-        <ActivityActionBadge action={activity.action} translations={t} />
-      ),
-    },
-    {
-      id: "entity",
-      label: t.activity_entity,
-      accessor: (activity) => entityTechnicalValue(activity.entity_type, activity.entity_id),
-      width: 180,
-      render: (activity) => (
-        <span className="font-mono text-xs text-foreground">
-          {entityDisplay(activity.entity_type, activity.entity_id, t)}
-        </span>
-      ),
-    },
-    {
-      id: "details",
-      label: t.activity_details,
-      accessor: (activity) => contextSummary(activity.context, activity.action, t),
-      width: 360,
-      render: (activity) => {
-        const details = contextSummary(activity.context, activity.action, t);
-        return (
-          <span className="truncate text-xs text-foreground" title={details}>
-            {details}
+  const columns = useMemo<ColumnDef<ActivityRow>[]>(
+    () => [
+      {
+        id: "created_at",
+        label: t.activity_time,
+        accessor: (activity) => activity.created_at,
+        width: 170,
+        render: (activity) => (
+          <span className="font-mono text-xs text-foreground whitespace-nowrap">
+            {formatAdminDateTime(activity.created_at, lang)}
           </span>
-        );
+        ),
       },
-    },
-  ], [
-    lang,
-    t,
-  ]);
+      {
+        id: "user",
+        label: t.activity_user,
+        accessor: (activity) => `${activity.user_name} ${activity.user_email}`,
+        width: 260,
+        render: (activity) => (
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground">
+              {activityInitials(actorLabel(activity, t))}
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-xs font-medium text-foreground">
+                {actorLabel(activity, t)}
+              </div>
+              <div className="truncate text-[11px] text-foreground">
+                {activity.user_email || "—"}
+              </div>
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "action",
+        label: t.activity_action,
+        accessor: (activity) => activity.action,
+        width: 180,
+        render: (activity) => (
+          <ActivityActionBadge action={activity.action} translations={t} />
+        ),
+      },
+      {
+        id: "entity",
+        label: t.activity_entity,
+        accessor: (activity) =>
+          entityTechnicalValue(activity.entity_type, activity.entity_id),
+        width: 180,
+        render: (activity) => (
+          <span className="font-mono text-xs text-foreground">
+            {entityDisplay(activity.entity_type, activity.entity_id, t)}
+          </span>
+        ),
+      },
+      {
+        id: "details",
+        label: t.activity_details,
+        accessor: (activity) =>
+          contextSummary(activity.context, activity.action, t),
+        width: 360,
+        render: (activity) => {
+          const details = contextSummary(activity.context, activity.action, t);
+          return (
+            <span className="truncate text-xs text-foreground" title={details}>
+              {details}
+            </span>
+          );
+        },
+      },
+    ],
+    [lang, t],
+  );
 
   const anyFilterActive =
-    search.trim() !== "" || filterAction !== "" || dateFrom !== "" || dateTo !== "";
+    search.trim() !== "" ||
+    filterAction !== "" ||
+    dateFrom !== "" ||
+    dateTo !== "";
   const pageIndex = Math.floor(offset / pageSize);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const countLabel = total;
 
   return (
     <>
-      <div className="space-y-4">
+      <div
+        data-testid="activity-workspace"
+        className="min-w-0 space-y-4 rounded-xl bg-muted p-3 sm:p-4"
+      >
         <PageHeader
           title={t.activity_title}
           description={t.activity_subtitle}
-          actions={(
+          actions={
             <>
               <AdminGuideButton
                 title={t.activity_title}
@@ -1342,7 +1496,7 @@ export function AdminActivityPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+                className="h-8 rounded-lg gap-1.5 bg-card px-3 text-xs"
                 disabled={loading}
                 onClick={() =>
                   void loadData({
@@ -1360,8 +1514,10 @@ export function AdminActivityPage() {
                 {t.common_refresh}
               </Button>
             </>
-          )}
+          }
         />
+
+        <AdminActivityMetrics metrics={metrics} t={t} />
 
         <AdminActivityViewSelector
           view={view}
@@ -1371,85 +1527,88 @@ export function AdminActivityPage() {
           onChange={setView}
         />
 
-        <AdminActivityToolbarSection
-          actionOptions={actionOptions}
-          anyFilterActive={anyFilterActive}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          filterAction={filterAction}
-          pageSize={pageSize}
-          search={search}
-          t={t}
-          onDateFromChange={setDateFrom}
-          onDateToChange={setDateTo}
-          onFilterActionChange={setFilterAction}
-          onPageSizeChange={setPageSize}
-          onReset={() =>
-            dispatchActivityState({
-              dateFrom: "",
-              dateTo: "",
-              detailOpen: false,
-              filterAction: "",
-              offset: 0,
-              search: "",
-              selectedIndex: null,
-            })
-          }
-          onSearchChange={setSearch}
-        />
+        <section className="min-w-0 space-y-4 overflow-hidden rounded-xl border border-border/70 bg-card p-3 shadow-xs sm:p-4">
+          <AdminActivityToolbarSection
+            actionOptions={actionOptions}
+            anyFilterActive={anyFilterActive}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            filterAction={filterAction}
+            pageSize={pageSize}
+            search={search}
+            t={t}
+            onDateFromChange={setDateFrom}
+            onDateToChange={setDateTo}
+            onFilterActionChange={setFilterAction}
+            onPageSizeChange={setPageSize}
+            onReset={() =>
+              dispatchActivityState({
+                dateFrom: "",
+                dateTo: "",
+                detailOpen: false,
+                filterAction: "",
+                offset: 0,
+                search: "",
+                selectedIndex: null,
+              })
+            }
+            onSearchChange={setSearch}
+          />
 
-        <DataTablePager
-          className="rounded-lg border border-border/60"
-          pageIndex={pageIndex}
-          pageSize={pageSize}
-          totalPages={totalPages}
-          totalRows={total}
-          previousLabel={t.pagination_previous}
-          nextLabel={t.pagination_next}
-          onPageChange={(nextPageIndex) =>
-            dispatchActivityState({
-              detailOpen: false,
-              offset: nextPageIndex * pageSize,
-              selectedIndex: null,
-            })
-          }
-        />
+          <DataTablePager
+            className="rounded-lg border border-border/60"
+            pageIndex={pageIndex}
+            pageSize={pageSize}
+            totalPages={totalPages}
+            totalRows={total}
+            previousLabel={t.pagination_previous}
+            nextLabel={t.pagination_next}
+            onPageChange={(nextPageIndex) =>
+              dispatchActivityState({
+                detailOpen: false,
+                offset: nextPageIndex * pageSize,
+                selectedIndex: null,
+              })
+            }
+          />
 
-        <AdminActivityMetrics metrics={metrics} t={t} />
+          {loading ? <TabLoader /> : null}
+          {!loading && error ? <Banner tone="error">{error}</Banner> : null}
 
-        {loading ? <TabLoader /> : null}
-        {!loading && error ? <Banner tone="error">{error}</Banner> : null}
-
-        {!loading && !error ? (
-          <AdminTableCard
-            title={t.activity_title}
-            description={t.activity_subtitle}
-            count={countLabel}
-          >
-            {activities.length === 0 ? (
-              <div className="p-4">
-                <EmptyCell>{t.activity_no_events}</EmptyCell>
+          {!loading && !error ? (
+            <div className="min-w-0 space-y-3">
+              <div className="flex items-center gap-2 text-[13px] font-semibold">
+                <span
+                  aria-hidden
+                  className="size-1.5 rounded-full bg-primary"
+                />
+                {t.activity_title}
+                <StatusChip className="font-mono">{countLabel}</StatusChip>
               </div>
-            ) : (
-              <DataTableSurface
-                rows={activities}
-                columns={columns}
-                defaultDensity="comfortable"
-                defaultSort={[{ field: "created_at", dir: "desc" }]}
-                dictionary={t as unknown as Record<string, string>}
-                rowId={(activity) => activity.id}
-                activeRowId={selectedActivityId}
-                onRowClick={(activity) => {
-                  dispatchActivityState({
-                    detailOpen: true,
-                    selectedIndex: activities.indexOf(activity),
-                  });
-                }}
-                tableClassName="min-h-[360px]"
-              />
-            )}
-          </AdminTableCard>
-        ) : null}
+              {activities.length === 0 ? (
+                <div className="p-4">
+                  <EmptyCell>{t.activity_no_events}</EmptyCell>
+                </div>
+              ) : (
+                <DataTableSurface
+                  rows={activities}
+                  columns={columns}
+                  defaultDensity="comfortable"
+                  defaultSort={[{ field: "created_at", dir: "desc" }]}
+                  dictionary={t as unknown as Record<string, string>}
+                  rowId={(activity) => activity.id}
+                  activeRowId={selectedActivityId}
+                  onRowClick={(activity) => {
+                    dispatchActivityState({
+                      detailOpen: true,
+                      selectedIndex: activities.indexOf(activity),
+                    });
+                  }}
+                />
+              )}
+            </div>
+          ) : null}
+        </section>
       </div>
 
       <AdminActivityDetailSheet

@@ -1757,7 +1757,7 @@ struct LeadContext {
     converted: bool,
     /// Served by the portal: neither deleted nor converted.
     open: bool,
-    request_submitted: bool,
+    request_submitted_at: Option<DateTime<Utc>>,
     declaration: Option<Declaration>,
     /// The organisation mask the lead entered (defaults of the link).
     organisation_mask: OrganisationMask,
@@ -1808,11 +1808,10 @@ async fn load_context(
             .flatten()
             .is_some(),
         open: lead.try_get::<bool, _>("open").unwrap_or(false),
-        request_submitted: lead
+        request_submitted_at: lead
             .try_get::<Option<DateTime<Utc>>, _>("portal_submitted_at")
             .ok()
-            .flatten()
-            .is_some(),
+            .flatten(),
         declaration,
         organisation_mask,
         loaded,
@@ -1855,7 +1854,7 @@ impl LeadContext {
         if !self.open {
             return Some("lead_deleted");
         }
-        if !self.request_submitted {
+        if self.request_submitted_at.is_none() {
             return Some("request_not_submitted");
         }
         let Some(declaration) = self.third_party() else {
@@ -1866,6 +1865,9 @@ impl LeadContext {
         }
         if declaration.contact_consent_at.is_none() {
             return Some("contact_consent_missing");
+        }
+        if declaration.contact_consent_at > self.request_submitted_at {
+            return Some("request_not_submitted");
         }
         if !declaration.email.as_deref().is_some_and(is_plausible_email) {
             return Some("payer_email_missing");
@@ -2367,10 +2369,14 @@ async fn resolve_link(conn: &mut PgConnection, headers: &HeaderMap) -> Result<Li
     let declaration = lead_payer::load_declaration(conn, link.lead_id).await?;
     let current = declaration.filter(|declaration| {
         declaration.is_third_party()
+            && declaration.contact_consent_at.is_some()
             && declaration.payer_key() == link.payer_key
             && normalized_email(declaration.email.as_deref()) == normalized_email(Some(&link.email))
     });
     if current.is_none() {
+        return Err(Refusal::LinkRevoked);
+    }
+    if payer_has_cabinet_login(conn, link.lead_id, current.as_ref()).await? {
         return Err(Refusal::LinkRevoked);
     }
     if link.expires_at <= Utc::now() {
@@ -4937,6 +4943,33 @@ pub(crate) async fn link_can_be_sent(state: &AppState, lead_id: Uuid) -> Result<
         .is_some_and(|context| context.blocked_reason().is_none()))
 }
 
+async fn payer_has_cabinet_login(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    payer: Option<&Declaration>,
+) -> Result<bool, sqlx::Error> {
+    let loaded = lead_representatives::load(conn, lead_id)
+        .await?
+        .unwrap_or_default();
+    Ok(
+        lead_representatives::payer_same_person(&loaded.representation, payer)
+            .and_then(|id| loaded.representation.find(id))
+            .is_some_and(|parent| parent.has_login()),
+    )
+}
+
+pub(crate) async fn revoke_for_cabinet_payer(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let payer = lead_payer::load_declaration(conn, lead_id).await?;
+    if payer_has_cabinet_login(conn, lead_id, payer.as_ref()).await? {
+        revoke_active(conn, lead_id, "payer_has_cabinet_login", Some(actor)).await?;
+    }
+    Ok(())
+}
+
 /// D10: the declaration changed (called after it is stored, in the same
 /// transaction). Another payer (kind or key): the active link is revoked
 /// (`payer_changed`), the statement's answers are cleared — all but staff's
@@ -4950,7 +4983,7 @@ pub(crate) async fn link_can_be_sent(state: &AppState, lead_id: Uuid) -> Result<
 /// the holder of the old one stated — the answers are cleared and the files
 /// withdrawn like above, and section 8 of the declaration, which the payer
 /// answered through the link, is cleared too (in `next` and in the stored
-/// row, so the caller's audit diff shows it).
+/// row, so the caller's audit names the changed fields).
 pub(crate) async fn payer_changed_in_tx(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -4964,8 +4997,13 @@ pub(crate) async fn payer_changed_in_tx(
     let payer_changed = previous.payer_kind != next.payer_kind
         || (next.is_third_party() && previous.payer_key() != next.payer_key());
     if payer_changed {
+        sqlx::query("UPDATE lead_payer_declarations SET organisation_legal_form = NULL, organisation_register_number = NULL, organisation_contact_name = NULL WHERE lead_id = $1")
+            .bind(lead_id).execute(&mut *conn).await?;
         revoke_active(conn, lead_id, "payer_changed", actor).await?;
         return reset_statement(conn, lead_id, "payer_changed", actor, &[]).await;
+    }
+    if previous.contact_consent_at.is_some() && next.contact_consent_at.is_none() {
+        revoke_active(conn, lead_id, "consent_withdrawn", actor).await?;
     }
     if !next.is_third_party()
         || normalized_email(previous.email.as_deref()) == normalized_email(next.email.as_deref())
@@ -4988,7 +5026,7 @@ pub(crate) async fn payer_changed_in_tx(
             r#"UPDATE lead_payer_declarations
                SET payment_method = NULL, payment_method_details = NULL,
                    account_country = NULL, account_holder = NULL, bank_name = NULL,
-                   via_third_party = NULL, via_third_party_details = NULL,
+                   via_third_party = NULL, via_third_party_details = NULL, via_third_party_kind = NULL,
                    updated_at = now()
                WHERE lead_id = $1"#,
         )
@@ -5496,6 +5534,30 @@ mod tests {
 
     fn patch(body: Value) -> Map<String, Value> {
         body.as_object().cloned().unwrap()
+    }
+
+    #[test]
+    fn invitation_requires_the_current_consent_to_be_in_the_submitted_request() {
+        let at = Utc::now();
+        let mut payer = person_payer();
+        payer.contact_consent_at = Some(at);
+        let mut context = LeadContext {
+            patient_name: "Synthetic Patient".into(),
+            primary_language: None,
+            converted: false,
+            open: true,
+            request_submitted_at: Some(at - Duration::minutes(1)),
+            declaration: Some(payer),
+            organisation_mask: OrganisationMask::default(),
+            loaded: lead_representatives::Loaded::default(),
+            statement: None,
+            uploads: Vec::new(),
+        };
+        assert_eq!(context.blocked_reason(), Some("request_not_submitted"));
+        context.request_submitted_at = Some(at);
+        assert_eq!(context.blocked_reason(), None);
+        context.declaration.as_mut().unwrap().contact_consent_at = None;
+        assert_eq!(context.blocked_reason(), Some("contact_consent_missing"));
     }
 
     #[test]

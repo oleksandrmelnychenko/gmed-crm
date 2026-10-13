@@ -116,6 +116,7 @@ function normalized(field: PersonalField, draft: PersonalDraft): string {
 
 /** A value the server refused; it is not sent again until the patient changes it. */
 export type RejectedValue = { field: PersonalField; value: string };
+export type RejectedPersonal = Partial<Record<PersonalField, string>>;
 
 /**
  * Only the fields that differ from the last saved state, so a concurrent edit
@@ -125,14 +126,14 @@ export type RejectedValue = { field: PersonalField; value: string };
 export function personalDataPatch(
   saved: PersonalDraft,
   draft: PersonalDraft,
-  rejected: RejectedValue | null = null,
+  rejected: RejectedPersonal | RejectedValue | null = null,
 ): PersonalDataPatch {
   const patch: PersonalDataPatch = {};
   for (const field of PERSONAL_FIELDS) {
     const next = normalized(field, draft);
     if (next === normalized(field, saved)) continue;
-    if ((field === "first_name" || field === "last_name") && !next) continue;
-    if (rejected && rejected.field === field && rejected.value === next) continue;
+    if ((field === "first_name" || field === "last_name" || (field === "date_of_birth" && saved.date_of_birth)) && !next) continue;
+    if (rejected && ("field" in rejected ? rejected.field === field && rejected.value === next : rejected[field] === next)) continue;
     patch[field] = field === "citizenships" ? [...draft.citizenships] : next;
   }
   return patch;
@@ -554,7 +555,7 @@ export function payerDraftFromRecipient(
     ...base,
     payer_kind: "third_party",
     guardian_pays: false,
-    payer_type: organisation ? (organisationPayerType(base.payer_type) ?? "organisation") : "person",
+    payer_type: organisation ? (base.payer_type === "company" ? "company" : "organisation") : "person",
     organisation_name: organisation ? recipient.organisation_name : "",
     organisation_legal_form: organisation ? recipient.legal_form : "",
     organisation_register_number: organisation ? extras.register_number : "",
@@ -697,17 +698,24 @@ export function thirdPartyPayerNamed(draft: PayerDraft, typed = true): boolean {
     : Boolean(oneLine(draft.organisation_name));
 }
 
-/**
- * Whether the autosave sends the payer answer (`saved` is the stored one):
- * never an unnamed third party in place of the patient who pays (QA
- * 2026-10-11 A-08a). Only choosing "a person" while trying the "recipient is
- * the payer" box stored an empty third party, and the server cleared the
- * patient's own payment method and source of funds with it. Once a name is
- * typed, the third party is stored as before.
- */
+/** The named payer identity used to bind consent and guard autosave replacements. */
+export function payerIdentityKey(draft: PayerDraft): string {
+  return JSON.stringify([draft.payer_kind, payerTypeOf(draft), oneLine(draft.organisation_name), oneLine(draft.first_name), oneLine(draft.last_name), draft.date_of_birth]);
+}
+
+/** Consent belongs to the identity the patient named, not the form itself. */
+export function withPayerField<K extends keyof PayerDraft>(draft: PayerDraft, field: K, value: PayerDraft[K]): PayerDraft {
+  const next = { ...draft, [field]: value };
+  return payerIdentityKey(next) === payerIdentityKey(draft) ? next : { ...next, contact_consent: false };
+}
+
 export function payerAnswerSavable(saved: PayerDraft, draft: PayerDraft, typed = true): boolean {
-  if (draft.payer_kind !== "third_party" || saved.payer_kind !== "self") return true;
-  return thirdPartyPayerNamed(draft, typed);
+  if (draft.payer_kind !== "third_party" || !saved.payer_kind || payerIdentityKey(saved) === payerIdentityKey(draft)) return true;
+  if (saved.payer_kind === "third_party" && !thirdPartyPayerNamed(saved, typed)) return true;
+  if (draft.guardian_pays) return Boolean(oneLine(draft.first_name) && oneLine(draft.last_name));
+  const named = (typed ? payerTypeOf(draft) : "person") === "person"
+    ? Boolean(oneLine(draft.first_name) && oneLine(draft.last_name)) : Boolean(oneLine(draft.organisation_name));
+  return named && Boolean(draft.country && (payerTypeOf(draft) !== "person" || oneLine(draft.city)));
 }
 
 /**
@@ -930,6 +938,7 @@ export type IdentificationSubmitField = IdentificationField | "id_document_uploa
  * the representation or of the billing.
  */
 export type SubmitField =
+  | "name_latin"
   | PersonalField
   | PayerField
   | IdentificationSubmitField
@@ -946,6 +955,7 @@ export type SubmitField =
  * a follow-up block now; its keys stay for an older server.
  */
 export const SUBMIT_FIELDS: SubmitField[] = [
+  "name_latin",
   // Person
   "salutation",
   "first_name",

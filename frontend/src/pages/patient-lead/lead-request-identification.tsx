@@ -143,7 +143,9 @@ export function useIdentificationForm({
       // The message belongs to the refused value: it goes as soon as the patient changes it.
       const value = refused.values[field];
       if (value === undefined || value !== identificationValue(field, draft)) return undefined;
-      return refused.codes[field] === "id_document_expired" ? text.idDocumentExpired : text.invalidField;
+      if (refused.codes[field] === "id_document_expired") return text.idDocumentExpired;
+      if (refused.codes[field] === "health_consent_required") return text.healthConsentRequired;
+      return text.invalidField;
     },
   };
 }
@@ -221,11 +223,13 @@ export function IdentificationTextArea({
   field,
   maxLength = 2000,
   rows = 3,
+  disabled = false,
 }: {
   form: IdentificationForm;
   field: IdentificationTextField;
   maxLength?: number;
   rows?: number;
+  disabled?: boolean;
 }) {
   return (
     <textarea
@@ -234,6 +238,7 @@ export function IdentificationTextArea({
       className={cn(textareaClass, "text-base md:text-sm")}
       rows={rows}
       maxLength={maxLength}
+      disabled={disabled}
       autoComplete="off"
       value={form.draft[field]}
       onChange={(event) => form.set(field, event.target.value)}
@@ -367,7 +372,7 @@ export function IdentityDocumentSection({
         nextErrors.push(
           errorBody(cause)?.code === "inquiry_consent_required"
             ? text.identityUploadNeedsConsent
-            : `${file.name}: ${errorMessage(cause)}`,
+            : `${file.name}: ${errorMessage(cause, text)}`,
         );
       }
     }
@@ -380,7 +385,7 @@ export function IdentityDocumentSection({
     try {
       onChange(await enqueue(() => withdrawLeadDocument(request.lead_id, documentId)));
     } catch (cause) {
-      setErrors([errorMessage(cause)]);
+      setErrors([errorMessage(cause, text)]);
     }
   }
 

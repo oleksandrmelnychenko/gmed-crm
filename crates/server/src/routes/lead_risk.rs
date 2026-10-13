@@ -103,6 +103,14 @@ async fn lead_exists(conn: &mut PgConnection, lead_id: Uuid) -> Result<bool, sql
         .await
 }
 
+async fn lock_identity_lead(conn: &mut PgConnection, lead_id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, Uuid>("SELECT id FROM leads WHERE id = $1 FOR UPDATE")
+        .bind(lead_id)
+        .fetch_optional(conn)
+        .await
+        .map(|id| id.is_some())
+}
+
 // ----------------------------------------------------------------------------
 // The assessment
 // ----------------------------------------------------------------------------
@@ -843,7 +851,7 @@ async fn put_identity_data(
     let fields = changed_identity_keys(&data);
     let result = async {
         let mut tx = state.db.begin().await?;
-        if !lead_exists(&mut tx, lead_id).await? {
+        if !lock_identity_lead(&mut tx, lead_id).await? {
             return Ok(None);
         }
         sqlx::query(
@@ -863,7 +871,7 @@ async fn put_identity_data(
                    id_valid_until = CASE WHEN $12 THEN $13 ELSE id_valid_until END,
                    id_document_unreadable = COALESCE($14, id_document_unreadable),
                    id_data_entered_by = $15,
-                   id_data_entered_at = now()
+                   id_data_entered_at = clock_timestamp()
                WHERE lead_id = $1"#,
         )
         .bind(lead_id)
@@ -943,6 +951,9 @@ async fn put_representative_identity_data(
     let fields = changed_identity_keys(&data);
     let result = async {
         let mut tx = state.db.begin().await?;
+        if !lock_identity_lead(&mut tx, lead_id).await? {
+            return Ok(None);
+        }
         let updated = sqlx::query(
             r#"UPDATE lead_representatives SET
                    id_document_type = CASE WHEN $3 THEN $4 ELSE id_document_type END,
@@ -953,7 +964,7 @@ async fn put_representative_identity_data(
                    id_valid_until = CASE WHEN $13 THEN $14 ELSE id_valid_until END,
                    id_document_unreadable = COALESCE($15, id_document_unreadable),
                    id_data_entered_by = $16,
-                   id_data_entered_at = now()
+                   id_data_entered_at = clock_timestamp()
                WHERE lead_id = $1 AND contact_id = $2"#,
         )
         .bind(lead_id)

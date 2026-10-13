@@ -232,18 +232,18 @@ export function RiskSettingsTab() {
       {flash ? <SuccessBanner>{flash}</SuccessBanner> : null}
       {config ? (
         <section className="space-y-4" data-testid="risk-config">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/50 bg-card p-4">
             <div className="min-w-0 space-y-1">
               <AdminSectionTitle>{t.risk_config_title}</AdminSectionTitle>
               <p className="text-xs leading-5 text-muted-foreground">{t.risk_config_hint}</p>
             </div>
-            <span className="text-xs text-muted-foreground" data-testid="risk-config-version">
+            <span className="rounded-full border border-border/50 bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground" data-testid="risk-config-version">
               {formatUiText(t.risk_config_version, { version: config.version })}
             </span>
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <div className="min-w-0 space-y-2" data-testid="risk-list-1">
+            <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-4" data-testid="risk-list-1">
               <AdminSectionTitle>{t.risk_list_1}</AdminSectionTitle>
               <CitizenshipMultiSelect
                 value={config.list_1}
@@ -252,7 +252,7 @@ export function RiskSettingsTab() {
                 disabled={busy}
               />
             </div>
-            <div className="min-w-0 space-y-2" data-testid="risk-list-2">
+            <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-4" data-testid="risk-list-2">
               <AdminSectionTitle>{t.risk_list_2}</AdminSectionTitle>
               <CitizenshipMultiSelect
                 value={config.list_2}
@@ -264,7 +264,7 @@ export function RiskSettingsTab() {
           </div>
           <p className="text-xs text-muted-foreground">{t.risk_lists_hint}</p>
 
-          <div className="space-y-2 border-t border-border/60 pt-3">
+          <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-4">
             <AdminSectionTitle>{t.risk_points}</AdminSectionTitle>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[30rem] text-left text-sm" data-testid="risk-points">
@@ -325,11 +325,11 @@ export function RiskSettingsTab() {
             </div>
           </div>
 
-          <div className="grid gap-3 border-t border-border/60 pt-3 sm:grid-cols-2">
+          <div className="grid gap-3 rounded-xl border border-border/50 bg-card p-4 sm:grid-cols-2">
             <NumberField label={t.risk_level_2_from} value={config.level_2_from} min={1} disabled={busy} testId="risk-level-2-from" onChange={(value) => patch({ level_2_from: value })} />
             <NumberField label={t.risk_level_3_from} value={config.level_3_from} min={2} disabled={busy} testId="risk-level-3-from" onChange={(value) => patch({ level_3_from: value })} />
           </div>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-border/50 bg-card p-4 text-sm">
             <input
               type="checkbox"
               className={checkboxClass}
@@ -340,7 +340,7 @@ export function RiskSettingsTab() {
             {t.risk_level_2_blocks_automatic}
           </label>
 
-          <div className="space-y-2 border-t border-border/60 pt-3" data-testid="risk-reviewers">
+          <div className="space-y-3 rounded-xl border border-border/50 bg-card p-4" data-testid="risk-reviewers">
             <AdminSectionTitle>{t.risk_reviewers}</AdminSectionTitle>
             <p className="text-xs leading-5 text-muted-foreground">{t.risk_reviewers_hint}</p>
             {reviewerCounts ? (
@@ -358,7 +358,7 @@ export function RiskSettingsTab() {
             ) : (
               <div className="grid gap-1 sm:grid-cols-2">
                 {reviewerOptions.map((candidate) => (
-                  <label key={candidate.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <label key={candidate.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-border/50 p-2.5 text-sm">
                     <input
                       type="checkbox"
                       className={checkboxClass}
@@ -386,7 +386,7 @@ export function RiskSettingsTab() {
               ))}
             </ul>
           ) : null}
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 rounded-xl border border-border/50 bg-card p-3">
             <Button type="button" variant="outline" size="sm" disabled={busy || !changed} onClick={() => setConfig(saved)}>
               {t.common_cancel}
             </Button>

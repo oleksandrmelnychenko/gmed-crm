@@ -4,6 +4,7 @@ import type { LeadRequest, LeadRequestFollowUp } from "./lead-request-api";
 import {
   STEP_IDS,
   firstIncompleteStep,
+  hasBaseFormInput,
   initialStep,
   missingByStep,
   stepDone,
@@ -40,6 +41,10 @@ const followUp = (overrides: Partial<LeadRequestFollowUp>): LeadRequestFollowUp 
 });
 
 describe("lead cabinet steps", () => {
+  it("keeps hidden and unknown requirements out of base-form edit links", () => {
+    for (const field of ["birth_place", "pep_self", "id_valid_until", "something_new"]) expect(hasBaseFormInput(field)).toBe(false);
+    for (const field of ["name_latin", "phone", "custody", "rep2_name_latin", "id_document_upload", "request_reason"]) expect(hasBaseFormInput(field)).toBe(true);
+  });
   it("shows the follow-up step only while the server opened a block of the cabinet", () => {
     expect(STEP_IDS).toEqual([
       "person",

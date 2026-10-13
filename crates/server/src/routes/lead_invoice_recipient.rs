@@ -612,10 +612,14 @@ impl SectionSeven {
                 invoice_email: recipient.email.clone(),
                 ..Self::default()
             },
-            (Some(RECIPIENT_THIRD_PARTY), Some(true)) if declaration.is_third_party() => Self {
-                invoice_to: Some(INVOICE_TO_PAYER.into()),
-                ..Self::default()
-            },
+            (Some(RECIPIENT_THIRD_PARTY), Some(true))
+                if recipient_matches_payer(recipient, declaration) =>
+            {
+                Self {
+                    invoice_to: Some(INVOICE_TO_PAYER.into()),
+                    ..Self::default()
+                }
+            }
             (Some(RECIPIENT_THIRD_PARTY), Some(false)) => Self {
                 invoice_to: Some(INVOICE_TO_OTHER.into()),
                 invoice_name: recipient.name(),
@@ -727,8 +731,10 @@ pub(crate) fn payer_fits(
     let third_party = declaration.is_third_party();
     match (recipient.recipient.as_deref(), recipient.is_payer) {
         (Some(RECIPIENT_SELF), Some(true)) => !third_party || paying_parent,
-        (Some(RECIPIENT_SELF), Some(false)) => third_party,
-        (Some(RECIPIENT_THIRD_PARTY), Some(true)) => third_party,
+        (Some(RECIPIENT_SELF), Some(false)) => third_party && !paying_parent,
+        (Some(RECIPIENT_THIRD_PARTY), Some(true)) => {
+            recipient_matches_payer(recipient, declaration)
+        }
         (Some(RECIPIENT_THIRD_PARTY), Some(false)) => {
             !third_party
                 || match (declaration.payer_name(), recipient.name()) {
@@ -740,7 +746,33 @@ pub(crate) fn payer_fits(
     }
 }
 
-fn same_name(left: &str, right: &str) -> bool {
+pub(crate) fn recipient_matches_payer(recipient: &Recipient, declaration: &Declaration) -> bool {
+    if !recipient.is_third_party()
+        || !declaration.is_third_party()
+        || recipient.recipient_type.is_none()
+        || recipient.is_organisation() != declaration.is_organisation()
+    {
+        return false;
+    }
+    if !recipient.is_organisation()
+        && (recipient
+            .first_name
+            .as_deref()
+            .is_none_or(|s| s.trim().is_empty())
+            || recipient
+                .last_name
+                .as_deref()
+                .is_none_or(|s| s.trim().is_empty()))
+    {
+        return false;
+    }
+    match (recipient.name(), declaration.payer_name()) {
+        (Some(recipient), Some(payer)) => same_name(&recipient, &payer),
+        _ => false,
+    }
+}
+
+pub(crate) fn same_name(left: &str, right: &str) -> bool {
     let normalized = |value: &str| {
         value
             .split_whitespace()
@@ -760,8 +792,8 @@ pub(crate) fn payer_question_reached(recipient: &Recipient) -> bool {
 /// What the cabinet still needs of the recipient before sending, in form
 /// order: the two answers and, for a third party, the type and its data —
 /// a person's name, address and relationship, an organisation's name, seat
-/// and reason. Of a third party who pays the payer's keys count instead
-/// (it is the payer).
+/// and reason. A paying recipient also needs its full invoice address; payer
+/// extras and consent are checked separately.
 pub(crate) fn missing(recipient: &Recipient) -> Vec<&'static str> {
     let mut missing = Vec::new();
     let Some(answer) = recipient.recipient.as_deref() else {
@@ -772,7 +804,7 @@ pub(crate) fn missing(recipient: &Recipient) -> Vec<&'static str> {
     // "Another address" of an older request names nobody's type or
     // relationship: its name and address count, as they did.
     let legacy = recipient.legacy_name.is_some();
-    if answer == RECIPIENT_THIRD_PARTY && recipient.is_payer != Some(true) {
+    if answer == RECIPIENT_THIRD_PARTY {
         match recipient.recipient_type.as_deref() {
             None if legacy => {}
             None => missing.push("recipient_type"),
@@ -804,7 +836,7 @@ pub(crate) fn missing(recipient: &Recipient) -> Vec<&'static str> {
         }
         match recipient.recipient_type.as_deref() {
             Some(RECIPIENT_TYPE_ORGANISATION) => {
-                if blank(&recipient.payment_reason) {
+                if recipient.is_payer != Some(true) && blank(&recipient.payment_reason) {
                     missing.push("recipient_payment_reason");
                 }
             }
@@ -956,6 +988,9 @@ mod tests {
         let paying = Recipient {
             recipient: Some("third_party".into()),
             is_payer: Some(true),
+            recipient_type: Some("person".into()),
+            first_name: Some("Viktor".into()),
+            last_name: Some("Zahler".into()),
             ..Recipient::default()
         };
         assert_eq!(
@@ -1034,7 +1069,7 @@ mod tests {
             false
         ));
         assert!(payer_fits(&answers("self", false), Some(&viktor), false));
-        assert!(payer_fits(
+        assert!(!payer_fits(
             &answers("third_party", true),
             Some(&viktor),
             false
@@ -1055,7 +1090,12 @@ mod tests {
         recipient.first_name = Some("viktor".into());
         recipient.last_name = Some("ZAHLER".into());
         assert!(!payer_fits(&recipient, Some(&viktor), false));
+        recipient.is_payer = Some(true);
+        assert!(payer_fits(&recipient, Some(&viktor), false));
+        assert!(!payer_fits(&answers("self", false), Some(&viktor), true));
         recipient.first_name = Some("Mia".into());
+        assert!(!payer_fits(&recipient, Some(&viktor), false));
+        recipient.is_payer = Some(false);
         assert!(payer_fits(&recipient, Some(&viktor), false));
         assert!(!payer_fits(&answers("self", true), None, false));
         assert!(!payer_fits(&Recipient::default(), Some(&own_payer), false));
@@ -1115,6 +1155,15 @@ mod tests {
         );
         // A third party who pays: the payer's keys count.
         third.is_payer = Some(true);
-        assert!(missing(&third).is_empty());
+        assert_eq!(
+            missing(&third),
+            [
+                "recipient_organisation_name",
+                "recipient_street",
+                "recipient_zip",
+                "recipient_city",
+                "recipient_country"
+            ]
+        );
     }
 }

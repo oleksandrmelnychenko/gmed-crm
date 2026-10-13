@@ -78,7 +78,7 @@ export function PortalFact({
 }) {
   return (
     <div className={cn("min-w-0", className)} data-testid={testId}>
-      <dt className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label}</dt>
+      <dt className="font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 text-[13px] font-medium leading-snug text-foreground">{children}</dd>
     </div>
   );
@@ -90,14 +90,14 @@ export function LoginEmailFact({
   delivery,
   lang,
 }: {
-  emailedAt: string;
+  emailedAt?: string | null;
   delivery?: LoginEmailDeliveryStatus | null;
   lang: Lang;
 }) {
   const state = delivery ? loginEmailDelivery(delivery, lang) : null;
   return (
     <PortalFact label={lang === "de" ? "Zugang per E-Mail" : "Доступ по e-mail"} testId="portal-login-email-fact">
-      {formatAppDateTime(emailedAt)}
+      {emailedAt ? formatAppDateTime(emailedAt) : lang === "de" ? "noch nicht gesendet" : "ещё не отправлялся"}
       {state ? (
         <span className="mt-1 flex flex-col items-start gap-1">
           <StatusBadge tone={state.tone}>
@@ -275,20 +275,20 @@ export function LeadPortalAccessDetail({
   }
 
   return (
-    <div className="space-y-3 px-4 py-3 text-xs" data-testid="lead-portal-access">
+    <div className="@container space-y-4 border-y border-l-2 border-border border-l-primary bg-muted px-4 py-4 text-xs" data-testid="lead-portal-access">
       {/* Portal state and grouped actions stay visually separate. */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="grid items-center gap-3 @[64rem]:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <AdminSectionTitle>{de ? "Patientenportal" : "Портал пациента"}</AdminSectionTitle>
           <StatusChip tone={leadPortalStatusTone(status)}>{leadPortalStatusLabel(status, lang)}</StatusChip>
         </div>
-        <div className="flex max-w-full flex-wrap items-center gap-2" role="group" aria-label={de ? "Portalaktionen" : "Действия с порталом"}>
+        <div className="grid w-full grid-cols-1 items-stretch gap-2 @[32rem]:grid-cols-[9rem_minmax(0,14rem)_10rem] @[64rem]:w-auto" role="group" aria-label={de ? "Portalaktionen" : "Действия с порталом"}>
           {canOffer ? (
             <Button
               type="button"
-              variant="outline"
+              variant={canReset ? "outline" : "default"}
               size="sm"
-              className="h-8 gap-1.5 rounded-lg bg-field px-2.5 text-xs"
+              className={cn("h-auto min-h-8 w-full gap-1.5 whitespace-normal rounded-lg px-2.5 py-1.5 text-xs shadow-xs", canReset && "border-foreground/20 bg-card hover:bg-accent")}
               disabled={busy}
               onClick={() => (canReset ? setConfirmOpen(true) : void issue())}
             >
@@ -305,9 +305,9 @@ export function LeadPortalAccessDetail({
           {canOffer ? (
             <Button
               type="button"
-              variant="outline"
+              variant={canReset ? "default" : "outline"}
               size="sm"
-              className="h-8 gap-1.5 rounded-lg bg-field px-2.5 text-xs"
+              className={cn("h-auto min-h-8 w-full gap-1.5 whitespace-normal rounded-lg px-2.5 py-1.5 text-xs shadow-xs", !canReset && "border-foreground/20 bg-card hover:bg-accent")}
               disabled={busy || emailInfo === undefined}
               onClick={() => {
                 setEmailNotice("");
@@ -319,13 +319,13 @@ export function LeadPortalAccessDetail({
               {de ? "Zugang per E-Mail senden" : "Отправить доступ на e-mail"}
             </Button>
           ) : null}
-          {canOfferSheet ? (
+          {canIssue && minor !== true ? (
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 gap-1.5 rounded-lg bg-field px-2.5 text-xs"
-              disabled={busy || sheetBusy}
+              className="h-auto min-h-8 w-full gap-1.5 whitespace-normal rounded-lg border-foreground/20 bg-card px-2.5 py-1.5 text-xs shadow-xs hover:bg-accent @[32rem]:col-start-3"
+              disabled={!canOfferSheet || busy || sheetBusy}
               title={de ? "Dokumentationsbogen natürliche Personen (GwG), aus der Anfrage ausgefüllt" : "Лист идентификации по GwG, заполненный из заявки"}
               onClick={() => void downloadGwgSheet()}
               data-testid="lead-gwg-sheet"
@@ -334,6 +334,9 @@ export function LeadPortalAccessDetail({
               Doku-Bogen GwG
             </Button>
           ) : null}
+        </div>
+      </div>
+      {sheetNotice || emailNotice ? <div className="flex flex-wrap gap-2">
           {sheetNotice ? (
             <span className="text-emerald-700" role="status" data-testid="lead-gwg-sheet-notice">
               {sheetNotice}
@@ -344,26 +347,21 @@ export function LeadPortalAccessDetail({
               {emailNotice}
             </span>
           ) : null}
-        </div>
-      </div>
+      </div> : null}
       {status !== "none" ? (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 xl:grid-cols-7">
-          <PortalFact label={de ? "Login" : "Логин"} className="col-span-2 sm:col-span-1 xl:col-span-2">
+        <dl className="grid grid-cols-2 gap-2 @[40rem]:grid-cols-4 @[80rem]:grid-cols-[minmax(220px,2fr)_repeat(6,minmax(0,1fr))] [&>div]:rounded-lg [&>div]:border [&>div]:border-border [&>div]:bg-card [&>div]:p-3">
+          <PortalFact label={de ? "Login" : "Логин"} className="col-span-2 @[80rem]:col-span-1">
             <span className="break-all">{lead.email ?? "—"}</span>
           </PortalFact>
           <PortalFact label={de ? "Letzte Anmeldung" : "Последний вход"}>
             {lastLogin ? formatAppDateTime(lastLogin) : de ? "noch nie" : "ещё не было"}
           </PortalFact>
-          {lead.portal_account?.login_emailed_at ? (
             <LoginEmailFact
-              emailedAt={lead.portal_account.login_emailed_at}
-              delivery={lead.portal_account.login_email_delivery}
+              emailedAt={lead.portal_account?.login_emailed_at}
+              delivery={lead.portal_account?.login_email_delivery}
               lang={lang}
             />
-          ) : null}
-          {lead.retention_deadline_at && status !== "disabled" ? (
-            <PortalFact label={de ? "Zugang bis" : "Доступ до"}>{formatAppDate(lead.retention_deadline_at)}</PortalFact>
-          ) : null}
+          <PortalFact label={de ? "Zugang bis" : "Доступ до"}>{lead.retention_deadline_at && status !== "disabled" ? formatAppDate(lead.retention_deadline_at) : "—"}</PortalFact>
           {intake ? (
             <>
               <PortalFact label={de ? "Fragebogen" : "Анкета"} testId="lead-portal-progress">

@@ -215,7 +215,9 @@ test("the CEO compares the match with the list entry and records a false positiv
     "href",
     "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32099R0001",
   );
-  await expect(page.getByText("Совпадение имени — не установление личности", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Гайд", exact: true }).click();
+  await expect(page.getByRole("dialog").getByText("Совпадение имени — не установление личности", { exact: false })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Закрыть", exact: true }).first().click();
   await page.screenshot({ path: "../tmp/sanctions-review.png", fullPage: true });
 
   await card.getByRole("button", { name: "Ложное совпадение" }).click();
@@ -236,6 +238,35 @@ test("the CEO compares the match with the list entry and records a false positiv
     },
   ]);
 });
+
+for (const width of [1440, 390]) {
+  test(`sanctions list settings stay readable at ${width}px without changing configuration`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const { calls } = await setup(page);
+    const version = {
+      id: "list-version-test", source: "download", list_date: "2026-10-12",
+      generated_at: null, global_file_id: null, sha256: "a".repeat(64), byte_size: 1200,
+      entry_count: 2300, person_count: 2000, is_active: true, imported_by_name: null,
+      created_at: "2026-10-12T06:00:00Z",
+    };
+    await page.route("**/api/v1/sanctions/list", (route) => route.fulfill({ json: {
+      list: {
+        active: version, versions: [version], stale: false, automatic_download: true,
+        source_url: "https://example.invalid/list.xml",
+        sync: { last_attempt_at: version.created_at, last_success_at: version.created_at,
+          last_error_code: null, last_error_at: null, consecutive_failures: 0 },
+      },
+      blocked_countries: ["RU"],
+    } }));
+    await page.goto("/sanctions?tab=list");
+    const settings = page.getByTestId("sanctions-list-settings");
+    await expect(settings).toContainText("12.10.2026");
+    await expect(settings.getByRole("button", { name: "Сохранить", exact: true })).toBeDisabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`sanctions-list-${width}.png`), fullPage: true });
+    expect(calls).toEqual([]);
+  });
+}
 
 test("FiSaLis opens without any data in the URL and the name goes to the clipboard", async ({ page, context, baseURL }) => {
   // The app's own origin, whatever port the dev server runs on.

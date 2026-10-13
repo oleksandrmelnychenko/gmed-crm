@@ -134,7 +134,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const [created, setCreated] = useState<CreatedInvoice | null>(null);
 
   const copy = de ? {
-    title: "Patientenabrechnung", subtitle: "Leistungen und von GMed bezahlte Fremdkosten in einer Rechnung zusammenstellen.",
+    title: "Patientenabrechnung",
     order: "Bezugsauftrag (optional)", noOrder: "Ohne Auftrag", currency: "Währung", quote: "Angebot für Leistungen", noQuote: "Nur Fremdkosten – ohne Angebot", type: "Rechnungsart",
     interim: "Zwischenrechnung", final: "Schlussrechnung", due: "Fällig am", services: "Leistungen", expenses: "Weiterberechenbare Kosten",
     waiting: "Weitere Kosten", amount: "Betrag", source: "Ursprung", payment: "Zahlung", patientInvoice: "Patientenrechnung",
@@ -142,7 +142,6 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     create: "Rechnungsentwurf erstellen", creating: "Entwurf wird erstellt…", retry: "Aktualisieren", failed: "Die Abrechnungsdaten konnten nicht geladen werden.",
     saveFailed: "Der Rechnungsentwurf konnte nicht erstellt werden. Prüfen Sie die ausgewählten Positionen.",
     success: "Der Rechnungsentwurf wurde erstellt und die gewählten Kosten wurden reserviert.", open: "Entwurf öffnen",
-    late: "Kosten können auftragsübergreifend oder ohne Auftrag berechnet werden. Auch später eingehende Belege bleiben verfügbar.",
     total: "Summe des Entwurfs", choose: "Mindestens eine Leistung oder einen Kostenbeleg auswählen.", patientPaid: "Patient selbst", gmedPaid: "GMed", unpaid: "Unbezahlt",
     ready: "Nicht berechnet", reserved: "Im Entwurf / berechnet", afterPayment: "Nach Zahlung", notRequired: "Nicht erforderlich",
     orderService: "Über die Auftragsleistung",
@@ -156,7 +155,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     cancel: "Abbrechen", waiverFailed: "Die Änderung konnte nicht gespeichert werden.",
     waivedBy: (amount: string, reason: string) => `${amount} trägt GMED: ${reason}`,
   } : {
-    title: "Выставление пациенту", subtitle: "Соберите услуги и оплаченные GMed внешние расходы в одном счёте.",
+    title: "Выставление пациенту",
     order: "Заказ (необязательно)", noOrder: "Без заказа", currency: "Валюта", quote: "Предложение с услугами", noQuote: "Только расходы — без предложения", type: "Тип счёта",
     interim: "Промежуточный", final: "Финальный", due: "Срок оплаты", services: "Услуги", expenses: "Расходы для перевыставления",
     waiting: "Остальные расходы", amount: "Сумма", source: "Источник", payment: "Оплата", patientInvoice: "Счёт пациенту",
@@ -164,7 +163,6 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     create: "Создать черновик счёта", creating: "Создаём черновик…", retry: "Обновить", failed: "Не удалось загрузить данные для выставления.",
     saveFailed: "Не удалось создать черновик. Проверьте выбранные позиции.",
     success: "Черновик создан, выбранные расходы зарезервированы за ним.", open: "Открыть черновик",
-    late: "Расходы можно объединить по пациенту из разных заказов или выставить без заказа. Поздние документы также остаются доступными.",
     total: "Сумма черновика", choose: "Выберите хотя бы одну услугу или расход.", patientPaid: "Сам пациент", gmedPaid: "GMed", unpaid: "Не оплачен",
     ready: "Не выставлено", reserved: "В черновике / выставлено", afterPayment: "После оплаты", notRequired: "Не требуется",
     orderService: "Через услугу заказа",
@@ -366,10 +364,9 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     <PatientTerminationSettlements patientId={patientId} lang={lang} />
     <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
-        <div><h2 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--brand)]" />{copy.title}</h2><p className="mt-1 text-xs text-muted-foreground">{copy.subtitle}</p></div>
+        <h2 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--brand)]" />{copy.title}</h2>
         <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setRevision(value => value + 1)}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />{copy.retry}</Button>
       </div>
-      <p className="border-b border-border/60 bg-muted/20 px-4 py-2.5 text-xs leading-5 text-muted-foreground">{copy.late}</p>
       <form className="space-y-4 p-4" onSubmit={submit}>
         <div className="grid gap-3 lg:grid-cols-5">
           <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setLineComments({}); setSelectedExpenses([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.cancellation_reason === "contract_terminated" ? (de ? "gekündigt" : "расторгнут") : item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>

@@ -13,7 +13,8 @@ import {
   type PatientSymptomItem,
 } from "@/pages/patients/data/patient-symptoms-pain";
 import { CaseItemList } from "@/pages/case-workspace/case-item-list";
-import { Field, Panel, inputBaseClassName } from "@/pages/case-workspace/primitives";
+import { Field, inputBaseClassName } from "@/pages/case-workspace/primitives";
+import { PatientFormSection as Panel } from "../shared/patient-form-primitives";
 
 function tri(lang: string, key: string) {
   const catalog = translateCatalog(lang === "de" ? "de" : "ru");
@@ -252,6 +253,7 @@ export function PatientSymptomsPainSections({
   return (
     <>
       <CaseItemList<PatientSymptomItem>
+        editorPresentation="dialog"
         columns={symptomColumns}
         title={tri(lang, "case_ws_symptoms")}
         description={tri(lang, "case_ws_clinical_complaints_and_related_specialty")}
@@ -280,6 +282,7 @@ export function PatientSymptomsPainSections({
       />
 
       <CaseItemList<PatientPainItem>
+        editorPresentation="dialog"
         columns={painColumns}
         title={t.cases_pain_title}
         description={t.cases_pain_description}

@@ -22,11 +22,13 @@ function isFollowUpBlock(value: string): value is FollowUpBlock {
 }
 
 /** The open blocks of the cabinet, in letter order; none while nothing is required. */
-export function openFollowUpBlocks(request: Pick<LeadRequest, "follow_up">): FollowUpBlock[] {
+export function openFollowUpBlocks(request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "identification">>): FollowUpBlock[] {
   const followUp = request.follow_up;
   if (!followUp?.required) return [];
   const open = new Set(followUp.blocks.map((block) => block.trim().toUpperCase()).filter(isFollowUpBlock));
-  return FOLLOW_UP_BLOCKS.filter((block) => open.has(block));
+  return FOLLOW_UP_BLOCKS.filter((block) => open.has(block)
+    && !(block === "H" && request.identification && request.identification.pep_self !== true && request.identification.pep_related !== true)
+    && !(block === "J" && request.identification && request.identification.sanctions_links !== true));
 }
 
 /**
@@ -36,24 +38,24 @@ export function openFollowUpBlocks(request: Pick<LeadRequest, "follow_up">): Fol
  * wait for the send instead of adding a step to the base form (QA
  * 2026-10-10: block I duplicated the identity step).
  */
-export function followUpShown(request: Pick<LeadRequest, "follow_up" | "submitted_at">): boolean {
+export function followUpShown(request: Pick<LeadRequest, "follow_up" | "submitted_at"> & Partial<Pick<LeadRequest, "identification">>): boolean {
   return Boolean(request.submitted_at) && openFollowUpBlocks(request).length > 0;
 }
 
 /** What an open block still misses, as the server names it. */
-export function followUpMissing(request: Pick<LeadRequest, "follow_up">, block: FollowUpBlock): string[] {
+export function followUpMissing(request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "identification">>, block: FollowUpBlock): string[] {
   if (!openFollowUpBlocks(request).includes(block)) return [];
   return request.follow_up?.missing?.[block] ?? [];
 }
 
 /** Everything the open blocks still miss, block after block. */
-export function followUpMissingAll(request: Pick<LeadRequest, "follow_up">): Array<{ block: FollowUpBlock; key: string }> {
+export function followUpMissingAll(request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "identification">>): Array<{ block: FollowUpBlock; key: string }> {
   return openFollowUpBlocks(request).flatMap((block) => followUpMissing(request, block).map((key) => ({ block, key })));
 }
 
 /** The answers were sent and nothing is missing: GMED reviews them. */
-export function followUpAnswered(request: Pick<LeadRequest, "follow_up">): boolean {
-  return Boolean(request.follow_up?.answered_at) && followUpMissingAll(request).length === 0;
+export function followUpAnswered(request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "identification">>): boolean {
+  return Boolean(request.follow_up?.answered_at) && request.follow_up?.changed_since_answer !== true && followUpMissingAll(request).length === 0;
 }
 
 /**
@@ -112,19 +114,14 @@ const NO_ASKS: ExtraQuestionAsks = {
  * Which questions of block A this login is asked, as the server decides
  * them (`follow_up.missing.A`): a self-payer states the own source with a
  * proof, profession and sector; a patient whose payer is another person or
- * organisation says what is known of that party's funds unless the payer
- * already stated them on the own link; a parent who pays answers the funds
+ * organisation gives only the patient's profession and sector; the payer
+ * states funds through the own link. A parent who pays answers the funds
  * and the profession in the own payer section, the sector here.
  */
 export function blockAAsks(request: Pick<LeadRequest, "follow_up" | "payer" | "payer_questionnaire">): ExtraQuestionAsks {
   if (request.payer_questionnaire) return { ...NO_ASKS, sector: true, payer_states_funds: true };
   if (request.payer?.payer_kind === "third_party") {
-    const missing = request.follow_up?.missing?.A ?? [];
-    const answers = request.follow_up?.answers;
-    const payerFunds =
-      missing.some((key) => blockAKey(key).startsWith("payer_funds_")) ||
-      Boolean(answers?.payer_funds_source || answers?.payer_funds_description);
-    return { ...NO_ASKS, payer_funds: payerFunds, occupation: true, sector: true, payer_states_funds: true };
+    return { ...NO_ASKS, occupation: true, sector: true, payer_states_funds: true };
   }
   return { ...NO_ASKS, funds: true, occupation: true, sector: true, funds_proof: true };
 }

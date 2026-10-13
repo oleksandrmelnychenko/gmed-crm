@@ -770,7 +770,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
   });
 
   test("when the payer answers the route meanwhile, the section goes and the request is loaded afresh", async ({ page }) => {
-    const { calls } = await setup(page, { prepare: (request) => request.billing && (request.billing.invoice_to = "self") });
+    const { calls, request } = await setup(page, { prepare: (request) => request.billing && (request.billing.invoice_to = "self") });
     await page.goto("/");
     await step(page, "billing");
     const route = page.getByTestId("lead-request-payment-route");
@@ -792,6 +792,13 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await billing.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" }).fill("rechnung@example.com");
     await expect.poll(() => calls.billing.at(-1)).toEqual({ invoice_email: "rechnung@example.com" });
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
+    // A later authoritative response returns section 8 to the patient.
+    calls.payerTookOver = false;
+    request.payer = selfPayer();
+    await billing.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" }).fill("another@example.com");
+    await expect.poll(() => calls.billing.at(-1)).toEqual({ invoice_email: "another@example.com" });
+    await expect(route).toBeVisible();
+    await expect(page.getByTestId("lead-request-payment-route-by-payer")).toHaveCount(0);
   });
 
   test("the two sections fit a wide screen and a phone", async ({ page }) => {

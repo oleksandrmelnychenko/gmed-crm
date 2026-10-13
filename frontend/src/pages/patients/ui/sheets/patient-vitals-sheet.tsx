@@ -15,7 +15,7 @@ import { berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zon
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { PatientVitalMeasurement } from "@/pages/patients/model/detail-resource-types";
-import { FormSection } from "../shared/patient-form-primitives";
+import { PatientFormSection as FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type FormState = {
@@ -171,7 +171,7 @@ export function PatientVitalsSheet({
   }
 
   return (
-    <PatientSheetScaffold requireChanges={Boolean(initialMeasurement?.id)}
+    <PatientSheetScaffold presentation="dialog" requireChanges={Boolean(initialMeasurement?.id)}
       open={open}
       onOpenChange={onOpenChange}
       maxWidthClassName="sm:max-w-[540px]"

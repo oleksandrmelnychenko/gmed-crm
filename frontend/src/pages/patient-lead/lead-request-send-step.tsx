@@ -11,7 +11,7 @@ import { INQUIRY_CONSENT, submitLeadRequest, type LeadRequest } from "./lead-req
 import { followUpAnswered, followUpShown } from "./lead-request-follow-up-model";
 import { canSubmit, changedSinceSubmit, consentGiven, type SubmitField } from "./lead-request-model";
 import { CabinetSection as Section, RequiredMark, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
-import { firstIncompleteStep, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
+import { hasBaseFormInput, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
 import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
 import { submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
@@ -44,10 +44,13 @@ export function SendStep({
   const guardian = request.access_kind === "guardian";
   // What is still missing, by the step it is answered in (the follow-up is sent on its own).
   const byStep = missingByStep(request);
+  for (const step of visibleSteps(request)) byStep[step] = byStep[step].filter(hasBaseFormInput);
   const missingSteps = visibleSteps(request).filter(
     (step): step is Exclude<StepId, "send" | "follow_up"> => step !== "send" && step !== "follow_up" && byStep[step].length > 0,
   );
-  const missingCount = missingSteps.reduce((count, step) => count + byStep[step].length, 0);
+  const shownKeys = new Set(missingSteps.flatMap((step) => byStep[step]));
+  const otherMissing = request.progress.missing_for_submit.filter((key) => !shownKeys.has(key));
+  const missingCount = shownKeys.size + otherMissing.length;
   const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);
   // After sending, GMED may ask for more: the neutral pointer to the step (never why).
   const followUpOpen = Boolean(request.submitted_at) && followUpShown(request) && !followUpAnswered(request);
@@ -70,7 +73,7 @@ export function SendStep({
       // The confirmation belongs to what was sent; a later change is confirmed anew.
       setConfirmed(false);
     } catch (cause) {
-      setError(errorBody(cause)?.code === "declaration_required" ? text.declarationRequired : errorMessage(cause));
+      setError(errorBody(cause)?.code === "declaration_required" ? text.declarationRequired : errorMessage(cause, text));
     } finally {
       setBusy(false);
     }
@@ -151,6 +154,12 @@ export function SendStep({
               </ul>
             ) : null}
             {/* Grouped by step, each with a way there. */}
+            {otherMissing.length > 0 ? <div data-testid="lead-request-missing-other">
+              <p className="text-xs font-semibold">{text.furtherDetails}</p>
+              <ul className="list-inside list-disc">{otherMissing.map((field) => <li key={field}>
+                {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type)}
+              </li>)}</ul>
+            </div> : null}
             {missingSteps.map((step) => (
               <div key={step} data-testid={`lead-request-missing-${step}`}>
                 <button
@@ -175,7 +184,7 @@ export function SendStep({
               size="sm"
               className="gap-1.5 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
               // To the first step that still misses something.
-              onClick={() => onEdit(firstIncompleteStep(request) ?? "person")}
+              onClick={() => onEdit(!inquiryConsent ? "person" : missingSteps[0] ?? "person")}
             >
               <Pencil aria-hidden="true" className="size-3.5" />
               {text.editData}

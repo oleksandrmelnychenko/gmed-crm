@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { ChevronDown } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { StatusChip } from "@/components/ui/status-chip";
+import { ComplianceSection } from "@/pages/admin/ui/compliance-section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Banner, Field, Section, selectClass, textareaClass } from "@/components/ui-shell";
+import { Banner, Field, selectClass, textareaClass } from "@/components/ui-shell";
 import { berlinLocalInputToIso, formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import {
@@ -149,12 +151,12 @@ export function IncidentRegisterSection({
   };
 
   return (
-    <Section title={l("incidents_title")}>
+    <ComplianceSection title={l("incidents_title")}>
       <p className="text-xs text-muted-foreground">{l("incidents_intro")}</p>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? <p className="text-sm text-emerald-700">{notice}</p> : null}
 
-      <form className="grid gap-3 md:grid-cols-2" onSubmit={submitReport} data-testid="incident-report-form">
+      <form className="grid gap-3 rounded-xl border border-border/70 bg-muted/20 p-3 md:grid-cols-2" onSubmit={submitReport} data-testid="incident-report-form">
         <Field label={l("incidents_field_title")} htmlFor="incident-title" required>
           <Input
             id="incident-title"
@@ -223,7 +225,7 @@ export function IncidentRegisterSection({
         <div className="md:col-span-2">
           <Button
             type="submit"
-            className="h-9 rounded-lg px-3.5"
+            className="h-8 rounded-lg px-3 text-xs"
             disabled={busy}
           >
             {l("incidents_report")}
@@ -239,31 +241,33 @@ export function IncidentRegisterSection({
           {incidents.map((incident) => {
             const left = hoursLeft(incident.authority_deadline);
             return (
-              <div key={incident.id} className="rounded-lg border border-border/60 bg-card p-3">
+              <div key={incident.id} className="rounded-xl border border-border/70 bg-muted/10 p-3">
                 <button
                   type="button"
-                  className="flex w-full flex-wrap items-center gap-2 text-left"
+                  className="flex w-full flex-wrap items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-expanded={openId === incident.id}
                   onClick={() => openIncident(incident)}
                 >
                   <span className="font-mono text-xs text-muted-foreground">{incident.reference}</span>
                   <span className="text-sm font-medium">{incident.title}</span>
-                  <Badge className="bg-slate-500/15 text-slate-700">{l(`incidents_status_${incident.status}`)}</Badge>
-                  <Badge className="bg-slate-500/15 text-slate-700">{l(`incidents_severity_${incident.severity}`)}</Badge>
+                  <StatusChip tone={incident.status === "resolved" || incident.status === "closed" ? "success" : "warning"}>{l(`incidents_status_${incident.status}`)}</StatusChip>
+                  <StatusChip tone={incident.severity === "critical" || incident.severity === "high" ? "error" : "neutral"}>{l(`incidents_severity_${incident.severity}`)}</StatusChip>
                   {incident.authority_notified_late ? (
-                    <Badge className="bg-red-500/15 text-red-700">{l("incidents_notified_late")}</Badge>
+                    <StatusChip tone="error">{l("incidents_notified_late")}</StatusChip>
                   ) : null}
                   {incident.reopened_at ? (
-                    <Badge className="bg-amber-500/15 text-amber-800">{l("incidents_reopened")}</Badge>
+                    <StatusChip tone="warning">{l("incidents_reopened")}</StatusChip>
                   ) : null}
                   {incident.notification_decision_documented ? (
-                    <Badge className="bg-emerald-500/15 text-emerald-700">{l("incidents_decision_documented")}</Badge>
+                    <StatusChip tone="success">{l("incidents_decision_documented")}</StatusChip>
                   ) : incident.authority_deadline_missed ? (
-                    <Badge className="bg-red-500/15 text-red-700">{l("incidents_deadline_missed")}</Badge>
+                    <StatusChip tone="error">{l("incidents_deadline_missed")}</StatusChip>
                   ) : (
-                    <Badge className="bg-amber-500/15 text-amber-800">
+                    <StatusChip tone="warning">
                       {l("incidents_deadline_left")}: {left} {l("incidents_hours_unit")}
-                    </Badge>
+                    </StatusChip>
                   )}
+                  <ChevronDown className={`ml-auto size-4 shrink-0 text-muted-foreground transition-transform ${openId === incident.id ? "rotate-180" : ""}`} />
                 </button>
 
                 {openId === incident.id ? (
@@ -392,7 +396,7 @@ export function IncidentRegisterSection({
                     <div className="flex flex-wrap gap-2">
                       <Button
                         type="button"
-                        className="h-9 rounded-lg"
+                        className="h-8 rounded-lg text-xs"
                         disabled={
                           busy ||
                           (incident.status === "closed" &&
@@ -407,7 +411,7 @@ export function IncidentRegisterSection({
                         <Button
                           type="button"
                           variant="outline"
-                          className="h-9 rounded-lg"
+                          className="h-8 rounded-lg text-xs"
                           disabled={busy}
                           onClick={() => void saveDecision(incident, { authority_notified_at: new Date().toISOString() })}
                         >
@@ -418,7 +422,7 @@ export function IncidentRegisterSection({
                         <Button
                           type="button"
                           variant="outline"
-                          className="h-9 rounded-lg"
+                          className="h-8 rounded-lg text-xs"
                           disabled={busy}
                           onClick={() => void saveDecision(incident, { subjects_notified_at: new Date().toISOString() })}
                         >
@@ -434,6 +438,6 @@ export function IncidentRegisterSection({
           })}
         </div>
       ) : null}
-    </Section>
+    </ComplianceSection>
   );
 }

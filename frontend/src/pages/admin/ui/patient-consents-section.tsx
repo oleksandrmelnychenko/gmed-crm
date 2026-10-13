@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
+import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
+import { ComplianceSection } from "@/pages/admin/ui/compliance-section";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Banner, Field, Section, selectClass, textareaClass } from "@/components/ui-shell";
+import { Banner, Field, selectClass, textareaClass } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
@@ -69,12 +70,12 @@ export function consentRowStatus(
   return "active";
 }
 
-const CONSENT_STATUS_BADGE: Record<ConsentRowStatus, string> = {
-  active: "bg-emerald-500/15 text-emerald-700",
-  expired: "bg-amber-500/15 text-amber-800",
-  superseded: "bg-slate-500/15 text-slate-700",
-  ended: "bg-slate-500/15 text-slate-700",
-  revoked: "bg-red-500/15 text-red-700",
+const CONSENT_STATUS_TONE: Record<ConsentRowStatus, StatusChipTone> = {
+  active: "success",
+  expired: "warning",
+  superseded: "neutral",
+  ended: "neutral",
+  revoked: "error",
 };
 
 /** How the patient's revocation reached GMED (Art. 7 Abs. 3 DSGVO evidence). */
@@ -123,7 +124,7 @@ function ConsentRevokeDialog({
   const valid = channel !== "" && reason.trim().length >= 10;
   return (
     <Dialog open={consentType !== null} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={Boolean(reason || channel)}>
-      <DialogContent className="sm:max-w-[520px]" data-testid="consent-revoke-dialog">
+      <DialogContent overlayClassName="bg-black/40" className="sm:max-w-[560px]" data-testid="consent-revoke-dialog">
         <DialogHeader>
           <DialogTitle>
             {l("consents_revoke_title")}: {consentType ? typeLabel(consentType) : ""}
@@ -270,11 +271,11 @@ export function PatientConsentsSection({
   }
 
   return (
-    <Section
+    <ComplianceSection
       title={l("consents_title")}
       accessory={patientLabel ? (
         <div
-          className="rounded-full border border-border/60 bg-muted/25 px-3 py-1 text-xs font-medium text-foreground"
+          className="max-w-full break-words rounded-lg border border-border/60 bg-muted/25 px-2.5 py-1.5 text-xs font-medium text-foreground"
           data-testid="consents-patient"
         >
           {patientLabel}
@@ -284,7 +285,7 @@ export function PatientConsentsSection({
       {error ? <Banner tone="error">{error}</Banner> : null}
 
       {canManage ? (
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
+      <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/20 p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
         <Field label={l("consents_field_type")} htmlFor="consent-type">
           <select
             id="consent-type"
@@ -311,7 +312,7 @@ export function PatientConsentsSection({
         <div className="flex items-end">
           <Button
             type="button"
-            className="h-9 rounded-lg px-3.5"
+            className="h-8 rounded-lg px-3 text-xs"
             disabled={busy || actionsDisabled}
             onClick={() => void save(consentType, "grant", note.trim())}
           >
@@ -331,11 +332,11 @@ export function PatientConsentsSection({
           return (
             <div
               key={consent.id}
-              className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card p-3 text-sm"
+              className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-muted/10 p-3 text-sm"
             >
               <span className="font-medium">{typeLabel(consent.consent_type)}</span>
-              <Badge className={CONSENT_STATUS_BADGE[status]}>{l(`consents_status_${status}`)}</Badge>
-              <span className="text-xs text-muted-foreground">
+              <StatusChip tone={CONSENT_STATUS_TONE[status]}>{l(`consents_status_${status}`)}</StatusChip>
+              <span className="min-w-0 break-words text-xs text-muted-foreground">
                 {day(consent.granted_at ?? consent.created_at)}
                 {consent.expires_at ? ` → ${day(consent.expires_at)}` : ""} · {consent.managed_by_name}
                 {consent.note ? ` · ${consent.note}` : ""}
@@ -344,7 +345,7 @@ export function PatientConsentsSection({
                 <Button
                   type="button"
                   variant="outline"
-                  className="ml-auto h-8 rounded-lg"
+                  className="ml-auto h-8 rounded-lg text-xs"
                   disabled={busy || actionsDisabled}
                   onClick={() => setRevoking(consent.consent_type)}
                 >
@@ -368,6 +369,6 @@ export function PatientConsentsSection({
           if (ok) setRevoking(null);
         }}
       />
-    </Section>
+    </ComplianceSection>
   );
 }

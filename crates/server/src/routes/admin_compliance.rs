@@ -4217,6 +4217,12 @@ async fn anonymize_patient_record(
         )
     })?;
     for lead_id in &source_lead_ids {
+        super::lead_portal_account::disable_for_lead_in_tx(&mut tx, *lead_id, Some(actor_id))
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, lead_id = %lead_id, "purge source lead portal for erasure");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to anonymize patient")
+            })?;
         super::leads::anonymize_lead_pii(
             &mut tx,
             *lead_id,

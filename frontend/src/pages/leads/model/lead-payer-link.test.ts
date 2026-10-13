@@ -171,7 +171,7 @@ describe("payer link: reload and status", () => {
     );
     expect(revoked.label).toBe("Widerrufen");
     expect(revoked.text).toMatch(/^Widerrufen am 06\.10\.2026 13:00 — Zahler geändert · gesendet am/);
-    for (const reason of ["resent", "staff_revoked", "payer_changed", "email_changed", "lead_converted", "email_failed"]) {
+    for (const reason of ["resent", "staff_revoked", "payer_changed", "email_changed", "consent_withdrawn", "payer_has_cabinet_login", "lead_converted", "email_failed"]) {
       expect(payerLinkRevokeReasonLabel(reason, ru)).not.toBe(reason);
     }
     // The failed e-mail is the reason of the revocation: said once.
@@ -316,7 +316,7 @@ describe("payer link: what may be done", () => {
       "lead_converted",
     ].map((reason) => payerLinkBlockedReasonText(reason, de));
     expect(new Set(texts).size).toBe(6);
-    expect(texts[0]).toBe("Der Link kann gesendet werden, sobald der Patient die Anfrage im Portal gesendet hat");
+    expect(texts[0]).toBe("Der Patient muss die aktuelle Anfrage im Portal absenden. Nach einer Änderung des Zahlers oder Einverständnisses ist ein erneutes Absenden erforderlich");
     expect(payerLinkBlockedReasonText("unknown", de)).toBe("Der Link kann derzeit nicht gesendet werden");
   });
 });
@@ -326,7 +326,7 @@ describe("payer link: errors of the writes", () => {
 
   it("words the 409 codes and the mail errors", () => {
     expect(payerLinkErrorText(error(409, "request_not_submitted"), de)).toBe(
-      "Der Link kann gesendet werden, sobald der Patient die Anfrage im Portal gesendet hat",
+      "Der Patient muss die aktuelle Anfrage im Portal absenden. Nach einer Änderung des Zahlers oder Einverständnisses ist ein erneutes Absenden erforderlich",
     );
     expect(payerLinkErrorText(error(409, "payer_already_submitted"), de)).toContain("„Zur Korrektur öffnen“");
     expect(payerLinkErrorText(error(503, "mail_not_configured"), ru)).toBe(

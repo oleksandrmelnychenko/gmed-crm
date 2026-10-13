@@ -16,7 +16,7 @@ import { berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zon
 import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { PatientRiskScore } from "@/pages/patients/model/detail-resource-types";
-import { FormSection } from "../shared/patient-form-primitives";
+import { PatientFormSection as FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const SCORE_TYPE_OPTIONS = [
@@ -178,7 +178,7 @@ export function PatientRiskScoreSheet({
   }
 
   return (
-    <PatientSheetScaffold requireChanges={Boolean(initialScore?.id)}
+    <PatientSheetScaffold presentation="dialog" requireChanges={Boolean(initialScore?.id)}
       open={open}
       onOpenChange={onOpenChange}
       maxWidthClassName="sm:max-w-[540px]"

@@ -218,3 +218,7 @@ psql "$DATABASE_URL" -c "SELECT action, count(*) FROM audit_log GROUP BY action 
 - Schema: [`migrations/20260407000001_initial_schema.sql`](../../migrations/20260407000001_initial_schema.sql) (`audit_log` table + `audit_log_immutable` trigger)
 - Ratchet: [`scripts/check_repo_hygiene.py`](../../scripts/check_repo_hygiene.py) (`AUDIT_INSERT_BUDGET`)
 - ISO 27001 A.8.15 / BSI C5 OPS-15 — нормативна основа цих вимог
+
+## Застарілі знімки платника (2026-10-13, B-4)
+
+Нові події платника містять лише назви змінених полів. Міграція `20261013140000_payer_audit_erasure.sql` розширює контрольоване стирання для старих `update_lead_payer_declaration`, `lead_portal_update_payer_declaration`, `payer_link_adopt_payer_declaration` та `set_order_payer`: тільки за видаленого вихідного ліда, тільки при `gmed.dsgvo_erasure = on`, тільки детермінована заміна рядків у `old_value` / `new_value` на `[erased]`. Ключі, структура, числа, прапорці, час, актор, сутність, дія та контекст зберігаються. Видалення рядків і довільна зміна знімків не дозволені. Уже видалені ліди очищаються одноразово тією ж міграцією; майбутнє стирання виконує `scrub_lead_free_text_in_tx`, включаючи лічильник у подію стирання. AML-пояснення `lead_risk_decisions.reason` не змінюються.

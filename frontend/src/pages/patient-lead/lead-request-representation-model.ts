@@ -34,7 +34,7 @@ export type RepresentationDraft = {
   has_representative: string;
   under_guardianship: string;
   /** A minor's custody; both parents until somebody says otherwise. */
-  custody: Custody;
+  custody: Custody | "";
 };
 
 function answerOf(value: boolean | null | undefined): string {
@@ -51,7 +51,7 @@ export function draftFromRepresentation(
   return {
     has_representative: answerOf(representation?.has_representative),
     under_guardianship: answerOf(representation?.under_guardianship),
-    custody: representation?.custody ?? "joint",
+    custody: representation?.custody_stated ? representation.custody ?? "" : "",
   };
 }
 
@@ -66,7 +66,7 @@ export function representationPatch(
 ): RepresentationPatch {
   const patch: RepresentationPatch = {};
   if (minor) {
-    if (draft.custody !== saved.custody) patch.custody = draft.custody;
+    if (draft.custody && draft.custody !== saved.custody) patch.custody = draft.custody;
     return patch;
   }
   if (draft.has_representative !== saved.has_representative) {
@@ -104,7 +104,7 @@ export function shownSlots(
   draft: RepresentationDraft,
   representation: LeadRequestRepresentation | null | undefined = null,
 ): RepresentativeSlot[] {
-  if (minor) return draft.custody === "joint" ? ["rep1", "rep2"] : ["rep1"];
+  if (minor) return !draft.custody || draft.custody === "joint" ? ["rep1", "rep2"] : ["rep1"];
   // An authorised representative on file beside a legal guardian (recorded
   // before 2026-10-11, or by staff) keeps its place while somebody acts.
   const agentOnFile = draft.has_representative === "yes" && representativeInSlot(representation, "agent") !== null;
@@ -142,7 +142,7 @@ export function removedByAnswers(
 ): LeadRequestRepresentative[] {
   const persons = representation?.representatives ?? [];
   if (minor) {
-    if (next.custody === "joint" || next.custody === (representation?.custody ?? "joint")) return [];
+    if (!next.custody || next.custody === "joint" || next.custody === (representation?.custody ?? "joint")) return [];
     return persons.filter((person) => person.slot !== "rep1" && person.can_remove);
   }
   // As on the server: the person of an answer that no longer asks for anybody goes; the
@@ -150,6 +150,7 @@ export function removedByAnswers(
   // to be court-appointed.
   const stays = shownSlots(false, next);
   return persons.filter((person) => {
+    if (!person.can_remove) return false;
     if (person.slot === "guardian") return !stays.includes("guardian");
     if (person.slot !== "agent" || stays.includes("agent")) return false;
     if (next.has_representative !== "yes") return true;
@@ -218,10 +219,8 @@ export const REPRESENTATIVE_FIELDS: RepresentativeField[] = [
 ];
 
 /**
- * What the step "Einwilligung & Person" asks of a minor's legal
- * representatives (they consent and sign): the names and how to reach them.
- * The rest of a person — and an adult's representative — is the follow-up
- * block G.
+ * Minimal fields for compatibility with older servers. Current servers list
+ * the whole representative in the base form's missing keys.
  */
 export const BASE_REPRESENTATIVE_FIELDS: readonly RepresentativeField[] = ["first_name", "last_name", "email", "phone"];
 
@@ -357,10 +356,10 @@ export function withChildAddress(
 ): RepresentativeDraft {
   return {
     ...draft,
-    street: child.street_address ?? "",
-    zip: child.zip_code ?? "",
-    city: child.city ?? "",
-    country: child.country ?? "",
+    street: child.street_address?.trim() || draft.street,
+    zip: child.zip_code?.trim() || draft.zip,
+    city: child.city?.trim() || draft.city,
+    country: child.country?.trim() || draft.country,
   };
 }
 
@@ -391,12 +390,13 @@ export function authorityProofOf(
 }
 
 /** What `progress.missing_for_submit` names about a person: a field or one of the two uploads. */
-export type RepresentativeSubmitPart = RepresentativeField | "id_upload" | "authority_upload";
+export type RepresentativeSubmitPart = RepresentativeField | "id_upload" | "authority_upload" | "name_latin";
 
 /** Keys of the block in `progress.missing_for_submit`: the answers, and `<slot>_<part>` per person. */
 export type RepresentationSubmitField =
   | "has_representative"
   | "under_guardianship"
+  | "custody"
   | `${RepresentativeSlot}_${RepresentativeSubmitPart}`;
 
 /** The keys of one person in form order: the required fields, then the uploads. */
@@ -406,6 +406,7 @@ function slotSubmitFields(slot: RepresentativeSlot): RepresentationSubmitField[]
       (field): RepresentationSubmitField => `${slot}_${field}`,
     ),
     `${slot}_id_upload`,
+    `${slot}_name_latin`,
     // The second representative of a minor is a parent: no proof is asked.
     ...(slot === "rep2" ? [] : ([`${slot}_authority_upload`] as const)),
   ];
@@ -415,6 +416,7 @@ function slotSubmitFields(slot: RepresentativeSlot): RepresentationSubmitField[]
 export const REPRESENTATION_SUBMIT_FIELDS: RepresentationSubmitField[] = [
   "has_representative",
   "under_guardianship",
+  "custody",
   ...slotSubmitFields("agent"),
   ...slotSubmitFields("guardian"),
   ...slotSubmitFields("rep1"),
@@ -428,7 +430,7 @@ export function representativeSubmitPart(
   for (const slot of REPRESENTATIVE_SLOTS) {
     if (!field.startsWith(`${slot}_`)) continue;
     const part = field.slice(slot.length + 1);
-    if (part === "id_upload" || part === "authority_upload" || REPRESENTATIVE_FIELDS.includes(part as RepresentativeField)) {
+    if (part === "id_upload" || part === "authority_upload" || part === "name_latin" || REPRESENTATIVE_FIELDS.includes(part as RepresentativeField)) {
       return { slot, part: part as RepresentativeSubmitPart };
     }
   }

@@ -91,6 +91,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { OrderTerminationBanner } from "@/pages/invoices/termination-settlement/ui";
+import { StatusChip } from "@/components/ui/status-chip";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import {
   formatEnumLabel,
@@ -4108,17 +4109,10 @@ function useOrdersPageContent() {
 
                   <div className="rounded-b-xl border-t border-border/70 bg-muted/15 px-4 py-2 sm:px-5">
                     <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <span
-                          className={cn(
-                            "flex size-7 shrink-0 items-center justify-center rounded-md",
-                            orderNextStep?.kind === "terminal" &&
-                              orderNextStep.status === "cancelled"
-                              ? "bg-muted text-muted-foreground"
-                              : orderNextStepBlocked
-                                ? "bg-amber-100 text-amber-800"
-                                : "bg-emerald-100 text-emerald-700",
-                          )}
+                      <div className="min-w-0 space-y-1.5">
+                        <StatusChip
+                          tone={orderNextStep?.kind === "terminal" && orderNextStep.status === "cancelled"
+                            ? "neutral" : orderNextStepBlocked ? "warning" : "success"}
                         >
                           {orderNextStep?.kind === "terminal" &&
                           orderNextStep.status === "cancelled" ? (
@@ -4128,9 +4122,7 @@ function useOrdersPageContent() {
                           ) : (
                             <CheckCircle2 className="size-4" />
                           )}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold leading-5 text-foreground">
+                          <span>
                             {orderNextStep?.kind === "terminal"
                               ? orderNextStep.status === "cancelled"
                                 ? lang === "de"
@@ -4154,7 +4146,8 @@ function useOrdersPageContent() {
                                   : lang === "de"
                                     ? "Bereit für den nächsten Schritt"
                                     : "Можно переходить к следующему этапу"}
-                          </p>
+                          </span>
+                        </StatusChip>
                           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs leading-5 text-muted-foreground">
                             {currentLifecyclePhaseIndex >= 0 ? (
                               <span>
@@ -4185,7 +4178,6 @@ function useOrdersPageContent() {
                               </StaffLink>
                             ) : null}
                           </p>
-                        </div>
                       </div>
 
                       {permissions.canManagePhase &&

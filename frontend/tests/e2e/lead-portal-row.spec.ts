@@ -192,8 +192,20 @@ test("the expanded lead row shows the patient portal at a glance", async ({ page
   await expect(sent.getByTestId("lead-portal-progress")).toContainText("12 из 12 полей");
   await expect(sent).toContainText("05.10.2026 14:30");
 
-  // "New password" is the one action of the row: the brand button, not an outline one.
-  const action = fresh.getByRole("button", { name: "Новый пароль" });
+  // Keyboard activation toggles only the details, without opening the lead wizard.
+  const expand = page.getByTestId(`lead-expand-${leads[0].id}`).first();
+  await expand.press("Space");
+  await expect(expand).toHaveAttribute("aria-expanded", "false");
+  await expect(fresh).toHaveCount(0);
+  await expand.press("Enter");
+  await expect(expand).toHaveAttribute("aria-expanded", "true");
+  await expect(fresh).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // For an existing account, sending access is the primary action;
+  // resetting the password remains a separate secondary action.
+  await expect(fresh.getByRole("button", { name: "Новый пароль" })).toBeVisible();
+  const action = fresh.getByTestId("lead-portal-send-email");
   await expect(action).toBeVisible();
   const colours = await action.evaluate((button) => {
     const probe = document.createElement("span");
@@ -204,11 +216,6 @@ test("the expanded lead row shows the patient portal at a glance", async ({ page
     return { background: getComputedStyle(button).backgroundColor, brand };
   });
   expect(colours.background).toBe(colours.brand);
-  // It stands right beside the status, not at the far end of the wide row.
-  const badge = await fresh.getByText("Ещё не входил", { exact: true }).boundingBox();
-  const button = await action.boundingBox();
-  expect(button!.x - (badge!.x + badge!.width)).toBeLessThan(40);
-
   await page.screenshot({ path: "test-results/lead-portal-row.png" });
 });
 
@@ -222,6 +229,86 @@ test("the patient portal row reads in German too", async ({ page }) => {
   await expect(row.getByTestId("lead-portal-progress")).toContainText("12 von 12 Feldern");
   await expect(row).toContainText("Gesendet");
   await expect(row.getByRole("button", { name: "Neues Passwort" })).toBeVisible();
+});
+
+test("expanded portal panels stay in view while the columns scroll horizontally", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setup(page, "ru");
+  await page.goto("/leads");
+  for (const lead of leads.slice(0, 2)) {
+    await page.getByTestId(`lead-expand-${lead.id}`).first().click();
+  }
+  const table = page.getByRole("table");
+  const panels = table.locator("[data-row-detail]");
+  await expect(panels).toHaveCount(2);
+  const movingCell = table.locator('[role="cell"][data-column-id="email"]').first();
+  const originalCell = await movingCell.boundingBox();
+  expect(originalCell).not.toBeNull();
+
+  for (const fraction of [0.5, 1, 0]) {
+    await table.evaluate((element, nextFraction) => {
+      element.scrollLeft = (element.scrollWidth - element.clientWidth) * nextFraction;
+    }, fraction);
+    const viewport = await table.boundingBox();
+    for (const panel of await panels.all()) {
+      await expect.poll(async () => {
+        const bounds = await panel.boundingBox();
+        return Math.abs(bounds!.x - viewport!.x) + Math.abs(bounds!.width - viewport!.width);
+      }).toBeLessThan(2);
+      await expect(panel.getByRole("heading", { name: "Портал пациента" })).toBeInViewport();
+      await expect(panel.getByTestId("lead-portal-send-email")).toBeInViewport();
+    }
+    if (fraction > 0) {
+      expect((await movingCell.boundingBox())!.x).toBeLessThan(originalCell!.x - 100);
+    }
+  }
+});
+
+test("portal actions stay in place while permissions load and facts align across rows", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await setup(page, "ru");
+  await page.route("**/api/v1/leads", (route) => route.fulfill({ json: leads.map((lead, index) => ({
+    ...lead,
+    portal_account: { ...lead.portal_account, login_emailed_at: index ? "2026-10-05T12:00:00Z" : null, login_email_delivery: index ? "accepted" : null },
+  })) }));
+  let releaseIntake!: () => void;
+  const intakeReady = new Promise<void>((resolve) => { releaseIntake = resolve; });
+  await page.route("**/api/v1/leads/*/portal-intake", async (route) => {
+    await intakeReady;
+    await route.fulfill({ json: { minor: false, guardians: { links: [], candidates: [] } } });
+  });
+  await page.goto("/leads");
+  for (const lead of leads) await page.getByTestId(`lead-expand-${lead.id}`).first().click();
+  const panels = page.getByTestId("lead-portal-access");
+  const buttons = panels.first().getByRole("group", { name: "Действия с порталом" }).getByRole("button");
+  await expect(buttons).toHaveCount(3);
+  await expect(panels.first().getByTestId("lead-gwg-sheet")).toBeDisabled();
+  const before = await buttons.evaluateAll((elements) => elements.map((element) => {
+    const { x, y, width, height } = element.getBoundingClientRect();
+    return { x, y, width, height };
+  }));
+  releaseIntake();
+  await expect(panels.first().getByTestId("lead-gwg-sheet")).toBeEnabled();
+  expect(await buttons.evaluateAll((elements) => elements.map((element) => {
+    const { x, y, width, height } = element.getBoundingClientRect();
+    return { x, y, width, height };
+  }))).toEqual(before);
+
+  for (const width of [1920, 1440, 900]) {
+    await page.setViewportSize({ width, height: 1080 });
+    const facts = await panels.evaluateAll((elements) => elements.map((element) => {
+      const origin = element.getBoundingClientRect();
+      return Array.from(element.querySelectorAll("dl > div"), (fact) => {
+        const bounds = fact.getBoundingClientRect();
+        return { x: bounds.x - origin.x, y: bounds.y - origin.y, width: bounds.width };
+      });
+    }));
+    expect(facts[0]).toHaveLength(7);
+    for (let index = 0; index < 7; index += 1) {
+      expect(Math.abs(facts[0][index].x - facts[1][index].x)).toBeLessThan(1);
+      expect(Math.abs(facts[0][index].width - facts[1][index].width)).toBeLessThan(1);
+    }
+  }
 });
 
 test("one click issues a new password and e-mails the access to the lead", async ({ page }) => {

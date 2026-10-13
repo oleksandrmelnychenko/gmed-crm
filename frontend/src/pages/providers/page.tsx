@@ -44,6 +44,8 @@ import {
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
@@ -5359,83 +5361,80 @@ function ProviderDoctorFormSheet({
   const submitLabel = form.id ? t.common_save : createLabel;
 
   return (
-    <Sheet dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
-        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
-          <AdminSheetScaffold
-            title={form.id ? detailLabel : createLabel}
-            footer={
-              <SheetFormFooter
-                cancelLabel={t.common_cancel}
-                submitLabel={submitLabel}
-                submittingLabel={submitLabel}
-                submitting={busy}
-                onCancel={() => onOpenChange(false)}
-              />
-            }
-          >
-            <div className="space-y-3 rounded-xl p-4">
-              {error ? <Banner tone="error">{error}</Banner> : null}
-              {isMedicalProvider && !form.id ? (
-                <Section title={l("providers_existing_doctor_section")}>
-                  <Field label={l("providers_existing_doctor_select")}>
-                    <NativeComboboxSelect
-                      value={form.sharedIdentityId || ""}
-                      onChange={(event) => {
-                        const identityId = event.target.value;
-                        if (identityId) onSelectExistingDoctor(identityId);
-                      }}
-                      className={formSelectClassName}
-                      disabled={busy || existingDoctorOptionsBusy}
-                    >
-                      <option value="">
-                        {existingDoctorOptionsBusy
-                          ? l("providers_existing_doctor_loading")
-                          : l("providers_existing_doctor_placeholder")}
+    <Dialog dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
+      <AdminDialogScaffold
+        onSubmit={onSubmit}
+        title={form.id ? detailLabel : createLabel}
+        footer={
+          <SheetFormFooter
+            cancelLabel={t.common_cancel}
+            submitLabel={submitLabel}
+            submittingLabel={submitLabel}
+            submitting={busy}
+            onCancel={() => onOpenChange(false)}
+          />
+        }
+      >
+        <div className="space-y-3">
+          {error ? <Banner tone="error">{error}</Banner> : null}
+          {isMedicalProvider && !form.id ? (
+            <AdminFormSection title={l("providers_existing_doctor_section")}>
+              <Field label={l("providers_existing_doctor_select")}>
+                <NativeComboboxSelect
+                  value={form.sharedIdentityId || ""}
+                  onChange={(event) => {
+                    const identityId = event.target.value;
+                    if (identityId) onSelectExistingDoctor(identityId);
+                  }}
+                  className={formSelectClassName}
+                  disabled={busy || existingDoctorOptionsBusy}
+                >
+                  <option value="">
+                    {existingDoctorOptionsBusy
+                      ? l("providers_existing_doctor_loading")
+                      : l("providers_existing_doctor_placeholder")}
+                  </option>
+                  {existingDoctorOptions.map((doctor) => {
+                    const identityId = doctorIdentityValue(doctor);
+                    return (
+                      <option key={identityId} value={identityId}>
+                        {providerPeopleDoctorOptionLabel(doctor)}
                       </option>
-                      {existingDoctorOptions.map((doctor) => {
-                        const identityId = doctorIdentityValue(doctor);
-                        return (
-                          <option key={identityId} value={identityId}>
-                            {providerPeopleDoctorOptionLabel(doctor)}
-                          </option>
-                        );
-                      })}
-                    </NativeComboboxSelect>
-                  </Field>
-                  {existingDoctorOptionsError ? (
-                    <p className="text-xs text-destructive">{existingDoctorOptionsError}</p>
-                  ) : existingDoctorOptionsBusy ? null : existingDoctorOptions.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      {l("providers_existing_doctor_empty")}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      {l("providers_existing_doctor_hint")}
-                    </p>
-                  )}
-                </Section>
-              ) : null}
-              {isMedicalProvider ? (
-                <DoctorFormFields
-                  form={form}
-                  specializations={specializations}
-                  insuranceProviders={insuranceProviders}
-                  onChange={onChange}
-                  onContactsChange={onContactsChange}
-                />
+                    );
+                  })}
+                </NativeComboboxSelect>
+              </Field>
+              {existingDoctorOptionsError ? (
+                <p className="text-xs text-destructive">{existingDoctorOptionsError}</p>
+              ) : existingDoctorOptionsBusy ? null : existingDoctorOptions.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {l("providers_existing_doctor_empty")}
+                </p>
               ) : (
-                <ContactPersonFormFields
-                  form={form}
-                  onChange={onChange}
-                  onContactsChange={onContactsChange}
-                />
+                <p className="text-xs text-muted-foreground">
+                  {l("providers_existing_doctor_hint")}
+                </p>
               )}
-            </div>
-          </AdminSheetScaffold>
-        </form>
-      </SheetContent>
-    </Sheet>
+            </AdminFormSection>
+          ) : null}
+          {isMedicalProvider ? (
+            <DoctorFormFields
+              form={form}
+              specializations={specializations}
+              insuranceProviders={insuranceProviders}
+              onChange={onChange}
+              onContactsChange={onContactsChange}
+            />
+          ) : (
+            <ContactPersonFormFields
+              form={form}
+              onChange={onChange}
+              onContactsChange={onContactsChange}
+            />
+          )}
+        </div>
+      </AdminDialogScaffold>
+    </Dialog>
   );
 }
 
@@ -5659,34 +5658,31 @@ function ProviderServiceFormSheet({
   const submitLabel = form.id ? t.common_save : t.providers_service_new;
 
   return (
-    <Sheet dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
-        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
-          <AdminSheetScaffold
-            title={form.id ? t.providers_service_detail : t.providers_service_new}
-            footer={
-              <SheetFormFooter
-                cancelLabel={t.common_cancel}
-                submitLabel={submitLabel}
-                submittingLabel={submitLabel}
-                submitting={busy}
-                onCancel={() => onOpenChange(false)}
-              />
-            }
-          >
-            <div className="space-y-3 rounded-xl p-4">
-              {error ? <Banner tone="error">{error}</Banner> : null}
-              <ServiceFormFields
-                form={form}
-                providerType={providerType}
-                taxonomyNodes={taxonomyNodes}
-                onChange={onChange}
-              />
-            </div>
-          </AdminSheetScaffold>
-        </form>
-      </SheetContent>
-    </Sheet>
+    <Dialog dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
+      <AdminDialogScaffold
+        onSubmit={onSubmit}
+        title={form.id ? t.providers_service_detail : t.providers_service_new}
+        footer={
+          <SheetFormFooter
+            cancelLabel={t.common_cancel}
+            submitLabel={submitLabel}
+            submittingLabel={submitLabel}
+            submitting={busy}
+            onCancel={() => onOpenChange(false)}
+          />
+        }
+      >
+        <div className="space-y-3">
+          {error ? <Banner tone="error">{error}</Banner> : null}
+          <ServiceFormFields
+            form={form}
+            providerType={providerType}
+            taxonomyNodes={taxonomyNodes}
+            onChange={onChange}
+          />
+        </div>
+      </AdminDialogScaffold>
+    </Dialog>
   );
 }
 
@@ -5717,34 +5713,31 @@ function ProviderStaffFormSheet({
   const submitLabel = form.id ? t.common_save : l("providers_staff_new");
 
   return (
-    <Sheet dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
-        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
-          <AdminSheetScaffold
-            title={form.id ? l("providers_staff_detail") : l("providers_staff_new")}
-            footer={
-              <SheetFormFooter
-                cancelLabel={t.common_cancel}
-                submitLabel={submitLabel}
-                submittingLabel={submitLabel}
-                submitting={busy}
-                onCancel={() => onOpenChange(false)}
-              />
-            }
-          >
-            <div className="space-y-3 rounded-xl p-4">
-              {error ? <Banner tone="error">{error}</Banner> : null}
-              <StaffFormFields
-                form={form}
-                staffRoles={staffRoles}
-                onChange={onChange}
-                onContactsChange={onContactsChange}
-              />
-            </div>
-          </AdminSheetScaffold>
-        </form>
-      </SheetContent>
-    </Sheet>
+    <Dialog dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
+      <AdminDialogScaffold
+        onSubmit={onSubmit}
+        title={form.id ? l("providers_staff_detail") : l("providers_staff_new")}
+        footer={
+          <SheetFormFooter
+            cancelLabel={t.common_cancel}
+            submitLabel={submitLabel}
+            submittingLabel={submitLabel}
+            submitting={busy}
+            onCancel={() => onOpenChange(false)}
+          />
+        }
+      >
+        <div className="space-y-3">
+          {error ? <Banner tone="error">{error}</Banner> : null}
+          <StaffFormFields
+            form={form}
+            staffRoles={staffRoles}
+            onChange={onChange}
+            onContactsChange={onContactsChange}
+          />
+        </div>
+      </AdminDialogScaffold>
+    </Dialog>
   );
 }
 
@@ -9110,7 +9103,7 @@ function ContactPersonProfileFields({
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
-    <Section title={t.providers_contact_profile}>
+    <AdminFormSection title={t.providers_contact_profile}>
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={t.patients_first_name}>
           <Input
@@ -9178,7 +9171,7 @@ function ContactPersonProfileFields({
           </FieldGroup>
         </div>
       </div>
-    </Section>
+    </AdminFormSection>
   );
 }
 
@@ -9205,7 +9198,7 @@ function DoctorProfileFields({
   ];
 
   return (
-    <Section title={l("providers_doctor_profile")}>
+    <AdminFormSection title={l("providers_doctor_profile")}>
       <div className="grid gap-4 md:grid-cols-2">
         <Field label={t.patients_first_name}>
           <Input
@@ -9339,7 +9332,7 @@ function DoctorProfileFields({
           </FieldGroup>
         </div>
       </div>
-    </Section>
+    </AdminFormSection>
   );
 }
 
@@ -9365,7 +9358,7 @@ function PersonContactFields({
     contactKind === "email" ? t.field_email : t.field_phone;
 
   return (
-    <Section title={l("providers_contacts")}>
+    <AdminFormSection title={l("providers_contacts")}>
       <div className="space-y-3">
         {contacts.map((contact) => (
           <div
@@ -9482,7 +9475,7 @@ function PersonContactFields({
           </Button>
         </div>
       </div>
-    </Section>
+    </AdminFormSection>
   );
 }
 
@@ -9518,7 +9511,7 @@ function DoctorLicenseFields({
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
-    <Section title={l("providers_license")}>
+    <AdminFormSection title={l("providers_license")}>
       <div className="grid gap-4 md:grid-cols-3">
         <Field label={l("providers_license_number")}>
           <Input
@@ -9543,7 +9536,7 @@ function DoctorLicenseFields({
           />
         </Field>
       </div>
-    </Section>
+    </AdminFormSection>
   );
 }
 
@@ -9558,7 +9551,7 @@ function DoctorNotesFields({
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
-    <Section title={l("appointments_notes")}>
+    <AdminFormSection title={l("appointments_notes")}>
       <Field label={t.providers_notes}>
         <textarea
           value={notes}
@@ -9567,7 +9560,7 @@ function DoctorNotesFields({
           rows={3}
         />
       </Field>
-    </Section>
+    </AdminFormSection>
   );
 }
 
@@ -9616,7 +9609,7 @@ function StaffFormFields({
 
   return (
     <div className="space-y-3">
-      <Section title={l("providers_staff_profile")}>
+      <AdminFormSection title={l("providers_staff_profile")}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.patients_first_name}>
             <Input
@@ -9705,7 +9698,7 @@ function StaffFormFields({
             </FieldGroup>
           </div>
         </div>
-      </Section>
+      </AdminFormSection>
 
       <PersonContactFields
         contacts={form.contacts}
@@ -9714,7 +9707,7 @@ function StaffFormFields({
         onUpdate={updateContact}
       />
 
-      <Section title={l("appointments_notes")}>
+      <AdminFormSection title={l("appointments_notes")}>
         <Field label={t.providers_notes}>
           <textarea
             value={form.notes}
@@ -9723,7 +9716,7 @@ function StaffFormFields({
             rows={3}
           />
         </Field>
-      </Section>
+      </AdminFormSection>
     </div>
   );
 }
@@ -9747,7 +9740,7 @@ function ServiceFormFields({
   const formAttributeKeys = taxonomyAttributeKeys(selectedTaxonomyNode);
   return (
     <div className="space-y-3">
-      <Section title={l("providers_service")}>
+      <AdminFormSection title={l("providers_service")}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.providers_service_name} required>
             <Input
@@ -9803,9 +9796,9 @@ function ServiceFormFields({
             ))}
           </div>
         ) : null}
-      </Section>
+      </AdminFormSection>
 
-      <Section title={l("providers_cost")}>
+      <AdminFormSection title={l("providers_cost")}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={l("providers_price_type")}>
             <NativeComboboxSelect
@@ -9888,9 +9881,9 @@ function ServiceFormFields({
             </Field>
           ) : null}
         </div>
-      </Section>
+      </AdminFormSection>
 
-      <Section title={l("providers_validity")}>
+      <AdminFormSection title={l("providers_validity")}>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t.providers_service_valid_from}>
             <Input
@@ -9909,7 +9902,7 @@ function ServiceFormFields({
             />
           </Field>
         </div>
-      </Section>
+      </AdminFormSection>
     </div>
   );
 }

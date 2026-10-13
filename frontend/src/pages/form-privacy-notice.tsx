@@ -1,4 +1,4 @@
-import { FORM_PRIVACY_SECTIONS, FORM_PRIVACY_VERSION } from "./form-privacy-content";
+import { FORM_PRIVACY_SECTIONS, FORM_PRIVACY_VERSION, type FormPrivacyLanguage } from "./form-privacy-content";
 
 export type FormPrivacyAgency = Partial<Record<
   | "agency_name"
@@ -13,7 +13,13 @@ export type FormPrivacyAgency = Partial<Record<
 >>;
 
 /** The notice for an inquiry, available before consent and inside the lead cabinet. */
-export function FormPrivacyNotice({ lang, agency }: { lang: "de" | "ru"; agency: FormPrivacyAgency | null }) {
+export function FormPrivacyNotice({ lang, agency }: { lang: FormPrivacyLanguage; agency: FormPrivacyAgency | null }) {
+  const labels = {
+    de: { phone: "Telefon", controller: "Verantwortlich für die Datenverarbeitung", privacy: "Datenschutzkontakt" },
+    en: { phone: "Telephone", controller: "Responsible for data processing", privacy: "Data protection contact" },
+    uk: { phone: "Телефон", controller: "Відповідальний за обробку даних", privacy: "Контакт із захисту даних" },
+    ru: { phone: "Телефон", controller: "Ответственное за обработку данных лицо", privacy: "Контакт по защите данных" },
+  }[lang];
   const name = agency?.agency_name || "GMED";
   const privacyEmail = agency?.agency_privacy_email || agency?.agency_email || "";
   const replaceSettings = (paragraph: string) => paragraph
@@ -21,7 +27,7 @@ export function FormPrivacyNotice({ lang, agency }: { lang: "de" | "ru"; agency:
     .replaceAll("datenschutz@gmed-health.com", privacyEmail || "datenschutz@gmed-health.com");
 
   return (
-    <div className="space-y-5" data-testid="form-privacy-notice" data-version={FORM_PRIVACY_VERSION}>
+    <div className="space-y-5" data-testid="form-privacy-notice" data-version={FORM_PRIVACY_VERSION} lang={lang}>
       {FORM_PRIVACY_SECTIONS[lang].map((section) => (
         <section key={section.number} className="space-y-2.5 border-t border-border/50 pt-4 first:border-t-0 first:pt-0" aria-labelledby={`form-privacy-section-${section.number}`}>
           <h3 id={`form-privacy-section-${section.number}`} className="flex items-baseline gap-2 text-[13px] font-semibold leading-5 tracking-tight">
@@ -35,12 +41,12 @@ export function FormPrivacyNotice({ lang, agency }: { lang: "de" | "ru"; agency:
                 {agency?.agency_care_of ? <><br />{agency.agency_care_of}</> : null}
                 {agency?.agency_address ? <><br />{agency.agency_address}</> : null}
                 {agency?.agency_email ? <><br />E-Mail: <a href={`mailto:${agency.agency_email}`} className="underline underline-offset-2">{agency.agency_email}</a></> : null}
-                {agency?.agency_phone ? <><br />{lang === "de" ? "Telefon" : "Телефон"}: {agency.agency_phone}</> : null}
+                {agency?.agency_phone ? <><br />{labels.phone}: {agency.agency_phone}</> : null}
               </address>
-              {agency?.agency_care_of ? <p>{lang === "de" ? "Verantwortlich für die Datenverarbeitung" : "Ответственное за обработку данных лицо"}: {agency.agency_care_of}.</p> : null}
+              {agency?.agency_care_of ? <p>{labels.controller}: {agency.agency_care_of}.</p> : null}
               {privacyEmail ? (
                 <p>
-                  {lang === "de" ? "Datenschutzkontakt" : "Контакт по защите данных"}: <a href={`mailto:${privacyEmail}`} className="underline underline-offset-2">{privacyEmail}</a>
+                  {labels.privacy}: <a href={`mailto:${privacyEmail}`} className="underline underline-offset-2">{privacyEmail}</a>
                 </p>
               ) : null}
             </>

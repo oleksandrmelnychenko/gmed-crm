@@ -374,20 +374,49 @@ pub(crate) async fn link_to_patient_in_tx(
     patient_id: Uuid,
     assigned_by: Uuid,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query(&format!(
         r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
            SELECT $2, l.portal_user_id, $3
            FROM leads l
            JOIN users u ON u.id = l.portal_user_id AND u.role = 'patient' AND u.is_active
-           WHERE l.id = $1
+           WHERE l.id = $1 AND NOT {OWN_LOGIN_CLOSED_SQL}
            ON CONFLICT (patient_id, user_id)
            DO UPDATE SET revoked_at = NULL"#,
-    )
+    ))
     .bind(lead_id)
     .bind(patient_id)
     .bind(assigned_by)
     .execute(&mut **tx)
     .await?;
+    let guardian_ids: Vec<Uuid> = sqlx::query_scalar(&format!(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           SELECT DISTINCT $2, a.user_id, $3
+           FROM leads l
+           JOIN lead_portal_access a ON a.lead_id = l.id
+           JOIN users u ON u.id = a.user_id AND u.role = 'patient' AND u.is_active
+           WHERE l.id = $1 AND {OWN_LOGIN_CLOSED_SQL}
+             AND a.kind = 'guardian' AND a.revoked_at IS NULL
+           ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL
+           RETURNING user_id"#,
+    ))
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(assigned_by)
+    .fetch_all(&mut **tx)
+    .await?;
+    for guardian_id in guardian_ids {
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "link_lead_guardian_to_patient",
+                Some(assigned_by),
+                "patient",
+                Some(patient_id),
+                json!({ "reason": "guardian_of_converted_minor", "lead_id": lead_id, "user_id": guardian_id }),
+            ),
+        )
+        .await?;
+    }
     sqlx::query(
         "UPDATE consent_records SET patient_id = $2 WHERE lead_id = $1 AND patient_id IS NULL",
     )
@@ -409,8 +438,8 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         .into_response()
 }
 
-/// 409 `minor_own_login_closed`: the lead's own login of a minor whose
-/// parents have access gets no new password and no sign-in e-mail (QA
+/// 409 `minor_own_login_closed`: a minor's own login gets no new password
+/// and no sign-in e-mail, regardless of whether parents already have access (QA
 /// 2026-10-12, A3-01). The code is also the `error`, which the UI translates.
 pub(crate) fn minor_own_login_closed() -> axum::response::Response {
     (
@@ -418,7 +447,7 @@ pub(crate) fn minor_own_login_closed() -> axum::response::Response {
         Json(json!({
             "error": "minor_own_login_closed",
             "code": "minor_own_login_closed",
-            "message": "The minor's own login is closed while the parents have access",
+            "message": "A minor's request must be completed by a parent or legal representative",
         })),
     )
         .into_response()
@@ -570,13 +599,21 @@ async fn issue_lead_portal_access(
         .execute(&state.db)
         .await;
         crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
-        state.audit_sender.try_send(audit::domain_event(
+        let audit_event = audit::domain_event(
             "reset_lead_portal_password",
             Some(auth.user_id),
             "lead",
             Some(lead_id),
             json!({ "portal_user_id": user_id, "sessions_revoked": true }),
-        ));
+        );
+        let mut audit_conn = match state.db.acquire().await {
+            Ok(conn) => conn,
+            Err(error) => return internal(error, lead_id, "audit password reset"),
+        };
+        if let Err(error) = audit::write_in_transaction(&mut audit_conn, &audit_event).await {
+            return internal(error, lead_id, "audit password reset");
+        }
+        drop(audit_conn);
         let email: Option<String> = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_optional(&state.db)

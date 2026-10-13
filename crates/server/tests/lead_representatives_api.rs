@@ -1744,3 +1744,41 @@ async fn the_representation_is_reached_only_through_the_own_request() {
     assert_eq!(status, StatusCode::CONFLICT, "{error}");
     assert_eq!(error["code"], "representative_id_taken", "{error}");
 }
+
+#[tokio::test]
+async fn a_paying_parent_snapshot_follows_representation_corrections_and_cannot_be_minor_self() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let router = &app.suite.app;
+    let mother = Uuid::new_v4();
+    let email = address("payer-parent");
+    let lead_id = minor_lead(
+        &app,
+        json!([{ "id": mother, "name": "Anna Muster", "relation": "mother", "email": email }]),
+    )
+    .await;
+    let (_, parent) = guardian_login(&app, lead_id, mother).await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        &parent,
+        Some(json!({ "payer_kind": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["field"], "payer_kind");
+    let (status, body) = json_request(router, "POST", &format!("{request}/payer"), &parent, Some(json!({
+        "payer_kind": "third_party", "payer_type": "person", "first_name": "Anna", "last_name": "Muster", "email": email, "relationship_kind": "parent"
+    }))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(router, "POST", &format!("{request}/representatives/{mother}"), &parent, Some(json!({
+        "first_name": "Anna", "last_name": "Muster", "citizenships": ["AT"], "street": "Testweg 2", "zip": "1010", "city": "Wien", "country": "AT"
+    }))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["citizenships"], json!(["AT"]), "{body}");
+    assert_eq!(body["payer"]["street"], "Testweg 2", "{body}");
+    assert_eq!(body["payer"]["city"], "Wien", "{body}");
+}

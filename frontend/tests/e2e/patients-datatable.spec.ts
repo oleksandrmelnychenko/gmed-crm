@@ -690,6 +690,16 @@ test.describe("patients data-table", () => {
     // A row without login data from the server has no chevron.
     await expect(patientGrid(page).getByTestId(`patient-expand-${patients[1].id}`)).toHaveCount(0);
 
+    // Portal details stay within the viewport even at the end of the wide grid.
+    const grid = patientGrid(page);
+    await grid.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+    const viewport = await grid.boundingBox();
+    await expect.poll(async () => {
+      const bounds = await row.boundingBox();
+      return Math.abs(bounds!.x - viewport!.x) + Math.abs(bounds!.width - viewport!.width);
+    }).toBeLessThan(2);
+    await expect(row.getByTestId("patient-portal-issue")).toBeInViewport();
+
     await row.getByTestId("patient-portal-issue").click();
     await page.getByRole("button", { name: /Passwort ausgeben|Выдать пароль/ }).click();
     await expect(page.getByTestId("portal-credentials-password")).toHaveText("Kq7-mP2x-Rw9t");

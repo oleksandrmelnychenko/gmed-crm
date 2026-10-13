@@ -37,7 +37,7 @@ import {
   relationToForm,
   type RelationFormState,
 } from "../../model/sheet-forms";
-import { FormSection } from "../shared/patient-form-primitives";
+import { PatientFormSection as FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const RELATION_TYPE_OPTIONS = [
@@ -260,14 +260,15 @@ function PatientRelationEditorSheet({
     <PatientSheetScaffold
       open={open}
       onOpenChange={onOpenChange}
-      width="narrow"
+      presentation="dialog"
+      width="default"
       onSubmit={handleSubmit}
       title={
         editingRelation
           ? t.patient_relation_title_edit
           : t.patient_relation_title_add
       }
-      bodyClassName="space-y-4 px-5 py-4"
+      bodyClassName="space-y-3 bg-muted px-3 py-3 sm:px-4"
       footer={
         <PatientRelationEditorFooter
           busy={busy}
@@ -399,7 +400,7 @@ function PatientRelationEditorSheet({
             />
           </FormField>
 
-          <label className="flex min-h-9 items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground">
+          <label className="flex min-h-9 items-center gap-2 self-end rounded-lg border border-input bg-muted/40 px-3 py-2 text-sm text-foreground">
             <input
               type="checkbox"
               className={checkboxClass}
@@ -418,7 +419,7 @@ function PatientRelationEditorSheet({
 
           {/* A linked patient record is a person; only a separate contact can be an organisation. */}
           {form.relatedPatientId ? null : (
-            <label className="flex min-h-9 items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground md:col-span-2">
+            <label className="flex min-h-9 items-center gap-2 rounded-lg border border-input bg-muted/40 px-3 py-2 text-sm text-foreground md:col-span-2">
               <input
                 type="checkbox"
                 className={checkboxClass}
@@ -512,7 +513,7 @@ function PatientRelationEditorSheet({
             />
           </FormField>
         </div>
-        <label className="flex min-h-9 items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground">
+        <label className="flex min-h-9 items-center gap-2 rounded-lg border border-input bg-muted/40 px-3 py-2 text-sm text-foreground">
           <input
             type="checkbox"
             className={checkboxClass}

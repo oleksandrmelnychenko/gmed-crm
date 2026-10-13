@@ -143,6 +143,10 @@ describe("consent form choices in the lead cabinet", () => {
     );
     expect(markup).toContain("сохранил другой родитель или представитель");
     expect(markup).not.toContain("Ваш выбор от");
+    // The second parent can deliberately record the same selection as their
+    // own; changing a consent merely to become its signer is not required.
+    const saveButton = (markup.match(/<button[^>]*>/g) ?? []).find((tag) => tag.includes("lead-request-consent-form-save"));
+    expect(saveButton).not.toContain('disabled=""');
   });
 
   it("is hidden for an older server without the consent form", () => {

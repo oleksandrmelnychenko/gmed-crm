@@ -31,6 +31,7 @@ import {
   withLegalAnswer,
   withPayerAnswer,
   withPayerType,
+  withPayerField,
   withRejectedIdentification,
   withRelationshipKind,
 } from "./lead-request-model";
@@ -100,6 +101,15 @@ describe("lead request autosave patch", () => {
   it("clears an optional field with an empty string", () => {
     const saved = draftFromPersonalData(personal);
     expect(personalDataPatch(saved, { ...saved, city: "" })).toEqual({ city: "" });
+  });
+
+  it("keeps several refused values out of the retry while saving other fields", () => {
+    const saved = draftFromPersonalData({ ...personal, date_of_birth: "1990-01-01" });
+    const draft = { ...saved, date_of_birth: "2015-01-01", phone: "bad phone", city: "Berlin" };
+    const rejected = { date_of_birth: "2015-01-01", phone: "bad phone" };
+    expect(personalDataPatch(saved, draft, rejected)).toEqual({ city: "Berlin" });
+    expect(personalDataPatch(saved, { ...draft, phone: "+4930123456" }, rejected)).toEqual({ city: "Berlin", phone: "+4930123456" });
+    expect(personalDataPatch(saved, { ...saved, date_of_birth: "" })).toEqual({});
   });
 });
 
@@ -308,17 +318,30 @@ describe("lead request send step", () => {
     const self = { ...draftFromPayer(null), payer_kind: "self" };
     const unnamed = { ...draftFromPayer(null), payer_kind: "third_party", payer_type: "person" };
     expect(payerAnswerSavable(self, unnamed)).toBe(false);
-    expect(payerAnswerSavable(self, { ...unnamed, last_name: " Zahler " })).toBe(true);
+    expect(payerAnswerSavable(self, { ...unnamed, last_name: " Zahler " })).toBe(false);
     // An organisation counts by its name.
     const organisation = { ...unnamed, payer_type: "organisation", first_name: "Viktor" };
     expect(thirdPartyPayerNamed(organisation)).toBe(false);
     expect(payerAnswerSavable(self, organisation)).toBe(false);
-    expect(payerAnswerSavable(self, { ...organisation, organisation_name: "Beispiel GmbH" })).toBe(true);
+    expect(payerAnswerSavable(self, { ...organisation, organisation_name: "Beispiel GmbH" })).toBe(false);
     // Nothing stored yet, or a third party stored: as before.
     expect(payerAnswerSavable(draftFromPayer(null), unnamed)).toBe(true);
-    expect(payerAnswerSavable({ ...unnamed, last_name: "Zahler" }, unnamed)).toBe(true);
+    expect(payerAnswerSavable({ ...unnamed, last_name: "Zahler" }, unnamed)).toBe(false);
+    const complete = { ...unnamed, first_name: "Viktor", last_name: "Zahler", street: "Testweg 1", zip: "10115", city: "Berlin", country: "DE" };
+    expect(payerAnswerSavable(self, complete)).toBe(true);
+    expect(payerAnswerSavable({ ...complete, last_name: "Alt" }, complete)).toBe(true);
+    expect(payerAnswerSavable(complete, { ...complete, street: "" })).toBe(true);
     // Back to "I pay" is always sent.
     expect(payerAnswerSavable({ ...unnamed, last_name: "Zahler" }, self)).toBe(true);
+  });
+
+  it("resets contact consent on every payer identity change, but keeps it for contact corrections", () => {
+    const payer = { ...draftFromPayer(null), payer_kind: "third_party", payer_type: "person", contact_consent: true };
+    for (const field of ["first_name", "last_name", "date_of_birth", "organisation_name", "payer_type"] as const) {
+      expect(withPayerField(payer, field, field === "payer_type" ? "organisation" : "changed").contact_consent, field).toBe(false);
+    }
+    expect(withPayerField(payer, "phone", "+4915100000000").contact_consent).toBe(true);
+    expect(withPayerField(payer, "last_name", "").contact_consent).toBe(true);
   });
 
   it("sends who pays as a whole answer", () => {

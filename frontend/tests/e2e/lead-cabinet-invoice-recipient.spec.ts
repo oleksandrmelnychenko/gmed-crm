@@ -223,8 +223,8 @@ function payerFits(request: Request): boolean {
   const answer = billing.invoice_recipient;
   const pays = billing.invoice_recipient_is_payer;
   if (answer === "self" && pays === true) return !third || parentPays(request);
-  if (answer === "self" && pays === false) return third;
-  if (answer === "third_party" && pays === true) return third;
+  if (answer === "self" && pays === false) return third && !parentPays(request);
+  if (answer === "third_party" && pays === true) return third && Boolean(billing.recipient.type) && payerName(payer).toLowerCase() === recipientName(billing.recipient).toLowerCase();
   if (answer === "third_party" && pays === false) {
     return !third || payerName(payer).toLowerCase() !== recipientName(billing.recipient).toLowerCase();
   }
@@ -690,4 +690,59 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await expect(page.getByTestId("lead-request-recipient-party")).toBeVisible();
     expect(await overflow(page)).toBeLessThanOrEqual(1);
   });
+});
+
+
+test("changing the default checked recipient cannot replace an existing payer until complete and confirmed", async ({ page }) => {
+  const { request, calls } = await setup(page, { prepare: (request) => {
+    request.payer = { ...selfPayer(), payer_kind: "third_party", payer_type: "person", first_name: "Old", last_name: "Payer", date_of_birth: "1960-01-01", citizenships: ["DE"], contact_consent_at: "2026-10-11T09:00:00Z", cost_estimate_consent_at: "2026-10-11T09:00:00Z" };
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  const box = page.getByTestId("lead-request-step-billing");
+  await box.getByRole("radio", { name: "Eine andere Person oder Organisation" }).check();
+  const party = page.getByTestId("lead-request-recipient-party");
+  await choose(page, party.getByRole("combobox", { name: "Rechnungsempfänger ist" }), "Eine Privatperson");
+  await party.getByRole("textbox", { name: "Vorname" }).fill("A");
+  await expect.poll(() => request.billing.recipient.first_name).toBe("A");
+  expect(calls.payer).toEqual([]);
+  const replacement = page.getByTestId("lead-request-payer-replacement");
+  await expect(replacement.getByRole("button")).toBeDisabled();
+  const extras = page.getByTestId("lead-request-recipient-payer");
+  await expect(extras.locator("#lead-request-payer_contact_consent")).not.toBeChecked();
+  await expect(page.getByTestId("lead-request-payer-cost-estimate-consent")).toHaveCount(0);
+  await party.getByRole("textbox", { name: "Vorname" }).fill("Another");
+  await party.getByRole("textbox", { name: "Nachname" }).fill("Recipient");
+  await choose(page, party.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" }), "Freund/in");
+  await party.getByRole("textbox", { name: "Straße und Hausnummer" }).fill("Testweg 1");
+  await party.getByRole("textbox", { name: "Postleitzahl" }).fill("10115");
+  await party.getByRole("textbox", { name: "Ort" }).fill("Berlin");
+  await choose(page, party.getByRole("combobox", { name: "Land" }), "Deutschland");
+  await party.getByRole("textbox", { name: "E-Mail" }).fill("another@example.com");
+  await party.getByRole("textbox", { name: "Telefon" }).fill("+4915100000000");
+  await expect.poll(() => request.billing.recipient.phone).toBe("+4915100000000");
+  expect(calls.payer).toEqual([]);
+  await expect(replacement.getByRole("button")).toBeEnabled();
+  await replacement.getByRole("button").click();
+  await expect.poll(() => calls.payer.at(-1)).toMatchObject({ first_name: "Another", last_name: "Recipient", contact_consent: false });
+  expect(calls.payer.at(-1)).not.toHaveProperty("date_of_birth");
+  expect(calls.payer.at(-1)).not.toHaveProperty("citizenships");
+});
+
+test("guardian does not overwrite a stored self payer simply by opening billing", async ({ page }) => {
+  const { calls } = await setup(page, { minor: true, prepare: (request) => {
+    request.payer = selfPayer();
+    request.billing.invoice_recipient = "self";
+    request.billing.invoice_recipient_is_payer = true;
+    request.billing.payment_method = "bank_transfer";
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  const payer = page.getByTestId("lead-request-payer");
+  await expect(payer).toBeVisible();
+  expect(calls.payer).toEqual([]);
+  const select = payer.getByRole("combobox").first();
+  await select.click();
+  await page.getByRole("option", { name: /als Elternteil/ }).click();
+  await expect.poll(() => calls.payer.at(-1)).toMatchObject({ first_name: "Maria", last_name: "Muster", relationship_kind: "parent" });
 });

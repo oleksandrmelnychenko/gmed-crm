@@ -21,7 +21,7 @@ import {
 } from "@/pages/invoices/model/invoice-dunning";
 
 import type { DunningEvent } from "../../model/detail-tab-types";
-import { FormSection } from "../shared/patient-form-primitives";
+import { FormSection, PatientFormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 /** Dunning levels read as on the invoices page, never as raw keys. */
@@ -205,7 +205,7 @@ function ContractCreateDialog({
   patientDetailStatusLabel,
 }: ContractCreateDialogProps) {
   return (
-    <PatientSheetScaffold open={contractCreateOpen} onOpenChange={onContractCreateOpenChange} width="narrow" onSubmit={onContractCreateSubmit}
+    <PatientSheetScaffold presentation="dialog" open={contractCreateOpen} onOpenChange={onContractCreateOpenChange} width="narrow" onSubmit={onContractCreateSubmit}
       title={l("patients_create_framework_contract")}
       bodyClassName="space-y-4 px-5 py-4"
       footer={
@@ -217,7 +217,7 @@ function ContractCreateDialog({
         />
       }
     >
-      <FormSection title={l("patients_contract")}>
+      <PatientFormSection title={l("patients_contract")}>
         <div className="grid gap-3 md:grid-cols-2">
           <FormField label={l("patients_status")} htmlFor="contract-status">
           <NativeComboboxSelect
@@ -247,7 +247,7 @@ function ContractCreateDialog({
           />
           </FormField>
         </div>
-      </FormSection>
+      </PatientFormSection>
     </PatientSheetScaffold>
   );
 }

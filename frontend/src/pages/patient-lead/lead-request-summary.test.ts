@@ -3,8 +3,25 @@ import { describe, expect, it } from "vitest";
 import type { LeadRequest, LeadRequestBilling, LeadRequestDocument, LeadRequestRepresentative } from "./lead-request-api";
 import { answeredPayerRows, payerAnsweredByPayer, requestSummary } from "./lead-request-summary";
 import { leadRequestText } from "./lead-request-text";
+import { consentFormText } from "./lead-request-consent-form-text";
 
 const de = leadRequestText("de");
+
+it("shows saved consent choices and explicit recipients in the submission summary", () => {
+  const wording = consentFormText("de");
+  const groups = requestSummary(request({ consent_form: {
+    version: "2026-10-12", chosen_at: "2026-10-13T08:00:00Z", chosen_by_me: false,
+    choices: { agency_processing: true, doctors_to_agency: true, data_system: true, named_recipients: true,
+      channel_email: true, channel_threema: false, channel_whatsapp: false, channel_telegram: false },
+    recipients: [{ name: "Example Relative", relation: "relative", contact: "relative@example.test" }],
+  } }), de, "de");
+  const summary = rows(groups, "consent_form");
+  expect(summary[wording.options.channel_email]).toBe(de.yesNo.yes);
+  expect(summary[wording.options.channel_whatsapp]).toBe(de.yesNo.no);
+  expect(summary[wording.recipientsTitle]).toContain("Example Relative");
+  expect(summary[wording.recipientsTitle]).toContain("relative@example.test");
+  expect(summary[de.saved]).toContain("13.10.2026");
+});
 
 function upload(id: string, fileName: string): LeadRequestDocument {
   return {
@@ -481,6 +498,8 @@ describe("lead request summary", () => {
         relationship_kind: null,
       },
     });
+    const differentPayer = { ...paying, payer: { ...paying.payer!, organisation_name: "Other GmbH" } };
+    expect(rows(requestSummary(differentPayer, de, "de"), "billing")).toMatchObject({ "Name der Organisation": "Beispiel GmbH", "Straße und Hausnummer": "Hauptstraße 1" });
     const payingGroups = requestSummary(paying, de, "de");
     expect(rows(payingGroups, "billing")).toEqual({
       "Wer ist Rechnungsempfänger?": "Eine andere Person oder Organisation",

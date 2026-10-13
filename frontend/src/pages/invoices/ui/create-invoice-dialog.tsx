@@ -3,7 +3,8 @@ import { AlertCircle, FileText, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Input } from "@/components/ui/input";
 import { CountBadge, checkboxClass, inputClass, selectClass, textareaClass, tokens } from "@/components/ui-shell";
 import { INTERNAL_NOTE_MAX_LENGTH } from "@/lib/internal-note";
@@ -115,18 +116,18 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
     <Dialog dirty={dirty} open={open} onOpenChange={(nextOpen) => { if (!formBusy) onOpenChange(nextOpen); }}>
       <DialogContent
         showCloseButton={!formBusy}
-        className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[min(90dvh,54rem)] sm:w-[calc(100vw-3rem)] sm:max-w-5xl sm:pb-0"
+        overlayClassName="bg-black/40"
+        className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:w-[calc(100vw-3rem)] sm:max-w-5xl sm:pb-0"
       >
-        <DialogHeader className="shrink-0 border-b border-border px-5 py-4 pr-12">
-          <DialogTitle className="flex items-center gap-2"><span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />{t.invoices_new}</DialogTitle>
-          <DialogDescription className="text-xs">
-            {de ? "Rechnung für einen Patienten auf Grundlage eines Angebots erstellen." : "Создание счёта пациенту на основании предложения."}
-          </DialogDescription>
+        <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
+          <DialogTitle className="text-[15px] font-semibold">{t.invoices_new}</DialogTitle>
         </DialogHeader>
         <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_18rem]">
-              <fieldset disabled={formBusy} className="min-w-0 space-y-4 p-4 sm:p-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted">
+            <div className="grid min-w-0 gap-3 p-3 sm:p-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
+              <fieldset disabled={formBusy} className="min-w-0 space-y-3">
+                <section className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                <AdminSectionTitle>{de ? "Rechnungsdaten" : "Данные счёта"}</AdminSectionTitle>
                 <FormField label={t.revenue_invoices_section_quote}>
                   <NativeComboboxSelect
                     aria-label={t.revenue_invoices_section_quote}
@@ -182,6 +183,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     ? "Die Rechnung wird als Entwurf ohne Nummer angelegt. Nummer und Rechnungsdatum erhält sie erst bei der Ausstellung; das Fälligkeitsdatum darf dann nicht vor dem Rechnungsdatum liegen."
                     : "Счёт создаётся черновиком без номера. Номер и дату счёта он получает только при выпуске; срок оплаты тогда не может быть раньше даты счёта."}
                 </p>
+                </section>
 
                 {form.invoiceType === "advance" && selectedQuote && requiredPrepayment != null ? (
                   <fieldset className="grid gap-2 rounded-xl border border-border bg-card p-3">
@@ -310,6 +312,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   )}
                 </section>
                 )}
+                <section className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                <AdminSectionTitle>{de ? "Anmerkungen" : "Примечания"}</AdminSectionTitle>
                 <FormField label={t.invoices_workspace_notes}>
                   <textarea rows={2} className={cn(textareaClass, "min-h-20")} value={form.notes}
                     onChange={(event) => onFormChange((current) => ({ ...current, notes: event.target.value }))}
@@ -324,10 +328,11 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   {/* Staff only: never printed, never in the portal (owner 2026-10-12). */}
                   <p className="text-xs text-muted-foreground">{t.finance_internal_note_hint}</p>
                 </FormField>
+                </section>
               </fieldset>
 
-              <aside className="min-w-0 border-t border-border bg-muted/25 p-5 lg:border-t-0 lg:border-l">
-                <div className="space-y-5 lg:sticky lg:top-5">
+              <aside className="min-w-0">
+                <div className="space-y-4 rounded-xl border border-border/50 bg-card p-3.5 lg:sticky lg:top-0">
                   <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />{de ? "Rechnungsübersicht" : "Итог счёта"}</h3>
                   {selectedQuote ? (
                     <dl className="space-y-3 text-sm">
@@ -358,8 +363,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
           <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
             <p className="text-sm tabular-nums"><span className="text-muted-foreground">{t.invoices_total}: </span><strong>{money(totals.gross)}</strong></p>
             <div className="flex gap-2">
-              <Button type="button" variant="outline" disabled={formBusy} onClick={() => onOpenChange(false)}>{t.common_cancel}</Button>
-              <Button type="submit" requireChanges={false} disabled={formBusy || optionsBusy || Boolean(optionsError) || !valid}>
+              <Button type="button" size="sm" variant="outline" disabled={formBusy} onClick={() => onOpenChange(false)}>{t.common_cancel}</Button>
+              <Button type="submit" size="sm" requireChanges={false} disabled={formBusy || optionsBusy || Boolean(optionsError) || !valid}>
                 {formBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                 {de ? "Rechnung erstellen" : "Создать счёт"}
               </Button>

@@ -1324,6 +1324,9 @@ async fn a_staff_save_keeps_the_leads_invoice_recipient_and_payment_route() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["error"], "invoice_vat_id_too_long", "{body}");
 
+    sqlx::query("UPDATE lead_payer_declarations SET via_third_party_kind = 'person', contact_consent_at = now(), cost_estimate_consent_at = now() WHERE lead_id = $1")
+        .bind(lead_id).execute(pool).await.unwrap();
+
     // Another payer named by staff: the payment route was the first payer's
     // answer and goes; where the invoice goes stays.
     let mut renamed = third_party_payer();
@@ -1337,6 +1340,20 @@ async fn a_staff_save_keeps_the_leads_invoice_recipient_and_payment_route() {
     assert!(after["account_holder"].is_null(), "{body}");
     assert!(after["via_third_party"].is_null(), "{body}");
     assert!(after["via_third_party_details"].is_null(), "{body}");
+    let reset: bool = sqlx::query_scalar("SELECT via_third_party_kind IS NULL AND contact_consent_at IS NULL AND cost_estimate_consent_at IS NULL FROM lead_payer_declarations WHERE lead_id = $1")
+        .bind(lead_id).fetch_one(pool).await.unwrap();
+    assert!(
+        reset,
+        "the new payer cannot inherit consents or a route subtype"
+    );
+
+    let audit_is_metadata_only: bool = sqlx::query_scalar(
+        "SELECT old_value IS NULL AND new_value IS NULL AND context ? 'changed_fields' FROM audit_log WHERE action = 'update_lead_payer_declaration' AND entity_id = $1 ORDER BY created_at DESC LIMIT 1",
+    ).bind(lead_id).fetch_one(pool).await.unwrap();
+    assert!(
+        audit_is_metadata_only,
+        "payer changes must not put identity or bank values in audit snapshots"
+    );
 
     // The patient pays himself: "to the payer" would be no answer; another
     // address still is.

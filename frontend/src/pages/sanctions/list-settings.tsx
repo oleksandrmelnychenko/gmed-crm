@@ -1,6 +1,6 @@
 /**
  * CEO card: EU sanctions list status, manual upload / refresh and the blocked
- * countries. Shown in the admin settings and on the sanctions page.
+ * countries. Available on the dedicated sanctions page.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, LoaderCircle, RefreshCcw, ShieldCheck, Upload } from "lucide-react";
@@ -9,6 +9,7 @@ import { CitizenshipMultiSelect, normalizeCitizenships } from "@/components/ui/c
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, SuccessBanner, TabLoader, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -90,7 +91,7 @@ export function SanctionsListSettings({ className }: { className?: string }) {
 
   return (
     <section className={cn("space-y-4", className)} data-testid="sanctions-list-settings">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/50 bg-card p-4">
         <div className="min-w-0 space-y-1">
           <AdminSectionTitle>
             <span className="inline-flex items-center gap-1.5">
@@ -141,8 +142,8 @@ export function SanctionsListSettings({ className }: { className?: string }) {
       {flash ? <SuccessBanner>{flash}</SuccessBanner> : null}
 
       {list ? (
-        <div className={cn("space-y-1.5 rounded-lg p-3.5 text-[13px]", tokens.surface.card)}>
-          <p className={cn(!active && "text-amber-700")}>
+        <div className={cn("space-y-3 rounded-xl p-4 text-[13px]", tokens.surface.card)}>
+          <StatusChip tone={active && !list.stale ? "success" : "warning"}>
             {active
               ? formatUiText(t.sanctions_list_active, {
                   date: formatAppDate(active.list_date),
@@ -150,28 +151,28 @@ export function SanctionsListSettings({ className }: { className?: string }) {
                   persons: active.person_count,
                 })
               : t.sanctions_list_none}
-          </p>
-          {active && list.stale ? <p className="text-amber-700">{t.sanctions_list_stale}</p> : null}
-          {!list.automatic_download ? <p className="text-amber-700">{t.sanctions_list_auto_off}</p> : null}
+          </StatusChip>
+          {active && list.stale ? <div><StatusChip tone="warning">{t.sanctions_list_stale}</StatusChip></div> : null}
+          {!list.automatic_download ? <div><StatusChip tone="warning">{t.sanctions_list_auto_off}</StatusChip></div> : null}
           {list.sync.last_success_at ? (
             <p className="text-xs text-muted-foreground">
               {formatUiText(t.sanctions_list_last_success, { date: formatAppDateTime(list.sync.last_success_at) })}
             </p>
           ) : null}
           {list.sync.last_error_code && list.sync.last_error_at ? (
-            <p className="text-xs text-amber-700">
+            <div><StatusChip tone="warning">
               {formatUiText(t.sanctions_list_last_error, {
                 code: list.sync.last_error_code,
                 date: formatAppDateTime(list.sync.last_error_at),
               })}
-            </p>
+            </StatusChip></div>
           ) : null}
           {list.versions.length > 0 ? (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground">{t.sanctions_list_versions}</summary>
-              <ul className="mt-1.5 space-y-1">
+            <details className="rounded-lg border border-border/50 bg-muted/40 p-3 text-xs">
+              <summary className="cursor-pointer font-medium text-foreground">{t.sanctions_list_versions}</summary>
+              <ul className="mt-2 divide-y divide-border/50">
                 {list.versions.map((version) => (
-                  <li key={version.id} className={cn("flex flex-wrap gap-x-3", version.is_active && "font-semibold")}>
+                  <li key={version.id} className={cn("flex flex-wrap gap-x-3 gap-y-1 py-2", version.is_active && "font-semibold")}>
                     <span>{formatAppDate(version.list_date)}</span>
                     <span>
                       {version.source === "upload" ? t.sanctions_list_source_upload : t.sanctions_list_source_download}
@@ -190,7 +191,7 @@ export function SanctionsListSettings({ className }: { className?: string }) {
         </div>
       ) : null}
 
-      <div className="space-y-2 border-t border-border/60 pt-3">
+      <div className="space-y-3 rounded-xl border border-border/50 bg-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <AdminSectionTitle>
             {t.sanctions_blocked_countries}

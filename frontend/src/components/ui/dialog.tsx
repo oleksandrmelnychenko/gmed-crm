@@ -239,6 +239,8 @@ function DialogOverlay({
   return (
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
+      // Base UI otherwise omits nested backdrops, leaving the parent wizard undimmed.
+      forceRender
       className={cn(
         // No backdrop-filter on the animated overlay: animating opacity over a
         // full-viewport blur layer flashes the whole page in Chrome on macOS

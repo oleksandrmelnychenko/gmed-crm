@@ -146,10 +146,14 @@ describe("step 3: the invoice recipient first (owner spec 2026-10-11)", () => {
     expect(payerFitsFlow({ recipient: "self", isPayer: "yes" }, own, recipient, false)).toBe(true);
     expect(payerFitsFlow({ recipient: "self", isPayer: "no" }, own, recipient, false)).toBe(false);
     expect(payerFitsFlow({ recipient: "self", isPayer: "no" }, viktor, recipient, false)).toBe(true);
-    expect(payerFitsFlow({ recipient: "third_party", isPayer: "yes" }, viktor, recipient, false)).toBe(true);
+    expect(payerFitsFlow({ recipient: "third_party", isPayer: "yes" }, viktor, recipient, false)).toBe(false);
     // The recipient who does not pay is not the payer named.
     const named = { ...recipient, recipient: "third_party", type: "person", first_name: "viktor", last_name: "zahler" };
     expect(payerFitsFlow({ recipient: "third_party", isPayer: "no" }, viktor, named, false)).toBe(false);
+    expect(payerFitsFlow({ recipient: "third_party", isPayer: "yes" }, viktor, named, false)).toBe(true);
+    expect(payerFitsFlow({ recipient: "third_party", isPayer: "yes" }, viktor, { ...named, first_name: "Another" }, false)).toBe(false);
+    expect(payerFitsFlow({ recipient: "third_party", isPayer: "yes" }, viktor, { ...named, type: "organisation", organisation_name: "Viktor Zahler" }, false)).toBe(false);
+    expect(payerFitsFlow({ recipient: "self", isPayer: "no" }, viktor, named, true)).toBe(false);
     expect(payerFitsFlow({ recipient: "third_party", isPayer: "no" }, own, named, false)).toBe(true);
     expect(payerFitsFlow({ recipient: "", isPayer: "" }, viktor, recipient, false)).toBe(false);
     // Unanswered: the own economic interest stays, nobody is named.

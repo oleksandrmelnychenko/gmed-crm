@@ -176,6 +176,29 @@ for (const kind of ["dialog", "sheet"]) {
       await expect(page.getByRole("dialog", { name: "Child editor" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Save values" })).toBeDisabled();
     });
+
+    test("dims the parent editor while a child dialog is open", async ({ page }) => {
+      const parent = page.getByRole("dialog", { name: "Edit values" });
+      const parentBounds = await parent.boundingBox();
+      expect(parentBounds).not.toBeNull();
+      await page.getByRole("button", { name: "Open child" }).click();
+      const child = page.getByRole("dialog", { name: "Child editor" });
+      await expect(child).toBeVisible();
+      const backdrops = page.locator('[data-slot="dialog-overlay"]:visible, [data-slot="sheet-overlay"]:visible');
+      await expect(backdrops).toHaveCount(2);
+      const childBackdrop = page.locator('[data-slot="dialog-overlay"]').last();
+      expect(await childBackdrop.boundingBox()).toEqual({ x: 0, y: 0, ...page.viewportSize()! });
+      // A point on the parent, outside the smaller child, is covered by the
+      // child's backdrop rather than an interactive parent control.
+      await expect.poll(() => page.evaluate(({ x, y }) =>
+        document.elementFromPoint(x, y)?.getAttribute("data-slot"),
+      { x: parentBounds!.x + 8, y: parentBounds!.y + 8 })).toBe("dialog-overlay");
+      await page.keyboard.press("Escape");
+      await expect(child).toHaveCount(0);
+      await expect(parent).toBeVisible();
+      await expect(backdrops).toHaveCount(1);
+      await expect(page.getByRole("button", { name: "Save values" })).toBeDisabled();
+    });
   });
 }
 

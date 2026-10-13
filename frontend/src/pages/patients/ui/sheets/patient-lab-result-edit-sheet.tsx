@@ -16,7 +16,7 @@ import {
   type PatientLabResultCorrectionPayload,
 } from "@/pages/patients/data/patient-lab-results";
 import type { PatientLabResult } from "@/pages/patients/model/detail-resource-types";
-import { FormSection } from "../shared/patient-form-primitives";
+import { PatientFormSection as FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type Bilingual = (ru: string, de: string) => string;
@@ -586,7 +586,7 @@ export function PatientLabResultEditSheet({
   }
 
   return (
-    <PatientSheetScaffold
+    <PatientSheetScaffold presentation="dialog"
       open={open}
       onOpenChange={(nextOpen) => {
         if (!busy) onOpenChange(nextOpen);
@@ -871,7 +871,7 @@ export function PatientLabResultDeleteSheet({
   }
 
   return (
-    <PatientSheetScaffold
+    <PatientSheetScaffold presentation="dialog"
       open={open}
       onOpenChange={(nextOpen) => {
         if (!busy) onOpenChange(nextOpen);

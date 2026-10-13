@@ -621,7 +621,7 @@ async fn deliver(
         }
     };
     let entity = target.subject.entity();
-    state.audit_sender.try_send(audit::domain_event(
+    let audit_event = audit::domain_event(
         match (entity, result.is_ok()) {
             ("lead", true) => "send_lead_portal_login_email",
             ("lead", false) => "send_lead_portal_login_email_failed",
@@ -644,7 +644,14 @@ async fn deliver(
             "replayed": replayed,
             "error_code": error_code,
         }),
-    ));
+    );
+    let mut audit_conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => return internal(error, subject_id, "audit login email"),
+    };
+    if let Err(error) = audit::write_in_transaction(&mut audit_conn, &audit_event).await {
+        return internal(error, subject_id, "audit login email");
+    }
 
     match result {
         Ok(sent) => Json(json!({

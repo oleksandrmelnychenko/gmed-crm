@@ -36,13 +36,14 @@ import {
   consentGiven,
   consentText,
   draftFromPersonalData,
+  payerAnswer,
   languageName,
   personalDataPatch,
   rejectedValue,
   withInsuranceAnswer,
   type PersonalDraft,
   type PersonalField,
-  type RejectedValue,
+  type RejectedPersonal,
   type SaveState,
   type SubmitField,
 } from "./lead-request-model";
@@ -65,7 +66,7 @@ import {
 import { InvoiceRecipientSection } from "./lead-request-invoice-recipient";
 import { PayerSection } from "./lead-request-payer-section";
 import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
-import { knowsRecipient, payerChoices } from "./lead-request-recipient-model";
+import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection } from "./lead-request-representation";
 import { asLeadCabinetLang, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
@@ -203,48 +204,46 @@ function usePersonalForm({
 }) {
   const [draft, setDraft] = useState<PersonalDraft>(() => draftFromPersonalData(request.personal_data));
   const savedRef = useRef<PersonalDraft>(draftFromPersonalData(request.personal_data));
-  const rejectedRef = useRef<RejectedValue | null>(null);
+  const rejectedRef = useRef<RejectedPersonal>({});
   const failedRef = useRef(false);
-  const [fieldError, setFieldError] = useState<{ field: string; message: string } | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<PersonalField, string>>>({});
 
   const save = useCallback(
     (snapshot: PersonalDraft) => {
       void enqueue(async () => {
-        const patch = personalDataPatch(savedRef.current, snapshot, rejectedRef.current);
-        if (Object.keys(patch).length === 0) {
-          // Nothing to save. A failure is over once the refused value is gone from the form.
-          const refused = rejectedRef.current;
-          const stillRefused = refused !== null && rejectedValue(refused.field, snapshot)?.value === refused.value;
-          if (failedRef.current && !stillRefused) {
-            failedRef.current = false;
-            rejectedRef.current = null;
-            setFieldError(null);
-            onSaveState("saved");
-          }
-          return;
+        const rejected: RejectedPersonal = {};
+        for (const [field, value] of Object.entries(rejectedRef.current)) {
+          if (rejectedValue(field, snapshot)?.value === value) rejected[field as PersonalField] = value;
         }
-        onSaveState("saving");
-        try {
-          const next = await saveLeadPersonalData(request.lead_id, patch);
-          savedRef.current = draftFromPersonalData(next.personal_data);
-          rejectedRef.current = null;
-          failedRef.current = false;
-          setFieldError(null);
-          onSaveState("saved");
-          onChange(next);
-        } catch (cause) {
-          const body = errorBody(cause);
-          const field = typeof body?.field === "string" ? body.field : null;
-          if (field) {
-            rejectedRef.current = rejectedValue(field, snapshot);
-            setFieldError({
-              field,
-              message: body?.code === "minor_needs_guardian" ? text.minorNeedsGuardian : text.invalidField,
-            });
+        let failed = false;
+        let saved = false;
+        for (;;) {
+          const patch = personalDataPatch(savedRef.current, snapshot, rejected);
+          if (Object.keys(patch).length === 0) break;
+          onSaveState("saving");
+          try {
+            const next = await saveLeadPersonalData(request.lead_id, patch);
+            savedRef.current = draftFromPersonalData(next.personal_data);
+            saved = true;
+            onChange(next);
+            break;
+          } catch (cause) {
+            const body = errorBody(cause);
+            const field = typeof body?.field === "string" ? body.field : "";
+            const refused = field in patch ? rejectedValue(field, snapshot) : null;
+            if (!refused) { failed = true; break; }
+            rejected[refused.field] = refused.value;
+            setFieldErrors((current) => ({ ...current, [field]:
+              body?.code === "minor_needs_guardian" ? text.minorNeedsGuardian :
+              body?.code === "dob_staff_only" ? text.dobStaffOnly : text.invalidField,
+            }));
           }
-          failedRef.current = true;
-          onSaveState("error");
         }
+        rejectedRef.current = rejected;
+        const wasFailed = failedRef.current;
+        failedRef.current = failed || Object.keys(rejected).length > 0;
+        if (failedRef.current) onSaveState("error");
+        else if (saved || wasFailed) onSaveState("saved");
       });
     },
     [enqueue, onChange, onSaveState, request.lead_id, text],
@@ -253,12 +252,14 @@ function usePersonalForm({
   useAutosave(draft, save);
 
   const set = <K extends PersonalField>(field: K, value: PersonalDraft[K]) => {
-    setDraft((current) => ({ ...current, [field]: value }));
+    setDraft((current) => ({ ...current, [field]: field === "date_of_birth" && !value
+      ? savedRef.current.date_of_birth : value }));
   };
   const requiredMissing = (field: PersonalField) =>
     (field === "first_name" || field === "last_name") && !draft[field].trim();
   const errorFor = (field: PersonalField) =>
-    requiredMissing(field) ? text.required : fieldError?.field === field ? fieldError.message : undefined;
+    requiredMissing(field) ? text.required : rejectedRef.current[field] === rejectedValue(field, draft)?.value
+      ? fieldErrors[field] : undefined;
   const fieldProps = (field: PersonalField) => ({
     id: `lead-request-${field}`,
     "aria-invalid": Boolean(errorFor(field)) || undefined,
@@ -385,6 +386,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               {...nameFieldProps("first_name")}
               className={inputClass}
               autoComplete="given-name"
+              maxLength={100}
               value={draft.first_name}
               onChange={(event) => set("first_name", event.target.value)}
             />
@@ -395,6 +397,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               {...nameFieldProps("last_name")}
               className={inputClass}
               autoComplete="family-name"
+              maxLength={100}
               value={draft.last_name}
               onChange={(event) => set("last_name", event.target.value)}
             />
@@ -405,6 +408,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               {...nameFieldProps("middle_name")}
               className={inputClass}
               autoComplete="additional-name"
+              maxLength={100}
               value={draft.middle_name}
               onChange={(event) => set("middle_name", event.target.value)}
             />
@@ -419,6 +423,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               autoComplete="bday"
               pickerLang={asLeadCabinetLang(lang) ?? undefined}
               max={appDateKey()}
+              min="1900-01-01"
               value={draft.date_of_birth}
               onChange={(event) => set("date_of_birth", event.target.value)}
             />
@@ -441,6 +446,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
           <FormField field="citizenships" text={text} error={errorFor("citizenships")} required className="sm:col-span-2">
             <CitizenshipMultiSelect
               id="lead-request-citizenships"
+              maxItems={5}
               value={draft.citizenships}
               lang={lang}
               placeholder={text.citizenshipsPlaceholder}
@@ -459,6 +465,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               {...fieldProps("street_address")}
               className={inputClass}
               autoComplete="street-address"
+              maxLength={200}
               value={draft.street_address}
               onChange={(event) => set("street_address", event.target.value)}
             />
@@ -468,6 +475,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               {...fieldProps("zip_code")}
               className={inputClass}
               autoComplete="postal-code"
+              maxLength={20}
               value={draft.zip_code}
               onChange={(event) => set("zip_code", event.target.value)}
             />
@@ -477,6 +485,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               {...fieldProps("city")}
               className={inputClass}
               autoComplete="address-level2"
+              maxLength={120}
               value={draft.city}
               onChange={(event) => set("city", event.target.value)}
             />
@@ -494,7 +503,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
       </Section>
       <Section title={text.sectionContact}>
         <div className={GRID}>
-          <FormField field="phone" text={text} error={errorFor("phone")}>
+          <FormField field="phone" text={text} error={errorFor("phone")} required={request.access_kind !== "guardian"}>
             <Input
               {...fieldProps("phone")}
               className={inputClass}
@@ -526,6 +535,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
       {/* An older server does not know who acts for the lead. Adult or minor: the block starts anew with the other questions. */}
       {request.representation ? (
         <RepresentationSection
+          childAddress={draft}
           key={request.minor ? "minor" : "adult"}
           request={request}
           text={text}
@@ -670,7 +680,9 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
   const guardian = request.access_kind === "guardian";
   const flowKnown = knowsRecipient(request);
   // The payment method belongs to the payer named: asked once somebody is.
-  const payerNamed = Boolean(request.payer) && (!flowKnown || request.billing?.invoice_recipient_is_payer != null);
+  const recipient = draftFromRecipient(request.billing);
+  const payerNamed = Boolean(request.payer) && (!flowKnown || payerFitsFlow(flowOf(recipient), request.payer, recipient,
+    payerAnswer(request.payer, request.payer_self_template) === "guardian" || request.billing?.payment_route_by === "guardian"));
   return (
     <StepFrame testId="lead-request-step-billing" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
       <Section title={text.sectionInsurance}>
@@ -861,7 +873,8 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
-  const full = request.documents.length >= request.max_documents;
+  const full = (request.documents_used ?? request.documents.length + (request.identity_documents?.length ?? 0)
+    + (request.representation?.representatives ?? []).reduce((count, person) => count + person.identity_documents.length + person.authority_documents.length, 0)) >= request.max_documents;
 
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
@@ -875,7 +888,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
       try {
         onChange(await enqueue(() => uploadLeadDocument(request.lead_id, file)));
       } catch (cause) {
-        nextErrors.push(`${file.name}: ${errorMessage(cause)}`);
+        nextErrors.push(`${file.name}: ${errorMessage(cause, text)}`);
       }
     }
     setErrors(nextErrors);
@@ -887,22 +900,12 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
     try {
       onChange(await enqueue(() => withdrawLeadDocument(request.lead_id, documentId)));
     } catch (cause) {
-      setErrors([errorMessage(cause)]);
+      setErrors([errorMessage(cause, text)]);
     }
   }
 
   return (
     <StepFrame testId="lead-request-documents" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
-      {asksReason ? (
-        <Section title={text.sectionRequest}>
-          <div data-testid="lead-request-reason">
-            <IdentificationFormField form={identification} field="request_reason" text={text} required>
-              <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={5} />
-            </IdentificationFormField>
-          </div>
-        </Section>
-      ) : null}
-
       <Section title={text.healthConsentTitle}>
         <p className="whitespace-pre-line rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
           {consentText(request, HEALTH_CONSENT, lang)}
@@ -918,6 +921,17 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
           testId="lead-request-health-consent"
         />
       </Section>
+
+      {asksReason ? (
+        <Section title={text.sectionRequest}>
+          <div data-testid="lead-request-reason">
+            <IdentificationFormField form={identification} field="request_reason" text={text} required>
+              <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={5} disabled={!consentReady} />
+            </IdentificationFormField>
+            {!consentReady ? <p className="text-xs text-muted-foreground">{text.healthConsentRequired}</p> : null}
+          </div>
+        </Section>
+      ) : null}
 
       <Section title={text.sectionUpload}>
         <p className="text-sm text-muted-foreground">{text.documentsIntro}</p>

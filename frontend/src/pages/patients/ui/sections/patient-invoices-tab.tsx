@@ -73,7 +73,7 @@ import {
   localizeFinancialDescription,
 } from "../../model/account-statement-labels";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
-import { FormSection } from "../shared/patient-form-primitives";
+import { FormSection, PatientFormSection } from "../shared/patient-form-primitives";
 import {
   usePortalLabels,
 } from "../../model/portal-shared";
@@ -2557,7 +2557,7 @@ function usePatientInvoicesTabContent({
         </>
       ) : null}
 
-      <PatientSheetScaffold
+      <PatientSheetScaffold presentation="dialog"
         open={balanceAdjustmentOpen && canManageBalance}
         onOpenChange={(open) => {
           setBalanceAdjustmentOpen(open);
@@ -2608,7 +2608,7 @@ function usePatientInvoicesTabContent({
             : "Используйте только для сумм, которые ещё не отражены счётом, оплатой, возвратом или кредит-нотой. Ошибочная запись сторнируется и остаётся в истории."}
         </Banner>
 
-        <FormSection title={lang === "de" ? "Buchung" : "Операция"}>
+        <PatientFormSection title={lang === "de" ? "Buchung" : "Операция"}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label={lang === "de" ? "Richtung" : "Направление"} htmlFor="balance-adjustment-direction">
               <NativeComboboxSelect
@@ -2716,9 +2716,9 @@ function usePatientInvoicesTabContent({
               </NativeComboboxSelect>
             </Field>
           </div>
-        </FormSection>
+        </PatientFormSection>
 
-        <FormSection title={lang === "de" ? "Begründung" : "Основание"}>
+        <PatientFormSection title={lang === "de" ? "Begründung" : "Основание"}>
           <div className="space-y-3">
             <Field label={lang === "de" ? "Grund" : "Причина"} htmlFor="balance-adjustment-reason">
               <Input
@@ -2769,7 +2769,7 @@ function usePatientInvoicesTabContent({
               </span>
             </label>
           </div>
-        </FormSection>
+        </PatientFormSection>
       </PatientSheetScaffold>
 
       <PatientSheetScaffold
@@ -3046,7 +3046,7 @@ function usePatientInvoicesTabContent({
       </PatientSheetScaffold>
 
 
-      <PatientSheetScaffold
+      <PatientSheetScaffold presentation="dialog"
         open={assignOpen && canManageInvoices}
         onOpenChange={(open) => setAssignOpen(open)}
         width="form-heavy"
@@ -3082,7 +3082,7 @@ function usePatientInvoicesTabContent({
           </Banner>
         ) : null}
 
-        <FormSection title={t.patient_invoices_package}>
+        <PatientFormSection title={t.patient_invoices_package}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label={t.patient_invoices_package} htmlFor="assign-package-id">
               <NativeComboboxSelect
@@ -3160,9 +3160,9 @@ function usePatientInvoicesTabContent({
               />
             </Field>
           </div>
-        </FormSection>
+        </PatientFormSection>
 
-        <FormSection title={t.patient_invoices_payer}>
+        <PatientFormSection title={t.patient_invoices_payer}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label={t.patient_invoices_payer} htmlFor="assign-package-payer">
               <Input
@@ -3196,9 +3196,9 @@ function usePatientInvoicesTabContent({
               />
             </Field>
           </div>
-        </FormSection>
+        </PatientFormSection>
 
-        <FormSection title={l("patients_additional")}>
+        <PatientFormSection title={l("patients_additional")}>
           <Field label={t.patient_invoices_notes} htmlFor="assign-package-notes">
             <textarea
               id="assign-package-notes"
@@ -3214,7 +3214,7 @@ function usePatientInvoicesTabContent({
               disabled={assignBusy}
             />
           </Field>
-        </FormSection>
+        </PatientFormSection>
       </PatientSheetScaffold>
 
       <PatientSheetScaffold

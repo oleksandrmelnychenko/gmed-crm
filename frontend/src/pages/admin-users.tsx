@@ -27,10 +27,10 @@ import {
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
-  AdminSheetScaffold,
   SheetFormFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
 import {
   DataTablePager,
   useDataTablePagination,
@@ -55,7 +55,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
@@ -162,12 +162,9 @@ function DotTitle({ children }: { children: ReactNode }) {
 
 function DotSection({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
-    <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
-      <h3>
-        <DotTitle>{title}</DotTitle>
-      </h3>
+    <AdminFormSection title={title}>
       {children}
-    </section>
+    </AdminFormSection>
   );
 }
 
@@ -1059,15 +1056,13 @@ function useAdminUsersPageContent() {
         )}
       />
 
-      <Sheet
+      <Dialog
         open={showCreate}
         onOpenChange={handleCreateSheetOpenChange}
         dirty={createDirty}
       >
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           {createdUser ? (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <AdminSheetScaffold
+              <AdminDialogScaffold
                 title={t.users_created_title}
                 description={`${createdUser.name} · ${createdUser.email}`}
                 footer={(
@@ -1086,11 +1081,10 @@ function useAdminUsersPageContent() {
                   copyLabel={t.users_copy_password}
                   copiedLabel={t.users_copied}
                 />
-              </AdminSheetScaffold>
-            </div>
+              </AdminDialogScaffold>
           ) : (
-            <form onSubmit={onSubmitCreate} className="flex min-h-0 flex-1 flex-col">
-              <AdminSheetScaffold
+              <AdminDialogScaffold
+                onSubmit={onSubmitCreate}
                 title={t.users_create_title}
                 description={t.users_subtitle}
                 footer={(
@@ -1106,7 +1100,7 @@ function useAdminUsersPageContent() {
               >
                 {createError ? <Banner tone="error">{createError}</Banner> : null}
                 <DotSection title={t.users_create_title}>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-1.5">
                       <Label className={fieldLabelClass}>{t.users_name}</Label>
                       <Input required placeholder={t.users_name_placeholder} value={newName} onChange={(e) => setNewName(e.target.value)} className="h-9 rounded-lg bg-field" />
@@ -1171,7 +1165,7 @@ function useAdminUsersPageContent() {
                   </div>
                   {manualPassword ? (
                     <>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-1.5">
                           <Label className={fieldLabelClass}>{t.users_password}</Label>
                           <div className="relative">
@@ -1249,22 +1243,16 @@ function useAdminUsersPageContent() {
                     </p>
                   )}
                 </DotSection>
-              </AdminSheetScaffold>
-            </form>
+              </AdminDialogScaffold>
           )}
-        </SheetContent>
-      </Sheet>
+      </Dialog>
 
-      <Sheet
+      <Dialog
         open={editUser !== null}
         onOpenChange={handleEditSheetOpenChange}
         dirty={editDirty}
       >
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
-          <div
-            className="flex min-h-0 flex-1 flex-col"
-          >
-            <AdminSheetScaffold
+            <AdminDialogScaffold
               title={`${t.patients_edit} - ${editUser?.name ?? ""}`}
               description={editUser?.email}
               footer={(
@@ -1305,7 +1293,7 @@ function useAdminUsersPageContent() {
                 />
               ) : null}
               <DotSection title={t.users_title}>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label className={fieldLabelClass}>{t.users_name}</Label>
                     <Input value={euName} onChange={(e) => setEuName(e.target.value)} className="h-9 rounded-lg bg-field" />
@@ -1404,7 +1392,7 @@ function useAdminUsersPageContent() {
                     {t.users_generate_one_time_password}
                   </Button>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
                   <Label className={fieldLabelClass}>
                     {t.users_password}
@@ -1488,10 +1476,8 @@ function useAdminUsersPageContent() {
                   </Button>
                 </div>
               </DotSection>
-            </AdminSheetScaffold>
-          </div>
-        </SheetContent>
-      </Sheet>
+            </AdminDialogScaffold>
+      </Dialog>
 
       {loading ? <TabLoader /> : null}
       {!loading && error ? <Banner tone="error">{error}</Banner> : null}

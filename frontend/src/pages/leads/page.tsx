@@ -35,6 +35,7 @@ import {
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { RowExpandButton } from "@/components/data-table/row-expand-button";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -779,27 +780,17 @@ function useLeadsPageContent() {
         render: (row) => {
           const expanded = expandedLeadIds.has(row.id);
           return (
-            <span className="flex min-w-0 items-center gap-1">
-              <button
-                type="button"
-                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-expanded={expanded}
-                aria-label={
+            <span className="flex min-w-0 items-center gap-2">
+              <RowExpandButton
+                expanded={expanded}
+                label={
                   lang === "de"
                     ? expanded ? "Portalzugang ausblenden" : "Portalzugang anzeigen"
                     : expanded ? "Скрыть доступ пациента" : "Показать доступ пациента"
                 }
-                data-testid={`lead-expand-${row.id}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  toggleLeadExpanded(row.id);
-                }}
-              >
-                <ChevronRight
-                  className={cn("size-3.5 transition-transform", expanded && "rotate-90")}
-                  aria-hidden="true"
-                />
-              </button>
+                testId={`lead-expand-${row.id}`}
+                onToggle={() => toggleLeadExpanded(row.id)}
+              />
               <span className="truncate font-mono text-xs text-foreground">
                 {leadDisplayName(row, tx)}
               </span>

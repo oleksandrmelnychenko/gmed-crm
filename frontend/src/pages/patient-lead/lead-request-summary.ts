@@ -2,6 +2,7 @@ import { countryLabel } from "@/components/ui/country-select";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
+import { consentFormText } from "./lead-request-consent-form-text";
 import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
 import {
   STATED_FUNDS_SOURCES,
@@ -22,7 +23,7 @@ import {
   payerTypeOf,
   type PayerField,
 } from "./lead-request-model";
-import { knowsRecipient } from "./lead-request-recipient-model";
+import { draftFromRecipient, flowOf, knowsRecipient, payerFitsFlow } from "./lead-request-recipient-model";
 import {
   REPRESENTATIVE_FIELDS,
   REPRESENTATIVE_SLOTS,
@@ -57,7 +58,8 @@ export type SummaryGroupId =
   | "legal"
   | "follow_up"
   | "request"
-  | "documents";
+  | "documents"
+  | "consent_form";
 
 /** A person inside a group: a representative with the own statements and files. */
 export type SummaryPart = { id: string; title: string; rows: SummaryRow[] };
@@ -277,7 +279,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     const billing = request.billing;
     const recipient = billing.recipient;
     const third = billing.invoice_recipient === "third_party";
-    const paying = billing.invoice_recipient_is_payer === true;
+    const recipientDraft = draftFromRecipient(billing);
+    const paying = billing.invoice_recipient_is_payer === true && payerFitsFlow(flowOf(recipientDraft), payer, recipientDraft, billing.payment_route_by === "guardian");
     const party = third && !paying && recipient ? recipient : null;
     const organisation = party?.type === "organisation";
     const kind = option(text.payerRelationshipOptions, party?.relationship_kind);
@@ -500,6 +503,18 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     // K and L are listed in their own groups: with nothing else answered there is no
     // empty "follow-up" group (QA 2026-10-10).
     if (entered(rows).length > 0) group("follow_up", text.steps.follow_up, rows);
+  }
+
+  const consent = request.consent_form;
+  if (consent?.choices) {
+    const wording = consentFormText(lang, guardian && request.minor);
+    group("consent_form", wording.title, [
+      ...Object.entries(consent.choices).map(([key, value]): Entry =>
+        [wording.options[key as keyof typeof consent.choices], yesNo(value)]),
+      ...(consent.choices.named_recipients ? (consent.recipients ?? []).map((person): Entry =>
+        [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], person.contact].filter(Boolean).join(" · ")]) : []),
+      [text.saved, consent.chosen_at ? (consent.chosen_by_me === false ? wording.savedByOtherAt : wording.savedAt)(formatAppDateTime(consent.chosen_at)) : ""],
+    ]);
   }
 
   // The reason of the request (13.1), from a server that knows it.

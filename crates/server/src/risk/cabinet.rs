@@ -268,11 +268,25 @@ pub async fn follow_up_json(
     let answered_at = assessment
         .as_ref()
         .and_then(|assessment| assessment.follow_up_answered_at);
+    let changed_since_answer: bool = if let Some(answered_at) = answered_at {
+        sqlx::query_scalar(r#"SELECT EXISTS (
+            SELECT 1 FROM leads l, jsonb_each(CASE WHEN jsonb_typeof(l.portal_field_updates) = 'object' THEN l.portal_field_updates ELSE '{}'::jsonb END) f
+            WHERE l.id = $1 AND f.key = ANY(ARRAY['enhanced_details','statements','identification','representation','billing','payer'])
+              AND (f.value->>'at')::timestamptz > $2
+        ) OR EXISTS (
+            SELECT 1 FROM lead_portal_uploads u WHERE u.lead_id = $1
+              AND u.kind IN ('self_funds_proof','relationship_proof','identity')
+              AND (u.created_at > $2 OR u.withdrawn_at > $2)
+        )"#).bind(lead_id).bind(answered_at).fetch_one(&mut *conn).await?
+    } else {
+        false
+    };
     let empty = json!({
         "required": false,
         "blocks": [],
         "missing": {},
         "answered_at": answered_at,
+        "changed_since_answer": changed_since_answer,
     });
     let Some(assessment) = assessment.filter(|assessment| {
         assessment.started()
@@ -318,6 +332,7 @@ pub async fn follow_up_json(
         "blocks": blocks,
         "missing": missing,
         "answered_at": answered_at,
+        "changed_since_answer": changed_since_answer,
         "identity_since": identity_since,
     }))
 }
@@ -397,14 +412,48 @@ async fn submit_follow_up(
         Ok(tx) => tx,
         Err(error) => return intake::internal(error, "begin"),
     };
-    let kind = match intake::lock_my_lead(&mut tx, lead_id, auth.user_id).await {
-        Ok(Some((kind, _))) => kind,
+    let (kind, lead) = match intake::lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+        Ok(Some(found)) => found,
         Ok(None) => return intake::not_found(),
         Err(error) => return intake::internal(error, "lock request"),
     };
+    if lead
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_submitted_at")
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        return coded(
+            StatusCode::CONFLICT,
+            "follow_up_not_requested",
+            "Send the request before sending additional information",
+            json!({}),
+        );
+    }
     if let Err(error) = store::reassess(&mut tx, lead_id, Cause::Cabinet, Some(auth.user_id)).await
     {
         return intake::internal(error, "reassess");
+    }
+    let follow_up = match follow_up_json(&mut tx, lead_id, auth.user_id).await {
+        Ok(value) => value,
+        Err(error) => return intake::internal(error, "load follow-up state"),
+    };
+    if follow_up["required"] != json!(true) {
+        return coded(
+            StatusCode::CONFLICT,
+            "follow_up_not_requested",
+            "No additional information is currently requested",
+            json!({}),
+        );
+    }
+    if !follow_up["answered_at"].is_null() && follow_up["changed_since_answer"] != json!(true) {
+        if let Err(error) = tx.commit().await {
+            return intake::internal(error, "commit unchanged follow-up");
+        }
+        return match intake::request_payload(&state, lead_id, auth.user_id, kind).await {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => intake::internal(error, "load request"),
+        };
     }
     let missing = match follow_up_missing(&mut tx, lead_id, auth.user_id).await {
         Ok(missing) => missing,

@@ -14,6 +14,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { languageLabel } from "@/components/ui/language-multi-select";
 import { apiFetch } from "@/lib/api";
@@ -51,7 +52,7 @@ import {
   type LeadOriginSelectedWorkType,
 } from "../../model/patient-lead-origin";
 import { LegalStatusPill } from "../shared/legal-status-pill";
-import { FormSection, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
+import { PatientFormSection, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
 import { PatientPayerSummaryCard } from "./patient-payer-summary";
 
 const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
@@ -220,7 +221,7 @@ function ProfileDetailTile({
   return (
     <article
       className={cn(
-        "group grid min-w-0 gap-2 border-b border-border/60 bg-white px-3 py-2.5 transition-colors last:border-b-0 hover:bg-muted/20 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center",
+        "grid min-w-0 gap-2 border-b border-border/60 bg-card px-4 py-3 last:border-b-0 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center",
       )}
     >
       <div
@@ -235,17 +236,9 @@ function ProfileDetailTile({
         {label}
       </p>
       <div className="flex items-center justify-start sm:justify-end">
-        <Badge
-          variant="outline"
-          className={cn(
-            "h-6 rounded-full px-2 text-[10px]",
-            done
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-amber-200 bg-amber-50 text-amber-700",
-          )}
-        >
+        <StatusChip tone={done ? "success" : "warning"}>
           {value}
-        </Badge>
+        </StatusChip>
       </div>
     </article>
   );
@@ -453,14 +446,14 @@ function ProfileActionCard({
     <button
       type="button"
       disabled={disabled}
-      className="group grid w-full min-w-0 gap-2 border-b border-border/60 bg-white px-3.5 py-3 text-left transition-colors last:border-b-0 hover:bg-orange-50/40 disabled:cursor-not-allowed disabled:opacity-60 sm:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)_2rem] sm:items-center"
+      className="group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-card px-3.5 py-3 text-left shadow-xs transition-colors hover:border-primary/40 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60"
       onClick={onClick}
     >
       <h3 className="min-w-0 text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
-      <p className="min-w-0 text-xs leading-5 text-muted-foreground">
+      <p className="col-start-1 row-start-2 min-w-0 text-xs leading-5 text-muted-foreground">
         {description}
       </p>
-      <span className="flex size-8 items-center justify-center rounded-md bg-orange-50 text-orange-700 transition-colors group-hover:bg-orange-100 group-hover:text-orange-800">
+      <span className="col-start-2 row-span-2 row-start-1 flex size-7 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground transition-colors group-hover:border-primary group-hover:bg-primary group-hover:text-primary-foreground">
         {busy ? (
           <LoaderCircle className="size-4 animate-spin" />
         ) : (
@@ -1172,7 +1165,8 @@ function usePatientProfileTabContent({
         </ProfileSummaryCard>
       </div>
 
-      <FormSection
+      <PatientFormSection
+        className="overflow-hidden shadow-xs [&>div:last-child]:bg-muted/40"
         title={
           <span className="inline-flex items-center gap-2">
             {t.patients_legal_status}
@@ -1193,28 +1187,31 @@ function usePatientProfileTabContent({
             {t.access_hidden}
           </p>
         ) : <>
-        <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[
             {
               icon: ShieldCheck,
               label: t.patient_profile_contract_status,
               value: patientDetailStatusLabel(legalStatus.contractStatus),
-              description: l("patients_contract_readiness"),
-              iconClass: "bg-sky-50 text-sky-700",
+              tone: (legalStatus.contractStatus === "signed" ? "success" : "warning") as StatusChipTone,
+              iconClass: legalStatus.contractStatus === "signed"
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-amber-50 text-amber-700",
             },
             {
               icon: CheckCircle2,
               label: t.patient_profile_done,
               value: `${legalStatusCompletion.completed}/${legalStatusCompletion.total}`,
-              description: l("patients_required_checks"),
-              iconClass: "bg-emerald-50 text-emerald-700",
+              tone: (legalStatusCompletion.completed === legalStatusCompletion.total ? "success" : "warning") as StatusChipTone,
+              iconClass: legalStatusCompletion.completed === legalStatusCompletion.total
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-amber-50 text-amber-700",
             },
             {
               icon: ClipboardCheck,
               label: l("patients_compliance"),
               value: legalStatus.complianceCompleted ? t.common_completed : t.common_pending,
-              // A revocation switched it off: say why (QA 2026-10-12 B2-13).
-              description: complianceNoteText ?? l("patients_internal_approval"),
+              tone: (legalStatus.complianceCompleted ? "success" : "warning") as StatusChipTone,
               iconClass: legalStatus.complianceCompleted
                 ? "bg-emerald-50 text-emerald-700"
                 : "bg-amber-50 text-amber-700",
@@ -1223,7 +1220,7 @@ function usePatientProfileTabContent({
               icon: NotebookText,
               label: t.patient_profile_notes,
               value: legalStatus.notes ? l("patients_yes") : l("patients_no"),
-              description: l("patients_legal_note"),
+              tone: "neutral" as StatusChipTone,
               iconClass: "bg-slate-100 text-slate-700",
             },
           ].map((metric) => {
@@ -1231,20 +1228,21 @@ function usePatientProfileTabContent({
             return (
               <div
                 key={String(metric.label)}
-                className="grid min-w-0 gap-2 border-b border-border/60 px-3 py-2.5 last:border-b-0 sm:grid-cols-[2rem_minmax(10rem,0.42fr)_minmax(8rem,0.3fr)_minmax(0,1fr)] sm:items-center"
+                className="flex min-w-0 flex-col items-start gap-3 rounded-xl border border-border bg-card p-3.5"
               >
-                <span className={cn("hidden size-7 items-center justify-center rounded-md sm:flex", metric.iconClass)}>
-                  <Icon className="size-3.5" />
-                </span>
-                <span className="text-xs font-medium text-muted-foreground sm:text-[13px]">{metric.label}</span>
-                <span className="text-sm font-semibold text-foreground">{metric.value}</span>
-                <span className="text-xs leading-5 text-muted-foreground">{metric.description}</span>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md", metric.iconClass)}>
+                    <Icon className="size-3.5" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 break-words font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">{metric.label}</span>
+                </div>
+                <StatusChip tone={metric.tone}>{metric.value}</StatusChip>
               </div>
             );
           })}
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
           {legalStatusChecklist.map((item) => {
             const documentBound = DOCUMENT_BOUND_LEGAL_STATUS_ITEMS.find(
               (entry) => entry.checklistKey === item.key,
@@ -1323,7 +1321,7 @@ function usePatientProfileTabContent({
         ) : null}
         </>}
 
-        <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {canCreateTasks && id ? (
             <ProfileActionCard
               title={l("patients_create_task_for_this_patient")}
@@ -1369,7 +1367,7 @@ function usePatientProfileTabContent({
             />
           ) : null}
         </div>
-      </FormSection>
+      </PatientFormSection>
 
       {id && canEditPatientProfile && legalStatusSheetOpen ? (
         <Suspense fallback={null}>
@@ -1386,7 +1384,8 @@ function usePatientProfileTabContent({
       ) : null}
 
 
-      <FormSection
+      <PatientFormSection
+        className="overflow-hidden shadow-xs"
         title={t.patients_notes}
         accessory={
           canEditPatientProfile ? (
@@ -1402,18 +1401,18 @@ function usePatientProfileTabContent({
           ) : null
         }
       >
-        <div className="rounded-xl border border-border/50 bg-muted/25 p-4">
+        <div className="rounded-lg bg-muted/40 px-3 py-3">
           {isHidden("notes") ? (
-            <p className="text-sm text-muted-foreground italic">{t.access_hidden}</p>
+            <p className="text-sm text-muted-foreground">{t.access_hidden}</p>
           ) : detail.notes ? (
             <p className="text-sm text-foreground whitespace-pre-wrap">{detail.notes}</p>
           ) : (
-            <p className="text-sm text-muted-foreground italic">
+            <p className="text-sm text-muted-foreground">
               {t.patient_profile_no_notes_yet}
             </p>
           )}
         </div>
-      </FormSection>
+      </PatientFormSection>
       {id && canEditPatientProfile && notesSheetOpen ? (
         <Suspense fallback={null}>
           <LazyPatientNotesSheet

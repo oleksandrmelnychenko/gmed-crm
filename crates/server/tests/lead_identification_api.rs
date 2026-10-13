@@ -154,7 +154,7 @@ async fn seed_document(app: &TestApp, lead_id: Option<Uuid>) -> Uuid {
 /// One signer of a signature request as the provider evidence records it.
 fn signer(role: &str, quality: &str, signed_at: DateTime<Utc>) -> Value {
     json!({
-        "email": format!("{role}.signer@example.com"),
+        "email": if role == "payer" { "viktor.zahler@example.com".to_string() } else { format!("{role}.signer@example.com") },
         "role": role,
         "signature_id": Uuid::new_v4(),
         "status": "SIGNED",
@@ -1736,7 +1736,7 @@ async fn a_minor_has_one_identification_sheet_per_legal_representative() {
             "{binding:?}"
         );
     }
-    // The payer's own sheet stays possible on the server.
+    // A paying parent uses the representative sheet; direct API must agree.
     let (status, generated) = json_request(
         &app,
         "POST",
@@ -1745,7 +1745,8 @@ async fn a_minor_has_one_identification_sheet_per_legal_representative() {
         generate(lead_id, Some("payer")),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{generated}");
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{generated}");
+    assert_eq!(generated["code"], "payer_is_representative");
 
     // An adult's sheet is the adult's own; nobody has a sheet as the adult's
     // representative.

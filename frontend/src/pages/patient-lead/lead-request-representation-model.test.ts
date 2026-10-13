@@ -92,7 +92,7 @@ const ben = person({
 describe("who the form asks for", () => {
   it("names the person who acts for an adult once both answers are given", () => {
     const answers = draftFromRepresentation(representation());
-    expect(answers).toEqual({ has_representative: "", under_guardianship: "", custody: "joint" });
+    expect(answers).toEqual({ has_representative: "", under_guardianship: "", custody: "" });
     expect(shownSlots(false, answers)).toEqual([]);
     expect(shownSlots(false, { ...answers, has_representative: "no" })).toEqual([]);
     // "Yes" asks the court-appointed question first (owner 2026-10-11) …
@@ -224,8 +224,8 @@ describe("what a change of the answers removes", () => {
     const byGuardian = representation({ has_representative: true, under_guardianship: true, representatives: [guardian] });
     const guardianAnswers = draftFromRepresentation(byGuardian);
     // Taking an answer back removes the person as well.
-    expect(removedByAnswers(byGuardian, false, { ...guardianAnswers, under_guardianship: "" })).toEqual([guardian]);
-    expect(removedByAnswers(byGuardian, false, withRepresentativeAnswer(guardianAnswers, "no"))).toEqual([guardian]);
+    expect(removedByAnswers(byGuardian, false, { ...guardianAnswers, under_guardianship: "" })).toEqual([]);
+    expect(removedByAnswers(byGuardian, false, withRepresentativeAnswer(guardianAnswers, "no"))).toEqual([]);
   });
 });
 
@@ -325,6 +325,9 @@ describe("the body of a save", () => {
       first_name: "Anna",
     });
     expect(hasChildAddress(child)).toBe(true);
+    expect(withChildAddress(draft, { ...child, city: "", street_address: " " })).toMatchObject({
+      street: "Alt", city: "Hamburg", zip: "10115", country: "DE",
+    });
     expect(hasChildAddress({ street_address: null, zip_code: " ", city: null, country: null })).toBe(false);
   });
 
@@ -379,7 +382,7 @@ describe("what is missing about the representation", () => {
     "zip",
     "city",
     "country",
-    "id_upload",
+    "id_upload", "name_latin",
     "authority_upload",
   ];
   const parent = [
@@ -394,13 +397,14 @@ describe("what is missing about the representation", () => {
     "country",
     "email",
     "phone",
-    "id_upload",
+    "id_upload", "name_latin",
   ];
 
   it("knows every key of the contract, in the order of the form", () => {
     expect(REPRESENTATION_SUBMIT_FIELDS).toEqual([
       "has_representative",
       "under_guardianship",
+      "custody",
       ...adult.map((part) => `agent_${part}`),
       ...adult.map((part) => `guardian_${part}`),
       ...parent.map((part) => `rep1_${part}`),
@@ -493,6 +497,6 @@ describe("what is missing about the representation", () => {
     ]);
     expect(submitFieldLabel(leadRequestText("en"), "agent_last_name")).toBe("Representative's details: Last name");
     expect(submitFieldLabel(leadRequestText("uk"), "rep2_phone")).toBe("2-й представник: Телефон");
-    expect(submitFieldLabel(leadRequestText("ru"), "guardian_zip")).toBe("Опекун: Почтовый индекс");
+    expect(submitFieldLabel(leadRequestText("ru"), "guardian_zip")).toBe("Представитель, назначенный судом (Betreuer): Почтовый индекс");
   });
 });

@@ -98,7 +98,7 @@ describe("LeadPayerLinkPanel", () => {
     expect(answered).toContain("Angaben eingegangen am 06.10.2026 12:30");
     expect(answered).toContain("Die Angaben sind eingegangen: Für einen neuen Link „Zur Korrektur öffnen“ wählen");
     const blocked = render(state({ can_send: false, blocked_reason: "request_not_submitted" }));
-    expect(blocked).toContain("Ссылку можно отправить, когда пациент отправит заявку в кабинете");
+    expect(blocked).toContain("Пациенту нужно отправить актуальную заявку из кабинета. После изменения плательщика или согласия заявку нужно отправить повторно");
     expect(blocked).not.toContain('data-highlight="true"');
     const noMail = render(state({ can_send: false, mail_available: false }));
     expect(noMail).toContain("Отправка e-mail не настроена. Mittaro подключается в разделе «API-подключения» → «E-Mail».");

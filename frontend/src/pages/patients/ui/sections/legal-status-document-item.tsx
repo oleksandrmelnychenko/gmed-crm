@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, Clock3, FilePlus2, ShieldOff } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { uiText, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
@@ -19,24 +19,24 @@ const STATUS_KEYS: Record<LegalStatusEvidenceState, string> = {
   missing: "patient_legal_doc_status_missing",
 };
 
-const TONES: Record<LegalStatusEvidenceState, { badge: string; icon: string; text: string }> = {
+const TONES: Record<LegalStatusEvidenceState, { chip: StatusChipTone; icon: string; text: string }> = {
   signed: {
-    badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    chip: "success",
     icon: "bg-emerald-50 text-emerald-700",
     text: "text-muted-foreground",
   },
   manual: {
-    badge: "border-amber-200 bg-amber-50 text-amber-700",
+    chip: "warning",
     icon: "bg-amber-50 text-amber-700",
     text: "font-medium text-amber-700",
   },
   revoked: {
-    badge: "border-rose-200 bg-rose-50 text-rose-700",
+    chip: "error",
     icon: "bg-rose-50 text-rose-700",
     text: "font-medium text-rose-700",
   },
   missing: {
-    badge: "border-amber-200 bg-amber-50 text-amber-700",
+    chip: "warning",
     icon: "bg-amber-50 text-amber-700",
     text: "text-muted-foreground",
   },
@@ -92,7 +92,7 @@ export function LegalStatusDocumentItem({
     <article
       data-testid={`legal-status-document-${kind}`}
       data-state={state}
-      className="grid min-w-0 gap-2 border-b border-border/60 bg-white px-3 py-2.5 transition-colors last:border-b-0 hover:bg-muted/20 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center"
+      className="grid min-w-0 gap-2 border-b border-border/60 bg-card px-4 py-3 last:border-b-0 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center"
     >
       <div className={cn("hidden size-7 shrink-0 items-center justify-center rounded-md sm:flex", tone.icon)}>
         <Icon className="size-4" />
@@ -116,9 +116,9 @@ export function LegalStatusDocumentItem({
         ) : null}
       </div>
       <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
-        <Badge variant="outline" className={cn("h-6 rounded-full px-2 text-[10px]", tone.badge)}>
+        <StatusChip tone={tone.chip}>
           {text(STATUS_KEYS[state])}
-        </Badge>
+        </StatusChip>
         {showActions && pendingDocument && !pendingDocument.signaturePending ? (
           <PaperSignatureConfirmButton
             documentId={pendingDocument.id}

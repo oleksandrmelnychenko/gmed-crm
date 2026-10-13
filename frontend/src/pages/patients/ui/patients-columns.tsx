@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronRight, Mail } from "lucide-react";
+import { AlertTriangle, Mail } from "lucide-react";
 import type { ReactNode } from "react";
 
 import {
@@ -7,6 +7,7 @@ import {
   normalizeFunctionalLabel,
 } from "./shared/patient-form-primitives";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
+import { RowExpandButton } from "@/components/data-table/row-expand-button";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import {
   appDateKey,
@@ -241,28 +242,18 @@ export function buildPatientColumns(
         const de = expansion?.lang === "de";
         const dot = portalDotState(p);
         return (
-          <div className="flex h-full min-w-0 items-center justify-start gap-1 overflow-hidden">
+          <div className="flex h-full min-w-0 items-center justify-start gap-2 overflow-hidden">
             {expansion ? (
-              <button
-                type="button"
-                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-expanded={expanded}
-                aria-label={
+              <RowExpandButton
+                expanded={expanded}
+                label={
                   de
                     ? expanded ? "Portalzugang ausblenden" : "Portalzugang anzeigen"
                     : expanded ? "Скрыть доступ пациента" : "Показать доступ пациента"
                 }
-                data-testid={`patient-expand-${p.id}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  expansion.toggle(p.id);
-                }}
-              >
-                <ChevronRight
-                  className={cn("size-3.5 transition-transform", expanded && "rotate-90")}
-                  aria-hidden="true"
-                />
-              </button>
+                testId={`patient-expand-${p.id}`}
+                onToggle={() => expansion.toggle(p.id)}
+              />
             ) : null}
             <div className="line-clamp-2 min-w-0 break-words text-left font-mono text-xs font-normal text-foreground">
               {patientDisplayName(p)}

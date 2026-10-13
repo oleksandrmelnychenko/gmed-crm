@@ -23,7 +23,7 @@ import type {
   WorkflowChecklistResponse,
 } from "../../model/detail-tab-types";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
-import { FormSection } from "../shared/patient-form-primitives";
+import { PatientFormSection as FormSection } from "../shared/patient-form-primitives";
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -260,6 +260,7 @@ function WorkflowCreateSheet({
 }: WorkflowCreateSheetProps) {
   return (
     <PatientSheetScaffold
+      presentation="dialog"
       open={createOpen}
       onOpenChange={onOpenChange}
       title={l("patients_add_workflow_item")}

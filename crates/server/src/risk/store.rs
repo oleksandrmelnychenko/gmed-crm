@@ -214,7 +214,8 @@ pub struct BlockAnswers {
     /// The representatives' keys of block G (adult representation).
     pub representation_missing: Vec<String>,
     pub route_by: Option<PaymentRouteBy>,
-    pub answered_by_payer: bool,
+    /// The payer is a legal representative, independent of the current viewer.
+    pub paying_parent: bool,
     pub statement_submitted: bool,
     pub statement_legal_form: Option<String>,
     pub statement_payment_reason: Option<String>,
@@ -233,11 +234,12 @@ pub async fn load_block_answers(
     caller: Option<Uuid>,
 ) -> Result<BlockAnswers, sqlx::Error> {
     let payer = lead_payer::load_declaration(conn, lead_id).await?;
-    let answered_by_payer =
-        crate::routes::lead_payer_link::answered_by_payer(conn, lead_id, payer.as_ref()).await?;
     let representation = lead_representatives::load(conn, lead_id)
         .await?
         .unwrap_or_default();
+    let paying_parent =
+        lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
+            .is_some();
     let route_by = crate::routes::lead_portal_intake::payment_route_by(
         payer.as_ref(),
         &representation.representation,
@@ -336,7 +338,7 @@ pub async fn load_block_answers(
         identity_entered_at: entered_at,
         representation_missing,
         route_by: Some(route_by),
-        answered_by_payer,
+        paying_parent,
         statement_submitted: row
             .try_get::<Option<DateTime<Utc>>, _>("statement_submitted_at")
             .ok()
@@ -362,7 +364,7 @@ const PAYMENT_ROUTE_KEYS: [&str; 7] = [
 fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<String>) {
     let payer = answers.payer.as_ref();
     let third_party = payer.is_some_and(Declaration::is_third_party);
-    let paying_parent = answers.route_by == Some(PaymentRouteBy::Guardian);
+    let paying_parent = answers.paying_parent;
     let mut missing: Vec<&str> = Vec::new();
     let link_submit = |missing: &mut Vec<&str>| {
         if !answers.statement_submitted {
@@ -371,17 +373,8 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
     };
     let party = match block {
         "A" => {
-            if third_party {
-                if !paying_parent && !answers.answered_by_payer {
-                    if payer.is_none_or(|payer| payer.payer_funds_source_stated.is_none()) {
-                        missing.push("payer_funds_source");
-                    }
-                    if blank(&payer.and_then(|payer| payer.payer_funds_description_stated.clone()))
-                    {
-                        missing.push("payer_funds_description");
-                    }
-                }
-            } else {
+            // A third-party payer states funds on the own payer link.
+            if !third_party {
                 if payer.is_none_or(|payer| payer.self_funds_source.is_none()) {
                     missing.push("funds_source");
                 }
@@ -469,7 +462,7 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
         "H" => {
             // The lead corrected both answers to "no" (QA 2026-10-10): nothing to
             // detail; the fired T14 stays for staff.
-            if answers.pep_self_answer == Some(false) && answers.pep_related_answer == Some(false) {
+            if answers.pep_self_answer != Some(true) && answers.pep_related_answer != Some(true) {
                 return (PARTY_CABINET, Vec::new());
             }
             for (key, value) in [
@@ -495,7 +488,7 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
         }
         "J" => {
             // Corrected to "no" (QA 2026-10-10): nothing to detail; T15 stays for staff.
-            if answers.sanctions_links_answer == Some(false) {
+            if answers.sanctions_links_answer != Some(true) {
                 return (PARTY_CABINET, Vec::new());
             }
             for (key, value) in [
@@ -588,6 +581,18 @@ pub fn block_states(
         let open = match block {
             "G" => requested || (sticky("T13") && !missing.is_empty()),
             "I" => requested || (sticky("T12") && !missing.is_empty()),
+            "H" => {
+                requested
+                    || triggers.iter().any(|trigger| {
+                        trigger.key == "T14" && trigger.subject == super::SUBJECT_PATIENT
+                    })
+            }
+            "J" => {
+                requested
+                    || triggers.iter().any(|trigger| {
+                        trigger.key == "T15" && trigger.subject == super::SUBJECT_PATIENT
+                    })
+            }
             // The enhanced check (level 2 or 3) asks the birth data and the legal
             // questions; the base form does not. A (source of funds, occupation,
             // sector, proof) too: the § 15 GwG check needs it whatever fired
@@ -1585,6 +1590,87 @@ mod tests {
 
     fn blocks(keys: &[&str]) -> Vec<String> {
         keys.iter().map(|key| key.to_string()).collect()
+    }
+
+    #[test]
+    fn parent_requirements_do_not_depend_on_the_viewing_login() {
+        let payer = Declaration {
+            payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.into(),
+            ..Declaration::default()
+        };
+        let parent = BlockAnswers {
+            payer: Some(payer),
+            paying_parent: true,
+            sector: Some("IT".into()),
+            route_by: Some(PaymentRouteBy::Patient),
+            ..Default::default()
+        };
+        assert!(block_missing("A", &parent).1.is_empty());
+        assert!(
+            !block_missing("B", &parent)
+                .1
+                .contains(&"payment_background".to_string())
+        );
+        let other = BlockAnswers {
+            paying_parent: false,
+            ..parent
+        };
+        assert_eq!(block_missing("A", &other).1, vec!["occupation"]);
+    }
+
+    #[test]
+    fn legal_details_require_a_positive_answer() {
+        let empty = BlockAnswers::default();
+        assert!(block_missing("H", &empty).1.is_empty());
+        assert!(block_missing("J", &empty).1.is_empty());
+        let yes = BlockAnswers {
+            pep_self_answer: Some(true),
+            sanctions_links_answer: Some(true),
+            ..empty
+        };
+        assert!(!block_missing("H", &yes).1.is_empty());
+        assert!(!block_missing("J", &yes).1.is_empty());
+    }
+
+    #[test]
+    fn patient_legal_details_open_even_when_automatic_level_two_blocks_are_off() {
+        let now = Utc::now();
+        let trigger = |key: &str, subject: &str| Sticky {
+            key: key.into(),
+            subject: subject.into(),
+            variant: None,
+            points: 1,
+            knockout: false,
+            first_fired_at: now,
+            last_fired_at: now,
+            active: true,
+            inactive_since: None,
+        };
+        let config = RiskConfig {
+            level_2_blocks_automatic: false,
+            ..RiskConfig::default()
+        };
+        let answers = BlockAnswers {
+            pep_self_answer: Some(true),
+            sanctions_links_answer: Some(true),
+            ..Default::default()
+        };
+        let states = block_states(
+            &[trigger("T14", "patient"), trigger("T15", "patient")],
+            1,
+            &[],
+            &config,
+            &answers,
+        );
+        assert!(states["H"].open && states["J"].open);
+        let payer = block_states(
+            &[trigger("T14", "payer"), trigger("T15", "payer")],
+            1,
+            &[],
+            &config,
+            &answers,
+        );
+        assert!(!payer["H"].open && !payer["J"].open);
     }
 
     #[test]

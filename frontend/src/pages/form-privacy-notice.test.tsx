@@ -10,7 +10,7 @@ const auth = vi.hoisted(() => ({ user: null as null | { role: string; portal_mod
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: auth.user }) }));
 
 describe("inquiry privacy notice", () => {
-  it.each(["de", "ru"] as const)("renders all 14 sections in %s with the configured agency contacts", (lang) => {
+  it.each(["de", "en", "uk", "ru"] as const)("renders all 14 sections in %s with the configured agency contacts", (lang) => {
     const html = renderToStaticMarkup(<FormPrivacyNotice lang={lang} agency={{
       agency_name: "Testagentur",
       agency_address: "Teststraße 1",
@@ -19,7 +19,7 @@ describe("inquiry privacy notice", () => {
       agency_data_system_name: "Test CRM",
     }} />);
     expect(FORM_PRIVACY_SECTIONS[lang].map((section) => section.number)).toEqual(Array.from({ length: 14 }, (_, index) => index + 1));
-    expect(html).toContain('data-version="2026-10-12"');
+    expect(html).toContain('data-version="2026-10-13"');
     expect(html).toContain("Testagentur");
     expect(html).toContain("Test CRM");
     expect(html).toContain("privacy@example.com");
@@ -31,7 +31,7 @@ describe("inquiry privacy notice", () => {
     expect(html).toContain("Skribble");
     expect(html).toContain("180");
     expect(html).toContain("14");
-    expect(html).toContain("12.10.2026");
+    expect(html).toContain("13.10.2026");
     // The lists in the reference remain semantic lists: data, purposes,
     // processors, other recipients, and the five retention cases.
     expect(html.match(/<ul\b/g)).toHaveLength(5);
@@ -40,6 +40,16 @@ describe("inquiry privacy notice", () => {
       .filter((block) => block.kind === "list").map((block) => block.items.length)).toEqual([2, 4]);
     expect(FORM_PRIVACY_SECTIONS[lang].find((section) => section.number === 9)?.blocks
       .find((block) => block.kind === "list")?.items).toHaveLength(5);
+  });
+
+  it.each(["de", "en", "uk", "ru"] as const)("opens the complete %s notice from a localized cabinet link", (lang) => {
+    auth.user = { role: "patient", portal_mode: "lead" };
+    const html = renderToStaticMarkup(<MemoryRouter initialEntries={[`/legal?lang=${lang}#privacy`]}><LegalNoticePage /></MemoryRouter>);
+    expect(html).toContain(`lang="${lang}"`);
+    expect(html).toContain(FORM_PRIVACY_SECTIONS[lang][0].title);
+    expect(html).toContain(FORM_PRIVACY_SECTIONS[lang][13].title);
+    if (lang !== "de") expect(html).not.toContain(FORM_PRIVACY_SECTIONS.de[4].title);
+    expect(html).toContain({ de: "Impressum", en: "Legal notice", uk: "Юридична інформація", ru: "Impressum" }[lang]);
   });
 
   it("makes the form notice available to leads and before signing in", () => {

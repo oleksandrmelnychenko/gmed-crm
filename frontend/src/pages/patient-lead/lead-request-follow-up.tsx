@@ -109,14 +109,7 @@ export function FollowUpStep({
   total: number;
 }) {
   const guardian = request.access_kind === "guardian";
-  // A lead who corrected "yes" to "no" has nothing to detail (QA 2026-10-10): the
-  // server stops asking H / J then, the details block goes too.
-  const legal = request.identification;
-  const blocks = openFollowUpBlocks(request).filter(
-    (block) =>
-      !(block === "H" && legal?.pep_self === false && legal?.pep_related === false) &&
-      !(block === "J" && legal?.sanctions_links === false),
-  );
+  const blocks = openFollowUpBlocks(request);
   const [states, setStates] = useState<Record<Part, SaveState>>({
     identification: "idle",
     funds: "idle",
@@ -240,6 +233,7 @@ export function FollowUpStep({
 
   return (
     <section className="space-y-6" data-testid="lead-request-follow-up">
+      <p className="text-sm text-muted-foreground">{text.followUpIntro}</p>
       {answered && answeredAt ? (
         <p
           role="status"
@@ -298,7 +292,7 @@ export function FollowUpStep({
           <Button
             type="button"
             className="h-9 gap-2"
-            disabled={sending}
+            disabled={sending || answered || Object.values(states).some((state) => state === "saving")}
             onClick={() => void send()}
             data-testid="lead-request-follow-up-submit"
           >
@@ -526,17 +520,20 @@ function RelationshipBlock({
   onChange: (request: LeadRequest) => void;
 }) {
   const leadId = request.lead_id;
+  const missing = followUpMissing(request, "B");
+  const asks = (key: "payment_background" | "relationship_since") => missing.includes(key) || Boolean(request.identification?.[key]);
+  if (request.payer?.payer_kind !== "third_party") return <p className="text-sm text-muted-foreground">{{ de: "Hier sind keine weiteren Angaben erforderlich.", en: "No additional information is needed here.", ru: "Здесь не нужны дополнительные сведения.", uk: "Тут додаткові відомості не потрібні." }[lang] ?? "No additional information is needed here."}</p>;
   return (
     <div className="space-y-4">
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-        <IdentificationFormField form={form} field="payment_background" text={text} required className={FULL_ROW}>
+        {asks("payment_background") ? <IdentificationFormField form={form} field="payment_background" text={text} required={missing.includes("payment_background")} className={FULL_ROW}>
           <IdentificationTextArea form={form} field="payment_background" />
-        </IdentificationFormField>
-        <IdentificationFormField form={form} field="relationship_since" text={text} required>
+        </IdentificationFormField> : null}
+        {asks("relationship_since") ? <IdentificationFormField form={form} field="relationship_since" text={text} required={missing.includes("relationship_since")}>
           <IdentificationTextInput form={form} field="relationship_since" maxLength={100} />
-        </IdentificationFormField>
+        </IdentificationFormField> : null}
       </div>
-      {request.follow_up?.relationship_proof_documents !== undefined ? (
+      {request.follow_up?.relationship_proof_documents !== undefined && (missing.includes("relationship_proof_upload") || request.follow_up.relationship_proof_documents.length > 0) ? (
         <FileUploadField
           id="lead-request-relationship-proof"
           label={text.relationshipProofTitle}

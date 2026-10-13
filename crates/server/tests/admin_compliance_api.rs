@@ -2989,3 +2989,33 @@ async fn ceo_assistant_reads_the_dsgvo_register_and_changes_nothing() {
             .unwrap();
     assert_eq!(open_requests, 1);
 }
+
+#[tokio::test]
+async fn erasure_cleans_source_lead_portal_choices_mail_uploads_and_guardians() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("source-lead-cleanup");
+    let patient = seed_patient(&pool, admin_id, &tag).await;
+    let guardian = seed_user(&pool, &format!("{tag}-parent"), "patient").await;
+    let pm = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient, pm, admin_id).await;
+    seed_patient_assignment(&pool, patient, guardian, admin_id).await;
+    let lead:Uuid=sqlx::query_scalar("INSERT INTO leads(first_name,last_name,date_of_birth,qualification_status,converted_patient_id,created_by) VALUES('Synthetic','Child','2015-01-01','converted',$1,$2) RETURNING id").bind(patient).bind(pm).fetch_one(&pool).await.unwrap();
+    sqlx::query("INSERT INTO lead_portal_access(lead_id,user_id,kind,trusted_contact_id,created_by) VALUES($1,$2,'guardian',$3,$4)").bind(lead).bind(guardian).bind(Uuid::new_v4()).bind(pm).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO consent_form_choices(template_id,lead_id,patient_id,choices,recipients,chosen_by,access_kind,source,language,text_version) VALUES('privacy_consents',$1,$2,'{}','[{\"name\":\"Private Recipient\"}]',$3,'guardian','lead_portal','de','2026-10-12')").bind(lead).bind(patient).bind(guardian).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO portal_login_emails(lead_id,user_id,recipient,language,status,sent_by) VALUES($1,$2,'private@example.com','de','failed',$3)").bind(lead).bind(guardian).bind(pm).execute(&pool).await.unwrap();
+    let doc = Uuid::new_v4();
+    sqlx::query("INSERT INTO documents(id,version_root_document_id,lead_id,auto_name,art,category,status,visibility,is_medical,uploaded_by) VALUES($3,$3,$1,'Private','report','medical','active','internal',true,$2)")
+        .bind(lead).bind(guardian).bind(doc).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO lead_portal_uploads(document_id,lead_id,uploaded_by,access_kind,kind) VALUES($1,$2,$3,'guardian','medical')").bind(doc).bind(lead).bind(guardian).execute(&pool).await.unwrap();
+    erase_through_register(&app, patient, &auth_header_for(admin_id, "ceo")).await;
+    let counts:(i64,i64,i64,i64)=sqlx::query_as("SELECT (SELECT count(*) FROM consent_form_choices WHERE lead_id=$1),(SELECT count(*) FROM portal_login_emails WHERE lead_id=$1),(SELECT count(*) FROM lead_portal_uploads WHERE lead_id=$1),(SELECT count(*) FROM lead_portal_access WHERE lead_id=$1 AND revoked_at IS NULL)").bind(lead).fetch_one(&pool).await.unwrap();
+    assert_eq!(counts, (0, 0, 0, 0));
+    let active: bool = sqlx::query_scalar("SELECT is_active FROM users WHERE id=$1")
+        .bind(guardian)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(!active);
+}

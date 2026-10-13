@@ -120,6 +120,7 @@ function useBillingForm({
   // A-08a: re-ticking "the recipient is the payer" wiped the payment method).
   const lastRouteByRef = useRef<PaymentRouteBy>(billing.payment_route_by);
   useEffect(() => {
+    setRouteRefused(false);
     const incoming = draftFromBilling(billing);
     const changed = changedOnServer(savedRef.current, incoming);
     if (changed.length > 0) {
@@ -200,7 +201,7 @@ function useBillingForm({
         else if (saved || wasFailed || routeTold) onSaveState("saved");
       });
     },
-    [enqueue, onChange, onSaveState, request.lead_id],
+    [billing.payer_declared, billing.payment_route_by, enqueue, onChange, onSaveState, request.lead_id],
   );
 
   useAutosave(draft, save);
@@ -308,6 +309,7 @@ export function BillingSections({
         {...control("payment_method")}
         className={selectClass}
         value={draft.payment_method}
+        missingValueLabel={draft.payment_method === "crypto" ? text.paymentMethodOptions.crypto : undefined}
         onChange={(event) => {
           const method = event.target.value;
           // The account holder is offered only where the account is asked (block C):
@@ -417,6 +419,10 @@ export function BillingSections({
             {paymentMethodField}
           </div>
         </Section>
+      ) : null}
+
+      {part === "method" && !asksPaymentRoute(context.routeBy) ? (
+        <Section title={text.sectionPaymentRoute}><p role="note" className="text-sm text-muted-foreground" data-testid="lead-request-payment-route-by-payer">{text.paymentRouteByPayer}</p></Section>
       ) : null}
 
       {part === "route" ? (

@@ -34,6 +34,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Dialog } from "@/components/ui/dialog";
+import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
 import { DataTable } from "@/components/data-table/data-table";
@@ -2421,17 +2423,16 @@ function useStaffServicesPageContent() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={createOpen} onOpenChange={(open) => (open ? setCreateOpen(true) : closeCreateSheet())}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[760px]">
-          <form onSubmit={handleCreateService} className="flex h-full min-h-0 flex-col">
-            <AdminSheetScaffold
+      <Dialog open={createOpen} onOpenChange={(open) => (open ? setCreateOpen(true) : closeCreateSheet())}>
+            <AdminDialogScaffold
+              onSubmit={handleCreateService}
+              maxWidthClassName="sm:max-w-[760px]"
               title={t.staff_services_create_title}
               description={
                 selectedPatient
                   ? patientOptionLabel(selectedPatient)
                   : t.staff_services_create_description
               }
-              bodyClassName="space-y-4 px-5 py-4"
               footer={
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
@@ -2450,7 +2451,7 @@ function useStaffServicesPageContent() {
                   </div>
                 ) : null}
 
-                <Section title={t.staff_services_create_section_service}>
+                <AdminFormSection title={t.staff_services_create_section_service}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
@@ -2504,9 +2505,9 @@ function useStaffServicesPageContent() {
                       className={formInputClassName}
                     />
                   </label>
-                </Section>
+                </AdminFormSection>
 
-                <Section title={t.staff_services_create_section_assignment}>
+                <AdminFormSection title={t.staff_services_create_section_assignment}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
@@ -2531,9 +2532,9 @@ function useStaffServicesPageContent() {
                       </NativeComboboxSelect>
                     </label>
                   </div>
-                </Section>
+                </AdminFormSection>
 
-                <Section title={t.staff_services_create_section_schedule}>
+                <AdminFormSection title={t.staff_services_create_section_schedule}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
@@ -2562,9 +2563,9 @@ function useStaffServicesPageContent() {
                       />
                     </label>
                   </div>
-                </Section>
+                </AdminFormSection>
 
-                <Section title={t.staff_services_create_section_finance}>
+                <AdminFormSection title={t.staff_services_create_section_finance}>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <label className="space-y-1.5 text-sm sm:col-span-3">
                       <span className="text-xs font-medium text-muted-foreground">
@@ -2739,9 +2740,9 @@ function useStaffServicesPageContent() {
                       </div>
                     ) : null}
                   </div>
-                </Section>
+                </AdminFormSection>
 
-                <Section title={t.staff_services_create_section_vendor_notes}>
+                <AdminFormSection title={t.staff_services_create_section_vendor_notes}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="space-y-1.5 text-sm">
                       <span className="text-xs font-medium text-muted-foreground">
@@ -2814,12 +2815,10 @@ function useStaffServicesPageContent() {
                       />
                     </label>
                   </div>
-                </Section>
+                </AdminFormSection>
               </div>
-            </AdminSheetScaffold>
-          </form>
-        </SheetContent>
-      </Sheet>
+            </AdminDialogScaffold>
+      </Dialog>
     </div>
   );
 }

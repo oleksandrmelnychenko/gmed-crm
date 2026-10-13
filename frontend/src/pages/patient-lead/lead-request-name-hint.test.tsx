@@ -69,7 +69,7 @@ describe("passport spelling hint", () => {
   });
 
   it("uses the cabinet language even when Cyrillic was entered in an English form", () => {
-    expect(render(["Анна", "Muster", ""], "en")).toContain("exactly as in your passport");
+    expect(render(["Анна", "Muster", ""], "en")).toContain("exactly as in the passport");
   });
 
   it("keeps the section hint unchanged and attaches the correction only to the invalid field", () => {

@@ -581,7 +581,7 @@ test("admin routes stay on the patients-style shell", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Neuer Kanal/i })).toBeVisible();
   await page.getByRole("button", { name: /Neuer Kanal/i }).click();
   await expect(
-    page.locator("[data-slot='sheet-title']", { hasText: /Neuer Kanal/i }),
+    page.getByRole("dialog", { name: /Neuer Kanal/i }),
   ).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-notifications-sheet.png", fullPage: true });
   await page.keyboard.press("Escape");
@@ -599,7 +599,7 @@ test("admin routes stay on the patients-style shell", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Wartungsmodus/i }).first()).toBeVisible();
   await page.getByRole("button", { name: /Wartungsmodus/i }).first().click();
   await expect(
-    page.locator("[data-slot='sheet-title']", { hasText: /Wartungsmodus/i }),
+    page.getByRole("dialog", { name: /Wartungsmodus/i }),
   ).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-security-sheet.png", fullPage: true });
   await page.keyboard.press("Escape");
@@ -608,7 +608,7 @@ test("admin routes stay on the patients-style shell", async ({ page }) => {
   await expect(page.locator("h1", { hasText: "Systemeinstellungen" })).toBeVisible();
   await page.getByRole("button", { name: /Token-Konfiguration/i }).first().click();
   await expect(
-    page.locator("[data-slot='sheet-title']", { hasText: /Token-Konfiguration/i }),
+    page.getByRole("dialog", { name: /Token-Konfiguration/i }),
   ).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-settings-sheet.png", fullPage: true });
 
@@ -636,3 +636,65 @@ test("admin routes stay on the patients-style shell", async ({ page }) => {
   await expect(page.getByRole("table").getByText("PT-001 - Anna Muster")).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-compliance.png", fullPage: true });
 });
+
+
+for (const width of [1440, 390]) {
+  test(`settings and notification workspaces stay organized at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const assertNoPageOverflow = async () => {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    };
+    const assertModal = async () => {
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      const bounds = await dialog.boundingBox();
+      expect(bounds?.width).toBeLessThanOrEqual(width - 16);
+      expect(bounds?.x).toBeGreaterThanOrEqual(0);
+      await expect(page.locator('[data-slot="dialog-overlay"]')).toHaveCSS("background-color", /^(rgba\(0, 0, 0, 0\.4\)|oklab\(0 0 0 \/ 0\.4\))$/);
+    };
+
+    await page.goto("/admin/settings");
+    await expect(page.getByRole("heading", { name: "Systemeinstellungen", exact: true })).toBeVisible();
+    const configuration = page.getByRole("tab", { name: "Konfiguration", exact: true });
+    await expect(configuration).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("button", { name: /Token-Konfiguration/ }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Sanktionsliste/ })).toHaveCount(0);
+    await assertNoPageOverflow();
+    await page.screenshot({ path: `../.tmp/release-audit/admin-settings-${width}.png`, fullPage: true });
+    await page.getByRole("button", { name: /Token-Konfiguration/ }).first().click();
+    await assertModal();
+    await expect(page.locator("#setting-access_token_minutes")).toHaveValue("15");
+    await expect(page.getByRole("dialog").getByRole("button", { name: "Speichern", exact: true })).toBeDisabled();
+    await page.screenshot({ path: `../.tmp/release-audit/admin-settings-dialog-${width}.png`, fullPage: true });
+    await page.keyboard.press("Escape");
+    await page.getByRole("tab", { name: /Aktive Sitzungen/ }).click();
+    await expect(page.getByText("admin@gmed.de", { exact: true }).filter({ visible: true })).toBeVisible();
+    await page.getByRole("tab", { name: /Ausstehende Anmeldungen/ }).click();
+    await expect(page.getByText("irina@gmed.de", { exact: true }).filter({ visible: true })).toBeVisible();
+    await assertNoPageOverflow();
+
+    await page.goto("/admin/notifications");
+    await expect(page.getByRole("heading", { name: "Benachrichtigungskanäle", exact: true })).toBeVisible();
+    await expect(page.getByText("Primary SMTP", { exact: true }).filter({ visible: true })).toBeVisible();
+    await assertNoPageOverflow();
+    await page.screenshot({ path: `../.tmp/release-audit/admin-notifications-${width}.png`, fullPage: true });
+    await page.locator("#notification-search").fill("Primary");
+    await expect(page.getByText("Ops Webhook", { exact: true }).filter({ visible: true })).toHaveCount(0);
+    await expect(page.getByText("Primary SMTP", { exact: true }).filter({ visible: true })).toBeVisible();
+    await page.getByRole("button", { name: "Zurücksetzen", exact: true }).click();
+    await expect(page.getByText("Ops Webhook", { exact: true }).filter({ visible: true })).toBeVisible();
+    await page.getByText("Ops Webhook", { exact: true }).filter({ visible: true }).click();
+    await assertModal();
+    await expect(page.getByRole("dialog").locator("pre")).toContainText('"secret": "masked"');
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Neuer Kanal", exact: true }).click();
+    await assertModal();
+    await page.screenshot({ path: `../.tmp/release-audit/admin-notification-create-${width}.png`, fullPage: true });
+    await page.locator("#channel-name").fill("Mock channel");
+    await page.locator("#channel-config").fill("[]");
+    await page.getByRole("dialog").getByRole("button", { name: "Anlegen", exact: true }).click();
+    await expect(page.getByRole("dialog").getByText("Geben Sie valides JSON ein oder lassen Sie das Feld leer.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog")).toBeVisible();
+  });
+}

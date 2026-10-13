@@ -168,6 +168,15 @@ test("choosing a patient loads it at once; requests and revocations go to that p
   await expect(page.getByTestId("compliance-active-patient")).toHaveText(LABEL_A);
   await expect(page.getByText(`История запросов приватности — ${LABEL_A}`)).toBeVisible();
 
+  // Registries scroll inside their cards; the surrounding page fits a phone.
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 4400 : 2300 });
+    const workspace = page.getByTestId("compliance-workspace");
+    expect(await workspace.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    await workspace.screenshot({ path: `../.tmp/release-audit/compliance-${width}.png`, animations: "disabled" });
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+
   // Pick patient B (the old bug: nothing loaded until "Поиск..." was pressed).
   await chooseComboboxOption(page, page.getByRole("combobox", { name: "Пациент", exact: true }), LABEL_B);
   await expect(page.getByTestId("compliance-active-patient")).toHaveText(LABEL_B);
@@ -185,6 +194,13 @@ test("choosing a patient loads it at once; requests and revocations go to that p
   // The create dialog names patient B and files the request for B.
   await create.click();
   await expect(page.getByTestId("privacy-request-dialog-patient")).toContainText(LABEL_B);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const dialog = page.getByRole("dialog");
+    expect(await dialog.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: `../.tmp/release-audit/compliance-create-${width}.png`, animations: "disabled" });
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await chooseComboboxOption(page, page.getByRole("combobox", { name: "Тип запроса" }), "Исправление данных (ст. 16)");
   await chooseComboboxOption(page, page.getByRole("combobox", { name: "Источник запроса" }), /Пациент обратился сам/);
   await page.getByRole("dialog").getByRole("button", { name: "Создать запрос" }).click();

@@ -50,6 +50,7 @@ export type CaseItemListProps<T> = {
   sheetTitle: { create: string; edit: string };
   sheetDescription?: string;
   sheetWidth?: "default" | "wide";
+  editorPresentation?: "sheet" | "dialog";
   emptyTitle: string;
   emptyHint?: string;
   addFirstLabel: string;
@@ -88,6 +89,7 @@ export function CaseItemList<T>({
   sheetTitle,
   sheetDescription,
   sheetWidth = "default",
+  editorPresentation = "sheet",
   emptyTitle,
   emptyHint,
   addFirstLabel,
@@ -276,6 +278,7 @@ export function CaseItemList<T>({
           onSubmit={handleSubmit}
           onDelete={sheet.mode === "edit" ? handleDelete : undefined}
           width={sheetWidth}
+          presentation={editorPresentation}
         >
           {formContent({
             form,
@@ -375,6 +378,7 @@ export function CaseItemList<T>({
         onSubmit={handleSubmit}
         onDelete={sheet.mode === "edit" ? handleDelete : undefined}
         width={sheetWidth}
+          presentation={editorPresentation}
       >
         {formContent({
           form,

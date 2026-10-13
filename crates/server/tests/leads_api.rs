@@ -7324,3 +7324,91 @@ async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_a
     );
     assert_eq!(summary["invoice_recipient"]["source"], "default_payer");
 }
+
+#[tokio::test]
+async fn minor_conversion_explicitly_links_both_guardians_and_never_the_child_login() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead = seed_minor_lead_with_parents(&app, "anna.muster@example.com", anna, ben, None).await;
+    let child = seed_user(pool, "converted-child", "patient").await;
+    sqlx::query("UPDATE leads SET portal_user_id=$2 WHERE id=$1")
+        .bind(lead)
+        .bind(child)
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut parents = Vec::new();
+    for (contact, email, name) in [
+        (anna, "anna.muster@example.com", "Anna Muster"),
+        (ben, "ben.muster@example.com", "Ben Muster"),
+    ] {
+        let user: Uuid=sqlx::query_scalar("INSERT INTO users(email,password_hash,name,role) VALUES($1,'synthetic',$2,'patient') RETURNING id")
+            .bind(email).bind(name).fetch_one(pool).await.unwrap();
+        sqlx::query("INSERT INTO lead_portal_access(lead_id,user_id,kind,trusted_contact_id,created_by) VALUES($1,$2,'guardian',$3,$4)")
+            .bind(lead).bind(user).bind(contact).bind(app.patient_manager_id).execute(pool).await.unwrap();
+        parents.push(user);
+    }
+    let artifacts = seed_complete_lead_onboarding(&app, lead).await;
+    declare_mother_as_payer_and_sign(&app, lead, artifacts.order_id).await;
+    let patient = convert_ready_lead(&app, lead).await;
+    for user in &parents {
+        let assignments: i64=sqlx::query_scalar("SELECT count(*) FROM patient_assignments WHERE patient_id=$1 AND user_id=$2 AND revoked_at IS NULL")
+            .bind(patient).bind(user).fetch_one(pool).await.unwrap();
+        assert_eq!(assignments, 1);
+        let token = format!(
+            "Bearer {}",
+            jwt::issue_access_token(TEST_SECRET, *user, "patient", Uuid::new_v4()).unwrap()
+        );
+        let (status, me) = json_request(&app, "GET", "/api/v1/me/export", &token, None).await;
+        assert_eq!(status, StatusCode::OK, "{me}");
+        assert_eq!(me["patient"]["id"], json!(patient), "{me}");
+        let (status, refused) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/me/lead-requests/{lead}/personal-data"),
+            &token,
+            Some(json!({"city":"Closed lead"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
+    }
+    let child_links: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM patient_assignments WHERE user_id=$1")
+            .bind(child)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(child_links, 0);
+    // A matching email must not implicitly grant access to a historical child login.
+    sqlx::query("UPDATE patients SET email=(SELECT email FROM users WHERE id=$2) WHERE id=$1")
+        .bind(patient)
+        .bind(child)
+        .execute(pool)
+        .await
+        .unwrap();
+    let token = format!(
+        "Bearer {}",
+        jwt::issue_access_token(TEST_SECRET, child, "patient", Uuid::new_v4()).unwrap()
+    );
+    let (status, refused) = json_request(&app, "GET", "/api/v1/me/export", &token, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
+    let active: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_portal_access WHERE lead_id=$1 AND revoked_at IS NULL",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        active, 2,
+        "guardian history and intentional access retained"
+    );
+    let contexts: Vec<Value>=sqlx::query_scalar("SELECT context FROM audit_log WHERE action='link_lead_guardian_to_patient' AND entity_id=$1").bind(patient).fetch_all(pool).await.unwrap();
+    assert_eq!(contexts.len(), 2);
+    assert!(
+        contexts
+            .iter()
+            .all(|c| c["reason"] == "guardian_of_converted_minor")
+    );
+}

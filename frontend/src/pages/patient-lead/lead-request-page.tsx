@@ -9,9 +9,9 @@ import { useLang } from "@/lib/i18n";
 import { setPortalAccountLabel } from "@/lib/portal-account-label";
 import { cn } from "@/lib/utils";
 
-import { fetchMyLeadRequestList, type LeadRequest } from "./lead-request-api";
+import { LEAD_REQUEST_ACCESS_CHANGED, fetchMyLeadRequestList, type LeadRequest } from "./lead-request-api";
 import { FollowUpStep } from "./lead-request-follow-up";
-import { useRequestQueue, type RequestQueue } from "./lead-request-parts";
+import { useRequestQueue } from "./lead-request-parts";
 import { SendStep } from "./lead-request-send-step";
 import {
   BillingStep,
@@ -187,7 +187,7 @@ export function LeadRequestPage() {
           ))}
         </div>
       ) : null}
-      <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} onChange={replaceRequest} />
+      <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} onChange={replaceRequest} onAccessLost={load} />
     </LeadCabinetFrame>
   );
 }
@@ -267,20 +267,27 @@ function LeadRequestView({
   text,
   lang,
   onChange,
+  onAccessLost,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
   lang: string;
   onChange: (request: LeadRequest) => void;
+  onAccessLost: () => Promise<void>;
 }) {
   const guardian = request.access_kind === "guardian";
   const [chosenStep, setChosenStep] = useState<StepId>(() => initialStep(request));
   // One queue for the writes of all steps: the last answer shown is the newest state.
-  const enqueue: RequestQueue = useRequestQueue();
+  const enqueue = useRequestQueue();
+  useEffect(() => {
+    const reload = () => { void onAccessLost(); };
+    window.addEventListener(LEAD_REQUEST_ACCESS_CHANGED, reload);
+    return () => window.removeEventListener(LEAD_REQUEST_ACCESS_CHANGED, reload);
+  }, [onAccessLost]);
   const deadline = request.retention_deadline_at ? formatAppDate(request.retention_deadline_at) : "";
   const steps = visibleSteps(request);
   // "Ergänzende Angaben" exists only while the server opened blocks.
-  const step: StepId = steps.includes(chosenStep) ? chosenStep : "person";
+  const step: StepId = steps.includes(chosenStep) ? chosenStep : "send";
   const missing = missingByStep(request);
   const position = steps.indexOf(step);
   const topRef = useRef<HTMLElement | null>(null);

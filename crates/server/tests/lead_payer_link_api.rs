@@ -349,7 +349,7 @@ async fn lead(app: &PayerApp, tag: &str) -> (Uuid, String) {
 }
 
 async fn submit_request(app: &PayerApp, lead_id: Uuid) {
-    sqlx::query("UPDATE leads SET portal_submitted_at = now() WHERE id = $1")
+    sqlx::query("UPDATE leads SET portal_submitted_at = clock_timestamp() WHERE id = $1")
         .bind(lead_id)
         .execute(app.pool())
         .await
@@ -530,6 +530,7 @@ async fn staff_send_the_link_only_through_the_gate_and_resend_or_revoke_it() {
     let mut without_email = viktor();
     without_email["email"] = Value::Null;
     name_payer(&app, lead_id, &patient, without_email).await;
+    submit_request(&app, lead_id).await;
     let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
     assert_eq!(info["blocked_reason"], "payer_email_missing", "{info}");
     name_payer(&app, lead_id, &patient, viktor()).await;
@@ -1846,6 +1847,19 @@ async fn another_payer_or_address_ends_the_link_and_the_purge_removes_it() {
     assert_eq!(resets.len(), 2);
     assert_eq!(resets[1].1["reason"], "payer_changed", "{:?}", resets[1]);
 
+    // The newly named payer and contact consent need a freshly submitted
+    // request before another invitation can be issued.
+    let (status, refused) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-link"),
+        &app.manager(),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "request_not_submitted", "{refused}");
+    submit_request(&app, lead_id).await;
     // A converted lead's link stops working.
     let (token, _) = send_link(&app, lead_id, json!({})).await;
     let (status, _) = as_payer(&app, "GET", OPEN, &[("X-Payer-Link", token.as_str())], None).await;
@@ -2314,4 +2328,59 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn withdrawing_payer_contact_consent_revokes_the_existing_link() {
+    let Some(app) = payer_app().await else {
+        return;
+    };
+    let (lead_id, patient) = lead_with_payer(&app, "consent-withdrawn").await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let mut payer = viktor();
+    payer["contact_consent"] = json!(false);
+    name_payer(&app, lead_id, &patient, payer).await;
+    let (status, body) = as_payer(&app, "POST", CODE, &[("X-Payer-Link", &token)], None).await;
+    assert_eq!(status, StatusCode::GONE, "{body}");
+    assert_eq!(body["code"], "link_revoked", "{body}");
+    let reason: Option<String> = sqlx::query_scalar("SELECT revoked_reason FROM lead_payer_links WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1")
+        .bind(lead_id).fetch_one(app.pool()).await.unwrap();
+    assert_eq!(reason.as_deref(), Some("consent_withdrawn"));
+}
+
+#[tokio::test]
+async fn issuing_a_paying_parent_cabinet_login_revokes_an_older_payer_link() {
+    let Some(app) = payer_app().await else {
+        return;
+    };
+    let (lead_id, patient) = lead_with_payer(&app, "parent-access").await;
+    let contact_id = Uuid::new_v4();
+    let email = format!("payer-parent-{}@example.com", contact_id.simple());
+    let mut payer = viktor();
+    payer["email"] = json!(email);
+    payer["relationship_kind"] = json!("parent");
+    name_payer(&app, lead_id, &patient, payer).await;
+    submit_request(&app, lead_id).await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    // Correcting the lead's age and giving the named parent cabinet access
+    // changes how that same payer answers; the old independent link must close.
+    sqlx::query("UPDATE leads SET date_of_birth = (CURRENT_DATE - INTERVAL '10 years')::date, trusted_contacts = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(json!([{ "id": contact_id, "name": "Viktor Zahler", "relation": "father", "email": email }]))
+        .execute(app.pool()).await.unwrap();
+    let (status, issued) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-guardians"),
+        &app.manager(),
+        Some(json!({ "trusted_contact_id": contact_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let reason: Option<String> = sqlx::query_scalar("SELECT revoked_reason FROM lead_payer_links WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1")
+        .bind(lead_id).fetch_one(app.pool()).await.unwrap();
+    assert_eq!(reason.as_deref(), Some("payer_has_cabinet_login"));
+    let (status, rejected) = as_payer(&app, "POST", CODE, &[("X-Payer-Link", &token)], None).await;
+    assert_eq!(status, StatusCode::GONE, "{rejected}");
+    assert_eq!(rejected["code"], "link_revoked", "{rejected}");
 }

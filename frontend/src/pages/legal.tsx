@@ -5,8 +5,9 @@ import { ArrowLeft } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { buildApiUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { t as translationsFor, useLang } from "@/lib/i18n";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
+import { asLeadCabinetLang } from "./patient-lead/lead-request-text";
 import { FormPrivacyNotice } from "./form-privacy-notice";
 
 type LegalNotice = Partial<Record<
@@ -41,8 +42,19 @@ function SectionMarker() {
 export function LegalNoticePage() {
   const { t, lang } = useLang();
   const { user } = useAuth();
-  const { hash } = useLocation();
-  const l = (key: string) => t.uiText[key] ?? key;
+  const { hash, search } = useLocation();
+  const noticeLang = asLeadCabinetLang(new URLSearchParams(search).get("lang")) ?? lang;
+  const localizedLabels: Partial<Record<string, string>> = noticeLang === "en" ? {
+    legal_imprint_title: "Legal notice", legal_privacy_title: "Privacy notice",
+    legal_load_error: "The agency contact details could not be loaded.",
+    legal_phone: "Telephone", legal_email: "Email", legal_vat_id: "VAT ID", legal_back: "Back to sign in",
+  } : noticeLang === "uk" ? {
+    legal_imprint_title: "Юридична інформація", legal_privacy_title: "Повідомлення про конфіденційність",
+    legal_load_error: "Не вдалося завантажити контактні дані агентства.",
+    legal_phone: "Телефон", legal_email: "Електронна пошта", legal_vat_id: "Номер ПДВ", legal_back: "Назад до входу",
+  } : {};
+  const noticeUi = noticeLang === "de" || noticeLang === "ru" ? translationsFor(noticeLang).uiText : t.uiText;
+  const l = (key: string) => localizedLabels[key] ?? noticeUi[key] ?? key;
   const [notice, setNotice] = useState<LegalNotice | null>(null);
   const [failed, setFailed] = useState(false);
   const inPortal = user?.role === "patient" && !user.password_change_required;
@@ -73,7 +85,7 @@ export function LegalNoticePage() {
   const name = notice?.agency_name || "GMED";
   const privacyEmail = notice?.agency_privacy_email || notice?.agency_email || "";
   const paragraphs = (key: string) => l(key).split("\n\n");
-  const title = lang === "de" ? "Impressum & Datenschutz" : "Impressum и защита данных";
+  const title = { de: "Impressum & Datenschutz", en: "Legal notice & data protection", uk: "Юридична інформація та захист даних", ru: "Impressum и защита данных" }[noticeLang];
 
   const content = (
     <>
@@ -93,7 +105,7 @@ export function LegalNoticePage() {
 
       <section id="privacy" className={`${cardClass} scroll-mt-4 leading-relaxed`} data-testid="legal-privacy">
         <h2 className={headingClass}><SectionMarker />{l("legal_privacy_title")}</h2>
-        {formNotice ? <FormPrivacyNotice lang={lang} agency={notice} /> : <>
+        {formNotice ? <FormPrivacyNotice lang={noticeLang} agency={notice} /> : <>
         <p>
           <strong>{l("legal_privacy_controller")}:</strong> {name}
           {notice?.agency_address ? `, ${notice.agency_address}` : ""}

@@ -299,3 +299,38 @@ test("last-CEO guard is shown as readable text", async ({ page }) => {
   await expect(page.getByText("Нельзя деактивировать или понизить последний активный аккаунт CEO.")).toBeVisible();
   expect(state.deactivated).toEqual(["ceo-1"]);
 });
+
+for (const width of [1440, 390]) {
+  test(`user editor keeps its footer visible and guards a draft at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await setup(page, { role: "ceo" });
+    await page.goto("/admin/users");
+    await page.getByText("Plain Billing", { exact: true }).filter({ visible: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Редактировать - Plain Billing" })).toBeVisible();
+    const save = dialog.getByRole("button", { name: "Сохранить", exact: true });
+    await expect(save).toBeDisabled();
+    const cancel = dialog.getByRole("button", { name: "Отмена", exact: true });
+    await expect(cancel).toBeInViewport();
+    await expect(page.locator('[data-slot="dialog-overlay"]').last()).toHaveCSS("background-color", /0\.4\)$/);
+    const bounds = await dialog.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`admin-user-modal-${width}.png`) });
+
+    const name = dialog.getByRole("textbox").first();
+    await name.fill("Updated Billing");
+    await expect(save).toBeEnabled();
+    await cancel.click();
+    const confirm = page.getByRole("alertdialog");
+    await expect(confirm).toBeVisible();
+    await confirm.getByRole("button", { name: "Отмена", exact: true }).click();
+    await expect(name).toHaveValue("Updated Billing");
+    await name.fill("Plain Billing");
+    await expect(save).toBeDisabled();
+    await cancel.click();
+    await expect(dialog).toHaveCount(0);
+  });
+}

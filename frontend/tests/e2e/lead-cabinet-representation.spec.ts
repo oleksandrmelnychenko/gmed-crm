@@ -255,6 +255,7 @@ function missingForSubmit(request: Request): string[] {
   };
   if (request.minor) {
     return [
+      ...(!answers.custody_stated ? ["custody"] : []),
       ...personKeys("rep1", MINOR_REQUIRED, answers.custody === "guardian"),
       ...(answers.custody === "joint" ? personKeys("rep2", MINOR_REQUIRED, false) : []),
     ];
@@ -391,11 +392,8 @@ async function setup(page: Page, options: { minor: boolean; prepare?: (request: 
           item.role === "authorised_representative"
             ? next.has_representative === true && !(next.under_guardianship === true && answers.under_guardianship !== true && item.can_remove)
             : next.has_representative === true && next.under_guardianship === true;
-        // A person that cannot be removed: nothing is saved.
-        if (answers.representatives.some((item) => !keeps(item) && !item.can_remove)) {
-          return route.fulfill({ status: 409, json: { code: "representative_in_use", message: "In use" } });
-        }
-        answers.representatives = answers.representatives.filter(keeps);
+        // The answer can change; protected people and their reviewed files stay on record.
+        answers.representatives = answers.representatives.filter((item) => keeps(item) || !item.can_remove);
         answers.has_representative = next.has_representative;
         answers.under_guardianship = next.under_guardianship;
       }
@@ -437,6 +435,9 @@ async function setup(page: Page, options: { minor: boolean; prepare?: (request: 
         const unknown = Object.keys(fields).find((key) => !(PERSON_FIELDS as readonly string[]).includes(key));
         // The identity document's data are staff's since the trigger flow.
         if (unknown) return refuse(422, unknown.startsWith("id_") ? "staff_only" : "invalid_field", unknown);
+        if (request.minor && known && !known.mine && ["first_name", "last_name", "date_of_birth"].some((key) => key in fields && fields[key] !== known[key as (typeof PERSON_FIELDS)[number]])) {
+          return refuse(422, "representative_not_yours");
+        }
         // The two refusals of an e-mail name no field: the code says which one it is.
         if ("email" in fields && known?.email_locked) return refuse(422, "representative_email_is_login");
         const email = typeof fields.email === "string" ? fields.email.trim().toLowerCase() : "";
@@ -755,8 +756,8 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(missing).not.toContainText("Angaben zur vertretenden Person");
   });
 
-  test("a person the cabinet may not remove stays, and the answer goes back", async ({ page }) => {
-    const { calls } = await setup(page, {
+  test("a protected representative stays on record while the patient updates the answer", async ({ page }) => {
+    const { request, calls } = await setup(page, {
       minor: false,
       prepare: (prepared) => {
         prepared.representation.has_representative = true;
@@ -784,21 +785,17 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(agent.getByRole("button", { name: "Entfernen" })).toHaveCount(0);
     await expect(page.getByTestId("lead-request-agent-identity-list")).toContainText("Von uns übernommen");
 
-    const asked: string[] = [];
-    onNextConfirm(page, true, asked);
     await choose(page, acts, "Nein");
-    expect(asked).toHaveLength(1);
-    await expect(page.getByTestId("lead-request-representation-problem")).toHaveText(
-      "Diese Person kann hier nicht entfernt werden. Bitte sprechen Sie uns an.",
-    );
-    expect(calls.answers).toHaveLength(1);
-    expect(calls.answers[0]).toMatchObject({ has_representative: false });
-    // Nothing was saved: the stored answer and the person are shown again.
-    await expect(acts).toContainText("Ja");
+    await expect.poll(() => calls.answers).toEqual([{ has_representative: false, under_guardianship: null }]);
+    await expect(acts).toContainText("Nein");
+    await expect(agent).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-representation-problem")).toHaveCount(0);
+    expect(request.representation.representatives).toHaveLength(1);
+    expect(request.representation.representatives[0].identity_documents[0].reviewed).toBe(true);
+    // Answering yes again restores the person already held on file, without re-entering data.
+    await choose(page, acts, "Ja");
     await expect(agent.getByRole("textbox", { name: "Nachname" })).toHaveValue("Muster");
-    // The refused answer is not sent again on its own.
-    await page.waitForTimeout(1000);
-    expect(calls.answers).toHaveLength(1);
+    await expect(page.getByTestId("lead-request-agent-identity-list")).toContainText("Von uns übernommen");
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
   });
 });
@@ -823,14 +820,17 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(block).not.toContainText("Für Minderjährige handeln die gesetzlichen Vertreter.");
     await expect(page.getByTestId("lead-request-custody-note")).toHaveCount(0);
     await expect(block.getByRole("combobox", { name: ACTS })).toHaveCount(0);
-    await expect(custody).toContainText("Beide Eltern gemeinsam");
+    await expect(custody).toContainText("Auswählen");
+    expect(calls.answers).toEqual([]);
     await custody.click();
     await expect(page.getByRole("option")).toHaveText([
+      "Auswählen",
       "Beide Eltern gemeinsam",
       "Ein Elternteil allein (alleiniges Sorgerecht)",
       "Vormund oder Pfleger",
     ]);
-    await page.keyboard.press("Escape");
+    await page.getByRole("option", { name: "Beide Eltern gemeinsam", exact: true }).click();
+    await expect.poll(() => calls.answers).toEqual([{ custody: "joint" }]);
     await expect(page.getByRole("option")).toHaveCount(0);
 
     // The parent at the form is the first representative: filled in, with the sign-in address that cannot be changed here.
@@ -876,6 +876,9 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     expect(benId).toMatch(UUID);
     expect(benId).not.toBe(ANNA);
     await expect(second.getByRole("button", { name: "Entfernen" })).toBeVisible();
+    await expect(second.getByRole("textbox", { name: "Vorname" })).toBeDisabled();
+    await expect(second.getByRole("textbox", { name: "Nachname" })).toBeDisabled();
+    await expect(page.locator("#lead-request-rep2_date_of_birth")).toBeDisabled();
     await second.getByRole("textbox", { name: "E-Mail" }).fill("ben.muster@example.com");
     await expect.poll(() => calls.persons.at(-1)).toEqual({ id: benId, status: 200, body: { email: "ben.muster@example.com" } });
     await page.locator("#lead-request-rep2-identity-files").setInputFiles(scan);
@@ -908,12 +911,12 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     expect(asked).toEqual(["Ben Muster: Alle Angaben und hochgeladenen Dateien zu dieser Person werden entfernt. Fortfahren?"]);
     await expect(custody).toContainText("Beide Eltern gemeinsam");
     await expect(second).toBeVisible();
-    expect(calls.answers).toEqual([]);
+    expect(calls.answers).toEqual([{ custody: "joint" }]);
 
     onNextConfirm(page, true, asked);
     await choose(page, custody, "Ein Elternteil allein (alleiniges Sorgerecht)");
     await expect(second).toHaveCount(0);
-    await expect.poll(() => calls.answers).toEqual([{ custody: "sole_parent" }]);
+    await expect.poll(() => calls.answers).toEqual([{ custody: "joint" }, { custody: "sole_parent" }]);
     await expect.poll(() => request.representation.representatives.map((item) => item.id)).toEqual([ANNA]);
     await expect(first.getByRole("textbox", { name: "Vorname" })).toHaveValue("Anna");
     // A parent with sole custody may show the proof of it; it is not required.

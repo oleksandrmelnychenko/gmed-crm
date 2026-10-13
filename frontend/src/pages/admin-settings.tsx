@@ -3,6 +3,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type SetStateAction,
 } from "react";
 import {
@@ -20,8 +21,6 @@ import {
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
-  AdminSectionTitle,
-  AdminSheetScaffold,
   SheetActionsFooter,
 } from "@/components/admin-page-patterns";
 import {
@@ -31,10 +30,10 @@ import {
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-} from "@/components/ui/sheet";
+import { Dialog } from "@/components/ui/dialog";
+import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
+import { StatusChip } from "@/components/ui/status-chip";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { formatEnumLabelFromKeys, useLang, type TranslationKey, type Translations } from "@/lib/i18n";
 import {
@@ -53,7 +52,6 @@ import {
   SuccessBanner,
   TabLoader,
   textareaClass,
-  tokens,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { issuerTaxRegistrationText } from "@/components/issuer-tax-registration-banner";
@@ -63,7 +61,6 @@ import { hasCapability } from "@/lib/permissions";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { canManageAdminAccount } from "@/pages/admin-users.helpers";
-import { SanctionsListSettings } from "@/pages/sanctions/list-settings";
 import {
   approvePendingMfaLogin,
   fetchAdminSettingsWorkspace,
@@ -146,7 +143,6 @@ type SettingsGroup = {
   descriptionKey: string;
   fields: SettingFieldMeta[];
   icon: typeof KeyRound;
-  tone: "sky" | "emerald" | "amber" | "slate";
 };
 
 type FlashState =
@@ -272,7 +268,6 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     descriptionKey: "settings_subtitle",
     fields: TOKEN_SETTING_FIELDS,
     icon: KeyRound,
-    tone: "sky",
   },
   {
     id: "agency",
@@ -280,7 +275,6 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     descriptionKey: "settings_agency_hint",
     fields: AGENCY_SETTING_FIELDS,
     icon: Building2,
-    tone: "emerald",
   },
   {
     id: "documents",
@@ -288,7 +282,6 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     descriptionKey: "settings_document_requirements_hint",
     fields: DOCUMENT_REQUIREMENT_SETTING_FIELDS,
     icon: ScrollText,
-    tone: "amber",
   },
   {
     id: "clinical",
@@ -296,7 +289,6 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     descriptionKey: "settings_clinical_data_hint",
     fields: CLINICAL_SETTING_FIELDS,
     icon: ShieldCheck,
-    tone: "slate",
   },
   {
     id: "concierge",
@@ -304,7 +296,6 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     descriptionKey: "settings_concierge_preparation_hint",
     fields: CONCIERGE_SETTING_FIELDS,
     icon: BellRing,
-    tone: "sky",
   },
   {
     id: "interpreter_access",
@@ -312,7 +303,6 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     descriptionKey: "settings_interpreter_access_hint",
     fields: INTERPRETER_ACCESS_SETTING_FIELDS,
     icon: UserRoundCheck,
-    tone: "emerald",
   },
   {
     id: "dunning",
@@ -320,7 +310,6 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     descriptionKey: "settings_dunning_hint",
     fields: DUNNING_SETTING_FIELDS,
     icon: Receipt,
-    tone: "amber",
   },
 ];
 
@@ -408,7 +397,7 @@ function useAdminSettingsPageContent() {
   // Portal logins of patients and leads: only the CEO acts on them (QA E-05).
   const canManagePortalAccounts =
     hasCapability(currentUser, "users.manage") && hasCapability(currentUser, "patients.edit");
-  const canReviewSanctions = hasCapability(currentUser, "sanctions.review");
+  const [workspaceTab, setWorkspaceTab] = useState("configuration");
   const tr = t as unknown as Record<string, string>;
   const [settingsState, dispatchSettingsState] = useReducer(
     adminSettingsReducer,
@@ -687,85 +676,7 @@ function useAdminSettingsPageContent() {
     }
   }, [load, t.common_error, t.settings_updated]);
 
-  type SettingsTableRow = {
-    key: string;
-    groupId: SettingsGroupId;
-    groupTitle: string;
-    label: string;
-    value: string;
-  };
-  const settingsTableRows = useMemo<SettingsTableRow[]>(
-    () =>
-      SETTINGS_GROUPS.flatMap((group) =>
-        group.fields.map((field) => ({
-          key: field.key,
-          groupId: group.id,
-          groupTitle: tr[group.titleKey] ?? group.id,
-          label: tr[field.labelKey] ?? field.key,
-          value: summarizeAdminSettingValue(
-            field.key,
-            editValues[field.key] ?? settingsMap[field.key]?.value ?? "",
-          ),
-        })),
-      ),
-    [editValues, settingsMap, tr],
-  );
-  const settingsPagination = useDataTablePagination(
-    settingsTableRows,
-    "system-settings",
-  );
-  const sessionsPagination = useDataTablePagination(
-    sessions,
-    String(sessions.length),
-  );
-  const settingsTableColumns = useMemo<ColumnDef<SettingsTableRow>[]>(
-    () => [
-      {
-        id: "group",
-        label: t.common_configuration,
-        accessor: (row) => row.groupTitle,
-        filterType: "enum",
-        filterOptions: SETTINGS_GROUPS.map((group) => ({
-          value: tr[group.titleKey] ?? group.id,
-          label: tr[group.titleKey] ?? group.id,
-        })),
-        sortable: true,
-        width: 250,
-        render: (row) => (
-          <span className="inline-flex max-w-full truncate rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] font-medium text-foreground">
-            {row.groupTitle}
-          </span>
-        ),
-      },
-      {
-        id: "label",
-        label: t.settings_parameter,
-        accessor: (row) => row.label,
-        filterType: "text",
-        sortable: true,
-        searchable: true,
-        required: true,
-        width: 300,
-        render: (row) => (
-          <span className="truncate text-xs text-foreground">{row.label}</span>
-        ),
-      },
-      {
-        id: "value",
-        label: t.common_value,
-        accessor: (row) => row.value,
-        filterType: "text",
-        searchable: true,
-        width: 380,
-        render: (row) => (
-          <span className="truncate font-mono text-xs text-foreground" title={row.value}>
-            {row.value || "—"}
-          </span>
-        ),
-      },
-    ],
-    [t, tr],
-  );
+  const sessionsPagination = useDataTablePagination(sessions, String(sessions.length));
 
   const pendingColumns = useMemo<ColumnDef<PendingLogin>[]>(() => [
     {
@@ -1005,7 +916,7 @@ function useAdminSettingsPageContent() {
 
   return (
     <>
-      <div className="space-y-4">
+      <div className="space-y-4 rounded-xl bg-muted/50 p-3 sm:p-4">
         {issuerTaxRegistrationMissing ? (
           <Banner tone="warning" withIcon>
             <p className="font-medium">{issuerTaxText.title}</p>
@@ -1029,18 +940,6 @@ function useAdminSettingsPageContent() {
                 <RefreshCcw className="size-3.5" />
                 {t.common_refresh}
               </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                className="h-9 rounded-lg"
-                disabled={sessions.length === 0 || actionBusyKey === "sessions:all"}
-                onClick={() => void logoutAll()}
-              >
-                {actionBusyKey === "sessions:all" ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : null}
-                {t.settings_logout_all}
-              </Button>
             </>
           )}
         />
@@ -1057,73 +956,45 @@ function useAdminSettingsPageContent() {
 
         {!loading && !error ? (
           <>
-            {/* EU sanctions list and blocked countries: the CEO's (sanctions.review). */}
-            {canReviewSanctions ? <SanctionsListSettings /> : null}
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {SETTINGS_GROUPS.map((group) => {
-                const GroupIcon = group.icon;
-                return (
-                  <button
-                    key={group.id}
-                    type="button"
-                    onClick={() => openGroupSheet(group.id)}
-                    className="flex min-w-0 items-start gap-3 rounded-lg border border-border/70 bg-card px-3.5 py-3 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <GroupIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-foreground">
-                        {tr[group.titleKey] ?? group.id}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-muted-foreground">
-                        {t.common_edit} · {group.fields.length}
-                      </span>
-                    </span>
-                    <Pencil className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                  </button>
-                );
-              })}
-            </div>
-            <DataTableSurface
-              rows={settingsPagination.pagedRows}
-
-              columns={settingsTableColumns}
-              defaultDensity="comfortable"
-              dictionary={t as unknown as Record<string, string>}
-              rowId={(row) => row.key}
-              onRowClick={(row) => openGroupSheet(row.groupId)}
-              toolbarStart={
-                <>
-                  <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
-                    {t.common_configuration}
-                  </span>
-                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
-                </>
-              }
-              toolbarAfter={
-                <DataTablePager
-                  pageIndex={settingsPagination.pageIndex}
-                  pageSize={settingsPagination.pageSize}
-                  totalPages={settingsPagination.totalPages}
-                  totalRows={settingsPagination.totalRows}
-                  previousLabel={t.pagination_previous}
-                  nextLabel={t.pagination_next}
-                  onPageChange={settingsPagination.onPageChange}
-                />
-              }
-              rowActions={(row) => (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                  onClick={() => openGroupSheet(row.groupId)}
-                  aria-label={t.common_edit}
-                  title={t.common_edit}
-                >
-                  <Pencil className="size-3.5" />
-                </Button>
-              )}
-            />
+            <Tabs value={workspaceTab} onValueChange={(value) => setWorkspaceTab(String(value))}>
+              <TabsList className="group-data-horizontal/tabs:h-auto max-w-full flex-wrap justify-start gap-1 rounded-xl border border-border/70 bg-card p-1">
+                <TabsTrigger value="configuration" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground"><ScrollText className="size-3.5" />{t.common_configuration}</TabsTrigger>
+                <TabsTrigger value="sessions" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground"><KeyRound className="size-3.5" />{t.settings_active_sessions}<span className="font-mono text-xs">{sessions.length}</span></TabsTrigger>
+                <TabsTrigger value="pending" className="h-8 gap-2 rounded-lg px-3 data-active:bg-primary data-active:text-primary-foreground"><UserRoundCheck className="size-3.5" />{t.mfa_pending_logins}<span className="font-mono text-xs">{pending.length}</span></TabsTrigger>
+              </TabsList>
+              <TabsContent value="configuration" className="mt-2">
+                <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {SETTINGS_GROUPS.map((group) => {
+                    const GroupIcon = group.icon;
+                    return (
+                      <section key={group.id} className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card shadow-xs">
+                        <button type="button" onClick={() => openGroupSheet(group.id)} className="flex w-full min-w-0 items-center gap-3 border-b border-border/50 px-4 py-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">
+                          <GroupIcon className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 text-[13px] font-semibold">{tr[group.titleKey] ?? group.id}</span>
+                          <Pencil className="size-3.5 shrink-0 text-primary" />
+                        </button>
+                        <div className="space-y-3 p-4">
+                          <p className="min-h-8 text-xs leading-5 text-muted-foreground">{tr[group.descriptionKey]}</p>
+                          <dl className="divide-y divide-border/50">
+                            {group.fields.slice(0, 3).map((field) => {
+                              const value = summarizeAdminSettingValue(field.key, settingsMap[field.key]?.value ?? "");
+                              return <div key={field.key} className="flex min-w-0 items-start justify-between gap-4 py-2 first:pt-0">
+                                <dt className="min-w-0 flex-1 text-xs leading-5 text-muted-foreground">{tr[field.labelKey] ?? field.key}</dt>
+                                <dd className="max-w-[50%] truncate font-mono text-xs leading-5 text-foreground" title={value || undefined}>{value || "—"}</dd>
+                              </div>;
+                            })}
+                          </dl>
+                          <div className="flex items-center justify-between gap-2 border-t border-border/50 pt-3">
+                            <StatusChip>{t.admin_system_fields}: {group.fields.length}</StatusChip>
+                            <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 rounded-lg text-xs" onClick={() => openGroupSheet(group.id)}><Pencil className="size-3" />{t.common_edit}</Button>
+                          </div>
+                        </div>
+                      </section>
+                    );
+                  })}
+                </div>
+              </TabsContent>
+              <TabsContent value="pending" className="mt-2">
             <DataTableSurface
               rows={pending}
               columns={pendingColumns}
@@ -1143,6 +1014,8 @@ function useAdminSettingsPageContent() {
               }
             />
 
+              </TabsContent>
+              <TabsContent value="sessions" className="mt-2">
             <DataTableSurface
               rows={sessionsPagination.pagedRows}
               columns={sessionColumns}
@@ -1185,17 +1058,18 @@ function useAdminSettingsPageContent() {
                 />
               }
             />
+              </TabsContent>
+            </Tabs>
           </>
         ) : null}
       </div>
 
-      <Sheet
+      <Dialog
         open={Boolean(selectedGroup)}
         onOpenChange={handleGroupSheetOpenChange}
         dirty={groupHasChanges}
       >
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[860px]">
-          <AdminSheetScaffold
+        <AdminDialogScaffold maxWidthClassName="sm:max-w-[860px]"
             title={selectedGroup ? tr[selectedGroup.titleKey] : t.settings_title}
             description={selectedGroup ? tr[selectedGroup.descriptionKey] : t.settings_subtitle}
             footer={(
@@ -1228,26 +1102,9 @@ function useAdminSettingsPageContent() {
 
             {selectedGroup ? (
               <>
-                <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <AdminSectionTitle>{t.admin_system_overview}</AdminSectionTitle>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge tone={groupHasChanges ? "warning" : "neutral"}>
-                      {groupHasChanges ? t.common_edit : t.common_monitoring}
-                    </StatusBadge>
-                  </div>
+                {changedFieldLabels.length > 0 ? <StatusChip tone="warning">{t.common_edit}: {changedFieldLabels.join(" · ")}</StatusChip> : null}
 
-                  {changedFieldLabels.length > 0 ? (
-                    <div className="rounded-lg border border-amber-200/70 bg-amber-50/60 px-3 py-2.5">
-                      <p className="text-xs font-medium text-amber-700">{t.common_edit}</p>
-                      <p className="mt-1 text-xs text-amber-700/90">
-                        {changedFieldLabels.join(" - ")}
-                      </p>
-                    </div>
-                  ) : null}
-                </section>
-
-                <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <AdminSectionTitle>{t.admin_system_fields}</AdminSectionTitle>
+                <AdminFormSection title={t.admin_system_fields}>
                   <div className="grid gap-3 md:grid-cols-2">
                     {selectedGroup.fields.map((field) => {
                       const changed = hasFieldChanged(field.key);
@@ -1292,12 +1149,11 @@ function useAdminSettingsPageContent() {
                       );
                     })}
                   </div>
-                </section>
+                </AdminFormSection>
               </>
             ) : null}
-          </AdminSheetScaffold>
-        </SheetContent>
-      </Sheet>
+        </AdminDialogScaffold>
+      </Dialog>
     </>
   );
 }

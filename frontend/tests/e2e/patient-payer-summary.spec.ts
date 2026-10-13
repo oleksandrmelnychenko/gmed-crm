@@ -371,6 +371,12 @@ for (const lang of ["ru", "de"] as const) {
       // 6. The footer.
       await expect(line("footer")).toContainText(w.converted);
       await expect(line("footer")).toContainText(w.changedElsewhere);
+      // Guidance remains available on demand, while evidence stays visible.
+      const guidance = line("footer").locator("details");
+      await expect(guidance.getByText(w.changedElsewhere, { exact: true })).toBeHidden();
+      await guidance.locator("summary").click();
+      await expect(guidance.getByText(w.changedElsewhere, { exact: true })).toBeVisible();
+      await guidance.locator("summary").click();
       const order = await Promise.all(
         ["who-pays", "name", "contracting-party", "recipient", "identification", "footer"].map(async (id) => (await line(id).boundingBox())!.y),
       );

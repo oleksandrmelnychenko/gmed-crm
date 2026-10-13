@@ -192,6 +192,26 @@ test("account page shows profile, password, two-factor and sessions", async ({ p
   await expect(sessions.first()).toContainText("Chrome · Windows");
   await expect(sessions.nth(1)).toContainText("Safari · iOS");
 
+  // The account supplies the 2FA heading once; cards remain readable on a phone.
+  await expect(page.getByRole("heading", { name: "Двухфакторный вход", exact: true })).toHaveCount(1);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const account = page.getByTestId("account-page");
+    expect(await account.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    if (width === 390) {
+      await page.getByRole("heading", { name: "Аккаунт", exact: true }).scrollIntoViewIfNeeded();
+      await expect(profileForm.locator("#account-email")).toBeVisible();
+      await page.screenshot({ path: "../.tmp/release-audit/account-390.png", animations: "disabled" });
+      await sessions.last().scrollIntoViewIfNeeded();
+      await expect(page.getByTestId("twofactor-inactive").getByRole("button")).toBeVisible();
+      await expect(sessions.last().getByRole("button")).toBeVisible();
+      await page.screenshot({ path: "../.tmp/release-audit/account-390-sessions.png", animations: "disabled" });
+    } else {
+      await account.screenshot({ path: `../.tmp/release-audit/account-${width}.png`, animations: "disabled" });
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+
   await sessions.nth(1).getByRole("button", { name: "Завершить", exact: true }).click();
   await expect(sessions).toHaveCount(1);
   expect(state.revoked).toEqual(["fam-phone"]);

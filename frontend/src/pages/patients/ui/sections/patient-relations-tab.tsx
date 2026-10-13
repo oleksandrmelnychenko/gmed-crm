@@ -200,6 +200,7 @@ export function PatientRelationsTab({
             rows={pagination.pagedRows}
             columns={columns}
             rowId={(relation) => relation.id}
+            onRowClick={canManageRelations ? onEditRelation : undefined}
             dictionary={t as unknown as Record<string, string>}
             emptyState={<EmptyCell>{l("patients_not_recorded_yet")}</EmptyCell>}
             toolbarStart={

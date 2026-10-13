@@ -10,7 +10,8 @@ import { ExternalLink, Gauge, Globe2, ListChecks, Search, ShieldAlert, ShieldChe
 import { StaffLink } from "@/components/staff-link";
 import { AdminGuideButton } from "@/components/admin-guide";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
-import { Banner, PageHeader, StatusBadge, SuccessBanner, TabLoader, TabShell, tokens } from "@/components/ui-shell";
+import { Banner, PageHeader, SuccessBanner, TabLoader, TabShell, tokens } from "@/components/ui-shell";
+import { StatusChip } from "@/components/ui/status-chip";
 import { Button } from "@/components/ui/button";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { copyText, selectElementText } from "@/lib/copy-text";
@@ -164,22 +165,22 @@ export function HitCard({
   return (
     <article
       ref={cardRef}
-      className={cn("space-y-3.5 rounded-xl p-3.5 sm:p-4", tokens.surface.card)}
+      className="min-w-0 space-y-3.5 rounded-xl border border-border/60 bg-card p-3.5 shadow-sm sm:p-4"
       data-testid="sanctions-hit"
     >
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge tone={hit.status === "confirmed" ? "error" : hit.status === "open" ? "warning" : "neutral"}>
+            <StatusChip tone={hit.status === "confirmed" ? "error" : hit.status === "open" ? "warning" : "success"}>
               {hitStatusLabel(hit.status, t)}
-            </StatusBadge>
+            </StatusChip>
             <span className="text-sm font-semibold" data-testid="sanctions-hit-kind">
               {subjectKindLabel(hit.subject_kind, t, hit.subject_ref, subject.relation)}
             </span>
             {hit.owner_name ? <span className="text-sm text-muted-foreground">· {hit.owner_name}</span> : null}
             {hit.patient_number ? <span className="font-mono text-xs text-muted-foreground">{hit.patient_number}</span> : null}
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="break-words text-xs leading-5 text-muted-foreground">
             {formatAppDateTime(hit.created_at)} · {t.sanctions_field_score}: {scorePercent(hit.score)}
             {hit.match_details.matched_name ? ` · ${t.sanctions_field_matched_name}: ${hit.match_details.matched_name}` : ""}
           </p>
@@ -193,8 +194,8 @@ export function HitCard({
 
       {!hit.still_matches ? <Banner tone="warning">{t.sanctions_no_longer_matches}</Banner> : null}
 
-      <div className="grid gap-4 border-y border-border/60 py-3.5 lg:grid-cols-2 lg:gap-6">
-        <section className="min-w-0 space-y-3">
+      <div className="grid gap-3 rounded-xl bg-muted p-3 lg:grid-cols-2">
+        <section className="min-w-0 space-y-3 rounded-lg border border-border/50 bg-card p-3">
           <AdminSectionTitle>{t.sanctions_our_person}</AdminSectionTitle>
           <SubjectDetails subject={subject} bank={bank} t={t} lang={lang} />
           {changed ? (
@@ -204,7 +205,7 @@ export function HitCard({
             </div>
           ) : null}
         </section>
-        <section className="min-w-0 space-y-3 lg:border-l lg:border-border/60 lg:pl-6">
+        <section className="min-w-0 space-y-3 rounded-lg border border-border/50 bg-card p-3">
           <AdminSectionTitle>
             {t.sanctions_list_entry}
             {entry.subject_type === "entity" ? ` · ${t.sanctions_field_entity}` : ""}
@@ -372,7 +373,7 @@ function HitsTab({
     <div className="space-y-3">
       {error ? <Banner tone="error">{error}</Banner> : null}
       {hits.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">{t.sanctions_no_hits}</p>
+        <p className="rounded-xl border border-border/50 bg-card px-4 py-10 text-center text-sm text-muted-foreground">{t.sanctions_no_hits}</p>
       ) : (
         hits.map((hit) => <HitCard key={hit.id} hit={hit} onDecided={() => void load()} />)
       )}
@@ -465,9 +466,9 @@ function CountriesTab() {
     >
       <div className="min-w-0 space-y-0.5">
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge tone={item.flag === "blocked_country" ? "warning" : "neutral"}>
+          <StatusChip tone={item.flag === "blocked_country" ? "warning" : "success"}>
             {item.flag === "blocked_country" ? t.sanctions_badge_blocked_country : t.sanctions_badge_country_lifted}
-          </StatusBadge>
+          </StatusChip>
           <StaffLink to={item.to} className="text-sm font-semibold hover:underline">
             {item.name}
           </StaffLink>
@@ -517,17 +518,17 @@ function CountriesTab() {
       {error ? <Banner tone="error">{error}</Banner> : null}
       {flash ? <SuccessBanner>{flash}</SuccessBanner> : null}
       {leads.length === 0 && patients.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">{t.sanctions_country_none}</p>
+        <p className="rounded-xl border border-border/50 bg-card px-4 py-10 text-center text-sm text-muted-foreground">{t.sanctions_country_none}</p>
       ) : null}
       {leads.length > 0 ? (
         <section className="space-y-2" aria-label={t.sanctions_country_leads}>
-          <h3 className="text-sm font-semibold">{t.sanctions_country_leads}</h3>
+          <AdminSectionTitle>{t.sanctions_country_leads}</AdminSectionTitle>
           <ul className="space-y-2">{leads.map(renderItem)}</ul>
         </section>
       ) : null}
       {patients.length > 0 ? (
         <section className="space-y-2" aria-label={t.sanctions_country_patients}>
-          <h3 className="text-sm font-semibold">{t.sanctions_country_patients}</h3>
+          <AdminSectionTitle>{t.sanctions_country_patients}</AdminSectionTitle>
           <p className="text-xs text-muted-foreground">{t.sanctions_country_patients_hint}</p>
           <ul className="space-y-2">{patients.map(renderItem)}</ul>
         </section>
@@ -672,8 +673,8 @@ export function SanctionsPage() {
           <p className="text-muted-foreground">{t.sanctions_disclaimer}</p>
         </AdminGuideButton>
       )} />
-      <div className="-mx-2.5 overflow-x-auto overflow-y-hidden px-2.5 pb-1 sm:mx-0 sm:px-0">
-      <nav ref={navigationRef} aria-label={t.nav_sanctions} className="flex w-max min-w-full justify-center gap-1">
+      <div className="min-w-0 overflow-x-auto overflow-y-hidden rounded-xl border border-border/60 bg-card p-1.5">
+      <nav ref={navigationRef} aria-label={t.nav_sanctions} className="flex w-max min-w-full gap-1">
         {TABS.map((entry) => (
           <Button
             key={entry}
@@ -681,7 +682,7 @@ export function SanctionsPage() {
             size="sm"
             variant={entry === tab ? "default" : "ghost"}
             aria-current={entry === tab ? "page" : undefined}
-            className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8"
+            className="h-9 min-w-0 flex-1 rounded-lg px-3 text-xs"
             onClick={() => setParams(entry === "open" ? {} : { tab: entry }, { replace: true })}
           >
             {icons[entry]}
@@ -690,7 +691,7 @@ export function SanctionsPage() {
         ))}
       </nav>
       </div>
-      <TabShell className="mt-0">
+      <TabShell className="mt-0 min-w-0 rounded-xl border border-border/50 bg-muted p-3 sm:p-4">
       {tab === "open" ? <HitsTab status="open" onCounts={updateCounts} /> : null}
       {tab === "decided" ? <HitsTab status="decided" onCounts={updateCounts} /> : null}
       {tab === "countries" ? <CountriesTab /> : null}

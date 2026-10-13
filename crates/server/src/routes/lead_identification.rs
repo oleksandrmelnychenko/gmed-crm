@@ -263,10 +263,10 @@ fn qualified_signatures(
             }
             let email = address(entry["email"].as_str());
             let signer_name = email.as_ref().and_then(|email| {
-                let signer = signers
-                    .as_array()?
-                    .iter()
-                    .find(|signer| address(signer["email"].as_str()).as_ref() == Some(email))?;
+                let signer = signers.as_array()?.iter().find(|signer| {
+                    signer["role"].as_str() == Some(role)
+                        && address(signer["email"].as_str()).as_ref() == Some(email)
+                })?;
                 let name = [signer["first_name"].as_str(), signer["last_name"].as_str()]
                     .into_iter()
                     .flatten()
@@ -312,6 +312,7 @@ fn standing(signatures: impl Iterator<Item = QualifiedSignature>) -> Option<Qual
 /// The signature that stands for the person of a role (the patient, the
 /// payer). `since` leaves out what was signed before the person was named (an
 /// earlier payer).
+#[cfg(test)]
 fn signature_of(
     signatures: &[RoleSignature],
     role: &str,
@@ -324,6 +325,35 @@ fn signature_of(
             .map(|candidate| candidate.signature)
             .filter(|signature| since.is_none_or(|since| signature.signed_at >= since)),
     )
+}
+
+/// A payer role is not an identity: only the currently declared or confirmed
+/// payer address may identify the payer, and only since that person was named.
+fn payer_signature_matches(
+    signature: &RoleSignature,
+    addresses: &[String],
+    since: DateTime<Utc>,
+) -> bool {
+    signature.role == SIGNER_ROLE_PAYER
+        && signature.signature.signed_at >= since
+        && signature
+            .email
+            .as_ref()
+            .is_some_and(|email| addresses.contains(email))
+}
+
+async fn payer_addresses(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    let values: Vec<Option<String>> = sqlx::query_scalar(
+        "SELECT email FROM lead_payer_declarations WHERE lead_id = $1 AND payer_kind = 'third_party'
+         UNION ALL SELECT confirmed_email FROM lead_payer_statements WHERE lead_id = $1 AND email_confirmed_at IS NOT NULL"
+    ).bind(lead_id).fetch_all(conn).await?;
+    Ok(values
+        .into_iter()
+        .filter_map(|value| address(value.as_deref()))
+        .collect())
 }
 
 /// The legal representative of a minor a signature counts for. The parents
@@ -370,8 +400,12 @@ fn signature_owner(
 fn acting_person_signature(
     signatures: &[RoleSignature],
     person: &Representative,
+    own: &[String],
 ) -> Option<QualifiedSignature> {
     let email = address(person.email.as_deref())?;
+    if own.contains(&email) {
+        return None;
+    }
     standing(
         signatures
             .iter()
@@ -403,7 +437,9 @@ fn patient_signature(
             .iter()
             .filter(|candidate| candidate.role == SIGNER_ROLE_CLIENT)
             .filter(|candidate| match &candidate.email {
-                Some(email) if !own.is_empty() => own.contains(email),
+                Some(email) if !own.is_empty() => {
+                    own.contains(email) && !acting_addresses.contains(email)
+                }
                 Some(email) => !acting_addresses.contains(email),
                 None => acting.is_empty(),
             })
@@ -487,6 +523,7 @@ pub(crate) async fn load_identification_status(
     lead_id: Uuid,
 ) -> Result<IdentificationStatus, sqlx::Error> {
     let payer_since = third_party_payer_since(&mut *conn, lead_id).await?;
+    let payer_addresses = payer_addresses(&mut *conn, lead_id).await?;
     let conversion = conversion_of(&mut *conn, lead_id).await?;
     let judged_on = conversion
         .map(|(_, converted_at)| crate::app_time::date_of(converted_at))
@@ -584,7 +621,7 @@ pub(crate) async fn load_identification_status(
                 RepresentativeIdentification::from_person(
                     person,
                     PersonIdentification {
-                        qes: acting_person_signature(&signatures, person),
+                        qes: acting_person_signature(&signatures, person, &own),
                         own_account_payment: payment_of(
                             lead_representatives::subject_of(person.id).as_str(),
                             None,
@@ -600,7 +637,14 @@ pub(crate) async fn load_identification_status(
                 own_account_payment: payment_of(SUBJECT_CONTRACT_PARTNER, None),
             },
             payer: payer_since.map(|since| PersonIdentification {
-                qes: signature_of(&signatures, SIGNER_ROLE_PAYER, Some(since)),
+                qes: standing(
+                    signatures
+                        .iter()
+                        .filter(|signature| {
+                            payer_signature_matches(signature, &payer_addresses, since)
+                        })
+                        .map(|signature| signature.signature),
+                ),
                 own_account_payment: payment_of(SUBJECT_PAYER, Some(since)),
             }),
             payer_same_person_as: None,
@@ -614,7 +658,15 @@ pub(crate) async fn load_identification_status(
     let people = &representation.representatives;
     let owners = signatures
         .iter()
-        .map(|signature| signature_owner(signature, people, payer_is.zip(payer_since)))
+        .map(|signature| {
+            // An exact representative address remains that person's evidence,
+            // even after a different payer is named. Only the role-based
+            // fallback needs to match the current payer's address and time.
+            let current_payer = payer_is
+                .zip(payer_since)
+                .filter(|(_, since)| payer_signature_matches(signature, &payer_addresses, *since));
+            signature_owner(signature, people, current_payer)
+        })
         .collect::<Vec<_>>();
     let representatives = people
         .iter()
@@ -651,8 +703,7 @@ pub(crate) async fn load_identification_status(
                     .zip(&owners)
                     .filter(|(signature, owner)| {
                         owner.is_none()
-                            && signature.role == SIGNER_ROLE_PAYER
-                            && signature.signature.signed_at >= since
+                            && payer_signature_matches(signature, &payer_addresses, since)
                     })
                     .map(|(signature, _)| signature.signature),
             ),
@@ -1244,7 +1295,7 @@ mod tests {
         // The client signature with the own address; neither the name nor a
         // payer signature counts.
         assert_eq!(
-            acting_person_signature(&signatures, &agent),
+            acting_person_signature(&signatures, &agent, &[]),
             Some(QualifiedSignature {
                 signed_at: at("2026-10-02T09:00:00Z"),
                 test_mode: false,
@@ -1255,7 +1306,7 @@ mod tests {
             email: None,
             ..agent.clone()
         };
-        assert_eq!(acting_person_signature(&signatures, &without), None);
+        assert_eq!(acting_person_signature(&signatures, &without, &[]), None);
 
         // The status finds the adult's person beside a minor's representatives.
         let status = IdentificationStatus {
@@ -1270,6 +1321,36 @@ mod tests {
             Some(agent.id)
         );
         assert!(status.representative(Uuid::from_bytes([9; 16])).is_none());
+    }
+
+    #[test]
+    fn shared_patient_representative_email_identifies_neither_person() {
+        let agent = parent(5, "Ben", Some("shared@example.com"));
+        let signatures = vec![signed(
+            "client",
+            "shared@example.com",
+            "Ben Muster",
+            "2026-10-03T09:00:00Z",
+        )];
+        let own = vec!["shared@example.com".into()];
+        assert!(patient_signature(&signatures, &own, std::slice::from_ref(&agent)).is_none());
+        assert!(acting_person_signature(&signatures, &agent, &own).is_none());
+    }
+
+    #[test]
+    fn payer_signature_needs_the_current_payers_address_as_well_as_role_and_time() {
+        let since = at("2026-10-01T00:00:00Z");
+        let own = vec!["payer@example.com".into()];
+        let other = signed("payer", "other@example.com", "", "2026-10-03T09:00:00Z");
+        assert!(!payer_signature_matches(&other, &own, since));
+        let valid = signed("payer", "payer@example.com", "", "2026-10-03T09:00:00Z");
+        assert!(payer_signature_matches(&valid, &own, since));
+        assert!(!payer_signature_matches(&valid, &[], since));
+        assert!(!payer_signature_matches(
+            &valid,
+            &own,
+            at("2026-10-04T00:00:00Z")
+        ));
     }
 
     #[test]

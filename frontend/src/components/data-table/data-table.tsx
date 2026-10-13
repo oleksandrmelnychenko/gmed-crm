@@ -346,6 +346,12 @@ function useDataTableContent<T>({
       }),
     [rowActions, rowActionsWidth, selectionEnabled, visibleCols],
   );
+  // Sticky detail panels need a containing block as wide as the columns.
+  // Overflowing grid tracks alone don't give them room to stick horizontally.
+  const gridMinWidth = visibleCols.reduce(
+    (width, col) => width + (columnWidth(col) ?? col.minWidth ?? 120),
+    (selectionEnabled ? 32 : 0) + (rowActions ? rowActionsWidth : 0),
+  );
 
   const allSelected = selectionEnabled && rows.length > 0 && selectedIds.length === rows.length;
   const someSelected = selectionEnabled && selectedIds.length > 0 && !allSelected;
@@ -438,6 +444,7 @@ function useDataTableContent<T>({
           className="data-table-header-row sticky top-0 z-20 grid items-center border-b border-border/40 bg-card text-xs font-medium text-muted-foreground"
           style={{
             gridTemplateColumns: gridTemplate,
+            minWidth: measuredRows ? gridMinWidth : undefined,
             height: HEADER_HEIGHT,
           }}
         >
@@ -548,7 +555,7 @@ function useDataTableContent<T>({
             {emptyState ?? t.common_no_results}
           </div>
         ) : (
-          <div style={{ height: totalSize, position: "relative" }}>
+          <div style={{ height: totalSize, position: "relative", minWidth: measuredRows ? gridMinWidth : undefined }}>
             {virtualRows.map((vRow) => {
               const row = rows[vRow.index];
               if (!row) return null;

@@ -74,7 +74,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use chrono::{DateTime, NaiveDate, SecondsFormat, SubsecRound, Utc};
+use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use sqlx::{PgConnection, Row, postgres::PgRow};
@@ -1818,15 +1818,8 @@ async fn save_payer_declaration(
             .is_some_and(|previous| previous.own_account_answered);
     // Only the lead gives or removes the consent to contact the payer and the
     // consent to pass the cost estimate on to the payer: staff keep both as
-    // long as a third party pays.
-    if declaration.is_third_party() {
-        declaration.contact_consent_at = previous
-            .as_ref()
-            .and_then(|previous| previous.contact_consent_at);
-        declaration.cost_estimate_consent_at = previous
-            .as_ref()
-            .and_then(|previous| previous.cost_estimate_consent_at);
-    }
+    // long as the same third party pays.
+    declaration.keep_patient_consents(previous.as_ref());
     // The payer's own link informs the payer (Art. 14 notice in the
     // invitation, phase 3a), a paying parent by acknowledging the notice in
     // the cabinet: a staff form that does not tick the checkbox — an older
@@ -1883,8 +1876,15 @@ async fn save_payer_declaration(
         // The first confirmation keeps its time and author.
         let earlier = previous
             .as_ref()
+            .filter(|previous| previous.payer_key() == declaration.payer_key())
             .and_then(|previous| previous.payer_informed_at.zip(previous.payer_informed_by));
-        let (at, by) = earlier.unwrap_or((Utc::now(), auth.user_id));
+        let (at, by) = match earlier {
+            Some(earlier) => earlier,
+            None => match crate::routes::lead_portal_intake::portal_update_time(&mut tx).await {
+                Ok(at) => (at, auth.user_id),
+                Err(error) => return database_error(error, "read payer confirmation time"),
+            },
+        };
         declaration.payer_informed_at = Some(at);
         declaration.payer_informed_by = Some(by);
     }
@@ -1920,18 +1920,22 @@ async fn save_payer_declaration(
     {
         return database_error(error, "reset payer link");
     }
-    let mut event = audit::domain_diff_event(
+    let changed_fields = changed_json_fields(
+        &previous
+            .as_ref()
+            .map(Declaration::to_json)
+            .unwrap_or(Value::Null),
+        &declaration.to_json(),
+    );
+    let mut event = audit::domain_event(
         "update_lead_payer_declaration",
         Some(auth.user_id),
         "lead",
         Some(lead_id),
-        previous
-            .as_ref()
-            .map(Declaration::to_json)
-            .unwrap_or(Value::Null),
-        declaration.to_json(),
+        Value::Null,
     );
     event.context = json!({
+        "changed_fields": changed_fields,
         "lead_id": lead_id,
         "payer_kind": declaration.payer_kind,
         "identity_changed": identity_changed,
@@ -1943,6 +1947,16 @@ async fn save_payer_declaration(
     if let Err(error) = sync_order_payers(&mut tx, lead_id, &declaration, Some(auth.user_id)).await
     {
         return database_error(error, "sync order payer");
+    }
+    if let Err(error) = crate::routes::lead_invoice_recipient::sync_section_seven(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+        "staff",
+    )
+    .await
+    {
+        return database_error(error, "derive invoice recipient");
     }
     if let Err(error) = tx.commit().await {
         return database_error(error, "commit payer declaration");
@@ -2031,6 +2045,8 @@ async fn store_declaration(
                account_holder = EXCLUDED.account_holder,
                bank_name = EXCLUDED.bank_name,
                via_third_party = EXCLUDED.via_third_party,
+               via_third_party_kind = CASE WHEN EXCLUDED.via_third_party IS TRUE
+                   THEN lead_payer_declarations.via_third_party_kind ELSE NULL END,
                via_third_party_details = EXCLUDED.via_third_party_details,
                identity_adopted_at = EXCLUDED.identity_adopted_at,
                identity_adopted_key = EXCLUDED.identity_adopted_key,
@@ -2122,7 +2138,7 @@ async fn store_declaration(
 #[derive(Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PortalPayerInput {
-    payer_kind: String,
+    pub(crate) payer_kind: String,
     /// Who the third party is; left out means a person (older clients).
     payer_type: Option<String>,
     /// Name of the company, organisation or insurer.
@@ -2191,7 +2207,30 @@ fn portal_field_of(code: &str) -> &'static str {
     }
 }
 
+fn changed_json_fields(before: &Value, after: &Value) -> Vec<String> {
+    let keys: std::collections::BTreeSet<_> = before
+        .as_object()
+        .into_iter()
+        .flat_map(|v| v.keys())
+        .chain(after.as_object().into_iter().flat_map(|v| v.keys()))
+        .collect();
+    keys.into_iter()
+        .filter(|key| before.get(*key) != after.get(*key))
+        .cloned()
+        .collect()
+}
+
 impl Declaration {
+    fn keep_patient_consents(&mut self, previous: Option<&Self>) {
+        let same = previous.filter(|previous| {
+            self.is_third_party()
+                && previous.is_third_party()
+                && self.payer_key() == previous.payer_key()
+        });
+        self.contact_consent_at = same.and_then(|previous| previous.contact_consent_at);
+        self.cost_estimate_consent_at = same.and_then(|previous| previous.cost_estimate_consent_at);
+    }
+
     /// The person or organisation named as payer: a different one has not
     /// been informed yet, has another place of birth, and the lead has not
     /// agreed that GMED contacts it. The payer's link keeps a snapshot of it
@@ -2470,6 +2509,9 @@ fn declaration_from_portal(
     today: NaiveDate,
     now: DateTime<Utc>,
 ) -> Result<Declaration, &'static str> {
+    if input.payer_type.as_deref().map(str::trim) == Some("insurance") {
+        return Err("payer_type_invalid");
+    }
     if input
         .beneficial_owner
         .as_deref()
@@ -2566,9 +2608,10 @@ pub(crate) async fn save_from_portal(
     today: NaiveDate,
 ) -> Result<Option<Declaration>, PortalPayerError> {
     let previous = load_declaration(conn, lead_id).await?;
-    // The precision the database keeps, so the stored consent time is the
-    // one the "entered by the patient" marker was made from.
-    let now = Utc::now().trunc_subsecs(6);
+    // Consent and request submission use the same database clock. Comparing
+    // an application-host timestamp with the database clock can incorrectly
+    // reject a request that was submitted just after giving consent.
+    let now = crate::routes::lead_portal_intake::portal_update_time(conn).await?;
     let mut declaration =
         declaration_from_portal(previous.as_ref(), input, today, now).map_err(|code| {
             PortalPayerError::Invalid {
@@ -2594,18 +2637,22 @@ pub(crate) async fn save_from_portal(
         Some(actor),
     )
     .await?;
-    let mut event = audit::domain_diff_event(
+    let changed_fields = changed_json_fields(
+        &previous
+            .as_ref()
+            .map(Declaration::to_json)
+            .unwrap_or(Value::Null),
+        &declaration.to_json(),
+    );
+    let mut event = audit::domain_event(
         "lead_portal_update_payer_declaration",
         Some(actor),
         "lead",
         Some(lead_id),
-        previous
-            .as_ref()
-            .map(Declaration::to_json)
-            .unwrap_or(Value::Null),
-        declaration.to_json(),
+        Value::Null,
     );
     event.context = json!({
+        "changed_fields": changed_fields,
         "lead_id": lead_id,
         "payer_kind": declaration.payer_kind,
         "identity_changed": identity_changed,
@@ -2622,7 +2669,7 @@ pub(crate) async fn save_from_portal(
 /// payer's identity written over it (the caller clones and changes it). It is
 /// stored without the reset rules of the other save paths — no
 /// [`Declaration::carry_billing`], no reset of the payer's link —, dated as a
-/// new payer identity when the identity key changed, audited as a diff and
+/// new payer identity when the identity key changed, audited with field names and
 /// synced onto the lead's orders. `actor` is `None` for the payer's link.
 ///
 /// Through the payer's link (`link_id`) the adoption is recorded with the
@@ -2640,8 +2687,8 @@ pub(crate) async fn adopt_payer_identity(
     let previous = load_declaration(conn, lead_id).await?;
     let mut declaration = declaration.clone();
     if link_id.is_some() && declaration.is_third_party() {
-        // The precision the database keeps.
-        declaration.identity_adopted_at = Some(Utc::now().trunc_subsecs(6));
+        declaration.identity_adopted_at =
+            Some(crate::routes::lead_portal_intake::portal_update_time(conn).await?);
         declaration.identity_adopted_key = Some(declaration.payer_key());
     } else {
         declaration.carry_identity_adoption(previous.as_ref());
@@ -2654,18 +2701,22 @@ pub(crate) async fn adopt_payer_identity(
         .as_ref()
         .is_none_or(|previous| previous.identity_key() != declaration.identity_key());
     store_declaration(conn, lead_id, declaration, actor, identity_changed).await?;
-    let mut event = audit::domain_diff_event(
+    let changed_fields = changed_json_fields(
+        &previous
+            .as_ref()
+            .map(Declaration::to_json)
+            .unwrap_or(Value::Null),
+        &declaration.to_json(),
+    );
+    let mut event = audit::domain_event(
         "payer_link_adopt_payer_declaration",
         actor,
         "lead",
         Some(lead_id),
-        previous
-            .as_ref()
-            .map(Declaration::to_json)
-            .unwrap_or(Value::Null),
-        declaration.to_json(),
+        Value::Null,
     );
     event.context = json!({
+        "changed_fields": changed_fields,
         "lead_id": lead_id,
         "link_id": link_id,
         "payer_kind": declaration.payer_kind,
@@ -2797,15 +2848,12 @@ async fn write_order_payer(
     .bind(next.contact_is_organisation)
     .execute(&mut *tx)
     .await?;
-    let mut event = audit::domain_diff_event(
-        "set_order_payer",
-        actor,
-        "order",
-        Some(order_id),
-        previous.to_audit_json(),
-        next.to_audit_json(),
-    );
-    event.context = context;
+    let mut context = context;
+    context["changed_fields"] = json!(changed_json_fields(
+        &previous.to_audit_json(),
+        &next.to_audit_json()
+    ));
+    let event = audit::domain_event("set_order_payer", actor, "order", Some(order_id), context);
     audit::write_in_transaction(&mut *tx, &event).await
 }
 
@@ -3797,6 +3845,24 @@ mod tests {
     }
 
     #[test]
+    fn staff_cannot_transfer_patient_consents_to_a_new_payer() {
+        let mut previous = from_input(&input("third_party")).unwrap();
+        previous.contact_consent_at = Some(now());
+        previous.cost_estimate_consent_at = Some(now());
+        let mut next = previous.clone();
+        next.street = Some("New address 1".into());
+        next.keep_patient_consents(Some(&previous));
+        assert_eq!(next.contact_consent_at, Some(now()));
+        next.last_name = Some("Another".into());
+        next.keep_patient_consents(Some(&previous));
+        assert_eq!(next.contact_consent_at, None);
+        assert_eq!(next.cost_estimate_consent_at, None);
+        assert!(
+            changed_json_fields(&previous.to_json(), &next.to_json()).contains(&"last_name".into())
+        );
+    }
+
+    #[test]
     fn self_payer_needs_only_the_source_of_funds() {
         let declaration = from_input(&input("self")).unwrap();
         assert!(declaration.first_name.is_none(), "third-party data dropped");
@@ -4287,7 +4353,7 @@ mod tests {
         assert!(shown["contact_consent_at"].is_null());
 
         let unnamed = PortalPayerInput {
-            payer_type: Some("insurance".into()),
+            payer_type: Some("organisation".into()),
             relationship_kind: Some("business_partner".into()),
             country: Some("de".into()),
             contact_consent: Some(true),
@@ -4301,6 +4367,17 @@ mod tests {
         let shown = insurer.portal_json();
         assert_eq!(shown["relationship_kind"], "business_partner");
         assert_eq!(shown["contact_consent_at"], "2026-10-03T09:20:00Z");
+
+        assert_eq!(
+            from_portal(
+                None,
+                &PortalPayerInput {
+                    payer_type: Some("insurance".into()),
+                    ..portal("third_party")
+                }
+            ),
+            Err("payer_type_invalid")
+        );
 
         // A refused value names its field.
         for (refused, code, field) in [

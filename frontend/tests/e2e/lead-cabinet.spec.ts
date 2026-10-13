@@ -414,6 +414,8 @@ function completeRequestWithPayer(request: ReturnType<typeof leadRequest>, payer
     first_name: "Viktor",
     last_name: "Zahler",
     citizenships: ["UA"],
+    city: "Berlin",
+    country: "DE",
     relationship_kind: "parent",
     contact_consent_at: "2026-10-03T09:16:00Z",
     ...payer,
@@ -748,6 +750,74 @@ async function setup(
 }
 
 test.describe("lead cabinet", () => {
+  test("audit: concern waits for health consent and the combined upload limit applies", async ({ page }) => {
+    const { request, calls } = await setup(page, "lead");
+    Object.assign(request, { documents_used: 30 });
+    await page.goto("/");
+    await step(page, "documents");
+    const reason = page.getByRole("textbox", { name: "Grund der Anfrage" });
+    await expect(reason).toBeDisabled();
+    await page.getByTestId("lead-request-health-consent").getByRole("checkbox").click();
+    await expect(reason).toBeEnabled();
+    await expect(page.locator("#lead-request-files")).toBeDisabled();
+    await reason.fill("Synthetic concern");
+    await expect.poll(() => calls.identification.at(-1)).toEqual({ request_reason: "Synthetic concern" });
+  });
+
+  test("audit: autosave retries valid fields after multiple independent rejections", async ({ page }) => {
+    const { calls } = await setup(page, "lead");
+    const attempts: Record<string, unknown>[] = [];
+    await page.route("**/api/v1/me/lead-requests/lead-1/personal-data", async (route) => {
+      const patch = route.request().postDataJSON();
+      attempts.push(patch);
+      const field = patch.first_name === "Refused" ? "first_name" : patch.city === "Invalid" ? "city" : null;
+      if (field) return route.fulfill({ status: 422, json: { code: "invalid_field", field, message: "Synthetic validation error" } });
+      await route.fallback();
+    });
+    await page.clock.install();
+    await page.goto("/");
+    await expect(page.locator("#lead-request-first_name")).toBeVisible();
+    await page.clock.pauseAt(Date.now() + 1000);
+    await page.locator("#lead-request-first_name").fill("Refused");
+    await page.locator("#lead-request-city").fill("Invalid");
+    await page.locator("#lead-request-phone").fill("+4930123456");
+    await page.clock.runFor(800);
+    await expect.poll(() => attempts.length).toBe(3);
+    expect(attempts[1]).not.toHaveProperty("first_name");
+    expect(attempts[2]).toEqual({ phone: "+4930123456" });
+    expect(calls.personalData.at(-1)).toEqual({ phone: "+4930123456" });
+    await expect(page.locator("#lead-request-first_name")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.locator("#lead-request-city")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  test("audit: access closed during autosave reloads the guardian-only notice", async ({ page }) => {
+    await setup(page, "lead");
+    let closed = false;
+    await page.route("**/api/v1/me/lead-requests", async (route) => {
+      if (closed) return route.fulfill({ json: { requests: [], own_access_closed: true } });
+      await route.fallback();
+    });
+    await page.route("**/api/v1/me/lead-requests/lead-1/personal-data", async (route) => {
+      closed = true;
+      await route.fulfill({ status: 403, json: { code: "lead_request_guardian_only", message: "Guardian only" } });
+    });
+    await page.goto("/");
+    await page.locator("#lead-request-middle_name").fill("Maria");
+    await expect(page.getByTestId("lead-request-step-person")).toHaveCount(0);
+    await expect(page.getByText("Diese Anfrage füllen Ihre Eltern bzw. Ihr gesetzlicher Vertreter", { exact: false })).toBeVisible();
+  });
+
+  test("audit: hidden legacy requirements remain visible in the sending summary", async ({ page }) => {
+    const { request } = await setup(page, "lead", { prepare: completeRequest });
+    request.progress.missing_for_submit = ["pep_self", "birth_place"];
+    await page.goto("/");
+    await step(page, "send");
+    const other = page.getByTestId("lead-request-missing-other");
+    await expect(other).toContainText("Weitere Angaben");
+    await expect(other.getByRole("listitem")).toHaveCount(2);
+    await expect(page.getByTestId("lead-request-send").getByRole("button", { name: "An den Manager senden", exact: true })).toBeDisabled();
+  });
+
   test("a lead login sees only its request, the account and the legal notice", async ({ page }) => {
     const { calls } = await setup(page, "lead");
     await page.goto("/");
@@ -889,6 +959,8 @@ test.describe("lead cabinet", () => {
     await expect(page.getByTestId("lead-request-legal")).toHaveCount(0);
 
     await step(page, "documents");
+    await page.getByTestId("lead-request-health-consent").getByRole("checkbox").click();
+    await expect(page.getByTestId("lead-request-health-consent").getByRole("checkbox")).toBeChecked();
     await page.getByRole("textbox", { name: "Grund der Anfrage" }).fill("Zweitmeinung zur Knie-OP");
     await expect.poll(() => calls.identification.at(-1)).toEqual({ request_reason: "Zweitmeinung zur Knie-OP" });
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
@@ -1107,6 +1179,7 @@ test.describe("lead cabinet", () => {
     await page.getByRole("option", { name: "Ukraine" }).first().click();
     await page.keyboard.press("Escape");
     await payer.getByRole("textbox", { name: "Ort", exact: true }).fill("München");
+    await choose(page, payer.getByRole("combobox", { name: "Wohnsitzland" }), "Deutschland");
     // The block is saved as a whole, trimmed, without the empty fields.
     await expect.poll(() => calls.payer.at(-1)).toEqual({
       payer_kind: "third_party",
@@ -1114,6 +1187,7 @@ test.describe("lead cabinet", () => {
       first_name: "Viktor",
       last_name: "Zahler",
       city: "München",
+      country: "DE",
       messenger: "",
       citizenships: ["UA"],
       contact_consent: false,
@@ -1155,9 +1229,9 @@ test.describe("lead cabinet", () => {
     const reason = payer.getByRole("textbox", { name: "Warum erfolgt die Zahlung über die Organisation?" });
 
     await choose(page, type, "Eine Privatperson");
-    await payer.getByRole("textbox", { name: "Vorname" }).fill("Viktor");
+    // No person was named yet: changing type may preserve the entered address.
     await payer.getByRole("textbox", { name: "Straße und Hausnummer" }).fill("Musterstraße 1");
-    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_type: "person", first_name: "Viktor" });
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_type: "person", street: "Musterstraße 1" });
     await expect(reason).toHaveCount(0);
 
     // An organisation has the organisation mask and a seat; the fields of a natural person are gone, with what was typed in them.
@@ -1239,9 +1313,17 @@ test.describe("lead cabinet", () => {
     await expect.poll(() => calls.identification.at(-1)).toEqual({ payment_background: "" });
     await expect(payer.getByRole("textbox", { name: "Vorname" })).toHaveValue("");
     await expect(payer.getByRole("textbox", { name: "Straße und Hausnummer", exact: true })).toHaveValue("Musterstraße 1");
+    // A named organisation remains stored until the replacement person is sufficiently identified.
+    expect(calls.payer.at(-1)).toMatchObject({ payer_type: "organisation", organisation_name: "Beispiel GmbH" });
+    await payer.getByRole("textbox", { name: "Vorname" }).fill("Viktor");
+    await payer.getByRole("textbox", { name: "Nachname" }).fill("Zahler");
+    await payer.getByRole("textbox", { name: "Ort", exact: true }).fill("Berlin");
     await expect.poll(() => calls.payer.at(-1)).toEqual({
       payer_kind: "third_party",
       payer_type: "person",
+      first_name: "Viktor",
+      last_name: "Zahler",
+      city: "Berlin",
       street: "Musterstraße 1",
       country: "DE",
       email: "kontakt@example.com",
@@ -1633,9 +1715,16 @@ test.describe("lead cabinet", () => {
     await expect(payer.getByRole("textbox", { name: "Telefon" })).toHaveValue("");
     await expect(question).toContainText("Eine Privatperson");
     await expect(payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" })).toContainText("Auswählen");
-    await expect
-      .poll(() => calls.payer.at(-1))
-      .toEqual({ payer_kind: "third_party", payer_type: "person", messenger: "", contact_consent: false });
+    // The parent remains the stored payer while the replacement is still blank.
+    expect(calls.payer.at(-1)).toMatchObject({ first_name: "Maria", relationship_kind: "parent" });
+    await payer.getByRole("textbox", { name: "Vorname" }).fill("Viktor");
+    await payer.getByRole("textbox", { name: "Nachname" }).fill("Zahler");
+    await payer.getByRole("textbox", { name: "Ort", exact: true }).fill("Berlin");
+    await choose(page, payer.getByRole("combobox", { name: "Wohnsitzland" }), "Deutschland");
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({
+      payer_kind: "third_party", payer_type: "person", first_name: "Viktor", last_name: "Zahler", city: "Berlin", country: "DE", contact_consent: false,
+    });
+    expect(calls.payer.at(-1)).not.toHaveProperty("relationship_kind");
     // Somebody else pays: the consent to contact that person is asked.
     await expect(payer.getByTestId("lead-request-payer-consent")).toBeVisible();
   });

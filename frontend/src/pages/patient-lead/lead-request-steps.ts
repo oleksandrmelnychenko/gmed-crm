@@ -36,6 +36,7 @@ export const SERVER_STEPS = ["person", "contact", "identity", "billing", "declar
 export type FormStep = Exclude<StepId, "follow_up" | "send">;
 
 const PERSON_KEYS: ReadonlySet<string> = new Set([
+  "name_latin",
   "salutation",
   "first_name",
   "last_name",
@@ -99,6 +100,18 @@ export function stepOfField(field: string): FormStep {
   if (DECLARATION_KEYS.has(field)) return "declarations";
   if (field === "request_reason") return "documents";
   return "person";
+}
+
+/** Legacy/server-only fields have no input in the base form. Keep them visible
+ * in the sending summary without pointing to a step that cannot answer them. */
+export function hasBaseFormInput(field: string): boolean {
+  if (["former_names", "birth_place", "birth_country", "habitual_residence_country", "payment_background"].includes(field)) return false;
+  if (DECLARATION_KEYS.has(field)) return false;
+  if (field.startsWith("id_") && field !== "id_document_upload") return false;
+  return PERSON_KEYS.has(field) || CONTACT_KEYS.has(field) || Boolean(representativeSubmitPart(field)) ||
+    field === "id_document_upload" || field === "request_reason" ||
+    field.startsWith("payer_") || isRecipientField(field) || isBillingField(field) ||
+    field === "has_insurance" || field.startsWith("insurance_");
 }
 
 /** The steps shown for this request, in their order. */

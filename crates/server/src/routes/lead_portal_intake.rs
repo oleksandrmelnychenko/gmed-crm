@@ -90,7 +90,8 @@ use gmed_domain::role::Role;
 
 /// Version of the consent texts below. A new wording needs a new version; a
 /// consent to an older version does not count any more.
-pub(crate) const HEALTH_CONSENT_VERSION: &str = "2026-10-03";
+pub(crate) const HEALTH_CONSENT_VERSION: &str = "2026-10-13";
+const INQUIRY_CONSENT_VERSION: &str = "2026-10-03";
 /// Languages of the consent texts: the portal speaks DE and RU, the lead
 /// cabinet also UA and EN (owner request 2026-10-04).
 const CONSENT_LANGUAGES: [&str; 4] = ["de", "ru", "uk", "en"];
@@ -133,7 +134,10 @@ impl ConsentPurpose {
     }
 
     fn version(self) -> &'static str {
-        HEALTH_CONSENT_VERSION
+        match self {
+            Self::HealthData => HEALTH_CONSENT_VERSION,
+            Self::InquiryProcessing => INQUIRY_CONSENT_VERSION,
+        }
     }
 
     fn purpose(self) -> &'static str {
@@ -193,8 +197,8 @@ pub(crate) fn health_consent_text(kind: AccessKind, language: &str) -> Option<&'
     Some(match (kind, language) {
         (AccessKind::Own, "de") => {
             "Ich willige ein, dass die GMed die Gesundheitsdaten, die ich in diesem Portal hochlade \
-             (zum Beispiel Arztbriefe, Befunde, Bilder und Laborwerte), verarbeitet, um meine Anfrage \
-             zu prüfen und eine mögliche Behandlung in Deutschland vorzubereiten (Art. 9 Abs. 2 lit. a \
+             (zum Beispiel Arztbriefe, Befunde, Bilder und Laborwerte), sowie die Beschreibung meines Anliegens verarbeitet, um meine Anfrage \
+             zu prüfen und mögliche Leistungen in Deutschland vorzubereiten (Art. 9 Abs. 2 lit. a \
              DSGVO). An Kliniken, Ärztinnen und Ärzte gibt die GMed diese Unterlagen erst nach einer \
              gesonderten Einwilligung weiter. Die Einwilligung ist freiwillig. Ich kann sie jederzeit \
              im Portal oder gegenüber der GMed mit Wirkung für die Zukunft widerrufen; die \
@@ -204,8 +208,8 @@ pub(crate) fn health_consent_text(kind: AccessKind, language: &str) -> Option<&'
         }
         (AccessKind::Own, "ru") => {
             "Я даю согласие на то, чтобы GMed обрабатывала данные о моём здоровье, которые я загружаю \
-             в этот портал (например, выписки, заключения, снимки и анализы), чтобы рассмотреть мою \
-             заявку и подготовить возможное лечение в Германии (ст. 9 п. 2 лит. a DSGVO). Клиникам и \
+             в этот портал (например, выписки, заключения, снимки и анализы), а также описание моего обращения, чтобы рассмотреть мою \
+             заявку и подготовить возможные услуги в Германии (ст. 9 п. 2 лит. a DSGVO). Клиникам и \
              врачам GMed передаёт эти документы только после отдельного согласия. Согласие \
              добровольное. Я могу в любой момент отозвать его в портале или обратившись в GMed; отзыв \
              действует на будущее и не влияет на законность обработки до отзыва. Если сотрудничество \
@@ -214,8 +218,8 @@ pub(crate) fn health_consent_text(kind: AccessKind, language: &str) -> Option<&'
         (AccessKind::Guardian, "de") => {
             "Als Elternteil oder gesetzlicher Vertreter willige ich ein, dass die GMed die \
              Gesundheitsdaten meines Kindes, die ich in diesem Portal hochlade (zum Beispiel \
-             Arztbriefe, Befunde, Bilder und Laborwerte), verarbeitet, um die Anfrage zu prüfen und \
-             eine mögliche Behandlung in Deutschland vorzubereiten (Art. 9 Abs. 2 lit. a DSGVO). An \
+             Arztbriefe, Befunde, Bilder und Laborwerte), sowie die Beschreibung des Anliegens verarbeitet, um die Anfrage zu prüfen und \
+             mögliche Leistungen in Deutschland vorzubereiten (Art. 9 Abs. 2 lit. a DSGVO). An \
              Kliniken, Ärztinnen und Ärzte gibt die GMed diese Unterlagen erst nach einer gesonderten \
              Einwilligung weiter. Die Einwilligung ist freiwillig. Ich kann sie jederzeit im Portal \
              oder gegenüber der GMed mit Wirkung für die Zukunft widerrufen; die Rechtmäßigkeit der \
@@ -225,7 +229,7 @@ pub(crate) fn health_consent_text(kind: AccessKind, language: &str) -> Option<&'
         (AccessKind::Guardian, "ru") => {
             "Как родитель или законный представитель я даю согласие на то, чтобы GMed обрабатывала \
              данные о здоровье моего ребёнка, которые я загружаю в этот портал (например, выписки, \
-             заключения, снимки и анализы), чтобы рассмотреть заявку и подготовить возможное лечение \
+             заключения, снимки и анализы), а также описание обращения, чтобы рассмотреть заявку и подготовить возможные услуги \
              в Германии (ст. 9 п. 2 лит. a DSGVO). Клиникам и врачам GMed передаёт эти документы \
              только после отдельного согласия. Согласие добровольное. Я могу в любой момент отозвать \
              его в портале или обратившись в GMed; отзыв действует на будущее и не влияет на \
@@ -234,8 +238,8 @@ pub(crate) fn health_consent_text(kind: AccessKind, language: &str) -> Option<&'
         }
         (AccessKind::Own, "uk") => {
             "Я даю згоду на те, щоб GMed обробляла дані про моє здоров'я, які я завантажую в цей \
-             портал (наприклад, виписки, висновки, знімки та аналізи), щоб розглянути мою заявку й \
-             підготувати можливе лікування в Німеччині (ст. 9 п. 2 літ. a DSGVO). Клінікам і лікарям \
+             портал (наприклад, виписки, висновки, знімки та аналізи), а також опис мого звернення, щоб розглянути мою заявку й \
+             підготувати можливі послуги в Німеччині (ст. 9 п. 2 літ. a DSGVO). Клінікам і лікарям \
              GMed передає ці документи лише після окремої згоди. Згода добровільна. Я можу будь-коли \
              відкликати її в порталі або звернувшись до GMed; відкликання діє на майбутнє і не \
              впливає на законність обробки до нього. Якщо співпраця не відбудеться, заявку та \
@@ -243,8 +247,8 @@ pub(crate) fn health_consent_text(kind: AccessKind, language: &str) -> Option<&'
         }
         (AccessKind::Own, "en") => {
             "I consent to GMed processing the health data I upload to this portal (for example \
-             doctors' letters, findings, images and lab results) in order to review my request and \
-             prepare a possible treatment in Germany (Art. 9(2)(a) GDPR). GMed passes these documents \
+             doctors' letters, findings, images and lab results), and the description of my concern, in order to review my request and \
+             prepare possible services in Germany (Art. 9(2)(a) GDPR). GMed passes these documents \
              on to clinics and doctors only after a separate consent. The consent is voluntary. I can \
              withdraw it at any time in the portal or by contacting GMed, with effect for the \
              future; the lawfulness of the processing up to then is not affected. If no cooperation \
@@ -254,7 +258,7 @@ pub(crate) fn health_consent_text(kind: AccessKind, language: &str) -> Option<&'
         (AccessKind::Guardian, "uk") => {
             "Як батько, мати або законний представник я даю згоду на те, щоб GMed обробляла дані про \
              здоров'я моєї дитини, які я завантажую в цей портал (наприклад, виписки, висновки, \
-             знімки та аналізи), щоб розглянути заявку й підготувати можливе лікування в Німеччині \
+             знімки та аналізи), а також опис звернення, щоб розглянути заявку й підготувати можливі послуги в Німеччині \
              (ст. 9 п. 2 літ. a DSGVO). Клінікам і лікарям GMed передає ці документи лише після \
              окремої згоди. Згода добровільна. Я можу будь-коли відкликати її в порталі або \
              звернувшись до GMed; відкликання діє на майбутнє і не впливає на законність обробки до \
@@ -264,7 +268,7 @@ pub(crate) fn health_consent_text(kind: AccessKind, language: &str) -> Option<&'
         (AccessKind::Guardian, "en") => {
             "As a parent or legal guardian I consent to GMed processing my child's health data that \
              I upload to this portal (for example doctors' letters, findings, images and lab \
-             results) in order to review the request and prepare a possible treatment in Germany \
+             results), and the description of the concern, in order to review the request and prepare possible services in Germany \
              (Art. 9(2)(a) GDPR). GMed passes these documents on to clinics and doctors only after a \
              separate consent. The consent is voluntary. I can withdraw it at any time in the portal \
              or by contacting GMed, with effect for the future; the lawfulness of the processing up \
@@ -644,14 +648,15 @@ pub(crate) async fn lock_my_lead(
     let row = sqlx::query(&format!(
         r#"SELECT CASE
                     WHEN l.portal_user_id = $2 AND NOT {OWN_LOGIN_CLOSED_SQL} THEN 'self'
-                    WHEN EXISTS (
+                    WHEN {OWN_LOGIN_CLOSED_SQL} AND EXISTS (
                         SELECT 1 FROM lead_portal_access a
                         WHERE a.lead_id = l.id AND a.user_id = $2
                           AND a.kind = 'guardian' AND a.revoked_at IS NULL
                     ) THEN 'guardian'
                   END AS access_kind,
                   {PERSONAL_DATA_COLUMNS},
-                  l.created_by, l.portal_submitted_at, l.portal_field_updates
+                  l.created_by, l.portal_submitted_at, l.portal_field_updates,
+                  {CHANGED_SINCE_SUBMIT_SQL} AS changed_since_submit
            FROM leads l
            WHERE l.id = $1 AND {PORTAL_LEAD_SQL}
            FOR UPDATE OF l"#
@@ -747,7 +752,7 @@ pub(crate) const PROGRESS_FIELDS: [&str; 12] = [
 ];
 
 /// Fields that must be filled before the data can be sent to the manager.
-const SUBMIT_REQUIRED_FIELDS: [&str; 9] = [
+const SUBMIT_REQUIRED_FIELDS: [&str; 10] = [
     "first_name",
     "last_name",
     "date_of_birth",
@@ -757,9 +762,19 @@ const SUBMIT_REQUIRED_FIELDS: [&str; 9] = [
     "zip_code",
     "city",
     "country",
+    "phone",
 ];
 
 const LEGAL_SEX_VALUES: [&str; 4] = ["female", "male", "diverse", "no_entry"];
+
+/// Same Unicode rule as the cabinet's PASSPORT_NAME. Drafts remain editable;
+/// submission asks the person to confirm the spelling from the passport.
+pub(crate) fn name_needs_latin_spelling(value: &str) -> bool {
+    static NAME: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^[\p{Latin}\p{M}\s'’.-]*$").expect("passport name regex")
+    });
+    !NAME.is_match(value.trim())
+}
 /// Same values as the staff wizard and `patients.insurance_type`.
 const INSURANCE_TYPE_VALUES: [&str; 4] = ["private", "public", "foreign", "self_pay"];
 const INSURANCE_COVERAGE_VALUES: [&str; 3] = ["yes", "no", "not_sure"];
@@ -861,11 +876,22 @@ impl PersonalData {
     }
 
     fn missing_for_submit(&self) -> Vec<&'static str> {
-        SUBMIT_REQUIRED_FIELDS
+        let mut missing: Vec<_> = SUBMIT_REQUIRED_FIELDS
             .iter()
             .copied()
             .filter(|field| self.value(field).is_none())
-            .collect()
+            .collect();
+        if [
+            &self.first_name,
+            &self.last_name,
+            self.middle_name.as_deref().unwrap_or(""),
+        ]
+        .into_iter()
+        .any(name_needs_latin_spelling)
+        {
+            missing.push("name_latin");
+        }
+        missing
     }
 
     fn to_json(&self) -> Value {
@@ -1682,12 +1708,6 @@ async fn store_identification(
                birth_country = EXCLUDED.birth_country,
                habitual_residence_country = EXCLUDED.habitual_residence_country,
                contact_channels = EXCLUDED.contact_channels,
-               id_document_type = EXCLUDED.id_document_type,
-               id_document_number = EXCLUDED.id_document_number,
-               id_issuing_authority = EXCLUDED.id_issuing_authority,
-               id_issuing_country = EXCLUDED.id_issuing_country,
-               id_issued_on = EXCLUDED.id_issued_on,
-               id_valid_until = EXCLUDED.id_valid_until,
                pep_self = EXCLUDED.pep_self,
                pep_self_details = EXCLUDED.pep_self_details,
                pep_related = EXCLUDED.pep_related,
@@ -1882,7 +1902,7 @@ impl ExtraQuestions {
         check_required: bool,
         payer: Option<&lead_payer::Declaration>,
         route_by: PaymentRouteBy,
-        answered_by_payer: bool,
+        _answered_by_payer: bool,
     ) -> Self {
         let third_party = payer.is_some_and(lead_payer::Declaration::is_third_party);
         let self_pays = payer.is_some_and(|payer| payer.payer_kind == lead_payer::PAYER_KIND_SELF);
@@ -1896,7 +1916,7 @@ impl ExtraQuestions {
             occupation: check_required && !paying_parent,
             sector: check_required,
             payment_background: required && third_party && !paying_parent,
-            payer_funds: outside && !answered_by_payer,
+            payer_funds: false,
             payer_states_funds: check_required && third_party && !paying_parent,
         }
     }
@@ -2028,6 +2048,11 @@ fn missing_for_submit(
     base: &crate::risk::cabinet::BaseExtra,
 ) -> Vec<String> {
     let mut missing = data.missing_for_submit();
+    // A child's request is completed through a guardian login. Contact
+    // numbers are required on the representatives, not on the child.
+    if crate::routes::leads::is_minor_on(data.date_of_birth, today) {
+        missing.retain(|key| *key != "phone");
+    }
     missing.extend(
         lead_payer::portal_missing(payer)
             .into_iter()
@@ -2114,7 +2139,13 @@ pub(crate) fn with_invoice_recipient(
         .map(str::to_string)
         .collect();
     if !fits && lead_invoice_recipient::payer_question_reached(recipient) {
-        step_three.push("payer_kind".to_string());
+        // A paying recipient has no separate "who pays" field. Its own
+        // fields and confirmation control are the actionable missing items.
+        if recipient.is_third_party() && recipient.is_payer == Some(true) {
+            step_three.push("invoice_recipient_is_payer".to_string());
+        } else {
+            step_three.push("payer_kind".to_string());
+        }
     }
     let at = reshaped
         .iter()
@@ -2145,7 +2176,11 @@ pub(crate) fn upload_taken_over(upload: &PgRow) -> bool {
             .ok()
             .flatten()
     };
-    time("reviewed_at").is_some() || time("signed_at").is_some()
+    time("reviewed_at").is_some()
+        || time("signed_at").is_some()
+        || upload
+            .try_get::<bool, _>("identity_in_use")
+            .unwrap_or(false)
 }
 
 pub(crate) fn upload_file_name(upload: &PgRow) -> Option<String> {
@@ -2167,6 +2202,11 @@ where
                JOIN documents d ON d.id = u.document_id
                WHERE u.lead_id = $1 AND u.kind = 'identity'
                  AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL
+           ) OR EXISTS (
+               SELECT 1 FROM documents d JOIN leads l ON l.id = $1
+               WHERE (d.lead_id = l.id OR d.patient_id = l.prospect_patient_id)
+                 AND d.status = 'active' AND d.file_deleted_at IS NULL
+                 AND d.compliance_kind = 'identity'
            )"#,
     )
     .bind(lead_id)
@@ -2367,20 +2407,22 @@ const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NOT NULL AND 
             CASE WHEN jsonb_typeof(l.portal_field_updates) = 'object'
                  THEN l.portal_field_updates ELSE '{}'::jsonb END
         ) AS field(name, entry)
-        WHERE (field.entry->>'at')::timestamptz > GREATEST(
-            l.portal_submitted_at,
-            (SELECT ra.follow_up_answered_at FROM lead_risk_assessments ra WHERE ra.lead_id = l.id)
-        )
+        WHERE (field.entry->>'at')::timestamptz > CASE
+            WHEN field.name IN ('enhanced_details', 'statements') THEN GREATEST(
+                l.portal_submitted_at,
+                (SELECT ra.follow_up_answered_at FROM lead_risk_assessments ra WHERE ra.lead_id = l.id)
+            ) ELSE l.portal_submitted_at END
     )
     OR EXISTS (
         SELECT 1 FROM lead_portal_uploads pu
         WHERE pu.lead_id = l.id
           -- The payer's files are not part of the request.
           AND pu.kind NOT IN ('payer_identity', 'payer_funds_proof')
-          AND GREATEST(pu.created_at, pu.withdrawn_at) > GREATEST(
-            l.portal_submitted_at,
-            (SELECT ra.follow_up_answered_at FROM lead_risk_assessments ra WHERE ra.lead_id = l.id)
-          )
+          AND GREATEST(pu.created_at, pu.withdrawn_at) > CASE
+            WHEN pu.kind IN ('self_funds_proof', 'relationship_proof') THEN GREATEST(
+                l.portal_submitted_at,
+                (SELECT ra.follow_up_answered_at FROM lead_risk_assessments ra WHERE ra.lead_id = l.id)
+            ) ELSE l.portal_submitted_at END
     )
 )"#;
 
@@ -2453,7 +2495,13 @@ pub(crate) async fn request_payload(
     let uploads = sqlx::query(
         r#"SELECT u.document_id, u.kind, u.created_at, u.reviewed_at, u.uploaded_by,
                   d.original_filename, d.auto_name, d.file_size, d.mime_type, d.patient_id,
-                  d.signed_at
+                  d.signed_at, d.lead_id,
+                  EXISTS(SELECT 1 FROM document_shares s WHERE s.document_id = d.id) AS shared,
+                  EXISTS(SELECT 1 FROM document_review_events r WHERE r.document_id = d.id) AS in_review,
+                  COALESCE(u.created_at <= CASE u.kind
+                    WHEN 'identity' THEN (SELECT g.id_data_entered_at FROM lead_gwg_declarations g WHERE g.lead_id = u.lead_id)
+                    WHEN 'representative_identity' THEN (SELECT r.id_data_entered_at FROM lead_representatives r WHERE r.lead_id = u.lead_id AND r.contact_id = u.representative_id)
+                  END, false) AS identity_in_use
            FROM lead_portal_uploads u
            JOIN documents d ON d.id = u.document_id
            WHERE u.lead_id = $1
@@ -2494,7 +2542,10 @@ pub(crate) async fn request_payload(
                     "uploaded_at": upload.try_get::<DateTime<Utc>, _>("created_at").ok(),
                     "uploaded_by_me": mine,
                     "reviewed": reviewed,
-                    "can_delete": mine && !reviewed && !moved,
+                    "can_delete": mine && !reviewed && !moved
+                        && upload.try_get::<Option<Uuid>, _>("lead_id").ok().flatten() == Some(lead_id)
+                        && !upload.try_get::<bool, _>("shared").unwrap_or(true)
+                        && !upload.try_get::<bool, _>("in_review").unwrap_or(true),
                 })
             })
             .collect()
@@ -2541,7 +2592,7 @@ pub(crate) async fn request_payload(
             &data,
             payer.as_ref(),
             &identification,
-            !identity_documents.is_empty(),
+            identity_document_uploaded(&state.db, lead_id).await?,
             lead_representatives::missing_for_submit(&representation, today),
             route_by,
             extra,
@@ -2646,6 +2697,9 @@ pub(crate) async fn request_payload(
         "documents": documents,
         "identity_documents": identity_documents,
         "max_documents": MAX_PORTAL_UPLOADS,
+        "documents_used": uploads.iter().filter(|upload| {
+            !PAYER_UPLOAD_KINDS.contains(&upload.try_get::<String, _>("kind").unwrap_or_default().as_str())
+        }).count(),
         "consents": consents,
         // The person's own choice of the consent form options (2026-10-12).
         "consent_form": consent_form_json(consent_choice.as_ref(), user_id),
@@ -2755,12 +2809,16 @@ async fn notify_parents_access_missing(state: &AppState, user_id: Uuid) {
              AND {OWN_LOGIN_CLOSED_SQL}
              AND NOT EXISTS (
                  SELECT 1 FROM lead_portal_access a
-                 WHERE a.lead_id = l.id AND a.kind = 'guardian'
+                 WHERE a.lead_id = l.id AND a.kind = 'guardian' AND a.revoked_at IS NULL
              )
              AND NOT EXISTS (
                  SELECT 1 FROM user_notifications n
                  WHERE n.entity_type = 'lead' AND n.entity_id = l.id
                    AND n.kind = 'lead_portal_minor'
+                   AND n.created_at >= COALESCE((
+                       SELECT max(a.revoked_at) FROM lead_portal_access a
+                       WHERE a.lead_id = l.id AND a.kind = 'guardian'
+                   ), '-infinity'::timestamptz)
              )"#
     ))
     .bind(user_id)
@@ -2780,6 +2838,7 @@ async fn notify_parents_access_missing(state: &AppState, user_id: Uuid) {
             "lead_portal_minor",
             "Patient is under 18: issue the parents' access",
             "The patient signed in with the own login, but is under 18. A minor has no own login; issue access to a parent or legal guardian.",
+            false,
         )
         .await;
     }
@@ -2830,6 +2889,18 @@ async fn update_my_personal_data(
         Ok(next) => next,
         Err(error) => return error.into_response(),
     };
+    if patch.date_of_birth.is_some()
+        && ((kind == AccessKind::Guardian
+            && !crate::routes::leads::is_minor_on(next.date_of_birth, today))
+            || (current.date_of_birth.is_some() && next.date_of_birth.is_none()))
+    {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "dob_staff_only",
+            "Ask GMED to correct this date of birth",
+            json!({ "field": "date_of_birth" }),
+        );
+    }
     // A minor has no own login (owner decision 2026-10-03): the parents fill
     // in the request. The date is not stored; staff are told to issue the
     // parents' access instead.
@@ -2844,6 +2915,7 @@ async fn update_my_personal_data(
             "lead_portal_minor",
             "Patient is under 18: issue the parents' access",
             "The patient entered a date of birth under 18 in the portal. A minor has no own login; issue access to a parent or legal guardian.",
+            true,
         )
         .await;
         return coded(
@@ -3016,11 +3088,24 @@ async fn update_my_payer(
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
     };
-    let (kind, _) = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+    let (kind, lead) = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
         Ok(Some(found)) => found,
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    if input.payer_kind.trim() == lead_payer::PAYER_KIND_SELF
+        && crate::routes::leads::is_minor_on(
+            PersonalData::from_row(&lead).date_of_birth,
+            crate::app_time::today(),
+        )
+    {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "payer_kind_invalid",
+            "A minor's payer must be a parent or another adult",
+            json!({ "field": "payer_kind" }),
+        );
+    }
     // The payer answered through its own link: its identity is its own
     // statement now. The lead asks GMED to change the payer; staff can.
     let declared = match lead_payer::load_declaration(&mut tx, lead_id).await {
@@ -3107,23 +3192,30 @@ async fn update_my_payer(
     }
     let Some(declaration) = saved else {
         if !mask_changed.is_empty() || !synced.is_empty() {
-            if !markers.is_empty()
-                && let Err(error) = sqlx::query(
-                    r#"UPDATE leads
+            if let Err(error) = sqlx::query(
+                r#"UPDATE leads
                        SET portal_field_updates = portal_field_updates || $2::jsonb,
                            updated_at = now()
                        WHERE id = $1"#,
-                )
-                .bind(lead_id)
-                .bind(Value::Object(markers))
-                .execute(&mut *tx)
-                .await
+            )
+            .bind(lead_id)
+            .bind(Value::Object(markers))
+            .execute(&mut *tx)
+            .await
             {
                 return internal(error, "mark billing");
             }
             if let Err(error) = tx.commit().await {
                 return internal(error, "commit organisation");
             }
+            crate::realtime::publish_lead_event(
+                &state,
+                Some(auth.user_id),
+                "lead.portal_updated",
+                lead_id,
+                json!({ "change": "payer", "access_kind": kind.as_str() }),
+            )
+            .await;
         } else {
             drop(tx);
         }
@@ -3747,6 +3839,24 @@ async fn update_my_identification(
         Err(error) => return error.into_response(),
     };
     let changed = changed_identification_fields(&current, &next);
+    if statements_body
+        .get("request_reason")
+        .and_then(Value::as_str)
+        .is_some_and(|reason| !reason.trim().is_empty())
+    {
+        match active_consent(&mut *tx, lead_id, auth.user_id, ConsentPurpose::HealthData).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return coded(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "health_consent_required",
+                    "Give consent to health data processing before describing your concern",
+                    json!({ "field": "request_reason" }),
+                );
+            }
+            Err(error) => return internal(error, "load health consent"),
+        }
+    }
     let statements_changed = match crate::risk::cabinet::save_statements(
         &mut tx,
         lead_id,
@@ -3784,7 +3894,13 @@ async fn update_my_identification(
             "hash": value_marker(lead_id, IDENTIFICATION_MARKER, Some(&next.marker_value())),
         });
     }
-    if !statements_changed.is_empty() {
+    if statements_changed.contains(&"request_reason") {
+        marker["request_reason"] = json!({ "at": now, "by": auth.user_id, "kind": kind.as_str() });
+    }
+    if statements_changed
+        .iter()
+        .any(|key| *key != "request_reason")
+    {
         marker[STATEMENTS_MARKER] = json!({
             "at": now,
             "by": auth.user_id,
@@ -4011,8 +4127,30 @@ async fn save_consent_choices(
     {
         return internal(error, "audit consent choices");
     }
+    if let Err(error) = sqlx::query("UPDATE leads SET portal_field_updates = portal_field_updates || jsonb_build_object('consent_form', jsonb_build_object('at', $2::timestamptz)), updated_at = now() WHERE id = $1")
+        .bind(lead_id).bind(chosen_at).execute(&mut *tx).await {
+        return internal(error, "mark consent choice update");
+    }
+    let (invalidated_count, invalidated) =
+        match crate::document_signatures::invalidate_consent_choices(&mut tx, lead_id, auth.user_id)
+            .await
+        {
+            Ok(requests) => requests,
+            Err(error) => return internal(error, "invalidate earlier consent invitations"),
+        };
     if let Err(error) = tx.commit().await {
         return internal(error, "commit consent choices");
+    }
+    if invalidated_count > 0 {
+        notify_lead_staff(&state, lead_id, "lead_consent_choice_changed", "Consent choice changed", "The patient changed the consent choice. Create a new consent document and signature invitation.").await;
+        let signature_state = state.clone();
+        tokio::spawn(async move {
+            crate::document_signatures::withdraw_invalidated_consents(
+                &signature_state,
+                &invalidated,
+            )
+            .await;
+        });
     }
     crate::realtime::publish_lead_event(
         &state,
@@ -4617,11 +4755,26 @@ pub(crate) async fn store_my_upload(
 
     // The upload is registered with its consent in one transaction; if the
     // link or the consent went away meanwhile, the stored file goes again.
+    let mut upload_limit_reached = false;
     let registered = async {
         let mut tx = state.db.begin().await?;
         let Some((kind, _)) = lock_my_lead(&mut tx, lead_id, auth.user_id).await? else {
             return Ok::<_, sqlx::Error>(None);
         };
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM lead_portal_uploads u
+             JOIN documents d ON d.id = u.document_id
+             WHERE u.lead_id = $1 AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL
+               AND u.kind NOT IN ('payer_identity', 'payer_funds_proof')",
+        )
+        .bind(lead_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if count >= MAX_PORTAL_UPLOADS {
+            upload_limit_reached = true;
+            return Ok(None);
+        }
+        let uploaded_at = portal_update_time(&mut tx).await?;
         let Some((consent_id, _)) =
             active_consent(&mut *tx, lead_id, auth.user_id, consent_purpose).await?
         else {
@@ -4647,8 +4800,8 @@ pub(crate) async fn store_my_upload(
         sqlx::query(
             r#"INSERT INTO lead_portal_uploads
                    (document_id, lead_id, uploaded_by, access_kind, consent_record_id, kind,
-                    representative_id)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+                    representative_id, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
         )
         .bind(document_id)
         .bind(lead_id)
@@ -4657,6 +4810,7 @@ pub(crate) async fn store_my_upload(
         .bind(consent_id)
         .bind(upload_kind.as_str())
         .bind(representative.as_ref().map(|(id, _)| *id))
+        .bind(uploaded_at)
         .execute(&mut *tx)
         .await?;
         audit::write_in_transaction(
@@ -4687,7 +4841,16 @@ pub(crate) async fn store_my_upload(
         Ok(Some(_)) => {}
         Ok(None) => {
             discard_stored_document(&state, document_id, &storage_key).await;
-            return not_found();
+            return if upload_limit_reached {
+                coded(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "too_many_documents",
+                    "No more documents can be uploaded",
+                    json!({ "max": MAX_PORTAL_UPLOADS }),
+                )
+            } else {
+                not_found()
+            };
         }
         Err(error) => {
             discard_stored_document(&state, document_id, &storage_key).await;
@@ -4760,6 +4923,10 @@ async fn withdraw_my_lead_document(
     };
     let upload = match sqlx::query(
         r#"SELECT u.uploaded_by, u.reviewed_at, u.kind, d.storage_key, d.patient_id, d.lead_id,
+                  COALESCE(u.created_at <= CASE u.kind
+                    WHEN 'identity' THEN (SELECT g.id_data_entered_at FROM lead_gwg_declarations g WHERE g.lead_id = u.lead_id)
+                    WHEN 'representative_identity' THEN (SELECT r.id_data_entered_at FROM lead_representatives r WHERE r.lead_id = u.lead_id AND r.contact_id = u.representative_id)
+                  END, false) AS identity_in_use,
                   d.signed_at,
                   EXISTS(SELECT 1 FROM document_shares s WHERE s.document_id = d.id) AS shared,
                   EXISTS(SELECT 1 FROM document_review_events r WHERE r.document_id = d.id)
@@ -4829,10 +4996,17 @@ async fn withdraw_my_lead_document(
             .is_some()
         || upload.try_get::<bool, _>("shared").unwrap_or(true)
         || upload.try_get::<bool, _>("in_review").unwrap_or(true);
-    if reviewed || in_use {
+    let identity_in_use = upload
+        .try_get::<bool, _>("identity_in_use")
+        .unwrap_or(false);
+    if reviewed || in_use || identity_in_use {
         return coded(
             StatusCode::CONFLICT,
-            "upload_reviewed",
+            if identity_in_use {
+                "upload_in_use"
+            } else {
+                "upload_reviewed"
+            },
             "Staff have already taken over this document; ask them to remove it",
             json!({}),
         );
@@ -4871,8 +5045,10 @@ async fn withdraw_my_lead_document(
             Some(auth.user_id),
         )
         .await?;
-        sqlx::query("UPDATE lead_portal_uploads SET withdrawn_at = now() WHERE document_id = $1")
+        let withdrawn_at = portal_update_time(&mut tx).await?;
+        sqlx::query("UPDATE lead_portal_uploads SET withdrawn_at = $2 WHERE document_id = $1")
             .bind(document_id)
+            .bind(withdrawn_at)
             .execute(&mut *tx)
             .await?;
         audit::write_in_transaction(
@@ -4980,6 +5156,23 @@ async fn submit_my_lead_request(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    // Retrying an unchanged submission must not change the declaration time,
+    // enqueue notifications or recompute risk.
+    if row
+        .try_get::<Option<DateTime<Utc>>, _>("portal_submitted_at")
+        .ok()
+        .flatten()
+        .is_some()
+        && !row
+            .try_get::<bool, _>("changed_since_submit")
+            .unwrap_or(true)
+    {
+        drop(tx);
+        return match request_payload(&state, lead_id, auth.user_id, kind).await {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => internal(error, "load submitted request"),
+        };
+    }
     let data = PersonalData::from_row(&row);
     let payer = match lead_payer::load_declaration(&mut tx, lead_id).await {
         Ok(payer) => payer,
@@ -5257,6 +5450,7 @@ async fn notify_lead_staff_once(
     kind: &str,
     title: &str,
     body: &str,
+    entered_minor_birth_date: bool,
 ) {
     let stored: Result<Vec<(Uuid, Uuid)>, sqlx::Error> = async {
         let mut tx = state.db.begin().await?;
@@ -5267,9 +5461,31 @@ async fn notify_lead_staff_once(
         if lead.is_none() {
             return Ok(Vec::new());
         }
+        if kind == "lead_portal_minor" {
+            let still_missing: bool = sqlx::query_scalar(&format!(
+                // An attempted under-18 DOB is deliberately not persisted.
+                // That explicit report still needs a staff notice even while
+                // the saved date remains adult or absent.
+                "SELECT ($2 OR {OWN_LOGIN_CLOSED_SQL}) AND {PORTAL_LEAD_SQL}
+                    AND NOT EXISTS (SELECT 1 FROM lead_portal_access a
+                        WHERE a.lead_id = l.id AND a.kind = 'guardian' AND a.revoked_at IS NULL)
+                 FROM leads l WHERE l.id = $1",
+            ))
+            .bind(lead_id)
+            .bind(entered_minor_birth_date)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !still_missing {
+                return Ok(Vec::new());
+            }
+        }
         let notified: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM user_notifications
-             WHERE entity_type = 'lead' AND entity_id = $1 AND kind = $2)",
+             WHERE entity_type = 'lead' AND entity_id = $1 AND kind = $2
+               AND ($2 <> 'lead_portal_minor' OR created_at >= COALESCE((
+                   SELECT max(a.revoked_at) FROM lead_portal_access a
+                   WHERE a.lead_id = $1 AND a.kind = 'guardian'
+               ), '-infinity'::timestamptz)))",
         )
         .bind(lead_id)
         .bind(kind)
@@ -5759,6 +5975,12 @@ async fn get_lead_portal_intake(
     };
     let consent_items: Vec<Value> = consents
         .iter()
+        .filter(|consent| {
+            statements_visible
+                && (medical
+                    || consent.try_get::<String, _>("consent_type").ok().as_deref()
+                        != Some("health_data_processing"))
+        })
         .map(|consent| {
             json!({
                 "id": consent.try_get::<Uuid, _>("id").ok(),
@@ -5953,13 +6175,23 @@ async fn review_portal_upload(
     if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
         return response;
     }
-    if let Err(response) = auth.require_capability(Capability::PatientsMedicalView) {
-        return response;
-    }
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
     };
+    let kind: Option<String> = match sqlx::query_scalar(
+        "SELECT kind FROM lead_portal_uploads WHERE document_id = $1 AND lead_id = $2 AND withdrawn_at IS NULL FOR UPDATE"
+    ).bind(document_id).bind(lead_id).fetch_optional(&mut *tx).await {
+        Ok(kind) => kind,
+        Err(error) => return internal(error, "load upload kind"),
+    };
+    if !matches!(
+        kind.as_deref(),
+        Some("identity" | "representative_identity" | "representative_authority")
+    ) && let Err(response) = auth.require_capability(Capability::PatientsMedicalView)
+    {
+        return response;
+    }
     let reviewed: Option<DateTime<Utc>> = match sqlx::query_scalar(
         r#"UPDATE lead_portal_uploads
            SET reviewed_at = COALESCE(reviewed_at, now()),
@@ -6086,6 +6318,10 @@ pub(crate) async fn purge_portal_intake_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
 ) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM consent_form_choices WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(&mut **tx)
+        .await?;
     sqlx::query("DELETE FROM lead_gwg_declarations WHERE lead_id = $1")
         .bind(lead_id)
         .execute(&mut **tx)
@@ -6247,7 +6483,8 @@ mod tests {
                 "street_address",
                 "zip_code",
                 "city",
-                "country"
+                "country",
+                "phone"
             ]
         );
         data.middle_name = Some("Maria".into());
@@ -6259,6 +6496,36 @@ mod tests {
         assert_eq!(data.filled_count(), 4);
         assert_eq!(PROGRESS_FIELDS.len(), 12);
         assert!(!data.missing_for_submit().contains(&"has_insurance"));
+    }
+
+    #[test]
+    fn passport_spelling_is_required_only_for_submission() {
+        for accepted in [
+            "Anna",
+            "Müller",
+            "José",
+            "Łukasz",
+            "O'Neil",
+            "Jean-Luc",
+            "Jose\u{301}",
+        ] {
+            assert!(!name_needs_latin_spelling(accepted), "{accepted}");
+        }
+        for rejected in ["Анна", "王", "Anna2", "Anna🙂"] {
+            assert!(name_needs_latin_spelling(rejected), "{rejected}");
+        }
+        let data = apply_personal_data_patch(
+            &anna(),
+            &PersonalDataPatch {
+                first_name: Some("Анна".into()),
+                ..Default::default()
+            },
+            today(),
+        )
+        .unwrap();
+        assert!(data.missing_for_submit().contains(&"name_latin"));
+        assert_eq!(ConsentPurpose::InquiryProcessing.version(), "2026-10-03");
+        assert_eq!(ConsentPurpose::HealthData.version(), "2026-10-13");
     }
 
     #[test]
@@ -6607,6 +6874,7 @@ mod tests {
     #[test]
     fn sending_needs_the_identification_in_form_order() {
         let mut data = anna();
+        data.phone = Some("+4930123456".into());
         data.date_of_birth = NaiveDate::from_ymd_opt(1988, 5, 1);
         data.legal_sex = Some("female".into());
         data.citizenships = vec!["UA".into()];
@@ -7143,6 +7411,7 @@ mod tests {
     #[test]
     fn the_extra_step_asks_the_funds_of_a_self_payer_only_with_the_triggers() {
         let mut data = anna();
+        data.phone = Some("+4930123456".into());
         data.date_of_birth = NaiveDate::from_ymd_opt(1988, 5, 1);
         data.legal_sex = Some("female".into());
         data.citizenships = vec!["KP".into()];
@@ -7292,7 +7561,7 @@ mod tests {
             let questions = ExtraQuestions::of(false, Some(&payer), route, false);
             assert!(questions.required);
             assert!(!questions.check_required);
-            assert!(questions.payment_background && questions.payer_funds);
+            assert!(questions.payment_background && !questions.payer_funds);
             assert!(!questions.funds && !questions.occupation && !questions.sector);
             assert!(!questions.payer_states_funds);
             let missing = missing_extra(
@@ -7303,14 +7572,7 @@ mod tests {
                     ..ExtraState::default()
                 },
             );
-            assert_eq!(
-                missing,
-                [
-                    "enhanced_payment_background",
-                    "enhanced_payer_funds_source",
-                    "enhanced_payer_funds_description"
-                ]
-            );
+            assert_eq!(missing, ["enhanced_payment_background",]);
         }
         // Answered: nothing open.
         let sister = lead_payer::Declaration {
@@ -7341,7 +7603,7 @@ mod tests {
         // With triggers: both and profession, sector, the note on the
         // payer's own proofs.
         let full = ExtraQuestions::of(true, Some(&person("grandparent")), route, false);
-        assert!(full.payment_background && full.payer_funds && full.payer_states_funds);
+        assert!(full.payment_background && !full.payer_funds && full.payer_states_funds);
         assert!(full.occupation && full.sector && !full.funds);
         assert_eq!(
             missing_extra(
@@ -7354,8 +7616,6 @@ mod tests {
             ),
             [
                 "enhanced_payment_background",
-                "enhanced_payer_funds_source",
-                "enhanced_payer_funds_description",
                 "enhanced_occupation",
                 "enhanced_sector"
             ]
@@ -7447,6 +7707,24 @@ mod tests {
                 "request_reason"
             ])
         );
+        // A checked third-party recipient still needs visible recipient fields;
+        // an absent or different stored payer never produces a hidden payer-kind error.
+        let incomplete_recipient = Recipient {
+            recipient: Some("third_party".into()),
+            is_payer: Some(true),
+            ..Recipient::default()
+        };
+        let missing =
+            with_invoice_recipient(base.clone(), &incomplete_recipient, None, false, false);
+        assert!(
+            missing.contains(&"recipient_type".to_string()),
+            "{missing:?}"
+        );
+        assert!(
+            missing.contains(&"invoice_recipient_is_payer".to_string()),
+            "{missing:?}"
+        );
+        assert!(!missing.contains(&"payer_kind".to_string()), "{missing:?}");
         // The recipient answered, "does it pay?" not yet.
         let own = Recipient {
             recipient: Some("self".into()),

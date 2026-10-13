@@ -16,7 +16,7 @@ use uuid::Uuid;
 use gmed_server::auth::jwt;
 
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
-const CONSENT_VERSION: &str = "2026-10-03";
+const CONSENT_VERSION: &str = "2026-10-13";
 const PDF: &[u8] = b"%PDF-1.4\n% synthetic lead portal upload\n%%EOF\n";
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n synthetic identity document";
 
@@ -172,7 +172,7 @@ async fn give_consent(app: &axum::Router, lead_id: Uuid, bearer: &str, purpose: 
         "POST",
         &format!("/api/v1/me/lead-requests/{lead_id}/consent"),
         bearer,
-        Some(json!({ "purpose": purpose, "version": CONSENT_VERSION, "language": "de" })),
+        Some(json!({ "purpose": purpose, "version": if purpose == "lead_inquiry_processing" { "2026-10-03" } else { CONSENT_VERSION }, "language": "de" })),
     )
     .await;
     assert!(
@@ -222,6 +222,7 @@ fn complete_billing() -> Value {
 /// request consent and a copy of the identity document. Returns the request
 /// as the last save answered it.
 async fn fill_in_complete_request(app: &axum::Router, lead_id: Uuid, bearer: &str) -> Value {
+    give_consent(app, lead_id, bearer, "health_data_processing").await;
     let request = format!("/api/v1/me/lead-requests/{lead_id}");
     for (part, body) in [
         (
@@ -234,6 +235,7 @@ async fn fill_in_complete_request(app: &axum::Router, lead_id: Uuid, bearer: &st
                 "zip_code": "10115",
                 "city": "Berlin",
                 "country": "DE"
+                ,"phone": "+49 30 1234567"
             }),
         ),
         (
@@ -279,6 +281,164 @@ async fn audit_count(pool: &PgPool, action: &str, entity_id: Uuid) -> i64 {
         .fetch_one(pool)
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn cabinet_submission_protects_health_identity_and_base_changes() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let router = &app.suite.app;
+    let (lead, _, patient) = lead_with_login(&app, "Anna", "cabinet-audit@example.test").await;
+    let base = format!("/api/v1/me/lead-requests/{lead}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/identification"),
+        &patient,
+        Some(json!({"request_reason": "Synthetic concern"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "health_consent_required");
+    let full = fill_in_complete_request(router, lead, &patient).await;
+    let document = full["identity_documents"][0]["id"].as_str().unwrap();
+    let (status, changed) = json_request(
+        router,
+        "POST",
+        &format!("{base}/personal-data"),
+        &patient,
+        Some(json!({"first_name": "Анна", "phone": ""})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert!(
+        changed["progress"]["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("name_latin"))
+    );
+    assert!(
+        changed["progress"]["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("phone"))
+    );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/submit"),
+        &patient,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/personal-data"),
+        &patient,
+        Some(json!({"first_name": "Anna", "phone": "+49 30 1234567"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "PUT",
+        &format!("/api/v1/leads/{lead}/identity-document-data"),
+        &app.staff("sales"),
+        Some(json!({"id_document_number": "TEST12345"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/identification"),
+        &patient,
+        Some(json!({"salutation": "ms"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["identity_documents"][0]["can_delete"], false);
+    let number: Option<String> = sqlx::query_scalar(
+        "SELECT id_document_number FROM lead_gwg_declarations WHERE lead_id = $1",
+    )
+    .bind(lead)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(number.as_deref(), Some("TEST12345"));
+    let (status, body) = json_request(
+        router,
+        "DELETE",
+        &format!("{base}/documents/{document}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "upload_in_use");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead}/portal-intake/documents/{document}/review"),
+        &app.staff("sales"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "Identity review needs leads.edit: {body}"
+    );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/submit"),
+        &patient,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/personal-data"),
+        &patient,
+        Some(json!({"city": "Hamburg"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    sqlx::query("INSERT INTO lead_risk_assessments (lead_id, status, follow_up_answered_at) VALUES ($1, 'clear', clock_timestamp()) ON CONFLICT (lead_id) DO UPDATE SET follow_up_answered_at = clock_timestamp()")
+        .bind(lead).execute(&app.suite.pool).await.unwrap();
+    let (_, body) = json_request(router, "GET", &base, &patient, None).await;
+    assert_eq!(
+        body["changed_since_submit"], true,
+        "A follow-up must not consume a base form edit: {body}"
+    );
+    // A staff-held passport remains valid evidence without a current cabinet upload.
+    sqlx::query("UPDATE documents SET compliance_kind = 'identity' WHERE id = $1")
+        .bind(Uuid::parse_str(document).unwrap())
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE lead_portal_uploads SET withdrawn_at = clock_timestamp() WHERE document_id = $1",
+    )
+    .bind(Uuid::parse_str(document).unwrap())
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(router, "GET", &base, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        !body["progress"]["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("id_document_upload")),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -923,6 +1083,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         &patient,
         Some(json!({
             "date_of_birth": "1979-02-03",
+            "phone": "+4930123456",
             "legal_sex": "female",
             "citizenships": ["DE"],
             "street_address": "Musterstraße 1",
@@ -961,6 +1122,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     assert_eq!(body["missing"], still_missing, "{body}");
 
     // Who pays alone does not say in whose interest the patient acts.
+    give_consent(router, lead_id, &patient, "health_data_processing").await;
     let (status, body) = json_request(
         router,
         "POST",
@@ -2628,6 +2790,14 @@ async fn purging_a_lead_clears_the_portal_intake() {
             .unwrap();
     assert_eq!(recipients, 1);
 
+    let (status, choices) = choose(
+        router,
+        lead_id,
+        &patient,
+        &json!({ "agency_processing": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{choices}");
     let (status, body) = json_request(
         router,
         "POST",
@@ -2654,6 +2824,16 @@ async fn purging_a_lead_clears_the_portal_intake() {
         .unwrap();
     assert_eq!(updates, json!({}));
     assert_eq!(uploads, 0);
+    let choices: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM consent_form_choices WHERE lead_id=$1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        choices, 0,
+        "choice recipients must not survive lead erasure"
+    );
     // The lead's own statements, the payer answer with the source of funds,
     // the copy of the identity document and the proof of funds go with the
     // lead.
@@ -4762,6 +4942,9 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     let ceo_id = seed_user(&app.suite.pool, "lead-portal-risk", "ceo").await;
     let ceo = bearer(ceo_id, "ceo");
 
+    let (status, body) = json_request(router, "POST", &follow_up_submit, &patient, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "follow_up_not_requested");
     // No funds question before the answer who pays.
     let (status, body) = json_request(
         router,
@@ -5054,6 +5237,11 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
         json_request(router, "GET", &intake_path, &app.staff("concierge"), None).await;
     assert_eq!(status, StatusCode::OK, "{hidden}");
     assert!(hidden["enhanced_details"].is_null(), "{hidden}");
+    assert_eq!(
+        hidden["consents"],
+        json!([]),
+        "consent records are restricted: {hidden}"
+    );
     let (status, declaration) = json_request(
         router,
         "GET",
@@ -5086,6 +5274,19 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     let (status, body) = json_request(router, "POST", &follow_up_submit, &patient, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["follow_up"]["answered_at"].is_string(), "{body}");
+    let answered_at = body["follow_up"]["answered_at"].clone();
+    let (status, repeated) = json_request(router, "POST", &follow_up_submit, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated["follow_up"]["answered_at"], answered_at);
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_risk_events WHERE lead_id=$1 AND kind='follow_up_answered'",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(events, 1, "unchanged follow-up is idempotent");
+
     let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     // The audit is written asynchronously: wait for the second send's row.
@@ -5464,6 +5665,10 @@ async fn the_lead_chooses_the_consent_form_options_and_the_form_records_the_choi
     let (_, list) = json_request(router, "GET", "/api/v1/me/lead-requests", &patient, None).await;
     assert_eq!(list["requests"][0]["consent_form"]["choices"], choices);
 
+    // A trusted contact is not automatically a consent recipient.
+    sqlx::query("UPDATE leads SET trusted_contacts = $2 WHERE id = $1")
+        .bind(lead_id).bind(json!([{ "id": Uuid::new_v4(), "name": "Unchosen Trusted Contact", "relation": "friend", "email": "unchosen@example.com" }]))
+        .execute(pool).await.unwrap();
     // The generated form records the newest choice.
     let (status, generated) = json_request(
         router,
@@ -5489,6 +5694,17 @@ async fn the_lead_chooses_the_consent_form_options_and_the_form_records_the_choi
             .await
             .unwrap();
     assert_eq!(recorded["id"], json!(choice_id), "{recorded}");
+    let legacy_recipients: Option<String> = sqlx::query_scalar(
+        "SELECT generated_bindings ->> 'extra_release_recipients' FROM documents WHERE id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(
+        legacy_recipients.is_none(),
+        "an own choice must not bind unchosen contacts"
+    );
     assert_eq!(recorded["choices"], choices, "{recorded}");
     assert_eq!(recorded["source"], "lead_portal");
     // Who chose: the lead's own login, named as the person of the form, who
@@ -5503,6 +5719,60 @@ async fn the_lead_chooses_the_consent_form_options_and_the_form_records_the_choi
         "{recorded}"
     );
 
+    // A changed choice must close open invitations, including a worker lease,
+    // without changing already completed evidence.
+    let mut signature_requests = Vec::new();
+    for initial_status in [
+        "pending",
+        "submitting",
+        "submission_unknown",
+        "needs_review",
+        "completed",
+    ] {
+        let source = Uuid::new_v4();
+        // Separate source versions keep the one-active-request constraint valid.
+        sqlx::query(
+            r#"INSERT INTO documents
+            (id, version_root_document_id, lead_id, auto_name, art, category, status,
+             visibility, is_medical, uploaded_by, generated_template_id, generated_bindings)
+            SELECT $1,$1,lead_id,auto_name,art,category,status,visibility,is_medical,
+                   uploaded_by,generated_template_id,generated_bindings
+            FROM documents WHERE id=$2"#,
+        )
+        .bind(source)
+        .bind(document_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        let request = Uuid::new_v4();
+        let lease = Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO document_signature_requests
+            (id, source_document_id, requested_by, source_sha256, source_context, signers,
+             provider_account, test_mode, status, level, minimum_level, lease_token, lease_until,
+             result_document_id, report_storage_key, signed_sha256, report_sha256, evidence)
+            VALUES ($1,$2,$3,$4,'{}','[]','consent-test',true,$5,'QES','QES',
+                    CASE WHEN $5='completed' THEN NULL ELSE $6 END,
+                    CASE WHEN $5='completed' THEN NULL ELSE now()+interval '10 minutes' END,
+                    $2,'synthetic-report',$4,$4,'{"synthetic":true}')"#,
+        )
+        .bind(request)
+        .bind(source)
+        .bind(app.patient_manager_id)
+        .bind("a".repeat(64))
+        .bind(initial_status)
+        .bind(lease)
+        .execute(pool)
+        .await
+        .unwrap();
+        let before: Value =
+            sqlx::query_scalar("SELECT to_jsonb(r) FROM document_signature_requests r WHERE id=$1")
+                .bind(request)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        signature_requests.push((initial_status, request, lease, before));
+    }
     // A new choice is a new record; the older one stays.
     let mut changed = choices.clone();
     changed["channel_email"] = json!(true);
@@ -5522,6 +5792,37 @@ async fn the_lead_chooses_the_consent_form_options_and_the_form_records_the_choi
             .await
             .unwrap();
     assert_eq!(rows, 2);
+    for (initial_status, request, lease, before) in signature_requests {
+        let after: Value =
+            sqlx::query_scalar("SELECT to_jsonb(r) FROM document_signature_requests r WHERE id=$1")
+                .bind(request)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        if initial_status == "completed" {
+            assert_eq!(after, before, "completed evidence must remain immutable");
+            continue;
+        }
+        assert_eq!(after["status"], "error", "{initial_status}: {after}");
+        assert_eq!(after["last_error"], "consent_choice_changed");
+        assert_eq!(after["closed_kind"], "abandoned");
+        assert_eq!(after["close_reason"], "consent_choice_changed");
+        assert!(after["lease_token"].is_null(), "{initial_status}: {after}");
+        assert!(after["lease_until"].is_null(), "{initial_status}: {after}");
+        // A worker that captured the old lease cannot promote stale evidence.
+        let stale_publish = sqlx::query(
+            "UPDATE document_signature_requests SET status='completed' WHERE id=$1 AND lease_token=$2",
+        ).bind(request).bind(lease).execute(pool).await.unwrap();
+        assert_eq!(stale_publish.rows_affected(), 0, "{initial_status}");
+    }
+    let marker: Value =
+        sqlx::query_scalar("SELECT portal_field_updates->'consent_form' FROM leads WHERE id=$1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(marker["at"].is_string(), "{marker}");
+
     // The form generated before shows the older choice: no electronic
     // signature for it any more.
     let (status, state) = json_request(
@@ -6219,4 +6520,398 @@ async fn a_minors_own_login_is_closed_while_the_parents_have_access() {
     assert_eq!(list["requests"][0]["access_kind"], "self", "{list}");
     let (status, _) = json_request(router, "GET", &request, &child, None).await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn unchanged_submission_is_idempotent_but_a_real_edit_can_be_resubmitted() {
+    let Some(app) = test_app().await else { return };
+    let (lead, _, patient) = lead_with_login(&app, "Retry", "retry.submit@example.com").await;
+    fill_in_complete_request(&app.suite.app, lead, &patient).await;
+    let path = format!("/api/v1/me/lead-requests/{lead}/submit");
+    let (status, first) = json_request(&app.suite.app, "POST", &path, &patient, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    let snapshot = |pool: PgPool| async move {
+        sqlx::query_as::<_, (Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>, i64, i64)>(
+            "SELECT portal_submitted_at, (SELECT declared_correct_at FROM lead_gwg_declarations WHERE lead_id=$1),
+                (SELECT count(*) FROM audit_log WHERE entity_id = $1 AND action = 'lead_portal_submit'),
+                (SELECT count(*) FROM user_notifications WHERE entity_id = $1 AND kind = 'lead_portal_submitted')
+             FROM leads WHERE id = $1")
+            .bind(lead).fetch_one(&pool).await.unwrap()
+    };
+    let before = snapshot(app.suite.pool.clone()).await;
+    let (a, b) = tokio::join!(
+        json_request(&app.suite.app, "POST", &path, &patient, declared()),
+        json_request(&app.suite.app, "POST", &path, &patient, declared())
+    );
+    assert_eq!(a.0, StatusCode::OK, "{}", a.1);
+    assert_eq!(b.0, StatusCode::OK, "{}", b.1);
+    assert_eq!(snapshot(app.suite.pool.clone()).await, before);
+    let (status, saved) = json_request(
+        &app.suite.app,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead}/personal-data"),
+        &patient,
+        Some(json!({"city": "Bonn"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (status, resent) = json_request(&app.suite.app, "POST", &path, &patient, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{resent}");
+    let after = snapshot(app.suite.pool.clone()).await;
+    assert!(after.0 > before.0);
+    assert_eq!(after.2, before.2 + 1);
+}
+
+#[tokio::test]
+async fn guardian_identity_age_and_reactivation_boundaries_are_enforced() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+    let (lead, _, child) = lead_with_login(&app, "Minor", "minor.boundaries@example.com").await;
+    let (mother, father) = (Uuid::new_v4(), Uuid::new_v4());
+    sqlx::query("UPDATE leads SET date_of_birth = '2015-01-01', trusted_contacts = $2 WHERE id = $1")
+        .bind(lead).bind(json!([
+            {"id": mother,"name":"Anna Guardian","relation":"mother","email":"anna.boundaries@example.com","birth_date":"1980-01-01"},
+            {"id": father,"name":"Ben Guardian","relation":"father","email":"ben.boundaries@example.com","birth_date":"1980-02-02"}
+        ])).execute(pool).await.unwrap();
+    let issue_path = format!("/api/v1/leads/{lead}/portal-guardians");
+    // First notification, then an actual access revoke must allow one new notice.
+    json_request(router, "GET", "/api/v1/me/lead-requests", &child, None).await;
+    let notices: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications WHERE entity_id=$1 AND kind='lead_portal_minor'",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(notices > 0);
+    let (status, issued) = json_request(
+        router,
+        "POST",
+        &issue_path,
+        &pm,
+        Some(json!({"trusted_contact_id":mother})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let user: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let access = issued["access_id"].as_str().unwrap();
+    let parent = bearer(user, "patient");
+    for (field, value) in [
+        ("first_name", json!("Changed")),
+        ("last_name", json!("Changed")),
+        ("date_of_birth", json!("1981-01-01")),
+    ] {
+        let mut patch = json!({});
+        patch[field] = value;
+        let (status, refused) = json_request(
+            router,
+            "POST",
+            &format!("/api/v1/me/lead-requests/{lead}/representatives/{father}"),
+            &parent,
+            Some(patch),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+        assert_eq!(refused["code"], "representative_not_yours", "{refused}");
+        assert_eq!(refused["field"], field, "{refused}");
+    }
+    let (status, reset) = json_request(
+        router,
+        "POST",
+        &format!("{issue_path}/{access}/password"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reset}");
+    assert_eq!(
+        audit_count(pool, "reset_lead_guardian_password", lead).await,
+        1,
+        "audit is durable before response"
+    );
+    sqlx::query("UPDATE leads SET date_of_birth='1990-01-01' WHERE id=$1")
+        .bind(lead)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead}/personal-data"),
+        &parent,
+        Some(json!({"city":"Unauthorized change"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
+    sqlx::query("UPDATE leads SET date_of_birth='2015-01-01' WHERE id=$1")
+        .bind(lead)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, revoked) = json_request(
+        router,
+        "POST",
+        &format!("{issue_path}/{access}/revoke"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revoked}");
+    assert_eq!(revoked["login_deactivated"], true, "{revoked}");
+    for _ in 0..2 {
+        json_request(router, "GET", "/api/v1/me/lead-requests", &child, None).await;
+    }
+    let after: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications WHERE entity_id=$1 AND kind='lead_portal_minor'",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        after,
+        notices * 2,
+        "one new notice per recipient after revoke"
+    );
+    let (status, reissued) = json_request(
+        router,
+        "POST",
+        &issue_path,
+        &pm,
+        Some(json!({"trusted_contact_id":mother})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{reissued}");
+    assert_eq!(reissued["user_id"], json!(user));
+    let access = reissued["access_id"].as_str().unwrap();
+    json_request(
+        router,
+        "POST",
+        &format!("{issue_path}/{access}/revoke"),
+        &pm,
+        None,
+    )
+    .await;
+    // An IT disable/update after the revoke makes staff reactivation mandatory.
+    sqlx::query("UPDATE users SET is_active=false, updated_at=clock_timestamp() WHERE id=$1")
+        .bind(user)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &issue_path,
+        &pm,
+        Some(json!({"trusted_contact_id":mother})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "portal_account_inactive", "{refused}");
+}
+
+#[tokio::test]
+async fn concurrent_uploads_respect_the_locked_thirty_document_limit() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (lead, user, patient) =
+        lead_with_login(&app, "Limit", "limit.concurrent@example.com").await;
+    give_consent(&app.suite.app, lead, &patient, "health_data_processing").await;
+    for _ in 0..29 {
+        let document = Uuid::new_v4();
+        sqlx::query("INSERT INTO documents(id,version_root_document_id,lead_id,auto_name,art,category,status,visibility,is_medical,uploaded_by) VALUES($3,$3,$1,'Synthetic','report','medical','active','internal',true,$2)")
+            .bind(lead).bind(user).bind(document).execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO lead_portal_uploads(document_id,lead_id,uploaded_by,access_kind,kind) VALUES($1,$2,$3,'self','medical')")
+            .bind(document).bind(lead).bind(user).execute(pool).await.unwrap();
+    }
+    let mut gate = pool.begin().await.unwrap();
+    sqlx::query("SELECT id FROM leads WHERE id=$1 FOR NO KEY UPDATE")
+        .bind(lead)
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *gate)
+        .await
+        .unwrap();
+    let mut uploads = Vec::new();
+    for _ in 0..2 {
+        let router = app.suite.app.clone();
+        let patient = patient.clone();
+        uploads.push(tokio::spawn(async move {
+            upload(
+                &router,
+                &format!("/api/v1/me/lead-requests/{lead}/documents"),
+                &patient,
+                PDF,
+            )
+            .await
+        }));
+    }
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        sqlx::query("SELECT pg_stat_clear_snapshot()")
+            .execute(&mut *gate)
+            .await
+            .unwrap();
+        let blocked: i64=sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity waiting WHERE $1 = ANY(pg_blocking_pids(waiting.pid)) OR EXISTS(SELECT 1 FROM pg_stat_activity first_waiter WHERE $1 = ANY(pg_blocking_pids(first_waiter.pid)) AND first_waiter.pid = ANY(pg_blocking_pids(waiting.pid)))")
+            .bind(pid).fetch_one(&mut *gate).await.unwrap();
+        if blocked >= 2 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "uploads reached the gate"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    gate.commit().await.unwrap();
+    let mut statuses = Vec::new();
+    for task in uploads {
+        let result = tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap();
+        if result.0 == StatusCode::UNPROCESSABLE_ENTITY {
+            assert_eq!(result.1["code"], "too_many_documents", "{}", result.1);
+        }
+        statuses.push(result.0);
+    }
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|s| **s == StatusCode::CREATED)
+            .count(),
+        1,
+        "{statuses:?}"
+    );
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|s| **s == StatusCode::UNPROCESSABLE_ENTITY)
+            .count(),
+        1,
+        "{statuses:?}"
+    );
+    let (uploads,docs):(i64,i64)=sqlx::query_as("SELECT (SELECT count(*) FROM lead_portal_uploads WHERE lead_id=$1 AND withdrawn_at IS NULL), (SELECT count(*) FROM documents WHERE lead_id=$1 AND file_deleted_at IS NULL)").bind(lead).fetch_one(pool).await.unwrap();
+    assert_eq!(uploads, 30);
+    assert_eq!(docs, 30, "refused stored document must be discarded");
+}
+
+#[tokio::test]
+async fn historical_payer_snapshots_are_scrubbed_only_on_lead_erasure() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (lead, _, _) = lead_with_login(&app, "Audit", "audit.scrub@example.com").await;
+    let event = gmed_server::audit::domain_diff_event(
+        "lead_portal_update_payer_declaration",
+        Some(app.patient_manager_id),
+        "lead",
+        Some(lead),
+        json!({"name":"Previous Person","nested":{"email":"old@example.com"},"flag":true}),
+        json!({"name":"New Person","nested":{"email":"new@example.com"},"flag":false}),
+    );
+    let mut conn = pool.acquire().await.unwrap();
+    gmed_server::audit::write_in_transaction(&mut conn, &event)
+        .await
+        .unwrap();
+    drop(conn);
+    let id:i64=sqlx::query_scalar("SELECT id FROM audit_log WHERE action='lead_portal_update_payer_declaration' AND entity_id=$1").bind(lead).fetch_one(pool).await.unwrap();
+    assert!(
+        sqlx::query("UPDATE audit_log SET old_value='{}' WHERE id=$1")
+            .bind(id)
+            .execute(pool)
+            .await
+            .is_err()
+    );
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure','on',true)")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert!(sqlx::query("UPDATE audit_log SET old_value=gmed_scrub_jsonb_text(old_value,'(?s)^.+$','[erased]'), new_value=gmed_scrub_jsonb_text(new_value,'(?s)^.+$','[erased]') WHERE id=$1").bind(id).execute(&mut *tx).await.is_err(),"active lead snapshots remain immutable");
+    tx.rollback().await.unwrap();
+    let (status, erased) = json_request(
+        &app.suite.app,
+        "POST",
+        &format!("/api/v1/leads/{lead}/failed-flow"),
+        &app.staff("patient_manager"),
+        Some(json!({"resolution":"delete","reason":"not_our_lead"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{erased}");
+    let (old, new): (Value, Value) =
+        sqlx::query_as("SELECT old_value,new_value FROM audit_log WHERE id=$1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        old,
+        json!({"name":"[erased]","nested":{"email":"[erased]"},"flag":true})
+    );
+    assert_eq!(
+        new,
+        json!({"name":"[erased]","nested":{"email":"[erased]"},"flag":false})
+    );
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure','on',true)")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert!(
+        sqlx::query(
+            "UPDATE audit_log SET new_value=jsonb_set(new_value,'{flag}','true') WHERE id=$1"
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .is_err(),
+        "erasure must preserve non-text evidence"
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn rejected_minor_birth_date_notifies_staff_once_without_persisting_it() {
+    let Some(app) = test_app().await else { return };
+    let (lead, _, patient) = lead_with_login(&app, "Attempt", "attempt.minor@example.com").await;
+    sqlx::query("UPDATE leads SET date_of_birth='1990-01-01' WHERE id=$1")
+        .bind(lead)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    let path = format!("/api/v1/me/lead-requests/{lead}/personal-data");
+    let mut notice_count = 0;
+    for attempt in 0..2 {
+        let (status, body) = json_request(
+            &app.suite.app,
+            "POST",
+            &path,
+            &patient,
+            Some(json!({"date_of_birth":"2015-01-01"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "minor_needs_guardian", "{body}");
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM user_notifications WHERE entity_id=$1 AND kind='lead_portal_minor'")
+            .bind(lead).fetch_one(&app.suite.pool).await.unwrap();
+        if attempt == 0 {
+            assert!(
+                count > 0,
+                "staff must be told about the rejected under-18 date"
+            );
+            notice_count = count;
+        } else {
+            assert_eq!(count, notice_count, "retries do not duplicate the notice");
+        }
+    }
+    let dob: String = sqlx::query_scalar("SELECT date_of_birth::text FROM leads WHERE id=$1")
+        .bind(lead)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    assert_eq!(dob, "1990-01-01");
 }

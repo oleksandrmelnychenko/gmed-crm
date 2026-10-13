@@ -8364,6 +8364,26 @@ pub(crate) async fn scrub_lead_free_text_in_tx(
             .await?;
         scrubbed.audit_rows = changes.len() as u64;
     }
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'on', true)")
+        .execute(&mut *conn)
+        .await?;
+    let payer_rows = sqlx::query(
+        r#"UPDATE audit_log a
+           SET old_value = gmed_scrub_jsonb_text(a.old_value, '(?s)^.+$', '[erased]'),
+               new_value = gmed_scrub_jsonb_text(a.new_value, '(?s)^.+$', '[erased]')
+           WHERE ((a.entity_type = 'lead' AND a.entity_id = $1
+                   AND a.action IN ('update_lead_payer_declaration', 'lead_portal_update_payer_declaration',
+                                    'payer_link_adopt_payer_declaration'))
+                  OR (a.entity_type = 'order' AND a.action = 'set_order_payer'
+                      AND EXISTS (SELECT 1 FROM orders o WHERE o.id = a.entity_id
+                          AND o.source_lead_id = $1)))
+             AND (a.old_value IS DISTINCT FROM gmed_scrub_jsonb_text(a.old_value, '(?s)^.+$', '[erased]')
+                  OR a.new_value IS DISTINCT FROM gmed_scrub_jsonb_text(a.new_value, '(?s)^.+$', '[erased]'))"#,
+    ).bind(lead_id).execute(&mut *conn).await?.rows_affected();
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'off', true)")
+        .execute(&mut *conn)
+        .await?;
+    scrubbed.audit_rows += payer_rows;
     Ok(scrubbed)
 }
 

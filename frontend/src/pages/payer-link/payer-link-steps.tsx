@@ -54,12 +54,14 @@ const LANGUAGE_VALUES = LEAD_CABINET_LANGS.map((option) => option.value);
 export function PrivacyStep({
   questionnaire,
   text,
+  lang,
   busy,
   error,
   onConsent,
 }: {
   questionnaire: PayerQuestionnaire;
   text: PayerLinkText;
+  lang: string;
   busy: boolean;
   error: string | null;
   /** Records the acknowledgement with the channels; false when the server refused it. */
@@ -76,7 +78,7 @@ export function PrivacyStep({
         {text.privacyNotice(questionnaire.patient_name, questionnaire.payer_type !== "person").map((paragraph) => (
           <p key={paragraph}>{paragraph}</p>
         ))}
-        <a href="/legal#privacy" target="_blank" rel="noreferrer" className="inline-block text-sm text-[var(--brand)] underline">
+        <a href={`/legal?lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="inline-block text-sm text-[var(--brand)] underline">
           {text.privacyLink}
         </a>
       </div>

@@ -1,4 +1,19 @@
-import { apiFetch } from "@/lib/api";
+import { ApiRequestError, apiFetch as request } from "@/lib/api";
+
+export const LEAD_REQUEST_ACCESS_CHANGED = "gmed:lead-request-access-changed";
+
+// Autosave handlers consume validation errors inside the write queue. Notify the
+// cabinet at the API boundary so an access change also reaches those handlers.
+async function apiFetch<T>(path: string, options?: Parameters<typeof request>[1]): Promise<T> {
+  try {
+    return await request<T>(path, options);
+  } catch (error) {
+    if (error instanceof ApiRequestError && (error.code === "lead_request_guardian_only" || error.body?.code === "lead_request_guardian_only")) {
+      window.dispatchEvent(new Event(LEAD_REQUEST_ACCESS_CHANGED));
+    }
+    throw error;
+  }
+}
 
 /** Consent to process the uploaded health documents (Art. 9 DSGVO), before the first upload. */
 export const HEALTH_CONSENT = "health_data_processing";
@@ -612,6 +627,7 @@ export type FollowUpBlock = "A" | "B" | "C" | "F" | "G" | "H" | "I" | "J" | "K" 
  * why (no points, level, trigger or reason). Absent on an older server.
  */
 export type LeadRequestFollowUp = {
+  changed_since_answer?: boolean;
   required: boolean;
   blocks: string[];
   missing: Record<string, string[]>;
@@ -721,6 +737,8 @@ export type LeadRequest = {
   minor: boolean;
   documents: LeadRequestDocument[];
   max_documents: number;
+  /** All active cabinet uploads, including identity and representative files. */
+  documents_used?: number;
   consents: Record<string, LeadRequestConsent>;
   /** The person's own choice of the consent form options; absent on an older server. */
   consent_form?: LeadRequestConsentForm;

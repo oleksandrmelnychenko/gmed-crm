@@ -22,14 +22,9 @@ import {
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
-  ADMIN_INLINE_METRICS_GRID,
-  AdminInlineMetric,
   AdminSectionTitle,
-  AdminSheetScaffold,
   SheetActionsFooter,
   SheetFormFooter,
-  AdminToolbar,
-  AdminTableCard,
 } from "@/components/admin-page-patterns";
 import {
   DataTablePager,
@@ -39,10 +34,9 @@ import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import {
-  Sheet,
-  SheetContent,
-} from "@/components/ui/sheet";
+import { Dialog } from "@/components/ui/dialog";
+import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
+import { StatusChip } from "@/components/ui/status-chip";
 import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import {
   compactNotificationConfig,
@@ -54,16 +48,13 @@ import {
   EmptyCell,
   Field,
   PageHeader,
-  StatusBadge,
   SuccessBanner,
   TabLoader,
   textareaClass,
-  tokens,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { clearApiCache } from "@/lib/api";
 import { useRealtimeSubscription } from "@/lib/realtime";
-import { cn } from "@/lib/utils";
 import {
   createAdminNotificationChannel,
   deleteAdminNotificationChannel,
@@ -97,7 +88,7 @@ const NOTIFICATION_CHANNEL_TYPE_LABEL_KEYS = {
 
 function channelTypeTone(channelType: string) {
   if (channelType === "smtp") return "info" as const;
-  if (channelType === "webhook") return "brand" as const;
+  if (channelType === "webhook") return "neutral" as const;
   return "neutral" as const;
 }
 
@@ -403,11 +394,8 @@ function useAdminNotificationsPageContent() {
       width: 260,
       render: (channel) => (
         <div className="min-w-0">
-          <div className="truncate text-xs text-foreground">
+          <div className="truncate text-[13px] font-medium text-foreground">
             {channel.name}
-          </div>
-          <div className="mt-1 truncate text-xs text-foreground">
-            {channel.id}
           </div>
         </div>
       ),
@@ -419,9 +407,9 @@ function useAdminNotificationsPageContent() {
       sortable: true,
       width: 140,
       render: (channel) => (
-        <StatusBadge tone={channelTypeTone(channel.channel_type)}>
+        <StatusChip tone={channelTypeTone(channel.channel_type)}>
           {channelTypeLabel(channel.channel_type)}
-        </StatusBadge>
+        </StatusChip>
       ),
     },
     {
@@ -446,9 +434,9 @@ function useAdminNotificationsPageContent() {
       sortable: true,
       width: 120,
       render: (channel) => (
-        <StatusBadge tone={channel.is_active ? "success" : "neutral"}>
+        <StatusChip tone={channel.is_active ? "success" : "warning"}>
           {channel.is_active ? t.common_active : t.common_inactive}
-        </StatusBadge>
+        </StatusChip>
       ),
     },
     {
@@ -509,7 +497,7 @@ function useAdminNotificationsPageContent() {
 
   return (
     <>
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4 rounded-xl bg-muted/50 p-3 sm:p-4">
         <PageHeader
           title={t.notif_title}
           description={t.notif_subtitle}
@@ -519,7 +507,7 @@ function useAdminNotificationsPageContent() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+                className="h-8 rounded-lg gap-1.5 bg-card px-3 text-xs"
                 onClick={() => void load()}
               >
                 <RefreshCcw className="size-3.5" />
@@ -527,7 +515,7 @@ function useAdminNotificationsPageContent() {
               </Button>
               <Button
                 type="button"
-                className="h-9 rounded-lg gap-1.5 px-3.5"
+                className="h-8 rounded-lg gap-1.5 px-3 text-xs"
                 onClick={() => setCreateOpen(true)}
               >
                 <Plus className="size-3.5" />
@@ -537,81 +525,21 @@ function useAdminNotificationsPageContent() {
           )}
         />
 
-        <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t.common_search}
-              className="h-8 w-[240px] rounded-lg bg-field pl-8 text-[13px]"
-            />
-          </div>
-
-          <NativeComboboxSelect value={typeFilter}
-            onChange={(event) => setTypeFilter(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-field text-[13px]">
-              <option value="">{t.providers_all}</option>
-              <option value="smtp">{t.notif_smtp}</option>
-              <option value="webhook">{t.notif_webhook}</option>
-            </NativeComboboxSelect>
-
-          <NativeComboboxSelect
-            value={statusFilter}
-
-
-            onChange={(event) => setStatusFilter(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-field text-[13px]">
-              <option value="">{t.providers_all}</option>
-              <option value="active">{t.common_active}</option>
-              <option value="inactive">{t.common_inactive}</option>
-            </NativeComboboxSelect>
-
-          {anyFilterActive ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
-              onClick={() => {
-                setSearch("");
-                setTypeFilter("");
-                setStatusFilter("");
-              }}
-            >
-              <X className="size-3.5" />
-              {t.common_reset}
-            </Button>
-          ) : null}
-        </AdminToolbar>
-
-        <div className={ADMIN_INLINE_METRICS_GRID} data-testid="notification-metrics">
-          <AdminInlineMetric
-            icon={BellRing}
-            tone="sky"
-            label={t.notif_title}
-            value={metrics.total}
-            description={t.common_registry}
-          />
-          <AdminInlineMetric
-            icon={CheckCheck}
-            tone="emerald"
-            label={t.common_active}
-            value={metrics.active}
-            description={t.users_status}
-          />
-          <AdminInlineMetric
-            icon={Send}
-            tone="amber"
-            label={t.notif_smtp}
-            value={metrics.smtp}
-            description={t.notif_type}
-          />
-          <AdminInlineMetric
-            icon={Webhook}
-            tone="slate"
-            label={t.notif_webhook}
-            value={metrics.webhook}
-            description={t.notif_type}
-          />
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4" data-testid="notification-metrics">
+          {[
+            { icon: BellRing, label: t.notif_title, value: metrics.total },
+            { icon: CheckCheck, label: t.common_active, value: metrics.active },
+            { icon: Send, label: t.notif_smtp, value: metrics.smtp },
+            { icon: Webhook, label: t.notif_webhook, value: metrics.webhook },
+          ].map(({ icon: Icon, label, value }) => (
+            <div key={label} className="min-w-0 rounded-xl border border-border/70 bg-card px-4 py-3 shadow-xs">
+              <div className="flex items-start justify-between gap-2">
+                <p className="min-w-0 flex-1 break-words font-mono text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+                <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              </div>
+              <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">{value}</p>
+            </div>
+          ))}
         </div>
 
         {flash ? (
@@ -624,11 +552,38 @@ function useAdminNotificationsPageContent() {
 
         {error ? <Banner tone="error">{error}</Banner> : null}
 
-        <AdminTableCard
-          title={t.common_registry}
-          description={t.notif_subtitle}
-          count={filteredChannels.length}
-        >
+        <section className="min-w-0 space-y-3">
+          <div className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5 shadow-xs">
+            <div className="flex items-center justify-between gap-3">
+              <AdminSectionTitle>{t.common_registry}</AdminSectionTitle>
+              <StatusChip>{filteredChannels.length}</StatusChip>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_minmax(180px,240px)_minmax(180px,240px)_auto] xl:items-end">
+              <Field label={t.common_search} htmlFor="notification-search">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input id="notification-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.common_search} className="h-9 w-full rounded-lg bg-field pl-8 text-[13px]" />
+                </div>
+              </Field>
+              <Field label={t.notif_type} htmlFor="notification-type-filter">
+                <NativeComboboxSelect id="notification-type-filter" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-field text-[13px]">
+                  <option value="">{t.providers_all}</option>
+                  <option value="smtp">{t.notif_smtp}</option>
+                  <option value="webhook">{t.notif_webhook}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={t.users_status} htmlFor="notification-status-filter">
+                <NativeComboboxSelect id="notification-status-filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-field text-[13px]">
+                  <option value="">{t.providers_all}</option>
+                  <option value="active">{t.common_active}</option>
+                  <option value="inactive">{t.common_inactive}</option>
+                </NativeComboboxSelect>
+              </Field>
+              <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5 justify-self-start rounded-lg text-xs" disabled={!anyFilterActive} onClick={() => { setSearch(""); setTypeFilter(""); setStatusFilter(""); }}>
+                <X className="size-3.5" />{t.common_reset}
+              </Button>
+            </div>
+          </div>
           {loading ? (
             <TabLoader />
           ) : (
@@ -658,13 +613,12 @@ function useAdminNotificationsPageContent() {
               )}
             />
           )}
-        </AdminTableCard>
+        </section>
       </div>
 
-      <Sheet open={createOpen} onOpenChange={handleCreateOpenChange}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
-          <form onSubmit={handleCreate} className="flex flex-1 min-h-0 flex-col">
-            <AdminSheetScaffold
+      <Dialog open={createOpen} onOpenChange={handleCreateOpenChange}>
+            <AdminDialogScaffold
+              onSubmit={handleCreate}
               title={t.notif_new}
               description={t.notif_subtitle}
               footer={(
@@ -678,8 +632,7 @@ function useAdminNotificationsPageContent() {
             >
               {formError ? <Banner tone="error">{formError}</Banner> : null}
 
-              <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
-                <AdminSectionTitle>{t.notif_new}</AdminSectionTitle>
+              <AdminFormSection title={t.activity_details}>
                 <div className="grid gap-3 md:grid-cols-2">
                   <Field label={`${t.notif_name} *`} htmlFor="channel-name">
                     <Input
@@ -702,6 +655,8 @@ function useAdminNotificationsPageContent() {
                   </Field>
                 </div>
 
+              </AdminFormSection>
+              <AdminFormSection title={t.notif_config}>
                 <Field label={t.notif_config} htmlFor="channel-config">
                   <textarea
                     id="channel-config"
@@ -709,20 +664,17 @@ function useAdminNotificationsPageContent() {
                     onChange={(event) => setFormConfig(event.target.value)}
                     placeholder={t.notif_config_placeholder}
                     rows={10}
-                    className={textareaClass}
+                    className={`${textareaClass} font-mono text-xs`}
                   />
                 </Field>
-              </section>
-            </AdminSheetScaffold>
-          </form>
-        </SheetContent>
-      </Sheet>
+              </AdminFormSection>
+            </AdminDialogScaffold>
+      </Dialog>
 
-      <Sheet open={detailOpen} onOpenChange={handleDetailOpenChange}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
-          <AdminSheetScaffold
+      <Dialog open={detailOpen} onOpenChange={handleDetailOpenChange}>
+          <AdminDialogScaffold
             title={selectedChannel?.name ?? t.notif_title}
-            description={selectedChannel ? selectedChannel.id : t.notif_subtitle}
+            description={t.notif_subtitle}
             footer={(
               <SheetActionsFooter>
                 <Button
@@ -763,17 +715,16 @@ function useAdminNotificationsPageContent() {
           >
             {selectedChannel ? (
               <>
-                <section className={cn("space-y-2.5 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <AdminSectionTitle>{t.activity_details}</AdminSectionTitle>
+                <AdminFormSection title={t.activity_details}>
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <StatusBadge
+                    <StatusChip
                       tone={channelTypeTone(selectedChannel.channel_type)}
                     >
                       {channelTypeLabel(selectedChannel.channel_type)}
-                    </StatusBadge>
-                    <StatusBadge tone={selectedChannel.is_active ? "success" : "neutral"}>
+                    </StatusChip>
+                    <StatusChip tone={selectedChannel.is_active ? "success" : "warning"}>
                       {selectedChannel.is_active ? t.common_active : t.common_inactive}
-                    </StatusBadge>
+                    </StatusChip>
                   </div>
 
                   <div className="grid gap-2.5 md:grid-cols-2">
@@ -790,23 +741,19 @@ function useAdminNotificationsPageContent() {
                       </p>
                     </div>
                   </div>
-                </section>
+                </AdminFormSection>
 
-                <section className={cn("space-y-2.5 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <div className="flex items-center justify-between gap-2">
-                    <AdminSectionTitle>{t.notif_config}</AdminSectionTitle>
-                  </div>
-                  <pre className="overflow-x-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs leading-6 text-muted-foreground">
+                <AdminFormSection title={t.notif_config}>
+                  <pre className="whitespace-pre-wrap break-all rounded-lg border border-border/50 bg-muted/50 p-3 font-mono text-xs leading-6 text-muted-foreground">
                     {prettyNotificationConfig(selectedChannel.config)}
                   </pre>
-                </section>
+                </AdminFormSection>
               </>
             ) : (
               <EmptyCell>{t.notif_no_channels}</EmptyCell>
             )}
-          </AdminSheetScaffold>
-        </SheetContent>
-      </Sheet>
+          </AdminDialogScaffold>
+      </Dialog>
     </>
   );
 }

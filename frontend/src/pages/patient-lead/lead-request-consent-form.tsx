@@ -131,6 +131,18 @@ export function ConsentFormChoicesSection({
   const text = consentFormText(lang, choosesForChild(request));
   const [draft, setDraft] = useState<ConsentFormChoices>(form?.choices ?? NO_CONSENT_FORM_CHOICES);
   const [recipients, setRecipients] = useState<RecipientDraft[]>(() => recipientDrafts(form?.recipients));
+  const [baseline, setBaseline] = useState(form);
+  // A server refresh may carry the other parent's choice. Adopt it only when
+  // this tab has no local edits, comparing against the previous server value.
+  if (form?.chosen_at !== baseline?.chosen_at) {
+    const localRecipients = draft.named_recipients ? recipientsToSend(recipients) : [];
+    const locallyChanged = consentFormChanged(draft, baseline?.choices ?? null) || !sameRecipients(localRecipients, baseline?.recipients ?? []);
+    setBaseline(form);
+    if (!locallyChanged) {
+      setDraft(form?.choices ?? NO_CONSENT_FORM_CHOICES);
+      setRecipients(recipientDrafts(form?.recipients));
+    }
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!form) return null;
@@ -313,7 +325,7 @@ export function ConsentFormChoicesSection({
             <Button
               type="button"
               variant="outline"
-              disabled={busy || !coreTicked || problem !== null || (!changed && Boolean(form.choices))}
+              disabled={busy || !coreTicked || problem !== null || (!changed && Boolean(form.choices) && form.chosen_by_me !== false)}
               onClick={() => void save()}
               data-testid="lead-request-consent-form-save"
             >

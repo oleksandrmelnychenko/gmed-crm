@@ -75,6 +75,10 @@ export type LeadRequestText = {
   saved: string;
   notSaved: string;
   invalidField: string;
+  dobStaffOnly: string;
+  healthConsentRequired: string;
+  furtherDetails: string;
+  errors: Record<string, string>;
   minorNeedsGuardian: string;
   next: string;
   back: string;
@@ -209,6 +213,8 @@ export type LeadRequestText = {
    */
   recipient: {
     section: string;
+    confirmPayerChange: string;
+    replacePayerHint: string;
     question: string;
     options: Record<InvoiceRecipient, string>;
     optionsGuardian: Record<InvoiceRecipient, string>;
@@ -740,6 +746,8 @@ export function submitFieldLabel(
   }
   if (field === "id_document_upload") return `${text.sectionIdentity}: ${text.identityFiles}`;
   if (field === "request_reason") return text.identificationFields.request_reason;
+  if (field === "name_latin") return text.namePassportCorrection;
+  if (field === "custody") return text.custodyQuestion;
   if (field === "has_representative") return text.hasRepresentativeQuestion;
   if (field === "under_guardianship") return text.underGuardianshipQuestion;
   if ((BILLING_SUBMIT_FIELDS as readonly string[]).includes(field)) return billingSubmitLabel(text, field as BillingField);
@@ -751,7 +759,7 @@ export function submitFieldLabel(
         ? representativeUploadLabel(text, person.slot, "identity")
         : person.part === "authority_upload"
           ? representativeUploadLabel(text, person.slot, "authority")
-          : representativeFieldLabel(text, person.part);
+          : person.part === "name_latin" ? text.namePassportCorrection : representativeFieldLabel(text, person.part);
     return `${text.representativeCaptions[person.slot]}: ${label}`;
   }
   // A missing answer names the question in short.
@@ -817,8 +825,12 @@ const de: LeadRequestText = {
   saved: "Gespeichert",
   notSaved: "Nicht gespeichert",
   invalidField: "Bitte prüfen Sie diese Angabe.",
+  dobStaffOnly: "Bitte wenden Sie sich an GMED, um das Geburtsdatum zu korrigieren.",
+  healthConsentRequired: "Bitte stimmen Sie zuerst der Verarbeitung der Gesundheitsdaten zu.",
+  furtherDetails: "Weitere Angaben",
+  errors: {"upload_reviewed":"GMED hat dieses Dokument bereits übernommen. Bitte wenden Sie sich für die Entfernung an unser Team.","upload_in_use":"Dieses Dokument wird bereits verwendet. Bitte wenden Sie sich an GMED.","too_many_documents":"Sie können höchstens 30 Dokumente hochladen. Entfernen Sie zuerst eine nicht benötigte Datei.","unsupported_file_type":"Bitte laden Sie eine PDF-, JPG- oder PNG-Datei hoch.","file_too_large":"Die Datei darf höchstens 25 MB groß sein.","personal_data_incomplete":"Bitte ergänzen Sie die markierten Angaben, bevor Sie die Anfrage senden.","request_failed":"Das hat leider nicht geklappt. Bitte versuchen Sie es erneut."},
   minorNeedsGuardian:
-    "Für Personen unter 18 Jahren füllen die Eltern oder der gesetzliche Vertreter die Anfrage aus. Wir haben Ihr Team informiert und melden uns.",
+    "Für Personen unter 18 Jahren füllen die Eltern oder der gesetzliche Vertreter die Anfrage aus. Wir haben unser GMED-Team informiert und melden uns.",
   next: "Weiter",
   back: "Zurück",
   inquiryConsentLabel: "Ich bin einverstanden, dass meine Angaben zur Bearbeitung meiner Anfrage verarbeitet werden.",
@@ -830,7 +842,7 @@ const de: LeadRequestText = {
   documentsIntro:
     "Laden Sie ärztliche Unterlagen hoch, die Sie bereits haben (Arztbriefe, Befunde, Bilder, Laborwerte). PDF, JPG oder PNG, bis 25 MB pro Datei.",
   healthConsentTitle: "Einwilligung zu Gesundheitsdaten",
-  healthConsentLabel: "Ich willige ein (Pflicht vor dem ersten Hochladen).",
+  healthConsentLabel: "Ich willige ein (erforderlich für das Anliegen und die Unterlagen).",
   uploadButton: "Dateien auswählen",
   uploading: "Wird hochgeladen…",
   uploadNeedsConsent: "Zum Hochladen bitte zuerst die Einwilligung oben bestätigen.",
@@ -867,7 +879,7 @@ const de: LeadRequestText = {
   requestFor: "Anfrage für",
   language: "Sprache",
   sectionPerson: "Persönliche Daten",
-  namePassportHint: "Bitte schreiben Sie Ihren Namen in lateinischen Buchstaben – genau wie im Reisepass, z. B. Anna Ivanova.",
+  namePassportHint: "Bitte den Namen in lateinischen Buchstaben schreiben – genau wie im Reisepass, z. B. Anna Ivanova.",
   namePassportCorrection: "Nur lateinische Buchstaben, wie im Reisepass.",
   namePassportSuggestion: "Im Reisepass vermutlich: {name}",
   namePassportApply: "Übernehmen",
@@ -949,6 +961,8 @@ const de: LeadRequestText = {
   hasInsuranceGuardian: "Hat die Patientin / der Patient eine Krankenversicherung?",
   recipient: {
     section: "Rechnungsempfänger",
+    confirmPayerChange: "Diesen Rechnungsempfänger als Zahler bestätigen",
+    replacePayerHint: "Bitte vervollständigen Sie die Angaben und bestätigen Sie den neuen Zahler. Die bisherigen Zahlerangaben und Antworten werden ersetzt.",
     question: "Wer ist Rechnungsempfänger?",
     options: { self: "Ich", third_party: "Eine andere Person oder Organisation" },
     optionsGuardian: {
@@ -1188,7 +1202,7 @@ const de: LeadRequestText = {
     bank_transfer: "Überweisung",
     card: "Karte",
     cash: "Bar",
-    crypto: "Kryptowährung",
+    crypto: "Kryptowährung (nicht mehr unterstützt)",
     other: "Sonstiges",
   },
   cashCryptoNote: "Barzahlungen prüft GMED gesondert (Geldwäschegesetz).",
@@ -1326,8 +1340,12 @@ const ru: LeadRequestText = {
   saved: "Сохранено",
   notSaved: "Не сохранено",
   invalidField: "Пожалуйста, проверьте это поле.",
+  dobStaffOnly: "Чтобы исправить дату рождения, обратитесь в GMED.",
+  healthConsentRequired: "Сначала дайте согласие на обработку данных о здоровье.",
+  furtherDetails: "Дополнительные сведения",
+  errors: {"upload_reviewed":"GMED уже приняла этот документ. Чтобы удалить его, обратитесь к нашей команде.","upload_in_use":"Этот документ уже используется. Для удаления обратитесь в GMED.","too_many_documents":"Можно загрузить до 30 документов. Сначала удалите ненужный файл.","unsupported_file_type":"Загрузите файл PDF, JPG или PNG.","file_too_large":"Размер файла не должен превышать 25 МБ.","personal_data_incomplete":"Заполните отмеченные поля перед отправкой заявки.","request_failed":"Не удалось выполнить действие. Попробуйте ещё раз."},
   minorNeedsGuardian:
-    "Для лиц младше 18 лет заявку заполняют родители или законный представитель. Мы сообщили вашей команде и свяжемся с вами.",
+    "Для лиц младше 18 лет заявку заполняют родители или законный представитель. Мы сообщили нашей команде GMED и свяжемся с вами.",
   next: "Далее",
   back: "Назад",
   inquiryConsentLabel: "Я согласен(на), что мои данные обрабатываются для рассмотрения моего обращения.",
@@ -1338,7 +1356,7 @@ const ru: LeadRequestText = {
   documentsIntro:
     "Загрузите медицинские документы, которые у вас уже есть (выписки, заключения, снимки, анализы). PDF, JPG или PNG, до 25 МБ на файл.",
   healthConsentTitle: "Согласие на обработку данных о здоровье",
-  healthConsentLabel: "Я даю согласие (обязательно перед первой загрузкой).",
+  healthConsentLabel: "Я даю согласие на обработку описания обращения и документов.",
   uploadButton: "Выбрать файлы",
   uploading: "Загружается…",
   uploadNeedsConsent: "Чтобы загрузить файлы, сначала подтвердите согласие выше.",
@@ -1454,6 +1472,8 @@ const ru: LeadRequestText = {
   hasInsuranceGuardian: "Есть ли у пациента медицинская страховка?",
   recipient: {
     section: "Получатель счёта",
+    confirmPayerChange: "Подтвердить этого получателя как плательщика",
+    replacePayerHint: "Заполните данные и подтвердите нового плательщика. Данные и ответы прежнего плательщика будут заменены.",
     question: "Кто является получателем счёта?",
     options: { self: "Я", third_party: "Третье лицо или организация" },
     optionsGuardian: {
@@ -1616,7 +1636,7 @@ const ru: LeadRequestText = {
   idDocumentExpired: "Срок действия документа истёк. Пожалуйста, укажите действующий документ.",
   sectionRepresentation: "Представительство",
   hasRepresentativeQuestion: "Действует ли кто-то от вашего имени?",
-  underGuardianshipQuestion: "Это представитель, назначенный по решению суда (опекун, rechtliche Betreuung)?",
+  underGuardianshipQuestion: "Это представитель, назначенный судом (Betreuer)?",
   sectionLegalRepresentatives: "Законные представители",
   custodyQuestion: "Кто представляет ребёнка?",
   custodyOptions: {
@@ -1628,7 +1648,7 @@ const ru: LeadRequestText = {
     rep1: "1-й представитель",
     rep2: "2-й представитель",
     agent: "Данные представителя",
-    guardian: "Опекун",
+    guardian: "Представитель, назначенный судом (Betreuer)",
   },
   representativeYou: "вы",
   representativeOtherParent: "второй родитель",
@@ -1692,7 +1712,7 @@ const ru: LeadRequestText = {
     bank_transfer: "Банковский перевод",
     card: "Карта",
     cash: "Наличные",
-    crypto: "Криптовалюта",
+    crypto: "Криптовалюта (больше не поддерживается)",
     other: "Другое",
   },
   cashCryptoNote: "Оплату наличными GMED проверяет отдельно (закон о противодействии отмыванию денег).",
@@ -1831,8 +1851,12 @@ const uk: LeadRequestText = {
   saved: "Збережено",
   notSaved: "Не збережено",
   invalidField: "Будь ласка, перевірте це поле.",
+  dobStaffOnly: "Щоб виправити дату народження, зверніться до GMED.",
+  healthConsentRequired: "Спочатку дайте згоду на обробку даних про здоров’я.",
+  furtherDetails: "Додаткові відомості",
+  errors: {"upload_reviewed":"GMED вже прийняла цей документ. Щоб видалити його, зверніться до нашої команди.","upload_in_use":"Цей документ вже використовується. Для видалення зверніться до GMED.","too_many_documents":"Можна завантажити до 30 документів. Спочатку видаліть непотрібний файл.","unsupported_file_type":"Завантажте файл PDF, JPG або PNG.","file_too_large":"Розмір файлу не має перевищувати 25 МБ.","personal_data_incomplete":"Заповніть позначені поля перед надсиланням заявки.","request_failed":"Не вдалося виконати дію. Спробуйте ще раз."},
   minorNeedsGuardian:
-    "Для осіб, молодших 18 років, заявку заповнюють батьки або законний представник. Ми повідомили вашу команду і зв'яжемося з вами.",
+    "Для осіб, молодших 18 років, заявку заповнюють батьки або законний представник. Ми повідомили нашу команду GMED і зв'яжемося з вами.",
   next: "Далі",
   back: "Назад",
   inquiryConsentLabel: "Я погоджуюся, що мої дані обробляються для розгляду мого звернення.",
@@ -1843,7 +1867,7 @@ const uk: LeadRequestText = {
   documentsIntro:
     "Завантажте медичні документи, які у вас уже є (виписки, висновки, знімки, аналізи). PDF, JPG або PNG, до 25 МБ на файл.",
   healthConsentTitle: "Згода на обробку даних про здоров'я",
-  healthConsentLabel: "Я даю згоду (обов'язково перед першим завантаженням).",
+  healthConsentLabel: "Я даю згоду на обробку опису звернення та документів.",
   uploadButton: "Вибрати файли",
   uploading: "Завантажується…",
   uploadNeedsConsent: "Щоб завантажити файли, спершу підтвердьте згоду вище.",
@@ -1959,6 +1983,8 @@ const uk: LeadRequestText = {
   hasInsuranceGuardian: "Чи є в пацієнта медична страховка?",
   recipient: {
     section: "Отримувач рахунку",
+    confirmPayerChange: "Підтвердити цього отримувача як платника",
+    replacePayerHint: "Заповніть дані й підтвердьте нового платника. Дані та відповіді попереднього платника буде замінено.",
     question: "Хто є отримувачем рахунку?",
     options: { self: "Я", third_party: "Третя особа або організація" },
     optionsGuardian: {
@@ -2121,7 +2147,7 @@ const uk: LeadRequestText = {
   idDocumentExpired: "Термін дії документа минув. Будь ласка, вкажіть дійсний документ.",
   sectionRepresentation: "Представництво",
   hasRepresentativeQuestion: "Чи діє хтось від вашого імені?",
-  underGuardianshipQuestion: "Це представник, призначений рішенням суду (опікун, rechtliche Betreuung)?",
+  underGuardianshipQuestion: "Це представник, призначений судом (Betreuer)?",
   sectionLegalRepresentatives: "Законні представники",
   custodyQuestion: "Хто представляє дитину?",
   custodyOptions: {
@@ -2133,7 +2159,7 @@ const uk: LeadRequestText = {
     rep1: "1-й представник",
     rep2: "2-й представник",
     agent: "Дані представника",
-    guardian: "Опікун",
+    guardian: "Представник, призначений судом (Betreuer)",
   },
   representativeYou: "ви",
   representativeOtherParent: "другий із батьків",
@@ -2197,7 +2223,7 @@ const uk: LeadRequestText = {
     bank_transfer: "Банківський переказ",
     card: "Картка",
     cash: "Готівка",
-    crypto: "Криптовалюта",
+    crypto: "Криптовалюта (більше не підтримується)",
     other: "Інше",
   },
   cashCryptoNote: "Оплату готівкою GMED перевіряє окремо (закон про запобігання відмиванню коштів).",
@@ -2336,8 +2362,12 @@ const en: LeadRequestText = {
   saved: "Saved",
   notSaved: "Not saved",
   invalidField: "Please check this entry.",
+  dobStaffOnly: "Please contact GMED to correct the date of birth.",
+  healthConsentRequired: "Please consent to health data processing first.",
+  furtherDetails: "Further information",
+  errors: {"upload_reviewed":"GMED has already taken over this document. Please contact our team to remove it.","upload_in_use":"This document is already in use. Please contact GMED to remove it.","too_many_documents":"You can upload up to 30 documents. Remove an unneeded file first.","unsupported_file_type":"Please upload a PDF, JPG or PNG file.","file_too_large":"The file must be no larger than 25 MB.","personal_data_incomplete":"Please complete the highlighted fields before sending the request.","request_failed":"The action could not be completed. Please try again."},
   minorNeedsGuardian:
-    "For persons under 18 the parents or the legal guardian fill in the request. We have informed your team and will get in touch.",
+    "For persons under 18 the parents or the legal guardian fill in the request. We have informed our GMED team and will get in touch.",
   next: "Next",
   back: "Back",
   inquiryConsentLabel: "I agree that my details are processed to handle my request.",
@@ -2348,7 +2378,7 @@ const en: LeadRequestText = {
   documentsIntro:
     "Upload medical documents you already have (doctors' letters, findings, images, lab results). PDF, JPG or PNG, up to 25 MB per file.",
   healthConsentTitle: "Consent to health data processing",
-  healthConsentLabel: "I consent (required before the first upload).",
+  healthConsentLabel: "I consent to processing the description of my concern and documents.",
   uploadButton: "Choose files",
   uploading: "Uploading…",
   uploadNeedsConsent: "To upload files, first confirm the consent above.",
@@ -2384,7 +2414,7 @@ const en: LeadRequestText = {
   requestFor: "Request for",
   language: "Language",
   sectionPerson: "Personal details",
-  namePassportHint: "Please write your names in Latin letters – exactly as in your passport, e.g. Anna Ivanova.",
+  namePassportHint: "Please write the names in Latin letters – exactly as in the passport, e.g. Anna Ivanova.",
   namePassportCorrection: "Latin letters only, as in your passport.",
   namePassportSuggestion: "Your passport most likely says: {name}",
   namePassportApply: "Use this",
@@ -2464,6 +2494,8 @@ const en: LeadRequestText = {
   hasInsuranceGuardian: "Does the patient have health insurance?",
   recipient: {
     section: "Invoice recipient",
+    confirmPayerChange: "Confirm this recipient as the payer",
+    replacePayerHint: "Complete the details and confirm the new payer. The previous payer’s details and answers will be replaced.",
     question: "Who is the invoice recipient?",
     options: { self: "Me", third_party: "Another person or an organisation" },
     optionsGuardian: {
@@ -2620,7 +2652,7 @@ const en: LeadRequestText = {
   idDocumentExpired: "The document has expired. Please enter a valid document.",
   sectionRepresentation: "Representation",
   hasRepresentativeQuestion: "Does anyone act on your behalf?",
-  underGuardianshipQuestion: "Is this person a court-appointed representative (legal guardian)?",
+  underGuardianshipQuestion: "Is this person a court-appointed representative (Betreuer)?",
   sectionLegalRepresentatives: "Legal representatives",
   custodyQuestion: "Who represents the child?",
   custodyOptions: {
@@ -2632,7 +2664,7 @@ const en: LeadRequestText = {
     rep1: "1st representative",
     rep2: "2nd representative",
     agent: "Representative's details",
-    guardian: "Legal guardian",
+    guardian: "Court-appointed representative (Betreuer)",
   },
   representativeYou: "you",
   representativeOtherParent: "other parent",
@@ -2695,7 +2727,7 @@ const en: LeadRequestText = {
     bank_transfer: "Bank transfer",
     card: "Card",
     cash: "Cash",
-    crypto: "Cryptocurrency",
+    crypto: "Cryptocurrency (no longer supported)",
     other: "Other",
   },
   cashCryptoNote: "GMED checks cash payments separately (Money Laundering Act).",

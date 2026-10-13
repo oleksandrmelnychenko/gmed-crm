@@ -7,13 +7,14 @@ describe("staff cabinet parity payload", () => {
       lead_id: "test-only",
       payer_organisation: { legal_form: "GmbH", register_number: "HRB 123", contact_name: "Test Contact" },
       billing: { via_third_party: true, via_third_party_kind: "psp", recipient_updated_at: "2026-10-12T08:00:00Z" },
-      enhanced_details: { relationship_proof_requested: true, relationship_proof_documents: [
+      enhanced_details: { missing: ["relationship_proof_upload", 42], relationship_proof_requested: true, relationship_proof_documents: [
         { id: "test-document", file_name: "relationship.pdf", uploaded_at: "2026-10-12T07:00:00Z", reviewed: false },
       ] },
     });
     expect(intake?.billing?.via_third_party_kind).toBe("psp");
     expect(intake?.billing?.recipient_updated_at).toBe("2026-10-12T08:00:00Z");
     expect(intake?.payer_organisation?.register_number).toBe("HRB 123");
+    expect(intake?.enhanced_details?.missing).toEqual(["relationship_proof_upload"]);
     expect(intake?.enhanced_details?.relationship_proof_requested).toBe(true);
     expect(intake?.enhanced_details?.relationship_proof_documents?.[0].file_name).toBe("relationship.pdf");
   });

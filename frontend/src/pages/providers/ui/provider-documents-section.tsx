@@ -3,7 +3,10 @@ import { Download, FileText, LoaderCircle, Paperclip, Plus, Search } from "lucid
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
+import { SheetActionsFooter } from "@/components/admin-page-patterns";
+import { Field, checkboxClass, inputClass, selectClass, textareaClass } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
@@ -233,18 +236,31 @@ export function ProviderDocumentsSection({
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader><DialogTitle>{labels.upload}</DialogTitle></DialogHeader>
-          <form className="space-y-4" onSubmit={(event) => void submit(event)}>
+        <AdminDialogScaffold
+          title={labels.upload}
+          maxWidthClassName="sm:max-w-[640px]"
+          onSubmit={(event) => void submit(event)}
+          footer={
+            <SheetActionsFooter>
+              <Button type="button" size="sm" variant="outline" className="h-8 rounded-lg" disabled={submitting} onClick={() => setDialogOpen(false)}>{labels.cancel}</Button>
+              <Button type="submit" size="sm" className="h-8 gap-1.5 rounded-lg" disabled={submitting || !file || (isMedical && !patientId)}>{submitting ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}{submitting ? labels.saving : labels.save}</Button>
+            </SheetActionsFooter>
+          }
+        >
             {error ? <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-            <label className="block space-y-1.5 text-sm font-medium"><span>{labels.file}</span><input ref={fileRef} type="file" required accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" className="hidden" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /><Button type="button" variant="outline" className="w-full justify-start" onClick={() => fileRef.current?.click()}><Paperclip />{file?.name || labels.chooseFile}</Button></label>
-            <label className="block space-y-1.5 text-sm font-medium"><span>{labels.titleField}</span><Input value={title} maxLength={255} placeholder={file?.name || ""} onChange={(event) => setTitle(event.target.value)} /></label>
-            <label className="block space-y-1.5 text-sm font-medium"><span>{labels.linkPatient}</span><select className="h-9 w-full rounded-md border border-input bg-field px-3 text-sm" value={patientId} required={isMedical} onChange={(event) => setPatientId(event.target.value)}><option value="">{labels.noPatient}</option>{patientOptions.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · {patient.patientNumber}</option>)}</select></label>
-            <label className="flex items-start gap-2 rounded-lg border bg-muted/20 p-3 text-sm"><input type="checkbox" className="mt-0.5" checked={isMedical} onChange={(event) => setIsMedical(event.target.checked)} /><span><span className="font-medium">{labels.medicalToggle}</span><span className="mt-0.5 block text-xs text-muted-foreground">{labels.medicalHint}</span></span></label>
-            <label className="block space-y-1.5 text-sm font-medium"><span>{labels.notes}</span><textarea className="min-h-24 w-full rounded-md border border-input bg-field px-3 py-2 text-sm" value={notes} maxLength={4000} onChange={(event) => setNotes(event.target.value)} /></label>
-            <div className="flex justify-end gap-2 border-t pt-4"><Button type="button" variant="outline" disabled={submitting} onClick={() => setDialogOpen(false)}>{labels.cancel}</Button><Button type="submit" disabled={submitting || !file || (isMedical && !patientId)}>{submitting ? <LoaderCircle className="animate-spin" /> : <FileText />}{submitting ? labels.saving : labels.save}</Button></div>
-          </form>
-        </DialogContent>
+            <AdminFormSection title={labels.file}>
+              <input ref={fileRef} aria-label={labels.file} type="file" required accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx" className="hidden" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+              <Button type="button" variant="outline" className="h-auto min-h-10 w-full justify-start gap-2 rounded-lg bg-muted/40 py-2 text-left text-xs whitespace-normal" onClick={() => fileRef.current?.click()}><Paperclip className="size-4 shrink-0 text-primary" /><span className="min-w-0 break-all">{file?.name || labels.chooseFile}</span></Button>
+              <Field label={labels.titleField} htmlFor="provider-document-title"><Input id="provider-document-title" className={inputClass} value={title} maxLength={255} placeholder={file?.name || ""} onChange={(event) => setTitle(event.target.value)} /></Field>
+            </AdminFormSection>
+            <AdminFormSection title={labels.linkPatient}>
+              <Field label={labels.patient} htmlFor="provider-document-patient"><select id="provider-document-patient" className={selectClass} value={patientId} required={isMedical} onChange={(event) => setPatientId(event.target.value)}><option value="">{labels.noPatient}</option>{patientOptions.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · {patient.patientNumber}</option>)}</select></Field>
+              <label className="flex items-start gap-2 rounded-lg border border-border/50 bg-muted/40 p-3 text-xs"><input type="checkbox" className={checkboxClass} checked={isMedical} onChange={(event) => setIsMedical(event.target.checked)} /><span><span className="font-medium">{labels.medicalToggle}</span><span className="mt-0.5 block leading-5 text-muted-foreground">{labels.medicalHint}</span></span></label>
+            </AdminFormSection>
+            <AdminFormSection title={labels.notes}>
+              <textarea aria-label={labels.notes} className={textareaClass} value={notes} maxLength={4000} onChange={(event) => setNotes(event.target.value)} />
+            </AdminFormSection>
+        </AdminDialogScaffold>
       </Dialog>
     </section>
   );

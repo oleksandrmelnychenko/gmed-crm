@@ -45,6 +45,13 @@ describe("follow-up blocks", () => {
     expect(followUpAnswered({ follow_up: { ...followUp, missing: {}, answered_at: "2026-10-07T10:00:00Z" } })).toBe(true);
   });
 
+  it("keeps corrected legal answers out of the step and permits sending changed follow-up again", () => {
+    const follow_up = { required: true, blocks: ["H", "J"], missing: {}, answered_at: "2026-10-07T10:00:00Z" };
+    const identification = { pep_self: false, pep_related: false, sanctions_links: false } as import("./lead-request-api").LeadRequest["identification"];
+    expect(openFollowUpBlocks({ follow_up, identification })).toEqual([]);
+    expect(followUpAnswered({ follow_up: { ...follow_up, changed_since_answer: true } })).toBe(false);
+  });
+
   it("reads what a refusal names as missing, by block", () => {
     expect(missingOfRefusal({ code: "follow_up_incomplete", missing: { A: ["funds_source", 3], B: "x" } })).toEqual({
       A: ["funds_source"],
@@ -56,13 +63,13 @@ describe("follow-up blocks", () => {
   it("asks block A by who pays and what the server misses", () => {
     expect(blockAAsks({ payer: payer("self") })).toMatchObject({ funds: true, occupation: true, sector: true, funds_proof: true, payer_funds: false });
     expect(blockAAsks({ payer: null })).toMatchObject({ funds: true });
-    // The payer's funds only while the server asks them (not after the payer stated them on the own link).
+    // Even stale server missing keys never ask the lead for a third party's funds.
     const asked = { required: true, blocks: ["A"], missing: { A: ["payer_funds_source", "sector"] }, answered_at: null };
-    expect(blockAAsks({ payer: payer("third_party"), follow_up: asked })).toMatchObject({ payer_funds: true, payer_states_funds: true, funds: false, funds_proof: false });
+    expect(blockAAsks({ payer: payer("third_party"), follow_up: asked })).toMatchObject({ payer_funds: false, payer_states_funds: true, funds: false, funds_proof: false });
     expect(blockAAsks({ payer: payer("third_party"), follow_up: { ...asked, missing: { A: ["sector"] } } })).toMatchObject({ payer_funds: false, sector: true });
     expect(
       blockAAsks({ payer: payer("third_party"), follow_up: { ...asked, missing: { A: [] }, answers: { payer_funds_source: "savings" } } }),
-    ).toMatchObject({ payer_funds: true });
+    ).toMatchObject({ payer_funds: false });
   });
 
   it("sends one source with the words, trimmed, only what changed", () => {
