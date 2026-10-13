@@ -36,6 +36,60 @@
       "runtimeExecutable": "fnm",
       "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4176", "--strictPort"],
       "port": 4176
+    },
+    {
+      "name": "qa-stack-a",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4176 --strictPort"
+      ],
+      "port": 4176
+    },
+    {
+      "name": "qa-stack-b",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4180 --strictPort"
+      ],
+      "port": 4180
+    },
+    {
+      "name": "qa-stack-c",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4181 --strictPort"
+      ],
+      "port": 4181
+    },
+    {
+      "name": "qa-stack-d",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4182 --strictPort"
+      ],
+      "port": 4182
+    },
+    {
+      "name": "qa-stack-e",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& set VITE_IDLE_LOGOUT_MINUTES=2&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4183 --strictPort"
+      ],
+      "port": 4183
+    },
+    {
+      "name": "qa-stack-f",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "set VITE_PROXY_TARGET=http://127.0.0.1:3320&& fnm exec --using 22 -- npm.cmd --prefix frontend run dev -- --host 0.0.0.0 --port 4184 --strictPort"
+      ],
+      "port": 4184
     }
   ]
 }
