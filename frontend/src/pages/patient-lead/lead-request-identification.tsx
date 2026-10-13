@@ -51,6 +51,7 @@ import {
   errorBody,
   errorMessage,
   useAutosave,
+  runDraftSave,
   type RequestQueue,
 } from "./lead-request-parts";
 import { identificationFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -101,7 +102,7 @@ export function useIdentificationForm({
         identificationPatch(queuedDraftRef.current, snapshot),
       );
       queuedDraftRef.current = snapshot;
-      void enqueue(async () => {
+      return runDraftSave(enqueue, fields, async () => {
         let saved = false;
         let failed = false;
         let rejected = stillRejectedIdentification(refusedRef.current.values, snapshot);
@@ -139,6 +140,7 @@ export function useIdentificationForm({
         failedRef.current = failed || Object.keys(rejected).length > 0;
         if (failedRef.current) onSaveState("error");
         else if (saved || wasFailed) onSaveState("saved");
+        return !failedRef.current;
       });
     },
     [enqueue, onChange, onSaveState, request.lead_id],

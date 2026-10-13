@@ -67,6 +67,7 @@ import {
   errorBody,
   errorMessage,
   useAutosave,
+  runDraftSave,
   type RequestQueue,
 } from "./lead-request-parts";
 import { PayerSection } from "./lead-request-payer-section";
@@ -364,14 +365,14 @@ function FundsBlock({
         extraPatch(queuedDraftRef.current, snapshot, asked),
       );
       queuedDraftRef.current = snapshot;
-      void enqueue(async () => {
+      return runDraftSave(enqueue, fields, async () => {
         const stillRefused: Refused = {};
         for (const [field, value] of Object.entries(refusedRef.current) as Array<[keyof ExtraDraft, string]>) {
           if (value === extraValue(field, snapshot)) stillRefused[field] = value;
         }
         refusedRef.current = stillRefused;
         const patch = scopedDraftPatch(extraPatch(savedRef.current, snapshot, asked, stillRefused), fields);
-        if (Object.keys(patch).length === 0) return;
+        if (Object.keys(patch).length === 0) return Object.keys(stillRefused).length === 0;
         onSaveState("saving");
         try {
           const baseline = savedRef.current;
@@ -383,6 +384,7 @@ function FundsBlock({
           setRefused(stillRefused);
           onSaveState(Object.keys(stillRefused).length > 0 ? "error" : "saved");
           onChange(next);
+          return Object.keys(stillRefused).length === 0;
         } catch (cause) {
           const body = errorBody(cause);
           if (body?.code === PAYER_NOT_SELF || body?.code === PAYER_NOT_THIRD_PARTY) {
@@ -400,6 +402,7 @@ function FundsBlock({
             setRefused(refusedRef.current);
           }
           onSaveState("error");
+          return false;
         }
       });
     },

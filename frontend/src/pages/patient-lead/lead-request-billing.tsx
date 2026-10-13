@@ -54,7 +54,7 @@ import {
   type RejectedBilling,
 } from "./lead-request-billing-model";
 import type { SaveState } from "./lead-request-model";
-import { CabinetSection as Section, LabeledField, RequiredMark, YesNoSelect, errorBody, useAutosave, type RequestQueue } from "./lead-request-parts";
+import { CabinetSection as Section, LabeledField, RequiredMark, YesNoSelect, errorBody, useAutosave, runDraftSave, type RequestQueue } from "./lead-request-parts";
 import { invoiceToLabel, type LeadRequestText } from "./lead-request-text";
 
 // Invoice recipient and payment route (owner spec "Patientenformular",
@@ -152,7 +152,7 @@ function useBillingForm({
     (snapshot: BillingDraft) => {
       const fields = queuedDraftFields(billingPatch(savedRef.current, snapshot, routeByRef.current), billingPatch(queuedDraftRef.current, snapshot, routeByRef.current));
       queuedDraftRef.current = snapshot;
-      void enqueue(async () => {
+      return runDraftSave(enqueue, fields, async () => {
         let saved = false;
         let failed = false;
         let routeTold = false;
@@ -208,6 +208,7 @@ function useBillingForm({
         if (failedRef.current) onSaveState("error");
         // After the payer took section 8 over, the page shows the server's state: nothing is pending.
         else if (saved || wasFailed || routeTold) onSaveState("saved");
+        return !failedRef.current;
       });
     },
     [billing.payer_declared, billing.payment_route_by, enqueue, onChange, onSaveState, request.lead_id],
@@ -565,9 +566,12 @@ function BillingExtras({
     (snapshot: BillingExtrasDraft) => {
       const fields = queuedDraftFields(billingExtrasPatch(savedRef.current, snapshot), billingExtrasPatch(queuedDraftRef.current, snapshot));
       queuedDraftRef.current = snapshot;
-      void enqueue(async () => {
+      return runDraftSave(enqueue, fields, async () => {
+        refusedRef.current = Object.fromEntries(Object.entries(refusedRef.current).filter(
+          ([field, value]) => billingExtrasValue(field as BillingExtrasField, snapshot) === value,
+        ));
         const patch = scopedDraftPatch(billingExtrasPatch(savedRef.current, snapshot, refusedRef.current), fields);
-        if (Object.keys(patch).length === 0) return;
+        if (Object.keys(patch).length === 0) return Object.keys(refusedRef.current).length === 0;
         onSaveState("saving");
         try {
           const baseline = savedRef.current;
@@ -582,6 +586,7 @@ function BillingExtras({
           setRefused({});
           onSaveState("saved");
           onChange(next);
+          return Object.keys(refusedRef.current).length === 0;
         } catch (cause) {
           const field = errorBody(cause)?.field;
           if (cause instanceof ApiRequestError && cause.status === 422 && (field === "via_third_party_kind" || field === "expected_total_eur")) {
@@ -589,6 +594,7 @@ function BillingExtras({
             setRefused(refusedRef.current);
           }
           onSaveState("error");
+          return false;
         }
       });
     },

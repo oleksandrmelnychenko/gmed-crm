@@ -3934,6 +3934,9 @@ export function LeadWizard({
   const canReviewPortalUploads = Boolean(step1Portal.intake?.can_review_uploads);
   // The patient form is filled from the sent request: nothing to generate before.
   const leadRequestSent = leadSelfDisclosureAvailable(step1Portal.intake);
+  const leadFormUnavailableHint = step1Portal.intake?.changed_since_submit
+    ? tx("Ожидаем повторную отправку изменений пациентом — после этого можно создать анкету.", "Änderungen noch nicht erneut gesendet — danach kann das Formular erstellt werden.")
+    : tx("Ожидаем отправку заявки пациентом — после этого можно создать анкету.", "Anfrage des Patienten noch nicht gesendet — danach kann das Formular erstellt werden.");
   const patientUploadDocuments = useMemo(() => {
     const ids = new Set(step1Portal.intake?.uploads.map((upload) => upload.document_id) ?? []);
     return documents.filter((item) => ids.has(item.id) && !item.file_deleted_at && item.has_stored_file !== false);
@@ -8357,7 +8360,7 @@ ${serviceCommentLines.join("\n")}`
                         size="sm"
                         className="h-8 rounded-lg"
                         disabled={isBusy || !leadRequestSent}
-                        title={leadRequestSent ? undefined : tx("Доступно после отправки заявки пациентом", "Verfügbar, nachdem der Patient die Anfrage gesendet hat")}
+                        title={leadRequestSent ? undefined : leadFormUnavailableHint}
                         onClick={() => void generateLeadComplianceDocument(LEAD_SELF_DISCLOSURE_TEMPLATE)}
                       >
                         {busy === `generate-${LEAD_SELF_DISCLOSURE_TEMPLATE}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
@@ -8374,10 +8377,7 @@ ${serviceCommentLines.join("\n")}`
                     {!leadRequestSent ? (
                       <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-wizard-self-disclosure-hint">
                         <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                        <span>{tx(
-                          "Ожидаем отправку заявки пациентом — после этого можно создать анкету.",
-                          "Anfrage des Patienten noch nicht gesendet — danach kann das Formular erstellt werden.",
-                        )}</span>
+                        <span>{leadFormUnavailableHint}</span>
                       </StatusChip>
                     ) : null}
                     <WizardDocumentRows

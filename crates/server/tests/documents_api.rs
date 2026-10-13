@@ -12242,4 +12242,61 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
     ] {
         assert!(!text.contains(absent), "{absent} in {text}");
     }
+    // A draft edited after submission must never be printed with the old
+    // declaration timestamp. The API guard also applies to direct callers.
+    sqlx::query(
+        r#"UPDATE leads SET city = 'Hamburg', portal_field_updates =
+           jsonb_build_object('city', jsonb_build_object('at', portal_submitted_at + interval '1 second'))
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(json!({ "lead_id": lead_id }))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "lead_request_changed_since_submit");
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM documents WHERE lead_id = $1 AND generated_template_id = 'lead_self_disclosure'",
+    )
+    .bind(lead_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1, "refused generation must not create a document");
+    sqlx::query("UPDATE leads SET portal_submitted_at = portal_submitted_at + interval '2 seconds' WHERE id = $1")
+        .bind(lead_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, fresh) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(json!({ "lead_id": lead_id }))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{fresh}");
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/documents/{}/download",
+            fresh["id"].as_str().unwrap()
+        ),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let fresh_text = extract_pdf_text(&bytes);
+    assert!(fresh_text.contains("10115 Hamburg"), "{fresh_text}");
+    assert!(!fresh_text.contains("10115 Berlin"), "{fresh_text}");
 }

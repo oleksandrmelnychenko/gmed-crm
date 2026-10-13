@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { startClockAt } from "./helpers";
 
 // Fresh audit regressions: every request is synthetic and all API traffic is mocked.
-async function setup(page: Page, firstPersonalReply?: Promise<void>, scenario?: "representative" | "extra", secondPersonalReply?: Promise<void>) {
+async function setup(page: Page, firstPersonalReply?: Promise<void>, scenario?: "representative" | "extra", secondPersonalReply?: Promise<void>, failure?: { enabled: boolean; status: number; endpoint: string; field?: string }) {
   await startClockAt(page);
   const request = {
     lead_id: "person-recheck", access_kind: "self", created_at: "2026-10-12T08:00:00Z",
@@ -44,6 +44,7 @@ async function setup(page: Page, firstPersonalReply?: Promise<void>, scenario?: 
   const calls = {
     personal: [] as Record<string, unknown>[], identification: [] as Record<string, unknown>[],
     representative: [] as Record<string, unknown>[], extra: [] as Record<string, unknown>[], fundsUploads: 0,
+    submits: [] as Record<string, unknown>[],
   };
   await page.addInitScript(() => {
     localStorage.setItem("gmed_lang", "de");
@@ -52,12 +53,20 @@ async function setup(page: Page, firstPersonalReply?: Promise<void>, scenario?: 
   await page.routeWebSocket("**/api/**", (socket) => socket.close());
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/v1", "");
+    if (failure?.enabled && path.endsWith(failure.endpoint)) {
+      return route.fulfill({ status: failure.status, json: { code: "invalid_field", field: failure.field } });
+    }
     if (path === "/me") return route.fulfill({ json: {
       id: "synthetic-person-user", email: "person-recheck@example.invalid", name: "Anna Muster",
       role: "patient", capabilities: [], created_at: "2026-10-12T08:00:00Z", preferred_language: "de",
       password_change_required: false, portal_mode: "lead", lead_portal: { requests: 1 },
     } });
     if (path === "/me/lead-requests") return route.fulfill({ json: { requests: [request] } });
+    if (path.endsWith("/submit")) {
+      calls.submits.push(structuredClone(request.personal_data));
+      request.submitted_at = "2026-10-13T17:00:00Z";
+      return route.fulfill({ json: request });
+    }
     if (path.endsWith("/funds-proof")) {
       calls.fundsUploads++;
       request.follow_up.answers.occupation = "Staff-corrected profession";
@@ -88,7 +97,7 @@ async function setup(page: Page, firstPersonalReply?: Promise<void>, scenario?: 
       calls.personal.push(patch);
       Object.assign(request.personal_data, patch);
       // A concurrent staff edit is already in the complete server response.
-      if (calls.personal.length === 1) {
+      if (calls.personal.length === 1 && !failure) {
         request.personal_data.city = "Munich";
         await firstPersonalReply;
       }
@@ -228,4 +237,91 @@ test("recheck: a funds upload response cannot replace unsaved typing in an extra
   await expect.poll(() => calls.fundsUploads).toBe(1);
   await expect(page.locator("#lead-request-occupation")).toHaveValue("Architect");
   await expect.poll(() => request.follow_up.answers.occupation).toBe("Architect");
+});
+
+for (const status of [503, 422]) {
+  test(`failed autosave ${status} retains the draft and prevents leaving until recovery`, async ({ page }) => {
+    const failure = { enabled: true, status, endpoint: '/personal-data', field: status === 422 ? 'city' : undefined };
+    const { calls, request } = await setup(page, undefined, undefined, undefined, failure);
+    await page.locator('#lead-request-city').fill('Hamburg');
+    await page.locator('[data-step="send"]').click();
+    await expect(page.getByTestId('lead-request-save-blocked')).toBeVisible();
+    await expect(page.locator('#lead-request-city')).toHaveValue('Hamburg');
+    await expect(page.getByTestId('lead-request-submit')).toHaveCount(0);
+    expect(request.personal_data.city).toBe('Berlin');
+    failure.enabled = false;
+    // A validation refusal requires correcting the rejected value; a network
+    // failure can retry the identical draft through the same navigation action.
+    if (status === 422) await page.locator('#lead-request-city').fill('Bremen');
+    await page.locator('[data-step="send"]').click();
+    await expect(page.getByTestId('lead-request-submit')).toBeVisible();
+    expect(calls.personal.at(-1)).toEqual({ city: status === 422 ? 'Bremen' : 'Hamburg' });
+    await page.getByTestId('lead-request-declaration').getByRole('checkbox').check();
+    await page.getByTestId('lead-request-submit').click();
+    await expect(page.getByTestId('lead-request-sent')).toBeVisible();
+    expect(calls.submits).toHaveLength(1);
+    expect(calls.submits[0].city).toBe(status === 422 ? 'Bremen' : 'Hamburg');
+    await page.locator('[data-step="person"]').click();
+    await expect(page.locator('#lead-request-city')).toHaveValue(status === 422 ? 'Bremen' : 'Hamburg');
+  });
+}
+
+test('failed identification autosave retains channel choices across a refused step change', async ({ page }) => {
+  const failure = { enabled: true, status: 503, endpoint: '/identification' };
+  const { request } = await setup(page, undefined, undefined, undefined, failure);
+  const email = page.getByTestId('lead-request-contact-channels').getByRole('checkbox', { name: 'E-Mail', exact: true });
+  await email.check();
+  await page.locator('[data-step="send"]').click();
+  await expect(page.getByTestId('lead-request-save-blocked')).toBeVisible();
+  await expect(email).toBeChecked();
+  expect(request.identification.contact_channels).toEqual([]);
+  failure.enabled = false;
+  await page.locator('[data-step="send"]').click();
+  await expect(page.getByTestId('lead-request-submit')).toBeVisible();
+  expect(request.identification.contact_channels).toEqual(['email']);
+});
+
+test('clearing a required name cannot silently send the previously saved name', async ({ page }) => {
+  const { request } = await setup(page);
+  await page.locator('#lead-request-first_name').fill('');
+  await page.locator('[data-step="send"]').click();
+  await expect(page.getByTestId('lead-request-save-blocked')).toBeVisible();
+  await expect(page.locator('#lead-request-first_name')).toHaveValue('');
+  expect(request.personal_data.first_name).toBe('Anna');
+  await page.locator('#lead-request-first_name').fill('Annette');
+  await page.locator('[data-step="send"]').click();
+  await expect(page.getByTestId('lead-request-submit')).toBeVisible();
+  expect(request.personal_data.first_name).toBe('Annette');
+});
+
+test('typing while another section saves is included before leaving the step', async ({ page }) => {
+  let release = () => {};
+  const reply = new Promise<void>((resolve) => { release = resolve; });
+  const { request, calls } = await setup(page, undefined, undefined, undefined, { enabled: false, status: 503, endpoint: '/personal-data' });
+  let identificationStarted = false;
+  await page.route('**/me/lead-requests/person-recheck/identification', async (route) => {
+    identificationStarted = true;
+    Object.assign(request.identification, route.request().postDataJSON());
+    await reply;
+    await route.fulfill({ json: request });
+  });
+  await page.getByTestId('lead-request-contact-channels').getByRole('checkbox', { name: 'E-Mail', exact: true }).check();
+  await page.locator('[data-step="send"]').click();
+  await expect.poll(() => identificationStarted).toBe(true);
+  await page.locator('#lead-request-city').fill('Bremen');
+  release();
+  await expect(page.getByTestId('lead-request-submit')).toBeVisible();
+  expect(calls.personal.at(-1)).toEqual({ city: 'Bremen' });
+  expect(request.personal_data.city).toBe('Bremen');
+});
+
+test('leaving after save preserves server corrections without a stale unmount write', async ({ page }) => {
+  const { request, calls } = await setup(page);
+  await page.locator('#lead-request-first_name').fill('Annette');
+  await page.locator('[data-step="send"]').click();
+  await expect(page.getByTestId('lead-request-submit')).toBeVisible();
+  await page.locator('[data-step="person"]').click();
+  await expect(page.locator('#lead-request-city')).toHaveValue('Munich');
+  expect(request.personal_data.city).toBe('Munich');
+  expect(calls.personal).toEqual([{ first_name: 'Annette' }]);
 });

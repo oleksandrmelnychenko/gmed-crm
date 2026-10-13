@@ -2403,7 +2403,7 @@ where
 /// 2026-10-06, A X2) read the same expression. Sending the answers of the
 /// follow-up blocks counts as sending too (QA 2026-10-10): what the lead
 /// answered there was sent with them.
-const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NOT NULL AND (
+pub(super) const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NOT NULL AND (
     EXISTS (
         SELECT 1
         FROM jsonb_each(

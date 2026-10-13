@@ -121,6 +121,7 @@ export type LeadRequestText = {
   addDocuments: string;
   loadFailed: string;
   retry: string;
+  saveBeforeLeaving: string;
   noRequest: string;
   /** The own login of a minor whose parents have access (QA 2026-10-12, A3-01): neutral, no reason. */
   guardianOnly: string;
@@ -873,6 +874,7 @@ const de: LeadRequestText = {
   addDocuments: "Unterlagen ergänzen",
   loadFailed: "Die Anfrage konnte nicht geladen werden.",
   retry: "Erneut versuchen",
+  saveBeforeLeaving: "Die letzten Änderungen konnten nicht gespeichert werden. Ihre Eingaben bleiben hier erhalten. Prüfen Sie die markierten Felder und versuchen Sie den Schrittwechsel erneut.",
   noRequest: "Für Ihr Konto ist derzeit keine offene Anfrage vorhanden.",
   guardianOnly:
     "Diese Anfrage füllen Ihre Eltern bzw. Ihr gesetzlicher Vertreter mit ihrem eigenen Zugang aus. Bei Fragen wenden Sie sich bitte an GMED.",
@@ -1386,6 +1388,7 @@ const ru: LeadRequestText = {
   addDocuments: "Добавить документы",
   loadFailed: "Не удалось загрузить заявку.",
   retry: "Повторить",
+  saveBeforeLeaving: "Не удалось сохранить последние изменения. Введённые данные остаются здесь. Проверьте отмеченные поля и попробуйте перейти ещё раз.",
   noRequest: "Для вашего аккаунта сейчас нет открытой заявки.",
   guardianOnly:
     "Эту заявку заполняют ваши родители или законный представитель через свой собственный доступ. Если у вас есть вопросы, обратитесь в GMED.",
@@ -1897,6 +1900,7 @@ const uk: LeadRequestText = {
   addDocuments: "Додати документи",
   loadFailed: "Не вдалося завантажити заявку.",
   retry: "Спробувати ще раз",
+  saveBeforeLeaving: "Не вдалося зберегти останні зміни. Введені дані залишаються тут. Перевірте позначені поля й спробуйте перейти ще раз.",
   noRequest: "Для вашого акаунта зараз немає відкритої заявки.",
   guardianOnly:
     "Цю заявку заповнюють ваші батьки або законний представник через свій власний доступ. Якщо у вас є запитання, зверніться до GMED.",
@@ -2408,6 +2412,7 @@ const en: LeadRequestText = {
   addDocuments: "Add documents",
   loadFailed: "The request could not be loaded.",
   retry: "Try again",
+  saveBeforeLeaving: "Your latest changes could not be saved. Your entries are kept here. Check the marked fields and try moving to the next step again.",
   noRequest: "There is no open request for your account at the moment.",
   guardianOnly:
     "Your parents or your legal representative fill in this request with their own access. If you have any questions, please contact GMED.",

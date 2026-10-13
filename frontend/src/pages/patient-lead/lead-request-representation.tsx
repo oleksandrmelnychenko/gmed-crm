@@ -11,6 +11,7 @@ import { nameNeedsLatinSpelling, suggestPassportSpelling } from "./name-translit
 import { inputClass, selectClass, tokens } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
+import { ApiRequestError } from "@/lib/api";
 
 import {
   INQUIRY_CONSENT,
@@ -40,6 +41,7 @@ import {
   errorBody,
   errorMessage,
   useAutosave,
+  runDraftSave,
   type RequestQueue,
 } from "./lead-request-parts";
 import {
@@ -211,15 +213,15 @@ function useRepresentativeForm({
 
   const save = useCallback(
     (snapshot: RepresentativeDraft) => {
-      if (removedRef.current || !isShown(slot)) return;
+      if (removedRef.current || !isShown(slot)) return true;
       const options = { create: existsRef.current ? null : ROLE_OF_SLOT[slot], emailLocked: lockedRef.current };
       const fields = queuedDraftFields(
         representativePatch(savedRef.current, snapshot, options) ?? {},
         representativePatch(queuedDraftRef.current, snapshot, options) ?? {},
       );
       queuedDraftRef.current = snapshot;
-      void enqueue(async () => {
-        if (removedRef.current) return;
+      return runDraftSave(enqueue, fields, async () => {
+        if (removedRef.current) return true;
         let saved = false;
         let refusedAsWhole = "";
         let anotherId = false;
@@ -273,9 +275,11 @@ function useRepresentativeForm({
         setRefused(refusedRef.current);
         setProblem(refusedAsWhole);
         const wasFailed = failedRef.current;
-        failedRef.current = Boolean(refusedAsWhole) || Object.keys(rejected).length > 0;
+        const incompleteName = !snapshot.last_name.trim() && JSON.stringify(snapshot) !== JSON.stringify(savedRef.current);
+        failedRef.current = Boolean(refusedAsWhole) || Object.keys(rejected).length > 0 || incompleteName;
         if (failedRef.current) onSaveState("error");
         else if (saved || wasFailed) onSaveState("saved");
+        return !failedRef.current;
       });
     },
     [enqueue, isShown, onChange, onSaveState, request.lead_id, slot],
@@ -762,6 +766,7 @@ export function RepresentationSection({
   const minor = request.minor;
   const [draft, setDraft] = useState<RepresentationDraft>(() => draftFromRepresentation(representation));
   const savedRef = useRef<RepresentationDraft>(draftFromRepresentation(representation));
+  const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<string | null>(null);
   const failedRef = useRef(false);
   // "in_use": the server keeps a person, so the answer went back. "failed": the answers are not saved.
@@ -812,7 +817,9 @@ export function RepresentationSection({
 
   const save = useCallback(
     (snapshot: RepresentationDraft) => {
-      void enqueue(async () => {
+      const fields = queuedDraftFields(representationPatch(savedRef.current, snapshot, minor), representationPatch(queuedDraftRef.current, snapshot, minor));
+      queuedDraftRef.current = snapshot;
+      return runDraftSave(enqueue, fields, async () => {
         const patch = representationPatch(savedRef.current, snapshot, minor);
         const key = JSON.stringify(patch);
         if (Object.keys(patch).length === 0) {
@@ -823,9 +830,9 @@ export function RepresentationSection({
             setProblem((current) => (current === "failed" ? null : current));
             setPartState(ANSWERS, "saved");
           }
-          return;
+          return true;
         }
-        if (key === refusedRef.current) return;
+        if (key === refusedRef.current) return false;
         setPartState(ANSWERS, "saving");
         try {
           const next = await saveLeadRepresentation(request.lead_id, patch);
@@ -849,10 +856,11 @@ export function RepresentationSection({
             }));
           } else {
             // The refused answers are not repeated until they are changed.
-            refusedRef.current = key;
+            refusedRef.current = cause instanceof ApiRequestError && cause.status === 422 ? key : null;
             setProblem("failed");
           }
         }
+        return !failedRef.current;
       });
     },
     [enqueue, minor, onChange, request.lead_id, setPartState],

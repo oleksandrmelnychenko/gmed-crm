@@ -24790,17 +24790,25 @@ async fn load_lead_self_disclosure(
             "Failed to load the lead's answers",
         )
     };
+    // Every section and its submission marker must belong to the same database
+    // snapshot, including when the cabinet saves concurrently with generation.
     let mut conn = state
         .db
-        .acquire()
+        .begin()
         .await
-        .map_err(|error| failed(error, "connection"))?;
-    let row = sqlx::query(
+        .map_err(|error| failed(error, "transaction"))?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        .execute(&mut *conn)
+        .await
+        .map_err(|error| failed(error, "snapshot"))?;
+    let row = sqlx::query(&format!(
         r#"SELECT first_name, middle_name, last_name, date_of_birth, citizenships,
-                  street_address, zip_code, city, country, email, phone, portal_submitted_at
-           FROM leads
+                  street_address, zip_code, city, country, email, phone, portal_submitted_at,
+                  ({}) AS changed_since_submit
+           FROM leads l
            WHERE id = $1"#,
-    )
+        super::lead_portal_intake::CHANGED_SINCE_SUBMIT_SQL,
+    ))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await
@@ -24813,6 +24821,16 @@ async fn load_lead_self_disclosure(
     else {
         return Err(lead_request_not_sent());
     };
+    if row
+        .try_get::<bool, _>("changed_since_submit")
+        .map_err(|error| failed(error, "submission state"))?
+    {
+        return Err((StatusCode::CONFLICT, Json(json!({
+            "error": "lead_request_changed_since_submit",
+            "code": "lead_request_changed_since_submit",
+            "message": "The lead must send the changed request before generating the patient form",
+        }))).into_response());
+    }
     let text = |column: &str| {
         row.try_get::<Option<String>, _>(column)
             .ok()
@@ -24849,7 +24867,9 @@ async fn load_lead_self_disclosure(
     .map_err(|error| failed(error, "follow-up answers"))?
     .flatten()
     .filter(|answered_at| *answered_at > submitted_at);
-    drop(conn);
+    conn.commit()
+        .await
+        .map_err(|error| failed(error, "snapshot complete"))?;
 
     let representation = &represented.representation;
     let custody = representation.answers.custody();

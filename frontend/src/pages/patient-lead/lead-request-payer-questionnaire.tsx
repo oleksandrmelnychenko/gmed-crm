@@ -64,6 +64,7 @@ import {
   errorBody,
   errorMessage,
   useAutosave,
+  runDraftSave,
   type RequestQueue,
 } from "./lead-request-parts";
 import { payerQuestionnaireFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -227,7 +228,7 @@ function PayerQuestionnaireForm({
       if (!writableRef.current) return Promise.resolve(false);
       const fields = queuedDraftFields(payerQuestionnairePatch(savedRef.current, snapshot), payerQuestionnairePatch(queuedDraftRef.current, snapshot));
       queuedDraftRef.current = snapshot;
-      return enqueue(async () => {
+      return runDraftSave(enqueue, fields, async () => {
         if (!writableRef.current) return false;
         let saved = false;
         let failed = false;
@@ -274,7 +275,7 @@ function PayerQuestionnaireForm({
     [apply, enqueue, leadId, messageOf, onSaveState],
   );
 
-  useAutosave(draft, save);
+  useAutosave(draft, useCallback((snapshot: PayerQuestionnaireDraft) => !writableRef.current || save(snapshot), [save]));
 
   const errorFor = (field: PayerQuestionnaireField) => {
     // The message belongs to the refused value: it goes as soon as the parent changes it.

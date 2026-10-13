@@ -12,6 +12,7 @@ import {
 } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
+import { ApiRequestError } from "@/lib/api";
 
 import {
   NO_THIRD_PARTY_PAYER,
@@ -54,6 +55,7 @@ import {
   YesNoSelect,
   errorBody,
   useAutosave,
+  runDraftSave,
   type RequestQueue,
 } from "./lead-request-parts";
 import { payerFitsFlow, type PayerChoice, type RecipientDraft, type RecipientFlow } from "./lead-request-recipient-model";
@@ -90,6 +92,7 @@ export function usePayerAutosave({
   const answeredRef = useRef(payerAnsweredByPayer(request));
   answeredRef.current = payerAnsweredByPayer(request);
   const savedRef = useRef<PayerDraft>(draftFromPayer(request.payer));
+  const queuedDraftRef = useRef(savedRef.current);
   const rejectedRef = useRef<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   // A parent who pays is not asked to agree that GMED contacts them (the
@@ -99,8 +102,12 @@ export function usePayerAutosave({
 
   const save = useCallback(
     (snapshot: PayerDraft) => {
-      void enqueue(async () => {
-        if (!enabled || answeredRef.current) return;
+      const withConsent = !snapshot.guardian_pays || serverAsksConsent;
+      const keyOf = (value: PayerDraft) => JSON.stringify(payerInput(value, typed, withConsent));
+      const fields = new Set(keyOf(snapshot) === keyOf(savedRef.current) && keyOf(snapshot) === keyOf(queuedDraftRef.current) ? [] : ["payer"]);
+      queuedDraftRef.current = snapshot;
+      return runDraftSave(enqueue, fields, async () => {
+        if (!enabled || answeredRef.current) return true;
         // Without the box the consent is left out: the server keeps what it has.
         const withConsent = !snapshot.guardian_pays || serverAsksConsent;
         const input = payerInput(snapshot, typed, withConsent);
@@ -112,12 +119,13 @@ export function usePayerAutosave({
             setFieldError(null);
             onSaveState("saved");
           }
-          return;
+          return true;
         }
-        if (!input || key === rejectedRef.current) return;
+        if (!input) return false;
+        if (key === rejectedRef.current) return false;
         // A third party is stored once it has a name, never empty in place of the
         // patient (QA 2026-10-11 A-08a: that cleared the patient's payment method).
-        if (!payerAnswerSavable(savedRef.current, snapshot, typed)) return;
+        if (!payerAnswerSavable(savedRef.current, snapshot, typed)) return false;
         onSaveState("saving");
         try {
           const next = await saveLeadPayer(request.lead_id, input);
@@ -126,9 +134,10 @@ export function usePayerAutosave({
           setFieldError(null);
           onSaveState("saved");
           onChange(next);
+          return true;
         } catch (cause) {
           // The refused answer is not repeated until the patient changes it.
-          rejectedRef.current = key;
+          rejectedRef.current = cause instanceof ApiRequestError && cause.status === 422 ? key : null;
           const body = errorBody(cause);
           if (body?.code === PAYER_ANSWERED_BY_PAYER) {
             // The payer has answered in the meantime: the request is loaded
@@ -139,17 +148,18 @@ export function usePayerAutosave({
               if (fresh) {
                 onChange(fresh);
                 onSaveState("saved");
-                return;
+                return true;
               }
             } catch {
               // The next load of the page shows the state.
             }
             onSaveState("error");
-            return;
+            return false;
           }
           const field = body?.field;
           setFieldError(PAYER_FIELDS.includes(field as PayerField) ? (field as PayerField) : "payer");
           onSaveState("error");
+          return false;
         }
       });
     },

@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 import { LEAD_REQUEST_ACCESS_CHANGED, fetchMyLeadRequestList, type LeadRequest } from "./lead-request-api";
 import { FollowUpStep } from "./lead-request-follow-up";
-import { useRequestQueue } from "./lead-request-parts";
+import { AutosaveFlushContext, createRequestQueue, type AutosaveFlush, type RequestQueue } from "./lead-request-parts";
 import { SendStep } from "./lead-request-send-step";
 import {
   BillingStep,
@@ -74,6 +74,33 @@ export function LeadRequestPage() {
   const [ownAccessClosed, setOwnAccessClosed] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // Switching requests must not replace a queue whose uploads are still running.
+  const [sessions] = useState(() => new Map<string, { enqueue: RequestQueue; flushers: Set<AutosaveFlush> }>());
+  const [saveBlocked, setSaveBlocked] = useState(false);
+  const leaving = useRef(false);
+  const navigate = useCallback(async (leadId: string, action: () => void) => {
+    if (leaving.current) return;
+    leaving.current = true;
+    try {
+      const flushers = sessions.get(leadId)?.flushers ?? new Set<AutosaveFlush>();
+      for (;;) {
+        const versions = new Map(Array.from(flushers, (flush) => [flush, flush.version()] as const));
+        const results = await Promise.all(Array.from(versions.keys(), (flush) => flush.save()));
+        if (!results.every(Boolean)) {
+          setSaveBlocked(true);
+          break;
+        }
+        // A different section may have changed while a slower save was running.
+        // Include it (and newly mounted sections) before unmounting the step.
+        if (Array.from(flushers).some((flush) => !versions.has(flush) || versions.get(flush) !== flush.version())) continue;
+        setSaveBlocked(false);
+        action();
+        break;
+      }
+    } finally {
+      leaving.current = false;
+    }
+  }, [sessions]);
 
   const chooseLang = useCallback(
     (next: LeadCabinetLang) => {
@@ -164,6 +191,11 @@ export function LeadRequestPage() {
     );
   }
 
+  let session = sessions.get(request.lead_id);
+  if (!session) {
+    session = { enqueue: createRequestQueue(), flushers: new Set() };
+    sessions.set(request.lead_id, session);
+  }
   return (
     <LeadCabinetFrame lang={lang} onLang={chooseLang}>
       {requests.length > 1 ? (
@@ -180,14 +212,17 @@ export function LeadRequestPage() {
                   ? "border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand)]"
                   : "border-border text-muted-foreground",
               )}
-              onClick={() => setSelected(item.lead_id)}
+              onClick={() => { void navigate(request.lead_id, () => setSelected(item.lead_id)); }}
             >
               {[item.personal_data.first_name, item.personal_data.last_name].filter(Boolean).join(" ")}
             </button>
           ))}
         </div>
       ) : null}
-      <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} onChange={replaceRequest} onAccessLost={load} />
+      {saveBlocked ? <div role="alert" data-testid="lead-request-save-blocked"><Banner tone="error">{text.saveBeforeLeaving}</Banner></div> : null}
+      <AutosaveFlushContext.Provider value={session.flushers}>
+        <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} enqueue={session.enqueue} navigate={navigate} onChange={replaceRequest} onAccessLost={load} />
+      </AutosaveFlushContext.Provider>
     </LeadCabinetFrame>
   );
 }
@@ -268,17 +303,19 @@ function LeadRequestView({
   lang,
   onChange,
   onAccessLost,
+  enqueue,
+  navigate,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
   lang: string;
   onChange: (request: LeadRequest) => void;
   onAccessLost: () => Promise<void>;
+  enqueue: RequestQueue;
+  navigate: (leadId: string, action: () => void) => Promise<void>;
 }) {
   const guardian = request.access_kind === "guardian";
   const [chosenStep, setChosenStep] = useState<StepId>(() => initialStep(request));
-  // One queue for the writes of all steps: the last answer shown is the newest state.
-  const enqueue = useRequestQueue();
   useEffect(() => {
     const reload = () => { void onAccessLost(); };
     window.addEventListener(LEAD_REQUEST_ACCESS_CHANGED, reload);
@@ -312,15 +349,17 @@ function LeadRequestView({
   );
 
   const go = useCallback((next: StepId) => {
-    setChosenStep(next);
-    if (next === "send") setSendOpened(true);
-    // A long step was left at its bottom: the next one starts at its top.
-    const top = topRef.current;
-    if (top && top.getBoundingClientRect().top < 0) {
-      const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-      top.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
-    }
-  }, []);
+    void navigate(request.lead_id, () => {
+      setChosenStep(next);
+      if (next === "send") setSendOpened(true);
+      // A long step was left at its bottom: the next one starts at its top.
+      const top = topRef.current;
+      if (top && top.getBoundingClientRect().top < 0) {
+        const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+        top.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
+      }
+    });
+  }, [navigate, request.lead_id]);
 
   const nav: StepNav = {
     index: position + 1,

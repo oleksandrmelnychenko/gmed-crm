@@ -21,6 +21,14 @@ describe("the lead's patient form", () => {
     expect(leadSelfDisclosureAvailable({ submitted_at: null })).toBe(false);
     expect(leadSelfDisclosureAvailable(null)).toBe(false);
     expect(leadSelfDisclosureAvailable(undefined)).toBe(false);
+    expect(leadSelfDisclosureAvailable({ submitted_at: "2026-10-07T08:30:00Z", changed_since_submit: true })).toBe(false);
+    expect(leadSelfDisclosureAvailable({ submitted_at: "2026-10-07T08:30:00Z", changed_since_submit: false })).toBe(true);
+  });
+
+  it("asks for resubmission when the answers have changed", () => {
+    const error = new ApiRequestError("Conflict", { status: 409, body: { code: "lead_request_changed_since_submit" } });
+    expect(leadSelfDisclosureErrorText(error, de)).toContain("erneut gesendet");
+    expect(leadSelfDisclosureErrorText(error, ru)).toContain("повторной отправки");
   });
 
   it("explains the server's refusal before sending in the user's language", () => {

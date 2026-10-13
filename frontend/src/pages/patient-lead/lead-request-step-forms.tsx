@@ -62,6 +62,7 @@ import {
   errorBody,
   errorMessage,
   useAutosave,
+  runDraftSave,
   type RequestQueue,
 } from "./lead-request-parts";
 import { InvoiceRecipientSection } from "./lead-request-invoice-recipient";
@@ -217,7 +218,7 @@ function usePersonalForm({
         personalDataPatch(queuedDraftRef.current, snapshot),
       );
       queuedDraftRef.current = snapshot;
-      void enqueue(async () => {
+      return runDraftSave(enqueue, fields, async () => {
         const rejected: RejectedPersonal = {};
         for (const [field, value] of Object.entries(rejectedRef.current)) {
           if (rejectedValue(field, snapshot)?.value === value) rejected[field as PersonalField] = value;
@@ -252,9 +253,15 @@ function usePersonalForm({
         }
         rejectedRef.current = rejected;
         const wasFailed = failedRef.current;
-        failedRef.current = failed || Object.keys(rejected).length > 0;
+        // Empty required names are deliberately excluded from the PATCH; that
+        // must not allow navigation to silently restore a previously saved name.
+        const clearedName = (["first_name", "last_name"] as const).some(
+          (field) => Boolean(savedRef.current[field].trim()) && !snapshot[field].trim(),
+        );
+        failedRef.current = failed || Object.keys(rejected).length > 0 || clearedName;
         if (failedRef.current) onSaveState("error");
         else if (saved || wasFailed) onSaveState("saved");
+        return !failedRef.current;
       });
     },
     [enqueue, onChange, onSaveState, request.lead_id, text],

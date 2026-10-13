@@ -40,6 +40,7 @@ import {
   RequiredMark,
   errorBody,
   useAutosave,
+  runDraftSave,
   type RequestQueue,
 } from "./lead-request-parts";
 import {
@@ -130,7 +131,7 @@ export function InvoiceRecipientSection({
       const fields = queuedDraftFields(recipientPatch(savedRef.current, snapshot), recipientPatch(queuedDraftRef.current, snapshot));
       const edited = new Set(Array.from(fields).map(recipientFieldOf).filter((field): field is keyof RecipientDraft => field !== null));
       queuedDraftRef.current = snapshot;
-      void enqueue(async () => {
+      return runDraftSave(enqueue, fields, async () => {
         const hadRefusal = Object.keys(refusedRef.current).length > 0;
         const rejected = Object.fromEntries(Object.entries(refusedRef.current).filter(
           ([field, value]) => recipientValue(field as keyof RecipientDraft, snapshot) === value,
@@ -168,6 +169,7 @@ export function InvoiceRecipientSection({
         setRefused(rejected);
         if (failed || Object.keys(rejected).length > 0) onRecipientState("error");
         else if (saved || hadRefusal) onRecipientState("saved");
+        return !failed && Object.keys(rejected).length === 0;
       });
     },
     [enqueue, onChange, onRecipientState, request.lead_id],

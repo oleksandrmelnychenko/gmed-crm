@@ -204,6 +204,7 @@ type Mock = {
   refuseSheet?: boolean;
   /** When the lead (here: a parent) sent the request in the cabinet; not sent by default. */
   requestSentAt?: string;
+  requestChanged?: boolean;
 };
 
 async function mount(page: Page, mock: Mock) {
@@ -261,6 +262,7 @@ async function mount(page: Page, mock: Mock) {
         patient_payer: null,
         progress: { filled: 9, total: 12, documents: 0, submitted_at: mock.requestSentAt ?? null },
         submitted_at: mock.requestSentAt ?? null,
+        changed_since_submit: mock.requestChanged ?? false,
         submitted_by: mock.requestSentAt ? "guardian" : null,
         consents: [],
         uploads: [],
@@ -611,6 +613,15 @@ test("after the request was sent staff create the patient form from the server's
   // The first form replaces nothing; the GwG sheets stay where they are.
   expect(calls.generated[0]).not.toHaveProperty("replace_document_id");
   await expect(wizard.getByTestId("gwg-identification-actions")).toBeVisible();
+});
+
+test("the patient form waits for resubmission after the lead edits the answers", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "de", requestSentAt: "2026-10-07T08:30:00Z", requestChanged: true });
+  const section = wizard.getByTestId("lead-wizard-self-disclosure-section");
+  await expect(section).toHaveAttribute("data-available", "false");
+  await expect(section.getByRole("button", { name: "Dokument erstellen", exact: true })).toBeDisabled();
+  await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toContainText("Änderungen noch nicht erneut gesendet");
+  expect(calls.generated).toHaveLength(0);
 });
 
 test("staff state who represents the child, and the block warns when it does not fit", async ({ page }, testInfo) => {

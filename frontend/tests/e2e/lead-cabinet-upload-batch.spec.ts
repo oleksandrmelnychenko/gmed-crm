@@ -17,7 +17,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function setup(page: Page, scenario: Scenario, failMiddle = false) {
+async function setup(page: Page, scenario: Scenario, failMiddle = false, multiple = false) {
   await startClockAt(page);
   const first = deferred();
   const last = deferred();
@@ -71,6 +71,7 @@ async function setup(page: Page, scenario: Scenario, failMiddle = false) {
     changed_since_submit: false, retention_deadline_at: null,
   };
   const calls = { uploads: 0, submits: 0, events: [] as string[], submittedCount: 0 };
+  const secondRequest = { ...structuredClone(request), lead_id: "second-request", personal_data: { ...request.personal_data, first_name: "Ben" } };
   const base = "/me/lead-requests/upload-batch-recheck";
   await page.addInitScript(() => {
     localStorage.setItem("gmed_lang", "de");
@@ -84,7 +85,11 @@ async function setup(page: Page, scenario: Scenario, failMiddle = false) {
       role: "patient", capabilities: [], created_at: "2026-10-12T08:00:00Z", preferred_language: "de",
       password_change_required: false, portal_mode: "lead", lead_portal: { requests: 1 },
     } });
-    if (path === "/me/lead-requests") return route.fulfill({ json: { requests: [request] } });
+    if (path === "/me/lead-requests") return route.fulfill({ json: { requests: multiple ? [request, secondRequest] : [request] } });
+    if (path === "/me/lead-requests/second-request/personal-data") {
+      Object.assign(secondRequest.personal_data, route.request().postDataJSON());
+      return route.fulfill({ json: secondRequest });
+    }
     if (path === `${base}${scenario.endpoint}` && route.request().method() === "POST") {
       const index = ++calls.uploads;
       if (index === 1) await first.promise;
@@ -112,8 +117,32 @@ async function setup(page: Page, scenario: Scenario, failMiddle = false) {
   });
   await page.goto("/my/request");
   await page.locator(`[data-step="${scenario.step}"]`).click();
-  return { first, last, calls, request };
+  return { first, last, calls, request, secondRequest };
 }
+
+test("upload queue survives switching requests and does not hold back another request", async ({ page }) => {
+  const { first, last, calls, secondRequest } = await setup(page, scenarios[0], false, true);
+  await page.locator("#lead-request-files").setInputFiles([1, 2, 3].map((index) => ({
+    name: `proof-${index}.pdf`, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n"),
+  })));
+  await expect.poll(() => calls.uploads).toBe(1);
+  await page.getByRole("tab", { name: "Ben Muster", exact: true }).click();
+  await page.locator('[data-step="person"]').click();
+  await page.locator("#lead-request-city").fill("Hamburg");
+  await expect.poll(() => secondRequest.personal_data.city).toBe("Hamburg");
+  await page.getByRole("tab", { name: "Anna Muster", exact: true }).click();
+  await page.locator('[data-step="send"]').click();
+  await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
+  await page.getByTestId("lead-request-submit").click();
+  expect(calls.submits).toBe(0);
+  first.resolve();
+  await expect.poll(() => calls.uploads).toBe(3);
+  expect(calls.submits).toBe(0);
+  last.resolve();
+  await expect.poll(() => calls.submits).toBe(1);
+  expect(calls.events).toEqual(["upload-1", "upload-2", "upload-3", "submit"]);
+  expect(calls.submittedCount).toBe(3);
+});
 
 for (const scenario of scenarios) {
   test(`upload batch: ${scenario.name} completes before submit after navigation`, async ({ page }) => {

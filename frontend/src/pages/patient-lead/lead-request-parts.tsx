@@ -1,4 +1,4 @@
-import { createContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, FileText, LoaderCircle, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -56,14 +56,26 @@ export type RequestQueue = <Result>(task: () => Promise<Result>) => Promise<Resu
  * arrive in the wrong order and leave an older state on screen. Through this
  * queue one write starts when the one before has answered.
  */
-export function useRequestQueue(): RequestQueue {
-  const tail = useRef<Promise<unknown>>(Promise.resolve());
-  return useCallback<RequestQueue>((task) => {
-    const run = tail.current.then(task);
+export function createRequestQueue(): RequestQueue {
+  let tail: Promise<unknown> = Promise.resolve();
+  return (task) => {
+    const run = tail.then(task);
     // A failed write is the caller's to report; the next one still runs.
-    tail.current = run.catch(() => undefined);
+    tail = run.catch(() => undefined);
     return run;
-  }, []);
+  };
+}
+
+export function useRequestQueue(): RequestQueue {
+  return useState(createRequestQueue)[0];
+}
+
+export type AutosaveFlush = { save: () => Promise<boolean>; version: () => string | undefined };
+export const AutosaveFlushContext = createContext<Set<AutosaveFlush> | null>(null);
+
+/** An unchanged form can be left while uploads continue in its request queue. */
+export function runDraftSave<Result>(enqueue: RequestQueue, fields: ReadonlySet<string>, task: () => Promise<Result>) {
+  return fields.size === 0 ? task() : enqueue(task);
 }
 
 const AUTOSAVE_DELAY_MS = 700;
@@ -73,16 +85,46 @@ const AUTOSAVE_DELAY_MS = 700;
  * 700 ms, and at once when the step is left, so the last entry before "next"
  * is not lost. `save` itself sends only what changed.
  */
-export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => void) {
+export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => Promise<boolean> | boolean) {
+  const flushers = useContext(AutosaveFlushContext);
   const latest = useRef({ draft, save });
+  const flushed = useRef<{ draft: Draft } | null>(null);
   latest.current = { draft, save };
 
   useEffect(() => {
-    const timer = window.setTimeout(() => save(draft), AUTOSAVE_DELAY_MS);
+    const saveLatest = async () => {
+      // Include typing that happened while an earlier save was in flight.
+      for (;;) {
+        const current = latest.current;
+        try {
+          if (!(await current.save(current.draft))) return false;
+          flushed.current = { draft: current.draft };
+        } catch {
+          return false;
+        }
+        if (JSON.stringify(current.draft) === JSON.stringify(latest.current.draft)) return true;
+      }
+    };
+    const flush: AutosaveFlush = { save: saveLatest, version: () => JSON.stringify(latest.current.draft) };
+    flushers?.add(flush);
+    return () => { flushers?.delete(flush); };
+  }, [flushers]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      flushed.current = null;
+      void Promise.resolve(save(draft)).catch(() => undefined);
+    }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [draft, save]);
 
-  useEffect(() => () => latest.current.save(latest.current.draft), []);
+  useEffect(() => () => {
+    // Navigation already saved this snapshot. React may batch the server's
+    // normalized draft with unmounting; sending the old snapshot again would
+    // overwrite that correction before the new step mounts.
+    if (flushed.current && JSON.stringify(flushed.current.draft) === JSON.stringify(latest.current.draft)) return;
+    void Promise.resolve(latest.current.save(latest.current.draft)).catch(() => undefined);
+  }, []);
 }
 
 const STEP_COUNT = 8;
