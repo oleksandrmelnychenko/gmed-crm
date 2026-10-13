@@ -1698,7 +1698,7 @@ async fn list_my_subscriptions(
         return err(StatusCode::FORBIDDEN, "Patient portal access required");
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(patient_id) => patient_id,
         Err(resp) => return resp,
     };

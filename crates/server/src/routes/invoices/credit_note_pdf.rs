@@ -1405,7 +1405,7 @@ pub(crate) async fn download_my_credit_note_pdf(
     if let Err(response) = auth.require_any_role(&[Role::Patient]) {
         return response;
     }
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(response) => return response,
     };
@@ -1503,7 +1503,7 @@ pub(crate) async fn download_my_storno_pdf(
     if let Err(response) = auth.require_any_role(&[Role::Patient]) {
         return response;
     }
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(response) => return response,
     };

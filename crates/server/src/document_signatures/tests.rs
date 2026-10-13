@@ -701,6 +701,7 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         .await
         .unwrap();
     let auth = AuthUser {
+        selected_patient_id: None,
         user_id: actor,
         role: Role::Ceo,
         family_id: Uuid::new_v4(),
@@ -995,6 +996,7 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
             let restricted_app = router()
                 .with_state(state.clone())
                 .layer(Extension(AuthUser {
+                    selected_patient_id: None,
                     user_id: manager,
                     role: Role::PatientManager,
                     ..auth.clone()
@@ -1077,6 +1079,7 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
             .unwrap();
         assert_eq!(report_response.status(), StatusCode::OK);
         let forbidden_auth = AuthUser {
+            selected_patient_id: None,
             role: Role::Concierge,
             ..auth.clone()
         };
@@ -1146,6 +1149,7 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
     let denied = router()
         .with_state(connection_state.clone())
         .layer(Extension(AuthUser {
+            selected_patient_id: None,
             role: Role::PatientManager,
             ..auth.clone()
         }))
@@ -1523,6 +1527,7 @@ async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {
         json!({"signers":[]})
     );
     let manager = AuthUser {
+        selected_patient_id: None,
         role: Role::PatientManager,
         ..auth.clone()
     };
@@ -1625,6 +1630,7 @@ async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {
     assert_eq!(minor_signer.last_name, "Beispiel");
     assert_eq!(minor_signer.email, "family@example.org");
     let it_admin = AuthUser {
+        selected_patient_id: None,
         role: Role::ItAdmin,
         ..auth.clone()
     };

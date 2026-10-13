@@ -28,7 +28,7 @@ async fn list_my_next_actions(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };

@@ -14,6 +14,8 @@ import {
 import { AppShellFrame } from "./app-shell-frame";
 import { resolveWorkspaceRailKind } from "./workspace-rail-resolver";
 import { TwoFactorReminder } from "@/components/two-factor-reminder";
+import { clearApiCache } from "@/lib/api";
+import { selectPortalPatient, usePortalPatientId } from "@/lib/portal-patient-context";
 
 export function AuthenticatedAppShell() {
   const { user, loading, signOut } = useAuth();
@@ -61,7 +63,14 @@ export function AuthenticatedAppShell() {
 
 function AuthenticatedAppShellContent() {
   const { user } = useAuth();
+  const { lang } = useLang();
   const location = useLocation();
+  const patientId = usePortalPatientId(user?.id);
+  const patients = user?.role === "patient" ? user.patients ?? [] : [];
+  const accountPage = ["/account", "/request", "/legal", "/security"].some(
+    (path) => location.pathname === path || location.pathname.startsWith(`${path}/`),
+  );
+  const needsPatient = !accountPage && patients.length > 1 && !patients.some((patient) => patient.id === patientId);
 
   if (
     user &&
@@ -78,9 +87,35 @@ function AuthenticatedAppShellContent() {
   });
 
   return (
-    <AppShellFrame workspaceRailKind={workspaceRailKind}>
+    <AppShellFrame key={accountPage ? "account" : patientId ?? "account"} workspaceRailKind={workspaceRailKind}>
       <TwoFactorReminder />
-      <Outlet />
+      {!accountPage && patients.length > 1 && (
+        <div className="flex flex-wrap items-center gap-3 border-b bg-card px-4 py-3">
+          <label htmlFor="portal-patient" className="text-sm font-medium">
+            {lang === "de" ? "Patient / Patientin" : "Пациент"}
+          </label>
+          <select
+            id="portal-patient"
+            className="max-w-full rounded-md border bg-background px-3 py-2 text-sm"
+            value={patientId ?? ""}
+            onChange={(event) => {
+              if (!user || !patients.some((patient) => patient.id === event.target.value)) return;
+              clearApiCache();
+              selectPortalPatient(user.id, event.target.value);
+            }}
+          >
+            <option value="" disabled>{lang === "de" ? "Bitte auswählen" : "Выберите пациента"}</option>
+            {patients.map((patient) => (
+              <option key={patient.id} value={patient.id}>{patient.name} · {patient.patient_number}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      {needsPatient ? (
+        <p className="p-6 text-muted-foreground">
+          {lang === "de" ? "Wählen Sie, für wen Sie das Portal öffnen möchten." : "Выберите, для кого открыть кабинет."}
+        </p>
+      ) : <Outlet />}
     </AppShellFrame>
   );
 }

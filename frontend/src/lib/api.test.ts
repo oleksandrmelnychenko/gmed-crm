@@ -55,6 +55,30 @@ afterEach(() => {
 });
 
 describe("API validation errors", () => {
+  it("scopes cached JSON, mutations and file downloads to the selected patient", async () => {
+    setWindowOrigin("http://app.local:4173");
+    const payload = Buffer.from(JSON.stringify({ sub: "guardian", exp: 4102444800 })).toString("base64url");
+    setTokenStorage(`header.${payload}.signature`);
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => new Response(
+      JSON.stringify({ patient: new Headers(init?.headers).get("X-Patient-Id") }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const { apiFetch, apiFetchFile } = await loadApiModule();
+    const { selectPortalPatient } = await import("./portal-patient-context");
+    selectPortalPatient("guardian", "first");
+    expect(await apiFetch("/me/documents", { cacheTtlMs: 15_000 })).toEqual({ patient: "first" });
+    selectPortalPatient("guardian", "second");
+    expect(await apiFetch("/me/documents", { cacheTtlMs: 15_000 })).toEqual({ patient: "second" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await apiFetch("/me/privacy-requests", { method: "POST", body: "{}" })).toEqual({ patient: "second" });
+    await apiFetchFile("/me/documents/document/download");
+    expect(new Headers(fetchMock.mock.calls.at(-1)?.[1]?.headers).get("X-Patient-Id")).toBe("second");
+    selectPortalPatient("another-account", "foreign");
+    expect(await apiFetch("/me/documents")).toEqual({ patient: null });
+    selectPortalPatient("", null);
+  });
+
   it("preserves the field validation detail from an Axum plain-text 422", async () => {
     setWindowOrigin("http://app.local:4173");
     setTokenStorage("test-token");

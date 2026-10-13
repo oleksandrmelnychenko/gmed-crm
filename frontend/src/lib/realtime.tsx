@@ -7,6 +7,7 @@ import {
 
 import { clearApiCache, getWebSocketAccessToken, openAuthenticatedApiWebSocket } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { usePortalPatientId } from "@/lib/portal-patient-context";
 
 export type RealtimeEvent = {
   seq?: number | null;
@@ -208,6 +209,7 @@ function readEventSeq(event: RealtimeEvent) {
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const { user, loading, refreshUser } = useAuth();
   const userId = user?.id ?? "";
+  const patientId = usePortalPatientId(userId);
 
   // The signed-in user's own profile changed behind their back (a lead renamed
   // by staff): reload it, so the menu shows the new name without a new sign-in.
@@ -231,7 +233,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     let connecting = false;
     let stopped = false;
     let attempt = 0;
-    const storageKey = cursorStorageKey(userId);
+    const storageKey = cursorStorageKey(patientId ? `${userId}:${patientId}` : userId);
     let lastSeq = readStoredCursor(storageKey);
 
     function dispatch(event: RealtimeEvent) {
@@ -335,7 +337,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket?.close();
       dispatchConnectionSnapshot("disconnected", 0, userId);
     };
-  }, [loading, userId]);
+  }, [loading, userId, patientId]);
 
   return children;
 }

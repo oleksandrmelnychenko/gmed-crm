@@ -139,6 +139,7 @@ async fn main() {
             http::header::AUTHORIZATION,
             http::header::CONTENT_TYPE,
             http::header::ACCEPT,
+            http::HeaderName::from_static("x-patient-id"),
             // The payer's own link: token and session travel only in headers.
             http::HeaderName::from_static("x-payer-link"),
             http::HeaderName::from_static("x-payer-session"),

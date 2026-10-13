@@ -413,7 +413,7 @@ pub(crate) struct OpenInvoice {
 
 /// What an invoice still asks for once the patient's money already held is
 /// counted: `advance_credit` from unapplied paid advances of the same order,
-/// then `credit_applied` from credit balances anywhere on the patient's
+/// then `credit_applied` from the same recipient's credit balances,
 /// invoices, `to_pay` what remains.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct NetDue {
@@ -425,7 +425,9 @@ pub(crate) struct NetDue {
 /// Nets open invoice balances against money the patient already paid: paid
 /// advances not yet applied settle the same order's settlement invoices of
 /// the same recipient (oldest first, as the automatic application would),
-/// credit balances settle any open invoice (oldest first). One rule for the
+/// credit balances settle the same recipient's open invoices across orders
+/// (oldest first). A different recipient requires an explicit credit transfer.
+/// One rule for the
 /// order card, the invoice list, the account statement and the portal.
 pub(crate) fn net_open_balances(invoices: &[OpenInvoice]) -> Vec<NetDue> {
     let mut order = (0..invoices.len()).collect::<Vec<_>>();
@@ -445,10 +447,11 @@ pub(crate) fn net_open_balances(invoices: &[OpenInvoice]) -> Vec<NetDue> {
             *advance_pools.entry(key).or_default() += invoice.advance_available.max(Decimal::ZERO);
         }
     }
-    let mut credit_pool: Decimal = invoices
-        .iter()
-        .map(|invoice| invoice.credit_balance.max(Decimal::ZERO))
-        .sum();
+    let mut credit_pools = std::collections::BTreeMap::<Option<String>, Decimal>::new();
+    for invoice in invoices {
+        *credit_pools.entry(invoice.recipient.clone()).or_default() +=
+            invoice.credit_balance.max(Decimal::ZERO);
+    }
     for index in &order {
         let invoice = &invoices[*index];
         let mut left = invoice.due.max(Decimal::ZERO);
@@ -463,8 +466,11 @@ pub(crate) fn net_open_balances(invoices: &[OpenInvoice]) -> Vec<NetDue> {
         result[*index].to_pay = left;
     }
     for index in &order {
-        let take = credit_pool.min(result[*index].to_pay);
-        credit_pool -= take;
+        let pool = credit_pools
+            .entry(invoices[*index].recipient.clone())
+            .or_default();
+        let take = (*pool).min(result[*index].to_pay);
+        *pool -= take;
         result[*index].credit_applied = take;
         result[*index].to_pay -= take;
     }
@@ -500,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    fn unapplied_advances_net_their_own_order_and_credit_nets_anything() {
+    fn unapplied_advances_net_their_own_order_and_credit_nets_same_recipient_across_orders() {
         let invoices = [
             // Paid advance of 700 on order 1, final invoice of 1152.20 still open.
             open(Some(1), true, 0, 700, 0, 1),
@@ -527,6 +533,19 @@ mod tests {
             net.iter().map(|item| item.to_pay).sum::<Decimal>(),
             dec(702)
         );
+    }
+
+    #[test]
+    fn untransferred_credit_never_nets_another_recipients_invoice() {
+        let credit = open(Some(1), false, 0, 0, 50, 1);
+        let mut company = open(Some(2), false, 100, 0, 0, 2);
+        company.recipient = Some("company".to_string());
+        let patient = open(Some(3), false, 80, 0, 0, 3);
+        let net = net_open_balances(&[credit, company, patient]);
+        assert_eq!(net[1].credit_applied, dec(0));
+        assert_eq!(net[1].to_pay, dec(100));
+        assert_eq!(net[2].credit_applied, dec(50));
+        assert_eq!(net[2].to_pay, dec(30));
     }
 
     #[test]

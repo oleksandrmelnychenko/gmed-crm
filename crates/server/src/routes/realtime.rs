@@ -475,7 +475,7 @@ async fn can_receive_patient_event(
 ) -> Result<bool, axum::response::Response> {
     match auth.role {
         Role::Ceo | Role::CeoAssistant | Role::Billing => Ok(true),
-        Role::Patient => crate::routes::me::resolve_linked_patient_id(state, auth.user_id)
+        Role::Patient => crate::routes::me::resolve_linked_patient_id(state, auth)
             .await
             .map(|linked_patient_id| linked_patient_id == Some(patient_id)),
         Role::PatientManager | Role::TeamleadInterpreter | Role::Interpreter | Role::Concierge => {

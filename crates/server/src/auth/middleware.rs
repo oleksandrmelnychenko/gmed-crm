@@ -20,6 +20,8 @@ use gmed_domain::role::Role;
 
 #[derive(Debug, Clone)]
 pub struct AuthUser {
+    /// Request-local portal context, always checked against active assignments.
+    pub selected_patient_id: Option<Uuid>,
     pub user_id: Uuid,
     pub role: Role,
     pub family_id: Uuid,
@@ -124,10 +126,26 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         return unauthorized();
     };
 
-    let (auth_user, gates) = match auth_user_status_from_access_token(&state, token).await {
+    let (mut auth_user, gates) = match auth_user_status_from_access_token(&state, token).await {
         Ok(value) => value,
         Err(response) => return response,
     };
+
+    if auth_user.role == Role::Patient
+        && let Some(value) = req.headers().get("x-patient-id")
+    {
+        auth_user.selected_patient_id =
+            match value.to_str().ok().and_then(|id| id.parse().ok()) {
+                Some(id) => Some(id),
+                None => return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "invalid_patient_context", "message": "Invalid patient selection"
+                    })),
+                )
+                    .into_response(),
+            };
+    }
 
     // Forced password change (Stage 1 of the role cabinets plan): the session
     // is valid but confined to the self-service password endpoints until the
@@ -234,6 +252,7 @@ async fn auth_user_status_from_access_token(
     let (auth, password_change_required) = revalidate_auth_user_status(
         state,
         &AuthUser {
+            selected_patient_id: None,
             user_id: data.claims.sub,
             role,
             family_id: data.claims.fam,
@@ -369,6 +388,7 @@ struct WebSocketAuthMessage {
     #[serde(rename = "type")]
     kind: String,
     token: String,
+    patient_id: Option<Uuid>,
 }
 
 #[derive(Debug)]
@@ -395,9 +415,13 @@ pub(crate) async fn authenticate_websocket(
     if payload.kind != "auth" || token.is_empty() || token.len() > 4096 {
         return Err(WebSocketAuthError);
     }
-    auth_user_from_access_token(state, token)
+    let mut auth = auth_user_from_access_token(state, token)
         .await
-        .map_err(|_| WebSocketAuthError)
+        .map_err(|_| WebSocketAuthError)?;
+    if auth.role == Role::Patient {
+        auth.selected_patient_id = payload.patient_id;
+    }
+    Ok(auth)
 }
 
 /// Shared transport decision used by the public WebSocket routes, which
@@ -492,6 +516,7 @@ mod tests {
 
     fn user(role: Role) -> AuthUser {
         AuthUser {
+            selected_patient_id: None,
             user_id: Uuid::new_v4(),
             role,
             family_id: Uuid::new_v4(),

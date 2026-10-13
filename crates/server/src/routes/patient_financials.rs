@@ -414,7 +414,7 @@ async fn load_patient_settlement_ledger(
            )
            SELECT 'invoice:' || invoice.id::text AS movement_id,
                   'invoice'::text AS movement_kind,
-                  invoice.issued_at::date AS entry_date,
+                  (invoice.issued_at AT TIME ZONE 'Europe/Berlin')::date AS entry_date,
                   invoice.issued_at AS occurred_at,
                   invoice.order_id,
                   invoice.order_number,
@@ -433,7 +433,7 @@ async fn load_patient_settlement_ledger(
                         WHERE storno.invoice_id = invoice.id
                     )
              )
-             AND ($2::date IS NULL OR invoice.issued_at::date <= $2)
+             AND ($2::date IS NULL OR (invoice.issued_at AT TIME ZONE 'Europe/Berlin')::date <= $2)
 
            UNION ALL
 
@@ -606,7 +606,7 @@ async fn load_patient_settlement_ledger(
 
            SELECT 'payment-balance:' || invoice.id::text,
                   'payment'::text,
-                  COALESCE(invoice.paid_at::date, invoice.issued_at::date),
+                  COALESCE((invoice.paid_at AT TIME ZONE 'Europe/Berlin')::date, (invoice.issued_at AT TIME ZONE 'Europe/Berlin')::date),
                   COALESCE(invoice.paid_at, invoice.updated_at, invoice.created_at),
                   invoice.order_id,
                   invoice.order_number,
@@ -631,13 +631,13 @@ async fn load_patient_settlement_ledger(
            WHERE invoice.paid_amount
                  > COALESCE(journal.journal_amount, 0)
                    - COALESCE(refunded.journal_amount, 0)
-             AND ($2::date IS NULL OR COALESCE(invoice.paid_at::date, invoice.issued_at::date) <= $2)
+             AND ($2::date IS NULL OR COALESCE((invoice.paid_at AT TIME ZONE 'Europe/Berlin')::date, (invoice.issued_at AT TIME ZONE 'Europe/Berlin')::date) <= $2)
 
            UNION ALL
 
            SELECT 'external:' || external.id::text,
                   'external_receivable'::text,
-                  COALESCE(external.invoice_date, external.created_at::date),
+                  COALESCE(external.invoice_date, (external.created_at AT TIME ZONE 'Europe/Berlin')::date),
                   external.created_at,
                   external.order_id,
                   external.order_number,
@@ -647,13 +647,13 @@ async fn load_patient_settlement_ledger(
                   0::numeric
            FROM scoped_external external
            WHERE $2::date IS NULL
-              OR COALESCE(external.invoice_date, external.created_at::date) <= $2
+              OR COALESCE(external.invoice_date, (external.created_at AT TIME ZONE 'Europe/Berlin')::date) <= $2
 
            UNION ALL
 
            SELECT 'external-allocation:' || allocation.id::text,
                   'external_allocation'::text,
-                  allocation.created_at::date,
+                  (allocation.created_at AT TIME ZONE 'Europe/Berlin')::date,
                   allocation.created_at,
                   external.order_id,
                   external.order_number,
@@ -667,13 +667,13 @@ async fn load_patient_settlement_ledger(
              ON external.id = allocation.external_invoice_id
            JOIN invoices patient_invoice
              ON patient_invoice.id = allocation.patient_invoice_id
-           WHERE $2::date IS NULL OR allocation.created_at::date <= $2
+           WHERE $2::date IS NULL OR (allocation.created_at AT TIME ZONE 'Europe/Berlin')::date <= $2
 
            UNION ALL
 
            SELECT 'external-allocation-reversal:' || allocation.id::text,
                   'external_allocation_reversal'::text,
-                  allocation.reversed_at::date,
+                  (allocation.reversed_at AT TIME ZONE 'Europe/Berlin')::date,
                   allocation.reversed_at,
                   external.order_id,
                   external.order_number,
@@ -688,13 +688,13 @@ async fn load_patient_settlement_ledger(
            JOIN invoices patient_invoice
              ON patient_invoice.id = allocation.patient_invoice_id
            WHERE allocation.reversed_at IS NOT NULL
-             AND ($2::date IS NULL OR allocation.reversed_at::date <= $2)
+             AND ($2::date IS NULL OR (allocation.reversed_at AT TIME ZONE 'Europe/Berlin')::date <= $2)
 
            UNION ALL
 
            SELECT 'external-allocation-reopened:' || allocation.id::text,
                   'external_allocation_reversal'::text,
-                  patient_invoice.updated_at::date,
+                  (patient_invoice.updated_at AT TIME ZONE 'Europe/Berlin')::date,
                   patient_invoice.updated_at,
                   external.order_id,
                   external.order_number,
@@ -710,15 +710,15 @@ async fn load_patient_settlement_ledger(
            WHERE allocation.reversed_at IS NULL
              AND patient_invoice.status IN ('draft', 'cancelled')
              AND patient_invoice.updated_at >= allocation.created_at
-             AND ($2::date IS NULL OR patient_invoice.updated_at::date <= $2)
+             AND ($2::date IS NULL OR (patient_invoice.updated_at AT TIME ZONE 'Europe/Berlin')::date <= $2)
 
            UNION ALL
 
            -- GMED absorbs this part of the cost instead of re-billing it
-           -- (active re-billing waivers; a reversed one never counted).
+           -- Each waiver and its reversal remain separate dated movements.
            SELECT 'external-rebilling-waiver:' || waiver.id::text,
                   'external_rebilling_waived'::text,
-                  waiver.created_at::date,
+                  (waiver.created_at AT TIME ZONE 'Europe/Berlin')::date,
                   waiver.created_at,
                   external.order_id,
                   external.order_number,
@@ -729,8 +729,25 @@ async fn load_patient_settlement_ledger(
            FROM external_invoice_rebilling_waivers waiver
            JOIN scoped_external external
              ON external.id = waiver.external_invoice_id
-           WHERE waiver.reversed_at IS NULL
-             AND ($2::date IS NULL OR waiver.created_at::date <= $2)
+           WHERE ($2::date IS NULL OR (waiver.created_at AT TIME ZONE 'Europe/Berlin')::date <= $2)
+
+           UNION ALL
+
+           SELECT 'external-rebilling-waiver-reversal:' || waiver.id::text,
+                  'external_rebilling_waiver_reversal'::text,
+                  (waiver.reversed_at AT TIME ZONE 'Europe/Berlin')::date,
+                  waiver.reversed_at,
+                  external.order_id,
+                  external.order_number,
+                  external.external_invoice_number,
+                  waiver.reversal_reason,
+                  waiver.amount_gross,
+                  0::numeric
+           FROM external_invoice_rebilling_waivers waiver
+           JOIN scoped_external external
+             ON external.id = waiver.external_invoice_id
+           WHERE waiver.reversed_at IS NOT NULL
+             AND ($2::date IS NULL OR (waiver.reversed_at AT TIME ZONE 'Europe/Berlin')::date <= $2)
 
            ORDER BY entry_date, occurred_at, movement_id"#,
     )
@@ -869,13 +886,16 @@ async fn load_patient_account_statement(
                SELECT UPPER(TRIM(invoice.currency)) AS currency
                FROM invoices invoice
                WHERE invoice.patient_id = $1
-                 AND invoice.status <> 'cancelled'
+                 AND (invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM invoice_storno_documents storno
+                     WHERE storno.invoice_id = invoice.id AND storno.issued_on > $3
+                 )))
                  AND TRIM(COALESCE(invoice.currency, '')) <> ''
                  AND (
                         $2::boolean = false
                         OR (
                             invoice.portal_visible = true
-                            AND invoice.status NOT IN ('draft', 'cancelled')
+                            AND invoice.status <> 'draft'
                         )
                  )
                UNION ALL
@@ -894,6 +914,7 @@ async fn load_patient_account_statement(
     )
     .bind(patient_id)
     .bind(portal_scope)
+    .bind(to)
     .fetch_all(&state.db)
     .await?;
     let currency = parse_query_currency(query.currency.as_deref())
@@ -931,10 +952,14 @@ async fn load_patient_account_statement(
                       COALESCE((rcpt.value ->> 'is_payer')::boolean, false) AS is_payer
                FROM invoices invoice
                CROSS JOIN LATERAL (SELECT {INVOICE_RECIPIENT_VALUE} AS value) rcpt
-               WHERE invoice.patient_id = $1 AND invoice.status <> 'cancelled'
+               WHERE invoice.patient_id = $1 AND (invoice.status <> 'cancelled' OR ($2::date IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM invoice_storno_documents storno
+                     WHERE storno.invoice_id = invoice.id AND storno.issued_on > $2
+                 )))
                ORDER BY invoice_recipient_identity(rcpt.value), invoice.created_at DESC"#,
         ))
         .bind(patient_id)
+        .bind(to)
         .fetch_all(&state.db)
         .await?
         .into_iter()
@@ -976,8 +1001,8 @@ async fn load_patient_account_statement(
                       SELECT SUM(allocation.amount_gross)
                       FROM invoice_prepayment_allocation_history allocation
                       WHERE allocation.target_invoice_id = invoice.id
-                        AND allocation.created_at::date <= $3
-                        AND (allocation.released_at IS NULL OR allocation.released_at::date > $3)
+                        AND (allocation.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3
+                        AND (allocation.released_at IS NULL OR (allocation.released_at AT TIME ZONE 'Europe/Berlin')::date > $3)
                   ), 0) END AS prepayment_applied_amount,
                   invoice.portal_visible,
                   invoice.hide_amounts_from_patient, orders.order_number,
@@ -985,8 +1010,8 @@ async fn load_patient_account_statement(
                       SELECT SUM(allocation.amount_gross)
                       FROM invoice_prepayment_allocation_history allocation
                       WHERE allocation.advance_invoice_id = invoice.id
-                        AND ($3::date IS NULL OR allocation.created_at::date <= $3)
-                        AND (allocation.released_at IS NULL OR allocation.released_at::date > $3)
+                        AND ($3::date IS NULL OR (allocation.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3)
+                        AND (allocation.released_at IS NULL OR (allocation.released_at AT TIME ZONE 'Europe/Berlin')::date > $3)
                   ), 0) AS allocated_from_advance,
                   rcpt.value ->> 'name' AS recipient_name,
                   invoice_recipient_identity(rcpt.value) AS recipient_identity
@@ -994,10 +1019,13 @@ async fn load_patient_account_statement(
            LEFT JOIN orders ON orders.id = invoice.order_id
            CROSS JOIN LATERAL (SELECT {INVOICE_RECIPIENT_VALUE} AS value) rcpt
            WHERE invoice.patient_id = $1
-             AND invoice.status <> 'cancelled'
+             AND (invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM invoice_storno_documents storno
+                     WHERE storno.invoice_id = invoice.id AND storno.issued_on > $3
+                 )))
              AND ($8::text IS NULL OR invoice_recipient_identity(rcpt.value) = $8)
-             AND ($2::date IS NULL OR invoice.issued_at::date >= $2)
-             AND ($3::date IS NULL OR invoice.issued_at::date <= $3)
+             AND ($2::date IS NULL OR (invoice.issued_at AT TIME ZONE 'Europe/Berlin')::date >= $2)
+             AND ($3::date IS NULL OR (invoice.issued_at AT TIME ZONE 'Europe/Berlin')::date <= $3)
              AND ($4::uuid IS NULL OR invoice.order_id = $4)
              AND ($5::uuid IS NULL OR EXISTS (
                     SELECT 1
@@ -1021,7 +1049,7 @@ async fn load_patient_account_statement(
                     $6::boolean = false
                     OR (
                         invoice.portal_visible = true
-                        AND invoice.status NOT IN ('draft', 'cancelled')
+                        AND invoice.status <> 'draft'
                     )
              )
              AND invoice.currency = $7
@@ -1053,7 +1081,7 @@ async fn load_patient_account_statement(
 
     for row in invoice_rows {
         let invoice_type = row.try_get::<String, _>("invoice_type").unwrap_or_default();
-        let status = row.try_get::<String, _>("status").unwrap_or_default();
+        let mut status = row.try_get::<String, _>("status").unwrap_or_default();
         let total_gross = row
             .try_get::<Decimal, _>("total_gross")
             .unwrap_or(Decimal::ZERO);
@@ -1079,6 +1107,16 @@ async fn load_patient_account_statement(
         } else {
             Decimal::ZERO
         };
+        if let Some(as_of) = to.filter(|_| status != "draft") {
+            status = historical_invoice_status(
+                due,
+                paid + applied,
+                row.try_get::<Option<NaiveDate>, _>("due_date")
+                    .unwrap_or_default(),
+                as_of,
+            )
+            .to_string();
+        }
         let amounts_visible = !portal_scope
             || !row
                 .try_get::<bool, _>("hide_amounts_from_patient")
@@ -1213,7 +1251,10 @@ async fn load_patient_account_statement(
            LEFT JOIN orders ON orders.id = invoice.order_id
            CROSS JOIN LATERAL (SELECT {INVOICE_RECIPIENT_VALUE} AS value) rcpt
            WHERE invoice.patient_id = $1
-             AND invoice.status <> 'cancelled'
+             AND (invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM invoice_storno_documents storno
+                     WHERE storno.invoice_id = invoice.id AND storno.issued_on > $3
+                 )))
              AND ($8::text IS NULL OR invoice_recipient_identity(rcpt.value) = $8)
              AND ($2::date IS NULL OR credit.issued_on >= $2)
              AND ($3::date IS NULL OR credit.issued_on <= $3)
@@ -1307,37 +1348,50 @@ async fn load_patient_account_statement(
                       external.external_invoice_number, external.invoice_date,
                       external.created_at, external.status, external.paid_by,
                       external.service_delivered, external.amount_gross,
-                      external.currency, balance.patient_receivable_gross,
+                      external.currency,
+                      balance.patient_receivable_gross + balance.waived_receivable_gross AS original_receivable_gross,
                       balance.order_service_billed,
-                      balance.waived_receivable_gross,
+                      CASE WHEN $3::date IS NULL THEN balance.waived_receivable_gross ELSE COALESCE((
+                          SELECT SUM(waiver.amount_gross)
+                          FROM external_invoice_rebilling_waivers waiver
+                          WHERE waiver.external_invoice_id = external.id
+                            AND (waiver.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3
+                            AND (waiver.reversed_at IS NULL OR (waiver.reversed_at AT TIME ZONE 'Europe/Berlin')::date > $3)
+                      ), 0) END AS waived_receivable_gross,
                       external.patient_receivable_gross AS source_receivable_gross,
                       CASE WHEN $3::date IS NULL THEN balance.allocated_receivable_gross ELSE COALESCE((
                           SELECT SUM(allocation.amount_gross)
                           FROM external_invoice_patient_invoice_allocations allocation
                           JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id
                           WHERE allocation.external_invoice_id = external.id
-                            AND allocation.created_at::date <= $3
-                            AND (allocation.reversed_at IS NULL OR allocation.reversed_at::date > $3)
-                            AND patient_invoice.status NOT IN ('draft', 'cancelled')
+                            AND (allocation.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3
+                            AND (allocation.reversed_at IS NULL OR (allocation.reversed_at AT TIME ZONE 'Europe/Berlin')::date > $3)
+                            AND patient_invoice.status <> 'draft' AND (patient_invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM invoice_storno_documents storno
+                     WHERE storno.invoice_id = patient_invoice.id AND storno.issued_on > $3
+                 )))
                       ), 0) END AS allocated_receivable_gross,
                       -- As of a past date, waivers recorded later do not count yet.
                       CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
                           balance.patient_receivable_gross + balance.waived_receivable_gross
-                          - LEAST(balance.waived_receivable_gross, COALESCE((
+                          - COALESCE((
                               SELECT SUM(waiver.amount_gross)
                               FROM external_invoice_rebilling_waivers waiver
                               WHERE waiver.external_invoice_id = external.id
-                                AND waiver.reversed_at IS NULL
-                                AND waiver.created_at::date <= $3
-                          ), 0))
+                                AND (waiver.reversed_at IS NULL OR (waiver.reversed_at AT TIME ZONE 'Europe/Berlin')::date > $3)
+                                AND (waiver.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3
+                          ), 0)
                           - COALESCE((
                               SELECT SUM(allocation.amount_gross)
                               FROM external_invoice_patient_invoice_allocations allocation
                               JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id
                               WHERE allocation.external_invoice_id = external.id
-                                AND allocation.created_at::date <= $3
-                                AND (allocation.reversed_at IS NULL OR allocation.reversed_at::date > $3)
-                                AND patient_invoice.status NOT IN ('draft', 'cancelled')
+                                AND (allocation.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3
+                                AND (allocation.reversed_at IS NULL OR (allocation.reversed_at AT TIME ZONE 'Europe/Berlin')::date > $3)
+                                AND patient_invoice.status <> 'draft' AND (patient_invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM invoice_storno_documents storno
+                     WHERE storno.invoice_id = patient_invoice.id AND storno.issued_on > $3
+                 )))
                           ), 0),
                           0
                       ) END AS remaining_receivable_gross,
@@ -1350,8 +1404,8 @@ async fn load_patient_account_statement(
                LEFT JOIN providers provider ON provider.id = external.provider_id
                WHERE external.patient_id = $1
                  AND external.status <> 'cancelled'
-                 AND ($2::date IS NULL OR COALESCE(external.invoice_date, external.created_at::date) >= $2)
-                 AND ($3::date IS NULL OR COALESCE(external.invoice_date, external.created_at::date) <= $3)
+                 AND ($2::date IS NULL OR COALESCE(external.invoice_date, (external.created_at AT TIME ZONE 'Europe/Berlin')::date) >= $2)
+                 AND ($3::date IS NULL OR COALESCE(external.invoice_date, (external.created_at AT TIME ZONE 'Europe/Berlin')::date) <= $3)
                  AND ($4::uuid IS NULL OR external.order_id = $4)
                  AND ($5::uuid IS NULL OR EXISTS (
                         SELECT 1
@@ -1361,7 +1415,7 @@ async fn load_patient_account_statement(
                           AND package.order_id = external.order_id
                  ))
                  AND external.currency = $6
-               ORDER BY COALESCE(external.invoice_date, external.created_at::date) DESC,
+               ORDER BY COALESCE(external.invoice_date, (external.created_at AT TIME ZONE 'Europe/Berlin')::date) DESC,
                         external.created_at DESC"#,
         )
         .bind(patient_id)
@@ -1379,8 +1433,8 @@ async fn load_patient_account_statement(
                 .try_get::<String, _>("paid_by")
                 .unwrap_or_else(|_| "unpaid".to_string());
             let service_delivered = row.try_get::<bool, _>("service_delivered").unwrap_or(false);
-            let receivable = row
-                .try_get::<Decimal, _>("patient_receivable_gross")
+            let original_receivable = row
+                .try_get::<Decimal, _>("original_receivable_gross")
                 .unwrap_or(Decimal::ZERO);
             let allocated_receivable = row
                 .try_get::<Decimal, _>("allocated_receivable_gross")
@@ -1401,6 +1455,7 @@ async fn load_patient_account_statement(
             let waived_receivable = row
                 .try_get::<Decimal, _>("waived_receivable_gross")
                 .unwrap_or(Decimal::ZERO);
+            let receivable = (original_receivable - waived_receivable).max(Decimal::ZERO);
             let payment_state = if order_service_billed && source_receivable > Decimal::ZERO {
                 // GMED's cost of a service the patient is billed for.
                 "order_service_cost"
@@ -1466,7 +1521,10 @@ async fn load_patient_account_statement(
                       COALESCE(service.currency_snapshot, service.currency) AS currency,
                       service.status, orders.order_number,
                       COALESCE(SUM(allocation.quantity) FILTER (
-                          WHERE invoice.status <> 'cancelled'
+                          WHERE (invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM invoice_storno_documents storno
+                     WHERE storno.invoice_id = invoice.id AND storno.issued_on > $3
+                 )))
                             AND invoice.released_at IS NOT NULL
                       ), 0) AS invoiced_quantity
                FROM order_leistungen service
@@ -1475,8 +1533,8 @@ async fn load_patient_account_statement(
                       ON allocation.order_leistung_id = service.id
                LEFT JOIN invoices invoice ON invoice.id = allocation.invoice_id
                WHERE orders.patient_id = $1
-                 AND ($2::date IS NULL OR service.created_at::date >= $2)
-                 AND ($3::date IS NULL OR service.created_at::date <= $3)
+                 AND ($2::date IS NULL OR (service.created_at AT TIME ZONE 'Europe/Berlin')::date >= $2)
+                 AND ($3::date IS NULL OR (service.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3)
                  AND ($4::uuid IS NULL OR service.order_id = $4)
                  AND ($5::uuid IS NULL OR EXISTS (
                         SELECT 1
@@ -1654,7 +1712,7 @@ async fn get_my_account_statement(
     if auth.role != Role::Patient {
         return err(StatusCode::FORBIDDEN, "Patient access required");
     }
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(patient_id) => patient_id,
         Err(resp) => return resp,
     };
@@ -1679,6 +1737,24 @@ async fn get_my_account_statement(
                 "Failed to load account statement",
             )
         }
+    }
+}
+
+// Current status may reflect a payment or cancellation after the requested date.
+fn historical_invoice_status(
+    due: Decimal,
+    settled: Decimal,
+    due_date: Option<NaiveDate>,
+    as_of: NaiveDate,
+) -> &'static str {
+    if due <= Decimal::ZERO {
+        "paid"
+    } else if due_date.is_some_and(|date| date < as_of) {
+        "overdue"
+    } else if settled > Decimal::ZERO {
+        "partially_paid"
+    } else {
+        "sent"
     }
 }
 
@@ -1755,16 +1831,20 @@ async fn get_patient_financial_summary(
                       SELECT SUM(allocation.amount_gross)
                       FROM invoice_prepayment_allocation_history allocation
                       WHERE allocation.target_invoice_id = invoices.id
-                        AND allocation.created_at::date <= $3
-                        AND (allocation.released_at IS NULL OR allocation.released_at::date > $3)
+                        AND (allocation.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3
+                        AND (allocation.released_at IS NULL OR (allocation.released_at AT TIME ZONE 'Europe/Berlin')::date > $3)
                   ), 0) END AS prepayment_applied_amount,
                   line_items
            FROM invoices
            WHERE patient_id = $1
              AND invoice_type <> 'advance'
-             AND status IN ('sent', 'partially_paid', 'paid', 'overdue')
-             AND ($2::date IS NULL OR issued_at::date >= $2)
-             AND ($3::date IS NULL OR issued_at::date <= $3)
+             AND invoices.status <> 'draft'
+             AND (invoices.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM invoice_storno_documents storno
+                     WHERE storno.invoice_id = invoices.id AND storno.issued_on > $3
+                 )))
+             AND ($2::date IS NULL OR (issued_at AT TIME ZONE 'Europe/Berlin')::date >= $2)
+             AND ($3::date IS NULL OR (issued_at AT TIME ZONE 'Europe/Berlin')::date <= $3)
              AND ($4::uuid IS NULL OR order_id = $4)
              AND ($5::uuid IS NULL OR EXISTS (
                     SELECT 1
@@ -1812,21 +1892,24 @@ async fn get_patient_financial_summary(
                              AND (receivable_order.id IS NULL OR UPPER(receivable_order.currency) = $6)
                        THEN CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
                        balance.patient_receivable_gross + balance.waived_receivable_gross
-                       - LEAST(balance.waived_receivable_gross, COALESCE((
+                       - COALESCE((
                           SELECT SUM(waiver.amount_gross)
                           FROM external_invoice_rebilling_waivers waiver
                           WHERE waiver.external_invoice_id = external.id
-                            AND waiver.reversed_at IS NULL
-                            AND waiver.created_at::date <= $3
-                       ), 0))
+                            AND (waiver.reversed_at IS NULL OR (waiver.reversed_at AT TIME ZONE 'Europe/Berlin')::date > $3)
+                            AND (waiver.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3
+                       ), 0)
                        - COALESCE((
                           SELECT SUM(allocation.amount_gross)
                           FROM external_invoice_patient_invoice_allocations allocation
                           JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id
                           WHERE allocation.external_invoice_id = external.id
-                            AND allocation.created_at::date <= $3
-                            AND (allocation.reversed_at IS NULL OR allocation.reversed_at::date > $3)
-                            AND patient_invoice.status NOT IN ('draft', 'cancelled')
+                            AND (allocation.created_at AT TIME ZONE 'Europe/Berlin')::date <= $3
+                            AND (allocation.reversed_at IS NULL OR (allocation.reversed_at AT TIME ZONE 'Europe/Berlin')::date > $3)
+                            AND patient_invoice.status <> 'draft' AND (patient_invoice.status <> 'cancelled' OR ($3::date IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM invoice_storno_documents storno
+                     WHERE storno.invoice_id = patient_invoice.id AND storno.issued_on > $3
+                 )))
                       ), 0),
                        0
                    ) END ELSE 0 END
@@ -1840,8 +1923,8 @@ async fn get_patient_financial_summary(
              ON balance.external_invoice_id = external.id
            WHERE external.patient_id = $1
              AND external.status <> 'cancelled'
-             AND ($2::date IS NULL OR COALESCE(external.invoice_date, external.created_at::date) >= $2)
-             AND ($3::date IS NULL OR COALESCE(external.invoice_date, external.created_at::date) <= $3)
+             AND ($2::date IS NULL OR COALESCE(external.invoice_date, (external.created_at AT TIME ZONE 'Europe/Berlin')::date) >= $2)
+             AND ($3::date IS NULL OR COALESCE(external.invoice_date, (external.created_at AT TIME ZONE 'Europe/Berlin')::date) <= $3)
              AND ($4::uuid IS NULL OR external.order_id = $4)
              AND ($5::uuid IS NULL OR EXISTS (
                     SELECT 1
@@ -1914,8 +1997,8 @@ async fn get_patient_financial_summary(
              AND external.status <> 'cancelled'
              AND external.paid_by <> 'patient'
              AND (external.service_delivered OR external.status IN ('approved', 'paid'))
-             AND ($2::date IS NULL OR COALESCE(external.invoice_date, external.received_at::date, external.created_at::date) >= $2)
-             AND ($3::date IS NULL OR COALESCE(external.invoice_date, external.received_at::date, external.created_at::date) <= $3)
+             AND ($2::date IS NULL OR COALESCE(external.invoice_date, (external.received_at AT TIME ZONE 'Europe/Berlin')::date, (external.created_at AT TIME ZONE 'Europe/Berlin')::date) >= $2)
+             AND ($3::date IS NULL OR COALESCE(external.invoice_date, (external.received_at AT TIME ZONE 'Europe/Berlin')::date, (external.created_at AT TIME ZONE 'Europe/Berlin')::date) <= $3)
              AND ($4::uuid IS NULL OR external.order_id = $4)
              AND ($5::uuid IS NULL OR EXISTS (
                     SELECT 1
@@ -1999,6 +2082,10 @@ async fn get_patient_financial_summary(
         let due_date = row
             .try_get::<Option<NaiveDate>, _>("due_date")
             .unwrap_or_default();
+        let status = to.map_or(status, |as_of| {
+            historical_invoice_status(balance, paid + prepayment_applied, due_date, as_of)
+                .to_string()
+        });
         let line_items = row
             .try_get::<Value, _>("line_items")
             .unwrap_or_else(|_| serde_json::json!([]));

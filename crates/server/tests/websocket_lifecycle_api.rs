@@ -316,3 +316,72 @@ async fn interpreter_realtime_carries_only_documents_opened_to_him() {
     assert!(!mentions(closed_id), "closed document leaked: {received:?}");
     client.close(None).await.unwrap();
 }
+
+#[tokio::test]
+async fn family_realtime_replay_uses_the_explicit_patient_context() {
+    let Some(server) = TestServer::start().await else {
+        return;
+    };
+    let pool = &server.suite.pool;
+    let guardian = seed_user(pool, "patient").await;
+    let first = seed_patient(pool, server.user_id).await;
+    let second = seed_patient(pool, server.user_id).await;
+    for patient in [first, second] {
+        sqlx::query(
+            "INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$3)",
+        )
+        .bind(patient)
+        .bind(guardian)
+        .bind(server.user_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    let token = jwt::issue_access_token(SECRET, guardian, "patient", Uuid::new_v4()).unwrap();
+    for (selected, other) in [(first, second), (second, first)] {
+        let after_seq: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(seq),0) FROM realtime_events")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        for patient in [other, selected] {
+            gmed_server::realtime::publish_patient_event(
+                &server.suite.state,
+                Some(server.user_id),
+                "patient.updated",
+                patient,
+                json!({}),
+            )
+            .await;
+        }
+        let (mut client, _) = connect_async(format!(
+            "ws://{}/events/ws?last_seq={after_seq}",
+            server.address
+        ))
+        .await
+        .unwrap();
+        client
+            .send(Message::Text(
+                json!({"type":"auth","token":token,"patient_id":selected})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        loop {
+            let frame = tokio::time::timeout(Duration::from_secs(10), client.next())
+                .await
+                .expect("selected patient's replay")
+                .unwrap()
+                .unwrap();
+            let Message::Text(text) = frame else {
+                continue;
+            };
+            let event: Value = serde_json::from_str(text.as_str()).unwrap();
+            if event["type"] == "patient.updated" {
+                assert_eq!(event["entity_id"], json!(selected), "{event}");
+                break;
+            }
+        }
+        client.close(None).await.unwrap();
+    }
+}

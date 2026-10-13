@@ -5981,7 +5981,7 @@ async fn list_my_invoices(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice status");
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -6115,7 +6115,7 @@ async fn get_my_invoice(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -8645,7 +8645,7 @@ async fn list_my_invoice_payments(
     if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
         return resp;
     }
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(patient_id) => patient_id,
         Err(resp) => return resp,
     };
@@ -8890,7 +8890,7 @@ async fn list_my_invoice_credit_notes(
     if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
         return resp;
     }
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(patient_id) => patient_id,
         Err(resp) => return resp,
     };
@@ -11377,7 +11377,7 @@ async fn list_my_invoice_refunds(
     if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
         return resp;
     }
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(patient_id) => patient_id,
         Err(resp) => return resp,
     };
@@ -12101,7 +12101,7 @@ async fn download_my_invoice_pdf(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -13086,7 +13086,7 @@ async fn portal_invoice_with_documents(
     invoice_id: Uuid,
 ) -> Result<(Uuid, String), axum::response::Response> {
     auth.require_any_role(&[Role::Patient])?;
-    let patient_id = resolve_self_patient_id(state, auth.user_id).await?;
+    let patient_id = resolve_self_patient_id(state, auth).await?;
     let row = sqlx::query(
         r#"SELECT i.patient_id, i.released_at IS NOT NULL AS released, i.portal_visible,
                   i.hide_amounts_from_patient, i.pdf_visible_to_patient, p.languages

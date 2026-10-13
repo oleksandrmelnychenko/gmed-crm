@@ -21,6 +21,7 @@ import {
 import { resolveIdleLogoutMinutes, useIdleLogout } from "@/lib/idle-logout";
 import { getLang, uiText, useLang, type Lang } from "@/lib/i18n";
 import { clearSecurePersistedState } from "@/lib/secure-persist";
+import { reconcilePortalPatientSelection, selectPortalPatient, type PortalPatient } from "@/lib/portal-patient-context";
 
 export interface User {
   id: string;
@@ -54,6 +55,8 @@ export interface User {
   portal_mode?: "lead" | "patient" | null;
   /** Requests (leads) this patient login fills in. */
   lead_portal?: { requests: number } | null;
+  /** Active patient records the portal account may explicitly select. */
+  patients?: PortalPatient[];
 }
 
 /** Why the last session ended in this tab (null: never signed out here). */
@@ -175,6 +178,7 @@ async function saveTokens(tokens: AuthTokens) {
 }
 
 async function clearTokens() {
+  selectPortalPatient("", null);
   await clearPersistedAuthTokens();
   clearApiCache();
   clearSecurePersistedState();
@@ -231,7 +235,9 @@ async function fetchJson<T>(
 }
 
 async function fetchMe(accessToken: string) {
-  return fetchJson<User>("/me", { method: "GET" }, accessToken);
+  const user = await fetchJson<User>("/me", { method: "GET" }, accessToken);
+  reconcilePortalPatientSelection(user);
+  return user;
 }
 
 function createAuthState(): AuthState {

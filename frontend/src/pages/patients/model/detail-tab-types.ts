@@ -326,6 +326,7 @@ export type PatientAccountMovement = {
     | "external_allocation_reversal"
     /** Part of a supplier cost GMED bears instead of re-billing it (re-billing waiver). */
     | "external_rebilling_waived"
+    | "external_rebilling_waiver_reversal"
     /** Accrued but not yet invoiced amount of an open termination settlement. */
     | "termination_uninvoiced"
     /** Cancellation document (Stornorechnung) of a cancelled released invoice. */

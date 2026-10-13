@@ -2524,6 +2524,8 @@ function usePatientInvoicesTabContent({
                   <option value="external_receivable">{accountMovementKindLabel({ kind: "external_receivable", description: "" }, lang)}</option>
                   <option value="external_allocation">{accountMovementKindLabel({ kind: "external_allocation", description: "" }, lang)}</option>
                   <option value="external_allocation_reversal">{accountMovementKindLabel({ kind: "external_allocation_reversal", description: "" }, lang)}</option>
+                  <option value="external_rebilling_waived">{accountMovementKindLabel({ kind: "external_rebilling_waived", description: "" }, lang)}</option>
+                  <option value="external_rebilling_waiver_reversal">{accountMovementKindLabel({ kind: "external_rebilling_waiver_reversal", description: "" }, lang)}</option>
                 </NativeComboboxSelect>
               </>
             }

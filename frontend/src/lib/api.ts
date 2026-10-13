@@ -2,6 +2,7 @@
 import { BILLING_API_ERROR_KEYS } from "@/lib/billing-api-errors";
 import { ORDER_API_ERROR_KEYS } from "@/lib/order-api-errors";
 import { CARE_API_ERROR_KEYS } from "@/lib/care-api-errors";
+import { getPortalPatientId } from "@/lib/portal-patient-context";
 
 import {
   clearPersistedAuthTokens,
@@ -273,6 +274,8 @@ function buildApiHeaders(init: RequestInit = {}) {
   const token = getAccessToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
+  const patientId = getPortalPatientId(getAccessTokenSubject(token));
+  if (patientId) headers.set("X-Patient-Id", patientId);
   if (!headers.has("Content-Type") && init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
@@ -746,9 +749,10 @@ export function openAuthenticatedApiWebSocket(
   params?: Record<string, string | number | boolean | null | undefined>,
 ) {
   const socket = new WebSocket(buildApiWebSocketUrl(path, params));
+  const patientId = getPortalPatientId(getAccessTokenSubject(token));
   socket.addEventListener(
     "open",
-    () => socket.send(JSON.stringify({ type: "auth", token })),
+    () => socket.send(JSON.stringify({ type: "auth", token, ...(patientId ? { patient_id: patientId } : {}) })),
     { once: true },
   );
   return socket;

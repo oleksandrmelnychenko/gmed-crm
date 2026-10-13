@@ -7857,7 +7857,7 @@ async fn list_my_followup_milestones(
         return e;
     }
 
-    let patient_id = match crate::routes::me::resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match crate::routes::me::resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };

@@ -75,6 +75,7 @@ const MOVEMENT_KIND_LABELS: Record<PatientAccountMovement["kind"], Pair> = {
   external_receivable: ["Externe Forderung", "Внешний долг"],
   external_allocation: ["Forderung zugeordnet", "Долг распределён"],
   external_allocation_reversal: ["Zuordnung storniert", "Сторно распределения"],
+  external_rebilling_waiver_reversal: ["Storno der Kostenübernahme durch GMED", "Отмена расхода за счёт GMED"],
   external_rebilling_waived: ["Kosten trägt GMED", "Расход за счёт GMED"],
   termination_uninvoiced: [
     "Kündigung: angefallen, noch nicht berechnet",

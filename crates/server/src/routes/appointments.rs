@@ -614,7 +614,7 @@ async fn list_my_appointments(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -663,7 +663,7 @@ async fn list_my_appointment_requests(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -725,7 +725,7 @@ async fn create_my_appointment_request(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -1246,7 +1246,7 @@ async fn withdraw_my_appointment_request(
     if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
         return resp;
     }
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };

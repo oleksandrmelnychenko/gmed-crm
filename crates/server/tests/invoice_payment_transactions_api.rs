@@ -717,6 +717,18 @@ async fn overdue_invoice_stays_overdue_after_a_partial_payment() {
     let partial = record_payment(&app, &billing, invoice_id, Uuid::new_v4(), 19, "PART").await;
     assert_eq!(partial["invoice"]["status"], "overdue");
     assert_eq!(partial["invoice"]["paid_amount"], "19");
+    let today = gmed_server::app_time::today();
+    let (status, statement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement?to={today}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{statement}");
+    assert_eq!(statement["items"][0]["status"], "overdue");
+    assert_eq!(statement["items"][0]["amount_due"], "100");
 
     let (status, body) = json_request(
         &app,
@@ -1194,6 +1206,19 @@ async fn credit_transfer_to_another_recipient_names_both_recipients() {
         "{refused:?}"
     );
 
+    let statement_path = format!("/api/v1/patients/{patient_id}/account-statement");
+    let (status, before) = json_request(&app, "GET", &statement_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{before}");
+    let target_item = before["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == target.to_string())
+        .unwrap();
+    assert_eq!(target_item["amount_due"], "113.05");
+    assert_eq!(target_item["credit_applied"], "0");
+    assert_eq!(before["summary"]["total_due"], "113.05");
+
     let mut confirmed = request;
     confirmed["confirm_recipient_mismatch"] = json!(true);
     let (status, moved) = json_request(
@@ -1205,6 +1230,16 @@ async fn credit_transfer_to_another_recipient_names_both_recipients() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{moved:?}");
+    let (status, after) = json_request(&app, "GET", &statement_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{after}");
+    let target_item = after["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == target.to_string())
+        .unwrap();
+    assert_eq!(target_item["amount_due"], "83.05");
+    assert_eq!(after["summary"]["total_due"], "83.05");
 }
 
 /// Paid advances settle the final invoice as soon as it is released (oldest
@@ -1806,4 +1841,179 @@ async fn payments_of_an_order_without_required_prepayment_send_no_prepayment_not
     .await
     .unwrap();
     assert_eq!(tracked, "not_required", "the state is still tracked");
+}
+
+#[tokio::test]
+async fn historical_statement_after_storno() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("historical-storno");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let invoice:Uuid=sqlx::query_scalar(r#"INSERT INTO invoices
+        (order_id,patient_id,invoice_number,invoice_type,status,due_date,total_net,total_vat,total_gross,
+         paid_amount,line_items,portal_visible,hide_amounts_from_patient,created_by,issued_at)
+        VALUES ($1,$2,$3,'interim','sent',CURRENT_DATE+14,100,19,119,0,
+          '[{"description":"Review care","quantity":"1","unit_price":"100","vat_rate":"19","line_net":"100","line_vat":"19","line_gross":"119"}]',
+          true,false,$4,now()-interval '2 days') RETURNING id"#)
+      .bind(order_id).bind(patient_id).bind(format!("INV-{tag}")).bind(admin_id).fetch_one(&pool).await.unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+    let yesterday = (gmed_server::app_time::today() - chrono::Duration::days(1)).to_string();
+    let path = format!("/api/v1/patients/{patient_id}/account-statement?to={yesterday}");
+    let (status, before) = json_request(&app, "GET", &path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{before:?}");
+    let (status, cancelled) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice}/status"),
+        &billing,
+        Some(json!({"status":"cancelled","reason":"Review cancellation today"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled:?}");
+    let (status, after) = json_request(&app, "GET", &path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{after:?}");
+    assert_eq!(before["summary"]["invoiced_gross"], "119");
+    assert_eq!(after["summary"], before["summary"]);
+    assert_eq!(after["items"], before["items"]);
+    assert_eq!(after["movements"], before["movements"]);
+    let (status, current) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    assert_eq!(current["summary"]["closing_balance"], "0");
+    assert!(current["items"].as_array().unwrap().is_empty());
+    let today = gmed_server::app_time::today();
+    let (status, period) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement?from={today}&to={today}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{period}");
+    assert_eq!(period["summary"]["opening_balance"], "119");
+    assert_eq!(period["summary"]["credit_total"], "119");
+    assert_eq!(period["summary"]["closing_balance"], "0");
+    let (status, historical_summary) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/financial-summary?to={yesterday}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{historical_summary}");
+    assert_eq!(
+        historical_summary["revenue_gross"], "119",
+        "{historical_summary}"
+    );
+}
+
+#[tokio::test]
+async fn historical_waiver_reversal_preserves_prior_balance() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("historical-waiver");
+    let patient = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_assignment(&pool, patient, billing_id, admin_id).await;
+    let order = seed_order(&pool, patient, admin_id, &tag).await;
+    let external:Uuid=sqlx::query_scalar(r#"INSERT INTO external_invoices
+       (order_id,patient_id,external_invoice_number,amount_net,amount_vat,amount_gross,currency,status,paid_by,service_delivered,created_by,invoice_date,created_at)
+       VALUES($1,$2,$3,100,0,100,'EUR','paid','agency',true,$4,CURRENT_DATE-3,now()-interval '3 days') RETURNING id"#)
+       .bind(order).bind(patient).bind(format!("EXT-{tag}")).bind(admin_id).fetch_one(&pool).await.unwrap();
+    let waiver: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO external_invoice_rebilling_waivers
+       (external_invoice_id,request_id,amount_gross,reason,created_by,created_at)
+       VALUES($1,$2,100,'Synthetic historic goodwill',$3,now()-interval '2 days') RETURNING id"#,
+    )
+    .bind(external)
+    .bind(Uuid::new_v4())
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+    let yesterday = (gmed_server::app_time::today() - chrono::Duration::days(1)).to_string();
+    let path = format!("/api/v1/patients/{patient}/account-statement?to={yesterday}");
+    let (status, before) = json_request(&app, "GET", &path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{before}");
+    let (status, reversed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/external-invoices/{external}/rebilling-waivers/{waiver}/reversal"),
+        &billing,
+        Some(json!({"reason":"Synthetic reversal today"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reversed}");
+    let (status, after) = json_request(&app, "GET", &path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{after}");
+    assert_eq!(before["summary"]["closing_balance"], "0");
+    assert_eq!(after["summary"], before["summary"]);
+    assert_eq!(after["items"], before["items"]);
+    assert_eq!(after["movements"], before["movements"]);
+    let (status, current) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient}/account-statement"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    assert_eq!(current["summary"]["closing_balance"], "100");
+    assert_eq!(current["summary"]["external_receivable"], "100");
+    assert!(
+        current["movements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["kind"] == "external_rebilling_waived")
+    );
+    assert!(
+        current["movements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["kind"] == "external_rebilling_waiver_reversal")
+    );
+    let today = gmed_server::app_time::today();
+    let (status, period) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient}/account-statement?from={today}&to={today}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{period}");
+    assert_eq!(period["summary"]["opening_balance"], "0");
+    assert_eq!(period["summary"]["debit_total"], "100");
+    assert_eq!(period["summary"]["credit_total"], "0");
+    assert_eq!(period["summary"]["closing_balance"], "100");
+    let (status, historical_summary) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient}/financial-summary?to={yesterday}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{historical_summary}");
+    assert_eq!(
+        historical_summary["external_receivable_gross"], "0",
+        "{historical_summary}"
+    );
 }

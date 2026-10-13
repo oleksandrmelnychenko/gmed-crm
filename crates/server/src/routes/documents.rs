@@ -30894,7 +30894,7 @@ async fn list_my_uploaded_documents(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -30966,7 +30966,7 @@ async fn download_my_uploaded_document(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -31062,7 +31062,7 @@ async fn upload_my_document(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };

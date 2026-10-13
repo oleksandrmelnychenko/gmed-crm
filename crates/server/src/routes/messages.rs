@@ -3632,47 +3632,6 @@ fn ensure_chat_workspace_role(auth: &AuthUser) -> Result<(), axum::response::Res
     ))
 }
 
-async fn resolve_linked_patient_id_for_user(
-    state: &AppState,
-    user_id: Uuid,
-) -> Result<Option<Uuid>, axum::response::Response> {
-    let rows = sqlx::query(
-        r#"SELECT patient_id
-           FROM patient_assignments
-           WHERE user_id = $1
-             AND revoked_at IS NULL
-           ORDER BY assigned_at DESC
-           LIMIT 2"#,
-    )
-    .bind(user_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, user_id = %user_id, "resolve linked patient for chat");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to validate linked patient",
-        )
-    })?;
-
-    if rows.is_empty() {
-        return Ok(None);
-    }
-
-    if rows.len() > 1 {
-        return Err(err(
-            StatusCode::CONFLICT,
-            "Patient account is linked to multiple patient records",
-        ));
-    }
-
-    Ok(Some(
-        rows[0]
-            .try_get::<Uuid, _>("patient_id")
-            .unwrap_or_else(|_| Uuid::nil()),
-    ))
-}
-
 async fn load_active_peer(
     state: &AppState,
     user_id: Uuid,
@@ -3719,39 +3678,42 @@ async fn can_message_known_peer(
         return Ok(false);
     }
 
-    if auth.role == Role::Patient || peer_role == Role::Patient {
-        let patient_id = if auth.role == Role::Patient {
-            resolve_self_patient_id(state, auth.user_id).await?
-        } else if peer_role == Role::Patient {
-            match resolve_linked_patient_id_for_user(state, peer_id).await? {
-                Some(value) => value,
-                None => return Ok(false),
-            }
-        } else {
+    if auth.role == Role::Patient {
+        if !can_have_patient_chat(peer_role) {
             return Ok(false);
-        };
-
-        let staff_user_id = if auth.role == Role::Patient {
-            if !can_have_patient_chat(peer_role) {
-                return Ok(false);
-            }
-            peer_id
-        } else {
-            if !can_have_patient_chat(auth.role) {
-                return Ok(false);
-            }
-            auth.user_id
-        };
-
-        return has_active_patient_assignment(&state.db, patient_id, staff_user_id)
+        }
+        let patient_id = resolve_self_patient_id(state, auth).await?;
+        return has_active_patient_assignment(&state.db, patient_id, peer_id)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, patient_id = %patient_id, user_id = %staff_user_id, "check chat assignment");
+            .map_err(|error| {
+                tracing::error!(%error, "check patient chat assignment");
                 err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to validate chat permissions",
                 )
             });
+    }
+    if peer_role == Role::Patient {
+        if !can_have_patient_chat(auth.role) {
+            return Ok(false);
+        }
+        return sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM patient_assignments guardian
+             JOIN patient_assignments staff ON staff.patient_id = guardian.patient_id
+             WHERE guardian.user_id = $1 AND guardian.revoked_at IS NULL
+               AND staff.user_id = $2 AND staff.revoked_at IS NULL)",
+        )
+        .bind(peer_id)
+        .bind(auth.user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "check guardian chat assignment");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate chat permissions",
+            )
+        });
     }
 
     Ok(staff_roles_may_chat(auth.role, peer_role))
@@ -3806,7 +3768,7 @@ async fn load_allowed_peer_rows(
                  AND ($3::text = '%%' OR u.name ILIKE $3 OR u.email ILIKE $3)
                ORDER BY role_sort, u.name"#,
         )
-        .bind(resolve_self_patient_id(state, auth.user_id).await?)
+        .bind(resolve_self_patient_id(state, auth).await?)
         .bind(auth.user_id)
         .bind(search_pattern)
         .fetch_all(&state.db)

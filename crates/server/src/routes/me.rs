@@ -104,6 +104,29 @@ async fn get_me(
                 u.try_get::<i64, _>("password_history_len").unwrap_or(0) == 0
                     && u.try_get::<i64, _>("earlier_sessions").unwrap_or(0) == 0,
             );
+            let patients = if auth.role == Role::Patient
+                && !password_change_required
+                && !totp_enrolment_required
+            {
+                match sqlx::query(
+                    "SELECT p.id, p.patient_id, p.first_name, p.last_name
+                     FROM patient_assignments a JOIN patients p ON p.id = a.patient_id
+                     WHERE a.user_id = $1 AND a.revoked_at IS NULL
+                     ORDER BY p.last_name, p.first_name, p.id",
+                ).bind(auth.user_id).fetch_all(&state.db).await {
+                    Ok(rows) => rows.into_iter().map(|row| serde_json::json!({
+                        "id": row.get::<Uuid, _>("id"),
+                        "patient_number": row.get::<String, _>("patient_id"),
+                        "name": format!("{} {}", row.get::<String, _>("first_name"), row.get::<String, _>("last_name")),
+                    })).collect::<Vec<_>>(),
+                    Err(error) => {
+                        tracing::error!(%error, user_id = %auth.user_id, "load portal patients");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load linked patients");
+                    }
+                }
+            } else {
+                Vec::new()
+            };
             Json(serde_json::json!({
                 "id": u.try_get::<Uuid, _>("id").ok(),
                 "email": u.try_get::<String, _>("email").ok(),
@@ -127,6 +150,7 @@ async fn get_me(
                 // requests the login fills in (2026-10-03).
                 "portal_mode": portal_mode,
                 "lead_portal": lead_portal,
+                "patients": patients,
             }))
             .into_response()
         }
@@ -172,7 +196,7 @@ async fn list_my_privacy_requests(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -241,7 +265,7 @@ async fn create_my_privacy_request(
         Err(resp) => return resp,
     };
     let reason = normalize_optional(body.reason.as_deref());
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -432,7 +456,7 @@ async fn export_my_data(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -468,7 +492,7 @@ async fn list_my_document_alerts(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -521,7 +545,7 @@ async fn list_my_documents(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -600,7 +624,7 @@ async fn download_my_document(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -698,7 +722,7 @@ async fn confirm_my_document_release(
         return resp;
     }
 
-    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+    let patient_id = match resolve_self_patient_id(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -777,8 +801,29 @@ async fn confirm_my_document_release(
 
 pub(crate) async fn resolve_linked_patient_id(
     state: &AppState,
-    user_id: Uuid,
+    auth: &AuthUser,
 ) -> Result<Option<Uuid>, axum::response::Response> {
+    let user_id = auth.user_id;
+    if let Some(patient_id) = auth.selected_patient_id {
+        // An explicit context never falls back to another child or to email matching.
+        let allowed = crate::access::has_active_patient_assignment(&state.db, patient_id, user_id)
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, %user_id, %patient_id, "validate selected patient");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate linked patient",
+                )
+            })?;
+        return if allowed {
+            Ok(Some(patient_id))
+        } else {
+            Err(err(
+                StatusCode::FORBIDDEN,
+                "Selected patient is not available to this account",
+            ))
+        };
+    }
     let rows = sqlx::query(
         r#"SELECT patient_id
            FROM patient_assignments
@@ -993,9 +1038,9 @@ pub(crate) async fn resolve_linked_patient_id(
 
 pub(crate) async fn resolve_self_patient_id(
     state: &AppState,
-    user_id: Uuid,
+    auth: &AuthUser,
 ) -> Result<Uuid, axum::response::Response> {
-    match resolve_linked_patient_id(state, user_id).await? {
+    match resolve_linked_patient_id(state, auth).await? {
         Some(patient_id) => Ok(patient_id),
         None => Err(err(
             StatusCode::NOT_FOUND,

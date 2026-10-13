@@ -982,6 +982,7 @@ mod tests {
 
     fn reader(role: Role) -> AuthUser {
         AuthUser {
+            selected_patient_id: None,
             user_id: Uuid::new_v4(),
             role,
             family_id: Uuid::new_v4(),

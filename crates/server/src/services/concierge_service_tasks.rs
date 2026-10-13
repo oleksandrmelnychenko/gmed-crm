@@ -839,6 +839,7 @@ mod tests {
 
     fn actor(user_id: Uuid, role: Role) -> AuthUser {
         AuthUser {
+            selected_patient_id: None,
             user_id,
             role,
             family_id: Uuid::nil(),

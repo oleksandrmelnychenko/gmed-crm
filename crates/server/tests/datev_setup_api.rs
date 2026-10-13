@@ -17,6 +17,7 @@ async fn request(
     payload: Value,
 ) -> (StatusCode, Value) {
     let auth = gmed_server::auth::middleware::AuthUser {
+        selected_patient_id: None,
         user_id: user,
         role: match role {
             "ceo" => gmed_domain::role::Role::Ceo,

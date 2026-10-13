@@ -18,7 +18,7 @@ function multipartField(body: Buffer | null, name: string) {
   return match?.[1]?.trim() ?? null;
 }
 
-async function installPatientPortalMocks(page: Page) {
+async function installPatientPortalMocks(page: Page, patients?: Array<{ id: string; name: string; patient_number: string }>) {
   await startClockAt(page);
   let paymentProofUploadedAt: string | null = null;
   const paymentProofTimestamp = "2026-04-10T09:15:00Z";
@@ -231,6 +231,7 @@ async function installPatientPortalMocks(page: Page) {
         email: "patient@gmed.de",
         name: "Anna Portal",
         role: "patient",
+        patients,
         created_at: "2026-01-01T00:00:00Z",
       });
     }
@@ -355,6 +356,11 @@ async function installPatientPortalMocks(page: Page) {
     }
 
     if (path === "/me/documents") {
+      if (patients) {
+        const selected = patients.find((patient) => patient.id === route.request().headers()["x-patient-id"]);
+        if (!selected) return json(route, { message: "Select patient" }, 409);
+        return json(route, releasedDocuments.map((document) => ({ ...document, patient_id: selected.id, auto_name: `Report for ${selected.name}` })));
+      }
       return json(route, releasedDocuments);
     }
 
@@ -1340,4 +1346,39 @@ test.describe("patient portal smoke flows", () => {
       fullPage: false,
     });
   });
+});
+
+
+test("guardian selects a child and switches documents without sharing cached data", async ({ page }) => {
+  const patients = [
+    { id: "00000000-0000-0000-0000-000000008001", name: "Mia Muster", patient_number: "P-8001" },
+    { id: "00000000-0000-0000-0000-000000008002", name: "Ben Muster", patient_number: "P-8002" },
+  ];
+  const token = `header.${Buffer.from(JSON.stringify({ sub: "00000000-0000-0000-0000-000000009001", exp: Math.floor(new Date("2026-10-12T08:00:00Z").getTime() / 1000) + 3600 })).toString("base64url")}.signature`;
+  await page.addInitScript((accessToken) => {
+    localStorage.setItem("gmed_lang", "de");
+    localStorage.setItem("gmed_access_token", accessToken);
+    localStorage.setItem("gmed_refresh_token", "synthetic-refresh");
+  }, token);
+  await installPatientPortalMocks(page, patients);
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/v1/me/documents") requests.push(request.headers()["x-patient-id"] ?? "");
+  });
+  await page.goto("/documents");
+  const selector = page.getByLabel("Patient / Patientin", { exact: true });
+  await expect(selector).toHaveValue("");
+  await expect(page.getByText("Wählen Sie, für wen Sie das Portal öffnen möchten.")).toBeVisible();
+  expect(requests).toEqual([]);
+  await selector.selectOption(patients[0].id);
+  await expect(page.getByText("Report for Mia Muster", { exact: true })).toBeVisible();
+  await selector.selectOption(patients[1].id);
+  await expect(page.getByText("Report for Ben Muster", { exact: true })).toBeVisible();
+  await expect(page.getByText("Report for Mia Muster", { exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(selector).toHaveValue(patients[1].id);
+  await expect(page.getByText("Report for Ben Muster", { exact: true })).toBeVisible();
+  await selector.selectOption(patients[0].id);
+  await expect(page.getByText("Report for Mia Muster", { exact: true })).toBeVisible();
+  expect(requests).toEqual([patients[0].id, patients[1].id, patients[1].id, patients[0].id]);
 });

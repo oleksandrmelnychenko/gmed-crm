@@ -61,6 +61,7 @@ mod hotel_access_tests {
     #[test]
     fn concierge_can_access_hotel_operations() {
         let mut auth = AuthUser {
+            selected_patient_id: None,
             user_id: Uuid::nil(),
             role: Role::Concierge,
             family_id: Uuid::nil(),

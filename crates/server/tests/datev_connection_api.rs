@@ -89,6 +89,7 @@ async fn credentials_are_encrypted_callbacks_bound_and_accounting_writes_unavail
         .await
         .unwrap();
     let auth = AuthUser {
+        selected_patient_id: None,
         user_id: id,
         role: gmed_domain::role::Role::Ceo,
         family_id: Uuid::new_v4(),
@@ -611,6 +612,7 @@ async fn long_term_access_is_company_bound_and_failed_revocation_is_not_a_dead_e
         .await
         .unwrap();
     let auth = AuthUser {
+        selected_patient_id: None,
         user_id: id,
         role: gmed_domain::role::Role::Ceo,
         family_id: Uuid::new_v4(),

@@ -2433,3 +2433,56 @@ async fn legacy_plaintext_attachment_is_migrated_before_download() {
             .unwrap()
     );
 }
+
+#[tokio::test]
+async fn assigned_staff_can_reply_to_a_guardian_of_two_children() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("family-chat");
+    let guardian = seed_user(&pool, &tag, "patient").await;
+    let manager = seed_user(&pool, &tag, "patient_manager").await;
+    let first = seed_patient(&pool, admin_id, &format!("{tag}-first")).await;
+    let second = seed_patient(&pool, admin_id, &format!("{tag}-second")).await;
+    for patient in [first, second] {
+        seed_patient_assignment(&pool, patient, guardian, admin_id).await;
+    }
+    seed_patient_assignment(&pool, first, manager, admin_id).await;
+    let staff_token = auth_header_for(manager, "patient_manager");
+    let path = format!("/api/v1/messages/{guardian}");
+    let (status, reply) = json_request(
+        &app,
+        "POST",
+        &path,
+        &staff_token,
+        Some(json!({"message": "Synthetic family conversation"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    let guardian_token = auth_header_for(guardian, "patient");
+    for (selected, expected) in [(first, StatusCode::OK), (second, StatusCode::FORBIDDEN)] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/messages/{manager}"))
+                    .header("Authorization", &guardian_token)
+                    .header("X-Patient-Id", selected.to_string())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+    sqlx::query(
+        "UPDATE patient_assignments SET revoked_at=now() WHERE patient_id=$1 AND user_id=$2",
+    )
+    .bind(first)
+    .bind(guardian)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, refused) = json_request(&app, "GET", &path, &staff_token, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+}

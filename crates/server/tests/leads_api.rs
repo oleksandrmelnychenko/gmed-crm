@@ -7412,3 +7412,138 @@ async fn minor_conversion_explicitly_links_both_guardians_and_never_the_child_lo
             .all(|c| c["reason"] == "guardian_of_converted_minor")
     );
 }
+
+#[tokio::test]
+async fn two_children_keep_the_shared_guardian_portal_working() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let mut children = Vec::new();
+    let mut guardian = None;
+    for index in 0..2 {
+        let mother = Uuid::new_v4();
+        let lead = seed_minor_lead_with_parents(
+            &app,
+            &format!("review-child-{index}@example.com"),
+            mother,
+            Uuid::new_v4(),
+            None,
+        )
+        .await;
+        let (status, issued) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/leads/{lead}/portal-guardians"),
+            &pm,
+            Some(json!({"trusted_contact_id": mother})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{issued}");
+        let user: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+        if let Some(previous) = guardian {
+            assert_eq!(previous, user);
+        }
+        guardian = Some(user);
+        let artifacts = seed_complete_lead_onboarding(&app, lead).await;
+        declare_mother_as_payer_and_sign(&app, lead, artifacts.order_id).await;
+        children.push(lead);
+    }
+    let guardian = guardian.unwrap();
+    let token = format!(
+        "Bearer {}",
+        jwt::issue_access_token(TEST_SECRET, guardian, "patient", Uuid::new_v4()).unwrap()
+    );
+    let first = convert_ready_lead(&app, children[0]).await;
+    let (before_status, before) =
+        json_request(&app, "GET", "/api/v1/me/account-statement", &token, None).await;
+    assert_eq!(before_status, StatusCode::OK, "{before}");
+    let second = convert_ready_lead(&app, children[1]).await;
+    assert_ne!(first, second);
+    let (status, me) = json_request(&app, "GET", "/api/v1/me", &token, None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    let patients = me["patients"].as_array().unwrap();
+    assert_eq!(patients.len(), 2);
+    for patient in [first, second] {
+        assert!(
+            patients
+                .iter()
+                .any(|entry| entry["id"] == patient.to_string())
+        );
+    }
+    let (status, ambiguous) = json_request(&app, "GET", "/api/v1/me/export", &token, None).await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "An explicit choice is required: {ambiguous}"
+    );
+
+    async fn selected_request(
+        app: &TestApp,
+        token: &str,
+        patient: &str,
+        path: &str,
+    ) -> (StatusCode, Value) {
+        let response = app
+            .router()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("Authorization", token)
+                    .header("X-Patient-Id", patient)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+    for patient in [first, second, first] {
+        let selected = patient.to_string();
+        let (status, exported) =
+            selected_request(&app, &token, &selected, "/api/v1/me/export").await;
+        assert_eq!(status, StatusCode::OK, "{exported}");
+        assert_eq!(exported["patient"]["id"], json!(patient));
+        for path in [
+            "/api/v1/me/account-statement",
+            "/api/v1/me/documents",
+            "/api/v1/me/invoices",
+            "/api/v1/me/appointments",
+        ] {
+            let (status, body) = selected_request(&app, &token, &selected, path).await;
+            assert_eq!(status, StatusCode::OK, "{path}: {body}");
+        }
+    }
+    let (status, foreign) = selected_request(
+        &app,
+        &token,
+        &Uuid::new_v4().to_string(),
+        "/api/v1/me/export",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{foreign}");
+    let (status, invalid) = selected_request(&app, &token, "invalid", "/api/v1/me/export").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid}");
+
+    sqlx::query(
+        "UPDATE patient_assignments SET revoked_at=now() WHERE user_id=$1 AND patient_id=$2",
+    )
+    .bind(guardian)
+    .bind(first)
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+    let (status, revoked) =
+        selected_request(&app, &token, &first.to_string(), "/api/v1/me/export").await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{revoked}");
+    let (status, retained) =
+        selected_request(&app, &token, &second.to_string(), "/api/v1/me/export").await;
+    assert_eq!(status, StatusCode::OK, "{retained}");
+    assert_eq!(retained["patient"]["id"], json!(second));
+    let (status, me) = json_request(&app, "GET", "/api/v1/me", &token, None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["patients"].as_array().unwrap().len(), 1);
+    assert_eq!(me["patients"][0]["id"], json!(second));
+}

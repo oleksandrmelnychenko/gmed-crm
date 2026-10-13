@@ -426,6 +426,7 @@ mod tests {
 
     fn auth(role: Role) -> AuthUser {
         AuthUser {
+            selected_patient_id: None,
             user_id: Uuid::nil(),
             role,
             family_id: Uuid::nil(),

@@ -694,7 +694,14 @@ async fn unbilled_supplier_cost_can_be_absorbed_by_gmed_and_put_back() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|movement| movement["kind"] != "external_rebilling_waived")
+            .any(|movement| movement["kind"] == "external_rebilling_waived")
+    );
+    assert!(
+        reopened["movements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|movement| movement["kind"] == "external_rebilling_waiver_reversal")
     );
 }
 
