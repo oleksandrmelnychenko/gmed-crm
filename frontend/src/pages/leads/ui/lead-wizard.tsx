@@ -770,6 +770,7 @@ const PRIVACY_CONSENT_ID = "lead-wizard-privacy-consent";
 const HEALTHCARE_CONSENT_ID = "lead-wizard-healthcare-consent";
 const CONFIDENTIALITY_RELEASE_ID = "lead-wizard-confidentiality-release";
 const PRIVACY_DOCUMENT_ID = "lead-wizard-privacy-document";
+const IDENTITY_DOCUMENT_ID = "lead-wizard-identity-document";
 const FRAMEWORK_DOCUMENT_ID = "lead-wizard-framework-document";
 const COST_THRESHOLD_ID = "lead-wizard-cost-threshold";
 const ORDER_DOCUMENT_ID = "lead-wizard-order-document";
@@ -2463,7 +2464,7 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Healthcare consent is missing": HEALTHCARE_CONSENT_ID,
     "Primary concern is missing": SERVICE_CONCERN_ID,
     "Requested specialty is missing": SERVICE_SPECIALTIES_ID,
-    "Identity document is not verified": "lead-file-identity",
+    "Identity document is not verified": IDENTITY_DOCUMENT_ID,
     "Signed DSGVO document is missing": PRIVACY_DOCUMENT_ID,
     "Signed confidentiality release is missing": CONFIDENTIALITY_RELEASE_ID,
     "Anamnesis intake is incomplete": SERVICE_CONCERN_ID,
@@ -2631,7 +2632,7 @@ function documentsValidationIssues(
       key: "identity-document",
       step: "documents",
       message: readinessReasonLabel("Identity document is not verified", tx),
-      fieldId: "lead-file-identity",
+      fieldId: IDENTITY_DOCUMENT_ID,
     });
   }
   // A PEP or a country of the high-risk list no longer requires the check.
@@ -6700,8 +6701,16 @@ ${serviceCommentLines.join("\n")}`
     let attempts = 0;
     const focusField = () => {
       const field = document.getElementById(fieldId);
-      if (field) {
-        field.scrollIntoView({ block: "center" });
+      const panel = stepPanelRef.current;
+      if (field && panel?.contains(field)) {
+        // scrollIntoView also scrolls the overflow-hidden modal, which can move
+        // its header and entire body out of view. Only the step panel scrolls.
+        const panelRect = panel.getBoundingClientRect();
+        const fieldRect = field.getBoundingClientRect();
+        panel.scrollTo({
+          top: panel.scrollTop + fieldRect.top - panelRect.top
+            - Math.max(0, (panel.clientHeight - fieldRect.height) / 2),
+        });
         field.focus({ preventScroll: true });
       } else if (++attempts < 30) {
         window.requestAnimationFrame(focusField);
@@ -8599,6 +8608,7 @@ ${serviceCommentLines.join("\n")}`
                 />
               </Section>
 
+              <div id={IDENTITY_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
               <Section
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Документ, удостоверяющий личность", "Ausweisdokument")}
@@ -8691,6 +8701,7 @@ ${serviceCommentLines.join("\n")}`
                   );
                 })()}
               </Section>
+              </div>
               {supplementaryDocuments.length > 0 ? (
                 <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Другие документы", "Weitere Dokumente")}>
                   <WizardDocumentRows

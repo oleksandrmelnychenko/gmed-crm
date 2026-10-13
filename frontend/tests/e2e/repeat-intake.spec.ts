@@ -6,7 +6,43 @@ const caseId = "00000000-0000-0000-0000-000000000333";
 const orderId = "00000000-0000-0000-0000-000000000444";
 const allergyId = "00000000-0000-0000-0000-000000000555";
 
-async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "create" | "clinical" | "order", withNarrative = false, withDocuments = false, asLead = false, convertedLead = false, linkedPatientLifecycle?: "active" | "inactive") {
+for (const asLead of [false, true]) for (const width of [1440, 390]) test(`wizard can navigate back from the final step without losing its content (${asLead ? "lead" : "repeat"}, ${width}px)`, async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.setViewportSize({ width, height: 1000 });
+  const { wizard } = await mount(page, "ru", undefined, false, false, asLead, false, undefined, true);
+  if (!asLead) {
+    await wizard.getByRole("button", { name: "Далее", exact: true }).click();
+    await expect(wizard.getByText("Penicillin", { exact: true })).toBeVisible();
+  }
+  const tabs = wizard.getByRole("tab");
+  for (let index = 0; index < 6; index += 1) {
+    await tabs.last().click();
+    await expect(wizard.getByRole("button", { name: asLead ? "Создать пациента" : "Завершить обращение", exact: true })).toBeVisible();
+    await wizard.getByRole("tabpanel").evaluate(panel => { panel.scrollTop = panel.scrollHeight; });
+    await tabs.nth(index).click();
+    await expect(tabs.nth(index)).toHaveAttribute("aria-selected", "true");
+    await expect(wizard.getByRole("tabpanel")).not.toBeEmpty();
+    await expect(wizard.getByRole("tabpanel").locator(":scope > section").first()).toBeInViewport();
+    await expect(wizard.getByRole("heading", { name: "Anna Beispiel", exact: true })).toBeInViewport();
+    expect(errors).toEqual([]);
+  }
+  for (const reason of ["Укажите дату рождения", "Укажите причину обращения", "Выберите хотя бы одну специализацию", "Подтвердите документ, удостоверяющий личность", "Подпишите рамочный договор"]) {
+    await tabs.last().click();
+    await wizard.getByTestId("completion-blockers").getByRole("button", { name: reason, exact: true }).click();
+    await expect(tabs.last()).toHaveAttribute("aria-selected", "false");
+    await expect(wizard.getByRole("tabpanel").locator(":scope > section").first()).toBeInViewport();
+    await expect(wizard.getByRole("heading", { name: "Anna Beispiel", exact: true })).toBeInViewport();
+    await expect(wizard.getByRole("button", { name: "Назад", exact: true })).toBeInViewport();
+    if (reason === "Подтвердите документ, удостоверяющий личность") {
+      await expect(wizard.getByRole("heading", { name: "Документ, удостоверяющий личность", exact: true })).toBeInViewport();
+      await page.screenshot({ path: `../.tmp/release-audit/wizard-final-step-navigation-${asLead ? "lead" : "repeat"}-${width}.png` });
+    }
+    expect(errors).toEqual([]);
+  }
+});
+
+async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "create" | "clinical" | "order", withNarrative = false, withDocuments = false, asLead = false, convertedLead = false, linkedPatientLifecycle?: "active" | "inactive", readinessNavigation = false) {
   await page.addInitScript(value => {
     localStorage.setItem("gmed_lang", value);
     localStorage.setItem("gmed_access_token", "repeat-intake-test-token");
@@ -31,7 +67,7 @@ async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "
     id: leadId, first_name: "Anna", last_name: "Beispiel", qualification_status: "in_progress",
     intake_model: "patient_first", repeat_patient_id: asLead ? null : patientId, wizard_state: withDocuments && asLead ? {framework_contract_id: "valid-contract"} : {}, services: [], attachments: [],
     ...(convertedLead || linkedPatientLifecycle ? {converted_patient_id: convertedLead ? patientId : null, prospect_patient_id: patientId, prospect_patient_lifecycle: linkedPatientLifecycle ?? "active"} : {}),
-    readiness: {conversion_ready: false, blocking_reasons: [], steps: [], checks: []},
+    readiness: {conversion_ready: false, blocking_reasons: readinessNavigation ? ["Birth date is missing", "Primary concern is missing", "Requested specialty is missing", "Identity document is not verified", "Framework contract is not signed"] : [], steps: readinessNavigation ? ["master_data", "medical", "service", "documents", "order", "commercial", "release"].map(key => ({key, ready: false})) : [], checks: []},
   };
   let hasOrder = false;
   let passportExpiry = "2020-01-01";
