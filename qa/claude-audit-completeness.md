@@ -45,3 +45,15 @@ Initial runtime failures included old fixtures and expectations, the missing pay
 CI and the signed Release Build remain deployment gates for production; local checks do not replace them. Docker prebuild completed for all four DEV services from committed application code. No live patient data was changed by validation. The disposable PostgreSQL instance used a five-second authentication timeout to clean up abandoned test connections promptly; live database settings were not changed.
 
 An existing patient-portal limitation lies outside the supplied finding IDs: one parent login linked to multiple converted children needs a patient-context selector. Selecting a child implicitly would be unsafe; this broader flow was reported separately to the coordinating worker.
+
+## Deployment verification
+
+DEV published committed source `9666a83aa1f1e29d6d060a29109c6a7a3af5ae56` on 2026-10-13 at 08:30 UTC through `publish-dev-current.ps1 -CommittedOnly`. All four application images were rebuilt and their running image IDs verified. The unrelated, uncommitted parser training work was excluded.
+
+The migration rehearsal passed with 469 existing migrations and two pending migrations (`20261013140000`, `20261013141000`). The database backup is retained at `/home/gmed/deploy/backups/database-20261013T083007Z`; the preceding source release is retained at `/home/gmed/deploy/backups/gmed-crm.before-20261013T083007Z`. Deployment exited zero; the public health endpoint returned HTTP 200. Backend, frontend, invoice parser and machine translation reported healthy; the clinical parser worker was running. Evidence: `.tmp/release-audit/dev-publish-final.log`.
+
+Production promotion is gated by [Release Build 38369141127](https://github.com/oleksandrmelnychenko/gmed-crm/actions/runs/38369141127) for that exact source. It has not yet been promoted at this checkpoint.
+
+The release frontend quality gate completed successfully: all 3262 unit cases passed in one clean batch, all 38 mocked chat browser cases passed, and both live chat/realtime cases passed. Lint, production build, dependency audit, print binding audit, three migration-preflight checks and repository hygiene also passed. Evidence: `.tmp/release-audit/release-frontend-final.log`.
+
+CI run 38369140533 passed 42 of 43 cabinet browser cases, then identified an outdated exact payload assertion: the complete payer fixture now includes `city` and `country`. The expected payload now includes both fields, preserving the strict equality check; the scenario passed against an isolated current-source Vite server with its API proxy disabled. Evidence: `.tmp/release-audit/cabinet-ci-fixture-retry.log`. This correction changes only the browser test and this report; application source remains the release source above. A follow-up CI run is required for the corrected test commit.

@@ -1428,6 +1428,8 @@ test.describe("lead cabinet", () => {
       relationship_kind: "parent",
       messenger: "",
       citizenships: ["UA"],
+      city: "Berlin",
+      country: "DE",
       contact_consent: true,
       acts_on_own_account: true,
     });
