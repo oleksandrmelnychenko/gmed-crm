@@ -888,6 +888,24 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     assert_eq!(body["code"], "staff_only");
     assert_eq!(body["field"], "id_document_number");
 
+    // The concern contains health data and requires the current consent.
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("{path}/consent"),
+        &patient,
+        Some(json!({
+            "purpose": "health_data_processing",
+            "version": "2026-10-13",
+            "language": "de"
+        })),
+    )
+    .await;
+    assert!(
+        status == StatusCode::CREATED || status == StatusCode::OK,
+        "{body}"
+    );
+
     // The lead's reason of the request is the lead's own text.
     let (status, body) = request(
         &app,
@@ -1010,6 +1028,22 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("{path}/follow-up/submit"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "follow_up_not_requested");
+    // This assessment fixture now represents an already submitted base form.
+    sqlx::query("UPDATE leads SET portal_submitted_at = clock_timestamp() WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
     let (status, body) = request(
         &app,
         "POST",

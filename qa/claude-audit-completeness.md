@@ -23,7 +23,7 @@ There are 83 report entries, including overlaps between reports. No supplied fin
 - D-M12 does not rewrite completed signature history. Pending consent invitations are invalidated locally and remote withdrawal is attempted after commit.
 - C-M2 uses the existing identity-entry takeover action and identity-review API permission. Medical review chips stay medical-only; no new identity review control is invented.
 
-## Validation and boundary still to report
+## Verified checks and remaining release gates
 
 Each area matrix records tests already passed. Verified frontend gates:
 
@@ -33,6 +33,15 @@ Each area matrix records tests already passed. Verified frontend gates:
 - Sixteen admin/settings/notification/security/activity/health/sanctions browser cases passed, including 1440/390 px layouts. One outdated sheet-title selector was corrected for the new modal and its scenario rerun successfully.
 - Playwright collected all 826 cases in 86 files; this is collection evidence, not a claim that all 826 were executed.
 
-Combined Rust integration tests and workspace Clippy remain release gates. Initial runtime findings included outdated fixtures, a missing required synthetic document version root, and a real historical parent-QES attribution regression; fixes are included and the final batch must verify them. Host memory exhaustion interrupted the earlier parallel run; an interrupted build is not a passing result.
+Local backend verification completed:
+
+- Server library: 912 passed; one explicitly opt-in PostgreSQL provider test remained ignored.
+- 188 distinct API cases passed across the combined batch and targeted retries: admin compliance 18, identification 9, payer 11, payer links 9, cabinet 31, representatives 6, risk 6, leads 71, signature packages 14, signature closure 3, and documents 10.
+- Full workspace Clippy with `-D warnings`, rustfmt, and diff checks passed after the final fixture corrections.
+- Repository hygiene, print bindings and three production migration-preflight unit tests passed.
+
+Initial runtime failures included old fixtures and expectations, the missing payer-link revocation CHECK values, database/application timestamp ordering, and historical parent-QES attribution. Corrections were verified, including complete recipient details, protected adult representatives, health consent before concern text, and the base-submission gate before follow-up submission. The initial combined batch is not represented as green: its failed cases passed in the documented targeted retries. Logs are retained under `.tmp/release-audit/` (`cabinet-rust-verified`, `erasure-regression-retry`, `portal-regressions-retry`, `paying-parent-route-retry`, `representation-risk-retry`, `risk-follow-up-retry`, `signature-regressions`, `minor-signature-fixture-rerun`, `document-consent-regressions`, and `clippy-fixtures-final`).
+
+CI and the signed Release Build remain deployment gates for production; local checks do not replace them. Docker prebuild completed for all four DEV services from committed application code. No live patient data was changed by validation. The disposable PostgreSQL instance used a five-second authentication timeout to clean up abandoned test connections promptly; live database settings were not changed.
 
 An existing patient-portal limitation lies outside the supplied finding IDs: one parent login linked to multiple converted children needs a patient-context selector. Selecting a child implicitly would be unsafe; this broader flow was reported separately to the coordinating worker.

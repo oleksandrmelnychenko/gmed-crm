@@ -2794,7 +2794,7 @@ async fn purging_a_lead_clears_the_portal_intake() {
         router,
         lead_id,
         &patient,
-        &json!({ "agency_processing": true }),
+        &json!({ "agency_processing": true, "doctors_to_agency": true, "data_system": true }),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{choices}");
@@ -3970,7 +3970,8 @@ async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven()
 
     // A third party receives the invoice: answered before anybody pays.
     // "The recipient is also the payer" is ticked by default (owner
-    // 2026-10-11): a recipient who pays is the payer, so who pays is asked.
+    // 2026-10-11): the recipient's own fields and confirmation are actionable;
+    // a separate hidden "who pays" field must not block the form.
     let body = save(json!({ "invoice_recipient": "third_party" })).await;
     assert_eq!(
         body["billing"]["invoice_recipient"], "third_party",
@@ -3980,7 +3981,18 @@ async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven()
         body["billing"]["invoice_recipient_is_payer"], true,
         "{body}"
     );
-    assert_eq!(missing_for_step_three(&body), ["payer_kind"], "{body}");
+    assert_eq!(
+        missing_for_step_three(&body),
+        [
+            "recipient_type",
+            "recipient_street",
+            "recipient_zip",
+            "recipient_city",
+            "recipient_country",
+            "invoice_recipient_is_payer"
+        ],
+        "{body}"
+    );
     // Clearing the answer keeps the default while a recipient is chosen.
     let body = save(json!({ "invoice_recipient_is_payer": null })).await;
     assert_eq!(
@@ -4053,7 +4065,11 @@ async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven()
         body["billing"]["recipient"]["payment_reason"].is_null(),
         "{body}"
     );
-    assert_eq!(missing_for_step_three(&body), ["payer_kind"], "{body}");
+    assert_eq!(
+        missing_for_step_three(&body),
+        ["invoice_recipient_is_payer"],
+        "{body}"
+    );
     // The cabinet names the recipient as payer: section 7 goes "to the payer".
     let (status, body) = json_request(
         router,
@@ -4210,6 +4226,10 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
             "date_of_birth": "1985-03-02",
             "email": "Anna.Route@example.com",
             "citizenships": ["DE"],
+            "street": "Hauptstraße 1",
+            "zip": "10115",
+            "city": "Berlin",
+            "country": "DE",
             "contact_consent": true
         })),
     )
@@ -4272,7 +4292,18 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
         "POST",
         &billing,
         ben,
-        Some(json!({ "invoice_to": "payer" })),
+        Some(json!({
+            "invoice_recipient": "third_party",
+            "invoice_recipient_is_payer": true,
+            "recipient_type": "person",
+            "recipient_first_name": "Anna",
+            "recipient_last_name": "Muster",
+            "recipient_relationship_kind": "parent",
+            "recipient_street": "Hauptstraße 1",
+            "recipient_zip": "10115",
+            "recipient_city": "Berlin",
+            "recipient_country": "DE"
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -4343,7 +4374,14 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["billing"]["payment_route_by"], "guardian", "{body}");
-    assert_eq!(body["billing"]["invoice_to"], "payer", "{body}");
+    // Anna remains the named recipient. Naming Ben as payer must not silently
+    // transfer her recipient identity; the recipient/payer choice needs review.
+    assert!(body["billing"]["invoice_to"].is_null(), "{body}");
+    assert_eq!(body["billing"]["recipient"]["first_name"], "Anna", "{body}");
+    assert!(
+        missing_for_the_billing(&body).contains(&"invoice_recipient_is_payer"),
+        "{body}"
+    );
     assert!(body["billing"]["payment_method"].is_null(), "{body}");
     assert_eq!(
         body["billing"]["account_holder_suggestion"], "Ben Muster",
@@ -6033,8 +6071,9 @@ async fn a_minor_leads_consent_form_is_the_childs_and_names_the_parent_who_chose
     );
     assert!(text.contains("[x] E-mail"), "{text}");
     assert!(text.contains("[ ] WhatsApp-Messenger"), "{text}");
-    // The friend is a recipient; the parents are not.
-    assert!(text.contains("Oma Beispiel"), "{text}");
+    // Trusted contacts are not recipients of an explicit consent choice;
+    // the parent left the named-recipient option unticked.
+    assert!(!text.contains("Oma Beispiel"), "{text}");
     assert!(!text.contains("Ich, Mia"), "{text}");
     assert!(!text.contains("meine eigene Auswahl"), "{text}");
 

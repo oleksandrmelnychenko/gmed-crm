@@ -4,35 +4,37 @@ Reviewed 2026-10-13 against shared main checkout; source report is evidence, not
 
 | Finding | Verification / ownership | Status |
 | --- | --- | --- |
-| B-1 | Conversion currently links only own login; explicit active guardian assignments added and block email fallback for lead-login history. | Implemented; regression tests pending |
-| B-2 | Own minor login currently linked on conversion; exclude it. | Implemented; regression tests pending |
-| B-4 | New payer audits are metadata-only (payer agent). Migration 20261013140000 deterministically scrubs strings in legacy payer old/new snapshots on source-lead erasure and backfills already-deleted leads; same-key structure and non-text evidence retained. | New events: payer agent; historical scrub: lifecycle agent. Regression tests pending |
-| B-5 | Portal purge does not delete consent_form_choices named recipients. | Implemented; regression tests pending |
-| B-6 | Patient erasure anonymizes source leads without full portal account cleanup. | Implemented; regression tests pending |
-| B-7 | Unchanged repeat submit writes new timestamps, audit and notifications. | Implemented; regression tests pending |
-| B-8 | PORTAL_LEAD_SQL already hides converted leads, including writes. | Preserved; conversion regression test added |
-| B-9 | Guardian write authorization does not recheck minor age. | Implemented; regression tests pending |
-| B-10 | Organisation payer sync misses realtime event; payer agent owns handler branch. | Delegated, pending verification |
-| B-11 | Upload limit count occurs before lead lock. Also stamp created_at after lock (C-L1 coordination). | Implemented; regression tests pending |
-| B-12 | Minor own-login error incorrectly depends on parent access in wording. | Implemented; regression tests pending |
-| B-13 | Guardian reissue can reactivate IT-disabled accounts; stale lead links count as access. | Implemented; regression tests pending |
-| B-14 | Password reset and login-email audit uses best-effort queue. | Implemented; regression tests pending |
-| B-15a | Guardian can rename another parent's identity. Server guard here; frontend read-only coordination with C owner. | Implemented; regression tests pending |
-| B-15b | Revoked guardian links suppress missing-access notification forever. | Implemented; regression tests pending |
+| B-1 | Conversion creates explicit active guardian assignments and blocks email fallback for lead-login history. | Verified: both parents reach the converted patient through explicit assignments |
+| B-2 | Conversion excludes the minor's own closed login. | Verified: no child assignment and matching-email fallback remains denied |
+| B-4 | New payer audits are metadata-only (payer agent). Migration 20261013140000 deterministically scrubs strings in legacy payer old/new snapshots on source-lead erasure and backfills already-deleted leads; same-key structure and non-text evidence retained. | Verified: historical-snapshot erasure and immutability regression passed; payer API suites passed |
+| B-5 | Portal purge deletes consent_form_choices, including named recipients. | Verified: enhanced lead-purge regression passed on targeted retry |
+| B-6 | Patient erasure now runs full source-lead portal cleanup: consent choices, login-email records, uploads and guardian access. | Verified: dedicated erasure regression passed |
+| B-7 | Unchanged repeat submit returns the existing payload under the lead lock without changing timestamps, audit or notifications. | Verified: concurrent unchanged retries and real-edit resubmission regression passed |
+| B-8 | PORTAL_LEAD_SQL continues hiding converted leads, including writes. | Verified: converted-lead writes are refused for both guardians |
+| B-9 | Guardian write authorization rechecks the current minor age. | Verified: guardian age/write boundary regression passed; reads preserved per source scope |
+| B-10 | Organisation payer sync publishes the realtime update; payer agent owns the handler branch. | Implemented by payer agent; final payer API suites passed |
+| B-11 | Upload count is rechecked under the lead lock, and created_at is stamped after the lock (C-L1 coordination). | Verified: two concurrent uploads at 29 existing documents yield exactly one accepted upload |
+| B-12 | Minor own-login error wording reflects the unconditional under-18 closure. | Verified: minor own-login API regression passed |
+| B-13 | Guardian reissue respects later IT disabling and ignores stale converted/deleted lead links. | Verified: revoke/reactivate allowed; later IT disable cannot be bypassed |
+| B-14 | Password resets and sign-in email events use durable awaited audit writes. | Verified: guardian password-reset audit exists before response; all three paths use awaited writes |
+| B-15a | A guardian cannot edit another parent's identity; frontend read-only behavior coordinated with C owner. | Verified: other-parent first name, last name and DOB edits rejected |
+| B-15b | Missing-access notification can recur once after guardian access is revoked. | Verified: one notification batch after revoke and one for rejected minor-DOB attempts |
 | B-15c | lead_risk_decisions.reason retains AML evidence deliberately. | Retained as requested |
 
-B-3 is absent from the supplied source report. Parent owns C personal/identity/consent changes and CHANGED_SINCE_SUBMIT_SQL; D owns signature/PDF/follow-up functions. Tests will use disposable Docker PostgreSQL, never DEV.
+B-3 is absent from the supplied source report. Parent owns C personal/identity/consent changes and CHANGED_SINCE_SUBMIT_SQL; D owns signature/PDF/follow-up functions. Runtime tests used disposable Docker PostgreSQL, never DEV.
 
-## Added verification
+## Verification
 
-- lead_portal_api: unchanged_submission_is_idempotent_but_a_real_edit_can_be_resubmitted; guardian_identity_age_and_reactivation_boundaries_are_enforced; concurrent_uploads_respect_the_locked_thirty_document_limit; historical_payer_snapshots_are_scrubbed_only_on_lead_erasure; existing purging_a_lead_clears_the_portal_intake now checks consent choices.
-- Cross-review regression: rejected_minor_birth_date_notifies_staff_once_without_persisting_it checks the rejected own-login DOB attempt still notifies staff once, despite the persisted DOB remaining adult. Saved-minor notices still recheck current age/access under lock.
-- leads_api: minor_conversion_explicitly_links_both_guardians_and_never_the_child_login.
-- admin_compliance_api: erasure_cleans_source_lead_portal_choices_mail_uploads_and_guardians.
-- rustfmt passed on edited Rust files. Runtime tests queued behind shared cold build; results will be recorded below.
-- First integration attempt exposed an invalid `orders.lead_id` reference in the new audit-scrub migration. Corrected migration and runtime scrub to the actual `orders.source_lead_id` relationship. The next attempt stopped during compilation with memory-allocation failure; the coordinating agent is rerunning sequentially after the frontend build.
-- Sequential run: admin_compliance_api passed 17 existing cases; the new source-lead cleanup case stopped in its synthetic document seed because `version_root_document_id` is required. Fixed that fixture and the same seed in the new concurrent-upload case to use the document's own UUID as the version root; rerun pending.
-- The next source-lead cleanup run reached the erasure endpoint and correctly refused a patient-manager executor (403). Updated the fixture to use the seeded CEO for execution, matching the existing erasure helper usage and preserving production RBAC. Targeted rerun pending; the other 17 admin cases passed again.
+All added B runtime regressions passed across the coordinated final batch and targeted retries:
+
+- lead_portal_api: unchanged_submission_is_idempotent_but_a_real_edit_can_be_resubmitted; guardian_identity_age_and_reactivation_boundaries_are_enforced; concurrent_uploads_respect_the_locked_thirty_document_limit; historical_payer_snapshots_are_scrubbed_only_on_lead_erasure; rejected_minor_birth_date_notifies_staff_once_without_persisting_it.
+- Enhanced purging_a_lead_clears_the_portal_intake passed on retry and verifies consent-choice deletion with existing intake/file/declaration cleanup.
+- leads_api: minor_conversion_explicitly_links_both_guardians_and_never_the_child_login passed, including both parents' /me/export, retained explicit assignments, refused converted-lead writes and denied matching-email fallback for the child's closed login.
+- admin_compliance_api: erasure_cleans_source_lead_portal_choices_mail_uploads_and_guardians passed on targeted retry. All 18 distinct admin cases passed across the final batch and retry.
+- Evidence: .tmp/release-audit/cabinet-rust-verified.log; .tmp/release-audit/portal-regressions-retry.log; .tmp/release-audit/erasure-regression-retry.log. The portal retry log also includes an unrelated payer case failure handled by the payer agent; the B purge case itself passed.
+- rustfmt and git diff --check passed. Repository-wide release gates remain with the coordinating agent.
+
+Earlier runs caught and corrected the invalid orders.lead_id migration reference (actual relation: source_lead_id), required synthetic-document version roots, an incorrectly privileged erasure-test actor and a partial core-consent fixture. An earlier compiler memory-allocation failure was retried sequentially; it was not treated as passing evidence.
 
 ## D-11 follow-up (reassigned from D)
 

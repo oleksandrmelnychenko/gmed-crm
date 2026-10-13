@@ -38,7 +38,8 @@ All listed changes below are implemented in the shared working tree. Runtime val
 - Targeted ESLint passed for the person/identity/submission code and tests.
 - Production frontend build and full ESLint passed. The full frontend unit batch passed 3261 cases; its only obsolete payer-link copy assertion was updated and its entire 9-case file passed on rerun (3262 distinct cases verified).
 - All 43 full-cabinet browser cases passed across the initial 39 successful cases and four corrected payer-fixture retries. All nine representation cases and seven follow-up cases also passed against the built frontend.
-- Combined Rust unit/API verification remains in progress; see the aggregate report for final results. A test compilation or an interrupted run is not a passing result.
+- Backend regressions passed: 912 library cases; all 31 cabinet, six representation and six risk API cases verified across the combined run and targeted retries, plus the 71-case lead lifecycle suite. Old fixtures were updated for required health consent, base submission before follow-up, and keeping a protected representative when the answer changes to No. The dedicated health/identity/base-change and concurrent upload regressions passed.
+- Final full-workspace Clippy, rustfmt and diff checks passed. See the aggregate report for the complete 188-case targeted API evidence and remaining CI/release gates.
 - Independent review checked purpose-specific consent versions, staff identity preservation, upload deletion symmetry and base/follow-up timestamps. It found a rejected-minor notification regression, fixed by the lifecycle worker with a regression test.
 
 No live patient data was changed by these checks. Mocked browser servers proxy only to a closed local port; API tests use disposable local PostgreSQL.

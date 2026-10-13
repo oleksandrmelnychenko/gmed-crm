@@ -2328,8 +2328,8 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
          VALUES ('Kind', 'Beispiel', (current_date - interval '10 years')::date, 'kind@example.org', $1, $2) RETURNING id",
     )
     .bind(json!([
-        {"name":"Anna Beispiel","email":"anna@example.org","relation":"Mutter"},
-        {"name":"Bernd Beispiel","email":"bernd@example.org","relation":"Vater"}
+        {"id":Uuid::new_v4(),"name":"Anna Beispiel","email":"anna@example.org","relation":"Mutter"},
+        {"id":Uuid::new_v4(),"name":"Bernd Beispiel","email":"bernd@example.org","relation":"Vater"}
     ]))
     .bind(env.admin_id)
     .fetch_one(&env.pool)

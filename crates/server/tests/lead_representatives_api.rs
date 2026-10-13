@@ -863,8 +863,8 @@ async fn an_adult_names_the_person_who_acts_for_him() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
     assert_eq!(error["code"], "custody_minor_only", "{error}");
 
-    // Staff took the copy of the identity document over: "no" would remove
-    // the person and the file with it, so it is refused and nothing changes.
+    // Staff took the copy over: the answer may change, but the protected
+    // representative and their document stay on file.
     let (status, reviewed) = json_request(
         router,
         "POST",
@@ -876,20 +876,23 @@ async fn an_adult_names_the_person_who_acts_for_him() {
     assert_eq!(status, StatusCode::OK, "{reviewed}");
     let (_, body) = json_request(router, "GET", &request, &patient, None).await;
     assert_eq!(representative(&body, agent)["can_remove"], false, "{body}");
-    for (method, path, body) in [
-        (
-            "POST",
-            format!("{request}/representation"),
-            Some(json!({ "has_representative": false })),
-        ),
-        ("DELETE", agent_path.clone(), None),
-    ] {
-        let (status, error) = json_request(router, method, &path, &patient, body).await;
-        assert_eq!(status, StatusCode::CONFLICT, "{error}");
-        assert_eq!(error["code"], "representative_in_use", "{error}");
-    }
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/representation"),
+        &patient,
+        Some(json!({ "has_representative": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, error) = json_request(router, "DELETE", &agent_path, &patient, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+    assert_eq!(error["code"], "representative_in_use", "{error}");
     let (_, body) = json_request(router, "GET", &request, &patient, None).await;
-    assert_eq!(body["representation"]["has_representative"], true, "{body}");
+    assert_eq!(
+        body["representation"]["has_representative"], false,
+        "{body}"
+    );
     assert_eq!(representative(&body, agent)["last_name"], "Muster");
 }
 
