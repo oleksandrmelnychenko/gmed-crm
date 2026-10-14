@@ -283,15 +283,22 @@ export const NO_CONSENT_FORM_CHOICES: ConsentFormChoices = {
   channel_telegram: false,
 };
 
-/** Who a named recipient is to the person (owner 2026-10-12). */
-export const CONSENT_RECIPIENT_RELATIONS = ["spouse", "child", "relative", "family_doctor", "clinic", "other"] as const;
+/** Who a named recipient (a trusted person) is to the person (owner 2026-10-12; `friend` 2026-10-14). */
+export const CONSENT_RECIPIENT_RELATIONS = ["spouse", "child", "relative", "friend", "family_doctor", "clinic", "other"] as const;
 export type ConsentRecipientRelation = (typeof CONSENT_RECIPIENT_RELATIONS)[number];
 
 /**
  * A person or institution named for "named recipients": part of the choice, printed on the form
- * while that option is chosen; not sanctions-screened (owner 2026-10-12).
+ * while that option is chosen; not sanctions-screened (owner 2026-10-12). Since 2026-10-14 the
+ * list is the lead's trusted persons (own menu item of the cabinet, `TrustedPerson`).
  */
 export type ConsentRecipient = { name: string; relation: ConsentRecipientRelation; contact?: string | null };
+
+/**
+ * A trusted person of the cabinet (owner 2026-10-14): somebody GMED may tell about the person —
+ * information only, never acting for the person. Same shape and rules as a recipient.
+ */
+export type TrustedPerson = ConsentRecipient;
 
 /** At most this many recipients (the server answers 422 `consent_recipients_invalid` otherwise). */
 export const MAX_CONSENT_RECIPIENTS = 5;
@@ -742,6 +749,8 @@ export type LeadRequest = {
   consents: Record<string, LeadRequestConsent>;
   /** The person's own choice of the consent form options; absent on an older server. */
   consent_form?: LeadRequestConsentForm;
+  /** The trusted persons of the menu item (2026-10-14); absent on an older server. */
+  trusted_persons?: TrustedPerson[];
   submitted_at: string | null;
   /** Data or documents changed after sending; absent on an older server. */
   changed_since_submit?: boolean;
@@ -832,7 +841,9 @@ export function giveLeadConsent(
 
 /**
  * Saves the person's own choice of the consent form options (every save is a new record; the
- * newest counts). 409 `consent_version_outdated` when the texts changed meanwhile.
+ * newest counts). 409 `consent_version_outdated` when the texts changed meanwhile. Since
+ * 2026-10-14 the cabinet sends no recipients: with "named recipients" the server takes the stored
+ * trusted persons (422 `consent_recipients_required` while there are none).
  */
 export function saveLeadConsentFormChoices(
   leadId: string,
@@ -853,6 +864,18 @@ export async function saveLeadConsentFormChoicesAndRefresh(
 ): Promise<LeadRequest> {
   await saveLeadConsentFormChoices(...args);
   return fetchMyLeadRequest(args[0]);
+}
+
+/**
+ * Saves the whole list of trusted persons (owner 2026-10-14, at most five) and answers the
+ * request. 422 `consent_recipients_invalid` for an incomplete or too long entry. While the
+ * consent choice names recipients, a changed list is a new choice (a form made before is made anew).
+ */
+export function saveLeadTrustedPersons(leadId: string, persons: TrustedPerson[]): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/trusted-persons`, {
+    method: "POST",
+    body: JSON.stringify({ persons }),
+  });
 }
 
 export function revokeLeadConsent(leadId: string, purpose: string): Promise<{ revoked: boolean }> {

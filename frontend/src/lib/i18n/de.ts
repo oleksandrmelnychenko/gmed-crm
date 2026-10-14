@@ -66,6 +66,7 @@ export const de = {
   nav_my_notifications: "Meine Benachrichtigungen",
   nav_my_documents: "Meine Dokumente",
   nav_my_request: "Ihre Anfrage",
+  nav_trusted_persons: "Vertrauenspersonen",
   nav_my_appointments: "Meine Termine",
   nav_my_recommendations: "Meine Empfehlungen",
   nav_my_services: "Servicekatalog",

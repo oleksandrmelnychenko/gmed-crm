@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import { normalizeLeadPortalConsentForm, type LeadPortalConsentForm } from "../model/lead-portal-consents";
+import { normalizeConsentRecipients, normalizeLeadPortalConsentForm, type LeadPortalConsentForm, type LeadPortalConsentRecipient } from "../model/lead-portal-consents";
 
 import { INVOICE_TO_VALUES, PAYMENT_METHODS, type InvoiceTo, type PaymentMethod } from "../model/lead-payer";
 import {
@@ -276,6 +276,8 @@ export type LeadPortalIntake = {
   payer_organisation?: { legal_form: string | null; register_number: string | null; contact_name: string | null } | null;
   /** Read-only Anlage 1 choices made by the patient or representative. */
   consent_form?: LeadPortalConsentForm | null;
+  /** Stored independently of the optional consent to disclose to these people. */
+  trusted_persons?: LeadPortalConsentRecipient[];
   lead_id: string;
   fill_mode: Step1FillMode;
   /** Keys are lead columns: first_name, date_of_birth, street_address, … */
@@ -408,6 +410,7 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     patient_payer: raw.patient_payer && typeof raw.patient_payer === "object" ? raw.patient_payer : null,
     payer_organisation: raw.identification_hidden ? null : normalizePayerOrganisation(raw.payer_organisation),
     consent_form: raw.identification_hidden ? null : normalizeLeadPortalConsentForm(raw.consent_form),
+    trusted_persons: raw.identification_hidden ? [] : normalizeConsentRecipients(raw.trusted_persons),
     progress: raw.progress ?? { filled: 0, total: 0, documents: 0, submitted_at: null },
     submitted_at: raw.submitted_at ?? null,
     submitted_by: raw.submitted_by ?? null,

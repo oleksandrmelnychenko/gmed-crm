@@ -32,10 +32,20 @@ describe("staff cabinet parity payload", () => {
     const intake = normalizeLeadPortalIntake({
       lead_id: "test-only", identification_hidden: true,
       payer_organisation: { contact_name: "Restricted" },
+      trusted_persons: [{ name: "Restricted", relation: "friend" }],
       consent_form: { choices: { agency_processing: true }, chosen_by_name: "Restricted" },
     });
     expect(intake?.payer_organisation).toBeNull();
     expect(intake?.consent_form).toBeNull();
+    expect(intake?.trusted_persons).toEqual([]);
+  });
+
+  it("preserves trusted persons without a consent choice", () => {
+    const intake = normalizeLeadPortalIntake({ lead_id: "test-only", trusted_persons: [
+      { name: " Eva Muster ", relation: "friend", contact: " eva@example.com " }, { name: " " }, null,
+    ] });
+    expect(intake?.consent_form).toBeNull();
+    expect(intake?.trusted_persons).toEqual([{ name: "Eva Muster", relation: "friend", contact: "eva@example.com" }]);
   });
 
   it("preserves explicitly declined channels in the consent snapshot", () => {

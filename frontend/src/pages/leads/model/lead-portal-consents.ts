@@ -9,7 +9,7 @@ export const PORTAL_CONSENT_CHANNELS = [
 export type PortalConsentChoiceKey = typeof PORTAL_CONSENT_OPTIONS[number] | typeof PORTAL_CONSENT_CHANNELS[number];
 
 /** Who a named recipient is to the person (owner 2026-10-12); not sanctions-screened. */
-export const CONSENT_RECIPIENT_RELATIONS = ["spouse", "child", "relative", "family_doctor", "clinic", "other"] as const;
+export const CONSENT_RECIPIENT_RELATIONS = ["spouse", "child", "relative", "friend", "family_doctor", "clinic", "other"] as const;
 export type ConsentRecipientRelation = (typeof CONSENT_RECIPIENT_RELATIONS)[number];
 
 /** A person or institution the person named for "named recipients". */

@@ -14,7 +14,8 @@ type Tx = (ru: string, de: string) => string;
 /** Read-only cabinet choices; staff never change or preset the person's consent. */
 export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalIntake | null; tx: Tx }) {
   const form = intake?.consent_form;
-  if (!intake || intake.identification_hidden || !form) return null;
+  const persons = intake?.trusted_persons ?? [];
+  if (!intake || intake.identification_hidden || (!form && persons.length === 0)) return null;
   const labels: Record<PortalConsentChoiceKey, string> = {
     agency_processing: tx("GMED: получение, обработка, хранение и передача данных", "GMED: Daten einholen, verarbeiten, speichern und übermitteln"),
     doctors_to_agency: tx("Лечащие врачи и учреждения: передача документов GMED", "Behandelnde Ärzte und Einrichtungen: Unterlagen an GMED übermitteln"),
@@ -26,15 +27,16 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
     spouse: tx("супруг(а) / партнёр", "Ehe-/Lebenspartner/in"),
     child: tx("ребёнок", "Kind"),
     relative: tx("родственник", "Angehörige/r"),
+    friend: tx("друг / знакомый", "Freund/in / Bekannte/r"),
     family_doctor: tx("семейный врач", "Hausarzt/Hausärztin"),
     clinic: tx("клиника / учреждение", "Klinik/Einrichtung"),
     other: tx("другое", "Sonstige"),
   };
-  const who = form.chosen_by_name
-    ?? (form.access_kind === "guardian" ? tx("Родитель / представитель", "Elternteil / Vertretung")
-      : form.access_kind === "self" ? tx("Пациент", "Patient/in") : tx("Не указан", "Nicht angegeben"));
+  const who = form?.chosen_by_name
+    ?? (form?.access_kind === "guardian" ? tx("Родитель / представитель", "Elternteil / Vertretung")
+      : form?.access_kind === "self" ? tx("Пациент", "Patient/in") : tx("Не указан", "Nicht angegeben"));
   const choice = (key: PortalConsentChoiceKey) => {
-    const answer = form.choices?.[key];
+    const answer = form?.choices?.[key];
     return (
       <StatusChip tone={answer === true ? "success" : "neutral"}>
         {answer === true ? tx("Разрешено", "Erlaubt") : answer === false ? tx("Не разрешено", "Nicht erlaubt") : tx("Не отвечено", "Nicht beantwortet")}
@@ -42,7 +44,15 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
     );
   };
   return (
-    <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="portal-consent-choices">
+    <>
+    {persons.length > 0 ? <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="portal-trusted-persons">
+      <AdminSectionTitle>{tx("Доверенные лица (из кабинета)", "Vertrauenspersonen (aus dem Kundenkabinett)")}</AdminSectionTitle>
+      <p className="text-xs text-muted-foreground">{tx("Только получение информации. Не могут действовать от имени пациента или подписывать документы. Передача данных возможна только с соответствующим согласием.", "Nur für Auskünfte. Keine Vertretung und keine Unterschrift im Namen des Patienten. Die Datenübermittlung setzt eine entsprechende Einwilligung voraus.")}</p>
+      <ul className="space-y-1 text-sm">{persons.map((person, index) => <li key={index} className="break-words leading-5">
+        <span className="font-medium">{person.name}</span>{" · "}{relationLabels[person.relation as ConsentRecipientRelation] ?? relationLabels.other}{person.contact ? ` · ${person.contact}` : ""}
+      </li>)}</ul>
+    </div> : null}
+    {form ? <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="portal-consent-choices">
       <AdminSectionTitle>{tx("Выбор клиента: передача данных (Anlage 1)", "Auswahl im Kundenkabinett: Datenübermittlung (Anlage 1)")}</AdminSectionTitle>
       {form.choices ? (
         <p className="text-xs leading-5 text-muted-foreground" data-testid="portal-consent-chooser">
@@ -78,6 +88,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
           ))}
         </dl>
       </div>
-    </div>
+    </div> : null}
+    </>
   );
 }

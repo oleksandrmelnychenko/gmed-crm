@@ -61,6 +61,7 @@ export interface Translations
   nav_my_notifications: string;
   nav_my_documents: string;
   nav_my_request: string;
+  nav_trusted_persons: string;
   nav_my_appointments: string;
   nav_my_recommendations: string;
   nav_my_services: string;

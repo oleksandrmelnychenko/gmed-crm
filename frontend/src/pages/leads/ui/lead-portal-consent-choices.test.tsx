@@ -16,6 +16,16 @@ const savedForm = normalizeLeadPortalConsentForm({
 });
 
 describe("portal consent facts in the staff wizard", () => {
+  it("shows the stored trusted list independently of a consent choice and does not grant permission", () => {
+    const intake = state({ trusted_persons: [{ name: "Eva Muster", relation: "friend", contact: "eva@example.com" }] });
+    const html = renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={tx} />);
+    expect(html).toContain("Доверенные лица (из кабинета)");
+    expect(html).toContain("друг / знакомый");
+    expect(html).toContain("Eva Muster");
+    expect(html).not.toContain(">Разрешено<");
+    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain("Freund/in / Bekannte/r");
+    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={{ ...intake, identification_hidden: true }} tx={tx} />)).toBe("");
+  });
   it("shows medical consent independently of files, with grant and revocation dates", () => {
     const intake = state({ uploads: [], consents: [{ id: "health", type: "health_data_processing", given_at: "2026-10-11T09:00:00Z", revoked_at: "2026-10-12T09:00:00Z", version: "v1", access_kind: "guardian" }] });
     const html = renderToStaticMarkup(<PortalHealthConsentLine intake={intake} tx={tx} />);

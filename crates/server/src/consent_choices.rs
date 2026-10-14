@@ -112,16 +112,18 @@ impl ConsentChoices {
     }
 }
 
-/// Who a named recipient is to the person, in the order the cabinet offers it.
-pub const RECIPIENT_RELATIONS: [&str; 6] = [
+/// Who a named recipient (a trusted person of the cabinet) is to the person,
+/// in the order the cabinet offers it; `friend` since 2026-10-14.
+pub const RECIPIENT_RELATIONS: [&str; 7] = [
     "spouse",
     "child",
     "relative",
+    "friend",
     "family_doctor",
     "clinic",
     "other",
 ];
-/// At most this many recipients per choice.
+/// At most this many recipients per choice (and trusted persons per lead).
 pub const MAX_RECIPIENTS: usize = 5;
 const RECIPIENT_TEXT_MAX: usize = 120;
 /// Refusal of a save in the cabinet: "named recipients" is ticked, but nobody
@@ -155,6 +157,7 @@ impl ConsentRecipient {
             "spouse" => "Ehe-/Lebenspartner/in",
             "child" => "Kind",
             "relative" => "Angehörige/r",
+            "friend" => "Freund/in / Bekannte/r",
             "family_doctor" => "Hausarzt/Hausärztin",
             "clinic" => "Klinik/Einrichtung",
             _ => "Sonstige",
@@ -177,31 +180,23 @@ impl ConsentRecipient {
     }
 }
 
-/// The recipients as they are stored: trimmed, blank contacts dropped. `Err`
-/// with [`RECIPIENTS_INVALID`] for an empty name, an unknown relation, a text
-/// over 120 characters or more than [`MAX_RECIPIENTS`]; with
-/// [`RECIPIENTS_REQUIRED`] when "named recipients" is ticked and nobody is
-/// named.
-pub fn clean_recipients(
-    choices: &ConsentChoices,
-    recipients: Vec<ConsentRecipient>,
+/// Persons as they are stored — the trusted persons of the cabinet
+/// (`leads.portal_trusted_persons`, 2026-10-14) and the recipients of a
+/// choice: the name trimmed with inner spaces collapsed, the relation
+/// trimmed, blank contacts dropped. `Err` with [`RECIPIENTS_INVALID`] for an
+/// empty name, an unknown relation, a text over 120 characters or more than
+/// [`MAX_RECIPIENTS`]. An empty list is valid (nobody named).
+pub fn clean_persons(
+    persons: Vec<ConsentRecipient>,
 ) -> Result<Vec<ConsentRecipient>, &'static str> {
-    // Without the consent to pass data on, no third party's data is kept.
-    if !choices.named_recipients {
-        return Ok(Vec::new());
-    }
-    if recipients.len() > MAX_RECIPIENTS {
+    if persons.len() > MAX_RECIPIENTS {
         return Err(RECIPIENTS_INVALID);
     }
-    let mut cleaned = Vec::with_capacity(recipients.len());
-    for recipient in recipients {
-        let name = recipient
-            .name
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        let relation = recipient.relation.trim().to_string();
-        let contact = recipient
+    let mut cleaned = Vec::with_capacity(persons.len());
+    for person in persons {
+        let name = person.name.split_whitespace().collect::<Vec<_>>().join(" ");
+        let relation = person.relation.trim().to_string();
+        let contact = person
             .contact
             .map(|contact| contact.trim().to_string())
             .filter(|contact| !contact.is_empty());
@@ -220,7 +215,22 @@ pub fn clean_recipients(
             contact,
         });
     }
-    if choices.named_recipients && cleaned.is_empty() {
+    Ok(cleaned)
+}
+
+/// The recipients of a choice as they are stored ([`clean_persons`]); with
+/// [`RECIPIENTS_REQUIRED`] when "named recipients" is ticked and nobody is
+/// named.
+pub fn clean_recipients(
+    choices: &ConsentChoices,
+    recipients: Vec<ConsentRecipient>,
+) -> Result<Vec<ConsentRecipient>, &'static str> {
+    // Without the consent to pass data on, no third party's data is kept.
+    if !choices.named_recipients {
+        return Ok(Vec::new());
+    }
+    let cleaned = clean_persons(recipients)?;
+    if cleaned.is_empty() {
         return Err(RECIPIENTS_REQUIRED);
     }
     Ok(cleaned)
@@ -744,6 +754,65 @@ mod tests {
             OwnConsentChoice::from_bindings(Some(&json!({ BINDING_KEY: recorded.binding() })))
                 .unwrap();
         assert_eq!(restored, recorded);
+    }
+
+    /// The trusted persons of the cabinet (owner 2026-10-14): the same rules
+    /// as the recipients, but an empty list is valid and nothing depends on a
+    /// choice.
+    #[test]
+    fn trusted_persons_are_cleaned_like_recipients_and_may_be_empty() {
+        let person = |name: &str, relation: &str, contact: Option<&str>| ConsentRecipient {
+            name: name.into(),
+            relation: relation.into(),
+            contact: contact.map(Into::into),
+        };
+        assert_eq!(clean_persons(Vec::new()), Ok(Vec::new()));
+        assert_eq!(
+            clean_persons(vec![
+                person("  Oma   Lena ", " relative ", Some(" +49 30 000 ")),
+                person("Max Freund", "friend", Some("")),
+            ]),
+            Ok(vec![
+                person("Oma Lena", "relative", Some("+49 30 000")),
+                person("Max Freund", "friend", None),
+            ])
+        );
+        for invalid in [
+            person("", "friend", None),
+            person("Max", "neighbour", None),
+            person(&"x".repeat(121), "friend", None),
+            person("Max", "friend", Some(&"1".repeat(121))),
+        ] {
+            assert_eq!(clean_persons(vec![invalid]), Err(RECIPIENTS_INVALID));
+        }
+        assert_eq!(
+            clean_persons(vec![person("Max", "friend", None); MAX_RECIPIENTS + 1]),
+            Err(RECIPIENTS_INVALID)
+        );
+        assert_eq!(
+            clean_persons(vec![person("Max", "friend", None); MAX_RECIPIENTS])
+                .map(|list| list.len()),
+            Ok(MAX_RECIPIENTS)
+        );
+        // The new relation is offered and printed.
+        assert!(RECIPIENT_RELATIONS.contains(&"friend"));
+        assert_eq!(
+            person("Max Freund", "friend", None).printed_line(),
+            "Max Freund (Freund/in / Bekannte/r)"
+        );
+        // A choice with "named recipients" still needs somebody.
+        let named = ConsentChoices {
+            named_recipients: true,
+            ..core()
+        };
+        assert_eq!(
+            clean_recipients(&named, vec![person("Max", "friend", None)]),
+            Ok(vec![person("Max", "friend", None)])
+        );
+        assert_eq!(
+            clean_recipients(&named, Vec::new()),
+            Err(RECIPIENTS_REQUIRED)
+        );
     }
 
     #[test]

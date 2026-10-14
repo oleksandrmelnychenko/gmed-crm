@@ -701,25 +701,40 @@ const PATIENT_LEAD_REQUEST_ITEM: PatientPortalNavItem = {
   labelKey: "nav_my_request",
 };
 
+/**
+ * The trusted persons of a request (owner 2026-10-14): people GMED may tell about the person,
+ * a menu item of its own after the request.
+ */
+const TRUSTED_PERSONS_ITEM: PatientPortalNavItem = {
+  id: "trusted_persons",
+  to: "/trusted-persons",
+  labelKey: "nav_trusted_persons",
+};
+
 export function canAccessPatientPortalRoute(pathname: string): boolean {
   const p = normalizePathname(pathname);
-  return p === PATIENT_LEAD_REQUEST_ITEM.to || PATIENT_PORTAL_NAV_ITEMS.some((item) => item.to === p);
+  return (
+    p === PATIENT_LEAD_REQUEST_ITEM.to ||
+    p === TRUSTED_PERSONS_ITEM.to ||
+    PATIENT_PORTAL_NAV_ITEMS.some((item) => item.to === p)
+  );
 }
 
 export function listPatientPortalNavItems(options: { leadRequests?: boolean } = {}): PatientPortalNavItem[] {
   if (!options.leadRequests) return [...PATIENT_PORTAL_NAV_ITEMS];
   const [dashboard, ...rest] = PATIENT_PORTAL_NAV_ITEMS;
-  return [dashboard, PATIENT_LEAD_REQUEST_ITEM, ...rest];
+  return [dashboard, PATIENT_LEAD_REQUEST_ITEM, TRUSTED_PERSONS_ITEM, ...rest];
 }
 
 /**
  * Lead cabinet (owner decision 2026-10-03): a patient login that reaches only
- * requests (`/me.portal_mode === "lead"`) sees the request page, the account
- * and the legal notice — nothing else of the patient portal. The server
- * enforces the same (`lead_portal_only`).
+ * requests (`/me.portal_mode === "lead"`) sees the request page, the trusted
+ * persons (2026-10-14), the account and the legal notice — nothing else of the
+ * patient portal. The server enforces the same (`lead_portal_only`).
  */
 const LEAD_PORTAL_NAV_ITEMS: readonly PatientPortalNavItem[] = [
   { id: "lead_request", to: "/", labelKey: "nav_my_request" },
+  TRUSTED_PERSONS_ITEM,
   { id: "account", to: "/account", labelKey: "nav_account" },
   { id: "legal", to: "/legal", labelKey: "nav_legal_notice" },
 ] as const;

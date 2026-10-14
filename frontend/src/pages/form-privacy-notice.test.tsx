@@ -29,9 +29,9 @@ describe("inquiry privacy notice", () => {
     expect(html).not.toContain("[Link");
     expect(html).not.toContain("[ссылка");
     for (const setting of ["Testagentur", "Test CRM", "privacy@example.com", "contact@example.com"]) expect(html).not.toContain(setting);
-    expect(html.match(/<address/g)).toHaveLength(1);
+    expect(html.match(/<address\b/g)).toHaveLength(1);
     // The bold beginnings of the purposes, the recipients and the right to object, and the controller name.
-    expect(html.match(/<strong/g)).toHaveLength(9);
+    expect(html.match(/<strong\b/g)).toHaveLength(9);
     expect(html).toContain("FiSaLis");
     expect(html).toContain("Hetzner");
     expect(html).toContain("Skribble");
@@ -39,8 +39,8 @@ describe("inquiry privacy notice", () => {
     expect(html).toContain("12.10.2026");
     // The lists in the reference remain semantic lists: data, purposes,
     // processors, other recipients, and the five retention cases.
-    expect(html.match(/<ul/g)).toHaveLength(5);
-    expect(html.match(/<li/g)).toHaveLength(22);
+    expect(html.match(/<ul\b/g)).toHaveLength(5);
+    expect(html.match(/<li\b/g)).toHaveLength(22);
     expect(FORM_PRIVACY_SECTIONS[lang].find((section) => section.number === 6)?.blocks
       .filter((block) => block.kind === "list").map((block) => block.items.length)).toEqual([2, 4]);
     expect(FORM_PRIVACY_SECTIONS[lang].find((section) => section.number === 9)?.blocks

@@ -8134,6 +8134,7 @@ pub(crate) async fn anonymize_lead_pii(
                trusted_contact_birth_date = NULL,
                trusted_contact_address = NULL,
                trusted_contacts = '[]'::jsonb,
+               portal_trusted_persons = '[]'::jsonb,
                referrer_patient_id = NULL,
                preferred_location = NULL,
                visit_timing = NULL,

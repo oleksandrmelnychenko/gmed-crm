@@ -72,7 +72,7 @@ export function LeadRequestPage() {
   const [requests, setRequests] = useState<LeadRequest[] | null>(null);
   // The own login of a minor whose parents have access reaches no request (QA 2026-10-12, A3-01).
   const [ownAccessClosed, setOwnAccessClosed] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.search).get("lead"));
   const [error, setError] = useState("");
   // Switching requests must not replace a queue whose uploads are still running.
   const [sessions] = useState(() => new Map<string, { enqueue: RequestQueue; flushers: Set<AutosaveFlush> }>());
@@ -227,7 +227,7 @@ export function LeadRequestPage() {
   );
 }
 
-function LeadCabinetFrame({
+export function LeadCabinetFrame({
   lang,
   onLang,
   children,

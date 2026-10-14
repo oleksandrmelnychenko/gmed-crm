@@ -6,20 +6,21 @@ async function open(page: Page) {
 }
 test("clean consent draft adopts other parent's new choices and recipients", async ({ page }) => {
   await open(page);
-  const recipient = page.getByTestId("lead-request-consent-recipient").locator("input").first();
-  await expect(recipient).toHaveValue("First Recipient");
+  const recipient = page.getByTestId("trusted-persons-list");
+  await expect(recipient).toContainText("First Recipient");
   await expect(page.getByTestId("lead-request-consent-form-save")).toBeDisabled();
   await page.getByRole("button", { name: "Refresh other parent" }).click();
-  await expect(recipient).toHaveValue("Second Recipient");
+  await expect(recipient).toContainText("Second Recipient");
   await expect(page.locator('[data-consent-option="channel_email"]')).toBeChecked();
   await expect(page.getByTestId("lead-request-consent-form-save")).toBeEnabled();
 });
 test("locally edited consent draft survives a newer server choice", async ({ page }) => {
   await open(page);
-  const recipient = page.getByTestId("lead-request-consent-recipient").locator("input").first();
-  await recipient.fill("Local Unsaved Recipient");
+  const recipient = page.getByTestId("trusted-persons-list");
+  await page.locator('[data-consent-option="channel_threema"]').check();
   await page.getByRole("button", { name: "Refresh other parent" }).click();
-  await expect(recipient).toHaveValue("Local Unsaved Recipient");
+  await expect(recipient).toContainText("Second Recipient");
+  await expect(page.locator('[data-consent-option="channel_threema"]')).toBeChecked();
   await expect(page.locator('[data-consent-option="channel_email"]')).not.toBeChecked();
   await expect(page.getByTestId("lead-request-consent-form-save")).toBeEnabled();
 });

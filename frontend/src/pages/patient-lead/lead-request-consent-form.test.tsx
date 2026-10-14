@@ -8,8 +8,8 @@ import {
   choosesForChild,
   consentFormChanged,
   recipientsProblem,
-  recipientsToSend,
 } from "./lead-request-consent-form";
+import { recipientsToSend } from "./lead-trusted-persons-model";
 import { consentFormText } from "./lead-request-consent-form-text";
 
 const queue = <Result,>(task: () => Promise<Result>) => task();
@@ -176,6 +176,18 @@ describe("named recipients of the consent form (owner 2026-10-12)", () => {
   const named = { ...CORE, named_recipients: true };
   const row = (name: string, relation: "" | "spouse" | "family_doctor", contact = "") => ({ name, relation, contact });
 
+  it("uses the stored list independently of the historical consent snapshot and disables an empty named choice", () => {
+    const form = { version: "v1", choices: named, chosen_at: null, recipients: [{ name: "Old Recipient", relation: "spouse" as const }] };
+    const stored = { ...request(form), trusted_persons: [{ name: "Current Friend", relation: "friend" as const }] };
+    const html = renderToStaticMarkup(<ConsentFormChoicesSection request={stored} lang="en" enqueue={queue} onChange={() => undefined} />);
+    expect(html).toContain("Current Friend");
+    expect(html).not.toContain("Old Recipient");
+    expect(html).not.toContain("trusted-persons-editor");
+    const empty = renderToStaticMarkup(<ConsentFormChoicesSection request={{ ...stored, trusted_persons: [] }} lang="en" enqueue={queue} onChange={() => undefined} />);
+    expect(empty).toContain("Add at least one person");
+    expect((empty.match(/<button[^>]*>/g) ?? []).find((tag) => tag.includes("lead-request-consent-form-save"))).toContain('disabled=""');
+  });
+
   it("asks for at least one complete person while the option is ticked", () => {
     expect(recipientsProblem(named, [])).toBe("required");
     expect(recipientsProblem(named, [row("", "")])).toBe("required");
@@ -207,9 +219,11 @@ describe("named recipients of the consent form (owner 2026-10-12)", () => {
         onChange={() => undefined}
       />,
     );
-    expect(html).toContain("Доверенные лица и учреждения");
-    expect(html).toContain('value="Olga Muster"');
-    expect(html).toContain('value="+49 151 000000"');
-    expect(html).toContain("которых я назову ниже");
+    expect(html).toContain("Доверенные лица");
+    expect(html).toContain("Olga Muster");
+    expect(html).not.toContain('value="Olga Muster"');
+    expect(html).toContain('href="/trusted-persons?lead=lead-1"');
+    expect(html).toContain("+49 151 000000");
+    expect(html).toContain("которых я указываю в разделе «Доверенные лица»");
   });
 });

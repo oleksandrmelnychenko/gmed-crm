@@ -2789,6 +2789,16 @@ async fn purging_a_lead_clears_the_portal_intake() {
             .await
             .unwrap();
     assert_eq!(recipients, 1);
+    // The trusted persons of the cabinet (2026-10-14).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/trusted-persons"),
+        &patient,
+        Some(json!({ "persons": [{ "name": "Oma Lena", "relation": "relative" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 
     let (status, choices) = choose(
         router,
@@ -2873,6 +2883,17 @@ async fn purging_a_lead_clears_the_portal_intake() {
     assert_eq!(representatives, 0);
     assert_eq!(contacts, json!([]));
     assert_eq!(files, 0);
+    let trusted_persons: Value =
+        sqlx::query_scalar("SELECT portal_trusted_persons FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        trusted_persons,
+        json!([]),
+        "trusted persons go with the lead"
+    );
     let (status, _) = json_request(router, "GET", "/api/v1/me/lead-requests", &patient, None).await;
     // The login itself is switched off with the lead.
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -7291,4 +7312,601 @@ async fn representative_follow_up_tracks_files_and_requires_current_inquiry_cons
         again["follow_up"]["answered_at"],
         body["follow_up"]["answered_at"]
     );
+}
+
+/// Owner 2026-10-14: the trusted persons are a menu item of their own in the
+/// cabinet — people GMED may tell about the person, who never act for it. One
+/// list per lead; the consent form's "named recipients" prints it, and a
+/// changed list is a new choice while that option is chosen.
+#[tokio::test]
+async fn the_cabinet_keeps_the_trusted_persons_and_the_consent_choice_follows_them() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, user_id, patient) =
+        lead_with_login(&app, "Vera", "vera.trusted.persons@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let path = format!("{request}/trusted-persons");
+    let choice_rows = || async move {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM consent_form_choices WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    };
+
+    // Nobody is named yet.
+    let (status, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["trusted_persons"], json!([]), "{body}");
+
+    // Incomplete, unknown or too many persons are refused, nothing is kept.
+    for invalid in [
+        json!({ "persons": [{ "name": " ", "relation": "friend" }] }),
+        json!({ "persons": [{ "name": "Max", "relation": "neighbour" }] }),
+        json!({ "persons": [{ "name": "x".repeat(121), "relation": "friend" }] }),
+        json!({ "persons": vec![json!({ "name": "Max", "relation": "friend" }); 6] }),
+    ] {
+        let (status, body) = json_request(router, "POST", &path, &patient, Some(invalid)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "consent_recipients_invalid", "{body}");
+    }
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "persons": [], "acts_for_patient": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        audit_count(pool, "lead_portal_trusted_persons_saved", lead_id).await,
+        0
+    );
+
+    // The list is stored trimmed, with the new relation "friend".
+    let persons = json!([
+        { "name": "Oma Lena", "relation": "relative", "contact": "+49 30 000000" },
+        { "name": "Max Freund", "relation": "friend" }
+    ]);
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "persons": [
+            { "name": "  Oma   Lena ", "relation": "relative", "contact": " +49 30 000000 " },
+            { "name": "Max Freund", "relation": "friend", "contact": "" }
+        ] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["lead_id"], lead_id.to_string(), "{body}");
+    assert_eq!(body["trusted_persons"], persons, "{body}");
+    assert_eq!(
+        audit_count(pool, "lead_portal_trusted_persons_saved", lead_id).await,
+        1
+    );
+    let (context, marker): (Value, Value) = sqlx::query_as(
+        r#"SELECT (SELECT context FROM audit_log
+                   WHERE action = 'lead_portal_trusted_persons_saved' AND entity_id = $1),
+                  portal_field_updates -> 'trusted_persons'
+           FROM leads WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(context["count"], 2, "{context}");
+    assert_eq!(context["access_kind"], "self", "{context}");
+    assert!(
+        !context.to_string().contains("Oma"),
+        "no names in the audit trail: {context}"
+    );
+    assert_eq!(marker["by"], user_id.to_string(), "{marker}");
+    assert!(marker["at"].is_string(), "{marker}");
+    // No consent choice yet: only the list is stored.
+    assert_eq!(choice_rows().await, 0);
+
+    // The consent form's "named recipients" takes the stored list.
+    let named = json!({
+        "agency_processing": true,
+        "doctors_to_agency": true,
+        "data_system": true,
+        "named_recipients": true
+    });
+    let (status, saved) = choose(router, lead_id, &patient, &named).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["recipients"], persons, "{saved}");
+    assert_eq!(choice_rows().await, 1);
+
+    // A changed list is a new choice with the same options, by this login.
+    let changed =
+        json!([{ "name": "Max Freund", "relation": "friend", "contact": "max@example.com" }]);
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "persons": changed })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["trusted_persons"], changed, "{body}");
+    assert_eq!(body["consent_form"]["recipients"], changed, "{body}");
+    assert_eq!(
+        body["consent_form"]["choices"]["named_recipients"], true,
+        "{body}"
+    );
+    assert_eq!(body["consent_form"]["chosen_by_me"], true, "{body}");
+    assert_eq!(choice_rows().await, 2);
+    let (chooser, kind, version, language): (Uuid, String, String, String) = sqlx::query_as(
+        r#"SELECT chosen_by, access_kind, text_version, language FROM consent_form_choices
+           WHERE lead_id = $1 ORDER BY seq DESC LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (chooser, kind.as_str(), version.as_str(), language.as_str()),
+        (user_id, "self", "2026-10-12", "de")
+    );
+    // The same list again changes nothing.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "persons": changed })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(choice_rows().await, 2);
+    assert_eq!(
+        audit_count(pool, "lead_portal_trusted_persons_saved", lead_id).await,
+        2
+    );
+
+    // Without "named recipients" only the list is stored.
+    let core = json!({ "agency_processing": true, "doctors_to_agency": true, "data_system": true });
+    let (status, saved) = choose(router, lead_id, &patient, &core).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(choice_rows().await, 3);
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "persons": persons })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["trusted_persons"], persons, "{body}");
+    assert_eq!(body["consent_form"]["recipients"], json!([]), "{body}");
+    assert_eq!(choice_rows().await, 3);
+
+    // An older cabinet that still sends the recipients with the choice
+    // replaces the list (one source).
+    let older = json!([{ "name": "Praxis Dr. Beispiel", "relation": "family_doctor" }]);
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &format!("{request}/consent-choices"),
+        &patient,
+        Some(json!({
+            "choices": named, "recipients": older,
+            "version": "2026-10-12", "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    let (_, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(body["trusted_persons"], older, "{body}");
+    assert_eq!(body["consent_form"]["recipients"], older, "{body}");
+
+    // Staff read the list back where they read the consent choice; the
+    // concierge reads neither.
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(intake["trusted_persons"], older, "{intake}");
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &app.staff("concierge"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(intake["trusted_persons"], Value::Null, "{intake}");
+    assert_eq!(intake["consent_form"], Value::Null, "{intake}");
+
+    // Staff have no route to write the list; a minor's own login is refused.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &path,
+        &app.staff("patient_manager"),
+        Some(json!({ "persons": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (minor_lead, _, child) =
+        lead_with_login(&app, "Mia", "mia.trusted.persons@example.com").await;
+    sqlx::query("UPDATE leads SET date_of_birth = '2015-05-10' WHERE id = $1")
+        .bind(minor_lead)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{minor_lead}/trusted-persons"),
+        &child,
+        Some(json!({ "persons": [{ "name": "Oma Lena", "relation": "relative" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "lead_request_guardian_only", "{body}");
+    let stored: Value =
+        sqlx::query_scalar("SELECT portal_trusted_persons FROM leads WHERE id = $1")
+            .bind(minor_lead)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, json!([]));
+}
+
+#[tokio::test]
+async fn removing_the_last_trusted_person_withdraws_only_the_named_release_and_old_invitations() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, user_id, patient) =
+        lead_with_login(&app, "Nora", "nora.trusted.clear@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let path = format!("{request}/trusted-persons");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "persons": [{ "name": "Max Muster", "relation": "friend" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let chosen = json!({
+        "agency_processing": true, "doctors_to_agency": true, "data_system": true,
+        "named_recipients": true, "channel_email": true, "channel_threema": true,
+        "channel_whatsapp": false, "channel_telegram": true
+    });
+    let (status, body) = choose(router, lead_id, &patient, &chosen).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let old_choice: Uuid = sqlx::query_scalar(
+        "SELECT id FROM consent_form_choices WHERE lead_id=$1 ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let document = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents
+           (id, version_root_document_id, lead_id, auto_name, art, category, status,
+            visibility, is_medical, uploaded_by, generated_template_id)
+           VALUES ($1,$1,$2,'Synthetic consent','report','medical','active','internal',false,$3,'privacy_consents')"#,
+    ).bind(document).bind(lead_id).bind(app.patient_manager_id).execute(pool).await.unwrap();
+    let invitation = Uuid::new_v4();
+    let lease = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO document_signature_requests
+           (id, source_document_id, requested_by, source_sha256, source_context, signers,
+            provider_account, test_mode, status, level, minimum_level, lease_token, lease_until)
+           VALUES ($1,$2,$3,$4,'{}','[]','trusted-persons-test',true,'pending','QES','QES',$5,now()+interval '10 minutes')"#,
+    ).bind(invitation).bind(document).bind(app.patient_manager_id).bind("a".repeat(64))
+        .bind(lease).execute(pool).await.unwrap();
+    // Set the last submitted snapshot after the earlier list/choice writes.
+    sqlx::query(
+        "UPDATE leads SET portal_submitted_at=clock_timestamp(), portal_submitted_by=$2, portal_field_updates='{}' WHERE id=$1",
+    ).bind(lead_id).bind(user_id).execute(pool).await.unwrap();
+    let (_, before) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(before["changed_since_submit"], false, "{before}");
+
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "persons": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["trusted_persons"], json!([]), "{body}");
+    assert_eq!(body["consent_form"]["recipients"], json!([]), "{body}");
+    let mut expected = chosen.clone();
+    expected["named_recipients"] = json!(false);
+    assert_eq!(body["consent_form"]["choices"], expected, "{body}");
+    assert_eq!(body["changed_since_submit"], true, "{body}");
+    let (rows, old, new): (i64, Value, Value) = sqlx::query_as(
+        r#"SELECT count(*),
+           (SELECT choices FROM consent_form_choices WHERE id=$2),
+           (SELECT choices FROM consent_form_choices WHERE lead_id=$1 ORDER BY seq DESC LIMIT 1)
+           FROM consent_form_choices WHERE lead_id=$1"#,
+    )
+    .bind(lead_id)
+    .bind(old_choice)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(rows, 2, "the old choice remains append-only");
+    assert_eq!(old, chosen);
+    assert_eq!(new, expected);
+    let closed: Value =
+        sqlx::query_scalar("SELECT to_jsonb(r) FROM document_signature_requests r WHERE id=$1")
+            .bind(invitation)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(closed["status"], "error", "{closed}");
+    assert_eq!(closed["last_error"], "consent_choice_changed", "{closed}");
+    assert_eq!(closed["closed_kind"], "abandoned", "{closed}");
+    assert_eq!(closed["closed_by"], json!(user_id), "{closed}");
+    assert!(
+        closed["lease_token"].is_null() && closed["lease_until"].is_null(),
+        "{closed}"
+    );
+    assert_eq!(
+        audit_count(pool, "document_signature_consent_invalidated", document).await,
+        1
+    );
+    let (_, staff) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(staff["changed_since_submit"], true, "{staff}");
+
+    // Repeating the same empty list produces no choice or extra invalidation.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "persons": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM consent_form_choices WHERE lead_id=$1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(rows, 2);
+    assert_eq!(
+        audit_count(pool, "document_signature_consent_invalidated", document).await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn an_older_cabinet_may_untick_named_recipients_without_validating_its_inactive_draft() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let (lead_id, _, patient) =
+        lead_with_login(&app, "Ella", "ella.trusted.legacy@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let persons = json!([{ "name": "Max Muster", "relation": "friend" }]);
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/trusted-persons"),
+        &patient,
+        Some(json!({ "persons": persons })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let choices = json!({
+        "agency_processing": true, "doctors_to_agency": true,
+        "data_system": true, "named_recipients": false
+    });
+    let (status, saved) = json_request(
+        router, "POST", &format!("{request}/consent-choices"), &patient,
+        Some(json!({ "choices": choices, "version": "2026-10-12", "language": "de",
+            "recipients": [{ "name": "", "relation": "stale-invalid-relation", "contact": "x".repeat(121) }] })),
+    ).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["recipients"], json!([]), "{saved}");
+    let (_, current) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(
+        current["trusted_persons"], persons,
+        "inactive recipients never erase the stored list: {current}"
+    );
+    assert_eq!(
+        current["consent_form"]["choices"]["named_recipients"], false,
+        "{current}"
+    );
+}
+
+#[tokio::test]
+async fn a_guardian_changes_trusted_persons_only_for_an_active_link_and_is_the_new_chooser() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, contact_id) =
+        minor_lead(&app, "LinaTrusted", "lina.trusted.parent@example.com").await;
+    let (status, issued) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-guardians"),
+        &app.staff("patient_manager"),
+        Some(json!({ "trusted_contact_id": contact_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let guardian: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let access_id: Uuid = issued["access_id"].as_str().unwrap().parse().unwrap();
+    let parent = bearer(guardian, "patient");
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let path = format!("{request}/trusted-persons");
+    let persons = json!([{ "name": "Oma Muster", "relation": "relative" }]);
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &parent,
+        Some(json!({ "persons": persons })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["access_kind"], "guardian", "{body}");
+    let named = json!({ "agency_processing": true, "doctors_to_agency": true,
+        "data_system": true, "named_recipients": true, "channel_email": true });
+    let (status, saved) = choose(router, lead_id, &parent, &named).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    let changed =
+        json!([{ "name": "Oma Muster", "relation": "relative", "contact": "oma@example.com" }]);
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &parent,
+        Some(json!({ "persons": changed })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["consent_form"]["chosen_by_me"], true, "{body}");
+    let (chosen_by, access_kind, recipients): (Uuid, String, Value) = sqlx::query_as(
+        "SELECT chosen_by, access_kind, recipients FROM consent_form_choices WHERE lead_id=$1 ORDER BY seq DESC LIMIT 1",
+    ).bind(lead_id).fetch_one(pool).await.unwrap();
+    assert_eq!(chosen_by, guardian);
+    assert_eq!(access_kind, "guardian");
+    assert_eq!(recipients, changed);
+    let marker: Value =
+        sqlx::query_scalar("SELECT portal_field_updates->'trusted_persons' FROM leads WHERE id=$1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(marker["by"], json!(guardian), "{marker}");
+    assert_eq!(marker["kind"], "guardian", "{marker}");
+
+    let (_, _, foreign) =
+        lead_with_login(&app, "ForeignTrusted", "foreign.trusted@example.com").await;
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &foreign,
+        Some(json!({ "persons": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    sqlx::query("UPDATE lead_portal_access SET revoked_at=now() WHERE id=$1")
+        .bind(access_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &parent,
+        Some(json!({ "persons": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let stored: Value = sqlx::query_scalar("SELECT portal_trusted_persons FROM leads WHERE id=$1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored, changed,
+        "neither a foreign nor revoked login can replace the list"
+    );
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM consent_form_choices WHERE lead_id=$1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(rows, 2, "refused writes append no consent choice");
+}
+
+#[tokio::test]
+async fn trusted_persons_backfill_uses_the_latest_eligible_choice_without_reviving_an_older_list() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (adult, adult_login, _) =
+        lead_with_login(&app, "AdultBackfill", "adult.backfill@example.com").await;
+    let (minor, minor_login, _) =
+        lead_with_login(&app, "MinorBackfill", "minor.backfill@example.com").await;
+    let (guarded, guarded_login, _) =
+        lead_with_login(&app, "GuardedBackfill", "guarded.backfill@example.com").await;
+    let (unticked, unticked_login, _) =
+        lead_with_login(&app, "UntickedBackfill", "unticked.backfill@example.com").await;
+    let guardian = seed_user(pool, "trusted-backfill-guardian", "patient").await;
+    sqlx::query("UPDATE leads SET date_of_birth='2015-05-10' WHERE id=ANY($1)")
+        .bind(vec![minor, guarded])
+        .execute(pool)
+        .await
+        .unwrap();
+    let named = json!({ "agency_processing": true, "doctors_to_agency": true,
+        "data_system": true, "named_recipients": true });
+    let core = json!({ "agency_processing": true, "doctors_to_agency": true,
+        "data_system": true, "named_recipients": false });
+    let valid = json!([{ "name": "Oma Valid", "relation": "relative" }]);
+    let ignored = json!([{ "name": "Ignored Child Choice", "relation": "friend" }]);
+    // The raw rows model the existing installation, before the new list column.
+    for (lead, chooser, kind, choices, recipients) in [
+        (adult, adult_login, "self", named.clone(), valid.clone()),
+        (minor, minor_login, "self", named.clone(), ignored.clone()),
+        (guarded, guardian, "guardian", named.clone(), valid.clone()),
+        (guarded, guarded_login, "self", named.clone(), ignored),
+        (unticked, unticked_login, "self", named, valid.clone()),
+        (unticked, unticked_login, "self", core, json!([])),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO consent_form_choices
+               (template_id, lead_id, choices, chosen_by, access_kind, source, language, text_version, recipients)
+               VALUES ('privacy_consents',$1,$2,$3,$4,'lead_portal','de','2026-10-12',$5)"#,
+        ).bind(lead).bind(choices).bind(chooser).bind(kind).bind(recipients).execute(pool).await.unwrap();
+    }
+    // Execute the actual migration, not a copy of its selection query.
+    for _ in 0..2 {
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/20261014120000_lead_portal_trusted_persons.sql"
+        ))
+        .execute(pool)
+        .await
+        .unwrap();
+        for (lead, expected) in [
+            (adult, valid.clone()),
+            (minor, json!([])),
+            (guarded, valid.clone()),
+            (unticked, json!([])),
+        ] {
+            let stored: Value =
+                sqlx::query_scalar("SELECT portal_trusted_persons FROM leads WHERE id=$1")
+                    .bind(lead)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap();
+            assert_eq!(stored, expected, "backfill for {lead}");
+        }
+    }
 }

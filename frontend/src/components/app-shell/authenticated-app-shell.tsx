@@ -67,7 +67,7 @@ function AuthenticatedAppShellContent() {
   const location = useLocation();
   const patientId = usePortalPatientId(user?.id);
   const patients = user?.role === "patient" ? user.patients ?? [] : [];
-  const accountPage = ["/account", "/request", "/legal", "/security"].some(
+  const accountPage = ["/account", "/request", "/trusted-persons", "/legal", "/security"].some(
     (path) => location.pathname === path || location.pathname.startsWith(`${path}/`),
   );
   const needsPatient = !accountPage && patients.length > 1 && !patients.some((patient) => patient.id === patientId);

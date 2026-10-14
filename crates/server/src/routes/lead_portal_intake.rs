@@ -342,6 +342,12 @@ pub fn router() -> Router<AppState> {
             "/me/lead-requests/{lead_id}/consent-choices",
             post(save_consent_choices),
         )
+        // The trusted persons: people GMED may tell about the person, its own
+        // menu item of the cabinet (owner 2026-10-14).
+        .route(
+            "/me/lead-requests/{lead_id}/trusted-persons",
+            post(save_trusted_persons),
+        )
         .route(
             "/me/lead-requests/{lead_id}/documents",
             post(upload_my_lead_document).layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
@@ -732,6 +738,8 @@ const BILLING_MARKER: &str = "billing";
 const INVOICE_RECIPIENT_MARKER: &str = "invoice_recipient";
 /// Key of the answers of the extra step in `leads.portal_field_updates`.
 const ENHANCED_DETAILS_MARKER: &str = "enhanced_details";
+/// Key of the trusted persons (2026-10-14) in `leads.portal_field_updates`.
+const TRUSTED_PERSONS_MARKER: &str = "trusted_persons";
 
 /// Fields counted in "N of M filled" (the middle name is optional for everyone;
 /// of the insurance block only the answer whether there is one, because the
@@ -2672,6 +2680,7 @@ pub(crate) async fn request_payload(
     }
     let deadline = retention_deadline(state, &row, lead_id).await;
     let consent_choice = consent_choices::current_for(&state.db, Some(lead_id), None).await?;
+    let trusted_persons = load_trusted_persons(&state.db, lead_id).await?;
     Ok(json!({
         "lead_id": lead_id,
         "access_kind": kind.as_str(),
@@ -2706,6 +2715,9 @@ pub(crate) async fn request_payload(
         "consents": consents,
         // The person's own choice of the consent form options (2026-10-12).
         "consent_form": consent_form_json(consent_choice.as_ref(), user_id),
+        // The trusted persons of the menu item «Vertrauenspersonen»
+        // (2026-10-14): one list per lead.
+        "trusted_persons": trusted_persons,
         "submitted_at": row
             .try_get::<Option<DateTime<Utc>>, _>("portal_submitted_at")
             .ok()
@@ -3977,7 +3989,8 @@ struct ConsentRevokeRequest {
 struct ConsentChoicesRequest {
     choices: consent_choices::ConsentChoices,
     /// The persons or institutions named for "named recipients" (owner
-    /// 2026-10-12); an older cabinet sends none.
+    /// 2026-10-12). Since 2026-10-14 the cabinet sends none and the lead's
+    /// trusted persons are taken; a list sent replaces them.
     #[serde(default)]
     recipients: Vec<consent_choices::ConsentRecipient>,
     /// [`consent_choices::TEXT_VERSION`] of the texts the person saw.
@@ -4039,21 +4052,25 @@ async fn save_consent_choices(
         );
     }
     // "Named recipients" names somebody (owner 2026-10-12); the list is part
-    // of the choice and printed only while that option is chosen.
-    let recipients = match consent_choices::clean_recipients(&body.choices, body.recipients) {
-        Ok(recipients) => recipients,
-        Err(code) => {
-            return coded(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                code,
-                "Name at least one recipient (at most five): name, who they are, optionally how to reach them",
-                json!({ "field": "recipients", "max": consent_choices::MAX_RECIPIENTS }),
-            );
-        }
+    // of the choice and printed only while that option is chosen. Since
+    // 2026-10-14 the list is the lead's trusted persons (own menu item of the
+    // cabinet): the cabinet sends none and the stored list is taken; an older
+    // cabinet that still sends a list stores it as the trusted persons.
+    let recipients_refusal = |code: &str| {
+        coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            code,
+            "Name at least one trusted person (at most five) under «Trusted persons»: name, who they are, optionally how to reach them",
+            json!({ "field": "recipients", "max": consent_choices::MAX_RECIPIENTS }),
+        )
     };
-    let recipients_json = match serde_json::to_value(&recipients) {
-        Ok(value) => value,
-        Err(error) => return internal(error, "encode recipients"),
+    let sent_recipients = if body.choices.named_recipients {
+        match consent_choices::clean_persons(body.recipients) {
+            Ok(recipients) => recipients,
+            Err(code) => return recipients_refusal(code),
+        }
+    } else {
+        Vec::new()
     };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -4080,6 +4097,37 @@ async fn save_consent_choices(
             "For a minor, a parent or the legal guardian chooses with their own access",
             json!({}),
         );
+    }
+    let from_trusted_persons = body.choices.named_recipients && sent_recipients.is_empty();
+    let listed = if from_trusted_persons {
+        match load_trusted_persons(&mut *tx, lead_id).await {
+            Ok(persons) => persons,
+            Err(error) => return internal(error, "load trusted persons"),
+        }
+    } else {
+        sent_recipients
+    };
+    let recipients = match consent_choices::clean_recipients(&body.choices, listed) {
+        Ok(recipients) => recipients,
+        Err(code) => return recipients_refusal(code),
+    };
+    let recipients_json = match serde_json::to_value(&recipients) {
+        Ok(value) => value,
+        Err(error) => return internal(error, "encode recipients"),
+    };
+    // One list (2026-10-14): what an older cabinet names here becomes the
+    // lead's trusted persons.
+    if body.choices.named_recipients
+        && !from_trusted_persons
+        && let Err(error) = sqlx::query(
+            "UPDATE leads SET portal_trusted_persons = $2, updated_at = now() WHERE id = $1",
+        )
+        .bind(lead_id)
+        .bind(&recipients_json)
+        .execute(&mut *tx)
+        .await
+    {
+        return internal(error, "store trusted persons");
     }
     let choices = match serde_json::to_value(body.choices) {
         Ok(value) => value,
@@ -4181,6 +4229,222 @@ async fn save_consent_choices(
         Json(consent_form_json(Some(&saved), auth.user_id)),
     )
         .into_response()
+}
+
+/// The trusted persons the cabinet keeps on the lead
+/// (`leads.portal_trusted_persons`, owner 2026-10-14); empty for an unknown
+/// lead or an unreadable value.
+pub(crate) async fn load_trusted_persons<'e, E>(
+    executor: E,
+    lead_id: Uuid,
+) -> Result<Vec<consent_choices::ConsentRecipient>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    let stored: Option<Value> =
+        sqlx::query_scalar("SELECT portal_trusted_persons FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_optional(executor)
+            .await?;
+    Ok(stored
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TrustedPersonsRequest {
+    /// The whole list, at most [`consent_choices::MAX_RECIPIENTS`].
+    persons: Vec<consent_choices::ConsentRecipient>,
+}
+
+/// `POST /me/lead-requests/{lead_id}/trusted-persons`: the lead's trusted
+/// persons (owner 2026-10-14) — people GMED may tell about the person (or
+/// the child): name, who they are, optionally how to reach them. They have
+/// access to information only and never act for the person (who acts is the
+/// representation of step 1). Not sanctions-screened, not trusted contacts.
+///
+/// The list replaces the stored one. While the person's current choice of
+/// the consent form names recipients, a changed list is a new choice row with
+/// the same options and the new list, chosen by this login: a consent form
+/// generated before is no longer offered for an electronic signature
+/// (`consent_choice_changed`).
+async fn save_trusted_persons(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(body): Json<TrustedPersonsRequest>,
+) -> axum::response::Response {
+    if let Err(response) = require_patient(&auth) {
+        return response;
+    }
+    let persons = match consent_choices::clean_persons(body.persons) {
+        Ok(persons) => persons,
+        Err(code) => {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                code,
+                "At most five trusted persons: name, who they are, optionally how to reach them",
+                json!({ "field": "persons", "max": consent_choices::MAX_RECIPIENTS }),
+            );
+        }
+    };
+    let persons_json = match serde_json::to_value(&persons) {
+        Ok(value) => value,
+        Err(error) => return internal(error, "encode trusted persons"),
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return internal(error, "begin"),
+    };
+    // The own login of a minor never gets here: the middleware refuses it
+    // (`lead_request_guardian_only`) and the lock does not resolve it.
+    let (kind, _) = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+        Ok(Some(found)) => found,
+        Ok(None) => return not_found(),
+        Err(error) => return internal(error, "lock request"),
+    };
+    let stored = match load_trusted_persons(&mut *tx, lead_id).await {
+        Ok(stored) => stored,
+        Err(error) => return internal(error, "load trusted persons"),
+    };
+    if stored == persons {
+        drop(tx);
+        return match request_payload(&state, lead_id, auth.user_id, kind).await {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => internal(error, "load request"),
+        };
+    }
+    if let Err(error) = sqlx::query(
+        "UPDATE leads SET portal_trusted_persons = $2, updated_at = now() WHERE id = $1",
+    )
+    .bind(lead_id)
+    .bind(&persons_json)
+    .execute(&mut *tx)
+    .await
+    {
+        return internal(error, "store trusted persons");
+    }
+    let now = match portal_update_time(&mut tx).await {
+        Ok(now) => now,
+        Err(error) => return internal(error, "read portal update time"),
+    };
+    let marker = json!({
+        TRUSTED_PERSONS_MARKER: {
+            "at": now,
+            "by": auth.user_id,
+            "kind": kind.as_str(),
+            "hash": value_marker(lead_id, TRUSTED_PERSONS_MARKER, Some(&persons_json.to_string())),
+        }
+    });
+    if let Err(error) = sqlx::query(
+        r#"UPDATE leads
+           SET portal_field_updates = portal_field_updates || $2::jsonb, updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(marker)
+    .execute(&mut *tx)
+    .await
+    {
+        return internal(error, "mark trusted persons");
+    }
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "lead_portal_trusted_persons_saved",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            // Names stay out of the audit trail (erasure).
+            json!({ "count": persons.len(), "access_kind": kind.as_str() }),
+        ),
+    )
+    .await
+    {
+        return internal(error, "audit trusted persons");
+    }
+    // The consent form prints the list while "named recipients" is chosen:
+    // a changed list is a new choice with the same options.
+    let current = match consent_choices::current_for(&mut *tx, Some(lead_id), None).await {
+        Ok(current) => current,
+        Err(error) => return internal(error, "load consent choice"),
+    };
+    let mut invalidated = (0, Vec::new());
+    if let Some(current) = current
+        .as_ref()
+        .filter(|current| current.choices.named_recipients && current.recipients != persons)
+    {
+        // Removing the last person also withdraws this optional consent.
+        // Keep the other options and never create a checked, unnamed release.
+        let mut choices = current.choices;
+        choices.named_recipients = !persons.is_empty();
+        if let Err(error) = sqlx::query(
+            r#"INSERT INTO consent_form_choices (
+                   template_id, lead_id, patient_id, choices, chosen_by, access_kind,
+                   source, language, text_version, recipients, chosen_at)
+               SELECT c.template_id, l.id, l.prospect_patient_id, $6, $3, $4,
+                      'lead_portal', c.language, c.text_version, $5, clock_timestamp()
+               FROM consent_form_choices c
+               JOIN leads l ON l.id = $2
+               WHERE c.id = $1"#,
+        )
+        .bind(current.id)
+        .bind(lead_id)
+        .bind(auth.user_id)
+        .bind(kind.as_str())
+        .bind(&persons_json)
+        .bind(json!(choices))
+        .execute(&mut *tx)
+        .await
+        {
+            return internal(error, "insert consent choices");
+        }
+        invalidated = match crate::document_signatures::invalidate_consent_choices(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(requests) => requests,
+            Err(error) => return internal(error, "invalidate earlier consent invitations"),
+        };
+    }
+    if let Err(error) = tx.commit().await {
+        return internal(error, "commit trusted persons");
+    }
+    let (invalidated_count, invalidated) = invalidated;
+    if invalidated_count > 0 {
+        notify_lead_staff(
+            &state,
+            lead_id,
+            "lead_consent_choice_changed",
+            "Consent choice changed",
+            "The patient changed the consent choice. Create a new consent document and signature invitation.",
+        )
+        .await;
+        let signature_state = state.clone();
+        tokio::spawn(async move {
+            crate::document_signatures::withdraw_invalidated_consents(
+                &signature_state,
+                &invalidated,
+            )
+            .await;
+        });
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.portal_updated",
+        lead_id,
+        json!({ "change": "trusted_persons", "access_kind": kind.as_str() }),
+    )
+    .await;
+    match request_payload(&state, lead_id, auth.user_id, kind).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal(error, "load request"),
+    }
 }
 
 #[allow(clippy::result_large_err)]
@@ -5623,6 +5887,7 @@ async fn get_lead_portal_intake(
     let row = match sqlx::query(&format!(
         r#"SELECT {PERSONAL_DATA_COLUMNS}, l.portal_field_updates, l.portal_submitted_at,
                   ({CHANGED_SINCE_SUBMIT_SQL}) AS changed_since_submit,
+                  l.portal_trusted_persons,
                   l.wizard_state->>'step1_fill_mode' AS fill_mode,
                   (SELECT u.role FROM users u WHERE u.id = l.portal_submitted_by) AS submitted_by_role,
                   EXISTS(
@@ -5952,6 +6217,16 @@ async fn get_lead_portal_intake(
     } else {
         Value::Null
     };
+    // The trusted persons of the cabinet (2026-10-14), for the same roles as
+    // the consent form's choice.
+    let trusted_persons = if statements_visible {
+        row.try_get::<Value, _>("portal_trusted_persons")
+            .ok()
+            .filter(Value::is_array)
+            .unwrap_or_else(|| json!([]))
+    } else {
+        Value::Null
+    };
     let medical = auth.can(Capability::PatientsMedicalView);
     let time = |row: &PgRow, column: &str| {
         row.try_get::<Option<DateTime<Utc>>, _>(column)
@@ -6075,6 +6350,7 @@ async fn get_lead_portal_intake(
         "submitted_by": submitted_by,
         "consents": consent_items,
         "consent_form": consent_form,
+        "trusted_persons": trusted_persons,
         "uploads": upload_items,
         "uploads_hidden": !medical,
         "identification": identification_json,
@@ -6314,9 +6590,10 @@ pub(crate) async fn attach_list_progress(db: &gmed_db::DbPool, leads: &mut [Valu
 /// Clears what the portal intake keeps on the lead itself, in the purge
 /// transaction: the markers, the time of sending, the upload rows of every
 /// kind, the lead's own GwG statements, staff's confirmations of the
-/// own-account payments and — for an unconverted lead — the payer's
-/// statement and links (uploads go with the lead's documents, consents stay
-/// as evidence without personal data of their own).
+/// own-account payments, the trusted persons of the cabinet (2026-10-14) and
+/// — for an unconverted lead — the payer's statement and links (uploads go
+/// with the lead's documents, consents stay as evidence without personal data
+/// of their own).
 pub(crate) async fn purge_portal_intake_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
@@ -6334,6 +6611,7 @@ pub(crate) async fn purge_portal_intake_in_tx(
     sqlx::query(
         r#"UPDATE leads
            SET portal_field_updates = '{}'::jsonb,
+               portal_trusted_persons = '[]'::jsonb,
                portal_submitted_at = NULL,
                portal_submitted_by = NULL
            WHERE id = $1"#,

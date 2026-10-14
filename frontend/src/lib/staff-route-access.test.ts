@@ -535,9 +535,11 @@ describe("lead cabinet routes (owner decision 2026-10-03)", () => {
     expect(isLeadPortalUser(null)).toBe(false);
   });
 
-  it("offers only the request page, the account and the legal notice", () => {
-    expect(listLeadPortalNavItems().map((item) => item.to)).toEqual(["/", "/account", "/legal"]);
+  it("offers only the request page, the trusted persons, the account and the legal notice", () => {
+    expect(listLeadPortalNavItems().map((item) => item.to)).toEqual(["/", "/trusted-persons", "/account", "/legal"]);
+    expect(listLeadPortalNavItems().map((item) => item.labelKey)).toContain("nav_trusted_persons");
     expect(canAccessLeadPortalRoute("/")).toBe(true);
+    expect(canAccessLeadPortalRoute("/trusted-persons")).toBe(true);
     expect(canAccessLeadPortalRoute("/account")).toBe(true);
     for (const path of ["/notifications", "/chat", "/appointments", "/documents", "/invoices", "/privacy", "/request"]) {
       expect(canAccessLeadPortalRoute(path)).toBe(false);
@@ -545,11 +547,14 @@ describe("lead cabinet routes (owner decision 2026-10-03)", () => {
   });
 
   it("adds the request page to the portal of a patient who also fills in a request", () => {
-    expect(listPatientPortalNavItems({ leadRequests: true }).map((item) => item.to).slice(0, 2)).toEqual([
+    expect(listPatientPortalNavItems({ leadRequests: true }).map((item) => item.to).slice(0, 3)).toEqual([
       "/",
       "/request",
+      "/trusted-persons",
     ]);
     expect(listPatientPortalNavItems().map((item) => item.to)).not.toContain("/request");
+    expect(listPatientPortalNavItems().map((item) => item.to)).not.toContain("/trusted-persons");
     expect(canAccessPatientPortalRoute("/request")).toBe(true);
+    expect(canAccessPatientPortalRoute("/trusted-persons")).toBe(true);
   });
 });

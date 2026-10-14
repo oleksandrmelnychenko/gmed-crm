@@ -290,6 +290,11 @@ const LeadRequestPage = lazy(() =>
     default: module.LeadRequestPage,
   })),
 );
+const LeadTrustedPersonsPage = lazy(() =>
+  import("@/pages/patient-lead/lead-trusted-persons-page").then((module) => ({
+    default: module.LeadTrustedPersonsPage,
+  })),
+);
 const PayerLinkPage = lazy(() =>
   import("@/pages/payer-link/payer-link-page").then((module) => ({
     default: module.PayerLinkPage,
@@ -439,6 +444,7 @@ function AppRoutes() {
             <Route index element={<DashboardPage />} />
             <Route path="notifications" element={<PatientNotificationsPage />} />
             <Route path="request" element={<LeadRequestPage />} />
+            <Route path="trusted-persons" element={<LeadTrustedPersonsPage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="notes" element={<InternalNotesPage />} />
             <Route path="reports" element={<ReportsPage />} />
