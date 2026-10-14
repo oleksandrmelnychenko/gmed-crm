@@ -1,3 +1,5 @@
+import { ApiRequestError } from "@/lib/api";
+
 import { payerDeclarationPayload, type PayerDeclarationForm } from "./lead-payer";
 
 export type PayerAutosaveState = {
@@ -55,12 +57,22 @@ export function createPayerAutosave(
         }
         emit(pending ? "dirty" : "saved", Boolean(pending));
       } catch (error) {
-        // Keep the latest draft, but pause until a new edit or an explicit retry.
-        pending ??= snapshot;
-        failed = true;
-        ready = false;
-        clearTimer();
-        emit("error", true, error);
+        // The lead is gone for the server (404): no draft can ever be saved, so drop it and let
+        // the wizard close instead of staying stuck on a failed payer write (staff report 2026-10-14).
+        if (error instanceof ApiRequestError && error.status === 404) {
+          pending = null;
+          failed = false;
+          ready = false;
+          clearTimer();
+          emit("error", false, error);
+        } else {
+          // Keep the latest draft, but pause until a new edit or an explicit retry.
+          pending ??= snapshot;
+          failed = true;
+          ready = false;
+          clearTimer();
+          emit("error", true, error);
+        }
       } finally {
         running = null;
       }
