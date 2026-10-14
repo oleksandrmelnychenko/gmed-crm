@@ -821,7 +821,7 @@ test.describe("lead cabinet", () => {
     await expect(page.getByTestId("lead-request-send").getByRole("button", { name: "An den Manager senden", exact: true })).toBeDisabled();
   });
 
-  test("a lead login sees only its request, the account and the legal notice", async ({ page }) => {
+  test("a lead login keeps patient modules locked beside its request and utilities", async ({ page }) => {
     const { calls } = await setup(page, "lead");
     await page.goto("/");
 
@@ -831,7 +831,8 @@ test.describe("lead cabinet", () => {
     await expect(nav.getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Konto" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Meine Dokumente" })).toHaveCount(0);
-    await expect(page.getByTitle("Benachrichtigungen")).toHaveCount(0);
+    await expect(page.getByTitle("Benachrichtigungen", { exact: true })).toHaveCount(0);
+    await expect(nav.getByTestId("lead-portal-locked-notifications")).toHaveAttribute("aria-haspopup", "dialog");
 
     // Other portal pages lead back to the request page.
     await page.goto("/documents");

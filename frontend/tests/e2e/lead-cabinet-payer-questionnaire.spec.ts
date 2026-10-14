@@ -542,7 +542,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     // the payer's cards and the invoice (owner 2026-10-09).
     await expect(page.getByRole("heading", { name: TITLE, exact: true })).toBeVisible();
     const order = await page.getByTestId("lead-request-step-billing").locator("h3").evaluateAll((titles) => titles.map((title) => title.textContent));
-    expect(order).toEqual(["Versicherung", "Zahler", "Angaben zur zahlenden Person", "Kontakt", "Wohnort", "Rechnungsempfänger", TITLE, "Zahlungsweg"]);
+    expect(order).toEqual(["Versicherung des Kindes", "Zahler", "Angaben zur zahlenden Person", "Kontakt", "Wohnort", "Rechnungsempfänger", TITLE, "Zahlungsweg"]);
     await expect(section).toContainText("Name, Anschrift und Ausweis geben Sie im Abschnitt „Gesetzliche Vertreter“ an.");
 
     // The notice comes first: nothing else is asked before it.
