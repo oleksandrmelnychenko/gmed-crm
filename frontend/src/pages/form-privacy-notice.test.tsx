@@ -10,45 +10,47 @@ const auth = vi.hoisted(() => ({ user: null as null | { role: string; portal_mod
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: auth.user }) }));
 
 describe("inquiry privacy notice", () => {
-  it.each(["de", "ru"] as const)("renders all 14 sections in %s with the configured agency contacts", (lang) => {
+  it.each(["de", "ru"] as const)("shows all 14 sections in %s word for word as the document", (lang) => {
     const html = renderToStaticMarkup(<FormPrivacyNotice lang={lang} agency={{
       agency_name: "Testagentur",
-      agency_address: "Teststraße 1",
       agency_email: "contact@example.com",
       agency_privacy_email: "privacy@example.com",
       agency_data_system_name: "Test CRM",
     }} />);
     expect(FORM_PRIVACY_SECTIONS[lang].map((section) => section.number)).toEqual(Array.from({ length: 14 }, (_, index) => index + 1));
     expect(html).toContain('data-version="2026-10-12"');
-    expect(html).toContain("Testagentur");
-    expect(html).toContain("Test CRM");
-    expect(html).toContain("privacy@example.com");
-    expect(html).not.toContain("datenschutz@gmed-health.com");
-    expect(html).not.toContain("[Link");
-    expect(html).not.toContain("[ссылка");
+    // The document's own contact data, never the agency settings (owner 2026-10-14).
+    expect(html).toContain("GMED - Agentur für Patientenbetreuung,");
+    expect(html).toContain("contact@gmed-health.com");
+    expect(html).toContain("datenschutz@gmed-health.com");
+    expect(html).toContain("GMED-EDV-System");
+    for (const setting of ["Testagentur", "Test CRM", "privacy@example.com", "contact@example.com"]) expect(html).not.toContain(setting);
+    expect(html.match(/<address/g)).toHaveLength(1);
+    // The bold beginnings of the purposes, the recipients and the right to object.
+    expect(html.match(/<strong>/g)).toHaveLength(8);
     expect(html).toContain("FiSaLis");
     expect(html).toContain("Hetzner");
     expect(html).toContain("Skribble");
     expect(html).toContain("180");
-    expect(html).toContain("14");
     expect(html).toContain("12.10.2026");
     // The lists in the reference remain semantic lists: data, purposes,
     // processors, other recipients, and the five retention cases.
-    expect(html.match(/<ul\b/g)).toHaveLength(5);
-    expect(html.match(/<li\b/g)).toHaveLength(22);
+    expect(html.match(/<ul/g)).toHaveLength(5);
+    expect(html.match(/<li/g)).toHaveLength(22);
     expect(FORM_PRIVACY_SECTIONS[lang].find((section) => section.number === 6)?.blocks
       .filter((block) => block.kind === "list").map((block) => block.items.length)).toEqual([2, 4]);
     expect(FORM_PRIVACY_SECTIONS[lang].find((section) => section.number === 9)?.blocks
       .find((block) => block.kind === "list")?.items).toHaveLength(5);
   });
 
-  it.each(["de", "en", "uk", "ru"] as const)("opens the complete %s notice from a localized cabinet link", (lang) => {
+  it.each(["de", "en", "uk", "ru"] as const)("opens the complete notice from a %s cabinet link, German unless Russian", (lang) => {
     auth.user = { role: "patient", portal_mode: "lead" };
+    const notice = lang === "ru" ? "ru" : "de";
     const html = renderToStaticMarkup(<MemoryRouter initialEntries={[`/legal?lang=${lang}#privacy`]}><LegalNoticePage /></MemoryRouter>);
-    expect(html).toContain(`lang="${lang}"`);
-    expect(html).toContain(FORM_PRIVACY_SECTIONS[lang][0].title);
-    expect(html).toContain(FORM_PRIVACY_SECTIONS[lang][13].title);
-    if (lang !== "de") expect(html).not.toContain(FORM_PRIVACY_SECTIONS.de[4].title);
+    expect(html).toContain(`lang="${notice}"`);
+    expect(html).toContain(FORM_PRIVACY_SECTIONS[notice][0].title);
+    expect(html).toContain(FORM_PRIVACY_SECTIONS[notice][13].title);
+    if (notice === "ru") expect(html).not.toContain(FORM_PRIVACY_SECTIONS.de[4].title);
     expect(html).toContain({ de: "Impressum", en: "Legal notice", uk: "Юридична інформація", ru: "Impressum" }[lang]);
   });
 

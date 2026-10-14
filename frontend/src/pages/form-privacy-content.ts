@@ -1,8 +1,13 @@
-/** Form privacy notice (Datenschutzerklärung Formular GMED), DE original and RU translation, as supplied on 2026-10-12.
- * Legal text in German takes precedence; the cabinet shows the German text for every language but Russian.
- * Contact details are rendered from the agency settings; the reference's website-policy link is omitted.
+/** Datenschutzerklärung Formular GMED as supplied on 2026-10-12: the German original and its Russian version,
+ * shown word for word (owner 2026-10-14: what is in the Word document is what the page shows). `lead` is the
+ * bold beginning of a paragraph or item; section 1 opens with the controller's address lines as written.
+ * The German text is authoritative and shown for every other language.
  */
-export type FormPrivacyBlock = { kind: "paragraph"; text: string } | { kind: "list"; items: readonly string[] };
+export type FormPrivacyText = { lead?: string; text: string };
+export type FormPrivacyBlock =
+  | ({ kind: "paragraph" } & FormPrivacyText)
+  | { kind: "list"; items: readonly FormPrivacyText[] }
+  | { kind: "address"; lines: readonly string[] };
 export type FormPrivacySection = { number: number; title: string; blocks: readonly FormPrivacyBlock[] };
 
 export type FormPrivacyLanguage = "de" | "ru";
@@ -15,6 +20,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       number: 1,
       title: "Verantwortlicher und Datenschutzbeauftragter",
       blocks: [
+        { kind: "address", lines: ["GMED - Agentur für Patientenbetreuung,", "Heorhii Hudiiev, Albert-Schweitzer-Straße 56", "81735 München", "Deutschland", "E-Mail: contact@gmed-health.com,", "Telefon: +49 151 20943768"] },
         { kind: "paragraph", text: "Verantwortlich für die Verarbeitung Ihrer Daten ist Heorhii Hudiiev, Albert-Schweitzer-Straße 56, 81735 München, Deutschland, E-mail: datenschutz@gmed-health.com." },
         { kind: "paragraph", text: "Diese Datenschutzerklärung gilt für unsere Kundenbefragung (Befragungsformular) und die Bearbeitung Ihrer Anfrage. Wenn wir zusammenarbeiten und einen Vertrag schließen, informieren wir Sie gesondert über die Datenverarbeitung bei der Zusammenarbeit. Für unsere Website gilt [Link zur Datenschutzerklärung der Website]." },
       ],
@@ -24,7 +30,14 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       title: "Welche Daten wir im Formular verarbeiten",
       blocks: [
         { kind: "paragraph", text: "Wir verarbeiten:" },
-        { kind: "list", items: ["Kontakt- und Identifikationsdaten (z. B. Name, Geburtsdatum, Staatsangehörigkeit, Anschrift, E-Mail, Telefon),", "Angaben zur Zahlung und Abrechnung (z. B. Zahlungsweise, Rechnungsempfänger, zahlende Person, Versicherungsstatus),", "Angaben zu weiteren Personen oder Organisationen, die Sie im Formular benennen (z. B. Angehörige, zahlende Person),", "Gesundheitsdaten einschließlich medizinischer Daten, z. B. Diagnosen, Beschwerden, Anamnese (besondere Kategorie nach Art. 9 DSGVO),", "Kommunikationsdaten (z. B. E-Mails und Nachrichten),", "Ergebnisse des Sanktionsscreenings (siehe Abschnitt 5)."] },
+        { kind: "list", items: [
+          { text: "Kontakt- und Identifikationsdaten (z. B. Name, Geburtsdatum, Staatsangehörigkeit, Anschrift, E-Mail, Telefon)," },
+          { text: "Angaben zur Zahlung und Abrechnung (z. B. Zahlungsweise, Rechnungsempfänger, zahlende Person, Versicherungsstatus)," },
+          { text: "Angaben zu weiteren Personen oder Organisationen, die Sie im Formular benennen (z. B. Angehörige, zahlende Person)," },
+          { text: "Gesundheitsdaten einschließlich medizinischer Daten, z. B. Diagnosen, Beschwerden, Anamnese (besondere Kategorie nach Art. 9 DSGVO)," },
+          { text: "Kommunikationsdaten (z. B. E-Mails und Nachrichten)," },
+          { text: "Ergebnisse des Sanktionsscreenings (siehe Abschnitt 5)." },
+        ] },
         { kind: "paragraph", text: "Die Daten erhalten wir von Ihnen und von den Personen, die Sie im Formular benennen." },
         { kind: "paragraph", text: "Wir verarbeiten personenbezogene Daten und Gesundheitsdaten von Patientinnen, Patienten, Angehörigen und Interessenten ausschließlich, um medizinische Untersuchungen und  Behandlungen zu vermitteln, zu organisieren und abzurechnen, sowie um nicht-medizinische Leistungen zu erbringen, zu vermitteln, zu organisieren und abzurechnen. Wir erbringen keine medizinischen Leistungen selbst, sondern organisatorische und verwaltungsbezogene Leistungen einschließlich Dolmetschen." },
       ],
@@ -33,7 +46,13 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       number: 3,
       title: "Zwecke und Rechtsgrundlagen",
       blocks: [
-        { kind: "list", items: ["Bearbeitung Ihrer Anfrage, Prüfung und Vorbereitung einer Zusammenarbeit, Kommunikation mit Ihnen: Art. 6 Abs. 1 lit. b DSGVO (vorvertragliche Maßnahmen auf Ihre Anfrage).", "Verarbeitung von Gesundheitsangaben im Formular: Ihre ausdrückliche Einwilligung, Art. 9 Abs. 2 lit. a DSGVO.", "Sanktionsscreening: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse, siehe Abschnitt 5).", "Nachweis und Verteidigung gegen Rechtsansprüche: Art. 6 Abs. 1 lit. f DSGVO und, soweit Gesundheitsdaten betroffen sind, Art. 9 Abs. 2 lit. f DSGVO.", "Nachweis erteilter Einwilligungen: Art. 6 Abs. 1 lit. c DSGVO in Verbindung mit Art. 7 Abs. 1 DSGVO."] },
+        { kind: "list", items: [
+          { lead: "Bearbeitung Ihrer Anfrage, Prüfung und Vorbereitung einer Zusammenarbeit, Kommunikation mit Ihnen:", text: "Art. 6 Abs. 1 lit. b DSGVO (vorvertragliche Maßnahmen auf Ihre Anfrage)." },
+          { lead: "Verarbeitung von Gesundheitsangaben im Formular:", text: "Ihre ausdrückliche Einwilligung, Art. 9 Abs. 2 lit. a DSGVO." },
+          { lead: "Sanktionsscreening:", text: "Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse, siehe Abschnitt 5)." },
+          { lead: "Nachweis und Verteidigung gegen Rechtsansprüche:", text: "Art. 6 Abs. 1 lit. f DSGVO und, soweit Gesundheitsdaten betroffen sind, Art. 9 Abs. 2 lit. f DSGVO." },
+          { lead: "Nachweis erteilter Einwilligungen:", text: "Art. 6 Abs. 1 lit. c DSGVO in Verbindung mit Art. 7 Abs. 1 DSGVO." },
+        ] },
       ],
     },
     {
@@ -59,10 +78,18 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       title: "Empfänger und Auftragsverarbeiter",
       blocks: [
         { kind: "paragraph", text: "Wir verarbeiten Ihre Daten in unserem Kundenverwaltungssystem GMED-EDV-System." },
-        { kind: "paragraph", text: "Auftragsverarbeiter (Art. 28 DSGVO), die nach unseren Weisungen arbeiten:" },
-        { kind: "list", items: ["Hosting: Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen, Deutschland. Unsere Server stehen ausschließlich in Rechenzentren in Deutschland. Mit dem Anbieter besteht ein Auftragsverarbeitungsvertrag.", "Elektronische (Qualifizierte) Signatur: Skribble AG, Talacker 21, 8001 Zürich, Schweiz. Mit dem Anbieter besteht ein Auftragsverarbeitungsvertrag."] },
-        { kind: "paragraph", text: "Weitere Empfänger:" },
-        { kind: "list", items: ["unsere Mitarbeitenden, soweit sie die Daten für die Bearbeitung Ihrer Anfrage benötigen,", "Dolmetscherinnen und Dolmetscher, soweit sie an der Bearbeitung Ihrer Anfrage beteiligt sind,", "nur bei Online-Abfrage von FiSaLis: Deutsche Bundesbank (Suchbegriffe des Sanktionsscreenings),", "Behörden, soweit wir gesetzlich zur Meldung verpflichtet sind."] },
+        { kind: "paragraph", lead: "Auftragsverarbeiter (Art. 28 DSGVO), die nach unseren Weisungen arbeiten:", text: "" },
+        { kind: "list", items: [
+          { text: "Hosting: Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen, Deutschland. Unsere Server stehen ausschließlich in Rechenzentren in Deutschland. Mit dem Anbieter besteht ein Auftragsverarbeitungsvertrag." },
+          { text: "Elektronische (Qualifizierte) Signatur: Skribble AG, Talacker 21, 8001 Zürich, Schweiz. Mit dem Anbieter besteht ein Auftragsverarbeitungsvertrag." },
+        ] },
+        { kind: "paragraph", lead: "Weitere Empfänger:", text: "" },
+        { kind: "list", items: [
+          { text: "unsere Mitarbeitenden, soweit sie die Daten für die Bearbeitung Ihrer Anfrage benötigen," },
+          { text: "Dolmetscherinnen und Dolmetscher, soweit sie an der Bearbeitung Ihrer Anfrage beteiligt sind," },
+          { text: "nur bei Online-Abfrage von FiSaLis: Deutsche Bundesbank (Suchbegriffe des Sanktionsscreenings)," },
+          { text: "Behörden, soweit wir gesetzlich zur Meldung verpflichtet sind." },
+        ] },
         { kind: "paragraph", text: "Eine Weitergabe an Kliniken, Ärztinnen und Ärzte und andere medizinische Leistungserbringer erfolgt erst im Rahmen der Zusammenarbeit. Darüber informieren wir Sie gesondert." },
       ],
     },
@@ -85,7 +112,13 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       title: "Speicherdauer",
       blocks: [
         { kind: "paragraph", text: "Wir speichern personenbezogene Daten nur so lange, wie es für die genannten Zwecke erforderlich ist. Danach löschen wir sie, es sei denn, es bestehen gesetzliche Aufbewahrungspflichten (dann speichern wir sie bis zum Ablauf der jeweiligen Frist) oder wir benötigen sie weiterhin zur Geltendmachung, Ausübung oder Verteidigung von Rechtsansprüchen (Art. 6 Abs. 1 lit. f DSGVO, bei Gesundheitsdaten Art. 9 Abs. 2 lit. f DSGVO). Unterliegen Daten mehreren Aufbewahrungsfristen, gilt die längste. Im Einzelnen:" },
-        { kind: "list", items: ["Anfragen ohne Vertrag: 14 Tage nach Absendung.", "Einwilligung unterschrieben, aber kein Vertrag: 180 Tage, damit Sie sich in Ruhe entscheiden können und wir die bereits begonnene Planung (z. B. Abstimmung mit Kliniken, Klärung der Kostenübernahme) ohne erneute Datenerhebung fortsetzen können. Bei Widerruf der Einwilligung löschen wir sofort, soweit keine Aufbewahrungspflicht besteht.", "Ergebnisse des Sanktionsscreenings: ohne Vertragsschluss zusammen mit der Anfrage nach 14 Tagen bzw. nach 180 Tagen bei unterschriebener Einwilligung; bei bestätigtem Treffer nach 3 Jahren, damit wir die Ablehnung nachweisen und Rechtsansprüche abwehren können.", "Nachweis Ihrer Einwilligung: 3 Jahre nach Ablauf der jeweiligen Frist, damit wir sie nachweisen können (Art. 7 Abs. 1 DSGVO).", "Bei Vertragsschluss gehen Ihre Daten in das Vertragsverhältnis über. Die weiteren Speicherfristen, einschließlich der Aufbewahrung von Rechnungen, Verträgen und Screening-Ergebnissen, nennen wir Ihnen in der Datenschutzerklärung zur Zusammenarbeit."] },
+        { kind: "list", items: [
+          { text: "Anfragen ohne Vertrag: 14 Tage nach Absendung." },
+          { text: "Einwilligung unterschrieben, aber kein Vertrag: 180 Tage, damit Sie sich in Ruhe entscheiden können und wir die bereits begonnene Planung (z. B. Abstimmung mit Kliniken, Klärung der Kostenübernahme) ohne erneute Datenerhebung fortsetzen können. Bei Widerruf der Einwilligung löschen wir sofort, soweit keine Aufbewahrungspflicht besteht." },
+          { text: "Ergebnisse des Sanktionsscreenings: ohne Vertragsschluss zusammen mit der Anfrage nach 14 Tagen bzw. nach 180 Tagen bei unterschriebener Einwilligung; bei bestätigtem Treffer nach 3 Jahren, damit wir die Ablehnung nachweisen und Rechtsansprüche abwehren können." },
+          { text: "Nachweis Ihrer Einwilligung: 3 Jahre nach Ablauf der jeweiligen Frist, damit wir sie nachweisen können (Art. 7 Abs. 1 DSGVO)." },
+          { text: "Bei Vertragsschluss gehen Ihre Daten in das Vertragsverhältnis über. Die weiteren Speicherfristen, einschließlich der Aufbewahrung von Rechnungen, Verträgen und Screening-Ergebnissen, nennen wir Ihnen in der Datenschutzerklärung zur Zusammenarbeit." },
+        ] },
       ],
     },
     {
@@ -108,7 +141,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       number: 12,
       title: "Widerspruchsrecht",
       blocks: [
-        { kind: "paragraph", text: "Widerspruchsrecht (Art. 21 DSGVO): Sie können der Verarbeitung Ihrer Daten, die auf unserem berechtigten Interesse beruht (insbesondere dem Sanktionsscreening), jederzeit aus Gründen, die sich aus Ihrer besonderen Situation ergeben, widersprechen. Wir verarbeiten die Daten dann nicht mehr, es sei denn, wir können zwingende schutzwürdige Gründe nachweisen, die Ihre Interessen, Rechte und Freiheiten überwiegen, oder die Verarbeitung dient der Geltendmachung, Ausübung oder Verteidigung von Rechtsansprüchen. Ohne Sanktionsscreening können wir nach unseren internen Compliance-Vorgaben keine Zusammenarbeit anbieten und keine Zahlungen entgegennehmen." },
+        { kind: "paragraph", lead: "Widerspruchsrecht (Art. 21 DSGVO):", text: "Sie können der Verarbeitung Ihrer Daten, die auf unserem berechtigten Interesse beruht (insbesondere dem Sanktionsscreening), jederzeit aus Gründen, die sich aus Ihrer besonderen Situation ergeben, widersprechen. Wir verarbeiten die Daten dann nicht mehr, es sei denn, wir können zwingende schutzwürdige Gründe nachweisen, die Ihre Interessen, Rechte und Freiheiten überwiegen, oder die Verarbeitung dient der Geltendmachung, Ausübung oder Verteidigung von Rechtsansprüchen. Ohne Sanktionsscreening können wir nach unseren internen Compliance-Vorgaben keine Zusammenarbeit anbieten und keine Zahlungen entgegennehmen." },
       ],
     },
     {
@@ -132,7 +165,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       number: 1,
       title: "Ответственное лицо и уполномоченный по защите данных",
       blocks: [
-        { kind: "paragraph", text: "Albert-Schweitzer-Straße 56" },
+        { kind: "address", lines: ["GMED - Agentur für Patientenbetreuung,", "Heorhii Hudiiev,", "Albert-Schweitzer-Straße 56", "81735 München", "Deutschland", "E-Mail: contact@gmed-health.com,", "Telefon: +49 151 20943768"] },
         { kind: "paragraph", text: "Лицо ответственное за обработку Ваших данных: Heorhii Hudiiev, Albert-Schweitzer-Straße 56, 81735 München, Deutschland, E-Mail: contact@gmed-health.com" },
         { kind: "paragraph", text: "Настоящая политика конфиденциальности касается нашего опроса клиентов (формы опроса) и обработки Вашего запроса. Если мы начнём сотрудничество и заключим договор, мы отдельно проинформируем Вас об обработке данных при сотрудничестве. Для нашего сайта действует [ссылка на политику конфиденциальности сайта]." },
       ],
@@ -142,7 +175,14 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       title: "Какие данные мы обрабатываем в форме",
       blocks: [
         { kind: "paragraph", text: "Мы обрабатываем:" },
-        { kind: "list", items: ["контактные и идентификационные данные (например, имя, дата рождения, гражданство, адрес, e-mail, телефон),", "сведения об оплате и расчётах (например, способ оплаты, получатель счёта, плательщик, статус страхования),", "сведения о других лицах или организациях, которых Вы указываете в форме (например, близкие, плательщик),", "данные о здоровье, включая медицинские данные, например диагнозы, жалобы, анамнез (особая категория данных согласно ст. 9 DSGVO),", "данные коммуникации (например, электронные письма и сообщения),", "результаты санкционной проверки (см. раздел 5)."] },
+        { kind: "list", items: [
+          { text: "контактные и идентификационные данные (например, имя, дата рождения, гражданство, адрес, e-mail, телефон)," },
+          { text: "сведения об оплате и расчётах (например, способ оплаты, получатель счёта, плательщик, статус страхования)," },
+          { text: "сведения о других лицах или организациях, которых Вы указываете в форме (например, близкие, плательщик)," },
+          { text: "данные о здоровье, включая медицинские данные, например диагнозы, жалобы, анамнез (особая категория данных согласно ст. 9 DSGVO)," },
+          { text: "данные коммуникации (например, электронные письма и сообщения)," },
+          { text: "результаты санкционной проверки (см. раздел 5)." },
+        ] },
         { kind: "paragraph", text: "Данные мы получаем от Вас и от лиц, которых Вы указываете в форме." },
         { kind: "paragraph", text: "Мы сами не оказываем медицинских услуг, а предоставляем консалтинговые, организационные и административные услуги, включая услуги перевода." },
       ],
@@ -151,7 +191,13 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       number: 3,
       title: "Цели и правовые основания",
       blocks: [
-        { kind: "list", items: ["Обработка Вашего запроса, проверка и подготовка сотрудничества, общение с Вами: ст. 6 абз. 1 п. b DSGVO (предварительные меры по Вашему запросу).", "Обработка сведений о здоровье в форме: Ваше явное согласие, ст. 9 абз. 2 п. a DSGVO.", "Санкционная проверка: ст. 6 абз. 1 п. f DSGVO (законный интерес, см. раздел 5).", "Подтверждение и защита от правовых требований: ст. 6 абз. 1 п. f DSGVO и, если затрагиваются данные о здоровье, ст. 9 абз. 2 п. f DSGVO.", "Подтверждение данных согласий: ст. 6 абз. 1 п. c DSGVO в сочетании со ст. 7 абз. 1 DSGVO."] },
+        { kind: "list", items: [
+          { lead: "Обработка Вашего запроса, проверка и подготовка сотрудничества, общение с Вами:", text: "ст. 6 абз. 1 п. b DSGVO (предварительные меры по Вашему запросу)." },
+          { lead: "Обработка сведений о здоровье в форме:", text: "Ваше явное согласие, ст. 9 абз. 2 п. a DSGVO." },
+          { lead: "Санкционная проверка:", text: "ст. 6 абз. 1 п. f DSGVO (законный интерес, см. раздел 5)." },
+          { lead: "Подтверждение и защита от правовых требований:", text: "ст. 6 абз. 1 п. f DSGVO и, если затрагиваются данные о здоровье, ст. 9 абз. 2 п. f DSGVO." },
+          { lead: "Подтверждение данных согласий:", text: "ст. 6 абз. 1 п. c DSGVO в сочетании со ст. 7 абз. 1 DSGVO." },
+        ] },
       ],
     },
     {
@@ -177,10 +223,18 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       title: "Получатели и обработчики по поручению",
       blocks: [
         { kind: "paragraph", text: "Мы обрабатываем Ваши данные в нашей системе управления клиентами GMED-EDV-System." },
-        { kind: "paragraph", text: "Обработчики по поручению (ст. 28 DSGVO), действующие по нашим указаниям:" },
-        { kind: "list", items: ["Хостинг: Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen. Наши серверы находятся исключительно в центрах обработки данных в Германии. С провайдером заключён договор об обработке данных по поручению.", "Электронная (квалифицированная) подпись: Skribble AG, Talacker 21, 8001 Цюрих, Швейцария. Швейцария (третья страна, см. раздел 7). С поставщиком заключён договор об обработке данных по поручению."] },
-        { kind: "paragraph", text: "Другие получатели:" },
-        { kind: "list", items: ["наши сотрудники, которым данные необходимы для обработки Вашего запроса,", "переводчики, участвующие в обработке Вашего запроса,", "только при онлайн-запросе FiSaLis: Немецкий федеральный банк (поисковые данные санкционной проверки),", "органы власти, если мы обязаны по закону сообщить о данных."] },
+        { kind: "paragraph", lead: "Обработчики по поручению (ст. 28 DSGVO), действующие по нашим указаниям:", text: "" },
+        { kind: "list", items: [
+          { text: "Хостинг: Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen. Наши серверы находятся исключительно в центрах обработки данных в Германии. С провайдером заключён договор об обработке данных по поручению." },
+          { text: "Электронная (квалифицированная) подпись: Skribble AG, Talacker 21, 8001 Цюрих, Швейцария. Швейцария (третья страна, см. раздел 7). С поставщиком заключён договор об обработке данных по поручению." },
+        ] },
+        { kind: "paragraph", lead: "Другие получатели:", text: "" },
+        { kind: "list", items: [
+          { text: "наши сотрудники, которым данные необходимы для обработки Вашего запроса," },
+          { text: "переводчики, участвующие в обработке Вашего запроса," },
+          { text: "только при онлайн-запросе FiSaLis: Немецкий федеральный банк (поисковые данные санкционной проверки)," },
+          { text: "органы власти, если мы обязаны по закону сообщить о данных." },
+        ] },
         { kind: "paragraph", text: "Передача клиникам, врачам и другим медицинским учреждениям осуществляется только в рамках сотрудничества. Об этом мы проинформируем Вас отдельно." },
       ],
     },
@@ -203,7 +257,13 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       title: "Срок хранения",
       blocks: [
         { kind: "paragraph", text: "Мы храним персональные данные только столько, сколько это необходимо для указанных целей. После этого мы удаляем их, за исключением случаев, когда действуют установленные законом обязанности по хранению (тогда мы храним данные до истечения соответствующего срока) или когда данные по-прежнему нужны нам для предъявления, осуществления или защиты правовых требований (ст. 6 абз. 1 п. f DSGVO, для данных о здоровье ст. 9 абз. 2 п. f DSGVO). Если к данным применяется несколько сроков хранения, действует самый длительный. В частности:" },
-        { kind: "list", items: ["запросы без заключения договора: 14 дней после отправки.", "согласие подписано, договор не заключён: 180 дней, чтобы Вы могли спокойно принять решение, а мы могли продолжить уже начатую организацию (например, согласование с клиниками, выяснение вопроса о покрытии расходов) без повторного сбора данных. При отзыве согласия мы удаляем данные сразу, если нет обязанности хранения.", "результаты санкционной проверки: без заключения договора вместе с запросом через 14 дней или через 180 дней при подписанном согласии; при подтверждённом совпадении через 3 года, чтобы мы могли доказать причину отказа и защититься от правовых требований.", "подтверждение Вашего согласия: 3 года после истечения соответствующего срока, чтобы мы могли его подтвердить (ст. 7 абз. 1 DSGVO).", "при заключении договора Ваши данные переходят в договорные отношения. Дальнейшие сроки хранения, включая хранение счетов, договоров и результатов проверки, мы укажем в политике конфиденциальности при сотрудничестве."] },
+        { kind: "list", items: [
+          { text: "запросы без заключения договора: 14 дней после отправки." },
+          { text: "согласие подписано, договор не заключён: 180 дней, чтобы Вы могли спокойно принять решение, а мы могли продолжить уже начатую организацию (например, согласование с клиниками, выяснение вопроса о покрытии расходов) без повторного сбора данных. При отзыве согласия мы удаляем данные сразу, если нет обязанности хранения." },
+          { text: "результаты санкционной проверки: без заключения договора вместе с запросом через 14 дней или через 180 дней при подписанном согласии; при подтверждённом совпадении через 3 года, чтобы мы могли доказать причину отказа и защититься от правовых требований." },
+          { text: "подтверждение Вашего согласия: 3 года после истечения соответствующего срока, чтобы мы могли его подтвердить (ст. 7 абз. 1 DSGVO)." },
+          { text: "при заключении договора Ваши данные переходят в договорные отношения. Дальнейшие сроки хранения, включая хранение счетов, договоров и результатов проверки, мы укажем в политике конфиденциальности при сотрудничестве." },
+        ] },
       ],
     },
     {
@@ -226,7 +286,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       number: 12,
       title: "Право на возражение",
       blocks: [
-        { kind: "paragraph", text: "Право на возражение (ст. 21 DSGVO): Вы вправе в любой момент возразить против обработки Ваших данных, основанной на нашем законном интересе (в частности, против санкционной проверки), по причинам, связанным с Вашей особой ситуацией. После этого мы прекращаем обработку, если только не докажем наличие убедительных законных оснований, которые преобладают над Вашими интересами, правами и свободами, либо обработка служит для предъявления, осуществления или защиты правовых требований. Без санкционной проверки мы в соответствии с нашими внутренними требованиями комплаенса не можем предлагать сотрудничество и принимать платежи." },
+        { kind: "paragraph", lead: "Право на возражение (ст. 21 DSGVO):", text: "Вы вправе в любой момент возразить против обработки Ваших данных, основанной на нашем законном интересе (в частности, против санкционной проверки), по причинам, связанным с Вашей особой ситуацией. После этого мы прекращаем обработку, если только не докажем наличие убедительных законных оснований, которые преобладают над Вашими интересами, правами и свободами, либо обработка служит для предъявления, осуществления или защиты правовых требований. Без санкционной проверки мы в соответствии с нашими внутренними требованиями комплаенса не можем предлагать сотрудничество и принимать платежи." },
       ],
     },
     {

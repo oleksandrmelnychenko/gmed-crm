@@ -1,4 +1,4 @@
-import { FORM_PRIVACY_SECTIONS, FORM_PRIVACY_VERSION, type FormPrivacyLanguage } from "./form-privacy-content";
+import { FORM_PRIVACY_SECTIONS, FORM_PRIVACY_VERSION, type FormPrivacyLanguage, type FormPrivacyText } from "./form-privacy-content";
 
 export type FormPrivacyAgency = Partial<Record<
   | "agency_name"
@@ -12,20 +12,17 @@ export type FormPrivacyAgency = Partial<Record<
   string
 >>;
 
-/** The notice for an inquiry, available before consent and inside the lead cabinet. */
-export function FormPrivacyNotice({ lang, agency }: { lang: FormPrivacyLanguage; agency: FormPrivacyAgency | null }) {
-  const labels = {
-    de: { phone: "Telefon", controller: "Verantwortlich für die Datenverarbeitung", privacy: "Datenschutzkontakt" },
-    en: { phone: "Telephone", controller: "Responsible for data processing", privacy: "Data protection contact" },
-    uk: { phone: "Телефон", controller: "Відповідальний за обробку даних", privacy: "Контакт із захисту даних" },
-    ru: { phone: "Телефон", controller: "Ответственное за обработку данных лицо", privacy: "Контакт по защите данных" },
-  }[lang];
-  const name = agency?.agency_name || "GMED";
-  const privacyEmail = agency?.agency_privacy_email || agency?.agency_email || "";
-  const replaceSettings = (paragraph: string) => paragraph
-    .replaceAll("GMED-EDV-System", agency?.agency_data_system_name || "GMED-EDV-System")
-    .replaceAll("datenschutz@gmed-health.com", privacyEmail || "datenschutz@gmed-health.com");
+/** A paragraph or item as the document writes it: its bold beginning, then the rest. */
+function Text({ entry }: { entry: FormPrivacyText }) {
+  return entry.lead ? <><strong>{entry.lead}</strong> {entry.text}</> : <>{entry.text}</>;
+}
 
+/**
+ * The notice for an inquiry, available before consent and inside the lead cabinet. It shows the
+ * document word for word (owner 2026-10-14), so the agency settings fill nothing in here; the
+ * `agency` prop is kept for the callers' signature.
+ */
+export function FormPrivacyNotice({ lang }: { lang: FormPrivacyLanguage; agency?: FormPrivacyAgency | null }) {
   return (
     <div className="space-y-5" data-testid="form-privacy-notice" data-version={FORM_PRIVACY_VERSION} lang={lang}>
       {FORM_PRIVACY_SECTIONS[lang].map((section) => (
@@ -34,28 +31,23 @@ export function FormPrivacyNotice({ lang, agency }: { lang: FormPrivacyLanguage;
             <span className="shrink-0 font-mono text-xs text-muted-foreground">{section.number}.</span>
             <span>{section.title}</span>
           </h3>
-          {section.number === 1 ? (
-            <>
-              <address className="not-italic leading-6">
-                <strong>{name}</strong>
-                {agency?.agency_care_of ? <><br />{agency.agency_care_of}</> : null}
-                {agency?.agency_address ? <><br />{agency.agency_address}</> : null}
-                {agency?.agency_email ? <><br />E-Mail: <a href={`mailto:${agency.agency_email}`} className="underline underline-offset-2">{agency.agency_email}</a></> : null}
-                {agency?.agency_phone ? <><br />{labels.phone}: {agency.agency_phone}</> : null}
-              </address>
-              {agency?.agency_care_of ? <p>{labels.controller}: {agency.agency_care_of}.</p> : null}
-              {privacyEmail ? (
-                <p>
-                  {labels.privacy}: <a href={`mailto:${privacyEmail}`} className="underline underline-offset-2">{privacyEmail}</a>
-                </p>
-              ) : null}
-            </>
-          ) : null}
-          {section.blocks.map((block, index) => block.kind === "list" ? (
-            <ul key={index} className="list-disc space-y-2 pl-5 marker:text-[var(--brand)]" data-testid={`form-privacy-list-${section.number}-${index}`}>
-              {block.items.map((item, itemIndex) => <li key={itemIndex} className="pl-1">{replaceSettings(item)}</li>)}
-            </ul>
-          ) : <p key={index} className={block.text.endsWith(":") && block.text.length < 160 ? "font-medium" : undefined}>{replaceSettings(block.text)}</p>)}
+          {section.blocks.map((block, index) => {
+            if (block.kind === "address") {
+              return (
+                <address key={index} className="not-italic leading-6">
+                  {block.lines.map((line, lineIndex) => <span key={lineIndex} className="block">{line}</span>)}
+                </address>
+              );
+            }
+            if (block.kind === "list") {
+              return (
+                <ul key={index} className="list-disc space-y-2 pl-5 marker:text-[var(--brand)]" data-testid={`form-privacy-list-${section.number}-${index}`}>
+                  {block.items.map((item, itemIndex) => <li key={itemIndex} className="pl-1"><Text entry={item} /></li>)}
+                </ul>
+              );
+            }
+            return <p key={index}><Text entry={block} /></p>;
+          })}
         </section>
       ))}
     </div>
