@@ -448,6 +448,21 @@ async fn an_adult_names_the_person_who_acts_for_him() {
         "{body}"
     );
     start_assessment(&app, lead_id).await;
+    let (_, preview) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(preview["follow_up"]["before_submit"], false, "{preview}");
+    assert_eq!(preview["follow_up"]["blocks"], json!([]), "{preview}");
+    assert_eq!(
+        missing_representation(&preview),
+        keys("agent", &ADULT_FIELDS),
+        "the base form still asks for the representative: {preview}"
+    );
+    // From here the fixture represents an already submitted base form.
+    // Staff follow-up then exposes G/I without duplicating them beforehand.
+    sqlx::query("UPDATE leads SET portal_submitted_at = clock_timestamp() WHERE id = $1")
+        .bind(lead_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
     let (_, body) = json_request(router, "GET", &request, &patient, None).await;
     assert_eq!(body["follow_up"]["blocks"], json!(["G", "I"]), "{body}");
     assert_eq!(

@@ -33,6 +33,12 @@ async function setup(page: Page, firstPersonalReply?: Promise<void>, scenario?: 
         can_remove: true, identity_documents: [], authority_documents: [],
       } as Record<string, unknown>] : [],
     },
+    // Own financial answers and proof uploads require an explicit payer declaration.
+    payer: scenario === "extra" ? {
+      payer_kind: "self", first_name: "Anna", last_name: "Muster", date_of_birth: "1980-02-03",
+      street: "Teststrasse 1", zip: "10115", city: "Berlin", country: "DE", citizenships: ["DE"],
+      relationship: null, email: null, phone: "+4915112345678", acts_on_own_account: true,
+    } : null,
     follow_up: {
       required: scenario === "extra", blocks: scenario === "extra" ? ["A"] : [], missing: {}, answered_at: null,
       answers: { occupation: "Engineer", sector: "Old sector", funds_source: "income", funds_description: "Salary" } as Record<string, unknown>,
