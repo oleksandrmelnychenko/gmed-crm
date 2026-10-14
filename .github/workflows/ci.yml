@@ -39,6 +39,19 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      - name: Pull disposable test database image
+        shell: bash
+        run: |
+          for test_db_attempt in 1 2 3; do
+            if docker pull postgres:16-alpine; then
+              exit 0
+            fi
+            if [ "$test_db_attempt" -lt 3 ]; then
+              sleep "$((test_db_attempt * 5))"
+            fi
+          done
+          exit 1
+
       - name: Test
         shell: bash
         run: |

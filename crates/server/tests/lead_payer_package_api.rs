@@ -1787,9 +1787,9 @@ async fn a_paying_parent_signs_the_same_package_and_is_identified_on_the_own_lin
             "email": format!("mia.parent.{}@example.com", Uuid::new_v4().simple()),
             "trusted_contacts": [
                 { "id": mother, "name": "Anna Muster", "relation": "mother",
-                  "email": "anna.package@example.com", "birth_date": "1985-03-02" },
+                  "email": "anna.package@example.com", "phone": "+49300000001", "birth_date": "1985-03-02" },
                 { "id": father, "name": "Ben Muster", "relation": "father",
-                  "email": "ben.package@example.com", "birth_date": "1983-01-02" }
+                  "email": "ben.package@example.com", "phone": "+49300000002", "birth_date": "1983-01-02" }
             ]
         })),
     )
@@ -1811,6 +1811,51 @@ async fn a_paying_parent_signs_the_same_package_and_is_identified_on_the_own_lin
         logins.push(bearer(user, "patient"));
     }
     let (anna, ben) = (&logins[0], &logins[1]);
+    // Signing the payer's contractual package is beyond the short first
+    // inquiry: both joint custodians have full identity data and copies.
+    sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,custody) VALUES($1,'joint') ON CONFLICT(lead_id) DO UPDATE SET custody=EXCLUDED.custody")
+        .bind(child).execute(pool).await.unwrap();
+    for (contact, first_name) in [(mother, "Anna"), (father, "Ben")] {
+        sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,birth_place,birth_country,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_valid_until) VALUES($1,$2,'legal_representative','staff',$3,'Muster','Berlin','DE',ARRAY['DE'],'Musterweg 1','10115','Berlin','DE','passport',$4,'Synthetic office','DE',(current_date+interval '10 years')::date)")
+            .bind(child).bind(contact).bind(first_name).bind(format!("SYNTHETIC-{contact}")).execute(pool).await.unwrap();
+        let boundary = format!("----gmed-parent-{}", Uuid::new_v4().simple());
+        let mut upload = Vec::new();
+        for (name, value) in [
+            ("lead_id", child.to_string()),
+            ("auto_name", format!("Synthetic {first_name} identity")),
+            ("art", "uploaded_document".to_string()),
+            ("category", "administrative".to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "internal".to_string()),
+            ("is_medical", "false".to_string()),
+        ] {
+            upload.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
+        }
+        upload.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"synthetic-parent.pdf\"\r\nContent-Type: application/pdf\r\n\r\n").as_bytes());
+        upload.extend_from_slice(PDF);
+        upload.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/documents/upload")
+            .header("Authorization", app.ceo())
+            .header(
+                "Content-Type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(Body::from(upload))
+            .unwrap();
+        let (status, bytes) = call(&app, request).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
+        let document: Value = serde_json::from_slice(&bytes).unwrap();
+        let identity: Uuid = document["id"].as_str().unwrap().parse().unwrap();
+        sqlx::query("INSERT INTO lead_portal_uploads(document_id,lead_id,uploaded_by,access_kind,kind,representative_id) VALUES($1,$2,$3,'guardian','representative_identity',$4)")
+            .bind(identity).bind(child).bind(app.suite.admin_id).bind(contact).execute(pool).await.unwrap();
+    }
     let request = name_payer(
         &app,
         child,
