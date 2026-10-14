@@ -24,6 +24,10 @@ describe("inquiry privacy notice", () => {
     expect(html).toContain("contact@gmed-health.com");
     expect(html).toContain("datenschutz@gmed-health.com");
     expect(html).toContain("GMED-EDV-System");
+    // The document's placeholder for the website policy is the website's legal page.
+    expect(html).toContain('href="https://www.gmed-health.com/legal"');
+    expect(html).not.toContain("[Link");
+    expect(html).not.toContain("[ссылка");
     for (const setting of ["Testagentur", "Test CRM", "privacy@example.com", "contact@example.com"]) expect(html).not.toContain(setting);
     expect(html.match(/<address/g)).toHaveLength(1);
     // The bold beginnings of the purposes, the recipients and the right to object, and the controller name.

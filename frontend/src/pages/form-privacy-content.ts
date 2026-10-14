@@ -22,7 +22,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       blocks: [
         { kind: "address", lines: ["GMED - Agentur für Patientenbetreuung,", "Heorhii Hudiiev, Albert-Schweitzer-Straße 56", "81735 München", "Deutschland", "E-Mail: contact@gmed-health.com,", "Telefon: +49 151 20943768"] },
         { kind: "paragraph", text: "Verantwortlich für die Verarbeitung Ihrer Daten ist Heorhii Hudiiev, Albert-Schweitzer-Straße 56, 81735 München, Deutschland, E-mail: datenschutz@gmed-health.com." },
-        { kind: "paragraph", text: "Diese Datenschutzerklärung gilt für unsere Kundenbefragung (Befragungsformular) und die Bearbeitung Ihrer Anfrage. Wenn wir zusammenarbeiten und einen Vertrag schließen, informieren wir Sie gesondert über die Datenverarbeitung bei der Zusammenarbeit. Für unsere Website gilt [Link zur Datenschutzerklärung der Website]." },
+        { kind: "paragraph", text: "Diese Datenschutzerklärung gilt für unsere Kundenbefragung (Befragungsformular) und die Bearbeitung Ihrer Anfrage. Wenn wir zusammenarbeiten und einen Vertrag schließen, informieren wir Sie gesondert über die Datenverarbeitung bei der Zusammenarbeit. Für unsere Website gilt www.gmed-health.com/legal." },
       ],
     },
     {
@@ -167,7 +167,7 @@ export const FORM_PRIVACY_SECTIONS: Record<FormPrivacyLanguage, readonly FormPri
       blocks: [
         { kind: "address", lines: ["GMED - Agentur für Patientenbetreuung,", "Heorhii Hudiiev,", "Albert-Schweitzer-Straße 56", "81735 München", "Deutschland", "E-Mail: contact@gmed-health.com,", "Telefon: +49 151 20943768"] },
         { kind: "paragraph", text: "Лицо ответственное за обработку Ваших данных: Heorhii Hudiiev, Albert-Schweitzer-Straße 56, 81735 München, Deutschland, E-Mail: contact@gmed-health.com" },
-        { kind: "paragraph", text: "Настоящая политика конфиденциальности касается нашего опроса клиентов (формы опроса) и обработки Вашего запроса. Если мы начнём сотрудничество и заключим договор, мы отдельно проинформируем Вас об обработке данных при сотрудничестве. Для нашего сайта действует [ссылка на политику конфиденциальности сайта]." },
+        { kind: "paragraph", text: "Настоящая политика конфиденциальности касается нашего опроса клиентов (формы опроса) и обработки Вашего запроса. Если мы начнём сотрудничество и заключим договор, мы отдельно проинформируем Вас об обработке данных при сотрудничестве. Для нашего сайта действует www.gmed-health.com/legal." },
       ],
     },
     {

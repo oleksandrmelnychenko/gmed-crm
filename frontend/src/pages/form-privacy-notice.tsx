@@ -12,9 +12,25 @@ export type FormPrivacyAgency = Partial<Record<
   string
 >>;
 
+/** The website's privacy policy the document refers to (owner 2026-10-14). */
+const WEBSITE_POLICY = "www.gmed-health.com/legal";
+
+/** Text with the website's policy address as a link. */
+function Linked({ text }: { text: string }) {
+  const at = text.indexOf(WEBSITE_POLICY);
+  if (at < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, at)}
+      <a href={`https://${WEBSITE_POLICY}`} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{WEBSITE_POLICY}</a>
+      {text.slice(at + WEBSITE_POLICY.length)}
+    </>
+  );
+}
+
 /** A paragraph or item as the document writes it: its bold beginning, then the rest. */
 function Text({ entry }: { entry: FormPrivacyText }) {
-  return entry.lead ? <><strong>{entry.lead}</strong> {entry.text}</> : <>{entry.text}</>;
+  return entry.lead ? <><strong>{entry.lead}</strong> <Linked text={entry.text} /></> : <Linked text={entry.text} />;
 }
 
 /**
