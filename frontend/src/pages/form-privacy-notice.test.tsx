@@ -26,8 +26,8 @@ describe("inquiry privacy notice", () => {
     expect(html).toContain("GMED-EDV-System");
     for (const setting of ["Testagentur", "Test CRM", "privacy@example.com", "contact@example.com"]) expect(html).not.toContain(setting);
     expect(html.match(/<address/g)).toHaveLength(1);
-    // The bold beginnings of the purposes, the recipients and the right to object.
-    expect(html.match(/<strong>/g)).toHaveLength(8);
+    // The bold beginnings of the purposes, the recipients and the right to object, and the controller name.
+    expect(html.match(/<strong/g)).toHaveLength(9);
     expect(html).toContain("FiSaLis");
     expect(html).toContain("Hetzner");
     expect(html).toContain("Skribble");

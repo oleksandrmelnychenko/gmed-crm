@@ -35,7 +35,9 @@ export function FormPrivacyNotice({ lang }: { lang: FormPrivacyLanguage; agency?
             if (block.kind === "address") {
               return (
                 <address key={index} className="not-italic leading-6">
-                  {block.lines.map((line, lineIndex) => <span key={lineIndex} className="block">{line}</span>)}
+                  {block.lines.map((line, lineIndex) => lineIndex === 0
+                    ? <strong key={lineIndex} className="block">{line}</strong>
+                    : <span key={lineIndex} className="block">{line}</span>)}
                 </address>
               );
             }
@@ -46,7 +48,9 @@ export function FormPrivacyNotice({ lang }: { lang: FormPrivacyLanguage; agency?
                 </ul>
               );
             }
-            return <p key={index}><Text entry={block} /></p>;
+            // The page's earlier styles: a short lead-in sentence ending with a colon stands out a little.
+            const leadIn = !block.lead && block.text.endsWith(":") && block.text.length < 160;
+            return <p key={index} className={leadIn ? "font-medium" : undefined}><Text entry={block} /></p>;
           })}
         </section>
       ))}
