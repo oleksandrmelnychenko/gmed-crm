@@ -4991,6 +4991,499 @@ fn follow_up_missing(body: &Value) -> Value {
     body["follow_up"]["missing"].clone()
 }
 
+async fn assert_country_preview_has_no_stored_assessment(pool: &PgPool, lead: Uuid) {
+    let (assessments, events, submitted): (i64, i64, bool) = sqlx::query_as(
+        r#"SELECT (SELECT count(*) FROM lead_risk_assessments WHERE lead_id=$1),
+                  (SELECT count(*) FROM lead_risk_events WHERE lead_id=$1),
+                  portal_submitted_at IS NOT NULL FROM leads WHERE id=$1"#,
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (assessments, events, submitted),
+        (0, 0, false),
+        "a draft preview never starts, scores or ratchets an assessment"
+    );
+}
+
+fn assert_neutral_country_preview(body: &Value) {
+    assert_eq!(body["follow_up"]["required"], true, "{body}");
+    assert_eq!(body["follow_up"]["before_submit"], true, "{body}");
+    assert_eq!(
+        body["follow_up"]["blocks"],
+        json!(["A", "F", "K", "L"]),
+        "{body}"
+    );
+    for key in ["pep_self", "pep_related", "sanctions_links"] {
+        assert!(
+            body["identification"][key].is_null(),
+            "a country is not a positive legal answer: {body}"
+        );
+        assert!(
+            body["follow_up"]["missing"]["L"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(key)),
+            "{body}"
+        );
+    }
+    for key in ["points", "level", "triggers", "reasons"] {
+        assert!(
+            body["follow_up"].get(key).is_none(),
+            "internal assessment data stays out of the preview: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_listed_citizenship_or_residence_previews_questions_before_submission_and_reverts_without_history()
+ {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    for (index, patch) in [
+        json!({ "citizenships": ["RU"], "country": "DE" }),
+        json!({ "citizenships": ["DE"], "country": "RU" }),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (lead, _, patient) = lead_with_login(
+            &app,
+            &format!("CountryPreview{index}"),
+            &format!("country.preview.{index}@example.com"),
+        )
+        .await;
+        let request = format!("/api/v1/me/lead-requests/{lead}");
+        let personal = format!("{request}/personal-data");
+        let (status, body) = json_request(router, "POST", &personal, &patient, Some(patch)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_neutral_country_preview(&body);
+        assert!(
+            !body["follow_up"]["missing"]["A"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("funds_source")),
+            "source waits for who pays: {body}"
+        );
+        assert_country_preview_has_no_stored_assessment(pool, lead).await;
+        let (status, read) = json_request(router, "GET", &request, &patient, None).await;
+        assert_eq!(status, StatusCode::OK, "{read}");
+        assert_neutral_country_preview(&read);
+        assert_country_preview_has_no_stored_assessment(pool, lead).await;
+        let (status, staff) = json_request(
+            router,
+            "GET",
+            &format!("/api/v1/leads/{lead}/risk-assessment"),
+            &app.staff("patient_manager"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{staff}");
+        assert_eq!(staff["before_submit"], true, "{staff}");
+        for key in ["points", "patient_points", "payer_points", "level"] {
+            assert!(
+                staff[key].is_null(),
+                "a question preview is not a persisted score: {staff}"
+            );
+        }
+        assert_eq!(staff["triggers"], json!([]), "{staff}");
+        for block in ["A", "F", "K", "L"] {
+            assert_eq!(staff["blocks"][block]["open"], true, "{staff}");
+        }
+        for block in ["G", "H", "I", "J"] {
+            assert_eq!(staff["blocks"][block]["open"], false, "{staff}");
+        }
+        assert_country_preview_has_no_stored_assessment(pool, lead).await;
+        let (status, cleared) = json_request(
+            router,
+            "POST",
+            &personal,
+            &patient,
+            Some(json!({ "citizenships": ["DE"], "country": "DE" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{cleared}");
+        assert_eq!(cleared["follow_up"]["required"], false, "{cleared}");
+        assert_eq!(cleared["follow_up"]["before_submit"], false, "{cleared}");
+        assert_eq!(cleared["follow_up"]["blocks"], json!([]), "{cleared}");
+        assert_country_preview_has_no_stored_assessment(pool, lead).await;
+    }
+}
+
+#[tokio::test]
+async fn country_preview_uses_configured_lists_and_opens_legal_details_only_after_an_explicit_yes()
+{
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead, _, patient) =
+        lead_with_login(&app, "ConfiguredCountry", "configured.country@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead}");
+    let personal = format!("{request}/personal-data");
+    let config = gmed_server::risk::RiskConfig {
+        list_1: vec!["CA".into()],
+        list_2: Vec::new(),
+        ..Default::default()
+    };
+    sqlx::query("INSERT INTO system_settings(key,value) VALUES('risk_assessment_config',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value")
+        .bind(json!(config)).execute(pool).await.unwrap();
+    let (status, excluded) = json_request(
+        router,
+        "POST",
+        &personal,
+        &patient,
+        Some(json!({ "citizenships": ["RU"], "country": "DE" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{excluded}");
+    assert_eq!(
+        excluded["follow_up"]["required"], false,
+        "countries are not hardcoded: {excluded}"
+    );
+    let (status, included) = json_request(
+        router,
+        "POST",
+        &personal,
+        &patient,
+        Some(json!({ "citizenships": ["CA"], "country": "DE" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{included}");
+    assert_neutral_country_preview(&included);
+    let (status, positive) = json_request(
+        router,
+        "POST",
+        &format!("{request}/identification"),
+        &patient,
+        Some(json!({ "pep_self": true, "pep_related": false, "sanctions_links": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{positive}");
+    assert_eq!(
+        positive["follow_up"]["blocks"],
+        json!(["A", "F", "H", "J", "K", "L"]),
+        "{positive}"
+    );
+    assert!(
+        positive["follow_up"]["missing"]["H"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("pep_office")),
+        "{positive}"
+    );
+    assert!(
+        positive["follow_up"]["missing"]["J"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("sanctions_link_name")),
+        "{positive}"
+    );
+    let (status, corrected) = json_request(
+        router,
+        "POST",
+        &format!("{request}/identification"),
+        &patient,
+        Some(json!({ "pep_self": false, "pep_related": false, "sanctions_links": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{corrected}");
+    assert_eq!(
+        corrected["follow_up"]["blocks"],
+        json!(["A", "F", "K", "L"]),
+        "{corrected}"
+    );
+    assert_country_preview_has_no_stored_assessment(pool, lead).await;
+}
+
+#[tokio::test]
+async fn country_preview_blocks_first_submission_until_answers_are_complete_without_raising_the_country_score()
+ {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead, _, patient) =
+        lead_with_login(&app, "CountrySubmit", "country.first.submit@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead}");
+    fill_in_complete_request(router, lead, &patient).await;
+    // The helper's legacy fixture contains legal/birth answers; this request
+    // has not answered those additional questions yet.
+    sqlx::query("UPDATE lead_gwg_declarations SET pep_self=NULL,pep_related=NULL,sanctions_links=NULL,birth_place=NULL,birth_country=NULL WHERE lead_id=$1")
+        .bind(lead).execute(pool).await.unwrap();
+    let (status, preview) = json_request(
+        router,
+        "POST",
+        &format!("{request}/personal-data"),
+        &patient,
+        Some(json!({ "citizenships": ["RU"], "country": "DE" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_neutral_country_preview(&preview);
+    assert!(
+        preview["follow_up"]["missing"]["A"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("funds_source")),
+        "the declared self-payer answers the source: {preview}"
+    );
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &format!("{request}/submit"),
+        &patient,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "follow_up_incomplete", "{refused}");
+    assert_eq!(refused["before_submit"], true, "{refused}");
+    assert!(
+        refused["missing"]["L"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("pep_self")),
+        "{refused}"
+    );
+    assert_country_preview_has_no_stored_assessment(pool, lead).await;
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/enhanced-details"),
+        &patient,
+        Some(
+            json!({ "funds_source": "income", "funds_description": "Synthetic salary",
+            "occupation": "Engineer", "sector": "Manufacturing" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/identification"),
+        &patient,
+        Some(
+            json!({ "pep_self": false, "pep_related": false, "sanctions_links": false,
+            "birth_place": "Synthetic City", "birth_country": "DE", "residence_since": "2010",
+            "stay_reason": "work" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, complete) = upload_file(
+        router,
+        &format!("{request}/funds-proof"),
+        &patient,
+        "synthetic-income.pdf",
+        "application/pdf",
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{complete}");
+    for (block, missing) in complete["follow_up"]["missing"].as_object().unwrap() {
+        assert_eq!(missing, &json!([]), "{block}: {complete}");
+    }
+    assert_country_preview_has_no_stored_assessment(pool, lead).await;
+    let (status, sent) = json_request(
+        router,
+        "POST",
+        &format!("{request}/submit"),
+        &patient,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert_eq!(sent["follow_up"]["before_submit"], false, "{sent}");
+    assert!(
+        sent["follow_up"]["answered_at"].is_string(),
+        "one send records the completed follow-up: {sent}"
+    );
+    let (points, level, knockout, triggers): (i32, i16, bool, Value) = sqlx::query_as(
+        "SELECT points,level,knockout,triggers FROM lead_risk_assessments WHERE lead_id=$1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (points, level, knockout),
+        (2, 1, false),
+        "country questions do not force a higher score: {triggers}"
+    );
+    assert_eq!(triggers.as_array().unwrap().len(), 1, "{triggers}");
+    assert_eq!(triggers[0]["key"], "T1", "{triggers}");
+    let answered: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_risk_events WHERE lead_id=$1 AND kind='follow_up_answered'",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(answered, 1);
+    let (status, changed) = json_request(
+        router,
+        "POST",
+        &format!("{request}/personal-data"),
+        &patient,
+        Some(json!({ "citizenships": ["DE"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(
+        changed["follow_up"]["blocks"],
+        json!(["A", "F", "K", "L"]),
+        "after submission the stored ratchet stays: {changed}"
+    );
+    for key in ["pep_self", "pep_related", "sanctions_links"] {
+        assert_eq!(
+            changed["identification"][key], false,
+            "a country does not invent a positive answer: {changed}"
+        );
+    }
+    let stored: Value =
+        sqlx::query_scalar("SELECT triggers FROM lead_risk_assessments WHERE lead_id=$1")
+            .bind(lead)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(stored[0]["key"], "T1", "{stored}");
+    assert_eq!(stored[0]["active"], false, "{stored}");
+}
+
+#[tokio::test]
+async fn a_post_submission_country_change_holds_guarded_actions_only_until_its_answers_are_complete()
+ {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    // Isolate the configured country-question gate from the separate CEO
+    // country-block policy (which already blocks RU before this middleware).
+    let config = gmed_server::risk::RiskConfig {
+        list_1: vec!["CA".into()],
+        list_2: Vec::new(),
+        ..Default::default()
+    };
+    sqlx::query("INSERT INTO system_settings(key,value) VALUES('risk_assessment_config',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value")
+        .bind(json!(config)).execute(pool).await.unwrap();
+    let (lead, _, patient) = lead_with_login(
+        &app,
+        "CountryEdited",
+        "country.edited.after.submit@example.com",
+    )
+    .await;
+    let request = format!("/api/v1/me/lead-requests/{lead}");
+    fill_in_complete_request(router, lead, &patient).await;
+    let (status, sent) = json_request(
+        router,
+        "POST",
+        &format!("{request}/submit"),
+        &patient,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert_eq!(sent["follow_up"]["required"], false, "{sent}");
+    let (status, pending) = json_request(
+        router,
+        "POST",
+        &format!("{request}/personal-data"),
+        &patient,
+        Some(json!({ "citizenships": ["CA"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pending}");
+    assert_eq!(pending["follow_up"]["before_submit"], false, "{pending}");
+    assert_eq!(
+        pending["follow_up"]["blocks"],
+        json!(["A", "F", "K", "L"]),
+        "{pending}"
+    );
+    let (points, level, risk_status): (i32, i16, String) =
+        sqlx::query_as("SELECT points,level,status FROM lead_risk_assessments WHERE lead_id=$1")
+            .bind(lead)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (points, level, risk_status.as_str()),
+        (2, 1, "awaiting_answers")
+    );
+    let qualify = format!("/api/v1/leads/{lead}/qualify");
+    let (status, held) = json_request(
+        router,
+        "POST",
+        &qualify,
+        &app.staff("patient_manager"),
+        Some(json!({ "status": "qualified" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{held}");
+    assert_eq!(
+        held["code"], "risk_review_required",
+        "new country answers cannot be bypassed by qualification: {held}"
+    );
+    for (part, body) in [
+        (
+            "enhanced-details",
+            json!({ "funds_source": "income", "funds_description": "Synthetic salary",
+            "occupation": "Engineer", "sector": "Manufacturing" }),
+        ),
+        (
+            "identification",
+            json!({ "residence_since": "2010", "stay_reason": "work" }),
+        ),
+    ] {
+        let (status, saved) = json_request(
+            router,
+            "POST",
+            &format!("{request}/{part}"),
+            &patient,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+    }
+    let (status, complete) = upload_file(
+        router,
+        &format!("{request}/funds-proof"),
+        &patient,
+        "synthetic-income.pdf",
+        "application/pdf",
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{complete}");
+    for (block, missing) in complete["follow_up"]["missing"].as_object().unwrap() {
+        assert_eq!(missing, &json!([]), "{block}: {complete}");
+    }
+    let (points, level, risk_status): (i32, i16, String) =
+        sqlx::query_as("SELECT points,level,status FROM lead_risk_assessments WHERE lead_id=$1")
+            .bind(lead)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (points, level, risk_status.as_str()),
+        (2, 1, "clear"),
+        "completed answers unblock without a score/level change"
+    );
+    let (_, unheld) = json_request(
+        router,
+        "POST",
+        &qualify,
+        &app.staff("patient_manager"),
+        Some(json!({ "status": "qualified" })),
+    )
+    .await;
+    assert_ne!(
+        unheld["code"], "risk_review_required",
+        "other qualification prerequisites are separate: {unheld}"
+    );
+}
+
 #[tokio::test]
 async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     let Some(app) = test_app().await else { return };

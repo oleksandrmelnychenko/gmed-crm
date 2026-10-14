@@ -93,13 +93,19 @@ impl Assessment {
     }
 
     /// Whether the guarded staff actions wait for a decision: a rejected
-    /// lead, or level ≥ 2 that nobody released. Not started and
+    /// lead, level ≥ 2 that nobody released, or a country-triggered request
+    /// whose mandatory answers are still pending. Not started and
     /// grandfathered leads are not held here (the gate starts them).
     pub fn holds(&self) -> bool {
         if !self.started() {
             return false;
         }
-        self.status == STATUS_REJECTED || (self.score.level >= 2 && self.status != STATUS_RELEASED)
+        self.status == STATUS_REJECTED
+            || (self.score.level >= 2 && self.status != STATUS_RELEASED)
+            || (self.status == STATUS_AWAITING
+                && self.triggers.iter().any(|trigger| {
+                    super::patient_country_follow_up(&trigger.key, &trigger.subject)
+                }))
     }
 
     /// Whether the payer's link waits: a rejected lead, or level 3 that
@@ -374,7 +380,7 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
     let party = match block {
         "A" => {
             // A third-party payer states funds on the own payer link.
-            if !third_party {
+            if payer.is_some() && !third_party {
                 if payer.is_none_or(|payer| payer.self_funds_source.is_none()) {
                     missing.push("funds_source");
                 }
@@ -389,7 +395,7 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
                 missing.push("sector");
             }
             // The proof is required while A is open (PDF).
-            if !third_party && !answers.funds_proof_uploaded {
+            if payer.is_some() && !third_party && !answers.funds_proof_uploaded {
                 missing.push("funds_proof_upload");
             }
             PARTY_CABINET
@@ -558,7 +564,8 @@ pub struct BlockState {
 /// Which blocks are open (contract 3.3) and what each still misses: G and I
 /// whenever T13 / T12 is sticky and their data are missing; the others at
 /// level 2 from the sticky triggers (when `level_2_blocks_automatic`) and,
-/// at any level, the ones staff requested.
+/// at any level, the ones staff requested. Patient country triggers also
+/// open A/F/K/L below level two; their configured points are unchanged.
 pub fn block_states(
     triggers: &[Sticky],
     level: i16,
@@ -574,6 +581,9 @@ pub fn block_states(
         Vec::new()
     };
     let sticky = |key: &str| triggers.iter().any(|trigger| trigger.key == key);
+    let patient_country = triggers
+        .iter()
+        .any(|trigger| super::patient_country_follow_up(&trigger.key, &trigger.subject));
     let mut states = BTreeMap::new();
     for block in BLOCKS {
         let (party, missing) = block_missing(block, answers);
@@ -597,7 +607,8 @@ pub fn block_states(
             // questions; the base form does not. A (source of funds, occupation,
             // sector, proof) too: the § 15 GwG check needs it whatever fired
             // (QA 2026-10-10, two-stage form 2026-10-07).
-            "A" | "K" | "L" => requested || level >= 2,
+            "A" | "K" | "L" => requested || level >= 2 || patient_country,
+            "F" => requested || automatic.contains(&block) || patient_country,
             _ => requested || automatic.contains(&block),
         };
         states.insert(
@@ -1590,6 +1601,138 @@ mod tests {
 
     fn blocks(keys: &[&str]) -> Vec<String> {
         keys.iter().map(|key| key.to_string()).collect()
+    }
+
+    #[test]
+    fn only_pending_started_patient_country_questions_hold_level_one_actions() {
+        let now = Utc::now();
+        let mut assessment = Assessment {
+            lead_id: Uuid::nil(),
+            started_at: Some(now),
+            config_version: 1,
+            score: Score {
+                level: 1,
+                points: 2,
+                patient_points: 2,
+                ..Default::default()
+            },
+            triggers: Vec::new(),
+            fingerprint: String::new(),
+            requested_blocks: Vec::new(),
+            follow_up_answered_at: None,
+            status: STATUS_AWAITING.into(),
+            released_fingerprint: None,
+        };
+        let trigger = |key: &str, subject: &str| Sticky {
+            key: key.into(),
+            subject: subject.into(),
+            variant: None,
+            points: 2,
+            knockout: false,
+            first_fired_at: now,
+            last_fired_at: now,
+            active: true,
+            inactive_since: None,
+        };
+        assert!(
+            !assessment.holds(),
+            "unrelated pending requests at level one keep existing behavior"
+        );
+        assessment.triggers = vec![trigger("T12", super::super::SUBJECT_PATIENT)];
+        assert!(
+            !assessment.holds(),
+            "this change is not a blanket hold for pending blocks"
+        );
+        assessment.triggers = vec![trigger("T1", super::super::SUBJECT_PAYER)];
+        assert!(
+            !assessment.holds(),
+            "patient-country requirement does not cover the payer"
+        );
+        for key in ["T1", "T2", "T3"] {
+            assessment.triggers = vec![trigger(key, super::super::SUBJECT_PATIENT)];
+            assert!(
+                assessment.holds(),
+                "{key}: a started country request waits for its answers"
+            );
+            assessment.triggers[0].active = false;
+            assert!(
+                assessment.holds(),
+                "the submitted ratchet retains the requirement"
+            );
+        }
+        assessment.status = STATUS_CLEAR.into();
+        assert!(
+            !assessment.holds(),
+            "completed country questions unblock level one"
+        );
+        assessment.status = STATUS_RELEASED.into();
+        assert!(!assessment.holds(), "an explicit release remains effective");
+        assessment.status = STATUS_AWAITING.into();
+        assessment.started_at = None;
+        assert!(
+            !assessment.holds(),
+            "a pure preview is not a started assessment"
+        );
+        assessment.started_at = Some(now);
+        assessment.status = STATUS_GRANDFATHERED.into();
+        assert!(!assessment.holds(), "grandfathering stays unchanged");
+        assessment.status = STATUS_REJECTED.into();
+        assessment.triggers.clear();
+        assert!(
+            assessment.holds(),
+            "a reject still holds without a country trigger"
+        );
+        assert_eq!((assessment.score.points, assessment.score.level), (2, 1));
+    }
+
+    #[test]
+    fn patient_country_questions_open_at_level_one_without_inventing_legal_answers() {
+        let now = Utc::now();
+        let config = RiskConfig {
+            level_2_blocks_automatic: false,
+            ..Default::default()
+        };
+        for key in ["T1", "T2", "T3"] {
+            let trigger = Sticky {
+                key: key.into(),
+                subject: super::super::SUBJECT_PATIENT.into(),
+                variant: Some(super::super::VARIANT_LIST_1.into()),
+                points: 2,
+                knockout: false,
+                first_fired_at: now,
+                last_fired_at: now,
+                active: true,
+                inactive_since: None,
+            };
+            let answers = BlockAnswers {
+                identity_issue: true,
+                ..Default::default()
+            };
+            let states = block_states(std::slice::from_ref(&trigger), 1, &[], &config, &answers);
+            let open: Vec<&str> = states
+                .iter()
+                .filter(|(_, state)| state.open)
+                .map(|(key, _)| *key)
+                .collect();
+            assert_eq!(open, vec!["A", "F", "K", "L"], "{key}");
+            assert_eq!(
+                states["A"].missing,
+                vec!["occupation", "sector"],
+                "source waits for who pays"
+            );
+            for field in ["pep_self", "pep_related", "sanctions_links"] {
+                assert!(states["L"].missing.contains(&field.to_string()));
+            }
+            let payer_trigger = Sticky {
+                subject: super::super::SUBJECT_PAYER.into(),
+                ..trigger
+            };
+            let payer = block_states(&[payer_trigger], 1, &[], &config, &answers);
+            assert!(
+                payer.values().all(|state| !state.open),
+                "patient preview is not a payer-country rule"
+            );
+        }
     }
 
     #[test]

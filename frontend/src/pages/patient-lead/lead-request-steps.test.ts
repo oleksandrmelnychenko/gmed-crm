@@ -41,6 +41,18 @@ const followUp = (overrides: Partial<LeadRequestFollowUp>): LeadRequestFollowUp 
 });
 
 describe("lead cabinet steps", () => {
+  it("inserts a live country step before first submission and completes it by autosaved answers", () => {
+    const preview = request({ follow_up: followUp({ before_submit: true, blocks: ["A", "L", "I"], missing: { A: ["funds_source"], L: ["pep_self"], I: ["id_document_upload"] } }) });
+    expect(visibleSteps(preview)).toEqual(["person", "identity", "billing", "follow_up", "documents", "send"]);
+    expect(stepMissingCount(preview, "follow_up")).toBe(2);
+    expect(stepDone(preview, "follow_up")).toBe(false);
+    expect(stepDone(preview, "send")).toBe(false);
+    const answered = { ...preview, follow_up: { ...preview.follow_up!, missing: { I: ["id_document_upload"] } } };
+    expect(stepDone(answered, "follow_up")).toBe(true);
+    expect(stepDone(answered, "send")).toBe(false);
+    expect(visibleSteps({ ...preview, follow_up: followUp({ required: false, blocks: [] }) })).not.toContain("follow_up");
+  });
+
   it("keeps hidden and unknown requirements out of base-form edit links", () => {
     for (const field of ["birth_place", "pep_self", "id_valid_until", "something_new"]) expect(hasBaseFormInput(field)).toBe(false);
     for (const field of ["name_latin", "phone", "custody", "rep2_name_latin", "id_document_upload", "request_reason"]) expect(hasBaseFormInput(field)).toBe(true);

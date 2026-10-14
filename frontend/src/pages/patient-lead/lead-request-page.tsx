@@ -331,21 +331,21 @@ function LeadRequestView({
   const languageSwitch = useContext(CabinetLanguageContext);
   useEffect(() => languageSwitch?.claim(), [languageSwitch?.claim]);
 
-  // The steps whose "next" showed what is missing, and whether the summary of step "send"
-  // was opened: only those carry the amber count badges (QA 2026-10-10: none before "next").
+  // Base-step badges appear after "next" or opening the summary. Live country
+  // questions expose their pending count as soon as the server opens them.
   const [missingShownSteps, setMissingShownSteps] = useState<ReadonlySet<StepId>>(() => new Set());
   const [sendOpened, setSendOpened] = useState(() => initialStep(request) === "send");
   const showMissingOf = useCallback((id: StepId) => {
     setMissingShownSteps((current) => (current.has(id) ? current : new Set(current).add(id)));
   }, []);
   const badgesFor = useCallback(
-    // A request sent once was checked as a whole: its badges show. The follow-up
-    // step is sent on its own: its badge only after "next" or "send" on it (QA 2026-10-10).
+    // A request sent once was checked as a whole: its base-step badges show.
+    // Staff follow-up is sent separately; live country questions show their pending count immediately.
     (id: StepId) =>
       id === "follow_up"
-        ? missingShownSteps.has(id)
+        ? request.follow_up?.before_submit === true || missingShownSteps.has(id)
         : sendOpened || Boolean(request.submitted_at) || missingShownSteps.has(id),
-    [missingShownSteps, request.submitted_at, sendOpened],
+    [missingShownSteps, request.submitted_at, request.follow_up?.before_submit, sendOpened],
   );
 
   const go = useCallback((next: StepId) => {
@@ -426,7 +426,7 @@ function LeadRequestView({
               onChange={onChange}
               onBack={() => nav.onBack?.()}
               onNext={() => nav.onNext?.()}
-              missingShown={nav.missingShown}
+              missingShown={nav.missingShown || (!request.submitted_at && sendOpened)}
               onShowMissing={nav.onShowMissing}
               index={nav.index}
               total={nav.total}
@@ -509,7 +509,7 @@ function StepNavBar({
                 "relative flex shrink-0 items-center gap-2 rounded-lg px-1 py-1.5 text-left text-xs font-medium",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-2.5 lg:w-full lg:py-2",
                 selected
-                  ? "bg-muted font-semibold text-foreground lg:before:absolute lg:before:left-0 lg:before:top-1.5 lg:before:bottom-1.5 lg:before:w-[3px] lg:before:rounded-r-full lg:before:bg-[var(--brand)]"
+                  ? "bg-[var(--brand)] font-semibold text-white"
                   : "text-foreground hover:bg-muted/60",
               )}
               onClick={() => onSelect(id)}
@@ -519,7 +519,7 @@ function StepNavBar({
                 className={cn(
                   "inline-flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-[11px] leading-none",
                   selected
-                    ? "bg-[var(--brand)] text-white"
+                    ? "bg-white/20 text-white"
                     : done
                       ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
                       : "bg-muted text-muted-foreground",

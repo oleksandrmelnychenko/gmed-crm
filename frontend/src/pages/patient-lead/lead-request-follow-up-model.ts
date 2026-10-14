@@ -8,7 +8,7 @@ import type {
 } from "./lead-request-api";
 
 // "Ergänzende Angaben" (trigger flow, contract 3.1 / 3.3 / 6): the follow-up
-// blocks the server opens after the request was sent — only which blocks and
+// blocks the server opens live for country questions or after submission — only which blocks and
 // what each still misses, never why (no points, level, trigger or reason,
 // P2). This module imports types only from the API, so the step model and
 // the texts can use it.
@@ -16,30 +16,33 @@ import type {
 /** The blocks the cabinet asks, in letter order (D and E are the payer link's). */
 // Personal details and the legal questions first, then the rest in letter order.
 export const FOLLOW_UP_BLOCKS = ["K", "L", "A", "B", "C", "F", "G", "H", "I", "J"] as const satisfies readonly FollowUpBlock[];
+const BEFORE_SUBMIT_BLOCKS: ReadonlySet<FollowUpBlock> = new Set(["A", "F", "K", "L", "H", "J"]);
+
+export function followUpBeforeSubmit(request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "submitted_at">>): boolean {
+  return !request.submitted_at && request.follow_up?.before_submit === true;
+}
 
 function isFollowUpBlock(value: string): value is FollowUpBlock {
   return (FOLLOW_UP_BLOCKS as readonly string[]).includes(value);
 }
 
 /** The open blocks of the cabinet, in letter order; none while nothing is required. */
-export function openFollowUpBlocks(request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "identification">>): FollowUpBlock[] {
+export function openFollowUpBlocks(request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "identification" | "submitted_at">>): FollowUpBlock[] {
   const followUp = request.follow_up;
   if (!followUp?.required) return [];
   const open = new Set(followUp.blocks.map((block) => block.trim().toUpperCase()).filter(isFollowUpBlock));
   return FOLLOW_UP_BLOCKS.filter((block) => open.has(block)
+    && (!followUpBeforeSubmit(request) || BEFORE_SUBMIT_BLOCKS.has(block))
     && !(block === "H" && request.identification && request.identification.pep_self !== true && request.identification.pep_related !== true)
     && !(block === "J" && request.identification && request.identification.sanctions_links !== true));
 }
 
 /**
- * Whether the step "Ergänzende Angaben" is shown: the request was sent once
- * and the server opened at least one block of the cabinet. A staff action
- * can start the assessment before the first send (a gate call): its blocks
- * wait for the send instead of adding a step to the base form (QA
- * 2026-10-10: block I duplicated the identity step).
+ * Live country questions can be answered before the first send. Other staff
+ * follow-up blocks still wait for submission (block I must not duplicate identity).
  */
 export function followUpShown(request: Pick<LeadRequest, "follow_up" | "submitted_at"> & Partial<Pick<LeadRequest, "identification">>): boolean {
-  return Boolean(request.submitted_at) && openFollowUpBlocks(request).length > 0;
+  return (Boolean(request.submitted_at) || followUpBeforeSubmit(request)) && openFollowUpBlocks(request).length > 0;
 }
 
 /** What an open block still misses, as the server names it. */
@@ -120,6 +123,8 @@ const NO_ASKS: ExtraQuestionAsks = {
  */
 export function blockAAsks(request: Pick<LeadRequest, "follow_up" | "payer" | "payer_questionnaire">): ExtraQuestionAsks {
   if (request.payer_questionnaire) return { ...NO_ASKS, sector: true, payer_states_funds: true };
+  // The paying person must be known before collecting personal financial details.
+  if (!request.payer) return { ...NO_ASKS, occupation: true, sector: true };
   if (request.payer?.payer_kind === "third_party") {
     return { ...NO_ASKS, occupation: true, sector: true, payer_states_funds: true };
   }

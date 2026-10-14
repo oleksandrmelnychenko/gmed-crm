@@ -147,4 +147,37 @@ describe("LeadRiskAssessmentPanel", () => {
   it("renders nothing without an assessment", () => {
     expect(renderToStaticMarkup(<LeadRiskAssessmentPanel assessment={null} controller={controller} tx={ru} />)).toBe("");
   });
+
+  it("shows country-triggered questions before submission as draft completeness, not a completed assessment", () => {
+    const value = assessment({
+      started_at: null, status: null, level: null, points: null, triggers: [],
+      before_submit: true,
+      preview: { level: 1, points: 2, patient_points: 2, payer_points: 0, triggers: [{ key: "T1", subject: "patient", variant: "list_1", points: 2 }] },
+      blocks: {
+        A: { open: true, party: "cabinet", answered: false, missing: ["funds_sources"] },
+        F: { open: true, party: "cabinet", answered: true, missing: [] },
+        K: { open: true, party: "cabinet", answered: false, missing: ["birth_place"] },
+        L: { open: true, party: "cabinet", answered: false, missing: ["pep_self", "sanctions_links"] },
+      },
+      requested_blocks: [], decisions: [], history: [], can_decide: false, can_restart: false,
+      // A stale historical timestamp must not turn a draft preview into a sent answer.
+      follow_up_answered_at: "2026-10-07T08:00:00Z",
+    });
+    const html = render(value);
+    expect(html).toContain("Не начата");
+    expect(html).toContain("Вопросы до отправки анкеты");
+    expect(html).toContain("оценка риска ещё не начата");
+    for (const block of ["A", "F", "K", "L"]) expect(html).toContain(`data-testid="lead-risk-block-${block}"`);
+    expect(html).toContain("заполнено");
+    expect(html).toContain("нужен ответ");
+    expect(html).not.toContain("ответ получен");
+    expect(html).not.toContain("lead-risk-follow-up-answered");
+    expect(html).not.toContain("lead-risk-decide-");
+    expect(html).not.toContain("lead-risk-restart");
+    expect(render(value, de)).toContain("Fragen vor dem Absenden der Anfrage");
+    expect(render(assessment({ ...value, before_submit: false }))).not.toContain('data-testid="lead-risk-blocks"');
+    const startedHtml = render(assessment({ before_submit: true }));
+    expect(startedHtml).not.toContain("lead-risk-questions-preview");
+    expect(startedHtml).toContain("ответ получен");
+  });
 });

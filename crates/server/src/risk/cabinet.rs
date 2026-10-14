@@ -257,8 +257,10 @@ pub async fn base_extra(
 
 /// `follow_up` of the request object: the cabinet blocks to answer, in
 /// letter order, what each still misses and when the lead last sent them.
-/// Nothing before the assessment started, and nothing after staff released
-/// or rejected the lead (the answers stay).
+/// Before the first submission, a listed patient country previews neutral
+/// questions from live answers without starting or persisting an assessment.
+/// After submission the stored trigger ratchet applies. Nothing after staff
+/// released or rejected the lead (the answers stay).
 pub async fn follow_up_json(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -284,32 +286,52 @@ pub async fn follow_up_json(
     };
     let empty = json!({
         "required": false,
+        "before_submit": false,
         "blocks": [],
         "missing": {},
         "answered_at": answered_at,
         "changed_since_answer": changed_since_answer,
     });
-    let Some(assessment) = assessment.filter(|assessment| {
-        assessment.started()
-            && !matches!(
-                assessment.status.as_str(),
-                store::STATUS_RELEASED | store::STATUS_REJECTED
-            )
-    }) else {
+    if assessment.as_ref().is_some_and(|assessment| {
+        matches!(
+            assessment.status.as_str(),
+            store::STATUS_RELEASED | store::STATUS_REJECTED
+        )
+    }) {
         return Ok(empty);
-    };
+    }
     let Some(inputs) = super::inputs::load(conn, lead_id).await? else {
         return Ok(empty);
     };
     let config = store::load_config(conn).await?;
     let answers = store::load_block_answers(conn, lead_id, &inputs, Some(caller)).await?;
-    let states = store::block_states(
-        &assessment.triggers,
-        assessment.score.level,
-        &assessment.requested_blocks,
-        &config,
-        &answers,
-    );
+    let submitted: bool =
+        sqlx::query_scalar("SELECT portal_submitted_at IS NOT NULL FROM leads WHERE id=$1")
+            .bind(lead_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .unwrap_or(false);
+    let (triggers, level, requested, before_submit) = if !submitted {
+        let preview = super::country_preview_triggers(&inputs, &config);
+        if preview.is_empty() {
+            return Ok(empty);
+        }
+        // Only the country-related questions and details of an explicit PEP /
+        // sanctions-links answer are previewed. No duplicate identity step,
+        // staff-only request, payer trigger, score or automated declaration.
+        (preview, 1, Vec::new(), true)
+    } else {
+        let Some(assessment) = assessment.filter(store::Assessment::started) else {
+            return Ok(empty);
+        };
+        (
+            assessment.triggers,
+            assessment.score.level,
+            assessment.requested_blocks,
+            false,
+        )
+    };
+    let states = store::block_states(&triggers, level, &requested, &config, &answers);
     let mut blocks = Vec::new();
     let mut missing = Map::new();
     for block in CABINET_BLOCKS {
@@ -330,6 +352,7 @@ pub async fn follow_up_json(
         .flatten();
     Ok(json!({
         "required": !blocks.is_empty(),
+        "before_submit": before_submit,
         "blocks": blocks,
         "missing": missing,
         "answered_at": answered_at,

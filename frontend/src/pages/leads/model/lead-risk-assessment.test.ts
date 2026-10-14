@@ -124,6 +124,27 @@ describe("the risk assessment of a lead (staff)", () => {
     expect(riskCanRestart({ ...grandfathered, can_decide: false })).toBe(false);
   });
 
+  it("preserves country-question preview without promoting it to a started assessment", () => {
+    const preview = { level: 1, points: 2, patient_points: 2, payer_points: 0, triggers: [{ key: "T1", subject: "patient", variant: "list_1", points: 2 }] };
+    const value = normalizeLeadRiskAssessment({
+      started_at: null, status: null, level: null, points: null, triggers: [],
+      before_submit: true, preview, can_decide: false, can_restart: true,
+      blocks: { L: { open: true, party: "cabinet", answered: false, missing: ["pep_self", "sanctions_links"] } },
+    })!;
+    expect(value.before_submit).toBe(true);
+    expect(value.blocks).toEqual([{ key: "L", open: true, party: "cabinet", answered: false, missing: ["pep_self", "sanctions_links"] }]);
+    expect(value.started_at).toBeNull();
+    expect(value.triggers).toEqual([]);
+    expect(value.points).toBe(0);
+    expect(riskDisplayedScore(value).points).toBe(2);
+    expect(riskAssessmentStarted(value)).toBe(false);
+    expect(riskAvailableDecisions(value)).toEqual([]);
+    expect(riskCanRestart(value)).toBe(true);
+    for (const before_submit of [undefined, false, "true"]) {
+      expect(normalizeLeadRiskAssessment({ preview, before_submit })?.before_submit).toBe(false);
+    }
+  });
+
   it("offers the decisions by level and status", () => {
     const two = normalizeLeadRiskAssessment(levelTwo())!;
     expect(riskAvailableDecisions(two)).toEqual(["release", "request_more", "reject"]);

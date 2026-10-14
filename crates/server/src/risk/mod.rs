@@ -68,6 +68,31 @@ pub const BLOCKS: [&str; 12] = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"
 /// of any other kind — sibling, grandparent, relative, friend … — fires.
 pub const FAMILY_RELATIONSHIP_KINDS: [&str; 3] = ["spouse", "parent", "child"];
 
+/// Country answers request the patient's neutral follow-up questions even
+/// when their configured points remain below the level-two threshold.
+/// A listed country is never itself a PEP or sanctions declaration.
+pub fn patient_country_follow_up(key: &str, subject: &str) -> bool {
+    subject == SUBJECT_PATIENT && matches!(key, "T1" | "T2" | "T3")
+}
+
+/// Live question preview only, with no stored score, ratchet or side effect.
+/// Identity/representation and payer questions keep their existing workflow;
+/// legal details appear only after the person explicitly answers yes.
+pub(crate) fn country_preview_triggers(inputs: &Inputs, config: &RiskConfig) -> Vec<Sticky> {
+    let mut live = evaluate(inputs, config);
+    if !live
+        .iter()
+        .any(|trigger| patient_country_follow_up(trigger.key, trigger.subject))
+    {
+        return Vec::new();
+    }
+    live.retain(|trigger| {
+        patient_country_follow_up(trigger.key, trigger.subject)
+            || (trigger.subject == SUBJECT_PATIENT && matches!(trigger.key, "T14" | "T15"))
+    });
+    merge(&[], &live, Utc::now(), &[]).triggers
+}
+
 /// The blocks a trigger asks for.
 pub fn trigger_blocks(key: &str) -> &'static [&'static str] {
     match key {

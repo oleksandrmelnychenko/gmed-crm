@@ -157,6 +157,8 @@ export type LeadRiskAssessment = RiskScore & {
   review_notice: boolean;
   /** The live scoring before the start; never stored. */
   preview: RiskScore | null;
+  /** Country-triggered cabinet questions shown before submission; not a started assessment. */
+  before_submit: boolean;
   decisions: RiskDecision[];
   history: RiskHistoryEvent[];
   pending_proposal: RiskProposal | null;
@@ -347,6 +349,7 @@ export function normalizeLeadRiskAssessment(value: unknown): LeadRiskAssessment 
     follow_up_answered_at: text(raw.follow_up_answered_at),
     review_notice: raw.review_notice === true,
     preview,
+    before_submit: raw.before_submit === true,
     decisions: Array.isArray(raw.decisions)
       ? raw.decisions.map(normalizeDecision).filter((item): item is RiskDecision => item !== null)
       : [],

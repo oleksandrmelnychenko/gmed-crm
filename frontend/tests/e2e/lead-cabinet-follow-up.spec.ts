@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { startClockAt } from "./helpers";
+import { leadRequestText } from "../../src/pages/patient-lead/lead-request-text";
 
 // Lead cabinet as a stepper with the follow-up blocks (trigger flow
 // 2026-10-07, contract sections 3, 6 and 13): short steps with badges from
@@ -102,6 +103,7 @@ function leadRequest() {
       expected_total_eur: null,
     } as Json,
     follow_up: {
+      before_submit: false,
       required: false,
       blocks: [] as string[],
       missing: {} as Record<string, string[]>,
@@ -148,9 +150,15 @@ function leadRequest() {
 type LeadRequestMock = ReturnType<typeof leadRequest>;
 
 /** Like the server: what each step still misses, and what each open block misses. */
-function recompute(request: LeadRequestMock) {
+function recompute(request: LeadRequestMock, countryPreview = false) {
   const data = request.personal_data;
   const id = request.identification;
+  if (countryPreview && !request.submitted_at) {
+    const listedCountry = data.country === "RU" || (data.citizenships as string[]).includes("RU");
+    request.follow_up.before_submit = listedCountry;
+    request.follow_up.required = listedCountry;
+    request.follow_up.blocks = listedCountry ? ["A", "F", "K", "L", ...(id.pep_self === true || id.pep_related === true ? ["H"] : []), ...(id.sanctions_links === true ? ["J"] : [])] : [];
+  }
   const filled = (value: unknown) => (Array.isArray(value) ? value.length > 0 : value !== null && value !== undefined && value !== "");
   const byStep: Record<string, string[]> = {
     person: ["date_of_birth", "legal_sex", "citizenships"].filter((key) => !filled(data[key])),
@@ -180,11 +188,11 @@ function recompute(request: LeadRequestMock) {
   for (const block of request.follow_up.blocks) {
     if (block === "A") {
       missing.A = [
-        ...(filled(answers.funds_source) ? [] : ["funds_source"]),
-        ...(filled(answers.funds_description) ? [] : ["funds_description"]),
+        ...(payer?.payer_kind !== "self" || filled(answers.funds_source) ? [] : ["funds_source"]),
+        ...(payer?.payer_kind !== "self" || filled(answers.funds_description) ? [] : ["funds_description"]),
         ...(filled(answers.occupation) ? [] : ["occupation"]),
         ...(filled(answers.sector) ? [] : ["sector"]),
-        ...(request.follow_up.funds_proof_documents.length > 0 ? [] : ["funds_proof_upload"]),
+        ...(payer?.payer_kind !== "self" || request.follow_up.funds_proof_documents.length > 0 ? [] : ["funds_proof_upload"]),
       ];
     }
     if (block === "B") {
@@ -201,6 +209,9 @@ function recompute(request: LeadRequestMock) {
       ];
     }
     if (block === "I") missing.I = request.follow_up.identity_documents.length > 0 ? [] : ["id_document_upload"];
+    if (block === "F") missing.F = ["residence_since", "stay_reason"].filter((key) => !filled(id[key]));
+    if (block === "H") missing.H = ["pep_office", "pep_country", "pep_period", "pep_wealth_origin"].filter((key) => !filled(id[key]));
+    if (block === "J") missing.J = ["sanctions_link_name", "sanctions_link_kind", "sanctions_link_since_extent"].filter((key) => !filled(id[key]));
     // K: the birth data; L: the legal questions and the own economic interest (owner 2026-10-09).
     if (block === "K") missing.K = ["birth_place", "birth_country"].filter((key) => !filled(id[key]));
     if (block === "L") {
@@ -212,11 +223,12 @@ function recompute(request: LeadRequestMock) {
   request.follow_up.missing = missing;
 }
 
-async function setup(page: Page, prepare?: (request: LeadRequestMock) => void) {
+async function setup(page: Page, prepare?: (request: LeadRequestMock) => void, options: { countryPreview?: boolean; lang?: "de" | "en" | "uk" | "ru"; refusePrimary?: boolean } = {}) {
   await startClockAt(page);
   const request = leadRequest();
   prepare?.(request);
-  recompute(request);
+  if (options.lang) request.personal_data.primary_language = options.lang;
+  recompute(request, options.countryPreview);
   const calls = {
     personalData: [] as Json[],
     identification: [] as Json[],
@@ -227,12 +239,13 @@ async function setup(page: Page, prepare?: (request: LeadRequestMock) => void) {
     relationshipProofs: 0,
     identityUploads: 0,
     followUpSubmits: 0,
+    submits: 0,
   };
 
-  await page.addInitScript(() => {
-    localStorage.setItem("gmed_lang", "de");
+  await page.addInitScript((lang) => {
+    localStorage.setItem("gmed_lang", lang);
     localStorage.setItem("gmed_access_token", "lead-cabinet-token");
-  });
+  }, options.lang ?? "de");
   await page.routeWebSocket("**/api/**", (socket) => socket.close());
   await page.route("**/api/v1/**", async (route) => {
     const req = route.request();
@@ -240,7 +253,7 @@ async function setup(page: Page, prepare?: (request: LeadRequestMock) => void) {
     const method = req.method();
     const base = "/me/lead-requests/lead-1";
     const answer = () => {
-      recompute(request);
+      recompute(request, options.countryPreview);
       return route.fulfill({ json: request });
     };
     const upload = (list: Json[], name: string) =>
@@ -264,7 +277,7 @@ async function setup(page: Page, prepare?: (request: LeadRequestMock) => void) {
           role: "patient",
           capabilities: [],
           created_at: "2026-10-07T08:00:00Z",
-          preferred_language: "de",
+          preferred_language: options.lang ?? "de",
           password_change_required: false,
           portal_mode: "lead",
           lead_portal: { requests: 1 },
@@ -363,6 +376,17 @@ async function setup(page: Page, prepare?: (request: LeadRequestMock) => void) {
       request.follow_up.answered_at = "2026-10-07T10:00:00Z";
       return answer();
     }
+    if (method === "POST" && path === `${base}/submit`) {
+      calls.submits += 1;
+      if (options.refusePrimary) return route.fulfill({ status: 422, json: { code: "follow_up_incomplete", missing: { L: ["pep_self"] } } });
+      recompute(request, options.countryPreview);
+      if (request.follow_up.before_submit && Object.values(request.follow_up.missing).some((keys) => keys.length)) return route.fulfill({ status: 422, json: { code: "follow_up_incomplete", missing: request.follow_up.missing } });
+      request.submitted_at = "2026-10-14T12:00:00Z";
+      request.follow_up.before_submit = false;
+      if (request.follow_up.required && Object.values(request.follow_up.missing).every((keys) => keys.length === 0)) request.follow_up.answered_at = request.submitted_at;
+      request.identification.declared_correct_at = request.submitted_at;
+      return answer();
+    }
     if (path === "/me/profile") {
       return route.fulfill({ json: { id: "lead-user", email: "anna.muster@example.com", name: "Anna Muster", role: "patient", phone: null, preferred_language: "de" } });
     }
@@ -417,6 +441,150 @@ function sentWithBlocks(blocks: string[]) {
 
 /** Words of an assessment the lead must never read (contract P2). */
 const RISK_WORDS = /risiko|risk|punkte|points|stufe|level|trigger|abgelehnt|rejected|verdacht|ризик|риск|балл/i;
+
+function readyBeforeSend(request: LeadRequestMock) {
+  sentWithBlocks([])(request);
+  request.submitted_at = null;
+  request.review_notice = false;
+  Object.assign(request.identification, { pep_self: null, pep_related: null, sanctions_links: null });
+}
+
+test.describe("live country questions before first submission", () => {
+  test("a first-step country choice waits for the payer before asking personal financial questions", async ({ page }) => {
+    const { calls, request } = await setup(page, (value) => {
+      readyBeforeSend(value);
+      value.payer = null;
+    }, { countryPreview: true });
+    await page.goto("/");
+    await choose(page, page.getByRole("combobox", { name: "Wohnsitzland", exact: true }), "Russland");
+    await expect(tab(page, "follow_up")).toBeVisible();
+    await tab(page, "follow_up").click();
+    await expect(page.getByTestId("lead-request-follow-up-L")).toBeVisible();
+    await expect(page.getByTestId("lead-request-follow-up-choose-payer")).toContainText("Versicherung & Rechnung");
+    await expect(page.locator("#lead-request-funds_source")).toHaveCount(0);
+    await expect(page.locator("#lead-request-funds-proof-files")).toHaveCount(0);
+    await page.locator("#lead-request-occupation").fill("Ingenieurin");
+    await expect.poll(() => request.follow_up.answers.occupation).toBe("Ingenieurin");
+    expect(calls.enhanced.some((patch) => "funds_source" in patch || "funds_description" in patch)).toBe(false);
+    await tab(page, "billing").click();
+    await choose(page, page.getByTestId("lead-request-payer").getByRole("combobox", { name: "Wer ist der Zahler?" }), "Ich selbst");
+    await expect.poll(() => request.payer?.payer_kind).toBe("self");
+    await tab(page, "follow_up").click();
+    await expect(page.locator("#lead-request-funds_source")).toBeVisible();
+    await expect(page.locator("#lead-request-funds-proof-files")).toHaveCount(1);
+    await expect(page.getByTestId("lead-request-follow-up-choose-payer")).toHaveCount(0);
+    await expect(page.locator("#lead-request-occupation")).toHaveValue("Ingenieurin");
+  });
+
+  for (const scenario of [
+    { lang: "de" as const, width: 1440, field: "citizenships", country: "Russland" },
+    { lang: "ru" as const, width: 390, field: "country", country: "Россия" },
+    { lang: "uk" as const, width: 390, field: "citizenships", country: "Росія" },
+    { lang: "en" as const, width: 1440, field: "country", country: "Russia" },
+  ]) {
+    test(`${scenario.lang}: changing ${scenario.field} opens questions immediately at ${scenario.width}px`, async ({ page }) => {
+      await page.setViewportSize({ width: scenario.width, height: 900 });
+      const { calls, request } = await setup(page, readyBeforeSend, { countryPreview: true, lang: scenario.lang });
+      const text = leadRequestText(scenario.lang);
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto("/");
+      await expect(tab(page, "follow_up")).toHaveCount(0);
+      if (scenario.field === "citizenships") {
+        await page.locator("#lead-request-citizenships").click();
+        await page.getByRole("option", { name: `${scenario.country} (RU)`, exact: true }).click();
+        await page.keyboard.press("Escape");
+      } else {
+        await choose(page, page.getByRole("combobox", { name: text.fields.country, exact: true }), scenario.country);
+      }
+      await expect.poll(() => calls.personalData.some((patch) => scenario.field === "country" ? patch.country === "RU" : (patch.citizenships as string[] | undefined)?.includes("RU"))).toBe(true);
+      await expect(tab(page, "follow_up")).toBeVisible();
+      expect(request.submitted_at).toBeNull();
+      expect(request.identification.pep_self).toBeNull();
+      expect(request.identification.sanctions_links).toBeNull();
+      await tab(page, "follow_up").click();
+      await expect(page.getByTestId("lead-request-follow-up-explanation")).toHaveText(text.followUpBeforeSubmitIntro);
+      await expect(page.getByTestId("lead-request-follow-up-submit")).toHaveCount(0);
+      for (const block of ["K", "L", "A", "F"]) await expect(page.getByTestId(`lead-request-follow-up-${block}`)).toBeVisible();
+      for (const block of ["I", "G", "H", "J"]) await expect(page.getByTestId(`lead-request-follow-up-${block}`)).toHaveCount(0);
+      expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await tab(page, "send").click();
+      await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
+      await expect(page.getByTestId("lead-request-submit")).toBeDisabled();
+      await page.getByTestId("lead-request-missing-follow_up").getByRole("button").click();
+      await expect(page.getByTestId("lead-request-follow-up-L")).toBeVisible();
+      await tab(page, "person").click();
+      if (scenario.field === "citizenships") {
+        await page.getByRole("button", { name: new RegExp(`: ${scenario.country}$`) }).click();
+      } else {
+        // A known unlisted country removes the preview on the next autosave response.
+        const germanCountry = { de: "Deutschland", ru: "Германия", uk: "Німеччина", en: "Germany" }[scenario.lang];
+        await choose(page, page.getByRole("combobox", { name: text.fields.country, exact: true }), germanCountry);
+      }
+      await expect(tab(page, "follow_up")).toHaveCount(0);
+      await expect(page.getByTestId("lead-request-step-person")).toBeVisible();
+      await tab(page, "send").click();
+      await expect(page.getByTestId("lead-request-send")).toBeVisible();
+      await expect(page.getByTestId("lead-request-missing-follow_up")).toHaveCount(0);
+      expect(calls.submits).toBe(0);
+      expect(calls.followUpSubmits).toBe(0);
+      expect(errors).toEqual([]);
+    });
+  }
+
+  test("autosaved No answers and source of funds permit the primary send; Yes details remain conditional", async ({ page }) => {
+    const { calls, request } = await setup(page, (value) => {
+      readyBeforeSend(value);
+      value.personal_data.country = "RU";
+    }, { countryPreview: true });
+    await page.goto("/");
+    await tab(page, "follow_up").click();
+    const legal = page.getByTestId("lead-request-follow-up-L");
+    await choose(page, legal.getByTestId("lead-request-legal-pep_self").getByRole("combobox"), "Ja");
+    await expect(page.getByTestId("lead-request-follow-up-H")).toBeVisible();
+    await choose(page, legal.getByTestId("lead-request-legal-pep_self").getByRole("combobox"), "Nein");
+    await expect(page.getByTestId("lead-request-follow-up-H")).toHaveCount(0);
+    await choose(page, legal.getByTestId("lead-request-legal-pep_related").getByRole("combobox"), "Nein");
+    await choose(page, legal.getByTestId("lead-request-legal-sanctions_links").getByRole("combobox"), "Ja");
+    await expect(page.getByTestId("lead-request-follow-up-J")).toBeVisible();
+    await choose(page, legal.getByTestId("lead-request-legal-sanctions_links").getByRole("combobox"), "Nein");
+    await expect(page.getByTestId("lead-request-follow-up-J")).toHaveCount(0);
+    const blockA = page.getByTestId("lead-request-follow-up-A");
+    await choose(page, blockA.getByRole("combobox", { name: "Herkunft der Mittel" }), "Einkommen");
+    await blockA.getByRole("textbox", { name: "Bitte beschreiben Sie die Herkunft der Mittel" }).fill("Gehalt");
+    await blockA.getByRole("textbox", { name: "Ihr Beruf" }).fill("Ingenieurin");
+    await blockA.getByRole("textbox", { name: "Branche / Sektor Ihrer Tätigkeit" }).fill("IT");
+    await page.locator("#lead-request-funds-proof-files").setInputFiles({ name: "proof.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") });
+    const residence = page.getByTestId("lead-request-follow-up-F");
+    await residence.getByRole("textbox", { name: "Seit wann wohnen Sie in Ihrem Wohnsitzland?" }).fill("2020");
+    await choose(page, residence.getByRole("combobox", { name: "Grund des Aufenthalts im Wohnsitzland" }), "Staatsangehörigkeit / dort geboren");
+    await expect.poll(() => Object.values(request.follow_up.missing).flat()).toEqual([]);
+    await tab(page, "send").click();
+    await expect(page.getByTestId("lead-request-missing-follow_up")).toHaveCount(0);
+    await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
+    await page.getByTestId("lead-request-submit").click();
+    await expect(page.getByTestId("lead-request-sent")).toBeVisible();
+    await expect(page.getByTestId("lead-request-follow-up-open")).toHaveCount(0);
+    expect(calls.submits).toBe(1);
+    expect(calls.followUpSubmits).toBe(0);
+    expect(request.identification).toMatchObject({ pep_self: false, pep_related: false, sanctions_links: false });
+  });
+
+  test("a primary-send country refusal exposes the missing questions without losing the form", async ({ page }) => {
+    const { calls } = await setup(page, readyBeforeSend, { refusePrimary: true });
+    await page.goto("/");
+    await tab(page, "send").click();
+    await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
+    await page.getByTestId("lead-request-submit").click();
+    await expect(page.getByTestId("lead-request-send")).toBeVisible();
+    await expect(page.getByText(leadRequestText("de").followUpIncomplete, { exact: true })).toBeVisible();
+    await expect(page.getByTestId("lead-request-submit")).toBeDisabled();
+    await page.getByTestId("lead-request-missing-follow_up").getByRole("button").click();
+    await expect(page.getByTestId("lead-request-follow-up-L")).toBeVisible();
+    expect(calls.submits).toBe(1);
+  });
+});
 
 test.describe("lead cabinet stepper and follow-up", () => {
   test("short steps with badges, free navigation, the identity document as an upload only, and the reason of the request", async ({ page }) => {

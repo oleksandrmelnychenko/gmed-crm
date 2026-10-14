@@ -134,7 +134,7 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
   );
 }
 
-function BlockRow({ block, requested, tx }: { block: RiskBlockState; requested: boolean; tx: Tx }) {
+function BlockRow({ block, requested, beforeSubmit = false, tx }: { block: RiskBlockState; requested: boolean; beforeSubmit?: boolean; tx: Tx }) {
   return (
     <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5" data-testid={`lead-risk-block-${block.key}`}>
       <span className="font-mono text-[11px] font-semibold text-foreground">{block.key}</span>
@@ -142,7 +142,9 @@ function BlockRow({ block, requested, tx }: { block: RiskBlockState; requested: 
       <span className="text-muted-foreground">· {riskPartyLabel(block.party, tx)}</span>
       {requested ? <span className="text-muted-foreground">· {tx("запрошено", "angefordert")}</span> : null}
       <span className={block.answered ? "text-emerald-700 dark:text-emerald-300" : WARNING_TEXT}>
-        · {block.answered ? tx("ответ получен", "beantwortet") : tx("ждём ответ", "offen")}
+        · {beforeSubmit
+          ? block.answered ? tx("заполнено", "ausgefüllt") : tx("нужен ответ", "Antwort erforderlich")
+          : block.answered ? tx("ответ получен", "beantwortet") : tx("ждём ответ", "offen")}
       </span>
       {block.missing.length > 0 ? (
         <span className="w-full text-xs text-muted-foreground" data-testid={`lead-risk-block-${block.key}-missing`}>
@@ -216,6 +218,7 @@ export function LeadRiskAssessmentPanel({
 
   const started = riskAssessmentStarted(assessment);
   const preview = riskShowsPreview(assessment);
+  const questionsBeforeSubmit = !started && assessment.before_submit;
   const score = riskDisplayedScore(assessment);
   const decisions = riskAvailableDecisions(assessment);
   const proposal = assessment.pending_proposal;
@@ -369,15 +372,23 @@ export function LeadRiskAssessmentPanel({
           </p>
         ) : null}
 
-        {started && blocksShown.length > 0 ? (
+        {(started || questionsBeforeSubmit) && blocksShown.length > 0 ? (
           <div className="space-y-1.5" data-testid="lead-risk-blocks">
-            <Caption>{tx("Дополнительные сведения", "Ergänzende Angaben")}</Caption>
+            <Caption>{questionsBeforeSubmit
+              ? tx("Вопросы до отправки анкеты", "Fragen vor dem Absenden der Anfrage")
+              : tx("Дополнительные сведения", "Ergänzende Angaben")}</Caption>
+            {questionsBeforeSubmit ? <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-risk-questions-preview">
+              {tx(
+                "Эти вопросы уже доступны пациенту в кабинете по текущим данным о стране. Ниже — заполненность ответов; оценка риска ещё не начата.",
+                "Diese Fragen stehen im Portal aufgrund der aktuellen Länderangaben bereits zur Verfügung. Unten ist der Ausfüllstand zu sehen; die Risikobewertung wurde noch nicht gestartet.",
+              )}
+            </p> : null}
             <ul className="space-y-1 text-xs">
               {blocksShown.map((block) => (
-                <BlockRow key={block.key} block={block} requested={requested.has(block.key)} tx={tx} />
+                <BlockRow key={block.key} block={block} requested={requested.has(block.key)} beforeSubmit={questionsBeforeSubmit} tx={tx} />
               ))}
             </ul>
-            {assessment.follow_up_answered_at ? (
+            {started && assessment.follow_up_answered_at ? (
               <p className="text-xs text-muted-foreground" data-testid="lead-risk-follow-up-answered">
                 {tx("Пациент отправил сведения", "Angaben gesendet am")} {formatAppDateTime(assessment.follow_up_answered_at)}
               </p>

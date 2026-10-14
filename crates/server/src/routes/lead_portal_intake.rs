@@ -5625,6 +5625,34 @@ async fn submit_my_lead_request(
             json!({ "missing": missing }),
         );
     }
+    // A listed-country questionnaire is part of the first submission. Its
+    // live preview has no stored risk score, but direct API callers must answer
+    // the same questions the cabinet shows before submitting the base form.
+    let follow_up = match crate::risk::cabinet::follow_up_json(&mut tx, lead_id, auth.user_id).await
+    {
+        Ok(follow_up) => follow_up,
+        Err(error) => return internal(error, "load pre-submission country questions"),
+    };
+    if follow_up["before_submit"] == json!(true) {
+        let open: Map<String, Value> = follow_up["missing"]
+            .as_object()
+            .map(|missing| {
+                missing
+                    .iter()
+                    .filter(|(_, keys)| keys.as_array().is_some_and(|keys| !keys.is_empty()))
+                    .map(|(block, keys)| (block.clone(), keys.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !open.is_empty() {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "follow_up_incomplete",
+                "Please complete the additional information before sending your request",
+                json!({ "missing": open, "before_submit": true }),
+            );
+        }
+    }
     // The checkbox after the personal data (owner request 2026-10-03).
     let inquiry_consent = match active_consent(
         &mut *tx,

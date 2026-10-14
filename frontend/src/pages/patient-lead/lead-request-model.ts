@@ -19,6 +19,7 @@ import {
   type RecipientSubmitField,
 } from "./lead-request-recipient-model";
 import { REPRESENTATION_SUBMIT_FIELDS, type RepresentationSubmitField } from "./lead-request-representation-model";
+import { followUpBeforeSubmit, followUpMissingAll } from "./lead-request-follow-up-model";
 
 /** The step-1 form as the patient types it (strings, citizenships as codes). */
 export type PersonalDraft = {
@@ -1062,8 +1063,9 @@ export function changedSinceSubmit(
   return request.documents.some((document) => Date.parse(document.uploaded_at) > sentAt);
 }
 
-export function canSubmit(request: Pick<LeadRequest, "progress" | "consents">, inquiryPurpose: string): boolean {
-  return request.progress.missing_for_submit.length === 0 && consentGiven(request, inquiryPurpose);
+export function canSubmit(request: Pick<LeadRequest, "progress" | "consents"> & Partial<Pick<LeadRequest, "follow_up" | "submitted_at" | "identification">>, inquiryPurpose: string): boolean {
+  return request.progress.missing_for_submit.length === 0 && consentGiven(request, inquiryPurpose)
+    && (!followUpBeforeSubmit(request) || followUpMissingAll(request).length === 0);
 }
 
 /** The consent text in the cabinet language, German as fallback. */

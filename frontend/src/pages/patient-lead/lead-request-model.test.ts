@@ -241,6 +241,18 @@ const storedPayer: LeadRequestPayer = {
 };
 
 describe("lead request send step", () => {
+  it("requires live country answers on first send without blocking older servers or post-submit updates", () => {
+    const complete = request({
+      progress: { filled: 12, total: 12, missing_for_submit: [] },
+      consents: { lead_inquiry_processing: { ...request().consents.lead_inquiry_processing, given_at: "2026-10-14T10:00:00Z" } },
+      follow_up: { required: true, before_submit: true, blocks: ["A", "L"], missing: { A: ["funds_source"], L: ["pep_self"] }, answered_at: null },
+    });
+    expect(canSubmit(complete, "lead_inquiry_processing")).toBe(false);
+    expect(canSubmit({ ...complete, follow_up: { ...complete.follow_up!, missing: {} } }, "lead_inquiry_processing")).toBe(true);
+    expect(canSubmit({ ...complete, follow_up: { ...complete.follow_up!, before_submit: undefined } }, "lead_inquiry_processing")).toBe(true);
+    expect(canSubmit({ ...complete, submitted_at: "2026-10-14T12:00:00Z" }, "lead_inquiry_processing")).toBe(true);
+  });
+
   it("lists the missing fields in form order and needs the request consent", () => {
     expect(missingForSubmit(request())).toEqual(["date_of_birth", "street_address"]);
     const complete = request({ progress: { filled: 9, total: 11, missing_for_submit: [] } });

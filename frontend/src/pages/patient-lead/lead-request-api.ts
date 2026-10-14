@@ -655,6 +655,8 @@ export type FollowUpBlock = "A" | "B" | "C" | "F" | "G" | "H" | "I" | "J" | "K" 
  * why (no points, level, trigger or reason). Absent on an older server.
  */
 export type LeadRequestFollowUp = {
+  /** Live country-based questions available before the first submission. */
+  before_submit?: boolean;
   changed_since_answer?: boolean;
   required: boolean;
   blocks: string[];

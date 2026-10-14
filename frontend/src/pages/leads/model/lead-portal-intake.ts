@@ -172,7 +172,7 @@ export function isPatientPortalEvent(event: Pick<RealtimeEvent, "type" | "payloa
 }
 
 /**
- * Portal state of one lead for the wizard, refreshed on `lead.portal_updated`.
+ * Portal state of one lead for the wizard, refreshed on patient and staff changes.
  * `onPatientEvent` runs for changes the patient made.
  */
 export function useLeadPortalIntake(
@@ -205,7 +205,7 @@ export function useLeadPortalIntake(
     void reload();
   }, [enabled, reload]);
 
-  useRealtimeSubscription(["lead.portal_updated"], (event) => {
+  useRealtimeSubscription(["lead.portal_updated", "lead.updated"], (event) => {
     if (!enabled || !leadId || event.entity_id !== leadId) return;
     void reload();
     if (isPatientPortalEvent(event)) onPatientEventRef.current?.(event);

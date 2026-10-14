@@ -258,6 +258,7 @@ export type LeadRequestText = {
    * asked (no points, level or reason).
    */
   followUpIntro: string;
+  followUpBeforeSubmitIntro: string;
   followUpBlocks: Record<FollowUpBlock, string>;
   followUpSubmit: string;
   followUpSending: string;
@@ -280,6 +281,7 @@ export type LeadRequestText = {
     string
   >;
   extraPayerStatesFunds: string;
+  extraChoosePayer: (step: string) => string;
   /** The paying parent states the profession in the own payer section. */
   extraOccupationElsewhere: string;
   selfFundsProofHint: string;
@@ -1004,6 +1006,7 @@ const de: LeadRequestText = {
     payerExtrasBlock: "Weitere Angaben zum Zahler",
     missingPrefix: "Rechnungsempfänger",
   },
+  followUpBeforeSubmitIntro: "Unter bestimmten Umständen müssen wir einige ergänzende Fragen stellen, um gesetzliche Anforderungen zu erfüllen. Bitte beantworten Sie die Fragen zu politisch exponierten Personen, Sanktionsbezügen und zur Herkunft der Mittel. Das bedeutet nicht, dass Sie zu diesen Personengruppen gehören. Ihre Antworten werden automatisch gespeichert.",
   followUpIntro:
     "Bitte ergänzen Sie die folgenden Angaben und senden Sie sie anschließend ab. Alles wird automatisch gespeichert.",
   followUpBlocks: {
@@ -1035,6 +1038,7 @@ const de: LeadRequestText = {
     sector: "Branche / Sektor Ihrer Tätigkeit",
     funds_proof: "Nachweise zur Herkunft der Mittel",
   },
+  extraChoosePayer: (step) => `Wählen Sie bitte zuerst unter „${step}“, wer bezahlt. Danach zeigen wir die passenden Fragen zur Herkunft der Mittel.`,
   extraPayerStatesFunds:
     "Angaben zur Herkunft der Mittel und die Nachweise macht die zahlende Person über ihren eigenen Link.",
   extraOccupationElsewhere: "Ihren Beruf geben Sie im Abschnitt „Angaben als zahlende Person“ an.",
@@ -1515,6 +1519,7 @@ const ru: LeadRequestText = {
     payerExtrasBlock: "Дополнительно о плательщике",
     missingPrefix: "Получатель счёта",
   },
+  followUpBeforeSubmitIntro: "При определённых обстоятельствах мы должны задать несколько уточняющих вопросов для выполнения законодательных требований. Ответьте на вопросы о политически значимых лицах, санкционных связях и происхождении средств. Это не означает, что вы относитесь к этим категориям. Ответы сохраняются автоматически.",
   followUpIntro: "Пожалуйста, дополните следующие сведения и затем отправьте их. Всё сохраняется автоматически.",
   followUpBlocks: {
     A: "Происхождение средств",
@@ -1545,6 +1550,7 @@ const ru: LeadRequestText = {
     funds_proof: "Подтверждения происхождения средств",
   },
   extraPayerStatesFunds: "Сведения о происхождении средств и подтверждения плательщик даёт по своей собственной ссылке.",
+  extraChoosePayer: (step) => `Сначала выберите, кто оплачивает лечение, на шаге «${step}». После этого появятся нужные вопросы о происхождении средств.`,
   extraOccupationElsewhere: "Профессию вы указываете в разделе «Сведения о плательщике».",
   selfFundsProofHint: "Например, выписка со счёта или справка о зарплате. PDF, JPG или PNG, до 25 МБ на файл.",
   relationshipProofTitle: "Подтверждение отношений",
@@ -2027,6 +2033,7 @@ const uk: LeadRequestText = {
     payerExtrasBlock: "Додатково про платника",
     missingPrefix: "Отримувач рахунку",
   },
+  followUpBeforeSubmitIntro: "За певних обставин ми маємо поставити кілька уточнювальних запитань для виконання законодавчих вимог. Дайте відповіді на запитання про політично значущих осіб, санкційні зв’язки та походження коштів. Це не означає, що ви належите до цих категорій. Відповіді зберігаються автоматично.",
   followUpIntro: "Будь ласка, доповніть наведені нижче відомості й потім надішліть їх. Усе зберігається автоматично.",
   followUpBlocks: {
     A: "Походження коштів",
@@ -2057,6 +2064,7 @@ const uk: LeadRequestText = {
     funds_proof: "Підтвердження походження коштів",
   },
   extraPayerStatesFunds: "Відомості про походження коштів і підтвердження платник надає за своїм власним посиланням.",
+  extraChoosePayer: (step) => `Спочатку виберіть, хто оплачує лікування, на кроці «${step}». Після цього з’являться потрібні запитання про походження коштів.`,
   extraOccupationElsewhere: "Професію ви вказуєте в розділі «Відомості про платника».",
   selfFundsProofHint: "Наприклад, виписка з рахунку або довідка про зарплату. PDF, JPG або PNG, до 25 МБ на файл.",
   relationshipProofTitle: "Підтвердження стосунків",
@@ -2539,6 +2547,7 @@ const en: LeadRequestText = {
     payerExtrasBlock: "More about the payer",
     missingPrefix: "Invoice recipient",
   },
+  followUpBeforeSubmitIntro: "In some circumstances, we need to ask a few additional questions to meet legal requirements. Please answer the questions about politically exposed persons, sanctions connections and the source of funds. This does not mean that you belong to these categories. Your answers are saved automatically.",
   followUpIntro: "Please complete the following details and then send them. Everything is saved automatically.",
   followUpBlocks: {
     A: "Source of funds",
@@ -2569,6 +2578,7 @@ const en: LeadRequestText = {
     funds_proof: "Proofs of the source of funds",
   },
   extraPayerStatesFunds: "The paying person states the source of funds and provides the proofs through their own link.",
+  extraChoosePayer: (step) => `Please choose who pays under “${step}” first. We will then show the relevant questions about the source of funds.`,
   extraOccupationElsewhere: "You state your occupation in the section “Details as the paying person”.",
   selfFundsProofHint: "For example a bank statement or a payslip. PDF, JPG or PNG, up to 25 MB per file.",
   relationshipProofTitle: "Proof of the relationship",

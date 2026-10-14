@@ -458,14 +458,15 @@ async fn a_valid_identity_document_withdraws_t12() {
     let (status, body) = upload(&app, &format!("{path}/identity-document"), &patient).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
 
-    // T12 is gone (not merely inactive); T1 alone is level 1, nothing waits for a review.
+    // T12 is gone (not merely inactive); T1 alone remains level one. The
+    // country questions still wait for answers without raising that score.
     let after = assessment(&app, lead_id).await;
     assert!(trigger(&after, "T12", "patient").is_none(), "{after}");
     assert!(trigger(&after, "T1", "patient").is_some());
     assert_eq!(after["patient_points"], 2);
     assert_eq!(after["points"], 2);
     assert_eq!(after["level"], 1);
-    assert_eq!(after["status"], "clear", "{after}");
+    assert_eq!(after["status"], "awaiting_answers", "{after}");
     let withdrawn: Vec<&Value> = after["history"]
         .as_array()
         .unwrap()
@@ -944,10 +945,39 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    // The first-submission preview deliberately excludes I: the identity
+    // document is still required on the base form, rather than shown twice.
+    let (status, preview) = request(&app, "GET", &path, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["follow_up"]["before_submit"], true, "{preview}");
+    assert_eq!(
+        preview["follow_up"]["blocks"],
+        json!(["A", "F", "K", "L"]),
+        "{preview}"
+    );
+    assert!(
+        preview["follow_up"]["missing"].get("I").is_none(),
+        "{preview}"
+    );
+    assert!(
+        preview["progress"]["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("id_document_upload")),
+        "{preview}"
+    );
+    // From here this fixture represents an already submitted base form and
+    // tests the stored assessment, including its identity follow-up.
+    sqlx::query("UPDATE leads SET portal_submitted_at = clock_timestamp() WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
     let (status, request_object) = request(&app, "GET", &path, &patient, None).await;
     assert_eq!(status, StatusCode::OK);
     let follow_up = &request_object["follow_up"];
     assert_eq!(follow_up["required"], true, "{follow_up}");
+    assert_eq!(follow_up["before_submit"], false, "{follow_up}");
     // Level 2 also opens the birth data (K) and the legal questions (L), owner 2026-10-09,
     // and the source of funds (A), QA 2026-10-10.
     assert_eq!(follow_up["blocks"], json!(["A", "F", "I", "K", "L"]));
@@ -1028,22 +1058,6 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let (status, body) = request(
-        &app,
-        "POST",
-        &format!("{path}/follow-up/submit"),
-        &patient,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "follow_up_not_requested");
-    // This assessment fixture now represents an already submitted base form.
-    sqlx::query("UPDATE leads SET portal_submitted_at = clock_timestamp() WHERE id = $1")
-        .bind(lead_id)
-        .execute(app.pool())
-        .await
-        .unwrap();
     let (status, body) = request(
         &app,
         "POST",

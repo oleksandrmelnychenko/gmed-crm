@@ -12,6 +12,7 @@ import {
   enhancedCheckRiskTier,
   enhancedCheckTriggers,
   isBlacklistCountry,
+  highRiskCountryHint,
   normalizeLeadEnhancedCheck,
   pepEnhancedCheckHint,
 } from "./enhanced-check";
@@ -99,5 +100,13 @@ describe("the enhanced check of the owner's rule (2026-10-07)", () => {
     expect(
       enhancedCheckRiskTier({ ...none, highRiskHint: true, check: { required: true, reasons: ["payer_sanctioned"], countries: [] } }),
     ).toBe("sanctions");
+  });
+
+  it("distinguishes additional country questions from the enhanced-check requirement", () => {
+    expect(highRiskCountryHint("Россия", ru)).toContain("дополнительных вопросах анкеты");
+    expect(highRiskCountryHint("Россия", ru)).toContain("определяется отдельно по оценке риска");
+    expect(highRiskCountryHint("Russland", de)).toContain("ergänzenden Fragen");
+    expect(highRiskCountryHint("Россия", ru, false)).toContain("учитывается в оценке риска");
+    expect(enhancedCheckRequired({ required: false, reasons: [], countries: [] })).toBe(false);
   });
 });

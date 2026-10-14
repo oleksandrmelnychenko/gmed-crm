@@ -266,7 +266,20 @@ async fn assessment_json(
         ),
         _ => (Vec::new(), 1, Vec::new()),
     };
-    let states = store::block_states(&triggers, level, &requested, &config, &answers);
+    // Show the same live country questionnaire as the cabinet before the
+    // first assessment. This does not start an assessment or store a score.
+    let question_preview = if started {
+        Vec::new()
+    } else {
+        risk::country_preview_triggers(&inputs, &config)
+    };
+    let before_submit = !question_preview.is_empty();
+    let question_triggers = if started {
+        &triggers
+    } else {
+        &question_preview
+    };
+    let states = store::block_states(question_triggers, level, &requested, &config, &answers);
     let blocks: Map<String, Value> = states
         .iter()
         .map(|(block, state)| (block.to_string(), json!(state)))
@@ -309,6 +322,7 @@ async fn assessment_json(
         "knockout": started && score.knockout,
         "triggers": triggers.iter().map(trigger_json).collect::<Vec<_>>(),
         "blocks": blocks,
+        "before_submit": before_submit,
         "requested_blocks": requested,
         "follow_up_answered_at": stored.as_ref().and_then(|assessment| assessment.follow_up_answered_at),
         "review_notice": review_notice,

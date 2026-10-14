@@ -1,6 +1,6 @@
 import { INQUIRY_CONSENT, type LeadRequest } from "./lead-request-api";
 import { isBillingField } from "./lead-request-billing-model";
-import { followUpAnswered, followUpMissingAll, followUpShown } from "./lead-request-follow-up-model";
+import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown } from "./lead-request-follow-up-model";
 import { SUBMIT_FIELDS, changedSinceSubmit, consentGiven } from "./lead-request-model";
 import { isRecipientField } from "./lead-request-recipient-model";
 import { representativeSubmitPart } from "./lead-request-representation-model";
@@ -183,7 +183,7 @@ export function stepDone(
   missing: Record<StepId, string[]> = missingByStep(request),
 ): boolean {
   if (step === "send") return Boolean(request.submitted_at) && !changedSinceSubmit(request);
-  if (step === "follow_up") return followUpAnswered(request);
+  if (step === "follow_up") return followUpBeforeSubmit(request) ? followUpMissingAll(request).length === 0 : followUpAnswered(request);
   return stepMissingCount(request, step, missing) === 0;
 }
 

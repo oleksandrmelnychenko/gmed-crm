@@ -7,13 +7,13 @@ import { checkboxClass } from "@/components/record-workspace/primitives/design-t
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
-import { INQUIRY_CONSENT, submitLeadRequest, type LeadRequest } from "./lead-request-api";
-import { followUpAnswered, followUpShown } from "./lead-request-follow-up-model";
+import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, submitLeadRequest, type LeadRequest } from "./lead-request-api";
+import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown, missingOfRefusal } from "./lead-request-follow-up-model";
 import { canSubmit, changedSinceSubmit, consentGiven, type SubmitField } from "./lead-request-model";
 import { CabinetSection as Section, RequiredMark, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
 import { hasBaseFormInput, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
 import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
-import { submitFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { followUpFieldLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 /**
  * Step "send": what will be sent, what is still missing, the confirmation
@@ -42,7 +42,8 @@ export function SendStep({
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const guardian = request.access_kind === "guardian";
-  // What is still missing, by the step it is answered in (the follow-up is sent on its own).
+  // Base fields and live country questions share the first submission.
+  // Staff follow-up after submission retains its separate send action.
   const byStep = missingByStep(request);
   for (const step of visibleSteps(request)) byStep[step] = byStep[step].filter(hasBaseFormInput);
   const missingSteps = visibleSteps(request).filter(
@@ -50,7 +51,8 @@ export function SendStep({
   );
   const shownKeys = new Set(missingSteps.flatMap((step) => byStep[step]));
   const otherMissing = request.progress.missing_for_submit.filter((key) => !shownKeys.has(key));
-  const missingCount = shownKeys.size + otherMissing.length;
+  const previewMissing = followUpBeforeSubmit(request) ? followUpMissingAll(request) : [];
+  const missingCount = shownKeys.size + otherMissing.length + previewMissing.length;
   const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);
   // After sending, GMED may ask for more: the neutral pointer to the step (never why).
   const followUpOpen = Boolean(request.submitted_at) && followUpShown(request) && !followUpAnswered(request);
@@ -73,7 +75,24 @@ export function SendStep({
       // The confirmation belongs to what was sent; a later change is confirmed anew.
       setConfirmed(false);
     } catch (cause) {
-      setError(errorBody(cause)?.code === "declaration_required" ? text.declarationRequired : errorMessage(cause, text));
+      const body = errorBody(cause);
+      const missing = body?.code === FOLLOW_UP_INCOMPLETE ? missingOfRefusal(body) : null;
+      if (missing) {
+        onChange({
+          ...request,
+          follow_up: {
+            ...request.follow_up,
+            required: true,
+            before_submit: !request.submitted_at,
+            blocks: [...new Set([...(request.follow_up?.blocks ?? []), ...Object.keys(missing)])],
+            missing,
+            answered_at: request.follow_up?.answered_at ?? null,
+          },
+        });
+        setError(text.followUpIncomplete);
+      } else {
+        setError(body?.code === "declaration_required" ? text.declarationRequired : errorMessage(cause, text));
+      }
     } finally {
       setBusy(false);
     }
@@ -178,13 +197,17 @@ export function SendStep({
                 </ul>
               </div>
             ))}
+            {previewMissing.length > 0 ? <div data-testid="lead-request-missing-follow_up">
+              <button type="button" className="text-xs font-semibold underline underline-offset-2" onClick={() => onEdit("follow_up")}>{text.steps.follow_up}</button>
+              <ul className="list-inside list-disc">{previewMissing.map(({ block, key }) => <li key={`${block}:${key}`} className="break-words">{followUpFieldLabel(text, key, guardian)}</li>)}</ul>
+            </div> : null}
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="gap-1.5 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
               // To the first step that still misses something.
-              onClick={() => onEdit(!inquiryConsent ? "person" : missingSteps[0] ?? "person")}
+              onClick={() => onEdit(!inquiryConsent ? "person" : missingSteps[0] ?? (previewMissing.length > 0 ? "follow_up" : "person"))}
             >
               <Pencil aria-hidden="true" className="size-3.5" />
               {text.editData}

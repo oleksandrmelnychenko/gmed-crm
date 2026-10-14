@@ -11,7 +11,10 @@ import {
   extraPatch,
   familyPayer,
   followUpAnswered,
+  followUpBeforeSubmit,
   followUpMissing,
+  followUpMissingAll,
+  followUpShown,
   fundsSourceOptions,
   missingOfRefusal,
   openFollowUpBlocks,
@@ -33,6 +36,24 @@ const payer = (payer_kind: "self" | "third_party"): LeadRequestPayer => ({
 });
 
 describe("follow-up blocks", () => {
+  it("shows only live country questions before sending, keeping staff requests and conditional yes details out", () => {
+    const request = {
+      submitted_at: null,
+      identification: { pep_self: null, pep_related: false, sanctions_links: false } as import("./lead-request-api").LeadRequest["identification"],
+      follow_up: { required: true, before_submit: true, blocks: ["A", "F", "K", "L", "H", "I", "J", "G"], missing: { A: ["sector"], H: ["pep_office"], I: ["id_document_upload"], J: ["sanctions_link_name"] }, answered_at: null },
+    };
+    expect(followUpBeforeSubmit(request)).toBe(true);
+    expect(followUpShown(request)).toBe(true);
+    expect(openFollowUpBlocks(request)).toEqual(["K", "L", "A", "F"]);
+    expect(followUpMissingAll(request)).toEqual([{ block: "A", key: "sector" }]);
+    expect(openFollowUpBlocks({ ...request, identification: { ...request.identification!, pep_self: true, sanctions_links: true } })).toEqual(["K", "L", "A", "F", "H", "J"]);
+    expect(followUpShown({ ...request, follow_up: { ...request.follow_up, before_submit: undefined } })).toBe(false);
+    expect(followUpShown({ ...request, follow_up: { ...request.follow_up, required: false, blocks: [] } })).toBe(false);
+    const sent = { ...request, submitted_at: "2026-10-14T12:00:00Z" };
+    expect(followUpBeforeSubmit(sent)).toBe(false);
+    expect(openFollowUpBlocks(sent)).toContain("I");
+  });
+
   it("opens the cabinet's blocks in letter order, nothing while not required", () => {
     const followUp = { required: true, blocks: ["J", "a", "D", "C", "E", "X"], missing: { A: ["sector"], J: [] }, answered_at: null };
     expect(openFollowUpBlocks({ follow_up: followUp })).toEqual(["A", "C", "J"]);
@@ -62,7 +83,8 @@ describe("follow-up blocks", () => {
 
   it("asks block A by who pays and what the server misses", () => {
     expect(blockAAsks({ payer: payer("self") })).toMatchObject({ funds: true, occupation: true, sector: true, funds_proof: true, payer_funds: false });
-    expect(blockAAsks({ payer: null })).toMatchObject({ funds: true });
+    expect(blockAAsks({ payer: null })).toMatchObject({ funds: false, funds_proof: false, occupation: true, sector: true });
+    expect([...askedExtraFields(blockAAsks({ payer: null }))]).toEqual(["occupation", "sector"]);
     // Even stale server missing keys never ask the lead for a third party's funds.
     const asked = { required: true, blocks: ["A"], missing: { A: ["payer_funds_source", "sector"] }, answered_at: null };
     expect(blockAAsks({ payer: payer("third_party"), follow_up: asked })).toMatchObject({ payer_funds: false, payer_states_funds: true, funds: false, funds_proof: false });

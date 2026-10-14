@@ -35,6 +35,7 @@ import {
   extraValue,
   familyPayer,
   followUpAnswered,
+  followUpBeforeSubmit,
   followUpMissing,
   fundsSourceOptions,
   missingOfRefusal,
@@ -133,6 +134,7 @@ export function FollowUpStep({
   const [error, setError] = useState("");
   const answered = followUpAnswered(request);
   const answeredAt = request.follow_up?.answered_at ?? null;
+  const beforeSubmit = followUpBeforeSubmit(request);
   const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);
 
   async function send() {
@@ -236,7 +238,7 @@ export function FollowUpStep({
 
   return (
     <section className="space-y-6" data-testid="lead-request-follow-up">
-      <p className="text-sm text-muted-foreground">{text.followUpIntro}</p>
+      <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-follow-up-explanation">{beforeSubmit ? text.followUpBeforeSubmitIntro : text.followUpIntro}</p>
       {answered && answeredAt ? (
         <p
           role="status"
@@ -293,7 +295,7 @@ export function FollowUpStep({
             {text.next}
             <ArrowRight aria-hidden="true" className="size-3.5" />
           </Button>
-          <Button
+          {!beforeSubmit ? <Button
             type="button"
             className="h-9 gap-2"
             disabled={sending || answered || !inquiryConsent || Object.values(states).some((state) => state === "saving")}
@@ -302,7 +304,7 @@ export function FollowUpStep({
           >
             {sending ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Send aria-hidden="true" className="size-3.5" />}
             {sending ? text.followUpSending : text.followUpSubmit}
-          </Button>
+          </Button> : null}
         </div>
       </StepFooter>
     </section>
@@ -467,6 +469,11 @@ function FundsBlock({
 
   return (
     <div className="space-y-4">
+      {!request.payer && !request.payer_questionnaire ? (
+        <p role="note" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-follow-up-choose-payer">
+          {text.extraChoosePayer(text.steps.billing)}
+        </p>
+      ) : null}
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         {asks.payer_funds ? (
           <>
