@@ -9,6 +9,8 @@
  * Staff only: nothing of this reaches the lead's cabinet or the payer link.
  */
 import { ApiRequestError } from "@/lib/api";
+import type { RepresentativeCountryQuestions } from "@/pages/patient-lead/lead-request-api";
+import { REPRESENTATIVE_COUNTRY_FIELDS } from "@/pages/patient-lead/lead-request-representative-questions-model";
 
 import type { Tx } from "./lead-payer";
 
@@ -40,7 +42,7 @@ export const RISK_KNOCKOUT_TRIGGERS: readonly string[] = ["T14", "T15", "T16"];
 export const RISK_LIST_TRIGGERS: readonly string[] = ["T1", "T2", "T6"];
 
 /** The follow-up blocks staff may request (A–L). */
-export const RISK_BLOCK_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"] as const;
+export const RISK_BLOCK_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "R"] as const;
 
 export type RiskBlockKey = (typeof RISK_BLOCK_KEYS)[number];
 
@@ -148,6 +150,7 @@ export type RiskProposal = {
 
 /** `GET /leads/{id}/risk-assessment`. */
 export type LeadRiskAssessment = RiskScore & {
+  representatives?: RepresentativeCountryQuestions[];
   /** Null while the assessment has not started (no cabinet submit, no gated action yet). */
   started_at: string | null;
   status: RiskStatus | null;
@@ -342,6 +345,7 @@ export function normalizeLeadRiskAssessment(value: unknown): LeadRiskAssessment 
   };
   return {
     ...score,
+    representatives: normalizeRepresentativeQuestions(raw.representatives),
     started_at: startedAt,
     status,
     blocks: normalizeBlocks(raw.blocks),
@@ -366,6 +370,26 @@ export function normalizeLeadRiskAssessment(value: unknown): LeadRiskAssessment 
     reviewers_available: count(raw.reviewers_available),
     sanctions_confirmed: raw.sanctions_confirmed === true,
   };
+}
+
+function normalizeRepresentativeQuestions(value: unknown): RepresentativeCountryQuestions[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const raw = record(entry);
+    const id = text(raw?.id);
+    if (!raw || !id) return [];
+    const fields = record(raw.fields);
+    return [{
+      id,
+      name: text(raw.name) ?? "",
+      country_questions: raw.country_questions === true,
+      missing: strings(raw.missing),
+      fields: Object.fromEntries(REPRESENTATIVE_COUNTRY_FIELDS.map((key) => {
+        const value = fields?.[key];
+        return [key, typeof value === "boolean" ? value : text(value)];
+      })),
+    }];
+  });
 }
 
 /**
@@ -444,11 +468,13 @@ export function riskLevelLabel(value: number, tx: Tx): string {
   return tx(`Уровень ${value}`, `Stufe ${value}`);
 }
 
-export function riskTriggerLabel(key: string, tx: Tx): string {
+export function riskTriggerLabel(key: string, tx: Tx, subject = "patient"): string {
   switch (key) {
     case "T1":
+      if (subject === "representative") return tx("Гражданство представителя в списке стран", "Staatsangehörigkeit des Vertreters auf der Länderliste");
       return tx("Гражданство пациента в списке стран", "Staatsangehörigkeit des Patienten auf der Länderliste");
     case "T2":
+      if (subject === "representative") return tx("Проживание представителя в стране из списка", "Wohnsitz des Vertreters in einem Land der Liste");
       return tx("Проживание пациента в стране из списка", "Wohnsitz des Patienten in einem Land der Liste");
     case "T3":
       return tx("Несколько гражданств, одно из списка", "Mehrere Staatsangehörigkeiten, eine davon gelistet");
@@ -559,6 +585,8 @@ export function riskBlockLabel(key: string, tx: Tx): string {
       return tx("Данные о рождении", "Geburtsangaben");
     case "L":
       return tx("Вопросы по закону (PEP, санкции)", "Fragen nach GwG (PEP, Sanktionen)");
+    case "R":
+      return tx("Дополнительные сведения представителей", "Ergänzende Angaben der Vertreter");
     default:
       return key;
   }
@@ -611,7 +639,12 @@ const RISK_MISSING_LABELS: Record<string, [ru: string, de: string]> = {
   payer_beneficial_owner: ["выгодоприобретатель", "wirtschaftlich Berechtigter"],
 };
 
-export function riskMissingLabel(key: string, tx: Tx): string {
+export function riskMissingLabel(key: string, tx: Tx, representatives: readonly RepresentativeCountryQuestions[] = []): string {
+  if (key.startsWith("representative:")) {
+    const [, id, field] = key.split(":");
+    const name = representatives.find((person) => person.id === id)?.name || tx("Представитель", "Vertreter");
+    return `${name}: ${riskMissingLabel(field ?? "", tx)}`;
+  }
   const label = RISK_MISSING_LABELS[key];
   return label ? tx(label[0], label[1]) : key;
 }
@@ -717,7 +750,9 @@ export function riskCauseLabel(cause: string | null, tx: Tx): string {
 
 /** "5 (пациент 4 · плательщик 1)": the points that count and both subjects. */
 export function riskPointsLine(score: RiskScore, tx: Tx): string {
-  return `${score.points} (${tx("пациент", "Patient")} ${score.patient_points} · ${tx("плательщик", "Zahler")} ${score.payer_points})`;
+  const patientSide = score.triggers.some((trigger) => trigger.subject === "representative")
+    ? tx("пациент и представители", "Patient und Vertreter") : tx("пациент", "Patient");
+  return `${score.points} (${patientSide} ${score.patient_points} · ${tx("плательщик", "Zahler")} ${score.payer_points})`;
 }
 
 /** The open blocks in letter order. */
@@ -744,7 +779,7 @@ export function riskSuggestedBlocks(assessment: LeadRiskAssessment): string[] {
 /** A decision error of the server in the user's language; null for other errors. */
 export function riskDecisionErrorText(error: unknown, tx: Tx): string | null {
   if (!(error instanceof ApiRequestError)) return null;
-  const code = error.body?.error ?? error.code;
+  const code = error.body?.code ?? error.body?.error ?? error.code;
   switch (code) {
     case "reason_required":
       return tx("Укажите причину (минимум 10 символов).", "Bitte eine Begründung angeben (mindestens 10 Zeichen).");
@@ -786,7 +821,13 @@ export function riskDecisionErrorText(error: unknown, tx: Tx): string | null {
 
 /** 409 `risk_review_required` of the gated staff actions (qualify, convert, signatures …). */
 export function riskGateErrorText(error: unknown, tx: Tx): string | null {
-  if (!(error instanceof ApiRequestError) || (error.body?.error ?? error.code) !== "risk_review_required") return null;
+  if (!(error instanceof ApiRequestError)) return null;
+  const code = error.body?.code ?? error.body?.error ?? error.code;
+  if (code === "representative_details_incomplete") return tx(
+    "Перед договором и подписью дополните данные родителей в разделе «Данные клиента». В кабинете можно запросить блок «Представители».",
+    "Bitte vervollständigen Sie vor Vertrag und Unterschrift die Elterndaten unter „Kundendaten“. Im Portal können Sie den Block „Vertretung“ anfordern.",
+  );
+  if (code !== "risk_review_required") return null;
   if (error.body?.rejected === true) {
     return tx(
       "Оценка риска отклонила лида: это действие недоступно.",

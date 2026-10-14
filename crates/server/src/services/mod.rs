@@ -9,6 +9,7 @@ pub mod drug_matching;
 pub mod gba_ais;
 pub mod interpreter_booking_links;
 pub mod interpreter_suggestions;
+pub mod lead_guardian_identity;
 pub mod machine_translation;
 pub mod medication_ai_jobs;
 pub mod medication_ai_provider;

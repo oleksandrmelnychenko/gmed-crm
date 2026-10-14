@@ -395,3 +395,10 @@ describe("lead errors", () => {
     expect(leadErrorMessage(new Error("Bitte Daten prüfen"), de)).toBe("Bitte Daten prüfen");
   });
 });
+
+it("explains the existing-parent repeat workflow rather than suggesting a different email", () => {
+  const cause = { body: { code: "existing_parent_patient_use_repeat_intake", patient_id: "parent-patient" } };
+  expect(leadErrorMessage(cause, (ru) => ru)).toContain("повторное обращение");
+  expect(leadErrorMessage(cause, (_ru, de) => de)).toContain("erneute Anfrage");
+  expect(leadErrorMessage(cause, (ru) => ru)).not.toContain("другую электронную почту");
+});

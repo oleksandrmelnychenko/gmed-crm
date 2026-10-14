@@ -85,6 +85,7 @@ pub struct Assessment {
     pub follow_up_answered_at: Option<DateTime<Utc>>,
     pub status: String,
     pub released_fingerprint: Option<String>,
+    pub representative_country_ids: Vec<Uuid>,
 }
 
 impl Assessment {
@@ -103,9 +104,10 @@ impl Assessment {
         self.status == STATUS_REJECTED
             || (self.score.level >= 2 && self.status != STATUS_RELEASED)
             || (self.status == STATUS_AWAITING
-                && self.triggers.iter().any(|trigger| {
-                    super::patient_country_follow_up(&trigger.key, &trigger.subject)
-                }))
+                && self
+                    .triggers
+                    .iter()
+                    .any(|trigger| super::country_follow_up(&trigger.key, &trigger.subject)))
     }
 
     /// Whether the payer's link waits: a rejected lead, or level 3 that
@@ -141,13 +143,16 @@ impl Assessment {
             follow_up_answered_at: row.try_get("follow_up_answered_at").ok().flatten(),
             status: row.try_get("status").unwrap_or_default(),
             released_fingerprint: row.try_get("released_fingerprint").ok().flatten(),
+            representative_country_ids: row
+                .try_get("representative_country_ids")
+                .unwrap_or_default(),
         }
     }
 }
 
 const ASSESSMENT_COLUMNS: &str = "lead_id, started_at, config_version, patient_points, \
      payer_points, points, knockout, level, triggers, fingerprint, requested_blocks, \
-     follow_up_answered_at, status, released_fingerprint, updated_at";
+     follow_up_answered_at, status, released_fingerprint, representative_country_ids, updated_at";
 
 /// The stored assessment, if any (no lock).
 pub async fn load(
@@ -185,6 +190,9 @@ async fn load_for_update(
 /// What the blocks look at besides the triggers.
 #[derive(Clone, Debug, Default)]
 pub struct BlockAnswers {
+    pub representatives: Vec<RepresentativeQuestions>,
+    pub minor_representation: bool,
+    pub document_stage: bool,
     pub payer: Option<Declaration>,
     pub via_third_party_kind: Option<String>,
     pub occupation: Option<String>,
@@ -227,6 +235,54 @@ pub struct BlockAnswers {
     pub statement_payment_reason: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct RepresentativeQuestions {
+    pub id: Uuid,
+    pub name: String,
+    pub fields: Value,
+    pub country_questions: bool,
+    pub missing: Vec<String>,
+}
+
+fn representative_ids(inputs: &Inputs, config: &RiskConfig, stored: &[Uuid]) -> Vec<Uuid> {
+    let mut ids: Vec<Uuid> = inputs
+        .representatives
+        .iter()
+        .filter(|person| {
+            stored.contains(&person.id)
+                || person.country_questions(config)
+                || person.fields["pep_self"] == true
+                || person.fields["pep_related"] == true
+                || person.fields["sanctions_links"] == true
+        })
+        .map(|person| person.id)
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn representative_questions(inputs: &Inputs, required: &[Uuid]) -> Vec<RepresentativeQuestions> {
+    inputs
+        .representatives
+        .iter()
+        .map(|person| {
+            let country_questions = required.contains(&person.id);
+            RepresentativeQuestions {
+                id: person.id,
+                name: person.name.clone(),
+                fields: person.fields.clone(),
+                country_questions,
+                missing: if country_questions {
+                    lead_representatives::country_question_missing(&person.fields)
+                } else {
+                    Vec::new()
+                },
+            }
+        })
+        .collect()
+}
+
 fn blank(value: &Option<String>) -> bool {
     value.as_deref().is_none_or(|value| value.trim().is_empty())
 }
@@ -252,12 +308,31 @@ pub async fn load_block_answers(
         caller,
     );
     let today = inputs.today.unwrap_or_else(crate::app_time::today);
-    let representation_missing: Vec<String> =
+    let config = load_config(conn).await?;
+    let stored = load(conn, lead_id).await?;
+    let submitted: bool =
+        sqlx::query_scalar("SELECT portal_submitted_at IS NOT NULL FROM leads WHERE id=$1")
+            .bind(lead_id)
+            .fetch_one(&mut *conn)
+            .await?;
+    let stored_ids = stored
+        .as_ref()
+        .filter(|assessment| submitted && assessment.started())
+        .map(|assessment| assessment.representative_country_ids.as_slice())
+        .unwrap_or(&[]);
+    let representatives =
+        representative_questions(inputs, &representative_ids(inputs, &config, stored_ids));
+    let representation_missing: Vec<String> = (if representation.representation.minor {
+        lead_representatives::missing_for_contract(&representation, today)
+    } else {
         lead_representatives::missing_for_submit(&representation, today)
-            .into_iter()
-            .filter(|key| super::cabinet::is_adult_representative_key(key))
-            .filter(|key| !super::cabinet::is_id_data_key(key))
-            .collect();
+    })
+    .into_iter()
+    .filter(|key| {
+        representation.representation.minor || super::cabinet::is_adult_representative_key(key)
+    })
+    .filter(|key| !super::cabinet::is_id_data_key(key))
+    .collect();
     let row = sqlx::query(
         r#"SELECT g.occupation, g.sector, g.payment_background, g.relationship_since,
                   g.residence_since, g.stay_reason, g.stay_reason_details, g.pep_related,
@@ -303,6 +378,9 @@ pub async fn load_block_answers(
         row.try_get("identity_uploaded_at").ok().flatten();
     let entered_at: Option<DateTime<Utc>> = row.try_get("id_data_entered_at").ok().flatten();
     Ok(BlockAnswers {
+        representatives,
+        minor_representation: representation.representation.minor,
+        document_stage: representation.document_stage,
         payer,
         via_third_party_kind: text("via_third_party_kind"),
         occupation: text("occupation"),
@@ -368,6 +446,22 @@ const PAYMENT_ROUTE_KEYS: [&str; 7] = [
 
 /// Who answers a block and what it still misses.
 fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<String>) {
+    if block == "R" {
+        return (
+            PARTY_CABINET,
+            answers
+                .representatives
+                .iter()
+                .filter(|person| person.country_questions)
+                .flat_map(|person| {
+                    person
+                        .missing
+                        .iter()
+                        .map(move |field| format!("representative:{}:{field}", person.id))
+                })
+                .collect(),
+        );
+    }
     let payer = answers.payer.as_ref();
     let third_party = payer.is_some_and(Declaration::is_third_party);
     let paying_parent = answers.paying_parent;
@@ -575,7 +669,22 @@ pub fn block_states(
 ) -> BTreeMap<&'static str, BlockState> {
     // Level 3 too (owner 2026-10-10): staff decide on level 3 with the details the
     // triggers ask for; the halt and the four-eyes decision stay.
-    let automatic = if level >= 2 && config.level_2_blocks_automatic {
+    let non_representative: Vec<Sticky> = triggers
+        .iter()
+        .filter(|trigger| trigger.subject != super::SUBJECT_REPRESENTATIVE)
+        .cloned()
+        .collect();
+    // A parent's country opens that parent's R, without asking the child's
+    // birth/PEP/residence questions merely because their combined points rose.
+    let child_level = if triggers
+        .iter()
+        .any(|trigger| trigger.subject == super::SUBJECT_REPRESENTATIVE)
+    {
+        score(&non_representative, config).level
+    } else {
+        level
+    };
+    let automatic = if child_level >= 2 && config.level_2_blocks_automatic {
         blocks_of(triggers)
     } else {
         Vec::new()
@@ -589,7 +698,12 @@ pub fn block_states(
         let (party, missing) = block_missing(block, answers);
         let requested = requested.iter().any(|known| known == block);
         let open = match block {
-            "G" => requested || (sticky("T13") && !missing.is_empty()),
+            "G" => {
+                requested
+                    || (sticky("T13")
+                        && !missing.is_empty()
+                        && (!answers.minor_representation || answers.document_stage))
+            }
             "I" => requested || (sticky("T12") && !missing.is_empty()),
             "H" => {
                 requested
@@ -607,8 +721,18 @@ pub fn block_states(
             // questions; the base form does not. A (source of funds, occupation,
             // sector, proof) too: the § 15 GwG check needs it whatever fired
             // (QA 2026-10-10, two-stage form 2026-10-07).
-            "A" | "K" | "L" => requested || level >= 2 || patient_country,
+            "A" | "K" | "L" => requested || child_level >= 2 || patient_country,
             "F" => requested || automatic.contains(&block) || patient_country,
+            "R" => {
+                requested
+                    || triggers
+                        .iter()
+                        .any(|trigger| trigger.subject == super::SUBJECT_REPRESENTATIVE)
+                    || answers
+                        .representatives
+                        .iter()
+                        .any(|person| person.country_questions)
+            }
             _ => requested || automatic.contains(&block),
         };
         states.insert(
@@ -984,8 +1108,22 @@ async fn evaluate_and_store(
     // set before, at the next reassessment of any cause.
     let merged = merge(&previous_triggers, &live, now, &inputs.t16_kept_for());
     let score = score(&merged.triggers, &config);
-    let print = fingerprint(&merged.triggers);
-    let answers = load_block_answers(conn, lead_id, &inputs, None).await?;
+    let representative_country_ids =
+        representative_ids(&inputs, &config, &stored.representative_country_ids);
+    let mut print = fingerprint(&merged.triggers);
+    for person in inputs
+        .representatives
+        .iter()
+        .filter(|person| representative_country_ids.contains(&person.id))
+    {
+        use sha2::{Digest, Sha256};
+        let digest = hex::encode(Sha256::digest(
+            format!("{}:{}", person.identity_fingerprint, person.fields).as_bytes(),
+        ));
+        print.push_str(&format!(",representative:{}:{digest}", person.id));
+    }
+    let mut answers = load_block_answers(conn, lead_id, &inputs, None).await?;
+    answers.representatives = representative_questions(&inputs, &representative_country_ids);
     let states = block_states(
         &merged.triggers,
         score.level,
@@ -1016,7 +1154,9 @@ async fn evaluate_and_store(
         || merged.triggers != stored.triggers
         || score != stored.score
         || status != stored.status
-        || config.version != stored.config_version;
+        || config.version != stored.config_version
+        || print != stored.fingerprint
+        || representative_country_ids != stored.representative_country_ids;
     if !changed {
         return Ok(stored);
     }
@@ -1029,7 +1169,7 @@ async fn evaluate_and_store(
         r#"UPDATE lead_risk_assessments
            SET started_at = $2, config_version = $3, patient_points = $4, payer_points = $5,
                points = $6, knockout = $7, level = $8, triggers = $9, fingerprint = $10,
-               status = $11, released_fingerprint = $12, updated_at = now()
+               status = $11, released_fingerprint = $12, representative_country_ids = $13, updated_at = now()
            WHERE lead_id = $1
            RETURNING {ASSESSMENT_COLUMNS}"#
     ))
@@ -1045,6 +1185,7 @@ async fn evaluate_and_store(
     .bind(&print)
     .bind(&status)
     .bind(&released_fingerprint)
+    .bind(&representative_country_ids)
     .fetch_one(&mut *conn)
     .await?;
     let updated = Assessment::from_row(&row);
@@ -1599,6 +1740,31 @@ pub async fn staff_id_valid_until(
 mod tests {
     use super::*;
 
+    #[test]
+    fn representatives_have_their_own_block_even_when_their_country_score_reaches_level_two() {
+        let config = RiskConfig::default();
+        let now = Utc::now();
+        let triggers: Vec<Sticky> = ["T1", "T2"]
+            .iter()
+            .map(|key| Sticky {
+                key: (*key).to_string(),
+                subject: super::super::SUBJECT_REPRESENTATIVE.to_string(),
+                variant: Some(super::super::VARIANT_LIST_1.to_string()),
+                points: 2,
+                knockout: false,
+                first_fired_at: now,
+                last_fired_at: now,
+                active: true,
+                inactive_since: None,
+            })
+            .collect();
+        let states = block_states(&triggers, 2, &[], &config, &BlockAnswers::default());
+        assert!(states["R"].open);
+        for block in ["A", "F", "H", "J", "K", "L"] {
+            assert!(!states[block].open, "{block}");
+        }
+    }
+
     fn blocks(keys: &[&str]) -> Vec<String> {
         keys.iter().map(|key| key.to_string()).collect()
     }
@@ -1622,6 +1788,7 @@ mod tests {
             follow_up_answered_at: None,
             status: STATUS_AWAITING.into(),
             released_fingerprint: None,
+            representative_country_ids: Vec::new(),
         };
         let trigger = |key: &str, subject: &str| Sticky {
             key: key.into(),

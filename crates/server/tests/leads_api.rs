@@ -7100,9 +7100,61 @@ async fn seed_minor_lead_with_parents(
     lead_id
 }
 
+/// Successful conversion fixtures need complete identity for both parents,
+/// including their own upload. These are synthetic metadata-only files, like
+/// seed_complete_lead_onboarding; no identity or signature gate is bypassed.
+async fn seed_minor_contract_identity(app: &TestApp, lead_id: Uuid) {
+    let pool = &app.suite.pool;
+    sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,custody) VALUES($1,'joint') ON CONFLICT(lead_id) DO UPDATE SET custody='joint'")
+        .bind(lead_id).execute(pool).await.unwrap();
+    let contacts: Value = sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id=$1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    for (index, contact) in contacts.as_array().unwrap().iter().enumerate() {
+        let contact_id = Uuid::parse_str(contact["id"].as_str().unwrap()).unwrap();
+        let (first, street, birth, phone) = if index == 0 {
+            ("Anna", "Musterweg 1", "1985-03-02", "+49 30 000000")
+        } else {
+            ("Ben", "Vaterweg 2", "1983-04-06", "+49 30 000001")
+        };
+        sqlx::query(
+            "UPDATE leads SET trusted_contacts=(SELECT jsonb_agg(CASE WHEN c->>'id'=$2::text
+                 THEN c || jsonb_build_object('birth_date',$3::text,'phone',$4::text) ELSE c END ORDER BY n)
+             FROM jsonb_array_elements(trusted_contacts) WITH ORDINALITY entries(c,n)) WHERE id=$1",
+        ).bind(lead_id).bind(contact_id).bind(birth).bind(phone).execute(pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,
+                 birth_place,citizenships,street,zip,city,country,id_document_type,id_document_number,
+                 id_issuing_authority,id_issuing_country,id_valid_until)
+             VALUES($1,$2,'legal_representative','portal',$3,'Muster','Berlin',ARRAY['DE'],$4,'10115','Berlin','DE',
+                 'passport',$5,'Synthetic authority','DE','2099-01-01')
+             ON CONFLICT(lead_id,contact_id) DO UPDATE SET birth_place=EXCLUDED.birth_place,
+                 citizenships=EXCLUDED.citizenships,street=EXCLUDED.street,zip=EXCLUDED.zip,
+                 city=EXCLUDED.city,country=EXCLUDED.country,id_document_type=EXCLUDED.id_document_type,
+                 id_document_number=EXCLUDED.id_document_number,id_issuing_authority=EXCLUDED.id_issuing_authority,
+                 id_issuing_country=EXCLUDED.id_issuing_country,id_valid_until=EXCLUDED.id_valid_until",
+        ).bind(lead_id).bind(contact_id).bind(first).bind(street)
+            .bind(format!("SYNTHETIC-{contact_id}")).execute(pool).await.unwrap();
+        let document = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO documents(id,lead_id,auto_name,original_filename,art,category,status,
+                 visibility,is_medical,mime_type,version_root_document_id,version_number,uploaded_by)
+             VALUES($1,$2,'Synthetic parent identity','synthetic-parent.pdf','representative_identity',
+                 'identity','active','internal',false,'application/pdf',$1,1,$3)",
+        ).bind(document).bind(lead_id).bind(app.patient_manager_id).execute(pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO lead_portal_uploads(document_id,lead_id,uploaded_by,access_kind,kind,representative_id)
+             VALUES($1,$2,$3,'guardian','representative_identity',$4)",
+        ).bind(document).bind(lead_id).bind(app.patient_manager_id).bind(contact_id).execute(pool).await.unwrap();
+    }
+}
+
 /// The mother declares herself as the payer (as the cabinet does); the
 /// Kostenübernahmeerklärung of the lead's order is generated and signed.
 async fn declare_mother_as_payer_and_sign(app: &TestApp, lead_id: Uuid, order_id: Uuid) {
+    seed_minor_contract_identity(app, lead_id).await;
     let pm = app.auth_header("patient_manager");
     let (status, saved) = json_request(
         app,
@@ -7224,7 +7276,11 @@ async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_a
     let (_, name, _, email, street, _, _, _, default_payer) = relations[1].clone();
     assert_eq!(name, "Ben Muster");
     assert_eq!(email.as_deref(), Some("ben.muster@example.com"));
-    assert!(street.is_none(), "no address entered for the father");
+    assert_eq!(
+        street.as_deref(),
+        Some("Vaterweg 2"),
+        "the father keeps his independently completed address"
+    );
     assert!(!default_payer);
     let audits: Vec<Value> = sqlx::query_scalar(
         r#"SELECT context FROM audit_log
@@ -7353,7 +7409,7 @@ async fn minor_conversion_explicitly_links_both_guardians_and_never_the_child_lo
     declare_mother_as_payer_and_sign(&app, lead, artifacts.order_id).await;
     let patient = convert_ready_lead(&app, lead).await;
     for user in &parents {
-        let assignments: i64=sqlx::query_scalar("SELECT count(*) FROM patient_assignments WHERE patient_id=$1 AND user_id=$2 AND revoked_at IS NULL")
+        let assignments: i64=sqlx::query_scalar("SELECT count(*) FROM patient_assignments WHERE patient_id=$1 AND user_id=$2 AND revoked_at IS NULL AND source='lead_guardian'")
             .bind(patient).bind(user).fetch_one(pool).await.unwrap();
         assert_eq!(assignments, 1);
         let token = format!(
@@ -7411,6 +7467,80 @@ async fn minor_conversion_explicitly_links_both_guardians_and_never_the_child_lo
             .iter()
             .all(|c| c["reason"] == "guardian_of_converted_minor")
     );
+}
+
+#[tokio::test]
+async fn converting_a_child_preserves_the_mothers_own_patient_and_links_the_same_person() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead = seed_minor_lead_with_parents(&app, "anna.muster@example.com", anna, ben, None).await;
+    let mother: Uuid = sqlx::query_scalar("INSERT INTO users(email,password_hash,name,role) VALUES('anna.muster@example.com','parent-password-preserved','Anna Muster','patient') RETURNING id")
+        .fetch_one(pool).await.unwrap();
+    let own_patient: Uuid = sqlx::query_scalar("INSERT INTO patients(patient_id,first_name,last_name,birth_date,gender,email,created_by) VALUES($1,'Anna','Muster','1985-03-02','female','anna.muster@example.com',$2) RETURNING id")
+        .bind(format!("P-PARENT-{}",Uuid::new_v4())).bind(app.patient_manager_id).fetch_one(pool).await.unwrap();
+    sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$3)")
+        .bind(own_patient)
+        .bind(mother)
+        .bind(app.patient_manager_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO lead_portal_access(lead_id,user_id,kind,trusted_contact_id,created_by) VALUES($1,$2,'guardian',$3,$4)")
+        .bind(lead).bind(mother).bind(anna).bind(app.patient_manager_id).execute(pool).await.unwrap();
+    let child_login = seed_user(pool, "existing-child-login", "patient").await;
+    sqlx::query("UPDATE leads SET portal_user_id=$2 WHERE id=$1")
+        .bind(lead)
+        .bind(child_login)
+        .execute(pool)
+        .await
+        .unwrap();
+    let session: Uuid =
+        sqlx::query_scalar("INSERT INTO token_families(user_id) VALUES($1) RETURNING id")
+            .bind(mother)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let artifacts = seed_complete_lead_onboarding(&app, lead).await;
+    declare_mother_as_payer_and_sign(&app, lead, artifacts.order_id).await;
+    let child_patient = convert_ready_lead(&app, lead).await;
+    let links: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT patient_id,source FROM patient_assignments WHERE user_id=$1 AND revoked_at IS NULL",
+    )
+    .bind(mother)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(
+        links.contains(&(own_patient, "manual".to_string())),
+        "{links:?}"
+    );
+    assert!(
+        links.contains(&(child_patient, "lead_guardian".to_string())),
+        "{links:?}"
+    );
+    let related: Uuid=sqlx::query_scalar("SELECT related_patient_id FROM patient_relations WHERE patient_id=$1 AND related_name='Anna Muster' AND relation_type='parent'")
+        .bind(child_patient).fetch_one(pool).await.unwrap();
+    assert_eq!(related, own_patient);
+    let password: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id=$1")
+        .bind(mother)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(password, "parent-password-preserved");
+    let revoked: bool = sqlx::query_scalar("SELECT is_revoked FROM token_families WHERE id=$1")
+        .bind(session)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(!revoked);
+    let child_links: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM patient_assignments WHERE user_id=$1")
+            .bind(child_login)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(child_links, 0);
 }
 
 #[tokio::test]

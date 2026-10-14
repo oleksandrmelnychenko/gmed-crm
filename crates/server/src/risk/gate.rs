@@ -268,6 +268,9 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
     if !route.applies(&body) {
         return next.run(request).await;
     }
+    // Detailed representative validation belongs to authorized handlers and
+    // their write transactions, so missing identity fields are not disclosed
+    // before the caller's role and subject access have been checked.
     let actor = request
         .extensions()
         .get::<AuthUser>()

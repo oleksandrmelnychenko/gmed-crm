@@ -110,7 +110,7 @@ export type PatientAssignment = {
   user_role: string;
   user_active: boolean;
   /** "manual" (assigned by a manager) or "interpreter_booking" (ends with the booking). */
-  source?: "manual" | "interpreter_booking";
+  source?: "manual" | "interpreter_booking" | "lead_guardian";
   assigned_by_name: string | null;
   assigned_at: string;
   revoked_at: string | null;

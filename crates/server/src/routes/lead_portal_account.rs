@@ -7,8 +7,8 @@
 //! anonymises it ([`disable_for_lead_in_tx`]), conversion links it to the new
 //! patient record ([`link_to_patient_in_tx`]).
 //!
-//! E-mail addresses are unique across all accounts. A conflict is reported
-//! with the owner of the address instead of being merged.
+//! E-mail addresses are unique across all accounts. An active guardian can
+//! use the same login for their own request after an explicit identity check.
 //!
 //! Only the CEO and patient managers see the one-time password or issue a new
 //! one; other roles that create leads get the account without the password.
@@ -85,6 +85,7 @@ where
                JOIN patients p ON p.id = pa.patient_id
                WHERE pa.user_id = u.id
                  AND pa.revoked_at IS NULL
+                 AND pa.source <> 'lead_guardian'
                  AND u.role = 'patient'
                ORDER BY pa.assigned_at DESC
                LIMIT 1
@@ -130,12 +131,170 @@ pub(crate) fn email_taken_response(owner: Value) -> axum::response::Response {
 pub(crate) struct NewPortalAccount {
     pub user_id: Uuid,
     pub email: String,
-    pub one_time_password: String,
+    pub one_time_password: Option<String>,
+    pub reused: bool,
+}
+
+/// Locks an existing account before deciding whether it is this adult's
+/// guardian login. A guardian assignment is not an own patient record.
+/// Matching an e-mail alone never establishes identity or account ownership.
+pub(crate) async fn reusable_guardian_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    email: &str,
+    name: &str,
+    birth_date: Option<chrono::NaiveDate>,
+    except_lead: Option<Uuid>,
+    except_patient: Option<Uuid>,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let Some(user) = sqlx::query(
+        "SELECT id, name, role, is_active FROM users WHERE lower(btrim(email)) = $1 FOR UPDATE",
+    )
+    .bind(email)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(None);
+    };
+    if user.try_get::<String, _>("role")? != "patient"
+        || !user.try_get::<bool, _>("is_active")?
+        || !super::lead_portal_guardians::same_person_name(
+            &user.try_get::<String, _>("name")?,
+            name,
+        )
+        || super::leads::is_minor_on(birth_date, crate::app_time::today())
+    {
+        return Ok(None);
+    }
+    let user_id: Uuid = user.try_get("id")?;
+    let (guardian, own_record): (bool, bool) = sqlx::query_as(
+        r#"SELECT
+           EXISTS(SELECT 1 FROM lead_portal_access a JOIN leads l ON l.id=a.lead_id
+                  WHERE a.user_id=$1 AND a.kind='guardian' AND a.revoked_at IS NULL
+                    AND l.qualification_status <> 'deleted')
+           OR EXISTS(SELECT 1 FROM patient_assignments pa
+                     WHERE pa.user_id=$1 AND pa.source='lead_guardian' AND pa.revoked_at IS NULL),
+           EXISTS(SELECT 1 FROM leads l WHERE l.portal_user_id=$1 AND l.qualification_status <> 'deleted'
+                  AND ($2::uuid IS NULL OR l.id<>$2)
+                  AND ($3::uuid IS NULL OR l.converted_patient_id IS DISTINCT FROM $3))
+           OR EXISTS(SELECT 1 FROM patient_assignments pa JOIN patients p ON p.id=pa.patient_id
+                     WHERE pa.user_id=$1 AND pa.source <> 'lead_guardian'
+                       AND p.lifecycle_status <> 'deleted' AND ($3::uuid IS NULL OR p.id<>$3))"#,
+    ).bind(user_id).bind(except_lead).bind(except_patient).fetch_one(&mut **tx).await?;
+    if !guardian || own_record {
+        return Ok(None);
+    }
+    // Known birth dates must agree too; a different adult with the same name
+    // cannot acquire a guardian login by entering its address.
+    let profiles = guardian_profiles_in_tx(tx, user_id).await?;
+    let mut previous_birth_date = None;
+    for profile in profiles {
+        if !super::lead_portal_guardians::same_person_name(&profile.name, name) {
+            return Ok(None);
+        }
+        if let Some(known) = profile
+            .contact
+            .get("birth_date")
+            .and_then(Value::as_str)
+            .and_then(|date| chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
+        {
+            if super::leads::is_minor_on(Some(known), crate::app_time::today())
+                || birth_date.is_some_and(|date| date != known)
+                || previous_birth_date.is_some_and(|date| date != known)
+            {
+                return Ok(None);
+            }
+            previous_birth_date = Some(known);
+        }
+    }
+    Ok(Some(user_id))
+}
+
+/// Only active guardian grants prove which contact belongs to this account.
+/// The shared canonical loader fills that contact's missing basic identity from
+/// its explicit patient link; unrelated contacts and e-mail matches are ignored.
+async fn guardian_profiles_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+) -> Result<Vec<crate::services::lead_guardian_identity::CanonicalGuardianIdentity>, sqlx::Error> {
+    let grants: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT a.lead_id,a.trusted_contact_id FROM lead_portal_access a
+         JOIN leads child ON child.id=a.lead_id
+         LEFT JOIN lead_representatives r ON r.lead_id=a.lead_id AND r.contact_id=a.trusted_contact_id
+         WHERE a.user_id=$1 AND a.kind='guardian' AND a.revoked_at IS NULL
+           AND a.trusted_contact_id IS NOT NULL AND child.qualification_status <> 'deleted'
+         ORDER BY r.updated_at DESC NULLS LAST,a.created_at DESC,a.id",
+    ).bind(user_id).fetch_all(&mut **tx).await?;
+    let leads = grants.iter().map(|(lead, _)| *lead).collect::<Vec<_>>();
+    let profiles = crate::services::lead_guardian_identity::load_many(tx, &leads).await?;
+    Ok(grants
+        .into_iter()
+        .filter_map(|(lead, contact)| {
+            profiles
+                .get(&lead)
+                .and_then(|people| {
+                    people
+                        .iter()
+                        .find(|person| person.contact_id == Some(contact))
+                })
+                .cloned()
+        })
+        .collect())
+}
+
+/// A proven parent already represented by an explicit patient record must use
+/// that record's activation/repeat workflow, not create another patient via a lead.
+pub(crate) async fn existing_parent_patients_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    email: &str,
+    name: &str,
+    birth_date: Option<chrono::NaiveDate>,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let Some(user_id) = reusable_guardian_in_tx(tx, email, name, birth_date, None, None).await?
+    else {
+        return Ok(Vec::new());
+    };
+    let ids = guardian_profiles_in_tx(tx, user_id)
+        .await?
+        .into_iter()
+        .filter_map(|person| person.related_patient_id)
+        .collect::<Vec<_>>();
+    sqlx::query_scalar("SELECT id FROM patients WHERE id=ANY($1) AND lifecycle_status <> 'deleted' AND legal_status->>'anonymized_at' IS NULL ORDER BY id")
+        .bind(ids).fetch_all(&mut **tx).await
+}
+
+/// Copies only missing basic profile values from an explicitly linked guardian
+/// contact. Representative documents, answers and consents remain on the child.
+async fn fill_guardian_profile_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    if let Some(profile) = guardian_profiles_in_tx(tx, user_id).await?.first() {
+        let contact = &profile.contact;
+        let extras = &profile.extras;
+        let text = |key: &str| extras.get(key).and_then(Value::as_str);
+        let birth_date = contact
+            .get("birth_date")
+            .and_then(Value::as_str)
+            .and_then(|date| chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok());
+        sqlx::query(
+            r#"UPDATE leads SET date_of_birth=COALESCE(date_of_birth,$2),
+               phone=COALESCE(NULLIF(btrim(phone),''),$3),
+               street_address=COALESCE(NULLIF(btrim(street_address),''),$4),
+               zip_code=COALESCE(NULLIF(btrim(zip_code),''),$5),
+               city=COALESCE(NULLIF(btrim(city),''),$6), country=COALESCE(NULLIF(btrim(country),''),$7),
+               citizenships=CASE WHEN cardinality(citizenships)=0 THEN $8 ELSE citizenships END
+               WHERE id=$1"#,
+        ).bind(lead_id).bind(birth_date).bind(contact.get("phone").and_then(Value::as_str))
+            .bind(text("street")).bind(text("zip")).bind(text("city"))
+            .bind(text("country")).bind(&profile.citizenships).execute(&mut **tx).await?;
+    }
+    Ok(())
 }
 
 /// Creates the `patient` account of `lead_id` and links it to the lead. The
-/// caller has checked that `email` is free; a concurrent insert still fails on
-/// the unique e-mail index.
+/// caller has authorized creation; an existing account is reusable only through
+/// the guardian identity check. Other collisions fail on the unique e-mail index.
 pub(crate) async fn create_for_lead_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
@@ -143,6 +302,37 @@ pub(crate) async fn create_for_lead_in_tx(
     name: &str,
     created_by: Uuid,
 ) -> Result<NewPortalAccount, sqlx::Error> {
+    let (birth_date, converted_patient): (Option<chrono::NaiveDate>, Option<Uuid>) =
+        sqlx::query_as("SELECT date_of_birth, converted_patient_id FROM leads WHERE id=$1")
+            .bind(lead_id)
+            .fetch_one(&mut **tx)
+            .await?;
+    if let Some(user_id) = reusable_guardian_in_tx(
+        tx,
+        email,
+        name,
+        birth_date,
+        Some(lead_id),
+        converted_patient,
+    )
+    .await?
+    {
+        sqlx::query("UPDATE leads SET portal_user_id=$2 WHERE id=$1")
+            .bind(lead_id)
+            .bind(user_id)
+            .execute(&mut **tx)
+            .await?;
+        fill_guardian_profile_in_tx(tx, lead_id, user_id).await?;
+        audit::write_in_transaction(tx, &audit::domain_event("reuse_guardian_for_own_lead",
+            Some(created_by), "lead", Some(lead_id),
+            json!({"portal_user_id":user_id,"password_changed":false,"child_access_preserved":true}))).await?;
+        return Ok(NewPortalAccount {
+            user_id,
+            email: email.to_string(),
+            one_time_password: None,
+            reused: true,
+        });
+    }
     let one_time_password = password_policy::generate_one_time_password();
     let hash = password::hash_password(&one_time_password)
         .map_err(|error| sqlx::Error::Protocol(format!("hash portal password: {error}")))?;
@@ -177,7 +367,8 @@ pub(crate) async fn create_for_lead_in_tx(
     Ok(NewPortalAccount {
         user_id,
         email: email.to_string(),
-        one_time_password,
+        one_time_password: Some(one_time_password),
+        reused: false,
     })
 }
 
@@ -187,7 +378,9 @@ pub(crate) fn new_account_payload(account: &NewPortalAccount, viewer: Role) -> V
     json!({
         "user_id": account.user_id,
         "email": account.email,
-        "created": true,
+        "created": !account.reused,
+        "reused": account.reused,
+        "password_changed": !account.reused,
         "one_time_password": may_issue_portal_password(viewer)
             .then(|| account.one_time_password.clone()),
     })
@@ -381,7 +574,7 @@ pub(crate) async fn link_to_patient_in_tx(
            JOIN users u ON u.id = l.portal_user_id AND u.role = 'patient' AND u.is_active
            WHERE l.id = $1 AND NOT {OWN_LOGIN_CLOSED_SQL}
            ON CONFLICT (patient_id, user_id)
-           DO UPDATE SET revoked_at = NULL"#,
+           DO UPDATE SET revoked_at = NULL, source = 'manual'"#,
     ))
     .bind(lead_id)
     .bind(patient_id)
@@ -389,14 +582,14 @@ pub(crate) async fn link_to_patient_in_tx(
     .execute(&mut **tx)
     .await?;
     let guardian_ids: Vec<Uuid> = sqlx::query_scalar(&format!(
-        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-           SELECT DISTINCT $2, a.user_id, $3
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by, source)
+           SELECT DISTINCT $2, a.user_id, $3, 'lead_guardian'
            FROM leads l
            JOIN lead_portal_access a ON a.lead_id = l.id
            JOIN users u ON u.id = a.user_id AND u.role = 'patient' AND u.is_active
            WHERE l.id = $1 AND {OWN_LOGIN_CLOSED_SQL}
              AND a.kind = 'guardian' AND a.revoked_at IS NULL
-           ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL
+           ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL, source = 'lead_guardian'
            RETURNING user_id"#,
     ))
     .bind(lead_id)
@@ -405,6 +598,12 @@ pub(crate) async fn link_to_patient_in_tx(
     .fetch_all(&mut **tx)
     .await?;
     for guardian_id in guardian_ids {
+        let own_patients: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT patient_id FROM patient_assignments WHERE user_id=$1 AND revoked_at IS NULL AND source <> 'lead_guardian'",
+        ).bind(guardian_id).fetch_all(&mut **tx).await?;
+        if let [own_patient] = own_patients.as_slice() {
+            link_guardian_relationships_in_tx(tx, guardian_id, *own_patient, assigned_by).await?;
+        }
         audit::write_in_transaction(
             tx,
             &audit::domain_event(
@@ -417,6 +616,14 @@ pub(crate) async fn link_to_patient_in_tx(
         )
         .await?;
     }
+    if let Some(user_id) =
+        sqlx::query_scalar::<_, Option<Uuid>>("SELECT portal_user_id FROM leads WHERE id=$1")
+            .bind(lead_id)
+            .fetch_one(&mut **tx)
+            .await?
+    {
+        link_guardian_relationships_in_tx(tx, user_id, patient_id, assigned_by).await?;
+    }
     sqlx::query(
         "UPDATE consent_records SET patient_id = $2 WHERE lead_id = $1 AND patient_id IS NULL",
     )
@@ -424,6 +631,81 @@ pub(crate) async fn link_to_patient_in_tx(
     .bind(patient_id)
     .execute(&mut **tx)
     .await?;
+    Ok(())
+}
+
+/// The guardian grant points to a particular trusted-contact UUID, so this
+/// creates an explicit relationship without inferring ownership from e-mail.
+/// It also works when the child is converted later than their parent.
+pub(crate) async fn link_guardian_relationships_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    own_patient: Uuid,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT l.id, l.converted_patient_id, a.trusted_contact_id, c AS contact, u.name AS account_name
+           FROM lead_portal_access a JOIN leads l ON l.id=a.lead_id
+           JOIN users u ON u.id=a.user_id AND u.role='patient' AND u.is_active
+           CROSS JOIN LATERAL jsonb_array_elements(l.trusted_contacts) c
+           WHERE a.user_id=$1 AND a.kind='guardian' AND a.revoked_at IS NULL
+             AND l.qualification_status <> 'deleted' AND c->>'id'=a.trusted_contact_id::text
+             AND (c->>'related_patient_id' IS NULL OR c->>'related_patient_id'=$2::text)"#,
+    )
+    .bind(user_id)
+    .bind(own_patient)
+    .fetch_all(&mut **tx)
+    .await?;
+    for row in rows {
+        let lead_id: Uuid = row.try_get("id")?;
+        let contact_id: Uuid = row.try_get("trusted_contact_id")?;
+        let contact: Value = row.try_get("contact")?;
+        let name = contact
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !super::lead_portal_guardians::same_person_name(
+            name,
+            &row.try_get::<String, _>("account_name")?,
+        ) {
+            continue;
+        }
+        sqlx::query(
+            r#"UPDATE leads SET trusted_contacts=(SELECT jsonb_agg(
+               CASE WHEN c->>'id'=$2::text THEN c || jsonb_build_object('related_patient_id',$3::uuid) ELSE c END ORDER BY n)
+               FROM jsonb_array_elements(trusted_contacts) WITH ORDINALITY AS entries(c,n)) WHERE id=$1"#,
+        ).bind(lead_id).bind(contact_id).bind(own_patient).execute(&mut **tx).await?;
+        if let Some(child) = row.try_get::<Option<Uuid>, _>("converted_patient_id")?
+            && child != own_patient
+        {
+            let relation = if super::leads::is_legal_guardian_relation(
+                contact.get("relation").and_then(Value::as_str),
+            ) {
+                "guardian"
+            } else {
+                "parent"
+            };
+            sqlx::query(
+                "UPDATE patient_relations SET related_patient_id=$2 WHERE patient_id=$1 AND related_patient_id IS NULL AND related_name=$3 AND relation_type=$4",
+            ).bind(child).bind(own_patient).bind(name).bind(relation).execute(&mut **tx).await?;
+            sqlx::query(
+                r#"INSERT INTO patient_relations(patient_id,related_patient_id,related_name,relation_type,phone)
+                   SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS(SELECT 1 FROM patient_relations WHERE patient_id=$1 AND related_patient_id=$2 AND relation_type=$4)"#,
+            ).bind(child).bind(own_patient).bind(name).bind(relation)
+                .bind(contact.get("phone").and_then(Value::as_str)).execute(&mut **tx).await?;
+        }
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "link_guardian_own_patient",
+                Some(actor),
+                "lead",
+                Some(lead_id),
+                json!({"user_id":user_id,"contact_id":contact_id,"related_patient_id":own_patient}),
+            ),
+        )
+        .await?;
+    }
     Ok(())
 }
 
@@ -651,11 +933,6 @@ async fn issue_lead_portal_access(
             "The lead needs a valid email before patient access can be issued",
         );
     };
-    match email_owner(&mut *tx, &email, None).await {
-        Ok(None) => {}
-        Ok(Some(owner)) => return email_taken_response(owner),
-        Err(error) => return internal(error, lead_id, "email owner"),
-    }
     let name = format!(
         "{} {}",
         lead.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -742,7 +1019,8 @@ mod tests {
         let account = NewPortalAccount {
             user_id: Uuid::nil(),
             email: "anna@example.de".into(),
-            one_time_password: "secret".into(),
+            one_time_password: Some("secret".into()),
+            reused: false,
         };
         assert!(new_account_payload(&account, Role::Sales)["one_time_password"].is_null());
         assert_eq!(

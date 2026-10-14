@@ -2323,13 +2323,15 @@ async fn frames_of_older_generated_documents_are_found_and_follow_the_bundle_pag
 async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() {
     let Some(env) = env().await else { return };
     let holder = seed_patient(&env.pool, env.admin_id, "1990-01-01").await;
+    let mother = Uuid::new_v4();
+    let father = Uuid::new_v4();
     let lead: Uuid = sqlx::query_scalar(
         "INSERT INTO leads (first_name, last_name, date_of_birth, email, trusted_contacts, created_by)
          VALUES ('Kind', 'Beispiel', (current_date - interval '10 years')::date, 'kind@example.org', $1, $2) RETURNING id",
     )
     .bind(json!([
-        {"id":Uuid::new_v4(),"name":"Anna Beispiel","email":"anna@example.org","relation":"Mutter"},
-        {"id":Uuid::new_v4(),"name":"Bernd Beispiel","email":"bernd@example.org","relation":"Vater"}
+        {"id":mother,"name":"Anna Beispiel","email":"anna@example.org","phone":"+49300000001","birth_date":"1985-03-02","relation":"Mutter"},
+        {"id":father,"name":"Bernd Beispiel","email":"bernd@example.org","phone":"+49300000002","birth_date":"1984-03-02","relation":"Vater"}
     ]))
     .bind(env.admin_id)
     .fetch_one(&env.pool)
@@ -2344,6 +2346,26 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
     .execute(&env.pool)
     .await
     .unwrap();
+    // This is the contracting stage, beyond the short first inquiry: both
+    // joint custodians have their complete identity and a document copy.
+    sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,custody) VALUES($1,'joint')")
+        .bind(lead)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    for (contact, first_name) in [(mother, "Anna"), (father, "Bernd")] {
+        sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,birth_place,birth_country,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_valid_until) VALUES($1,$2,'legal_representative','staff',$3,'Beispiel','Berlin','DE',ARRAY['DE'],'Synthetic street 1','10115','Berlin','DE','passport',$4,'Synthetic office','DE',(current_date+interval '10 years')::date)")
+            .bind(lead).bind(contact).bind(first_name).bind(format!("SYNTHETIC-{contact}")).execute(&env.pool).await.unwrap();
+        let identity = upload(&env, holder, Doc::new("representative_identity", 1)).await;
+        sqlx::query("UPDATE documents SET patient_id=NULL,lead_id=$2 WHERE id=$1")
+            .bind(identity)
+            .bind(lead)
+            .execute(&env.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO lead_portal_uploads(document_id,lead_id,uploaded_by,access_kind,kind,representative_id) VALUES($1,$2,$3,'guardian','representative_identity',$4)")
+            .bind(identity).bind(lead).bind(env.admin_id).bind(contact).execute(&env.pool).await.unwrap();
+    }
     let mut ids = Vec::new();
     for doc in [
         Doc::new("framework_contract", 1)

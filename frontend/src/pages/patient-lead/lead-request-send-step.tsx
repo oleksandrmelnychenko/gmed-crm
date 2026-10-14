@@ -199,7 +199,7 @@ export function SendStep({
             ))}
             {previewMissing.length > 0 ? <div data-testid="lead-request-missing-follow_up">
               <button type="button" className="text-xs font-semibold underline underline-offset-2" onClick={() => onEdit("follow_up")}>{text.steps.follow_up}</button>
-              <ul className="list-inside list-disc">{previewMissing.map(({ block, key }) => <li key={`${block}:${key}`} className="break-words">{followUpFieldLabel(text, key, guardian)}</li>)}</ul>
+              <ul className="list-inside list-disc">{previewMissing.map(({ block, key }) => <li key={`${block}:${key}`} className="break-words">{followUpFieldLabel(text, key, guardian, request.follow_up?.representatives)}</li>)}</ul>
             </div> : null}
             <Button
               type="button"

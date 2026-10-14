@@ -1363,6 +1363,26 @@ pub(crate) async fn check_contract_agency_signature(
         }
         (None, None) => None,
     };
+    let patient_id: Option<Uuid> = if let Some(contract_id) = contract_id {
+        sqlx::query_scalar("SELECT patient_id FROM framework_contracts WHERE id=$1")
+            .bind(contract_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(|error| database_error(error, "load contracting representative patient"))?
+            .flatten()
+    } else {
+        None
+    };
+    let missing = super::lead_representatives::contract_subject_details_missing(
+        conn, lead_id, patient_id, None,
+    )
+    .await
+    .map_err(|error| database_error(error, "validate contracting representatives"))?;
+    if !missing.is_empty() {
+        return Err(super::lead_representatives::contract_details_incomplete(
+            &missing,
+        ));
+    }
     let Some(lead_id) = lead_id else {
         return Ok(());
     };

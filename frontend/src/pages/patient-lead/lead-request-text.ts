@@ -10,6 +10,7 @@ import type {
   PayerType,
   RecipientType,
   RepresentativeSlot,
+  RepresentativeCountryQuestions,
 } from "./lead-request-api";
 import { recipientFieldOf, type PayerChoice, type PayerParty, type RecipientDraft } from "./lead-request-recipient-model";
 import {
@@ -128,6 +129,10 @@ export type LeadRequestText = {
   requestFor: string;
   language: string;
   sectionPerson: string;
+  childSections: Record<"person" | "address" | "contact" | "identity" | "insurance" | "request" | "upload", string>;
+  childIdentityFiles: string;
+  childIdentityUploadButton: string;
+  childIdentityUploadHint: string;
   namePassportHint: string;
   namePassportCorrection: string;
   /** "{name}": the suggested passport spelling. */
@@ -259,6 +264,7 @@ export type LeadRequestText = {
    */
   followUpIntro: string;
   followUpBeforeSubmitIntro: string;
+  representativeQuestionsIntro: string;
   followUpBlocks: Record<FollowUpBlock, string>;
   followUpSubmit: string;
   followUpSending: string;
@@ -339,6 +345,9 @@ export type LeadRequestText = {
   underGuardianshipQuestion: string;
   /** The same block for a minor: the legal representatives. */
   sectionLegalRepresentatives: string;
+  parentShortForm: string;
+  parentDocumentDetails: string;
+  parentShortFormIntro: string;
   custodyQuestion: string;
   custodyOptions: Record<Custody, string>;
   /** A person of the block: the heading of the form, and the prefix in the list of what is still missing. */
@@ -706,7 +715,17 @@ const LEGAL_TOPIC_OF: Partial<Record<SubmitField, LegalQuestion>> = {
  * own title is the heading of the list, so no prefix is added. An unknown key
  * is shown as it is.
  */
-export function followUpFieldLabel(text: LeadRequestText, key: string, guardian = false): string {
+export function childSectionTitle(text: LeadRequestText, key: keyof LeadRequestText["childSections"], minor: boolean): string {
+  const defaults = { person: text.sectionPerson, address: text.sectionAddress, contact: text.sectionContact, identity: text.sectionIdentity, insurance: text.sectionInsurance, request: text.sectionRequest, upload: text.sectionUpload };
+  return minor ? text.childSections[key] : defaults[key];
+}
+
+export function followUpFieldLabel(text: LeadRequestText, key: string, guardian = false, representatives: readonly RepresentativeCountryQuestions[] = []): string {
+  if (key.startsWith("representative:")) {
+    const [, id, field] = key.split(":");
+    const name = representatives.find((person) => person.id === id)?.name || text.followUpBlocks.R;
+    return `${name}: ${followUpFieldLabel(text, field ?? "", false)}`;
+  }
   const blockA = blockAKey(key);
   if (blockA === "funds_proof_upload") return text.extraFields.funds_proof;
   if (blockA in text.extraFields) return text.extraFields[blockA as keyof LeadRequestText["extraFields"]];
@@ -1010,6 +1029,7 @@ const de: LeadRequestText = {
   followUpIntro:
     "Bitte ergänzen Sie die folgenden Angaben und senden Sie sie anschließend ab. Alles wird automatisch gespeichert.",
   followUpBlocks: {
+    R: "Ergänzende Angaben der Eltern oder gesetzlichen Vertreter",
     A: "Herkunft der Mittel",
     B: "Beziehung zur zahlenden Person",
     C: "Zahlungsweg",
@@ -1022,6 +1042,7 @@ const de: LeadRequestText = {
     L: "Fragen nach dem Geldwäschegesetz",
   },
   followUpSubmit: "Angaben senden",
+  representativeQuestionsIntro: "Bitte beantworten Sie die folgenden Fragen für die jeweils genannte Person. Die Angaben betreffen den Elternteil oder gesetzlichen Vertreter, nicht das Kind. Bereits gespeicherte Antworten werden übernommen. Die Herkunft der Mittel gibt nur die tatsächlich zahlende Person in ihrer eigenen Erklärung an.",
   followUpSending: "Wird gesendet…",
   followUpIncomplete: "Bitte ergänzen Sie zuerst die noch offenen Angaben.",
   followUpAnsweredAt: (dateTime) => `Ihre ergänzenden Angaben wurden am ${dateTime} gesendet. Ihre Angaben werden geprüft.`,
@@ -1134,6 +1155,13 @@ const de: LeadRequestText = {
   hasRepresentativeQuestion: "Handelt jemand in Ihrem Namen?",
   underGuardianshipQuestion: "Ist diese Person vom Gericht bestellt (rechtliche Betreuerin / rechtlicher Betreuer)?",
   sectionLegalRepresentatives: "Gesetzliche Vertreter",
+  parentShortForm: "Kurze Angaben anzeigen",
+  childSections: { person: "Persönliche Daten des Kindes", address: "Adresse des Kindes", contact: "Kontakt zur Anfrage des Kindes", identity: "Ausweisdokument des Kindes", insurance: "Versicherung des Kindes", request: "Anliegen zum Kind", upload: "Medizinische Unterlagen des Kindes" },
+  childIdentityFiles: "Scan oder Foto des Ausweisdokuments des Kindes",
+  childIdentityUploadButton: "Ausweisdokument des Kindes hochladen",
+  childIdentityUploadHint: "Bitte laden Sie einen gut lesbaren Scan oder ein Foto des Ausweisdokuments des Kindes hoch. Die Dokumente der Eltern gehören in den jeweiligen Vertreterblock.",
+  parentDocumentDetails: "Angaben für den Vertrag anzeigen",
+  parentShortFormIntro: "Für die erste Anfrage genügen die Namen, Kontaktdaten, das Wohnsitzland und die Staatsangehörigkeiten der vertretenden Eltern. Weitere Angaben und Nachweise werden vor Vertrag und Unterschrift benötigt. Bereits gespeicherte Daten bleiben erhalten.",
   custodyQuestion: "Wer vertritt das Kind?",
   custodyOptions: {
     joint: "Beide Eltern gemeinsam",
@@ -1522,6 +1550,7 @@ const ru: LeadRequestText = {
   followUpBeforeSubmitIntro: "При определённых обстоятельствах мы должны задать несколько уточняющих вопросов для выполнения законодательных требований. Ответьте на вопросы о политически значимых лицах, санкционных связях и происхождении средств. Это не означает, что вы относитесь к этим категориям. Ответы сохраняются автоматически.",
   followUpIntro: "Пожалуйста, дополните следующие сведения и затем отправьте их. Всё сохраняется автоматически.",
   followUpBlocks: {
+    R: "Дополнительные сведения родителей или законных представителей",
     A: "Происхождение средств",
     B: "Отношения с плательщиком",
     C: "Способ оплаты",
@@ -1534,6 +1563,7 @@ const ru: LeadRequestText = {
     L: "Вопросы по закону (противодействие отмыванию денег)",
   },
   followUpSubmit: "Отправить сведения",
+  representativeQuestionsIntro: "Ответьте на вопросы для каждого указанного человека. Это сведения о родителе или законном представителе, а не о ребёнке. Уже сохранённые ответы подставляются автоматически. Происхождение средств указывает только человек, который действительно платит, в своей декларации.",
   followUpSending: "Отправляется…",
   followUpIncomplete: "Пожалуйста, сначала дополните недостающие сведения.",
   followUpAnsweredAt: (dateTime) => `Ваши дополнительные сведения отправлены ${dateTime}. Ваши данные проверяются.`,
@@ -1647,6 +1677,13 @@ const ru: LeadRequestText = {
   hasRepresentativeQuestion: "Действует ли кто-то от вашего имени?",
   underGuardianshipQuestion: "Это представитель, назначенный судом (Betreuer)?",
   sectionLegalRepresentatives: "Законные представители",
+  parentShortForm: "Показать короткую форму",
+  childSections: { person: "Личные данные ребёнка", address: "Адрес ребёнка", contact: "Контакт по заявке ребёнка", identity: "Документ, удостоверяющий личность ребёнка", insurance: "Страховка ребёнка", request: "Обращение по поводу ребёнка", upload: "Медицинские документы ребёнка" },
+  childIdentityFiles: "Скан или фото документа, удостоверяющего личность ребёнка",
+  childIdentityUploadButton: "Загрузить документ ребёнка",
+  childIdentityUploadHint: "Загрузите читаемый скан или фото документа ребёнка. Документы родителей добавляются отдельно, в блоке соответствующего представителя.",
+  parentDocumentDetails: "Показать данные для договора",
+  parentShortFormIntro: "Для первого обращения достаточно имён, контактов, страны проживания и гражданства родителей, представляющих ребёнка. Остальные сведения и документы понадобятся перед договором и подписью. Уже сохранённые данные сохраняются.",
   custodyQuestion: "Кто представляет ребёнка?",
   custodyOptions: {
     joint: "Оба родителя вместе",
@@ -2036,6 +2073,7 @@ const uk: LeadRequestText = {
   followUpBeforeSubmitIntro: "За певних обставин ми маємо поставити кілька уточнювальних запитань для виконання законодавчих вимог. Дайте відповіді на запитання про політично значущих осіб, санкційні зв’язки та походження коштів. Це не означає, що ви належите до цих категорій. Відповіді зберігаються автоматично.",
   followUpIntro: "Будь ласка, доповніть наведені нижче відомості й потім надішліть їх. Усе зберігається автоматично.",
   followUpBlocks: {
+    R: "Додаткові відомості батьків або законних представників",
     A: "Походження коштів",
     B: "Стосунки з платником",
     C: "Спосіб оплати",
@@ -2048,6 +2086,7 @@ const uk: LeadRequestText = {
     L: "Питання за законом (протидія відмиванню грошей)",
   },
   followUpSubmit: "Надіслати відомості",
+  representativeQuestionsIntro: "Дайте відповіді для кожної вказаної людини. Ці відомості стосуються батька, матері або законного представника, а не дитини. Уже збережені відповіді підставляються автоматично. Походження коштів зазначає лише людина, яка справді платить, у своїй декларації.",
   followUpSending: "Надсилається…",
   followUpIncomplete: "Будь ласка, спершу доповніть відомості, яких бракує.",
   followUpAnsweredAt: (dateTime) => `Ваші додаткові відомості надіслано ${dateTime}. Ваші дані перевіряються.`,
@@ -2161,6 +2200,13 @@ const uk: LeadRequestText = {
   hasRepresentativeQuestion: "Чи діє хтось від вашого імені?",
   underGuardianshipQuestion: "Це представник, призначений судом (Betreuer)?",
   sectionLegalRepresentatives: "Законні представники",
+  parentShortForm: "Показати коротку форму",
+  childSections: { person: "Особисті дані дитини", address: "Адреса дитини", contact: "Контакт щодо заявки дитини", identity: "Документ, що посвідчує особу дитини", insurance: "Страховка дитини", request: "Звернення щодо дитини", upload: "Медичні документи дитини" },
+  childIdentityFiles: "Скан або фото документа, що посвідчує особу дитини",
+  childIdentityUploadButton: "Завантажити документ дитини",
+  childIdentityUploadHint: "Завантажте читабельний скан або фото документа дитини. Документи батьків додаються окремо, у блоці відповідного представника.",
+  parentDocumentDetails: "Показати дані для договору",
+  parentShortFormIntro: "Для першого звернення достатньо імен, контактів, країни проживання та громадянства батьків, які представляють дитину. Решта відомостей і документів знадобиться перед договором і підписом. Уже збережені дані залишаються.",
   custodyQuestion: "Хто представляє дитину?",
   custodyOptions: {
     joint: "Обоє батьків разом",
@@ -2550,6 +2596,7 @@ const en: LeadRequestText = {
   followUpBeforeSubmitIntro: "In some circumstances, we need to ask a few additional questions to meet legal requirements. Please answer the questions about politically exposed persons, sanctions connections and the source of funds. This does not mean that you belong to these categories. Your answers are saved automatically.",
   followUpIntro: "Please complete the following details and then send them. Everything is saved automatically.",
   followUpBlocks: {
+    R: "Additional details of parents or legal representatives",
     A: "Source of funds",
     B: "Relationship to the paying person",
     C: "Payment route",
@@ -2562,6 +2609,7 @@ const en: LeadRequestText = {
     L: "Questions under the anti-money-laundering law",
   },
   followUpSubmit: "Send details",
+  representativeQuestionsIntro: "Please answer the questions for each named person. These details concern the parent or legal representative, rather than the child. Previously saved answers are filled in automatically. Only the person actually paying states the source of funds in their own declaration.",
   followUpSending: "Sending…",
   followUpIncomplete: "Please first complete the details that are still open.",
   followUpAnsweredAt: (dateTime) => `Your additional details were sent on ${dateTime}. Your details are being reviewed.`,
@@ -2669,6 +2717,13 @@ const en: LeadRequestText = {
   hasRepresentativeQuestion: "Does anyone act on your behalf?",
   underGuardianshipQuestion: "Is this person a court-appointed representative (Betreuer)?",
   sectionLegalRepresentatives: "Legal representatives",
+  parentShortForm: "Show the short form",
+  childSections: { person: "Child’s personal details", address: "Child’s address", contact: "Contact for the child’s request", identity: "Child’s identity document", insurance: "Child’s insurance", request: "Reason for the child’s request", upload: "Child’s medical documents" },
+  childIdentityFiles: "Scan or photo of the child’s identity document",
+  childIdentityUploadButton: "Upload the child’s identity document",
+  childIdentityUploadHint: "Upload a readable scan or photo of the child’s identity document. Parents’ documents are added separately in the respective representative’s section.",
+  parentDocumentDetails: "Show details for the contract",
+  parentShortFormIntro: "For the initial inquiry, we only need the names, contact details, country of residence and citizenships of the parents representing the child. Further details and documents will be needed before the contract and signature. Previously saved data is retained.",
   custodyQuestion: "Who represents the child?",
   custodyOptions: {
     joint: "Both parents together",

@@ -373,11 +373,23 @@ pub(crate) async fn enhanced_check_triggers(
         return Ok(EnhancedCheck::default());
     };
     let check = evaluate(&subjects);
-    let level = crate::risk::store::load(conn, lead_id)
+    let assessment = crate::risk::store::load(conn, lead_id)
         .await?
-        .filter(crate::risk::store::Assessment::started)
-        .map(|assessment| assessment.score.level)
-        .unwrap_or(1);
+        .filter(crate::risk::store::Assessment::started);
+    let level = if let Some(assessment) = assessment {
+        // A representative answers their own block R. Their risk must not
+        // silently turn the child's legacy extra form into a questionnaire.
+        let config = crate::risk::store::load_config(conn).await?;
+        let own_triggers = assessment
+            .triggers
+            .iter()
+            .filter(|trigger| trigger.subject != crate::risk::SUBJECT_REPRESENTATIVE)
+            .cloned()
+            .collect::<Vec<_>>();
+        crate::risk::score(&own_triggers, &config).level
+    } else {
+        1
+    };
     let mut check = with_risk_level(check, level);
     check.organisation_follow_up = crate::risk::store::block_open(conn, lead_id, "E").await?;
     Ok(check)

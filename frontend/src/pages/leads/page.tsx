@@ -1,3 +1,5 @@
+import { existingParentPatientFromError } from "./model/parent-profile-reuse";
+import { toast } from "@/components/ui/toast";
 import {
   Suspense,
   lazy,
@@ -463,6 +465,7 @@ function useLeadsPageContent() {
     [leadColumnGroupLabels],
   );
   const { staffGo } = useStaffNavigate();
+  const [existingParentPatientId, setExistingParentPatientId] = useState<string | null>(null);
   const [wizardLeadId, setWizardLeadId] = useState<string | null>(null);
   const [newLeadWizardOpen, setNewLeadWizardOpen] = useState(false);
   // A fresh wizard per "Новый лид": an open lead's wizard state must never carry
@@ -1291,6 +1294,7 @@ function useLeadsPageContent() {
     if (!permissions.canCreate) return;
     setCreateBusy(true);
     setCreateError("");
+    setExistingParentPatientId(null);
 
     const payload: CreateLeadBody = {
       first_name: createForm.firstName.trim(),
@@ -1307,6 +1311,9 @@ function useLeadsPageContent() {
       setCreateOpen(false);
       setCreateForm(blankLeadForm());
       const portalPassword = created.portal_account?.one_time_password;
+          if (created.portal_account?.reused) {
+            toast.success(lang === "de" ? "Bestehender Elternzugang verknüpft. Passwort und Zugang zu den Kindern bleiben erhalten." : "Подключён существующий аккаунт родителя. Пароль и доступ к детям сохранены.");
+          }
       if (created.portal_account && portalPassword) {
         setIssuedPortalAccess({
           email: created.portal_account.email,
@@ -1319,6 +1326,7 @@ function useLeadsPageContent() {
       if (permissions.canConvert) openLeadWizard(created.id);
       else reload();
     } catch (createFetchError) {
+      setExistingParentPatientId(existingParentPatientFromError(createFetchError)?.patientId ?? null);
       setCreateError(localizeLeadError(createFetchError, t.common_failed_create));
     } finally {
       setCreateBusy(false);
@@ -3238,7 +3246,7 @@ function useLeadsPageContent() {
               )}
             >
               <div className="space-y-4 rounded-xl">
-                {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
+                {createError ? <ShellBanner tone="error"><p>{createError}</p>{existingParentPatientId ? <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => { setCreateOpen(false); staffGo(`/patients/${encodeURIComponent(existingParentPatientId)}`); }}>{tx("Открыть пациента", "Patientenakte öffnen")}</Button> : null}</ShellBanner> : null}
 
                 <section className={cardClass("p-4")}>
                   <SectionTitle>{t.lead_section_identity}</SectionTitle>

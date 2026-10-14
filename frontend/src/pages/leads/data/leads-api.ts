@@ -62,6 +62,8 @@ export type LeadPortalAccountIssued = {
   user_id: string;
   email: string;
   created: boolean;
+  reused?: boolean;
+  password_changed?: boolean;
   one_time_password: string | null;
 };
 

@@ -263,6 +263,11 @@ describe("the risk assessment of a lead (staff)", () => {
     expect(riskDecisionErrorText(new Error("x"), de)).toBeNull();
     expect(riskGateErrorText(error("risk_review_required"), de)).toContain("Risikobewertung");
     expect(riskGateErrorText(error("payer_gate_blocked"), de)).toBeNull();
+    expect(riskGateErrorText(new ApiRequestError("Unprocessable Entity", {
+      status: 422,
+      code: "Unprocessable Entity",
+      body: { error: "Unprocessable Entity", code: "representative_details_incomplete" },
+    }), ru)).toContain("родителей");
   });
 
   it("names deputies only from eligible roles", () => {

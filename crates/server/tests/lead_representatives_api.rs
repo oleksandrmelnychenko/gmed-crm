@@ -299,19 +299,13 @@ const ADULT_FIELDS: [&str; 9] = [
     "authority_upload",
 ];
 
-const MINOR_FIELDS: [&str; 12] = [
+const MINOR_FIELDS: [&str; 6] = [
     "first_name",
     "last_name",
-    "date_of_birth",
-    "birth_place",
-    "citizenships",
-    "street",
-    "zip",
-    "city",
-    "country",
     "email",
     "phone",
-    "id_upload",
+    "country",
+    "citizenships",
 ];
 
 fn representative(body: &Value, id: Uuid) -> Value {
@@ -390,6 +384,8 @@ async fn an_adult_names_the_person_who_acts_for_him() {
             "under_guardianship": null,
             "custody": null,
             "custody_stated": false,
+            "document_stage": false,
+            "phase": "documents",
             "representatives": [],
         }),
         "{body}"
@@ -1218,8 +1214,7 @@ async fn both_parents_of_a_minor_are_asked_for_by_default() {
         (origin.as_str(), role.as_str()),
         ("staff", "legal_representative")
     );
-    let mut expected = vec!["rep1_id_upload".to_string()];
-    expected.extend(keys("rep2", &MINOR_FIELDS));
+    let expected = keys("rep2", &MINOR_FIELDS);
     assert_eq!(missing_representation(&body), expected, "{body}");
 
     // She names the father. Two signers of one request need two addresses.
@@ -1255,7 +1250,7 @@ async fn both_parents_of_a_minor_are_asked_for_by_default() {
     assert_eq!(other["can_remove"], true, "{other}");
     assert_eq!(
         missing_representation(&body),
-        vec!["rep1_id_upload", "rep2_id_upload"],
+        Vec::<String>::new(),
         "{body}"
     );
     // Both places are taken.
@@ -1575,7 +1570,14 @@ async fn one_parent_alone_or_a_guardian_represents_a_minor() {
         "{body}"
     );
 
-    // A guardian (Vormund) needs the appointment deed.
+    // Staff now request the contractual details; the initial short form
+    // did not require the appointment deed or identity-document uploads.
+    start_assessment(&app, lead_id).await;
+    let ceo = bearer(seed_user(pool, "ceo").await, "ceo");
+    let (status,asked)=json_request(router,"POST",&format!("/api/v1/leads/{lead_id}/risk-assessment/decisions"),&ceo,
+        Some(json!({"decision":"request_more","reason":"Synthetic request for contract details","blocks":["G"]}))).await;
+    assert_eq!(status, StatusCode::CREATED, "{asked}");
+    // A guardian (Vormund) needs the appointment deed at that stage.
     let (status, body) = json_request(
         router,
         "POST",

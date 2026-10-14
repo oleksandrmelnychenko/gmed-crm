@@ -5558,6 +5558,31 @@ async fn update_order_commercial_basis(
             );
         }
     };
+    if body.contract_id.is_some()
+        || body.signed_patient == Some(true)
+        || body.signed_agency == Some(true)
+    {
+        match super::lead_representatives::contract_subject_details_missing(
+            &mut transaction,
+            order_lead_id,
+            order_patient_id,
+            Some(order_id),
+        )
+        .await
+        {
+            Ok(missing) if !missing.is_empty() => {
+                return super::lead_representatives::contract_details_incomplete(&missing);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::error!(%error, %order_id, "validate contracting representatives for commercial basis");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to check representatives",
+                );
+            }
+        }
+    }
     let terms_before = match client_terms::lock_before(&mut transaction, order_id).await {
         Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),

@@ -111,7 +111,27 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
     let third_party =
         text("payer_kind").as_deref() == Some(crate::routes::lead_payer::PAYER_KIND_THIRD_PARTY);
     let payer_type = text("payer_type").filter(|_| third_party);
+    let active = crate::routes::lead_representatives::load(conn, lead_id)
+        .await?
+        .unwrap_or_default();
+    let canonical = crate::services::lead_guardian_identity::load(conn, lead_id).await?;
+    let representatives = active.representation.representatives.iter()
+        .filter(|person| person.slot.is_some())
+        .map(|person| {
+            use sha2::{Digest, Sha256};
+            let identity = canonical.iter().find(|identity| identity.contact_id == Some(person.id));
+            let citizenships = identity.map(|identity| identity.citizenships.clone()).unwrap_or_else(|| person.extras.citizenships.clone());
+            let residences = identity.map(|identity| identity.residences.clone()).unwrap_or_else(|| person.extras.country.clone().into_iter().collect());
+            let material = identity.map(|identity| serde_json::json!({"contact":identity.contact,"extras":identity.extras}))
+                .unwrap_or_else(|| serde_json::json!({"id":person.id,"name":person.name(),"citizenships":citizenships,"residences":residences}));
+            super::RepresentativeInputs {
+                id: person.id, name: person.name(), citizenships, residences,
+                fields: crate::routes::lead_representatives::representative_question_fields(&person.extras),
+                identity_fingerprint: hex::encode(Sha256::digest(material.to_string().as_bytes())),
+            }
+        }).collect();
     let inputs = Inputs {
+        representatives,
         patient_citizenships: subjects.patient_citizenships,
         former_citizenships: row
             .try_get::<Option<Vec<String>>, _>("former_citizenships")

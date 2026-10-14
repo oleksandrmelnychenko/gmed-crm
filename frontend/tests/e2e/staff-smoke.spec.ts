@@ -18,6 +18,7 @@ type StaffMockOptions = {
   email?: string;
   name?: string;
   userId?: string;
+  reusedParentProfile?: boolean;
 };
 
 let generatedDocumentPayloads: Array<Record<string, unknown>> = [];
@@ -1147,6 +1148,10 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
           requested_specialties: [],
           notes: payload.notes ?? null,
           wizard_state: {},
+          ...(options.reusedParentProfile ? {
+            street_address: "Inherited parent street 4", city: "Berlin", zip_code: "10115",
+            citizenships: ["NL"],
+          } : {}),
         });
       }
       return json(route, {
@@ -1155,8 +1160,9 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
           ? {
               user_id: "00000000-0000-0000-0000-000000000991",
               email: payload.email,
-              created: true,
-              one_time_password: "Kq7-mP2x-Rw9t",
+              created: !options.reusedParentProfile,
+              reused: options.reusedParentProfile === true,
+              one_time_password: options.reusedParentProfile ? null : "Kq7-mP2x-Rw9t",
             }
           : null,
       });
@@ -2923,6 +2929,45 @@ test.describe("lead onboarding wizard", () => {
       userId: "00000000-0000-0000-0000-000000000001",
     });
     await loginAsStaff(page, "ceo@gmed.de");
+  });
+
+  test("reused parent profile survives a failed bootstrap read and explicit retry", async ({ page }) => {
+    await installStaffApiMocks(page, { role: "ceo", reusedParentProfile: true });
+    const createdId = "00000000-0000-0000-0000-000000000990";
+    let failed = false;
+    let creates = 0;
+    const updates: Record<string, unknown>[] = [];
+    await page.route(`**/api/v1/leads/${createdId}`, (route) => {
+      if (!failed) {
+        failed = true;
+        return json(route, { message: "Temporary profile loading failure" }, 503);
+      }
+      return route.fallback();
+    });
+    page.on("request", (request) => {
+      if (request.method() !== "POST") return;
+      const path = new URL(request.url()).pathname;
+      if (path === "/api/v1/leads") creates += 1;
+      if (path === `/api/v1/leads/${createdId}/update`) updates.push(request.postDataJSON());
+    });
+    await page.goto("/leads");
+    await page.getByRole("button", { name: "Neuer Lead" }).click();
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.locator("#lead-wizard-first-name").fill("Anna");
+    await wizard.locator("#lead-wizard-last-name").fill("Mother");
+    await setDatePickerValue(wizard.locator("#lead-wizard-birth-date"), "1985-02-03");
+    await chooseComboboxOption(page, wizard.getByRole("combobox", { name: "Geschlecht laut Ausweisdokument" }), "Weiblich");
+    await wizard.locator("#lead-wizard-email").fill("parent-retry@example.test");
+    await wizard.locator('[data-step="medical"]').click();
+    await expect(wizard.getByRole("button", { name: "Erneut versuchen", exact: true })).toBeVisible();
+    expect(updates).toEqual([]);
+    await wizard.getByRole("button", { name: "Erneut versuchen", exact: true }).click();
+    await expect.poll(() => updates.length).toBeGreaterThan(0);
+    expect(updates[0]).toMatchObject({ street_address: "Inherited parent street 4", city: "Berlin", zip_code: "10115", citizenships: ["NL"] });
+    expect(creates).toBe(1);
+    await expect(page.getByTestId("portal-credentials-password")).toHaveCount(0);
+    await wizard.locator('[data-step="master_data"]').click();
+    await expect(wizard.locator("#lead-wizard-street")).toHaveValue("Inherited parent street 4");
   });
 
   test("lead table omits the inline actions column", async ({

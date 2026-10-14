@@ -400,6 +400,8 @@ export type LeadRequestRepresentative = {
  * are `null` and `custody` is never `null` (not stated counts as `joint`).
  */
 export type LeadRequestRepresentation = {
+  /** Staff has requested the full representative details for contract preparation. */
+  document_stage?: boolean;
   has_representative: boolean | null;
   under_guardianship: boolean | null;
   custody: Custody | null;
@@ -432,6 +434,7 @@ export type RepresentativePatch = Partial<
       | "citizenships"
       | "identity_documents"
       | "authority_documents"
+      | "country_questions"
     >,
     string
   >
@@ -646,7 +649,37 @@ export type PayerQuestionnairePatch = Partial<Record<keyof LeadPayerAnswers, str
  * citizenships, G representation, H public office, I identity document, J
  * links to sanctioned persons. D and E belong to the payer's own link.
  */
-export type FollowUpBlock = "A" | "B" | "C" | "F" | "G" | "H" | "I" | "J" | "K" | "L";
+export type FollowUpBlock = "A" | "B" | "C" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "R";
+
+/** Answers belong to the named contracting parent, separately from the child. */
+export type RepresentativeCountryAnswers = {
+  birth_place?: string | null;
+  birth_country?: string | null;
+  residence_since: string | null;
+  stay_reason: string | null;
+  stay_reason_details: string | null;
+  pep_self: boolean | null;
+  pep_related: boolean | null;
+  sanctions_links: boolean | null;
+  pep_office: string | null;
+  pep_country: string | null;
+  pep_period: string | null;
+  pep_relationship: string | null;
+  pep_wealth_origin: string | null;
+  sanctions_link_name: string | null;
+  sanctions_link_kind: string | null;
+  sanctions_link_since_extent: string | null;
+};
+
+export type RepresentativeCountryQuestions = {
+  id: string;
+  name: string;
+  fields: Partial<RepresentativeCountryAnswers>;
+  country_questions: boolean;
+  missing: string[];
+};
+
+export type RepresentativeCountryPatch = Partial<RepresentativeCountryAnswers>;
 
 /**
  * "Wir benötigen ergänzende Angaben" (contract 3.1): which blocks are open,
@@ -655,6 +688,7 @@ export type FollowUpBlock = "A" | "B" | "C" | "F" | "G" | "H" | "I" | "J" | "K" 
  * why (no points, level, trigger or reason). Absent on an older server.
  */
 export type LeadRequestFollowUp = {
+  representatives?: RepresentativeCountryQuestions[];
   /** Live country-based questions available before the first submission. */
   before_submit?: boolean;
   changed_since_answer?: boolean;
@@ -943,6 +977,18 @@ export function saveLeadRepresentative(
   patch: RepresentativePatch,
 ): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(representative(leadId, representativeId), {
+    method: "POST",
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Autosaves only the named representative's additional answers. */
+export function saveRepresentativeCountryQuestions(
+  leadId: string,
+  representativeId: string,
+  patch: RepresentativeCountryPatch,
+): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${representative(leadId, representativeId)}/country-questions`, {
     method: "POST",
     body: JSON.stringify(patch),
   });

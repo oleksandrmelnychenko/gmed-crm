@@ -92,6 +92,32 @@ async fn record(
     if let Some((status, code)) = refusal(&source) {
         return Err(error(status, code));
     }
+    if !documents::is_dsgvo_consent_or_identity_document(
+        source
+            .get::<Option<String>, _>("compliance_kind")
+            .as_deref(),
+        template_of(&source).as_deref(),
+        &source.get::<String, _>("art"),
+    ) && !signed_by_patient_side_only(
+        template_of(&source).as_deref(),
+        source
+            .get::<Option<String>, _>("compliance_kind")
+            .as_deref(),
+        &source.get::<String, _>("art"),
+    ) {
+        let mut conn = state.db.acquire().await.map_err(db_error)?;
+        let missing = crate::routes::lead_representatives::contract_subject_details_missing(
+            &mut conn,
+            source.get("lead_id"),
+            source.get("patient_id"),
+            source.get("order_id"),
+        )
+        .await
+        .map_err(db_error)?;
+        if !missing.is_empty() {
+            return Err(crate::routes::lead_representatives::contract_details_incomplete(&missing));
+        }
+    }
     if document_in_active_signature_request(&state.db, id)
         .await
         .map_err(db_error)?
@@ -245,6 +271,37 @@ async fn store_signed_version(
     signed_at: DateTime<Utc>,
 ) -> Result<Value, Response> {
     let mut tx = state.db.begin().await.map_err(db_error)?;
+    let context = sqlx::query("SELECT * FROM documents WHERE id=$1")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| error(StatusCode::NOT_FOUND, "document_unavailable"))?;
+    if !documents::is_dsgvo_consent_or_identity_document(
+        context
+            .get::<Option<String>, _>("compliance_kind")
+            .as_deref(),
+        template_of(&context).as_deref(),
+        &context.get::<String, _>("art"),
+    ) && !signed_by_patient_side_only(
+        template_of(&context).as_deref(),
+        context
+            .get::<Option<String>, _>("compliance_kind")
+            .as_deref(),
+        &context.get::<String, _>("art"),
+    ) {
+        let missing = crate::routes::lead_representatives::contract_subject_details_missing(
+            &mut tx,
+            context.get("lead_id"),
+            context.get("patient_id"),
+            context.get("order_id"),
+        )
+        .await
+        .map_err(db_error)?;
+        if !missing.is_empty() {
+            return Err(crate::routes::lead_representatives::contract_details_incomplete(&missing));
+        }
+    }
     let source = sqlx::query(
         "SELECT d.*, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version
          FROM documents d WHERE id=$1 FOR UPDATE",

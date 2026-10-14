@@ -1,3 +1,4 @@
+import { existingParentPatientFromError, fillMissingParentProfile } from "../model/parent-profile-reuse";
 import { OrderPatientDocumentReview, OrderExistingContractsTable, type RequestReviewRow } from "@/pages/orders/ui/order-patient-document-review";
 import { isContractUsable } from "@/pages/orders/model/order-intake";
 import { useRepeatPatientReview } from "../model/use-repeat-patient-review";
@@ -3191,6 +3192,7 @@ export function LeadWizard({
   // One-time password of the patient login created with the lead; shown once.
   const [issuedPortalAccess, setIssuedPortalAccess] = useState<(PortalCredentials & { language: string }) | null>(null);
   const [autosaveError, setAutosaveError] = useState("");
+  const [existingParentPatientId, setExistingParentPatientId] = useState<string | null>(null);
   const [autosaveErrorDetail, setAutosaveErrorDetail] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   // «Не подходит» asks for a reason first (QA 2026-10-11, A-39a); null while the dialog is closed.
@@ -3294,6 +3296,7 @@ export function LeadWizard({
   const [prospectResolutionBusy, setProspectResolutionBusy] = useState(false);
   const documentPreviewUrlRef = useRef<string | null>(null);
   const lastPersistedLeadIdRef = useRef<string | null>(null);
+  const pendingParentProfileLeadRef = useRef<string | null>(null);
   // Service options that were present when the draft was hydrated. Kept so that
   // unchecking a lead-supplied service (one outside the fixed questionnaire options)
   // leaves its row in place instead of removing it and making it unrecoverable.
@@ -4150,6 +4153,7 @@ export function LeadWizard({
     pendingClinicalEditsRef.current.clear();
     setClinicalAccessDenied(false);
     lastPersistedLeadIdRef.current = null;
+    pendingParentProfileLeadRef.current = null;
     initialServiceOptionsRef.current = [];
   }, [open, replaceDocumentPreview]);
 
@@ -4847,6 +4851,7 @@ export function LeadWizard({
 
       let targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
       let stage = "lead-create";
+      let inheritedDraft = snapshot.draft;
       const initializing = !leadId;
       if (
         (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__")) &&
@@ -4858,6 +4863,7 @@ export function LeadWizard({
 
       try {
         if (!targetLeadId) {
+          setExistingParentPatientId(null);
           const created = await createLead({
             creation_key: creationKeyRef.current,
             ...(existingPatient?.id ? { repeat_patient_id: existingPatient.id } : {}),
@@ -4884,6 +4890,10 @@ export function LeadWizard({
           hydrated.current = targetLeadId;
           lastPersistedLeadIdRef.current = targetLeadId;
           const portalPassword = created.portal_account?.one_time_password;
+          if (created.portal_account?.reused) {
+            pendingParentProfileLeadRef.current = created.id;
+            toast.success(lang === "de" ? "Bestehender Elternzugang verknüpft. Passwort und Zugang zu den Kindern bleiben erhalten." : "Подключён существующий аккаунт родителя. Пароль и доступ к детям сохранены.");
+          }
           if (created.portal_account && portalPassword) {
             setIssuedPortalAccess({
               email: created.portal_account.email,
@@ -4894,6 +4904,15 @@ export function LeadWizard({
               userId: created.portal_account.user_id,
             });
           }
+        }
+
+        // Creation can succeed while the profile GET fails. Keep this boundary
+        // pending across Retry so its first update cannot erase inherited data.
+        if (pendingParentProfileLeadRef.current === targetLeadId) {
+          const profile = await fetchLeadDetail(targetLeadId);
+          inheritedDraft = fillMissingParentProfile(snapshot.draft, profile);
+          Object.assign(payload, autosavePayload({ ...snapshot, draft: inheritedDraft }, previousWizardState, !lead?.prospect_patient_id));
+          setDraft((current) => hydrated.current === targetLeadId && current ? fillMissingParentProfile(current, profile) : current);
         }
 
         lastPersistedLeadIdRef.current = targetLeadId;
@@ -4907,6 +4926,7 @@ export function LeadWizard({
           lastSentTrustedContactsRef.current ?? trustedContactsBase,
         );
         await updateLeadWizard(targetLeadId, update.body);
+        if (pendingParentProfileLeadRef.current === targetLeadId) pendingParentProfileLeadRef.current = null;
         if (hydrated.current !== targetLeadId) return;
         if (update.contacts) {
           lastSentTrustedContactsRef.current = update.contacts;
@@ -4918,7 +4938,7 @@ export function LeadWizard({
           setRepresentationVersion((version) => version + 1);
         }
 
-        let savedDraft = snapshot.draft;
+        let savedDraft = inheritedDraft;
         if (
           existingPatient?.id
           && !prospectPatientIdRef.current
@@ -4977,6 +4997,7 @@ export function LeadWizard({
           (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__")) &&
           currentAutosaveSignatureRef.current === signature
         ) {
+          setExistingParentPatientId(existingParentPatientFromError(nextError)?.patientId ?? null);
           setAutosaveError(errorText(nextError, tx));
           setAutosaveErrorDetail(autosaveErrorDetailText(stage, nextError));
           setAutosaveStatus("error");
@@ -7227,7 +7248,7 @@ ${serviceCommentLines.join("\n")}`
                 tx={tx}
               >
               <Section
-                title={tx("Личные данные", "Persönliche Daten")}
+                title={isMinor(draft.birthDate, new Date()) ? tx("Личные данные ребёнка", "Persönliche Daten des Kindes") : tx("Личные данные", "Persönliche Daten")}
                 accessory={isRepeatIntake ? null : (
                   <Step1FillModeSwitch mode={step1Portal.mode} onChange={step1Portal.setMode} disabled={isBusy} tx={tx} />
                 )}
@@ -9894,6 +9915,7 @@ ${serviceCommentLines.join("\n")}`
                       ) : null}
                     </>
                   ) : error}
+                  {existingParentPatientId ? <StaffLink to={`/patients/${encodeURIComponent(existingParentPatientId)}`} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-2")} onClick={() => onOpenChange(false)}>{tx("Открыть пациента", "Patientenakte öffnen")}</StaffLink> : null}
                 </div>
                 {autosaveStatus === "error" ? (
                   <Button type="button" variant="outline" size="xs" disabled={isBusy || loading} onClick={() => void save()}>

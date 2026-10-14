@@ -44,6 +44,7 @@ mod lead_portal_consent_view;
 pub mod lead_portal_guardians;
 pub mod lead_portal_intake;
 pub mod lead_portal_login_email;
+pub mod lead_portal_plan_requests;
 pub mod lead_representatives;
 pub mod lead_risk;
 pub mod leads;
@@ -122,6 +123,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(lead_portal_guardians::router())
         .merge(lead_portal_intake::router())
         .merge(lead_portal_login_email::router())
+        .merge(lead_portal_plan_requests::router())
         .merge(patient_portal_access::router())
         .merge(lead_payer::router())
         .merge(lead_payer_link::router())

@@ -140,6 +140,7 @@ export function LeadPortalAccessDetail({
       const result = await issueLeadPortalAccess(lead.id);
       setConfirmOpen(false);
       setIssued(result);
+      if (result.reused) setEmailNotice(de ? "Bestehender Elternzugang verknüpft. Passwort und Zugang zu den Kindern bleiben erhalten." : "Подключён существующий аккаунт родителя. Пароль и доступ к детям сохранены.");
       onChanged?.();
     } catch (nextError) {
       setError(leadErrorMessage(nextError, (ru, de) => (lang === "de" ? de : ru)));
@@ -241,6 +242,11 @@ export function LeadPortalAccessDetail({
     let result: LeadPortalAccountIssued | null = null;
     try {
       result = await issueLeadPortalAccess(lead.id);
+      if (result.reused) {
+        setEmailConfirmOpen(false);
+        setEmailNotice(de ? "Bestehender Elternzugang verknüpft. Das bisherige Passwort gilt weiterhin; es wurde keine E-Mail versendet." : "Подключён существующий аккаунт родителя. Прежний пароль действует; письмо с новым паролем не отправлялось.");
+        return;
+      }
       if (!result.one_time_password) throw new Error("no password issued");
       const sent = await sendLeadLoginEmail(lead.id, {
         user_id: result.user_id,

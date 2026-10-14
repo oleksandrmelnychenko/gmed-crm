@@ -109,14 +109,16 @@ async fn get_me(
                 && !totp_enrolment_required
             {
                 match sqlx::query(
-                    "SELECT p.id, p.patient_id, p.first_name, p.last_name
+                    "SELECT p.id, p.patient_id, p.first_name, p.last_name, a.source
                      FROM patient_assignments a JOIN patients p ON p.id = a.patient_id
                      WHERE a.user_id = $1 AND a.revoked_at IS NULL
+                       AND p.lifecycle_status = 'active' AND p.is_active = true
                      ORDER BY p.last_name, p.first_name, p.id",
                 ).bind(auth.user_id).fetch_all(&state.db).await {
                     Ok(rows) => rows.into_iter().map(|row| serde_json::json!({
                         "id": row.get::<Uuid, _>("id"),
                         "patient_number": row.get::<String, _>("patient_id"),
+                        "access_kind": if row.get::<String,_>("source") == "lead_guardian" { "guardian" } else { "self" },
                         "name": format!("{} {}", row.get::<String, _>("first_name"), row.get::<String, _>("last_name")),
                     })).collect::<Vec<_>>(),
                     Err(error) => {
@@ -806,15 +808,24 @@ pub(crate) async fn resolve_linked_patient_id(
     let user_id = auth.user_id;
     if let Some(patient_id) = auth.selected_patient_id {
         // An explicit context never falls back to another child or to email matching.
-        let allowed = crate::access::has_active_patient_assignment(&state.db, patient_id, user_id)
-            .await
-            .map_err(|error| {
-                tracing::error!(%error, %user_id, %patient_id, "validate selected patient");
-                err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to validate linked patient",
-                )
-            })?;
+        let allowed = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                 SELECT 1 FROM patient_assignments a JOIN patients p ON p.id = a.patient_id
+                 WHERE a.patient_id = $1 AND a.user_id = $2 AND a.revoked_at IS NULL
+                   AND p.lifecycle_status = 'active' AND p.is_active = true
+             )",
+        )
+        .bind(patient_id)
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %user_id, %patient_id, "validate selected patient");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate linked patient",
+            )
+        })?;
         return if allowed {
             Ok(Some(patient_id))
         } else {
@@ -825,12 +836,16 @@ pub(crate) async fn resolve_linked_patient_id(
         };
     }
     let rows = sqlx::query(
-        r#"SELECT patient_id
-           FROM patient_assignments
-           WHERE user_id = $1
-             AND revoked_at IS NULL
-           ORDER BY assigned_at DESC
-           LIMIT 2"#,
+        r#"WITH active AS (
+               SELECT a.patient_id,a.source,a.assigned_at
+               FROM patient_assignments a JOIN patients p ON p.id = a.patient_id
+               WHERE a.user_id=$1 AND a.revoked_at IS NULL
+                 AND p.lifecycle_status = 'active' AND p.is_active = true
+           )
+           SELECT patient_id FROM active
+           WHERE source <> 'lead_guardian'
+              OR NOT EXISTS(SELECT 1 FROM active WHERE source <> 'lead_guardian')
+           ORDER BY assigned_at DESC LIMIT 2"#,
     )
     .bind(user_id)
     .fetch_all(&state.db)
@@ -884,12 +899,16 @@ pub(crate) async fn resolve_linked_patient_id(
         })?;
 
     let active_rows = sqlx::query(
-        r#"SELECT patient_id
-           FROM patient_assignments
-           WHERE user_id = $1
-             AND revoked_at IS NULL
-           ORDER BY assigned_at DESC
-           LIMIT 2"#,
+        r#"WITH active AS (
+               SELECT a.patient_id,a.source,a.assigned_at
+               FROM patient_assignments a JOIN patients p ON p.id = a.patient_id
+               WHERE a.user_id=$1 AND a.revoked_at IS NULL
+                 AND p.lifecycle_status = 'active' AND p.is_active = true
+           )
+           SELECT patient_id FROM active
+           WHERE source <> 'lead_guardian'
+              OR NOT EXISTS(SELECT 1 FROM active WHERE source <> 'lead_guardian')
+           ORDER BY assigned_at DESC LIMIT 2"#,
     )
     .bind(user_id)
     .fetch_all(&mut *tx)
@@ -945,6 +964,7 @@ pub(crate) async fn resolve_linked_patient_id(
           WHERE u.id = $1
             AND u.role = 'patient'
             AND p.is_active = true
+            AND p.lifecycle_status = 'active'
             AND p.email IS NOT NULL
             AND trim(p.email) <> ''
           ORDER BY p.created_at DESC

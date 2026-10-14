@@ -222,7 +222,7 @@ export const REPRESENTATIVE_FIELDS: RepresentativeField[] = [
  * Minimal fields for compatibility with older servers. Current servers list
  * the whole representative in the base form's missing keys.
  */
-export const BASE_REPRESENTATIVE_FIELDS: readonly RepresentativeField[] = ["first_name", "last_name", "email", "phone"];
+export const BASE_REPRESENTATIVE_FIELDS: readonly RepresentativeField[] = ["first_name", "last_name", "email", "phone", "country", "citizenships"];
 
 export function draftFromRepresentative(person: LeadRequestRepresentative | null | undefined): RepresentativeDraft {
   return {

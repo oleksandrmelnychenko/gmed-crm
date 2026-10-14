@@ -521,15 +521,18 @@ where
 }
 
 /// Whether a patient login reaches only requests (leads) and no patient
-/// record: the portal is then the lead cabinet (owner decision 2026-10-03).
+/// active patient record: a prospective placeholder is still only a request
+/// (owner decisions 2026-10-03 and 2026-10-14).
 pub(crate) async fn is_lead_only_login(
     db: &gmed_db::DbPool,
     user_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(&format!(
         r#"SELECT NOT EXISTS(
-                   SELECT 1 FROM patient_assignments
-                   WHERE user_id = $1 AND revoked_at IS NULL
+                   SELECT 1 FROM patient_assignments a
+                   JOIN patients p ON p.id = a.patient_id
+                   WHERE a.user_id = $1 AND a.revoked_at IS NULL
+                     AND p.lifecycle_status = 'active' AND p.is_active = true
                )
                AND (
                    EXISTS(SELECT 1 FROM leads l WHERE l.portal_user_id = $1 AND {PORTAL_LEAD_SQL})
@@ -2419,7 +2422,7 @@ pub(super) const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NO
                  THEN l.portal_field_updates ELSE '{}'::jsonb END
         ) AS field(name, entry)
         WHERE (field.entry->>'at')::timestamptz > CASE
-            WHEN field.name IN ('enhanced_details', 'statements') THEN GREATEST(
+            WHEN field.name IN ('enhanced_details', 'statements', 'representative_questions') THEN GREATEST(
                 l.portal_submitted_at,
                 (SELECT ra.follow_up_answered_at FROM lead_risk_assessments ra WHERE ra.lead_id = l.id)
             ) ELSE l.portal_submitted_at END

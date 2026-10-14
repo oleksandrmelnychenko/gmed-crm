@@ -156,6 +156,15 @@ const MINOR_REQUIRED: [&str; 17] = [
     "id_upload",
 ];
 
+const MINOR_INTAKE_REQUIRED: [&str; 6] = [
+    "first_name",
+    "last_name",
+    "email",
+    "phone",
+    "country",
+    "citizenships",
+];
+
 // ----------------------------------------------------------------------------
 // Who is a representative
 // ----------------------------------------------------------------------------
@@ -163,7 +172,8 @@ const MINOR_REQUIRED: [&str; 17] = [
 /// The row of a representative in `lead_representatives`: everything the
 /// trusted contact entry cannot hold. All empty for a parent or guardian the
 /// cabinet has not added to yet.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(default)]
 pub(crate) struct Extras {
     pub role: String,
     pub contact_origin: String,
@@ -182,6 +192,7 @@ pub(crate) struct Extras {
     pub id_issuing_country: Option<String>,
     pub id_issued_on: Option<NaiveDate>,
     pub id_valid_until: Option<NaiveDate>,
+    pub country_questions: Value,
 }
 
 impl Extras {
@@ -214,6 +225,9 @@ impl Extras {
             id_issuing_country: text("id_issuing_country"),
             id_issued_on: date("id_issued_on"),
             id_valid_until: date("id_valid_until"),
+            country_questions: row
+                .try_get("country_questions")
+                .unwrap_or_else(|_| json!({})),
         }
     }
 }
@@ -522,6 +536,8 @@ pub(crate) struct Upload {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Loaded {
     pub representation: Representation,
+    /// Staff requested contract details, or contractual documents already exist.
+    pub document_stage: bool,
     /// The uploads on file of the lead's representatives, oldest first.
     pub uploads: Vec<Upload>,
     /// The elements of `leads.trusted_contacts` as stored.
@@ -575,7 +591,14 @@ pub(crate) async fn load_on(
 ) -> Result<Option<Loaded>, sqlx::Error> {
     let Some(lead) = sqlx::query(
         r#"SELECT l.date_of_birth, l.trusted_contacts,
-                  g.has_representative, g.under_guardianship, g.custody
+                  g.has_representative, g.under_guardianship, g.custody,
+                  (l.converted_patient_id IS NOT NULL
+                   OR EXISTS (SELECT 1 FROM lead_risk_assessments ra WHERE ra.lead_id=l.id AND 'G'=ANY(ra.requested_blocks))
+                   OR EXISTS (SELECT 1 FROM framework_contracts fc WHERE fc.lead_id=l.id)
+                   OR EXISTS (SELECT 1 FROM documents d WHERE (d.lead_id=l.id OR d.order_id IN (SELECT o.id FROM orders o WHERE o.source_lead_id=l.id))
+                       AND d.status='active' AND d.file_deleted_at IS NULL
+                       AND d.generated_template_id IN ('framework_contract','single_order'))
+                  ) AS document_stage
            FROM leads l
            LEFT JOIN lead_gwg_declarations g ON g.lead_id = l.id
            WHERE l.id = $1"#,
@@ -586,7 +609,7 @@ pub(crate) async fn load_on(
     else {
         return Ok(None);
     };
-    let rows: HashMap<Uuid, Extras> =
+    let mut rows: HashMap<Uuid, Extras> =
         sqlx::query("SELECT * FROM lead_representatives WHERE lead_id = $1")
             .bind(lead_id)
             .fetch_all(&mut *conn)
@@ -664,6 +687,30 @@ pub(crate) async fn load_on(
         .flatten()
         .and_then(|contacts| contacts.as_array().cloned())
         .unwrap_or_default();
+    let stored_ids: Vec<Uuid> = rows.keys().copied().collect();
+    let mut effective_contacts = contacts.clone();
+    // Explicit links to existing parent records supply missing basic data;
+    // no clinical data, documents or consents are copied into this request.
+    for identity in crate::services::lead_guardian_identity::load_on(conn, lead_id, on).await? {
+        let Some(id) = identity.contact_id else {
+            continue;
+        };
+        if let Some(contact) = effective_contacts
+            .iter_mut()
+            .find(|contact| entry_id(contact) == Some(id))
+        {
+            *contact = identity.contact;
+        }
+        if let Ok(mut effective) = serde_json::from_value::<Extras>(identity.extras) {
+            if let Some(stored) = rows.get(&id) {
+                effective.contact_origin = stored.contact_origin.clone();
+                effective.country_questions = stored.country_questions.clone();
+            } else {
+                effective.contact_origin = ORIGIN_STAFF.to_string();
+            }
+            rows.insert(id, effective);
+        }
+    }
     let answers = Answers {
         has_representative: lead
             .try_get::<Option<bool>, _>("has_representative")
@@ -681,8 +728,12 @@ pub(crate) async fn load_on(
             .flatten(),
         on,
     );
-    let representatives = resolve(minor, &contacts, &rows, &logins, &answers);
+    let mut representatives = resolve(minor, &effective_contacts, &rows, &logins, &answers);
+    for person in &mut representatives {
+        person.has_data = stored_ids.contains(&person.id);
+    }
     Ok(Some(Loaded {
+        document_stage: lead.try_get("document_stage").unwrap_or(false),
         representation: Representation {
             minor,
             answers,
@@ -781,6 +832,60 @@ fn field_filled(loaded: &Loaded, person: &Representative, field: &str, today: Na
 /// minor needs both parents, or the one custodian or guardian (the guardian
 /// with the appointment deed).
 pub(crate) fn missing_for_submit(loaded: &Loaded, today: NaiveDate) -> Vec<String> {
+    representation_missing(loaded, today, loaded.document_stage)
+}
+
+pub(crate) fn missing_for_contract(loaded: &Loaded, today: NaiveDate) -> Vec<String> {
+    representation_missing(loaded, today, true)
+}
+
+pub(crate) async fn contract_details_missing(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    let Some(loaded) = load(conn, lead_id).await? else {
+        return Ok(Vec::new());
+    };
+    if !loaded.representation.minor {
+        return Ok(Vec::new());
+    }
+    Ok(missing_for_contract(&loaded, crate::app_time::today()))
+}
+
+/// Call inside the operation's transaction so representation cannot change
+/// between validation and creating a contractual record or invitation.
+pub(crate) async fn contract_subject_details_missing(
+    conn: &mut PgConnection,
+    lead_id: Option<Uuid>,
+    patient_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+) -> Result<Vec<String>, sqlx::Error> {
+    let leads: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT l.id FROM leads l WHERE l.qualification_status <> 'deleted' AND (
+            l.id=$1 OR l.prospect_patient_id=$2 OR l.converted_patient_id=$2 OR l.repeat_patient_id=$2
+            OR EXISTS (SELECT 1 FROM orders o WHERE o.id=$3 AND (o.source_lead_id=l.id
+                OR o.patient_id=l.prospect_patient_id OR o.patient_id=l.converted_patient_id OR o.patient_id=l.repeat_patient_id))
+        ) ORDER BY l.id FOR UPDATE"#,
+    ).bind(lead_id).bind(patient_id).bind(order_id).fetch_all(&mut *conn).await?;
+    for lead_id in leads {
+        let missing = contract_details_missing(conn, lead_id).await?;
+        if !missing.is_empty() {
+            return Ok(missing);
+        }
+    }
+    Ok(Vec::new())
+}
+
+pub(crate) fn contract_details_incomplete(missing: &[String]) -> axum::response::Response {
+    intake::coded(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "representative_details_incomplete",
+        "Complete the representative's details before creating a contract or inviting signatures",
+        json!({"missing":missing}),
+    )
+}
+
+fn representation_missing(loaded: &Loaded, today: NaiveDate, full_minor: bool) -> Vec<String> {
     let representation = &loaded.representation;
     // What the person of a place still lacks; everything while nobody is there.
     let place = |slot: &str, required: &[&str]| -> Vec<String> {
@@ -805,10 +910,17 @@ pub(crate) fn missing_for_submit(loaded: &Loaded, today: NaiveDate) -> Vec<Strin
         if representation.answers.custody.is_none() {
             missing.push("custody".to_string());
         }
-        missing.extend(place(SLOT_REP1, &MINOR_REQUIRED));
+        let required: &[&str] = if full_minor {
+            &MINOR_REQUIRED
+        } else {
+            &MINOR_INTAKE_REQUIRED
+        };
+        missing.extend(place(SLOT_REP1, required));
         match representation.answers.custody() {
-            CUSTODY_JOINT => missing.extend(place(SLOT_REP2, &MINOR_REQUIRED)),
-            CUSTODY_GUARDIAN => missing.extend(place(SLOT_REP1, &["authority_upload"])),
+            CUSTODY_JOINT => missing.extend(place(SLOT_REP2, required)),
+            CUSTODY_GUARDIAN if full_minor => {
+                missing.extend(place(SLOT_REP1, &["authority_upload"]))
+            }
             _ => {}
         }
         return missing;
@@ -864,6 +976,7 @@ fn person_json(person: &Representative) -> Map<String, Value> {
         "id_issuing_country": extras.id_issuing_country,
         "id_issued_on": date_text(extras.id_issued_on),
         "id_valid_until": date_text(extras.id_valid_until),
+        "country_questions": representative_question_fields(extras),
     });
     match value {
         Value::Object(map) => map,
@@ -943,6 +1056,15 @@ pub(crate) fn portal_payload(loaded: &Loaded, user_id: Uuid) -> Value {
         })
         .collect::<Vec<_>>();
     let mut payload = answers_json(&loaded.representation);
+    payload.insert("document_stage".into(), json!(loaded.document_stage));
+    payload.insert(
+        "phase".into(),
+        json!(if loaded.representation.minor && !loaded.document_stage {
+            "intake"
+        } else {
+            "documents"
+        }),
+    );
     payload.insert("representatives".into(), Value::Array(representatives));
     Value::Object(payload)
 }
@@ -994,6 +1116,15 @@ pub(crate) fn staff_payload(loaded: &Loaded) -> Value {
         })
         .collect::<Vec<_>>();
     let mut payload = answers_json(&loaded.representation);
+    payload.insert("document_stage".into(), json!(loaded.document_stage));
+    payload.insert(
+        "phase".into(),
+        json!(if loaded.representation.minor && !loaded.document_stage {
+            "intake"
+        } else {
+            "documents"
+        }),
+    );
     payload.insert("representatives".into(), Value::Array(representatives));
     Value::Object(payload)
 }
@@ -1990,6 +2121,7 @@ pub(crate) async fn update_my_representation(
 
     let mut staged = StagedFiles::default();
     let mut contacts = loaded.contacts.clone();
+    let mut invalidated = Vec::new();
     let written = async {
         if !fields.is_empty() {
             store_answers(&mut tx, lead_id, &next, auth.user_id)
@@ -2017,6 +2149,14 @@ pub(crate) async fn update_my_representation(
         )
         .await
         .map_err(|error| intake::internal(error, "mark representation"))?;
+        invalidated = crate::document_signatures::invalidate_representative_identity(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+        )
+        .await
+        .map_err(|error| intake::internal(error, "invalidate representative invitation"))?
+        .1;
         audit::write_in_transaction(
             &mut tx,
             &audit::domain_event(
@@ -2045,6 +2185,7 @@ pub(crate) async fn update_my_representation(
         return intake::internal(error, "commit representation");
     }
     staged.finalize().await;
+    crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
     publish_cabinet_change(&state, lead_id, auth.user_id, kind).await;
     request_response(&state, lead_id, auth.user_id, kind, StatusCode::OK).await
 }
@@ -2259,6 +2400,7 @@ pub(crate) async fn upsert_my_representative(
         Err(error) => return intake::internal(error, "load parent payer"),
     };
     let mut contacts = loaded.contacts.clone();
+    let mut invalidated = Vec::new();
     write_entry(
         &mut contacts,
         representative_id,
@@ -2317,12 +2459,20 @@ pub(crate) async fn upsert_my_representative(
             ),
         )
         .await?;
+        invalidated = crate::document_signatures::invalidate_representative_identity(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+        )
+        .await?
+        .1;
         tx.commit().await
     }
     .await;
     if let Err(error) = written {
         return intake::internal(error, "store representative");
     }
+    crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
     publish_cabinet_change(&state, lead_id, auth.user_id, kind).await;
     let status = if known.is_some() {
         StatusCode::OK
@@ -2366,6 +2516,7 @@ pub(crate) async fn remove_my_representative(
     }
     let mut staged = StagedFiles::default();
     let mut contacts = loaded.contacts.clone();
+    let mut invalidated = Vec::new();
     let written = async {
         remove_person(
             &mut tx,
@@ -2385,7 +2536,16 @@ pub(crate) async fn remove_my_representative(
             kind,
         )
         .await
-        .map_err(|error| intake::internal(error, "mark representation"))
+        .map_err(|error| intake::internal(error, "mark representation"))?;
+        invalidated = crate::document_signatures::invalidate_representative_identity(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+        )
+        .await
+        .map_err(|error| intake::internal(error, "invalidate removed representative invitation"))?
+        .1;
+        Ok::<(), axum::response::Response>(())
     }
     .await;
     if let Err(response) = written {
@@ -2397,6 +2557,7 @@ pub(crate) async fn remove_my_representative(
         return intake::internal(error, "commit representative removal");
     }
     staged.finalize().await;
+    crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
     publish_cabinet_change(&state, lead_id, auth.user_id, kind).await;
     request_response(&state, lead_id, auth.user_id, kind, StatusCode::OK).await
 }
@@ -2444,6 +2605,275 @@ pub(crate) async fn upload_my_representative_authority_document(
 // ----------------------------------------------------------------------------
 // Staff endpoints
 // ----------------------------------------------------------------------------
+
+const COUNTRY_QUESTION_FIELDS: [&str; 16] = [
+    "birth_place",
+    "birth_country",
+    "residence_since",
+    "stay_reason",
+    "stay_reason_details",
+    "pep_self",
+    "pep_related",
+    "sanctions_links",
+    "pep_office",
+    "pep_country",
+    "pep_period",
+    "pep_relationship",
+    "pep_wealth_origin",
+    "sanctions_link_name",
+    "sanctions_link_kind",
+    "sanctions_link_since_extent",
+];
+
+pub(crate) fn country_question_fields(stored: &Value) -> Value {
+    Value::Object(
+        COUNTRY_QUESTION_FIELDS
+            .iter()
+            .map(|key| {
+                (
+                    (*key).to_string(),
+                    stored.get(*key).cloned().unwrap_or(Value::Null),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// Birth data remains authoritative in the representative's basic identity.
+/// The questionnaire exposes its effective (including linked-patient) values.
+pub(crate) fn representative_question_fields(extras: &Extras) -> Value {
+    let mut fields = country_question_fields(&extras.country_questions);
+    fields["birth_place"] = json!(extras.birth_place);
+    fields["birth_country"] = json!(extras.birth_country);
+    fields
+}
+
+pub(crate) fn country_question_missing(fields: &Value) -> Vec<String> {
+    let blank = |key: &str| {
+        fields[key]
+            .as_str()
+            .is_none_or(|value| value.trim().is_empty())
+    };
+    let mut missing = Vec::new();
+    for field in ["birth_place", "birth_country"] {
+        if blank(field) {
+            missing.push(field.to_string());
+        }
+    }
+    for field in ["pep_self", "pep_related", "sanctions_links"] {
+        if fields[field].as_bool().is_none() {
+            missing.push(field.to_string());
+        }
+    }
+    if blank("residence_since") {
+        missing.push("residence_since".to_string());
+    }
+    if blank("stay_reason") {
+        missing.push("stay_reason".to_string());
+    }
+    if fields["stay_reason"] == "other" && blank("stay_reason_details") {
+        missing.push("stay_reason_details".to_string());
+    }
+    if fields["pep_self"] == true || fields["pep_related"] == true {
+        for key in [
+            "pep_office",
+            "pep_country",
+            "pep_period",
+            "pep_wealth_origin",
+        ] {
+            if blank(key) {
+                missing.push(key.to_string());
+            }
+        }
+        if fields["pep_related"] == true && blank("pep_relationship") {
+            missing.push("pep_relationship".to_string());
+        }
+    }
+    if fields["sanctions_links"] == true {
+        for key in [
+            "sanctions_link_name",
+            "sanctions_link_kind",
+            "sanctions_link_since_extent",
+        ] {
+            if blank(key) {
+                missing.push(key.to_string());
+            }
+        }
+    }
+    missing
+}
+
+fn apply_country_questions(current: &Value, body: &Value) -> Result<Value, FieldError> {
+    let object = body
+        .as_object()
+        .ok_or_else(|| field_error("body", "A JSON object is expected"))?;
+    let mut next = country_question_fields(current);
+    for (key, value) in object {
+        let Some(field) = COUNTRY_QUESTION_FIELDS
+            .iter()
+            .copied()
+            .find(|field| *field == key)
+        else {
+            return Err(field_error(
+                "body",
+                "An unknown representative question was sent",
+            ));
+        };
+        if matches!(field, "birth_place" | "birth_country") {
+            let text = if value.is_null() {
+                ""
+            } else {
+                value
+                    .as_str()
+                    .ok_or_else(|| field_error(field, "Text is expected"))?
+            };
+            next[field] = json!(if field == "birth_country" {
+                iso_country(text, "birth_country")?
+            } else {
+                intake::clean_text(text, "birth_place", 200)?
+            });
+        } else if matches!(field, "pep_self" | "pep_related" | "sanctions_links") {
+            if !value.is_null() && !value.is_boolean() {
+                return Err(field_error(field, "Answer yes or no"));
+            }
+            next[field] = value.clone();
+        } else {
+            let patch = Map::from_iter([(field.to_string(), value.clone())]);
+            let cleaned = crate::risk::cabinet::apply_statements(
+                &crate::risk::cabinet::Statements::default(),
+                &patch,
+            )?;
+            next[field] = cleaned
+                .gwg_json()
+                .get(field)
+                .cloned()
+                .unwrap_or(Value::Null);
+        }
+    }
+    if next["stay_reason"] != "other" {
+        next["stay_reason_details"] = Value::Null;
+    }
+    if next["pep_related"] == false {
+        next["pep_relationship"] = Value::Null;
+    }
+    if next["pep_self"] == false && next["pep_related"] == false {
+        for key in [
+            "pep_office",
+            "pep_country",
+            "pep_period",
+            "pep_relationship",
+            "pep_wealth_origin",
+        ] {
+            next[key] = Value::Null;
+        }
+    }
+    if next["sanctions_links"] == false {
+        for key in [
+            "sanctions_link_name",
+            "sanctions_link_kind",
+            "sanctions_link_since_extent",
+        ] {
+            next[key] = Value::Null;
+        }
+    }
+    Ok(next)
+}
+
+/// Neutral questions are owned by the recorded contracting representative,
+/// and may be answered by a login with active access to this child's request.
+pub(crate) async fn save_my_country_questions(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, representative_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<Value>,
+) -> axum::response::Response {
+    if let Err(response) = intake::require_patient(&auth) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin representative questions"),
+    };
+    let kind = match intake::lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+        Ok(Some((kind, _))) => kind,
+        Ok(None) => return intake::not_found(),
+        Err(error) => return intake::internal(error, "lock representative questions"),
+    };
+    let loaded = match load(&mut tx, lead_id).await {
+        Ok(Some(loaded)) => loaded,
+        Ok(None) => return intake::not_found(),
+        Err(error) => return intake::internal(error, "load representative questions"),
+    };
+    let Some(person) = loaded
+        .representation
+        .find(representative_id)
+        .filter(|person| person.slot.is_some())
+    else {
+        return intake::err(StatusCode::NOT_FOUND, "Acting representative not found");
+    };
+    let current = representative_question_fields(&person.extras);
+    let next = match apply_country_questions(&current, &body) {
+        Ok(next) => next,
+        Err(error) => return error.into_response(),
+    };
+    let fields: Vec<&str> = COUNTRY_QUESTION_FIELDS
+        .iter()
+        .copied()
+        .filter(|key| current[*key] != next[*key])
+        .collect();
+    let new_legal_yes = ["pep_self", "pep_related", "sanctions_links"]
+        .iter()
+        .any(|key| current[*key] != true && next[*key] == true);
+    let birth_changed = ["birth_place", "birth_country"]
+        .iter()
+        .any(|key| current[*key] != next[*key]);
+    let questions_changed = fields
+        .iter()
+        .any(|key| !matches!(*key, "birth_place" | "birth_country"));
+    let mut stored_questions = next.clone();
+    if let Some(object) = stored_questions.as_object_mut() {
+        object.remove("birth_place");
+        object.remove("birth_country");
+    }
+    let mut invalidated = Vec::new();
+    if !fields.is_empty() {
+        let saved = async {
+            // Saving the questionnaire must not freeze a linked patient's
+            // read-only basic-data fallback as explicit lead-specific answers.
+            sqlx::query("INSERT INTO lead_representatives (lead_id,contact_id,role,contact_origin,country_questions,updated_by,birth_place,birth_country) VALUES ($1,$2,$3,'staff',$4,$5,$6,$7) ON CONFLICT (lead_id,contact_id) DO UPDATE SET country_questions=CASE WHEN $10 THEN EXCLUDED.country_questions ELSE lead_representatives.country_questions END,birth_place=CASE WHEN $8 THEN EXCLUDED.birth_place ELSE lead_representatives.birth_place END,birth_country=CASE WHEN $9 THEN EXCLUDED.birth_country ELSE lead_representatives.birth_country END,updated_by=EXCLUDED.updated_by,updated_at=now()")
+                .bind(lead_id).bind(representative_id).bind(person.role)
+                .bind(if questions_changed { stored_questions.clone() } else { json!({}) }).bind(auth.user_id)
+                .bind(body.get("birth_place").and_then(|_| next["birth_place"].as_str()))
+                .bind(body.get("birth_country").and_then(|_| next["birth_country"].as_str()))
+                .bind(body.get("birth_place").is_some()).bind(body.get("birth_country").is_some())
+                .bind(questions_changed)
+                .execute(&mut *tx).await?;
+            let at = intake::portal_update_time(&mut tx).await?;
+            let marker = json!({"representative_questions": {
+                "at":at,"by":auth.user_id,"kind":kind.as_str(),
+                "hash":intake::value_marker(lead_id,"representative_questions",Some(&next.to_string())),
+            }});
+            store_lead(&mut tx, lead_id, None, &marker).await?;
+            audit::write_in_transaction(&mut tx, &audit::domain_event(
+                "lead_portal_representative_country_questions", Some(auth.user_id), "lead", Some(lead_id),
+                json!({"representative_id":representative_id,"fields":fields,"access_kind":kind.as_str()}),
+            )).await?;
+            crate::risk::store::reassess(&mut tx, lead_id, crate::risk::store::Cause::Cabinet, Some(auth.user_id)).await?;
+            if new_legal_yes || birth_changed {
+                invalidated = crate::document_signatures::invalidate_representative_identity(&mut tx, lead_id, auth.user_id).await?.1;
+            }
+            tx.commit().await
+        }.await;
+        if let Err(error) = saved {
+            return intake::internal(error, "save representative questions");
+        }
+        crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
+        publish_cabinet_change(&state, lead_id, auth.user_id, kind).await;
+    } else {
+        drop(tx);
+    }
+    request_response(&state, lead_id, auth.user_id, kind, StatusCode::OK).await
+}
 
 /// The roles that work the lead and read its payer block.
 #[allow(clippy::result_large_err)]
@@ -2555,6 +2985,7 @@ pub(crate) async fn set_lead_custody(
         );
     }
     let previous = loaded.representation.answers.custody.clone();
+    let mut invalidated = Vec::new();
     if previous != custody {
         let written = async {
             // The statements row belongs to the lead: its change time and
@@ -2578,7 +3009,15 @@ pub(crate) async fn set_lead_custody(
                     json!({ "custody": custody, "previous": previous }),
                 ),
             )
-            .await
+            .await?;
+            invalidated = crate::document_signatures::invalidate_representative_identity(
+                &mut tx,
+                lead_id,
+                auth.user_id,
+            )
+            .await?
+            .1;
+            Ok::<(), sqlx::Error>(())
         }
         .await;
         if let Err(error) = written {
@@ -2593,6 +3032,7 @@ pub(crate) async fn set_lead_custody(
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit custody");
     }
+    crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
     if previous != custody {
         publish_staff_change(&state, lead_id, auth.user_id).await;
     }
@@ -2662,6 +3102,16 @@ pub(crate) async fn remove_lead_representative(
         Ok(false) => return intake::err(StatusCode::NOT_FOUND, "Representative not found"),
         Err(error) => return intake::internal(error, "remove representative"),
     }
+    let invalidated = match crate::document_signatures::invalidate_representative_identity(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok((_, remote)) => remote,
+        Err(error) => return intake::internal(error, "invalidate representative invitation"),
+    };
     let loaded = match load(&mut tx, lead_id).await {
         Ok(Some(loaded)) => loaded,
         Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
@@ -2670,6 +3120,7 @@ pub(crate) async fn remove_lead_representative(
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit representative removal");
     }
+    crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
     publish_staff_change(&state, lead_id, auth.user_id).await;
     Json(json!({ "representation": staff_payload(&loaded) })).into_response()
 }
@@ -3056,13 +3507,13 @@ mod tests {
     }
 
     #[test]
-    fn a_minor_needs_both_parents_or_the_one_custodian_or_guardian() {
+    fn a_minor_contract_needs_both_parents_or_the_one_custodian_or_guardian() {
         // Nobody on file yet: both parents by default.
         let mut expected = vec!["custody".to_string()];
         expected.extend(keys(SLOT_REP1, &MINOR_REQUIRED));
         expected.extend(keys(SLOT_REP2, &MINOR_REQUIRED));
         assert_eq!(
-            missing_for_submit(&loaded(true, Answers::default(), Vec::new()), today()),
+            missing_for_contract(&loaded(true, Answers::default(), Vec::new()), today()),
             expected
         );
 
@@ -3081,7 +3532,7 @@ mod tests {
         );
         both.uploads = vec![upload(2, UPLOAD_IDENTITY)];
         assert_eq!(
-            missing_for_submit(&both, today()),
+            missing_for_contract(&both, today()),
             vec![
                 "custody",
                 "rep1_id_upload",
@@ -3102,16 +3553,53 @@ mod tests {
             vec![complete_person(1, SLOT_REP1, ROLE_LEGAL_REPRESENTATIVE)],
         );
         alone.uploads = vec![upload(1, UPLOAD_IDENTITY)];
-        assert!(missing_for_submit(&alone, today()).is_empty());
+        assert!(missing_for_contract(&alone, today()).is_empty());
 
         // A guardian needs the appointment deed.
         alone.representation.answers.custody = Some(CUSTODY_GUARDIAN.into());
         assert_eq!(
-            missing_for_submit(&alone, today()),
+            missing_for_contract(&alone, today()),
             vec!["rep1_authority_upload"]
         );
         alone.uploads.push(upload(1, UPLOAD_AUTHORITY));
-        assert!(missing_for_submit(&alone, today()).is_empty());
+        assert!(missing_for_contract(&alone, today()).is_empty());
+    }
+
+    #[test]
+    fn a_minor_intake_is_short_but_contract_details_are_still_required() {
+        let mut parent = complete_person(1, SLOT_REP1, ROLE_LEGAL_REPRESENTATIVE);
+        parent.date_of_birth = None;
+        parent.extras = Extras {
+            country: Some("DE".into()),
+            citizenships: vec!["DE".into()],
+            ..Default::default()
+        };
+        let mut child = loaded(
+            true,
+            Answers {
+                custody: Some(CUSTODY_GUARDIAN.into()),
+                ..Default::default()
+            },
+            vec![parent],
+        );
+        assert!(missing_for_submit(&child, today()).is_empty());
+        let full = missing_for_contract(&child, today());
+        for key in [
+            "rep1_date_of_birth",
+            "rep1_birth_place",
+            "rep1_street",
+            "rep1_id_document_number",
+            "rep1_id_upload",
+            "rep1_authority_upload",
+        ] {
+            assert!(full.contains(&key.to_string()), "{key}");
+        }
+        child.document_stage = true;
+        assert_eq!(
+            missing_for_submit(&child, today()),
+            full,
+            "an explicit document request reveals full requirements"
+        );
     }
 
     fn patch(body: Value) -> PersonPatch {

@@ -15,8 +15,8 @@ import type {
 
 /** The blocks the cabinet asks, in letter order (D and E are the payer link's). */
 // Personal details and the legal questions first, then the rest in letter order.
-export const FOLLOW_UP_BLOCKS = ["K", "L", "A", "B", "C", "F", "G", "H", "I", "J"] as const satisfies readonly FollowUpBlock[];
-const BEFORE_SUBMIT_BLOCKS: ReadonlySet<FollowUpBlock> = new Set(["A", "F", "K", "L", "H", "J"]);
+export const FOLLOW_UP_BLOCKS = ["K", "L", "R", "A", "B", "C", "F", "G", "H", "I", "J"] as const satisfies readonly FollowUpBlock[];
+const BEFORE_SUBMIT_BLOCKS: ReadonlySet<FollowUpBlock> = new Set(["A", "F", "K", "L", "H", "J", "R"]);
 
 export function followUpBeforeSubmit(request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "submitted_at">>): boolean {
   return !request.submitted_at && request.follow_up?.before_submit === true;

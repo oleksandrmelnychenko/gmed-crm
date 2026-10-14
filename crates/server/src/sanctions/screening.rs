@@ -5,7 +5,8 @@
 //! * for a minor patient, the lead's trusted contacts whose relation is
 //!   parent or guardian (`lead_guardian`), with the name parts, citizenships
 //!   and residence country the parent entered in the cabinet
-//!   (`lead_representatives`, by the id of the contact);
+//!   (`lead_representatives`, by the id of the contact). An explicit link to
+//!   an existing patient fills missing basic identity, never medical data;
 //! * for an adult patient, the representative and the legal guardian
 //!   (Betreuer) named in the cabinet — the same `lead_guardian` subject, its
 //!   relation is the role;
@@ -310,8 +311,8 @@ pub async fn load_lead_subjects(
         .next())
 }
 
-/// The subjects of several leads with two queries; anonymised and missing
-/// leads are left out.
+/// The subjects of several leads with batched queries; anonymised and missing
+/// leads are left out, and linked representatives never cause per-person reads.
 pub async fn load_leads_subjects(
     db: &gmed_db::DbPool,
     lead_ids: &[Uuid],
@@ -331,7 +332,10 @@ pub async fn load_leads_subjects(
     .fetch_all(db)
     .await?;
     let mut payers = load_payer_rows(db, lead_ids).await;
-    let mut representatives = load_representative_rows(db, lead_ids).await?;
+    let mut representatives = {
+        let mut conn = db.acquire().await?;
+        crate::services::lead_guardian_identity::load_many(&mut conn, lead_ids).await?
+    };
     let mut recipients = load_recipient_rows(db, lead_ids).await?;
     let mut contacts = load_lead_contact_rows(db, lead_ids).await?;
     let today = crate::app_time::today();
@@ -402,28 +406,8 @@ async fn load_recipient_rows(
     Ok(rows.into_iter().collect())
 }
 
-/// What the cabinet holds about the representatives of the leads
-/// (`lead_representatives`), as JSON rows by lead: the role, the name parts,
-/// the citizenships and the residence country of a trusted contact
-/// (`contact_id`).
-async fn load_representative_rows(
-    db: &gmed_db::DbPool,
-    lead_ids: &[Uuid],
-) -> Result<HashMap<Uuid, Vec<Value>>, sqlx::Error> {
-    let rows: Vec<(Uuid, Value)> = sqlx::query_as(
-        "SELECT r.lead_id, to_jsonb(r) FROM lead_representatives r WHERE r.lead_id = ANY($1)",
-    )
-    .bind(lead_ids)
-    .fetch_all(db)
-    .await?;
-    let mut by_lead: HashMap<Uuid, Vec<Value>> = HashMap::new();
-    for (lead_id, row) in rows {
-        by_lead.entry(lead_id).or_default().push(row);
-    }
-    Ok(by_lead)
-}
-
 /// The row of a trusted contact among a lead's representative rows.
+#[cfg(test)]
 fn representative_row<'a>(rows: &'a [Value], contact: &Value) -> Option<&'a Value> {
     let contact_id = json_text(contact, "id").to_lowercase();
     if contact_id.is_empty() {
@@ -498,7 +482,7 @@ fn guardian_subject(
 fn lead_subjects_from_row(
     row: &sqlx::postgres::PgRow,
     payer_rows: &[Value],
-    representative_rows: &[Value],
+    representatives: &[crate::services::lead_guardian_identity::CanonicalGuardianIdentity],
     today: NaiveDate,
 ) -> Option<LeadSubjects> {
     let lead_id: Uuid = row.try_get("id").ok()?;
@@ -536,39 +520,37 @@ fn lead_subjects_from_row(
         relation: None,
     }];
 
-    let contacts: Value = row
-        .try_get::<Option<Value>, _>("trusted_contacts")
-        .unwrap_or(None)
-        .unwrap_or(Value::Null);
     if crate::routes::leads::is_minor_on(date_of_birth, today) {
-        for (position, contact) in contacts.as_array().into_iter().flatten().enumerate() {
+        for identity in representatives {
+            let contact = &identity.contact;
             let relation = json_text(contact, "relation");
             if !is_guardian_relation(&relation) {
                 continue;
             }
             // What the parent entered in the cabinet; a row of an adult role
             // (from before a corrected date of birth) says nothing here.
-            let extras = representative_row(representative_rows, contact)
-                .filter(|extras| json_text(extras, "role") == "legal_representative");
+            let extras = (identity.role == "legal_representative").then_some(&identity.extras);
             subjects.push(guardian_subject(
-                lead_id, position, contact, extras, relation,
+                lead_id,
+                identity.position,
+                contact,
+                extras,
+                relation,
             ));
         }
     } else {
         // An adult's contacts are not screened — but for the representative
         // and the legal guardian (Betreuer) the lead named in the cabinet.
-        for (position, contact) in contacts.as_array().into_iter().flatten().enumerate() {
-            let Some(extras) = representative_row(representative_rows, contact) else {
-                continue;
-            };
-            let role = json_text(extras, "role");
+        for identity in representatives {
+            let contact = &identity.contact;
+            let role = &identity.role;
             if role == "authorised_representative" || role == "legal_guardian" {
                 subjects.push(guardian_subject(
                     lead_id,
-                    position,
+                    identity.position,
                     contact,
-                    Some(extras),
-                    role,
+                    Some(&identity.extras),
+                    role.clone(),
                 ));
             }
         }

@@ -73,6 +73,7 @@ import {
 } from "./lead-request-parts";
 import { PayerSection } from "./lead-request-payer-section";
 import { RepresentationSection } from "./lead-request-representation";
+import { RepresentativeQuestionsBlock } from "./lead-request-representative-questions";
 import { followUpFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // Step "Ergänzende Angaben" (trigger flow 2026-10-07, contract 3 and 6): the
@@ -81,7 +82,7 @@ import { followUpFieldLabel, type LeadRequestText } from "./lead-request-text";
 // never says so (P2). The answers autosave like the rest of the form; "send"
 // tells GMED they are complete.
 
-type Part = "identification" | "funds" | "billing" | "representation" | "payer";
+type Part = "identification" | "funds" | "billing" | "representation" | "payer" | "representative_questions";
 
 const FULL_ROW = "sm:col-span-2 lg:col-span-3";
 
@@ -119,6 +120,7 @@ export function FollowUpStep({
     billing: "idle",
     representation: "idle",
     payer: "idle",
+    representative_questions: "idle",
   });
   const setPart = useCallback((part: Part, state: SaveState) => {
     setStates((current) => (current[part] === state ? current : { ...current, [part]: state }));
@@ -128,6 +130,7 @@ export function FollowUpStep({
   const onBillingState = useCallback((state: SaveState) => setPart("billing", state), [setPart]);
   const onRepresentationState = useCallback((state: SaveState) => setPart("representation", state), [setPart]);
   const onPayerState = useCallback((state: SaveState) => setPart("payer", state), [setPart]);
+  const onRepresentativeQuestionsState = useCallback((state: SaveState) => setPart("representative_questions", state), [setPart]);
   // F, B, H and J are statements of the identification: one record, one autosave.
   const identification = useIdentificationForm({ request, text, enqueue, onChange, onSaveState: onIdentificationState });
   const [sending, setSending] = useState(false);
@@ -163,6 +166,8 @@ export function FollowUpStep({
     switch (block) {
       case "A":
         return <FundsBlock request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} onSaveState={onFundsState} />;
+      case "R":
+        return <RepresentativeQuestionsBlock request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} onSaveState={onRepresentativeQuestionsState} />;
       case "B":
         return <RelationshipBlock request={request} form={identification} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />;
       case "C":
@@ -256,7 +261,7 @@ export function FollowUpStep({
             {showMissing ? (
               <MissingList
                 title={text.stepMissingTitle}
-                labels={followUpMissing(request, block).map((key) => followUpFieldLabel(text, key, guardian))}
+                labels={followUpMissing(request, block).map((key) => followUpFieldLabel(text, key, guardian, request.follow_up?.representatives))}
                 testId={`lead-request-follow-up-${block}-missing`}
               />
             ) : null}

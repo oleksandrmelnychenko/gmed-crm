@@ -70,7 +70,7 @@ import { PayerSection } from "./lead-request-payer-section";
 import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection } from "./lead-request-representation";
-import { asLeadCabinetLang, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { asLeadCabinetLang, childSectionTitle, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // The steps of the lead cabinet that hold the base form (trigger flow
 // 2026-10-07, contract 6): short steps of the wider layout, each with what it
@@ -367,7 +367,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
         />
       </Section>
 
-      <Section title={text.sectionPerson}>
+      <Section title={childSectionTitle(text, "person", request.minor)}>
         {showNamePassportHint ? (
           <StatusChip id="lead-request-name-passport-hint" tone="warning" className="items-start rounded-lg px-2.5 py-1.5">
             <CircleAlert aria-hidden="true" className="mt-[3px]" />
@@ -375,7 +375,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
           </StatusChip>
         ) : null}
         <div className={GRID}>
-          {withIdentification ? (
+          {withIdentification && !request.minor ? (
             <IdentificationFormField form={identification} field="salutation" text={text}>
               <NativeComboboxSelect
                 id="lead-request-salutation"
@@ -476,7 +476,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
       </Section>
 
       {/* Address and contact (owner 2026-10-09: one tab with the consent and the person). */}
-      <Section title={text.sectionAddress}>
+      <Section title={childSectionTitle(text, "address", request.minor)}>
         <div className={GRID}>
           <FormField field="street_address" text={text} error={errorFor("street_address")} required className="sm:col-span-2">
             <Input
@@ -519,7 +519,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
           </FormField>
         </div>
       </Section>
-      <Section title={text.sectionContact}>
+      <Section title={childSectionTitle(text, "contact", request.minor)}>
         <div className={GRID}>
           <FormField field="phone" text={text} error={errorFor("phone")} required={request.access_kind !== "guardian"}>
             <Input
@@ -584,7 +584,7 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
 
   return (
     <StepFrame testId="lead-request-step-contact" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
-      <Section title={text.sectionAddress}>
+      <Section title={childSectionTitle(text, "address", request.minor)}>
         <div className={GRID}>
           <FormField field="street_address" text={text} error={errorFor("street_address")} required className="sm:col-span-2">
             <Input
@@ -624,7 +624,7 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
           </FormField>
         </div>
       </Section>
-      <Section title={text.sectionContact}>
+      <Section title={childSectionTitle(text, "contact", request.minor)}>
         <div className={GRID}>
           <FormField field="phone" text={text} error={errorFor("phone")}>
             <Input
@@ -703,7 +703,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
     payerAnswer(request.payer, request.payer_self_template) === "guardian" || request.billing?.payment_route_by === "guardian"));
   return (
     <StepFrame testId="lead-request-step-billing" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
-      <Section title={text.sectionInsurance}>
+      <Section title={childSectionTitle(text, "insurance", request.minor)}>
         <div className={GRID} data-testid="lead-request-insurance">
           <LabeledField
             id="lead-request-has_insurance"
@@ -944,7 +944,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
       </Section>
 
       {asksReason ? (
-        <Section title={text.sectionRequest}>
+        <Section title={childSectionTitle(text, "request", request.minor)}>
           <div data-testid="lead-request-reason">
             <IdentificationFormField form={identification} field="request_reason" text={text} required>
               <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={5} disabled={!consentReady} />
@@ -954,7 +954,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
         </Section>
       ) : null}
 
-      <Section title={text.sectionUpload}>
+      <Section title={childSectionTitle(text, "upload", request.minor)}>
         <p className="text-sm text-muted-foreground">{text.documentsIntro}</p>
         <div className="space-y-2">
           <input

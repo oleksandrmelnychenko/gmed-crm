@@ -39,7 +39,7 @@ pub const MIN_REASON_CHARS: usize = 10;
 pub const MAX_REASON_CHARS: usize = 2000;
 
 /// The blocks the cabinet answers (D and E belong to the payer's link).
-pub const CABINET_BLOCKS: [&str; 10] = ["A", "B", "C", "F", "G", "H", "I", "J", "K", "L"];
+pub const CABINET_BLOCKS: [&str; 11] = ["A", "B", "C", "F", "G", "H", "I", "J", "K", "L", "R"];
 
 /// Longest reason of the request (13.1).
 pub const REQUEST_REASON_MAX: usize = 4000;
@@ -49,6 +49,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/me/lead-requests/{lead_id}/follow-up/submit",
             post(submit_follow_up),
+        )
+        .route(
+            "/me/lead-requests/{lead_id}/representatives/{representative_id}/country-questions",
+            post(crate::routes::lead_representatives::save_my_country_questions),
         )
         .route(
             "/me/lead-requests/{lead_id}/relationship-proof",
@@ -273,7 +277,7 @@ pub async fn follow_up_json(
     let changed_since_answer: bool = if let Some(answered_at) = answered_at {
         sqlx::query_scalar(r#"SELECT EXISTS (
             SELECT 1 FROM leads l, jsonb_each(CASE WHEN jsonb_typeof(l.portal_field_updates) = 'object' THEN l.portal_field_updates ELSE '{}'::jsonb END) f
-            WHERE l.id = $1 AND f.key = ANY(ARRAY['enhanced_details','statements','identification','representation','billing','payer'])
+            WHERE l.id = $1 AND f.key = ANY(ARRAY['enhanced_details','statements','identification','representation','representative_questions','billing','payer'])
               AND (f.value->>'at')::timestamptz > $2
         ) OR EXISTS (
             SELECT 1 FROM lead_portal_uploads u WHERE u.lead_id = $1
@@ -289,6 +293,7 @@ pub async fn follow_up_json(
         "before_submit": false,
         "blocks": [],
         "missing": {},
+        "representatives": [],
         "answered_at": answered_at,
         "changed_since_answer": changed_since_answer,
     });
@@ -358,6 +363,7 @@ pub async fn follow_up_json(
         "answered_at": answered_at,
         "changed_since_answer": changed_since_answer,
         "identity_since": identity_since,
+        "representatives": answers.representatives.iter().filter(|person| person.country_questions).collect::<Vec<_>>(),
     }))
 }
 

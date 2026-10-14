@@ -774,6 +774,7 @@ export function RepresentationSection({
   // A person removed with "remove" leaves an empty form in its place.
   const [generations, setGenerations] = useState<Partial<Record<RepresentativeSlot, number>>>({});
   const [states, setStates] = useState<Record<string, SaveState>>({});
+  const [showDocumentDetails, setShowDocumentDetails] = useState(false);
   // A person's form opens once the server has the answer that asks for it (it
   // then knows whom it holds for that place), and closes with the answer.
   const stored = shownSlots(minor, draftFromRepresentation(representation), representation);
@@ -787,8 +788,9 @@ export function RepresentationSection({
   const [missingAtStart] = useState(() => slotsBeyondBase(stepMissing));
   const missingNow = slotsBeyondBase(stepMissing);
   // A parent who already gave more than names and contacts keeps the whole form.
-  const whole = (slot: RepresentativeSlot) => mode === "follow_up" || !minor || missingAtStart.has(slot) || missingNow.has(slot)
-    || storedBeyondBase(representativeInSlot(representation, slot));
+  const whole = (slot: RepresentativeSlot) => mode === "follow_up" || !minor || showDocumentDetails || representation?.document_stage === true
+    || (representation?.document_stage === undefined && (missingAtStart.has(slot) || missingNow.has(slot)
+      || storedBeyondBase(representativeInSlot(representation, slot))));
   const fieldsOf = (slot: RepresentativeSlot): ReadonlySet<RepresentativeField> =>
     new Set(whole(slot) ? REPRESENTATIVE_FIELDS : minor ? BASE_REPRESENTATIVE_FIELDS : []);
   const shown = answered.filter((slot) => minor || whole(slot));
@@ -929,8 +931,13 @@ export function RepresentationSection({
 
   if (minor) {
     return (
-      <Section title={text.sectionLegalRepresentatives}>
+      <Section title={text.sectionLegalRepresentatives} accessory={representation.document_stage === false ? (
+        <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 max-w-full whitespace-normal" onClick={() => setShowDocumentDetails((value) => !value)} data-testid="lead-request-parent-document-details">
+          {showDocumentDetails ? text.parentShortForm : text.parentDocumentDetails}
+        </Button>
+      ) : undefined}>
         <div className="space-y-4" data-testid="lead-request-representation">
+          {representation.document_stage === false && !showDocumentDetails ? <p className="text-sm leading-relaxed text-muted-foreground">{text.parentShortFormIntro}</p> : null}
           <LabeledField id="lead-request-custody" label={text.custodyQuestion}>
             <NativeComboboxSelect
               id="lead-request-custody"

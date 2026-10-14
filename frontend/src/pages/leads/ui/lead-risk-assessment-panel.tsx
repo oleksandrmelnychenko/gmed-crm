@@ -6,11 +6,14 @@ import type { ColumnDef } from "@/components/data-table/types";
 
 import { Section, StatusBadge, checkboxClass, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { countryLabel } from "@/components/ui/country-select";
+import { leadRequestText } from "@/pages/patient-lead/lead-request-text";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { SanctionsReasonDialog } from "@/pages/sanctions/components";
 
 import type { Tx } from "../model/lead-payer";
+import { REPRESENTATIVE_COUNTRY_FIELDS, REPRESENTATIVE_QUESTIONS } from "@/pages/patient-lead/lead-request-representative-questions-model";
 import {
   RISK_BLOCK_KEYS,
   riskAssessmentStarted,
@@ -72,7 +75,7 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
     {
       id: "trigger",
       label: tx("Триггер", "Auslöser"),
-      accessor: (trigger) => riskTriggerLabel(trigger.key, tx),
+      accessor: (trigger) => riskTriggerLabel(trigger.key, tx, trigger.subject),
       minWidth: 360,
       cellClassName: "whitespace-normal break-words leading-4",
       render: (trigger) => {
@@ -80,7 +83,7 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
         return (
           <span data-testid={`lead-risk-trigger-${trigger.key}`} data-active={trigger.active ? "true" : "false"}>
             <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">{trigger.key}</span>
-            <span className="font-medium">{riskTriggerLabel(trigger.key, tx)}</span>
+            <span className="font-medium">{riskTriggerLabel(trigger.key, tx, trigger.subject)}</span>
             {variant ? <span className="text-muted-foreground"> · {variant}</span> : null}
           </span>
         );
@@ -134,7 +137,7 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
   );
 }
 
-function BlockRow({ block, requested, beforeSubmit = false, tx }: { block: RiskBlockState; requested: boolean; beforeSubmit?: boolean; tx: Tx }) {
+function BlockRow({ block, requested, beforeSubmit = false, tx, representatives }: { block: RiskBlockState; requested: boolean; beforeSubmit?: boolean; tx: Tx; representatives: LeadRiskAssessment["representatives"] }) {
   return (
     <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5" data-testid={`lead-risk-block-${block.key}`}>
       <span className="font-mono text-[11px] font-semibold text-foreground">{block.key}</span>
@@ -148,7 +151,7 @@ function BlockRow({ block, requested, beforeSubmit = false, tx }: { block: RiskB
       </span>
       {block.missing.length > 0 ? (
         <span className="w-full text-xs text-muted-foreground" data-testid={`lead-risk-block-${block.key}-missing`}>
-          {tx("не хватает", "fehlt")}: {block.missing.map((key) => riskMissingLabel(key, tx)).join(", ")}
+          {tx("не хватает", "fehlt")}: {block.missing.map((key) => riskMissingLabel(key, tx, representatives)).join(", ")}
         </span>
       ) : null}
     </li>
@@ -226,6 +229,8 @@ export function LeadRiskAssessmentPanel({
   const secondReviewerMissing = riskSecondReviewerMissing(assessment);
   const requested = new Set(assessment.requested_blocks);
   const blocksShown = assessment.blocks.filter((block) => block.open || requested.has(block.key));
+  const lang = tx("ru", "de");
+  const cabinetText = leadRequestText(lang);
 
   const run = async (action: () => Promise<void>) => {
     try {
@@ -363,6 +368,34 @@ export function LeadRiskAssessmentPanel({
 
         <TriggerTable assessment={assessment} tx={tx} />
 
+        {assessment.representatives && assessment.representatives.length > 0 ? (
+          <div className="space-y-3" data-testid="lead-risk-representative-answers">
+            <Caption>{riskBlockLabel("R", tx)}</Caption>
+            {assessment.representatives.map((person) => (
+              <section key={person.id} className="rounded-lg border border-border bg-card p-3" data-testid={`lead-risk-representative-${person.id}`}>
+                <h5 className="mb-2 break-words text-sm font-semibold">{person.name || tx("Представитель", "Vertreter")}</h5>
+                <dl className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {REPRESENTATIVE_COUNTRY_FIELDS.flatMap((field) => {
+                    const value = person.fields[field];
+                    if (value === null || value === undefined || value === "") return [];
+                    const question = (REPRESENTATIVE_QUESTIONS as readonly string[]).includes(field);
+                    return [<div key={field} className="min-w-0">
+                      <dt className="text-xs text-muted-foreground">{field === "pep_self" ? tx("PEP: представитель", "PEP: Vertreter") : riskMissingLabel(field, tx)}</dt>
+                      <dd className="mt-1 whitespace-pre-wrap break-words text-sm">
+                        {question ? <StatusBadge tone={value === true ? "warning" : "success"}>{value === true ? tx("Да", "Ja") : tx("Нет", "Nein")}</StatusBadge>
+                          : field === "stay_reason" ? cabinetText.stayReasonOptions[value as keyof typeof cabinetText.stayReasonOptions] ?? String(value)
+                            : field === "sanctions_link_kind" ? cabinetText.sanctionsLinkKindOptions[value as keyof typeof cabinetText.sanctionsLinkKindOptions] ?? String(value)
+                              : field === "pep_country" || field === "birth_country" ? countryLabel(String(value), lang) : String(value)}
+                      </dd>
+                    </div>];
+                  })}
+                </dl>
+                {!Object.values(person.fields).some((value) => value !== null && value !== undefined && value !== "") ? <span className="text-xs text-muted-foreground">{tx("Не отвечено", "Nicht beantwortet")}</span> : null}
+              </section>
+            ))}
+          </div>
+        ) : null}
+
         {started && assessment.sanctions_confirmed ? (
           <p className={cn("text-xs leading-5", WARNING_TEXT)} data-testid="lead-risk-sanctions-confirmed">
             {tx(
@@ -385,7 +418,7 @@ export function LeadRiskAssessmentPanel({
             </p> : null}
             <ul className="space-y-1 text-xs">
               {blocksShown.map((block) => (
-                <BlockRow key={block.key} block={block} requested={requested.has(block.key)} beforeSubmit={questionsBeforeSubmit} tx={tx} />
+                <BlockRow key={block.key} block={block} requested={requested.has(block.key)} beforeSubmit={questionsBeforeSubmit} tx={tx} representatives={assessment.representatives} />
               ))}
             </ul>
             {started && assessment.follow_up_answered_at ? (

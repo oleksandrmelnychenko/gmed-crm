@@ -4,6 +4,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { storedTrustedPersons } from "./lead-trusted-persons-model";
+import { REPRESENTATIVE_COUNTRY_FIELDS } from "./lead-request-representative-questions-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
 import {
@@ -36,6 +37,8 @@ import {
 } from "./lead-request-representation-model";
 import {
   identificationFieldLabel,
+  childSectionTitle,
+  followUpFieldLabel,
   invoiceToLabel,
   payerFieldLabel,
   representativeFieldLabel,
@@ -172,8 +175,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
   const fileNames = (documents: readonly { file_name: string | null }[] | null | undefined) =>
     (documents ?? []).map((document) => document.file_name ?? "—").join(", ");
 
-  group("person", text.sectionPerson, [
-    [identificationLabel("salutation"), option(text.salutationOptions, identification?.salutation)],
+  group("person", childSectionTitle(text, "person", request.minor), [
+    [identificationLabel("salutation"), request.minor ? "" : option(text.salutationOptions, identification?.salutation)],
     [text.fields.first_name, data.first_name],
     [text.fields.last_name, data.last_name],
     [text.fields.middle_name, data.middle_name],
@@ -185,14 +188,14 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     [text.fields.citizenships, countries(data.citizenships)],
   ]);
 
-  group("address", text.sectionAddress, [
+  group("address", childSectionTitle(text, "address", request.minor), [
     [text.fields.street_address, data.street_address],
     [text.fields.zip_code, data.zip_code],
     [text.fields.city, data.city],
     [text.fields.country, country(data.country)],
   ]);
 
-  group("contact", text.sectionContact, [
+  group("contact", childSectionTitle(text, "contact", request.minor), [
     [text.fields.phone, data.phone],
     [text.fields.primary_language, data.primary_language ? languageName(data.primary_language, lang) : ""],
     [
@@ -203,7 +206,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
 
   // The identity document: the copies only, GMED enters the data.
   if (identification) {
-    group("identity", text.sectionIdentity, [[text.identityFiles, fileNames(request.identity_documents)]]);
+    group("identity", childSectionTitle(text, "identity", request.minor), [[request.minor ? text.childIdentityFiles : text.identityFiles, fileNames(request.identity_documents)]]);
   }
 
   // Who acts for the lead: the answers of an adult or the custody of a minor,
@@ -263,7 +266,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     });
   }
 
-  group("insurance", text.sectionInsurance, [
+  group("insurance", childSectionTitle(text, "insurance", request.minor), [
     [guardian ? text.hasInsuranceGuardian : text.fields.has_insurance, yesNo(data.has_insurance)],
     ...(data.has_insurance
       ? ([
@@ -502,6 +505,18 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       rows.push([identificationLabel("sanctions_link_name"), identification?.sanctions_link_name]);
       rows.push([identificationLabel("sanctions_link_kind"), option(text.sanctionsLinkKindOptions, identification?.sanctions_link_kind)]);
       rows.push([identificationLabel("sanctions_link_since_extent"), identification?.sanctions_link_since_extent]);
+    }
+    if (blocks.includes("R")) {
+      for (const person of request.follow_up?.representatives ?? []) {
+        for (const field of REPRESENTATIVE_COUNTRY_FIELDS) {
+          const value = person.fields[field];
+          const shown = typeof value === "boolean" ? yesNo(value)
+            : field === "stay_reason" ? option(text.stayReasonOptions, value)
+              : field === "sanctions_link_kind" ? option(text.sanctionsLinkKindOptions, value)
+                : field === "pep_country" || field === "birth_country" ? country(value) : value;
+          rows.push([`${person.name}: ${followUpFieldLabel(text, field)}`, shown]);
+        }
+      }
     }
     // K and L are listed in their own groups: with nothing else answered there is no
     // empty "follow-up" group (QA 2026-10-10).

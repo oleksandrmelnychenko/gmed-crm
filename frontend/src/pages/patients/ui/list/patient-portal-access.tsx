@@ -28,6 +28,7 @@ import {
   type PatientMessageLanguage,
 } from "@/pages/leads/model/lead-portal-access";
 import { leadErrorMessage } from "@/pages/leads/model/leads-model";
+import { isMinor } from "@/pages/leads/model/lead-wizard.model";
 import { LoginEmailFact, PortalCredentialsDialog, PortalFact } from "@/pages/leads/ui/lead-portal-access";
 
 import {
@@ -94,8 +95,9 @@ export function PatientPortalAccessDetail({
   const [emailNotice, setEmailNotice] = useState("");
 
   const loginEmail = account?.email ?? patient.email ?? null;
-  const canCreate = status === "none" && Boolean(patient.email);
-  const canReset = status !== "none" && status !== "disabled";
+  const minor = isMinor(patient.birth_date ?? "", new Date());
+  const canCreate = !minor && status === "none" && Boolean(patient.email);
+  const canReset = !minor && status !== "none" && status !== "disabled";
   const canOffer = canIssue && (canCreate || canReset);
   const errorText = (nextError: unknown) =>
     loginEmailErrorMessage(nextError, lang)
@@ -127,6 +129,7 @@ export function PatientPortalAccessDetail({
       const result = await issuePatientPortalAccess(patient.id);
       setConfirmOpen(false);
       setIssued(result);
+      if (result.reused) setEmailNotice(de ? "Bestehender Elternzugang verknüpft. Passwort und Zugang zu den Kindern bleiben erhalten." : "Подключён существующий аккаунт родителя. Пароль и доступ к детям сохранены.");
       onChanged?.();
     } catch (nextError) {
       setError(errorText(nextError));
@@ -143,6 +146,12 @@ export function PatientPortalAccessDetail({
     let result: PatientPortalAccessIssued | null = null;
     try {
       result = await issuePatientPortalAccess(patient.id);
+      if (result.reused) {
+        setEmailConfirmOpen(false);
+        setEmailNotice(de ? "Bestehender Elternzugang verknüpft. Das bisherige Passwort gilt weiterhin; es wurde keine E-Mail versendet." : "Подключён существующий аккаунт родителя. Прежний пароль действует; письмо с новым паролем не отправлялось.");
+        return;
+      }
+      if (!result.one_time_password) throw new Error("no password issued");
       const sent = await sendPortalLoginEmail(
         { kind: "patient", id: patient.id },
         { user_id: result.user_id, password: result.one_time_password, language },
@@ -156,7 +165,7 @@ export function PatientPortalAccessDetail({
     } catch (nextError) {
       setEmailConfirmOpen(false);
       const reason = errorText(nextError);
-      if (result) {
+      if (result?.one_time_password) {
         setIssued(result);
         setError(
           de
@@ -179,7 +188,9 @@ export function PatientPortalAccessDetail({
       <div className="grid items-center gap-3 @[52rem]:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <AdminSectionTitle>{de ? "Patientenportal" : "Портал пациента"}</AdminSectionTitle>
-          <StatusChip tone={leadPortalStatusTone(status)}>{leadPortalStatusLabel(status, lang)}</StatusChip>
+          <StatusChip tone={minor ? "neutral" : leadPortalStatusTone(status)}>{minor
+            ? de ? "Über Eltern / gesetzliche Vertretung" : "Через родителя / представителя"
+            : leadPortalStatusLabel(status, lang)}</StatusChip>
         </div>
         <div className="grid w-full grid-cols-1 items-stretch gap-2 @[26rem]:grid-cols-[9rem_minmax(0,14rem)] @[52rem]:w-auto" role="group" aria-label={de ? "Portalaktionen" : "Действия с порталом"}>
         {canOffer ? (
@@ -355,7 +366,7 @@ export function PatientPortalAccessDetail({
 
       <PortalCredentialsDialog
         credentials={
-          issued
+          issued?.one_time_password
             ? {
                 email: issued.email ?? loginEmail ?? "",
                 password: issued.one_time_password,

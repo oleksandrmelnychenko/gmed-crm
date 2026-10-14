@@ -2596,6 +2596,48 @@ async fn create_lead(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, "begin lead creation");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+        }
+    };
+    if let Some(email) = account_email.as_deref() {
+        let name = format!("{} {}", body.first_name.trim(), body.last_name.trim());
+        let existing = match super::lead_portal_account::existing_parent_patients_in_tx(
+            &mut tx,
+            email,
+            &name,
+            date_of_birth,
+        )
+        .await
+        {
+            Ok(patients) => patients,
+            Err(error) => {
+                tracing::error!(%error,"check existing parent patient before lead creation");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+            }
+        };
+        if !existing.is_empty() {
+            drop(tx);
+            let patient_id = if let [patient] = existing.as_slice() {
+                match super::patients::has_patient_edit_access(&state, &auth, *patient).await {
+                    Ok(true) => Some(*patient),
+                    Ok(false) => None,
+                    Err(response) => return response,
+                }
+            } else {
+                None
+            };
+            return (StatusCode::CONFLICT,Json(json!({
+                "error":"existing_parent_patient_use_repeat_intake",
+                "code":"existing_parent_patient_use_repeat_intake",
+                "message":"This parent already has a patient record. Open that record to activate the existing login or start a repeat intake.",
+                "patient_id":patient_id,
+            }))).into_response();
+        }
+    }
     if let Err(response) = validate_lead_contact_identity(
         &state,
         &LeadContactIdentity {
@@ -2613,30 +2655,7 @@ async fn create_lead(
     {
         return response;
     }
-    // A minor gets no login of their own (owner decision 2026-10-03): the
-    // parents fill in the data through their account, and the address may be
-    // a parent's address that already has one.
-    if let Some(account_email) = account_email.as_deref() {
-        match crate::routes::lead_portal_account::email_owner(&state.db, account_email, None).await
-        {
-            Ok(None) => {}
-            Ok(Some(owner)) => {
-                return crate::routes::lead_portal_account::email_taken_response(owner);
-            }
-            Err(error) => {
-                tracing::error!(%error, "check lead portal email");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
-            }
-        }
-    }
 
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(error) => {
-            tracing::error!(%error, "begin lead creation");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
-        }
-    };
     let inserted = sqlx::query_as::<_, (Uuid, bool)>(
         r#"INSERT INTO leads (
                 first_name, last_name, email, phone, source, country,
@@ -4080,6 +4099,9 @@ async fn update_lead(
         }
         None => None,
     };
+    let representative_changed = trusted_contacts
+        .as_ref()
+        .is_some_and(|contacts| *contacts != current_guardians);
     // «PEP-статус проверен» lives in the wizard state: its change is audited
     // as an action of its own (GwG traceability), so the stored value before
     // the update is read in the same transaction.
@@ -4324,10 +4346,29 @@ async fn update_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    let representative_invites = if representative_changed {
+        match crate::document_signatures::invalidate_representative_identity(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok((_, remote)) => remote,
+            Err(error) => {
+                tracing::error!(%error, %lead_id, "invalidate representative invitation");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    } else {
+        Vec::new()
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, lead_id = %lead_id, "commit lead update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    crate::document_signatures::withdraw_invalidated_consents(&state, &representative_invites)
+        .await;
     // Open pages show the new name at once: Users & Roles reloads its list and
     // the lead's cabinet reloads the profile.
     if let Some(user_id) = renamed_login {
@@ -5928,6 +5969,20 @@ async fn convert_lead(
             StatusCode::CONFLICT,
             "Failed leads cannot be converted into patients",
         );
+    }
+
+    match super::lead_representatives::contract_details_missing(&mut tx, lead_id).await {
+        Ok(missing) if !missing.is_empty() => {
+            return super::lead_representatives::contract_details_incomplete(&missing);
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "validate representatives before conversion");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to check representatives",
+            );
+        }
     }
 
     // Freeze the order while validating and confirming this intake.
@@ -8038,6 +8093,7 @@ pub(crate) async fn anonymize_lead_pii(
     processed_by: Option<Uuid>,
 ) -> Result<(sqlx::postgres::PgQueryResult, LeadFreeTextScrub), sqlx::Error> {
     let reason = anonymised_failure_reason(reason);
+    super::lead_portal_plan_requests::erase_for_lead_in_tx(conn, lead_id).await?;
     // The payer declaration of an unconverted lead goes with it (a converted
     // one belongs to the patient record and is kept, § 8 Abs. 4 GwG). The
     // lead's own GwG statements from the cabinet, what the cabinet holds about

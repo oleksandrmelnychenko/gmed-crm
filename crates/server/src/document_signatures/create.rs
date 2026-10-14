@@ -307,6 +307,35 @@ pub(super) async fn create_request(
         }
     }
     package_scope(&rows)?;
+    let contract_stage = rows.iter().any(|row| {
+        !documents::is_dsgvo_consent_or_identity_document(
+            row.get::<Option<String>, _>("compliance_kind").as_deref(),
+            template_of(row).as_deref(),
+            &row.get::<String, _>("art"),
+        ) && !signed_by_patient_side_only(
+            template_of(row).as_deref(),
+            row.get::<Option<String>, _>("compliance_kind").as_deref(),
+            &row.get::<String, _>("art"),
+        ) && !legal::informational(template_of(row).as_deref())
+    });
+    if contract_stage {
+        let mut conn = state.db.acquire().await.map_err(db_error)?;
+        for row in &rows {
+            let missing = crate::routes::lead_representatives::contract_subject_details_missing(
+                &mut conn,
+                row.get("lead_id"),
+                row.get("patient_id"),
+                row.get("order_id"),
+            )
+            .await
+            .map_err(db_error)?;
+            if !missing.is_empty() {
+                return Err(
+                    crate::routes::lead_representatives::contract_details_incomplete(&missing),
+                );
+            }
+        }
+    }
 
     let mut signers = provider::normalize_signers(plan.signers)
         .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
@@ -507,6 +536,24 @@ pub(super) async fn create_request(
         .collect();
     sqlx::query("SELECT id FROM leads WHERE id = ANY($1) OR prospect_patient_id = ANY($2) OR converted_patient_id = ANY($2) ORDER BY id FOR UPDATE")
         .bind(&scope_leads).bind(&scope_patients).fetch_all(&mut *tx).await.map_err(db_error)?;
+    if contract_stage {
+        for member in &members {
+            let row = &member.row;
+            let missing = crate::routes::lead_representatives::contract_subject_details_missing(
+                &mut tx,
+                row.get("lead_id"),
+                row.get("patient_id"),
+                row.get("order_id"),
+            )
+            .await
+            .map_err(db_error)?;
+            if !missing.is_empty() {
+                return Err(
+                    crate::routes::lead_representatives::contract_details_incomplete(&missing),
+                );
+            }
+        }
+    }
 
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(connection::CONFIG_LOCK)
@@ -668,7 +715,7 @@ pub(super) async fn create_request(
                 // Consent may have changed during the provider call. The local
                 // request stays invalid; withdraw the invitation just created.
                 if let Some(remote) = remote {
-                    let invalidated: bool = sqlx::query_scalar("SELECT last_error = 'consent_choice_changed' FROM document_signature_requests WHERE id=$1")
+                    let invalidated: bool = sqlx::query_scalar("SELECT last_error IN ('consent_choice_changed','representative_changed') FROM document_signature_requests WHERE id=$1")
                         .bind(request_id).fetch_optional(&state.db).await.ok().flatten().unwrap_or(false);
                     if invalidated { let _ = provider.withdraw(remote).await; }
                 }

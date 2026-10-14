@@ -780,6 +780,46 @@ pub(crate) async fn invalidate_consent_choices(
     Ok((count, remote))
 }
 
+/// The people entitled to sign changed. Stop every still-open invitation for
+/// this inquiry, including order packages; signed evidence stays immutable.
+pub(crate) async fn invalidate_representative_identity(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    actor: Uuid,
+) -> Result<(usize, Vec<(Uuid, String)>), sqlx::Error> {
+    let rows = sqlx::query(r#"UPDATE document_signature_requests r
+        SET status = 'error', last_error = 'representative_changed', closed_kind = 'abandoned',
+            close_reason = 'representative_changed', closed_by = $2, closed_at = now(),
+            lease_token = NULL, lease_until = NULL, updated_at = now()
+        WHERE r.status IN ('pending','submitting','submission_unknown','needs_review')
+          AND EXISTS (SELECT 1 FROM documents d
+              WHERE (d.id = r.source_document_id OR EXISTS (SELECT 1 FROM document_signature_members m WHERE m.request_id = r.id AND m.document_id = d.id))
+                AND (d.lead_id = $1
+                  OR d.patient_id IN (SELECT prospect_patient_id FROM leads WHERE id = $1 UNION SELECT converted_patient_id FROM leads WHERE id = $1)
+                  OR d.order_id IN (SELECT id FROM orders WHERE source_lead_id = $1)))
+        RETURNING r.id, r.source_document_id, r.provider_request_id, r.provider_account"#)
+        .bind(lead_id).bind(actor).fetch_all(&mut **tx).await?;
+    let count = rows.len();
+    let mut remote = Vec::new();
+    for row in rows {
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "document_signature_representative_invalidated",
+                Some(actor),
+                "document",
+                Some(row.get("source_document_id")),
+                json!({"request_id":row.get::<Uuid,_>("id"),"reason":"representative_changed"}),
+            ),
+        )
+        .await?;
+        if let Some(id) = row.get::<Option<Uuid>, _>("provider_request_id") {
+            remote.push((id, row.get("provider_account")));
+        }
+    }
+    Ok((count, remote))
+}
+
 /// Local invalidation is already committed; a provider outage must not let
 /// an old consent acquire legal effects while remote withdrawal is attempted.
 pub(crate) async fn withdraw_invalidated_consents(state: &AppState, requests: &[(Uuid, String)]) {

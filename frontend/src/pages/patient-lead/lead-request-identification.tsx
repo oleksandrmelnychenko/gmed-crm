@@ -410,7 +410,7 @@ export function IdentityDocumentSection({
       {intro ? <p className="text-sm leading-6 text-muted-foreground">{intro}</p> : null}
       <div className="space-y-2" data-testid="lead-request-identity-upload">
         <p className={tokens.text.label}>
-          {text.identityFiles}
+          {request.minor ? text.childIdentityFiles : text.identityFiles}
           <RequiredMark />
         </p>
         <input
@@ -436,10 +436,10 @@ export function IdentityDocumentSection({
           onClick={() => fileInput.current?.click()}
         >
           {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
-          {uploading ? text.uploading : text.identityUploadButton}
+          {uploading ? text.uploading : request.minor ? text.childIdentityUploadButton : text.identityUploadButton}
         </Button>
         {consentReady ? (
-          <p className="text-xs text-muted-foreground">{text.identityUploadHint}</p>
+          <p className="text-xs text-muted-foreground">{request.minor ? text.childIdentityUploadHint : text.identityUploadHint}</p>
         ) : (
           <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
         )}
@@ -460,7 +460,7 @@ export function IdentityDocumentSection({
     </>
   );
   // Inside a follow-up block the block's own section carries the title.
-  return bare ? body : <Section title={title ?? text.sectionIdentity}>{body}</Section>;
+  return bare ? body : <Section title={title ?? (request.minor ? text.childSections.identity : text.sectionIdentity)}>{body}</Section>;
 }
 
 /**

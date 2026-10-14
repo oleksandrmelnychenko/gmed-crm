@@ -138,6 +138,8 @@ type PortalAccountActivationForm = {
 };
 
 type PortalAccountActivationResponse = {
+  reused?: boolean;
+  password_changed?: boolean;
   user_id: string;
   email: string;
   name: string;
@@ -679,7 +681,7 @@ function usePatientInvoicesTabContent({
   const [balanceAdjustmentReversalReason, setBalanceAdjustmentReversalReason] = useState("");
   const [balanceAdjustmentReversalRequestId, setBalanceAdjustmentReversalRequestId] = useState("");
   const linkedPortalAssignment = assignments.find(
-    (item) => item.user_role === "patient" && !item.revoked_at,
+    (item) => item.user_role === "patient" && !item.revoked_at && item.source !== "lead_guardian",
   );
   const [activatedPortalAccount, setActivatedPortalAccount] =
     useState<PortalAccountActivationResponse | null>(null);
@@ -1067,7 +1069,7 @@ function usePatientInvoicesTabContent({
           method: "POST",
           body: JSON.stringify({
             email: portalAccountForm.email.trim(),
-            password: portalAccountForm.password,
+            password: portalAccountForm.password || undefined,
           }),
         },
       );
@@ -1086,6 +1088,7 @@ function usePatientInvoicesTabContent({
   }
 
   async function copyPortalCredentials() {
+    if (activatedPortalAccount?.reused) return;
     const text = `${activatedPortalAccount?.email ?? portalAccountForm.email}\n${portalAccountForm.password}`;
     try {
       await navigator.clipboard.writeText(text);
@@ -2862,7 +2865,9 @@ function usePatientInvoicesTabContent({
               <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
               <div>
                 <p className="font-semibold">
-                  {activatedPortalAccount.created
+                  {activatedPortalAccount.reused
+                    ? lang === "de" ? "Bestehender Elternzugang verknüpft" : "Подключён существующий аккаунт родителя"
+                    : activatedPortalAccount.created
                     ? lang === "de"
                       ? "Patientenkonto wurde erstellt"
                       : "Аккаунт пациента создан"
@@ -2871,14 +2876,16 @@ function usePatientInvoicesTabContent({
                       : "Аккаунт пациента обновлён"}
                 </p>
                 <p className="mt-1 text-emerald-700">
-                  {lang === "de"
+                  {activatedPortalAccount.reused
+                    ? lang === "de" ? "Das bisherige Passwort und der Zugang zu den Kindern bleiben erhalten." : "Прежний пароль и доступ к детям сохранены."
+                    : lang === "de"
                     ? "Übermitteln Sie diese Zugangsdaten sicher an den Patienten. Das temporäre Passwort wird nach dem Schließen nicht mehr angezeigt."
                     : "Безопасно передайте эти данные пациенту. После закрытия временный пароль больше не будет показан."}
                 </p>
               </div>
             </div>
 
-            <FormSection title={lang === "de" ? "Zugangsdaten" : "Данные для входа"}>
+            {!activatedPortalAccount.reused ? <FormSection title={lang === "de" ? "Zugangsdaten" : "Данные для входа"}>
               <div className="space-y-3">
                 <Field
                   label={lang === "de" ? "E-Mail" : "Электронная почта"}
@@ -2931,7 +2938,7 @@ function usePatientInvoicesTabContent({
                       : "Скопировать данные"}
                 </Button>
               </div>
-            </FormSection>
+            </FormSection> : null}
           </>
         ) : (
           <>
@@ -2945,8 +2952,8 @@ function usePatientInvoicesTabContent({
                     ? "Das bestehende Patientenkonto wird aktiviert und erhält ein neues Passwort. Aktive Sitzungen werden beendet."
                     : "Существующий аккаунт пациента будет активирован и получит новый пароль. Активные сессии будут завершены."
                 : lang === "de"
-                  ? "Ein Patientenkonto wird erstellt und mit dieser Patientenakte verknüpft."
-                  : "Будет создан аккаунт пациента и привязан к этой карточке."}
+                  ? "Ein bestehender Elternzugang derselben Person wird mit seinem bisherigen Passwort verknüpft. Für einen neuen Zugang vergeben Sie ein Passwort."
+                  : "Существующий аккаунт родителя для этого же человека подключается с прежним паролем. Для нового аккаунта укажите пароль."}
             </Banner>
 
             <FormSection title={lang === "de" ? "Patientenzugang" : "Доступ пациента"}>
@@ -2996,7 +3003,7 @@ function usePatientInvoicesTabContent({
                     }
                     className={inputClass}
                     disabled={portalAccountBusy}
-                    required
+                    required={Boolean(linkedPortalAssignment)}
                   />
                 </Field>
                 <Field
@@ -3016,7 +3023,7 @@ function usePatientInvoicesTabContent({
                     }
                     className={inputClass}
                     disabled={portalAccountBusy}
-                    required
+                    required={Boolean(linkedPortalAssignment)}
                   />
                 </Field>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">

@@ -116,11 +116,17 @@ async fn lock_identity_lead(conn: &mut PgConnection, lead_id: Uuid) -> Result<bo
 // ----------------------------------------------------------------------------
 
 fn trigger_json(trigger: &Sticky) -> Value {
-    let blocks: Vec<&str> = risk::trigger_blocks(&trigger.key)
-        .iter()
-        .copied()
-        .filter(|block| !(matches!(*block, "H" | "J") && trigger.subject != risk::SUBJECT_PATIENT))
-        .collect();
+    let blocks: Vec<&str> = if trigger.subject == risk::SUBJECT_REPRESENTATIVE {
+        vec!["R"]
+    } else {
+        risk::trigger_blocks(&trigger.key)
+            .iter()
+            .copied()
+            .filter(|block| {
+                !(matches!(*block, "H" | "J") && trigger.subject != risk::SUBJECT_PATIENT)
+            })
+            .collect()
+    };
     json!({
         "key": trigger.key,
         "subject": trigger.subject,
@@ -323,6 +329,7 @@ async fn assessment_json(
         "triggers": triggers.iter().map(trigger_json).collect::<Vec<_>>(),
         "blocks": blocks,
         "before_submit": before_submit,
+        "representatives": answers.representatives.iter().filter(|person| person.country_questions).collect::<Vec<_>>(),
         "requested_blocks": requested,
         "follow_up_answered_at": stored.as_ref().and_then(|assessment| assessment.follow_up_answered_at),
         "review_notice": review_notice,

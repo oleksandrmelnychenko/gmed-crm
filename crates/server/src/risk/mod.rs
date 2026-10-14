@@ -34,6 +34,7 @@ pub const CONFIG_SETTING: &str = "risk_assessment_config";
 
 pub const SUBJECT_PATIENT: &str = "patient";
 pub const SUBJECT_PAYER: &str = "payer";
+pub const SUBJECT_REPRESENTATIVE: &str = "representative";
 
 pub const VARIANT_LIST_1: &str = "list_1";
 pub const VARIANT_LIST_2: &str = "list_2";
@@ -62,7 +63,9 @@ pub const RETIRED_TRIGGERS: [&str; 2] = ["T10", "T11"];
 /// L (owner 2026-10-09): the three legal questions (PEP, PEP relatives, links to
 /// sanctioned persons), asked only with the enhanced check; staff confirm the PEP
 /// status of the other leads in the wizard.
-pub const BLOCKS: [&str; 12] = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
+pub const BLOCKS: [&str; 13] = [
+    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "R",
+];
 
 /// Relationship kinds that count as the close family for T5 (PDF): a payer
 /// of any other kind — sibling, grandparent, relative, friend … — fires.
@@ -75,6 +78,14 @@ pub fn patient_country_follow_up(key: &str, subject: &str) -> bool {
     subject == SUBJECT_PATIENT && matches!(key, "T1" | "T2" | "T3")
 }
 
+pub fn representative_country_follow_up(key: &str, subject: &str) -> bool {
+    subject == SUBJECT_REPRESENTATIVE && matches!(key, "T1" | "T2")
+}
+
+pub fn country_follow_up(key: &str, subject: &str) -> bool {
+    patient_country_follow_up(key, subject) || representative_country_follow_up(key, subject)
+}
+
 /// Live question preview only, with no stored score, ratchet or side effect.
 /// Identity/representation and payer questions keep their existing workflow;
 /// legal details appear only after the person explicitly answers yes.
@@ -82,13 +93,14 @@ pub(crate) fn country_preview_triggers(inputs: &Inputs, config: &RiskConfig) -> 
     let mut live = evaluate(inputs, config);
     if !live
         .iter()
-        .any(|trigger| patient_country_follow_up(trigger.key, trigger.subject))
+        .any(|trigger| country_follow_up(trigger.key, trigger.subject))
     {
         return Vec::new();
     }
     live.retain(|trigger| {
-        patient_country_follow_up(trigger.key, trigger.subject)
-            || (trigger.subject == SUBJECT_PATIENT && matches!(trigger.key, "T14" | "T15"))
+        country_follow_up(trigger.key, trigger.subject)
+            || (matches!(trigger.subject, SUBJECT_PATIENT | SUBJECT_REPRESENTATIVE)
+                && matches!(trigger.key, "T14" | "T15"))
     });
     merge(&[], &live, Utc::now(), &[]).triggers
 }
@@ -329,9 +341,30 @@ pub fn trigger_order(key: &str) -> usize {
 // Inputs and evaluation (pure)
 // ----------------------------------------------------------------------------
 
+/// A currently acting contracting representative, never merged into the child.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RepresentativeInputs {
+    pub id: Uuid,
+    pub name: String,
+    pub citizenships: Vec<String>,
+    pub residences: Vec<String>,
+    pub fields: Value,
+    pub identity_fingerprint: String,
+}
+
+impl RepresentativeInputs {
+    pub fn country_questions(&self, config: &RiskConfig) -> bool {
+        self.citizenships
+            .iter()
+            .chain(&self.residences)
+            .any(|country| config.list_of(country).is_some())
+    }
+}
+
 /// What the rule looks at for one lead (loaded by [`inputs::load`]).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Inputs {
+    pub representatives: Vec<RepresentativeInputs>,
     /// Stored citizenship values of the patient (ISO codes, older rows a
     /// name), without the former ones.
     pub patient_citizenships: Vec<String>,
@@ -472,6 +505,22 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
     if let Some(list) = highest_list(config, &inputs.patient_residences) {
         fire("T2", SUBJECT_PATIENT, Some(list));
     }
+    let representative_citizenships: Vec<String> = inputs
+        .representatives
+        .iter()
+        .flat_map(|person| person.citizenships.iter().cloned())
+        .collect();
+    let representative_residences: Vec<String> = inputs
+        .representatives
+        .iter()
+        .flat_map(|person| person.residences.iter().cloned())
+        .collect();
+    if let Some(list) = highest_list(config, &representative_citizenships) {
+        fire("T1", SUBJECT_REPRESENTATIVE, Some(list));
+    }
+    if let Some(list) = highest_list(config, &representative_residences) {
+        fire("T2", SUBJECT_REPRESENTATIVE, Some(list));
+    }
     // T3: two or more citizenships (incl. former ones), one in a list.
     let mut all_citizenships: Vec<String> = Vec::new();
     for value in inputs
@@ -542,11 +591,25 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
     if inputs.payer_pep {
         fire("T14", SUBJECT_PAYER, None);
     }
+    if inputs
+        .representatives
+        .iter()
+        .any(|person| person.fields["pep_self"] == true || person.fields["pep_related"] == true)
+    {
+        fire("T14", SUBJECT_REPRESENTATIVE, None);
+    }
     if inputs.patient_sanctions_links {
         fire("T15", SUBJECT_PATIENT, None);
     }
     if inputs.payer_sanctions_links {
         fire("T15", SUBJECT_PAYER, None);
+    }
+    if inputs
+        .representatives
+        .iter()
+        .any(|person| person.fields["sanctions_links"] == true)
+    {
+        fire("T15", SUBJECT_REPRESENTATIVE, None);
     }
     // T16: a confirmed sanctions hit (an open one is only the internal hold
     // of the sanctions gate).
@@ -768,6 +831,10 @@ pub fn blocks_of(triggers: &[Sticky]) -> Vec<&'static str> {
         .copied()
         .filter(|block| {
             triggers.iter().any(|trigger| {
+                if trigger.subject == SUBJECT_REPRESENTATIVE {
+                    return *block == "R"
+                        && matches!(trigger.key.as_str(), "T1" | "T2" | "T14" | "T15");
+                }
                 trigger_blocks(&trigger.key).contains(block)
                     && !(matches!(*block, "H" | "J") && trigger.subject != SUBJECT_PATIENT)
             })

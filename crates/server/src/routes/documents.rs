@@ -2428,7 +2428,7 @@ async fn mark_document_signed(
     };
 
     let document = match sqlx::query(
-        r#"SELECT patient_id, lead_id, generated_template_id, art, status,
+        r#"SELECT patient_id, lead_id, order_id, generated_template_id, art, status,
                   file_deleted_at IS NOT NULL AS file_deleted,
                   signed_at IS NOT NULL AS already_signed
            FROM documents
@@ -2543,6 +2543,45 @@ async fn mark_document_signed(
             "Document type does not satisfy the selected compliance requirement",
         );
     }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin mark-signed tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    // Read missing identity fields only after role and document access checks.
+    // Standalone privacy consent and identity evidence remain available early.
+    if !is_dsgvo_consent_or_identity_document(
+        Some(kind),
+        generated_template_id.as_deref(),
+        &document_art,
+    ) && !crate::document_signatures::signed_by_patient_side_only(
+        generated_template_id.as_deref(),
+        Some(kind),
+        &document_art,
+    ) {
+        match super::lead_representatives::contract_subject_details_missing(
+            &mut tx,
+            lead_id,
+            patient_id,
+            document.try_get("order_id").unwrap_or_default(),
+        )
+        .await
+        {
+            Ok(missing) if !missing.is_empty() => {
+                return super::lead_representatives::contract_details_incomplete(&missing);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::error!(error = %error, "validate representatives before marking signature");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to check representatives",
+                );
+            }
+        }
+    }
     // Owner decision 2026-10-11: a generated consent, confidentiality release
     // or framework contract is signed only with proof (scan or QES).
     if super::contracts::mark_signed_needs_proof(
@@ -2554,14 +2593,6 @@ async fn mark_document_signed(
     ) {
         return super::contracts::signature_proof_required_response();
     }
-
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            tracing::error!(error = %e, "begin mark-signed tx");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
     // A lead's framework contract counts as signed by both parties: GMED
     // signs only after the client and the payer (lead_payer.rs).
     if kind == "framework_contract"
@@ -14621,6 +14652,34 @@ pub(crate) async fn persist_document_file(
         input.is_medical,
         input.access_category,
     );
+    // Contract PDFs must not persist incomplete parent identities. Recheck in
+    // the same transaction as the document insert, after any PDF preparation.
+    let mut contract_tx = if matches!(
+        input.generated_template_id,
+        Some("framework_contract" | "single_order")
+    ) {
+        let mut tx = state.db.begin().await.map_err(|error| {
+            tracing::error!(error = %error, "begin contract document identity check");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to check representatives",
+            )
+        })?;
+        let missing = super::lead_representatives::contract_subject_details_missing(
+            &mut tx, input.lead_id, input.patient_id, input.order_id,
+        ).await.map_err(|error| {
+            tracing::error!(error = %error, "check representatives before storing contract document");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to check representatives")
+        })?;
+        if !missing.is_empty() {
+            return Err(super::lead_representatives::contract_details_incomplete(
+                &missing,
+            ));
+        }
+        Some(tx)
+    } else {
+        None
+    };
     let original_filename = if input.original_filename.trim().is_empty() {
         "document.bin".to_string()
     } else {
@@ -14659,7 +14718,7 @@ pub(crate) async fn persist_document_file(
         }
     }
 
-    if let Err(e) = sqlx::query(
+    let insert = sqlx::query(
         r#"INSERT INTO documents (
                 id, patient_id, lead_id, order_id, appointment_id, auto_name, original_filename,
                 art, category, status, visibility, is_medical, mime_type, file_size,
@@ -14724,12 +14783,26 @@ pub(crate) async fn persist_document_file(
         input
             .generated_bindings
             .and_then(|bindings| bindings.get("_order_intake_context")),
-    )
-    .execute(&state.db)
-    .await
-    {
+    );
+    let inserted = if let Some(tx) = contract_tx.as_mut() {
+        insert.execute(&mut **tx).await
+    } else {
+        insert.execute(&state.db).await
+    };
+    if let Err(e) = inserted {
         tracing::error!(error = %e, "insert document row");
         let _ = tokio::fs::remove_file(&path).await;
+        return Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save document",
+        ));
+    }
+    if let Some(tx) = contract_tx
+        && let Err(error) = tx.commit().await
+    {
+        // A failed acknowledgement may still have committed. Keep the sealed
+        // file so an existing document row never points to a deleted blob.
+        tracing::error!(error = %error, "commit contract document identity check");
         return Err(err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to save document",
@@ -15704,6 +15777,35 @@ async fn generate_document(
             StatusCode::UNPROCESSABLE_ENTITY,
             "This template is only available after patient conversion",
         );
+    }
+    if matches!(template.id, "framework_contract" | "single_order") {
+        let mut conn = match state.db.acquire().await {
+            Ok(conn) => conn,
+            Err(error) => {
+                tracing::error!(error = %error, "acquire representative document preflight");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to check representatives",
+                );
+            }
+        };
+        match super::lead_representatives::contract_subject_details_missing(
+            &mut conn, lead_id, patient_id, order_id,
+        )
+        .await
+        {
+            Ok(missing) if !missing.is_empty() => {
+                return super::lead_representatives::contract_details_incomplete(&missing);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::error!(error = %error, "preflight representative contract document");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to check representatives",
+                );
+            }
+        }
     }
     // Keep concurrent retries for one intake serialized until the document is
     // stored. This is a distinct advisory lock, so PDF generation can still

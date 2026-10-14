@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export type PortalPatient = { id: string; name: string; patient_number: string };
+export type PortalPatient = { id: string; name: string; patient_number: string; access_kind?: "self" | "guardian" };
 type Selection = { userId: string; patientId: string };
 const STORAGE_KEY = "gmed-portal-patient";
 const listeners = new Set<() => void>();
@@ -30,12 +30,13 @@ export function selectPortalPatient(userId: string, patientId: string | null) {
   listeners.forEach((listener) => listener());
 }
 
-/** Keep a valid explicit choice; only a single linked patient is selected automatically. */
+/** Keep an explicit choice; default to the unique own record, otherwise a single linked patient. */
 export function reconcilePortalPatientSelection(user: { id: string; role: string; patients?: PortalPatient[] }) {
   const patients = user.role === "patient" ? user.patients ?? [] : [];
+  const own = patients.filter((patient) => patient.access_kind === "self");
   const previous = getPortalPatientId(user.id);
   const next = patients.some((patient) => patient.id === previous)
-    ? previous : patients.length === 1 ? patients[0].id : null;
+    ? previous : own.length === 1 ? own[0].id : patients.length === 1 ? patients[0].id : null;
   selectPortalPatient(user.id, next);
 }
 

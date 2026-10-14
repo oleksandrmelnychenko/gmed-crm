@@ -7,6 +7,24 @@ const user = { id: "guardian", role: "patient", patients: [first, second] };
 afterEach(() => selectPortalPatient("", null));
 
 describe("family portal context", () => {
+  it("defaults to the parent's unique own record while preserving an explicit child selection", () => {
+    const family = { ...user, patients: [
+      { ...first, access_kind: "guardian" as const },
+      { ...second, access_kind: "self" as const },
+    ] };
+    reconcilePortalPatientSelection(family);
+    expect(getPortalPatientId(user.id)).toBe(second.id);
+    selectPortalPatient(user.id, first.id);
+    reconcilePortalPatientSelection(family);
+    expect(getPortalPatientId(user.id)).toBe(first.id);
+  });
+
+  it("never guesses between multiple own records", () => {
+    reconcilePortalPatientSelection({ ...user, patients: [
+      { ...first, access_kind: "self" }, { ...second, access_kind: "self" },
+    ] });
+    expect(getPortalPatientId(user.id)).toBeNull();
+  });
   it("requires an explicit selection for two patients and remembers a valid selection", () => {
     reconcilePortalPatientSelection(user);
     expect(getPortalPatientId(user.id)).toBeNull();

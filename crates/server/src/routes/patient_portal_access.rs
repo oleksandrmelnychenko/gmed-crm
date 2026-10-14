@@ -63,7 +63,7 @@ pub(crate) const PATIENT_PORTAL_LOGIN_SQL: &str = r#"
                AS login_email_delivery
     FROM patient_assignments pa
     JOIN users u ON u.id = pa.user_id AND u.role = 'patient'
-    WHERE pa.patient_id = p.id AND pa.revoked_at IS NULL
+    WHERE pa.patient_id = p.id AND pa.revoked_at IS NULL AND pa.source <> 'lead_guardian'
     ORDER BY pa.assigned_at DESC
     LIMIT 1"#;
 
@@ -121,6 +121,20 @@ async fn issue_patient_portal_access(
             StatusCode::CONFLICT,
             "patient_not_active",
             "Patient access is issued for an active patient record",
+        );
+    }
+
+    if crate::routes::leads::is_minor_on(
+        patient
+            .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+            .ok()
+            .flatten(),
+        crate::app_time::today(),
+    ) {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "patient_minor",
+            "A minor gets no own login; the parents use their account",
         );
     }
 
@@ -184,19 +198,6 @@ async fn issue_patient_portal_access(
         .into_response();
     }
 
-    if crate::routes::leads::is_minor_on(
-        patient
-            .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
-            .ok()
-            .flatten(),
-        crate::app_time::today(),
-    ) {
-        return coded(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "patient_minor",
-            "A minor gets no own login; the parents use their account",
-        );
-    }
     let Some(email) = normalize_portal_email(
         patient
             .try_get::<Option<String>, _>("email")
@@ -210,11 +211,6 @@ async fn issue_patient_portal_access(
             "The patient needs a valid email before patient access can be issued",
         );
     };
-    match email_owner(&state.db, &email, None).await {
-        Ok(None) => {}
-        Ok(Some(owner)) => return email_taken_response(owner),
-        Err(error) => return internal(error, patient_id, "email owner"),
-    }
     let name = format!(
         "{} {}",
         patient
@@ -226,15 +222,64 @@ async fn issue_patient_portal_access(
     )
     .trim()
     .to_string();
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return internal(error, patient_id, "begin"),
+    };
+    let reused_user = match super::lead_portal_account::reusable_guardian_in_tx(
+        &mut tx,
+        &email,
+        &name,
+        patient
+            .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+            .ok()
+            .flatten(),
+        None,
+        Some(patient_id),
+    )
+    .await
+    {
+        Ok(user_id) => user_id,
+        Err(error) => return internal(error, patient_id, "check guardian identity"),
+    };
+    if let Some(user_id) = reused_user {
+        if let Err(error) = sqlx::query(
+            "INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$3) ON CONFLICT(patient_id,user_id) DO UPDATE SET revoked_at=NULL,source='manual'",
+        ).bind(patient_id).bind(user_id).bind(auth.user_id).execute(&mut *tx).await {
+            return internal(error,patient_id,"link existing guardian login");
+        }
+        if let Err(error) = super::lead_portal_account::link_guardian_relationships_in_tx(
+            &mut tx,
+            user_id,
+            patient_id,
+            auth.user_id,
+        )
+        .await
+        {
+            return internal(error, patient_id, "link guardian relationships");
+        }
+        if let Err(error) = audit::write_in_transaction(&mut tx,&audit::domain_event(
+            "reuse_guardian_for_own_patient",Some(auth.user_id),"patient",Some(patient_id),
+            json!({"portal_user_id":user_id,"password_changed":false,"child_access_preserved":true}),
+        )).await { return internal(error,patient_id,"audit reuse"); }
+        if let Err(error) = tx.commit().await {
+            return internal(error, patient_id, "commit reuse");
+        }
+        return Json(
+            json!({"user_id":user_id,"email":email,"created":false,"reused":true,
+            "password_changed":false,"one_time_password":null}),
+        )
+        .into_response();
+    }
+    match email_owner(&mut *tx, &email, None).await {
+        Ok(None) => {}
+        Ok(Some(owner)) => return email_taken_response(owner),
+        Err(error) => return internal(error, patient_id, "email owner"),
+    }
     let one_time_password = password_policy::generate_one_time_password();
     let hash = match password::hash_password(&one_time_password) {
         Ok(hash) => hash,
         Err(error) => return internal(error, patient_id, "hash password"),
-    };
-
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(error) => return internal(error, patient_id, "begin"),
     };
     let user_id: Uuid = match sqlx::query_scalar(
         r#"INSERT INTO users (email, password_hash, name, role, is_active, password_reset_required)

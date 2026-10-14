@@ -2547,6 +2547,27 @@ async fn create_framework_contract(
         }
     };
 
+    match super::lead_representatives::contract_subject_details_missing(
+        &mut tx,
+        subject.lead_id(),
+        subject.patient_id(),
+        None,
+    )
+    .await
+    {
+        Ok(missing) if !missing.is_empty() => {
+            return super::lead_representatives::contract_details_incomplete(&missing);
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(error = %error, "validate contracting representatives");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to check representatives",
+            );
+        }
+    }
+
     let seq: i64 = match sqlx::query_scalar("SELECT nextval('contract_number_seq')")
         .fetch_one(&mut *tx)
         .await

@@ -345,7 +345,7 @@ pub(crate) async fn load_patient_view_rule_scope(
 #[derive(Deserialize)]
 struct ActivatePatientPortalAccountRequest {
     email: String,
-    password: String,
+    password: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -3403,6 +3403,73 @@ async fn create_patient(
     ))
 }
 
+/// Effective contracting identities only: explicit contact and patient UUIDs,
+/// active custody slots, and no medical, consent or file data in the snapshot.
+async fn linked_representative_identity(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    patient_id: Uuid,
+) -> Result<Value, sqlx::Error> {
+    let Some(loaded) = super::lead_representatives::load(conn, lead_id).await? else {
+        return Ok(json!({}));
+    };
+    let active: HashSet<Uuid> = loaded
+        .representation
+        .representatives
+        .iter()
+        .filter(|person| person.slot.is_some())
+        .map(|person| person.id)
+        .collect();
+    let identities = crate::services::lead_guardian_identity::load(conn, lead_id).await?;
+    let mut result = Map::new();
+    for identity in identities {
+        if let Some(contact_id) = identity.contact_id
+            && identity.related_patient_id == Some(patient_id)
+            && active.contains(&contact_id)
+        {
+            result.insert(contact_id.to_string(), json!({
+                "contact":identity.contact,"extras":identity.extras,
+                "citizenships":identity.citizenships,"residences":identity.residences,"role":identity.role,
+            }));
+        }
+    }
+    Ok(Value::Object(result))
+}
+
+async fn lock_linked_representative_identities(
+    conn: &mut sqlx::PgConnection,
+    patient_id: Uuid,
+) -> Result<Vec<(Uuid, Value)>, sqlx::Error> {
+    // Lead-before-patient lock order matches representative edits and keeps
+    // the active link/custody stable across the canonical profile update.
+    let leads: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT l.id FROM leads l
+        WHERE l.qualification_status <> 'deleted' AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(l.trusted_contacts)='array'
+                THEN l.trusted_contacts ELSE '[]'::jsonb END) contact
+            WHERE lower(btrim(contact->>'related_patient_id'))=$1::text
+        ) ORDER BY l.id FOR UPDATE OF l"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    sqlx::query("SELECT id FROM patients WHERE id=$1 FOR UPDATE")
+        .bind(patient_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let mut snapshots = Vec::new();
+    for lead_id in leads {
+        let snapshot = linked_representative_identity(conn, lead_id, patient_id).await?;
+        if snapshot
+            .as_object()
+            .is_some_and(|object| !object.is_empty())
+        {
+            snapshots.push((lead_id, snapshot));
+        }
+    }
+    Ok(snapshots)
+}
+
 async fn update_patient(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -4052,6 +4119,41 @@ async fn update_patient(
         }
     };
 
+    let inherited_identity_may_change = changed_fields.iter().any(|field| {
+        matches!(
+            field.as_str(),
+            "first_name"
+                | "last_name"
+                | "birth_date"
+                | "email"
+                | "phone_primary"
+                | "nationality"
+                | "citizenships"
+                | "residence_country"
+                | "address_country"
+                | "address_street"
+                | "address_city"
+                | "address_zip"
+                | "passport_number"
+                | "passport_expiry"
+        )
+    }) || legal_status_changed_keys
+        .iter()
+        .any(|key| key == "anonymized_at");
+    let representative_before = if inherited_identity_may_change {
+        match lock_linked_representative_identities(&mut tx, patient_uuid).await {
+            Ok(snapshots) => snapshots,
+            Err(error) => {
+                tracing::error!(%error, %patient_uuid, "load linked contracting identities before profile update");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update patient",
+                );
+            }
+        }
+    } else {
+        Vec::new()
+    };
     let result = sqlx::query(
         r#"UPDATE patients SET
             title = $2,
@@ -4165,6 +4267,40 @@ async fn update_patient(
                     "Failed to update patient",
                 );
             }
+            let mut representative_invites = Vec::new();
+            for (lead_id, before) in representative_before {
+                let result = async {
+                    let after =
+                        linked_representative_identity(&mut tx, lead_id, patient_uuid).await?;
+                    if before != after {
+                        crate::risk::store::reassess(
+                            &mut tx,
+                            lead_id,
+                            crate::risk::store::Cause::Staff,
+                            Some(auth.user_id),
+                        )
+                        .await?;
+                        representative_invites.extend(
+                            crate::document_signatures::invalidate_representative_identity(
+                                &mut tx,
+                                lead_id,
+                                auth.user_id,
+                            )
+                            .await?
+                            .1,
+                        );
+                    }
+                    Ok::<_, sqlx::Error>(())
+                }
+                .await;
+                if let Err(error) = result {
+                    tracing::error!(%error, %patient_uuid, %lead_id, "invalidate changed linked contracting identity");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update patient",
+                    );
+                }
+            }
             if let Err(e) = tx.commit().await {
                 tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to commit patient update transaction");
                 return err(
@@ -4172,6 +4308,11 @@ async fn update_patient(
                     "Failed to update patient",
                 );
             }
+            crate::document_signatures::withdraw_invalidated_consents(
+                &state,
+                &representative_invites,
+            )
+            .await;
             state.audit_sender.try_send(audit::domain_event(
                 "update_patient",
                 Some(auth.user_id),
@@ -7461,12 +7602,9 @@ async fn activate_patient_portal_account(
     if email.is_empty() || email.len() > 320 || !email.contains('@') {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid email"));
     }
-    if let Err(message) = crate::auth::password_policy::validate_password_policy(&body.password) {
-        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message));
-    }
 
     let patient = sqlx::query(
-        r#"SELECT first_name, last_name, is_active
+        r#"SELECT first_name, last_name, is_active, birth_date
            FROM patients
            WHERE id = $1"#,
     )
@@ -7486,6 +7624,19 @@ async fn activate_patient_portal_account(
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Patient must be active before portal activation",
+        ));
+    }
+
+    if super::leads::is_minor_on(
+        patient
+            .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+            .ok()
+            .flatten(),
+        crate::app_time::today(),
+    ) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A minor gets no own login; the parents use their account",
         ));
     }
 
@@ -7522,14 +7673,6 @@ async fn activate_patient_portal_account(
         .try_get::<String, _>("last_name")
         .unwrap_or_default();
     let patient_name = format!("{first_name} {last_name}").trim().to_string();
-    let password_hash = password::hash_password(&body.password).map_err(|error| {
-        tracing::error!(%error, patient_id = %patient_uuid, "hash patient portal password");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to activate patient account",
-        )
-    })?;
-
     let mut tx = state.db.begin().await.map_err(|error| {
         tracing::error!(%error, patient_id = %patient_uuid, "begin patient portal activation");
         err(
@@ -7544,6 +7687,7 @@ async fn activate_patient_portal_account(
            JOIN users u ON u.id = assignment.user_id
            WHERE assignment.patient_id = $1
              AND assignment.revoked_at IS NULL
+             AND assignment.source <> 'lead_guardian'
              AND u.role = 'patient'
            ORDER BY assignment.assigned_at DESC
            LIMIT 2"#,
@@ -7566,6 +7710,49 @@ async fn activate_patient_portal_account(
         ));
     }
 
+    let reusable_guardian = if linked_accounts.is_empty() {
+        super::lead_portal_account::reusable_guardian_in_tx(
+            &mut tx,
+            &email,
+            &patient_name,
+            patient
+                .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+                .ok()
+                .flatten(),
+            None,
+            Some(patient_uuid),
+        )
+        .await
+        .map_err(|error| {
+            tracing::error!(%error,"check guardian account identity");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to activate patient account",
+            )
+        })?
+    } else {
+        None
+    };
+    let reused = reusable_guardian.is_some();
+    let password_hash = if reused {
+        None
+    } else {
+        let supplied = body.password.as_deref().ok_or_else(|| {
+            err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Password is required for a new account or a password reset",
+            )
+        })?;
+        crate::auth::password_policy::validate_password_policy(supplied)
+            .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))?;
+        Some(password::hash_password(supplied).map_err(|error| {
+            tracing::error!(%error,"hash patient portal password");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to activate patient account",
+            )
+        })?)
+    };
     let mut created = false;
     let user_id = if let Some(linked) = linked_accounts.first() {
         let linked_user_id = linked.try_get::<Uuid, _>("id").map_err(|error| {
@@ -7593,59 +7780,19 @@ async fn activate_patient_portal_account(
             return Err(err(StatusCode::CONFLICT, "Email already exists"));
         }
         linked_user_id
-    } else if let Some(existing) = sqlx::query(
-        "SELECT id, role FROM users WHERE lower(trim(email)) = $1 LIMIT 1",
-    )
-    .bind(&email)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|error| {
-        tracing::error!(%error, patient_id = %patient_uuid, "inspect portal account by email");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to activate patient account",
-        )
-    })? {
-        let existing_user_id = existing.try_get::<Uuid, _>("id").map_err(|error| {
-            tracing::error!(%error, patient_id = %patient_uuid, "decode portal account by email");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to activate patient account",
-            )
-        })?;
-        if existing.try_get::<String, _>("role").unwrap_or_default() != "patient" {
-            return Err(err(
-                StatusCode::CONFLICT,
-                "Email belongs to a non-patient account",
-            ));
-        }
-        let linked_elsewhere = sqlx::query_scalar::<_, bool>(
-            r#"SELECT EXISTS(
-                   SELECT 1
-                   FROM patient_assignments
-                   WHERE user_id = $1
-                     AND revoked_at IS NULL
-                     AND patient_id <> $2
-               )"#,
-        )
-        .bind(existing_user_id)
-        .bind(patient_uuid)
-        .fetch_one(&mut *tx)
+    } else if let Some(existing_user_id) = reusable_guardian {
+        existing_user_id
+    } else if let Some(owner) = super::lead_portal_account::email_owner(&mut *tx, &email, None)
         .await
         .map_err(|error| {
-            tracing::error!(%error, patient_id = %patient_uuid, user_id = %existing_user_id, "check portal account patient link");
+            tracing::error!(%error,"inspect patient account owner");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to activate patient account",
             )
-        })?;
-        if linked_elsewhere {
-            return Err(err(
-                StatusCode::CONFLICT,
-                "Patient account is linked to another patient record",
-            ));
-        }
-        existing_user_id
+        })?
+    {
+        return Err(super::lead_portal_account::email_taken_response(owner));
     } else {
         created = true;
         sqlx::query_scalar::<_, Uuid>(
@@ -7667,7 +7814,7 @@ async fn activate_patient_portal_account(
         })?
     };
 
-    if !created {
+    if !created && !reused {
         sqlx::query(
             r#"UPDATE users
                SET email = $2,
@@ -7702,7 +7849,7 @@ async fn activate_patient_portal_account(
         r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
            VALUES ($1, $2, $3)
            ON CONFLICT (patient_id, user_id)
-           DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()"#,
+           DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now(), source = 'manual'"#,
     )
     .bind(patient_uuid)
     .bind(user_id)
@@ -7730,7 +7877,8 @@ async fn activate_patient_portal_account(
             )
         })?;
 
-    sqlx::query(
+    if !reused {
+        sqlx::query(
         "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
          WHERE user_id = $1 AND status IN ('pending', 'approved')",
     )
@@ -7744,7 +7892,24 @@ async fn activate_patient_portal_account(
             "Failed to activate patient account",
         )
     })?;
-
+    }
+    if reused {
+        super::lead_portal_account::link_guardian_relationships_in_tx(
+            &mut tx,
+            user_id,
+            patient_uuid,
+            auth.user_id,
+        )
+        .await
+        .map_err(|error| {
+            tracing::error!(%error,"link guardian relationships");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to activate patient account",
+            )
+        })?;
+        audit::write_in_transaction(&mut tx,&audit::domain_event("reuse_guardian_for_own_patient",Some(auth.user_id),"patient",Some(patient_uuid),json!({"portal_user_id":user_id,"password_changed":false,"child_access_preserved":true}))).await.map_err(|error| { tracing::error!(%error,"audit guardian reuse"); err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to activate patient account") })?;
+    }
     tx.commit().await.map_err(|error| {
         tracing::error!(%error, patient_id = %patient_uuid, user_id = %user_id, "commit patient portal activation");
         err(
@@ -7753,7 +7918,7 @@ async fn activate_patient_portal_account(
         )
     })?;
 
-    if !created {
+    if !created && !reused {
         crate::auth::tokens::revoke_all_families(&state.db, user_id, "patient_account_activated")
             .await;
     }
@@ -7767,6 +7932,8 @@ async fn activate_patient_portal_account(
             "portal_user_id": user_id,
             "email": email,
             "created": created,
+            "reused": reused,
+            "password_changed": !reused,
         }),
     ));
     crate::realtime::publish_patient_event(
@@ -7791,6 +7958,8 @@ async fn activate_patient_portal_account(
             "role": "patient",
             "is_active": true,
             "created": created,
+            "reused": reused,
+            "password_changed": !reused,
         })),
     ))
 }

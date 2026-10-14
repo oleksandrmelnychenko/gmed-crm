@@ -5,7 +5,9 @@ export type PatientPortalAccessIssued = {
   user_id: string;
   email: string | null;
   created: boolean;
-  one_time_password: string;
+  reused?: boolean;
+  password_changed?: boolean;
+  one_time_password: string | null;
 };
 
 /**

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   BadgeCheck,
@@ -24,6 +25,7 @@ import {
   KeySquare,
   LayoutDashboard,
   LogOut,
+  LockKeyhole,
   Megaphone,
   MessageCircleHeart,
   MessagesSquare,
@@ -59,11 +61,13 @@ import {
   type StaffNavSection,
 } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
+import { LeadPortalPlanDialog } from "@/components/lead-portal-plan-dialog";
 
 interface NavItem {
   id: string;
   to: string;
   labelKey: string;
+  locked?: boolean;
 }
 
 const STAFF_NAV_SECTIONS: StaffNavSection[] = [
@@ -149,10 +153,12 @@ function toPatientNavItem(item: PatientPortalNavItem): NavItem {
 
 export function NavPanel() {
   const { user, logout } = useAuth();
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const { collapsed, toggle } = useNavState();
   const isPatientPortal = user?.role === "patient";
+  const isLeadPortal = isLeadPortalUser(user);
+  const [lockedModule, setLockedModule] = useState<{ id: string; label: string } | null>(null);
   // A parent's login in the lead cabinet is no patient: the cabinet names it.
   const portalAccountLabel = usePortalAccountLabel(isPatientPortal ? user?.id : null);
   const counters = useNavCounters(
@@ -160,10 +166,14 @@ export function NavPanel() {
     Boolean(user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities)),
   );
   const patientPortalNav = isPatientPortal
-    ? (isLeadPortalUser(user)
-        ? listLeadPortalNavItems()
-        : listPatientPortalNavItems({ leadRequests: Boolean(user?.lead_portal?.requests) })
-      ).map(toPatientNavItem)
+    ? isLeadPortal
+      ? [
+          ...listLeadPortalNavItems().filter((item) => item.id !== "account" && item.id !== "legal").map(toPatientNavItem),
+          ...listPatientPortalNavItems().filter((item) => !["services", "account", "legal"].includes(item.id))
+            .map((item) => ({ ...toPatientNavItem(item), locked: true })),
+          ...listLeadPortalNavItems().filter((item) => item.id === "account" || item.id === "legal").map(toPatientNavItem),
+        ]
+      : listPatientPortalNavItems({ leadRequests: Boolean(user?.lead_portal?.requests) }).map(toPatientNavItem)
     : [];
   const staffNavBySection =
     user && user.role !== "patient"
@@ -184,6 +194,7 @@ export function NavPanel() {
   };
 
   return (
+    <>
     <nav
       className={cn(
         "relative z-40 flex shrink-0 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain bg-sidebar transition-[width,transform] duration-200 ease-out motion-reduce:transition-none lg:relative lg:inset-auto lg:translate-x-0 max-lg:fixed max-lg:inset-y-12 max-lg:left-0 max-lg:w-72 max-lg:border-r max-lg:border-sidebar-border max-lg:shadow-xl",
@@ -197,7 +208,7 @@ export function NavPanel() {
           <UserCard
             name={user.name}
             role={user.role}
-            roleText={portalAccountLabel}
+            roleText={portalAccountLabel || (isLeadPortal ? (lang === "de" ? "Anfrageportal" : "Кабинет заявки") : null)}
             tr={tr}
             translations={t}
             collapsed={collapsed}
@@ -212,6 +223,11 @@ export function NavPanel() {
             translations={t}
             collapsed={collapsed}
             onNavigate={closeOnCompactViewport}
+            lockedLabel={lang === "de" ? "Gesperrt" : "Закрыто"}
+            onLocked={(id, label) => {
+              setLockedModule({ id, label });
+              closeOnCompactViewport();
+            }}
           />
         ) : (
           <StaffNavGroups
@@ -241,6 +257,13 @@ export function NavPanel() {
         </button>
       </div>
     </nav>
+    {isLeadPortal && lockedModule ? <LeadPortalPlanDialog
+      key={lockedModule.id}
+      moduleId={lockedModule.id}
+      moduleLabel={lockedModule.label}
+      onClose={() => setLockedModule(null)}
+    /> : null}
+    </>
   );
 }
 
@@ -304,6 +327,8 @@ function NavGroup({
   collapsed,
   counters,
   onNavigate,
+  onLocked,
+  lockedLabel,
 }: {
   items: NavItem[];
   tr: Record<string, string>;
@@ -311,6 +336,8 @@ function NavGroup({
   collapsed: boolean;
   counters?: NavCounterMap;
   onNavigate: () => void;
+  onLocked?: (id: string, label: string) => void;
+  lockedLabel?: string;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -318,9 +345,28 @@ function NavGroup({
         const Icon = NAV_ICONS[item.id] ?? FileText;
         const label = navItemLabel(item, tr, translations);
         const count = counters?.[item.id] ?? 0;
+        if (item.locked) {
+          return <button
+            key={item.id}
+            type="button"
+            data-testid={`lead-portal-locked-${item.id}`}
+            aria-label={`${label} — ${lockedLabel}`}
+            aria-haspopup="dialog"
+            title={`${label} — ${lockedLabel}`}
+            onClick={() => onLocked?.(item.id, label)}
+            className={cn(
+              "relative flex items-center rounded-lg text-left text-sm text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring motion-reduce:transition-none",
+              collapsed ? "mx-auto size-10 justify-center" : "h-9 gap-3 px-3",
+            )}
+          >
+            <Icon aria-hidden="true" strokeWidth={1.6} className={cn("shrink-0", collapsed ? "size-5" : "size-[18px]")} />
+            {!collapsed ? <span className="min-w-0 flex-1 truncate">{label}</span> : null}
+            <LockKeyhole aria-hidden="true" className={cn("shrink-0 text-muted-foreground", collapsed ? "absolute bottom-0.5 right-0.5 size-2.5" : "size-3.5")} />
+          </button>;
+        }
         return (
           <NavLink
-            key={item.to}
+            key={item.id}
             to={item.to}
             end={item.to === "/"}
             title={collapsed ? label : undefined}

@@ -1,3 +1,4 @@
+import { existingParentPatientFromError } from "./parent-profile-reuse";
 import type { Lead, LeadDetail } from "@/lib/api/types";
 import { isLocalizedApiError } from "@/lib/api";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
@@ -249,6 +250,10 @@ export function leadErrorMessage(
     : error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string"
       ? ((error as { message: string }).message).trim()
       : "";
+  if (existingParentPatientFromError(error)) return tx(
+    "У родителя уже есть карточка пациента. Откройте её, чтобы подключить существующий вход или создать повторное обращение. Если карточка недоступна, обратитесь к ответственному менеджеру.",
+    "Für diesen Elternteil besteht bereits eine Patientenakte. Öffnen Sie diese, um den vorhandenen Zugang zu verknüpfen oder eine erneute Anfrage zu starten. Falls die Akte nicht verfügbar ist, wenden Sie sich an die zuständige Patientenbetreuung.",
+  );
   const emailOwner = portalEmailOwnerFromError(error);
   if (emailOwner) {
     const lang = tx("ru", "de") === "de" ? "de" : "ru";
