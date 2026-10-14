@@ -68,7 +68,8 @@ pub(super) async fn load(
     let row = sqlx::query(
         r#"
         SELECT c.choices, c.text_version, c.chosen_at, c.chosen_by, c.access_kind,
-               COALESCE(to_jsonb(c) -> 'recipients', '[]'::jsonb) AS recipients
+               COALESCE(to_jsonb(c) -> 'recipients', '[]'::jsonb) AS recipients,
+               to_jsonb(c) -> 'disclosure' AS disclosure
         FROM consent_form_choices c
         LEFT JOIN leads subject ON subject.id = c.lead_id
         WHERE c.template_id = 'privacy_consents' AND c.lead_id = $1
@@ -129,12 +130,32 @@ pub(super) async fn load(
                 .filter(|name| !name.is_empty());
         }
     }
+    let mut disclosure: Option<Value> = row.try_get("disclosure")?;
+    if let Some(d) = disclosure
+        .as_mut()
+        .filter(|d| d.get("chosen_by_name").is_none())
+        && let Some(user_id) = d
+            .get("chosen_by")
+            .and_then(Value::as_str)
+            .and_then(|s| Uuid::parse_str(s).ok())
+    {
+        let original_name: Option<String> =
+            sqlx::query_scalar("SELECT name FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(db)
+                .await?;
+        d["chosen_by_name"] = json!(original_name);
+    }
+    let core_unanswered = disclosure.is_some()
+        && serde_json::from_value::<crate::consent_choices::ConsentChoices>(choices.clone())
+            .is_ok_and(|c| !c.has_core());
     Ok(json!({
         "version": row.try_get::<String, _>("text_version")?,
-        "choices": choice_values(&choices),
+        "choices": if core_unanswered { Value::Null } else { choice_values(&choices) },
         // The persons named for "named recipients" (owner 2026-10-12); not
         // sanctions-screened.
         "recipients": row.try_get::<Value, _>("recipients")?,
+        "disclosure": disclosure,
         "chosen_at": row.try_get::<DateTime<Utc>, _>("chosen_at")?,
         "chosen_by": chooser,
         "chosen_by_name": name,

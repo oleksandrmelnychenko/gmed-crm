@@ -66,7 +66,7 @@ export const ru = {
   nav_my_notifications: "Мои уведомления",
   nav_my_documents: "Мои документы",
   nav_my_request: "Ваша заявка",
-  nav_trusted_persons: "Доверенные лица",
+  nav_trusted_persons: "Предоставление информации третьим лицам",
   nav_my_appointments: "Мои визиты",
   nav_my_recommendations: "Мои рекомендации",
   nav_my_services: "Каталог сервисов",

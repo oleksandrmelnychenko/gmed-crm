@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { normalizeLeadPortalIntake, type LeadPortalIntake } from "../data/lead-portal-intake-api";
-import { normalizeLeadPortalConsentForm } from "../model/lead-portal-consents";
+import { normalizeLeadPortalConsentForm, normalizeLeadPortalDisclosure } from "../model/lead-portal-consents";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { PortalHealthConsentLine, PortalInquiryConsentLine } from "./lead-wizard-portal-intake";
 
@@ -66,7 +66,7 @@ describe("portal consent facts in the staff wizard", () => {
       version: "2026-10-12", chosen_at: "2026-10-12T10:00:00Z", access_kind: "self",
       choices: { agency_processing: true, doctors_to_agency: true, data_system: true, named_recipients: true },
       recipients: [
-        { name: "Olga Muster", relation: "spouse", contact: "+49 151 000000" },
+        { name: "Olga Muster", relation: "spouse", contact: "+49 151 000000", scope: "Только даты приёмов" },
         { name: "Praxis Dr. Beispiel", relation: "family_doctor" },
         { name: " ", relation: "other" },
       ],
@@ -75,6 +75,7 @@ describe("portal consent facts in the staff wizard", () => {
     expect(html).toContain("Olga Muster");
     expect(html).toContain("супруг(а) / партнёр");
     expect(html).toContain("+49 151 000000");
+    expect(html).toContain("Только даты приёмов");
     expect(html).toContain("Praxis Dr. Beispiel");
     expect(html.match(/<li/g)).toHaveLength(2);
   });
@@ -84,7 +85,72 @@ describe("portal consent facts in the staff wizard", () => {
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={state()} tx={tx} />)).toBe("");
     const html = renderToStaticMarkup(<PortalConsentChoiceView intake={state({ consent_form: normalizeLeadPortalConsentForm({ version: "v1", choices: null }) })} tx={tx} />);
     expect(html).toContain("Выбор ещё не сохранён");
-    expect(html.match(/>Не отвечено</g)).toHaveLength(8);
+    expect(html.split('data-testid="portal-consent-choices"')[1].match(/>Не отвечено</g)).toHaveLength(8);
     expect(html).not.toContain(">Разрешено<");
+  });
+
+  it("shows scoped disclosure with its original receipt actor independently of the later form chooser", () => {
+    const intake = state({
+      disclosure: normalizeLeadPortalDisclosure({
+        allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "de",
+        chosen_at: "2026-10-11T10:00:00Z", chosen_by: "original-parent", chosen_by_name: "Original Parent",
+        access_kind: "guardian", company_name: "GMED GmbH", consent_text: "Original consent text. <script>untrusted()</script>",
+      }),
+      consent_form: savedForm,
+      trusted_persons: [{ name: "Eva Muster", relation: "friend", contact: "eva@example.com", scope: "Только даты приёмов" }],
+    });
+    const html = renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={tx} />);
+    const [receiptHtml, formHtml] = html.split('data-testid="portal-consent-choices"');
+    expect(receiptHtml).toContain("Original Parent (Родитель / представитель)");
+    expect(receiptHtml).toContain("11.10.2026");
+    expect(receiptHtml).toContain("GMED GmbH · версия 2026-10-14 · DE");
+    expect(receiptHtml).toContain("Original consent text. &lt;script&gt;");
+    expect(receiptHtml).toContain("Объём информации: Только даты приёмов");
+    expect(receiptHtml).not.toContain("Anna Muster");
+    expect(formHtml).toContain("Anna Muster (Vormund)");
+    expect(formHtml).toContain("12.10.2026");
+    expect(receiptHtml).toMatch(/data-testid="portal-disclosure-decision" class="[^"]*border-emerald-200/);
+    expect(receiptHtml).toMatch(/data-testid="portal-disclosure-consent" class="[^"]*border-emerald-200/);
+    expect(html).not.toMatch(/<(?:button|input|script)\b/);
+    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain("Auskunftsumfang: Только даты приёмов");
+    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={{ ...intake, identification_hidden: true }} tx={tx} />)).toBe("");
+  });
+
+  it("renders an explicit No without named persons or Anlage 1 and uses warning chips", () => {
+    const intake = state({ disclosure: normalizeLeadPortalDisclosure({
+      allow_disclosure: false, consent_given: false, access_kind: "self", chosen_at: "2026-10-14T10:00:00Z",
+    }) });
+    const html = renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={tx} />);
+    expect(html).toContain(">Нет</span>");
+    expect(html).toContain(">Не дано</span>");
+    expect(html).toContain("Выбор зафиксирован: Пациент");
+    expect(html).toMatch(/data-testid="portal-disclosure-decision" class="[^"]*border-amber-200/);
+    expect(html).toMatch(/data-testid="portal-disclosure-consent" class="[^"]*border-amber-200/);
+    expect(html).not.toContain("portal-trusted-persons");
+    expect(html).not.toContain("portal-consent-choices");
+    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain(">Nein</span>");
+  });
+
+  it("does not invent a disclosure receipt or scope for historic recipients", () => {
+    const html = renderToStaticMarkup(<PortalConsentChoiceView intake={state({
+      consent_form: savedForm, trusted_persons: [{ name: "Historic Person", relation: "friend", contact: null }],
+    })} tx={tx} />);
+    const receiptHtml = html.split('data-testid="portal-consent-choices"')[0];
+    expect(receiptHtml).toContain(">Не отвечено</span>");
+    expect(receiptHtml).toContain(">Не зафиксировано</span>");
+    expect(receiptHtml).toContain("Объём информации: Не указан");
+    expect(receiptHtml).toMatch(/data-testid="portal-disclosure-decision" class="[^"]*border-amber-200/);
+    expect(receiptHtml).not.toContain("portal-disclosure-receipt");
+    expect(receiptHtml).not.toContain("Anna Muster");
+  });
+
+  it("does not mark an affirmative decision successful when consent is missing", () => {
+    const html = renderToStaticMarkup(<PortalConsentChoiceView intake={state({
+      disclosure: normalizeLeadPortalDisclosure({ allow_disclosure: true, access_kind: "guardian" }),
+    })} tx={tx} />);
+    expect(html).toContain(">Да</span>");
+    expect(html).toContain(">Не зафиксировано</span>");
+    expect(html).toContain("Выбор зафиксирован: Родитель / представитель");
+    expect(html).not.toContain("border-emerald-200");
   });
 });

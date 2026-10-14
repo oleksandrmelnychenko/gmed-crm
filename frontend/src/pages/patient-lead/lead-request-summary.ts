@@ -3,6 +3,8 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
+import { storedTrustedPersons } from "./lead-trusted-persons-model";
+import { trustedPersonsText } from "./lead-trusted-persons-text";
 import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
 import {
   STATED_FUNDS_SOURCES,
@@ -59,6 +61,7 @@ export type SummaryGroupId =
   | "follow_up"
   | "request"
   | "documents"
+  | "disclosure"
   | "consent_form";
 
 /** A person inside a group: a representative with the own statements and files. */
@@ -511,10 +514,29 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     group("consent_form", wording.title, [
       ...Object.entries(consent.choices).map(([key, value]): Entry =>
         [wording.options[key as keyof typeof consent.choices], yesNo(value)]),
-      ...(consent.choices.named_recipients ? (consent.recipients ?? []).map((person): Entry =>
-        [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], person.contact].filter(Boolean).join(" · ")]) : []),
+      ...(!request.disclosure && consent.choices.named_recipients ? storedTrustedPersons(request).map((person): Entry =>
+        [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], person.contact, person.scope].filter(Boolean).join(" · ")]) : []),
       [text.saved, consent.chosen_at ? (consent.chosen_by_me === false ? wording.savedByOtherAt : wording.savedAt)(formatAppDateTime(consent.chosen_at)) : ""],
     ]);
+  }
+
+  // This explicit decision is independent of whether Anlage 1's core choices were saved.
+  if (request.disclosure) {
+    const disclosure = request.disclosure;
+    const wording = trustedPersonsText(lang);
+    const relations = consentFormText(lang).recipientRelations;
+    groups.push({
+      id: "disclosure", title: wording.title, empty: text.summaryEmpty,
+      rows: entered([
+        [wording.question, yesNo(disclosure.allow_disclosure)],
+        [wording.consentHeading, [yesNo(disclosure.consent_given), disclosure.company_name].filter(Boolean).join(" · ")],
+        [text.saved, [formatAppDateTime(disclosure.chosen_at), disclosure.chosen_by_name].filter(Boolean).join(" · ")],
+      ]),
+      parts: disclosure.allow_disclosure ? storedTrustedPersons(request).map((person, index) => ({
+        id: `disclosure-person-${index}`, title: person.name,
+        rows: entered([[wording.relation, relations[person.relation]], [wording.contact, person.contact], [wording.scope, person.scope]]),
+      })) : [],
+    });
   }
 
   // The reason of the request (13.1), from a server that knows it.

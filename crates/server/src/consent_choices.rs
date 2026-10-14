@@ -132,10 +132,47 @@ pub const RECIPIENTS_REQUIRED: &str = "consent_recipients_required";
 /// Refusal of a save in the cabinet: a recipient is incomplete, too long, of
 /// an unknown kind, or there are more than [`MAX_RECIPIENTS`].
 pub const RECIPIENTS_INVALID: &str = "consent_recipients_invalid";
+pub const DISCLOSURE_VERSION: &str = "2026-10-14";
+pub const DISCLOSURE_REQUIRED: &str = "disclosure_consent_required";
+
+/// Evidence of the independent disclosure decision. The original actor/time
+/// survive later changes of unrelated consent options.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisclosureDecision {
+    pub allow_disclosure: bool,
+    pub consent_given: bool,
+    pub version: String,
+    pub language: String,
+    pub chosen_at: DateTime<Utc>,
+    pub chosen_by: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chosen_by_name: Option<String>,
+    pub access_kind: String,
+    pub company_name: String,
+    pub consent_text: String,
+}
+
+pub fn disclosure_consent_text(language: &str, company: &str) -> String {
+    let text = match language {
+        "ru" => {
+            "Я даю явное согласие на то, что [company] предоставляет указанным выше лицам в указанном объёме информацию о моих персональных данных, включая данные о состоянии здоровья, и передаёт им эти данные. Если существует обязанность соблюдать врачебную тайну, я в этом объёме освобождаю лиц, участвующих в организации и лечении, от этой обязанности. Я могу в любое время отозвать это согласие на будущее. Обработка данных, осуществлённая до отзыва, остаётся законной. Дополнительная информация содержится в Уведомлении о защите данных."
+        }
+        "uk" => {
+            "Я надаю явну згоду на те, що [company] надає зазначеним вище особам у вказаному обсязі інформацію про мої персональні дані, зокрема дані про стан здоров’я, та передає їм ці дані. Якщо існує обов’язок дотримуватися лікарської таємниці, я в цьому обсязі звільняю осіб, які беруть участь в організації та лікуванні, від цього обов’язку. Я можу будь-коли відкликати цю згоду на майбутнє. Обробка даних, здійснена до відкликання, залишається законною. Додаткова інформація міститься в Повідомленні про захист даних."
+        }
+        "en" => {
+            "I expressly consent to [company] providing the persons named above with information about my personal data, including my health data, within the specified scope, and transmitting this data to them. Where a duty of confidentiality applies, I release those involved in organisation and treatment from that duty to this extent. I may withdraw this consent at any time with effect for the future. Processing carried out before withdrawal remains unaffected. Further information can be found in the Privacy Notice."
+        }
+        _ => {
+            "Ich willige ausdrücklich ein, dass [company] den oben genannten Personen im angegebenen Umfang Auskunft über meine personenbezogenen Daten, einschließlich meiner Gesundheitsdaten, erteilt und diese Daten an sie übermittelt. Soweit eine Schweigepflicht besteht, entbinde ich die an Organisation und Behandlung Beteiligten insoweit von dieser. Ich kann diese Einwilligung jederzeit mit Wirkung für die Zukunft widerrufen. Die bis dahin erfolgte Verarbeitung bleibt davon unberührt. Weitere Informationen finden Sie im Datenschutzhinweis."
+        }
+    };
+    text.replace("[company]", company)
+}
 
 /// A person or institution the person names for the option
 /// [`ConsentChoices::named_recipients`] (owner decision 2026-10-12): who they
-/// are and how to reach them, nothing more. Part of the choice, so the form
+/// are, how to reach them and the explicitly permitted scope. Part of the choice, so the form
 /// prints exactly the list the person chose; not sanctions-screened (owner
 /// decision 2026-10-12).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,6 +185,9 @@ pub struct ConsentRecipient {
     /// A phone number or an e-mail address; optional.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contact: Option<String>,
+    /// Exactly what may be disclosed; absent only in legacy choices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 impl ConsentRecipient {
@@ -164,7 +204,7 @@ impl ConsentRecipient {
         }
     }
 
-    /// The line the form prints: "Name (Beziehung), Kontakt".
+    /// The line the form prints: name, relationship, contact and disclosure scope.
     pub fn printed_line(&self) -> String {
         let mut line = format!("{} ({})", self.name.trim(), self.relation_label());
         if let Some(contact) = self
@@ -175,6 +215,10 @@ impl ConsentRecipient {
         {
             line.push_str(", ");
             line.push_str(contact);
+        }
+        if let Some(scope) = self.scope.as_deref().filter(|s| !s.trim().is_empty()) {
+            line.push_str("; Umfang der Auskunft: ");
+            line.push_str(scope);
         }
         line
     }
@@ -200,12 +244,17 @@ pub fn clean_persons(
             .contact
             .map(|contact| contact.trim().to_string())
             .filter(|contact| !contact.is_empty());
+        let scope = person
+            .scope
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         if name.is_empty()
             || name.chars().count() > RECIPIENT_TEXT_MAX
             || !RECIPIENT_RELATIONS.contains(&relation.as_str())
             || contact
                 .as_ref()
                 .is_some_and(|contact| contact.chars().count() > RECIPIENT_TEXT_MAX)
+            || scope.as_ref().is_some_and(|s| s.chars().count() > 240)
         {
             return Err(RECIPIENTS_INVALID);
         }
@@ -213,6 +262,7 @@ pub fn clean_persons(
             name,
             relation,
             contact,
+            scope,
         });
     }
     Ok(cleaned)
@@ -246,6 +296,8 @@ pub struct OwnConsentChoice {
     /// 2026-10-12's recipients.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recipients: Vec<ConsentRecipient>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disclosure: Option<DisclosureDecision>,
     pub chosen_at: DateTime<Utc>,
     /// Where the person chose: `lead_portal`.
     pub source: String,
@@ -387,7 +439,7 @@ pub fn electronic_signing_refusal(
 /// re-judges it.
 const CURRENT_SQL: &str = r#"
     SELECT c.id, c.choices, c.chosen_at, c.source, c.access_kind, c.chosen_by, c.lead_id,
-           c.recipients
+           c.recipients, c.disclosure
     FROM consent_form_choices c
     LEFT JOIN leads subject ON subject.id = c.lead_id
     WHERE c.template_id = 'privacy_consents'
@@ -428,6 +480,7 @@ where
         Option<Uuid>,
         Option<Uuid>,
         Value,
+        Option<Value>,
     );
     let row: Option<Row> = sqlx::query_as(CURRENT_SQL)
         .bind(lead_id)
@@ -435,11 +488,22 @@ where
         .fetch_optional(executor)
         .await?;
     Ok(row.and_then(
-        |(id, choices, chosen_at, source, access_kind, chosen_by, choice_lead_id, recipients)| {
+        |(
+            id,
+            choices,
+            chosen_at,
+            source,
+            access_kind,
+            chosen_by,
+            choice_lead_id,
+            recipients,
+            disclosure,
+        )| {
             Some(OwnConsentChoice {
                 id,
                 choices: serde_json::from_value(choices).ok()?,
                 recipients: serde_json::from_value(recipients).unwrap_or_default(),
+                disclosure: disclosure.and_then(|d| serde_json::from_value(d).ok()),
                 chosen_at,
                 source,
                 access_kind: Some(access_kind),
@@ -612,6 +676,7 @@ mod tests {
                 ..core()
             },
             recipients: Vec::new(),
+            disclosure: None,
             chosen_at: Utc.with_ymd_and_hms(2026, 10, 12, 8, 5, 0).unwrap(),
             source: "lead_portal".into(),
             access_kind: None,
@@ -697,6 +762,7 @@ mod tests {
             name: name.into(),
             relation: relation.into(),
             contact: contact.map(Into::into),
+            scope: None,
         };
         assert_eq!(
             clean_recipients(&named, Vec::new()),
@@ -765,6 +831,7 @@ mod tests {
             name: name.into(),
             relation: relation.into(),
             contact: contact.map(Into::into),
+            scope: None,
         };
         assert_eq!(clean_persons(Vec::new()), Ok(Vec::new()));
         assert_eq!(

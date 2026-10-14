@@ -7,9 +7,8 @@ import {
   choiceOnlyByGuardian,
   choosesForChild,
   consentFormChanged,
-  recipientsProblem,
+  savedDisclosureAllowed,
 } from "./lead-request-consent-form";
-import { recipientsToSend } from "./lead-trusted-persons-model";
 import { consentFormText } from "./lead-request-consent-form-text";
 
 const queue = <Result,>(task: () => Promise<Result>) => task();
@@ -39,7 +38,7 @@ describe("consent form choices in the lead cabinet", () => {
       />,
     );
     expect(markup).toContain("Einwilligung zur Datenübermittlung (Anlage 1)");
-    expect(markup.match(/type="checkbox"/g)).toHaveLength(8);
+    expect(markup.match(/type="checkbox"/g)).toHaveLength(7);
     expect(markup).not.toContain('checked=""');
     expect(markup).toContain("Noch keine Auswahl gespeichert.");
     expect(markup).toContain("GMED kreuzt nichts für Sie an");
@@ -172,58 +171,26 @@ describe("consent form choices in the lead cabinet", () => {
   });
 });
 
-describe("named recipients of the consent form (owner 2026-10-12)", () => {
-  const named = { ...CORE, named_recipients: true };
-  const row = (name: string, relation: "" | "spouse" | "family_doctor", contact = "") => ({ name, relation, contact });
-
-  it("uses the stored list independently of the historical consent snapshot and disables an empty named choice", () => {
-    const form = { version: "v1", choices: named, chosen_at: null, recipients: [{ name: "Old Recipient", relation: "spouse" as const }] };
-    const stored = { ...request(form), trusted_persons: [{ name: "Current Friend", relation: "friend" as const }] };
-    const html = renderToStaticMarkup(<ConsentFormChoicesSection request={stored} lang="en" enqueue={queue} onChange={() => undefined} />);
-    expect(html).toContain("Current Friend");
-    expect(html).not.toContain("Old Recipient");
-    expect(html).not.toContain("trusted-persons-editor");
-    const empty = renderToStaticMarkup(<ConsentFormChoicesSection request={{ ...stored, trusted_persons: [] }} lang="en" enqueue={queue} onChange={() => undefined} />);
-    expect(empty).toContain("Add at least one person");
-    expect((empty.match(/<button[^>]*>/g) ?? []).find((tag) => tag.includes("lead-request-consent-form-save"))).toContain('disabled=""');
-  });
-
-  it("asks for at least one complete person while the option is ticked", () => {
-    expect(recipientsProblem(named, [])).toBe("required");
-    expect(recipientsProblem(named, [row("", "")])).toBe("required");
-    expect(recipientsProblem(named, [row("Olga Muster", "")])).toBe("invalid");
-    expect(recipientsProblem(named, [row("", "spouse")])).toBe("invalid");
-    expect(recipientsProblem(named, [row("Olga Muster", "spouse")])).toBeNull();
-    expect(recipientsProblem(named, Array.from({ length: 6 }, () => row("Olga", "spouse")))).toBe("invalid");
-    expect(recipientsProblem(CORE, [row("Olga", "")])).toBeNull();
-  });
-
-  it("sends trimmed rows and drops empty ones", () => {
-    expect(recipientsToSend([row("  Olga   Muster ", "spouse", " +49 151 000000 "), row("", ""), row("Praxis Dr. Beispiel", "family_doctor")])).toEqual([
-      { name: "Olga Muster", relation: "spouse", contact: "+49 151 000000" },
-      { name: "Praxis Dr. Beispiel", relation: "family_doctor", contact: null },
-    ]);
-  });
-
-  it("shows the saved persons while the option is chosen", () => {
-    const html = renderToStaticMarkup(
-      <ConsentFormChoicesSection
-        request={request({
-          version: "2026-10-12",
-          choices: named,
-          recipients: [{ name: "Olga Muster", relation: "spouse", contact: "+49 151 000000" }],
-          chosen_at: "2026-10-12T10:00:00Z",
-        })}
-        lang="ru"
-        enqueue={queue}
-        onChange={() => undefined}
-      />,
-    );
-    expect(html).toContain("Доверенные лица");
-    expect(html).toContain("Olga Muster");
-    expect(html).not.toContain('value="Olga Muster"');
+describe("read-only disclosure decision", () => {
+  it("preserves legacy choices without interpreting them as new explicit consent", () => {
+    const item = request({ version: "v1", chosen_at: null, choices: { ...CORE, named_recipients: true }, recipients: [{ name: "Old Recipient", relation: "friend" }] });
+    expect(savedDisclosureAllowed(item)).toBe(true);
+    const html = renderToStaticMarkup(<ConsentFormChoicesSection request={item} lang="en" enqueue={queue} onChange={() => undefined} />);
+    expect(html).toContain("Not answered yet");
+    expect(html).toContain("An earlier choice is on record");
+    expect(html).toContain("Old Recipient");
+    expect(html).not.toContain('data-consent-option="named_recipients"');
     expect(html).toContain('href="/trusted-persons?lead=lead-1"');
-    expect(html).toContain("+49 151 000000");
-    expect(html).toContain("которых я указываю в разделе «Доверенные лица»");
+    expect(consentFormChanged({ ...CORE, named_recipients: true }, CORE)).toBe(false);
+  });
+  it("uses explicit disclosure even before the core consents are saved and shows each person's scope", () => {
+    const item = { ...request({ version: "v1", chosen_at: null, choices: null }), trusted_persons: [{ name: "Current Friend", relation: "friend" as const, scope: "Invoices only" }], disclosure: { allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "en", chosen_at: "2026-10-14T08:00:00Z", chosen_by: "guardian", access_kind: "guardian" as const, company_name: "Example Clinic" } };
+    expect(savedDisclosureAllowed(item)).toBe(true);
+    const html = renderToStaticMarkup(<ConsentFormChoicesSection request={item} lang="en" enqueue={queue} onChange={() => undefined} />);
+    expect(html).toContain("Disclosure permitted");
+    expect(html).toContain("Invoices only");
+    expect(html).not.toContain('checked=""');
+    expect(html).not.toContain('data-consent-option="named_recipients"');
+    expect(savedDisclosureAllowed({ ...item, disclosure: { ...item.disclosure, allow_disclosure: false, consent_given: false } })).toBe(false);
   });
 });

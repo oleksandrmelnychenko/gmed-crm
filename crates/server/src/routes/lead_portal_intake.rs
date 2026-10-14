@@ -2718,6 +2718,8 @@ pub(crate) async fn request_payload(
         // The trusted persons of the menu item «Vertrauenspersonen»
         // (2026-10-14): one list per lead.
         "trusted_persons": trusted_persons,
+        "disclosure": consent_choice.as_ref().and_then(|c| c.disclosure.as_ref()),
+        "disclosure_company_name": disclosure_company_name(&state.db).await?,
         "submitted_at": row
             .try_get::<Option<DateTime<Utc>>, _>("portal_submitted_at")
             .ok()
@@ -4002,13 +4004,15 @@ struct ConsentChoicesRequest {
 /// `chosen_by_me` says whether the viewer's login saved it: a choice the
 /// other parent saved is not shown as the viewer's own (QA 2026-10-12, A3-01).
 fn consent_form_json(choice: Option<&consent_choices::OwnConsentChoice>, viewer: Uuid) -> Value {
+    // The first disclosure decision does not answer the core/channel questions.
+    let core_choice = choice.filter(|c| c.disclosure.is_none() || c.choices.has_core());
     json!({
         "version": consent_choices::TEXT_VERSION,
-        "choices": choice.map(|choice| choice.choices),
+        "choices": core_choice.map(|choice| choice.choices),
         "recipients": choice.map(|choice| choice.recipients.clone()).unwrap_or_default(),
         "max_recipients": consent_choices::MAX_RECIPIENTS,
-        "chosen_at": choice.map(|choice| choice.chosen_at),
-        "chosen_by_me": choice.map(|choice| choice.chosen_by == Some(viewer)),
+        "chosen_at": core_choice.map(|choice| choice.chosen_at),
+        "chosen_by_me": core_choice.map(|choice| choice.chosen_by == Some(viewer)),
     })
 }
 
@@ -4053,9 +4057,9 @@ async fn save_consent_choices(
     }
     // "Named recipients" names somebody (owner 2026-10-12); the list is part
     // of the choice and printed only while that option is chosen. Since
-    // 2026-10-14 the list is the lead's trusted persons (own menu item of the
-    // cabinet): the cabinet sends none and the stored list is taken; an older
-    // cabinet that still sends a list stores it as the trusted persons.
+    // 2026-10-14 the cabinet sends none and the canonical scoped list is taken.
+    // An older client may repeat an unchanged historical list, but cannot
+    // enable a release or change its recipients through this route.
     let recipients_refusal = |code: &str| {
         coded(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -4099,6 +4103,21 @@ async fn save_consent_choices(
         );
     }
     let from_trusted_persons = body.choices.named_recipients && sent_recipients.is_empty();
+    let current = match consent_choices::current_for(&mut *tx, Some(lead_id), None).await {
+        Ok(current) => current,
+        Err(error) => return internal(error, "load disclosure decision"),
+    };
+    let disclosure = current.as_ref().and_then(|c| c.disclosure.clone());
+    if let Some(d) = &disclosure
+        && body.choices.named_recipients != (d.allow_disclosure && d.consent_given)
+    {
+        return coded(
+            StatusCode::CONFLICT,
+            "disclosure_choice_changed",
+            "Reload the current disclosure decision; change it on Auskunft an Dritte",
+            json!({}),
+        );
+    }
     let listed = if from_trusted_persons {
         match load_trusted_persons(&mut *tx, lead_id).await {
             Ok(persons) => persons,
@@ -4111,12 +4130,30 @@ async fn save_consent_choices(
         Ok(recipients) => recipients,
         Err(code) => return recipients_refusal(code),
     };
+    // A core/channel checkbox save cannot widen the separately scoped release.
+    // Keep an unchanged legacy choice, but never infer the new explicit consent.
+    if body.choices.named_recipients {
+        let permitted = current.as_ref().is_some_and(|c| {
+            c.recipients == recipients
+                && match &c.disclosure {
+                    Some(d) => d.allow_disclosure && d.consent_given,
+                    None => c.choices.named_recipients,
+                }
+        });
+        if !permitted {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                consent_choices::DISCLOSURE_REQUIRED,
+                "Confirm the people, scope and explicit consent under Auskunft an Dritte",
+                json!({}),
+            );
+        }
+    }
     let recipients_json = match serde_json::to_value(&recipients) {
         Ok(value) => value,
         Err(error) => return internal(error, "encode recipients"),
     };
-    // One list (2026-10-14): what an older cabinet names here becomes the
-    // lead's trusted persons.
+    // A compatible older client can repeat only the already authorized list.
     if body.choices.named_recipients
         && !from_trusted_persons
         && let Err(error) = sqlx::query(
@@ -4136,8 +4173,8 @@ async fn save_consent_choices(
     let (choice_id, chosen_at): (Uuid, DateTime<Utc>) = match sqlx::query_as(
         r#"INSERT INTO consent_form_choices (
                template_id, lead_id, patient_id, choices, chosen_by, access_kind,
-               source, language, text_version, recipients, chosen_at)
-           SELECT $1, l.id, l.prospect_patient_id, $2, $3, $4, 'lead_portal', $5, $6, $8, clock_timestamp()
+               source, language, text_version, recipients, chosen_at, disclosure)
+           SELECT $1, l.id, l.prospect_patient_id, $2, $3, $4, 'lead_portal', $5, $6, $8, clock_timestamp(), $9
            FROM leads l WHERE l.id = $7
            RETURNING id, chosen_at"#,
     )
@@ -4149,6 +4186,7 @@ async fn save_consent_choices(
     .bind(consent_choices::TEXT_VERSION)
     .bind(lead_id)
     .bind(&recipients_json)
+    .bind(disclosure.as_ref().map(|d| json!(d)))
     .fetch_one(&mut *tx)
     .await
     {
@@ -4215,6 +4253,7 @@ async fn save_consent_choices(
         id: choice_id,
         choices: body.choices,
         recipients,
+        disclosure,
         chosen_at,
         source: "lead_portal".into(),
         access_kind: Some(kind.as_str().to_string()),
@@ -4256,19 +4295,37 @@ where
 struct TrustedPersonsRequest {
     /// The whole list, at most [`consent_choices::MAX_RECIPIENTS`].
     persons: Vec<consent_choices::ConsentRecipient>,
+    allow_disclosure: bool,
+    consent_given: bool,
+    version: String,
+    language: String,
+}
+
+async fn disclosure_company_name<'e, E>(executor: E) -> Result<String, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let name: Option<Option<String>> =
+        sqlx::query_scalar("SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name'")
+            .fetch_optional(executor)
+            .await?;
+    Ok(name
+        .flatten()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "GMED".into()))
 }
 
 /// `POST /me/lead-requests/{lead_id}/trusted-persons`: the lead's trusted
 /// persons (owner 2026-10-14) — people GMED may tell about the person (or
-/// the child): name, who they are, optionally how to reach them. They have
+/// the child): name, relationship, contact and scope, with an explicit
+/// Yes/No decision and separate consent. They have
 /// access to information only and never act for the person (who acts is the
 /// representation of step 1). Not sanctions-screened, not trusted contacts.
 ///
-/// The list replaces the stored one. While the person's current choice of
-/// the consent form names recipients, a changed list is a new choice row with
-/// the same options and the new list, chosen by this login: a consent form
-/// generated before is no longer offered for an electronic signature
-/// (`consent_choice_changed`).
+/// Every save appends an immutable decision; core/channel flags stay as they
+/// were. Earlier signature invitations are invalidated. Legacy lists never
+/// imply agreement to the new text.
 async fn save_trusted_persons(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -4277,6 +4334,34 @@ async fn save_trusted_persons(
 ) -> axum::response::Response {
     if let Err(response) = require_patient(&auth) {
         return response;
+    }
+    if body.version != consent_choices::DISCLOSURE_VERSION {
+        return coded(
+            StatusCode::CONFLICT,
+            "disclosure_version_outdated",
+            "Reload the updated disclosure text",
+            json!({ "version": consent_choices::DISCLOSURE_VERSION }),
+        );
+    }
+    let language = body.language.trim().to_lowercase();
+    if !CONSENT_LANGUAGES.contains(&language.as_str()) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Unsupported language");
+    }
+    if !body.allow_disclosure && (!body.persons.is_empty() || body.consent_given) {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "disclosure_decision_invalid",
+            "No disclosure means no named recipients or consent",
+            json!({}),
+        );
+    }
+    if body.allow_disclosure && !body.consent_given {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            consent_choices::DISCLOSURE_REQUIRED,
+            "Explicit consent to the named people and stated scope is required",
+            json!({}),
+        );
     }
     let persons = match consent_choices::clean_persons(body.persons) {
         Ok(persons) => persons,
@@ -4289,6 +4374,22 @@ async fn save_trusted_persons(
             );
         }
     };
+    if body.allow_disclosure && persons.is_empty() {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            consent_choices::RECIPIENTS_REQUIRED,
+            "Name at least one person",
+            json!({}),
+        );
+    }
+    if persons.iter().any(|p| p.scope.is_none()) {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            consent_choices::RECIPIENTS_INVALID,
+            "State the scope of information for each person (up to 240 characters)",
+            json!({ "field": "scope" }),
+        );
+    }
     let persons_json = match serde_json::to_value(&persons) {
         Ok(value) => value,
         Err(error) => return internal(error, "encode trusted persons"),
@@ -4304,17 +4405,14 @@ async fn save_trusted_persons(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
-    let stored = match load_trusted_persons(&mut *tx, lead_id).await {
-        Ok(stored) => stored,
-        Err(error) => return internal(error, "load trusted persons"),
+    let current = match consent_choices::current_for(&mut *tx, Some(lead_id), None).await {
+        Ok(current) => current,
+        Err(error) => return internal(error, "load consent choice"),
     };
-    if stored == persons {
-        drop(tx);
-        return match request_payload(&state, lead_id, auth.user_id, kind).await {
-            Ok(payload) => Json(payload).into_response(),
-            Err(error) => internal(error, "load request"),
-        };
-    }
+    let company_name = match disclosure_company_name(&mut *tx).await {
+        Ok(name) => name,
+        Err(error) => return internal(error, "load disclosure company"),
+    };
     if let Err(error) = sqlx::query(
         "UPDATE leads SET portal_trusted_persons = $2, updated_at = now() WHERE id = $1",
     )
@@ -4328,6 +4426,25 @@ async fn save_trusted_persons(
     let now = match portal_update_time(&mut tx).await {
         Ok(now) => now,
         Err(error) => return internal(error, "read portal update time"),
+    };
+    let disclosure = consent_choices::DisclosureDecision {
+        allow_disclosure: body.allow_disclosure,
+        consent_given: body.consent_given,
+        version: body.version,
+        language: language.clone(),
+        chosen_at: now,
+        chosen_by: auth.user_id,
+        chosen_by_name: match sqlx::query_scalar("SELECT name FROM users WHERE id = $1")
+            .bind(auth.user_id)
+            .fetch_optional(&mut *tx)
+            .await
+        {
+            Ok(name) => name,
+            Err(error) => return internal(error, "load disclosure chooser"),
+        },
+        access_kind: kind.as_str().into(),
+        consent_text: consent_choices::disclosure_consent_text(&language, &company_name),
+        company_name,
     };
     let marker = json!({
         TRUSTED_PERSONS_MARKER: {
@@ -4357,60 +4474,51 @@ async fn save_trusted_persons(
             "lead",
             Some(lead_id),
             // Names stay out of the audit trail (erasure).
-            json!({ "count": persons.len(), "access_kind": kind.as_str() }),
+            json!({ "count": persons.len(), "access_kind": kind.as_str(), "allow_disclosure": body.allow_disclosure,
+                "consent_given": body.consent_given, "text_version": consent_choices::DISCLOSURE_VERSION, "language": language }),
         ),
     )
     .await
     {
         return internal(error, "audit trusted persons");
     }
-    // The consent form prints the list while "named recipients" is chosen:
-    // a changed list is a new choice with the same options.
-    let current = match consent_choices::current_for(&mut *tx, Some(lead_id), None).await {
-        Ok(current) => current,
-        Err(error) => return internal(error, "load consent choice"),
-    };
-    let mut invalidated = (0, Vec::new());
-    if let Some(current) = current
-        .as_ref()
-        .filter(|current| current.choices.named_recipients && current.recipients != persons)
-    {
-        // Removing the last person also withdraws this optional consent.
-        // Keep the other options and never create a checked, unnamed release.
-        let mut choices = current.choices;
-        choices.named_recipients = !persons.is_empty();
-        if let Err(error) = sqlx::query(
-            r#"INSERT INTO consent_form_choices (
+    // Disclosure is independent of the three core consents. Keep their exact
+    // answers; an initial disclosure-only choice cannot pass electronic signing.
+    let mut choices = current.as_ref().map(|c| c.choices).unwrap_or_default();
+    choices.named_recipients = body.allow_disclosure;
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO consent_form_choices (
                    template_id, lead_id, patient_id, choices, chosen_by, access_kind,
-                   source, language, text_version, recipients, chosen_at)
-               SELECT c.template_id, l.id, l.prospect_patient_id, $6, $3, $4,
-                      'lead_portal', c.language, c.text_version, $5, clock_timestamp()
-               FROM consent_form_choices c
-               JOIN leads l ON l.id = $2
-               WHERE c.id = $1"#,
-        )
-        .bind(current.id)
-        .bind(lead_id)
-        .bind(auth.user_id)
-        .bind(kind.as_str())
-        .bind(&persons_json)
-        .bind(json!(choices))
-        .execute(&mut *tx)
-        .await
-        {
-            return internal(error, "insert consent choices");
-        }
-        invalidated = match crate::document_signatures::invalidate_consent_choices(
-            &mut tx,
-            lead_id,
-            auth.user_id,
-        )
-        .await
-        {
-            Ok(requests) => requests,
-            Err(error) => return internal(error, "invalidate earlier consent invitations"),
-        };
+                   source, language, text_version, recipients, chosen_at, disclosure)
+               SELECT $1, l.id, l.prospect_patient_id, $6, $3, $4,
+                      'lead_portal', $7, $8, $5, $9, $10
+               FROM leads l WHERE l.id = $2"#,
+    )
+    .bind(consent_choices::TEMPLATE)
+    .bind(lead_id)
+    .bind(auth.user_id)
+    .bind(kind.as_str())
+    .bind(&persons_json)
+    .bind(json!(choices))
+    .bind(&language)
+    .bind(consent_choices::TEXT_VERSION)
+    .bind(now)
+    .bind(json!(disclosure))
+    .execute(&mut *tx)
+    .await
+    {
+        return internal(error, "insert consent choices");
     }
+    let invalidated = match crate::document_signatures::invalidate_consent_choices(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(requests) => requests,
+        Err(error) => return internal(error, "invalidate earlier consent invitations"),
+    };
     if let Err(error) = tx.commit().await {
         return internal(error, "commit trusted persons");
     }
@@ -6350,6 +6458,7 @@ async fn get_lead_portal_intake(
         "submitted_by": submitted_by,
         "consents": consent_items,
         "consent_form": consent_form,
+        "disclosure": consent_form.get("disclosure").cloned().unwrap_or(Value::Null),
         "trusted_persons": trusted_persons,
         "uploads": upload_items,
         "uploads_hidden": !medical,

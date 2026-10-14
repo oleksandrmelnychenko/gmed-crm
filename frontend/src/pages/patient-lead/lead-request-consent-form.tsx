@@ -10,7 +10,6 @@ import {
   CONSENT_CHOICE_BY_GUARDIAN,
   CONSENT_FORM_CHANNELS,
   CONSENT_FORM_CORE,
-  CONSENT_FORM_OPTIONS,
   CONSENT_RECIPIENTS_INVALID,
   CONSENT_RECIPIENTS_REQUIRED,
   NO_CONSENT_FORM_CHOICES,
@@ -22,13 +21,13 @@ import {
 import { consentFormText } from "./lead-request-consent-form-text";
 import { CabinetSection as Section, errorBody, errorMessage, type RequestQueue } from "./lead-request-parts";
 
-import { recipientDrafts, recipientsToSend, storedTrustedPersons, trustedPersonsPath, trustedPersonsProblem, type RecipientDraft } from "./lead-trusted-persons-model";
+import { storedTrustedPersons, trustedPersonsPath } from "./lead-trusted-persons-model";
 import { TrustedPersonsList } from "./lead-trusted-persons-editor";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 
-export function recipientsProblem(choices: ConsentFormChoices, drafts: readonly RecipientDraft[]): "required" | "invalid" | null {
-  if (!choices.named_recipients) return null;
-  return trustedPersonsProblem(drafts) ?? (recipientsToSend(drafts).length === 0 ? "required" : null);
+export function savedDisclosureAllowed(request: Pick<LeadRequest, "disclosure" | "consent_form">): boolean {
+  // Unrelated consent edits preserve a historical choice; only the dedicated page grants a new one.
+  return request.disclosure ? request.disclosure.allow_disclosure && request.disclosure.consent_given : request.consent_form?.choices?.named_recipients === true;
 }
 
 /** Whether the draft differs from what is saved (nothing saved counts as "all unticked"). */
@@ -38,7 +37,7 @@ export function consentFormChanged(
 ): boolean {
   const base = saved ?? NO_CONSENT_FORM_CHOICES;
   return (Object.keys(NO_CONSENT_FORM_CHOICES) as (keyof ConsentFormChoices)[]).some(
-    (key) => draft[key] !== base[key],
+    (key) => key !== "named_recipients" && draft[key] !== base[key],
   );
 }
 
@@ -107,7 +106,6 @@ export function ConsentFormChoicesSection({
   }
   const changed = consentFormChanged(draft, form.choices);
   const coreTicked = hasCoreConsents(draft);
-  const problem = recipientsProblem(draft, recipientDrafts(recipients));
 
   async function save() {
     if (!form) return;
@@ -115,7 +113,7 @@ export function ConsentFormChoicesSection({
     setError("");
     try {
       const saved = await enqueue(() =>
-        saveLeadConsentFormChoicesAndRefresh(request.lead_id, draft, form.version, lang, []),
+        saveLeadConsentFormChoicesAndRefresh(request.lead_id, { ...draft, named_recipients: savedDisclosureAllowed(request) }, form.version, lang, []),
       );
       onChange(saved);
       setDraft(saved.consent_form?.choices ?? draft);
@@ -123,7 +121,9 @@ export function ConsentFormChoicesSection({
     } catch (cause) {
       const code = errorBody(cause)?.code;
       setError(
-        code === "consent_core_required"
+        code === "disclosure_choice_changed"
+          ? personsText.outdated
+          : code === "consent_core_required"
           ? text.coreRequired
           : code === CONSENT_CHOICE_BY_GUARDIAN
             ? text.byGuardianOnly
@@ -138,16 +138,17 @@ export function ConsentFormChoicesSection({
     }
   }
 
-  const recipientsBlock = draft.named_recipients ? (
-    <fieldset className="space-y-3 rounded-lg border border-border/60 p-3 sm:ml-7" data-testid="lead-request-consent-recipients">
+  const recipientsBlock = (
+    <fieldset className="space-y-3 rounded-lg border border-border/60 p-3" data-testid="lead-request-consent-recipients">
       <legend className="px-1 text-sm font-medium">{personsText.title}</legend>
+      <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs", request.disclosure?.allow_disclosure && request.disclosure.consent_given ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800")} data-testid="disclosure-saved-status">
+        {!request.disclosure ? personsText.unanswered : savedDisclosureAllowed(request) ? personsText.allowed : personsText.denied}
+      </span>
       {recipients.length > 0 ? <TrustedPersonsList persons={recipients} lang={lang} /> : null}
-      {problem ? <p className="text-xs text-amber-800 dark:text-amber-300" role="status" data-testid="lead-request-consent-recipients-problem">
-        {problem === "required" ? personsText.required : personsText.invalid}
-      </p> : null}
+      {!request.disclosure && form.choices?.named_recipients ? <p className="text-xs text-muted-foreground">{personsText.legacy}</p> : null}
       <a className="text-sm font-medium text-[var(--brand)] underline underline-offset-4" href={trustedPersonsPath(request.lead_id)}>{personsText.edit}</a>
     </fieldset>
-  ) : null;
+  );
 
   const option = (key: keyof ConsentFormChoices) => (
     <label key={key} className="flex items-start gap-3 text-sm">
@@ -178,7 +179,7 @@ export function ConsentFormChoicesSection({
       <Section title={text.title}>
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">{text.intro}</p>
-          <div className="space-y-2">{CONSENT_FORM_OPTIONS.map(option)}</div>
+          <div className="space-y-2">{CONSENT_FORM_CORE.map(option)}</div>
           {recipientsBlock}
           <fieldset className="space-y-2">
             <legend className="text-sm">{text.channelsTitle}</legend>
@@ -194,7 +195,7 @@ export function ConsentFormChoicesSection({
             <Button
               type="button"
               variant="outline"
-              disabled={busy || !coreTicked || problem !== null || (!changed && Boolean(form.choices) && form.chosen_by_me !== false)}
+              disabled={busy || !coreTicked || (!changed && Boolean(form.choices) && form.chosen_by_me !== false)}
               onClick={() => void save()}
               data-testid="lead-request-consent-form-save"
             >

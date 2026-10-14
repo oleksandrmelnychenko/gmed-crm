@@ -4,6 +4,7 @@ import type { LeadRequest, LeadRequestBilling, LeadRequestDocument, LeadRequestR
 import { answeredPayerRows, payerAnsweredByPayer, requestSummary } from "./lead-request-summary";
 import { leadRequestText } from "./lead-request-text";
 import { consentFormText } from "./lead-request-consent-form-text";
+import { trustedPersonsText } from "./lead-trusted-persons-text";
 
 const de = leadRequestText("de");
 
@@ -13,14 +14,34 @@ it("shows saved consent choices and explicit recipients in the submission summar
     version: "2026-10-12", chosen_at: "2026-10-13T08:00:00Z", chosen_by_me: false,
     choices: { agency_processing: true, doctors_to_agency: true, data_system: true, named_recipients: true,
       channel_email: true, channel_threema: false, channel_whatsapp: false, channel_telegram: false },
-    recipients: [{ name: "Example Relative", relation: "relative", contact: "relative@example.test" }],
+    recipients: [{ name: "Example Relative", relation: "relative", contact: "relative@example.test", scope: "Rechnungen" }],
   } }), de, "de");
   const summary = rows(groups, "consent_form");
   expect(summary[wording.options.channel_email]).toBe(de.yesNo.yes);
   expect(summary[wording.options.channel_whatsapp]).toBe(de.yesNo.no);
   expect(summary[wording.recipientsTitle]).toContain("Example Relative");
   expect(summary[wording.recipientsTitle]).toContain("relative@example.test");
+  expect(summary[wording.recipientsTitle]).toContain("Rechnungen");
   expect(summary[de.saved]).toContain("13.10.2026");
+});
+
+it("shows disclosure, actor and per-person scope before any core consent choice exists", () => {
+  const wording = trustedPersonsText("de");
+  const disclosure = { allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "de", chosen_at: "2026-10-14T08:00:00Z", chosen_by: "guardian-a", chosen_by_name: "Parent Muster", access_kind: "guardian" as const, company_name: "Example Clinic" };
+  const item = request({ disclosure, trusted_persons: [{ name: "Eva Friend", relation: "friend", scope: "Nur Rechnungen", contact: "eva@example.test" }], consent_form: { version: "v1", choices: null, chosen_at: null } });
+  const groups = requestSummary(item, de, "de");
+  const summary = rows(groups, "disclosure");
+  expect(summary[wording.question]).toBe("Ja");
+  expect(summary[wording.consentHeading]).toBe("Ja · Example Clinic");
+  expect(summary[de.saved]).toContain("Parent Muster");
+  expect(summary[de.saved]).toContain("14.10.2026");
+  const people = groups.find(group => group.id === "disclosure")?.parts;
+  expect(people?.[0].title).toBe("Eva Friend");
+  expect(people?.[0].rows).toContainEqual({ label: wording.scope, value: "Nur Rechnungen" });
+  expect(groups.find(group => group.id === "consent_form")).toBeUndefined();
+  const no = requestSummary({ ...item, disclosure: { ...disclosure, allow_disclosure: false, consent_given: false } }, de, "de").find(group => group.id === "disclosure");
+  expect(no?.rows).toContainEqual({ label: wording.question, value: "Nein" });
+  expect(no?.parts).toEqual([]);
 });
 
 function upload(id: string, fileName: string): LeadRequestDocument {

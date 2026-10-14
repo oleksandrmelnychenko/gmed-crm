@@ -13,7 +13,21 @@ export const CONSENT_RECIPIENT_RELATIONS = ["spouse", "child", "relative", "frie
 export type ConsentRecipientRelation = (typeof CONSENT_RECIPIENT_RELATIONS)[number];
 
 /** A person or institution the person named for "named recipients". */
-export type LeadPortalConsentRecipient = { name: string; relation: string; contact: string | null };
+export type LeadPortalConsentRecipient = { name: string; relation: string; contact: string | null; scope?: string | null };
+
+/** Independent disclosure receipt; legacy records without one remain unanswered. */
+export type LeadPortalDisclosure = {
+  allow_disclosure: boolean | null;
+  consent_given: boolean | null;
+  version: string | null;
+  language: string | null;
+  chosen_at: string | null;
+  chosen_by: string | null;
+  chosen_by_name: string | null;
+  access_kind: string | null;
+  company_name: string | null;
+  consent_text: string | null;
+};
 
 /** The current choice made in the cabinet; absent answers are never inferred. */
 export type LeadPortalConsentForm = {
@@ -46,8 +60,22 @@ export function normalizeConsentRecipients(value: unknown): LeadPortalConsentRec
     const name = typeof raw.name === "string" ? raw.name.trim() : "";
     if (!name) return [];
     const contact = typeof raw.contact === "string" && raw.contact.trim() ? raw.contact.trim() : null;
-    return [{ name, relation: typeof raw.relation === "string" ? raw.relation : "other", contact }];
+    const scope = typeof raw.scope === "string" && raw.scope.trim() ? raw.scope.trim() : null;
+    return [{ name, relation: typeof raw.relation === "string" ? raw.relation : "other", contact, scope }];
   });
+}
+
+export function normalizeLeadPortalDisclosure(value: unknown): LeadPortalDisclosure | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const text = (key: string) => typeof raw[key] === "string" && raw[key].trim() ? raw[key] as string : null;
+  return {
+    allow_disclosure: typeof raw.allow_disclosure === "boolean" ? raw.allow_disclosure : null,
+    consent_given: typeof raw.consent_given === "boolean" ? raw.consent_given : null,
+    version: text("version"), language: text("language"),
+    chosen_at: text("chosen_at"), chosen_by: text("chosen_by"), chosen_by_name: text("chosen_by_name"),
+    access_kind: text("access_kind"), company_name: text("company_name"), consent_text: text("consent_text"),
+  };
 }
 
 export function normalizeLeadPortalConsentForm(value: unknown): LeadPortalConsentForm | null {

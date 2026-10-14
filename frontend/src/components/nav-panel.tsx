@@ -329,7 +329,7 @@ function NavGroup({
             className={({ isActive }: { isActive: boolean }) =>
               cn(
                 "relative flex items-center rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring motion-reduce:transition-none",
-                collapsed ? "justify-center size-10 mx-auto" : "gap-3 px-3 h-9",
+                collapsed ? "justify-center size-10 mx-auto" : item.id === "trusted_persons" ? "gap-3 px-3 py-2 min-h-9" : "gap-3 px-3 h-9",
                 isActive
                   ? "bg-muted text-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
                   : "text-sidebar-foreground/90 hover:text-sidebar-foreground hover:bg-sidebar-accent/60",
@@ -348,7 +348,7 @@ function NavGroup({
                   )}
                 />
                 {!collapsed && (
-                  <span className="min-w-0 flex-1 truncate whitespace-nowrap">{label}</span>
+                  <span className={cn("min-w-0 flex-1", item.id === "trusted_persons" ? "whitespace-normal leading-5" : "truncate whitespace-nowrap")}>{label}</span>
                 )}
                 {count > 0 ? (
                   collapsed ? (

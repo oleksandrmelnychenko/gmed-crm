@@ -292,13 +292,34 @@ export type ConsentRecipientRelation = (typeof CONSENT_RECIPIENT_RELATIONS)[numb
  * while that option is chosen; not sanctions-screened (owner 2026-10-12). Since 2026-10-14 the
  * list is the lead's trusted persons (own menu item of the cabinet, `TrustedPerson`).
  */
-export type ConsentRecipient = { name: string; relation: ConsentRecipientRelation; contact?: string | null };
+export type ConsentRecipient = { name: string; relation: ConsentRecipientRelation; contact?: string | null; scope?: string | null };
 
 /**
  * A trusted person of the cabinet (owner 2026-10-14): somebody GMED may tell about the person —
  * information only, never acting for the person. Same shape and rules as a recipient.
  */
 export type TrustedPerson = ConsentRecipient;
+
+export const DISCLOSURE_VERSION = "2026-10-14";
+export type LeadDisclosure = {
+  allow_disclosure: boolean;
+  consent_given: boolean;
+  version: string;
+  language: string;
+  chosen_at: string;
+  chosen_by: string;
+  access_kind: "self" | "guardian";
+  company_name: string;
+  consent_text?: string;
+  chosen_by_name?: string | null;
+};
+export type LeadDisclosureInput = {
+  persons: (ConsentRecipient & { scope: string })[];
+  allow_disclosure: boolean;
+  consent_given: boolean;
+  version: typeof DISCLOSURE_VERSION;
+  language: "de" | "en" | "uk" | "ru";
+};
 
 /** At most this many recipients (the server answers 422 `consent_recipients_invalid` otherwise). */
 export const MAX_CONSENT_RECIPIENTS = 5;
@@ -751,6 +772,10 @@ export type LeadRequest = {
   consent_form?: LeadRequestConsentForm;
   /** The trusted persons of the menu item (2026-10-14); absent on an older server. */
   trusted_persons?: TrustedPerson[];
+  /** Explicit disclosure decision; a legacy list is not an explicit consent. */
+  disclosure?: LeadDisclosure | null;
+  /** Configured agency name shown in the consent being granted now. */
+  disclosure_company_name?: string | null;
   submitted_at: string | null;
   /** Data or documents changed after sending; absent on an older server. */
   changed_since_submit?: boolean;
@@ -867,14 +892,14 @@ export async function saveLeadConsentFormChoicesAndRefresh(
 }
 
 /**
- * Saves the whole list of trusted persons (owner 2026-10-14, at most five) and answers the
- * request. 422 `consent_recipients_invalid` for an incomplete or too long entry. While the
- * consent choice names recipients, a changed list is a new choice (a form made before is made anew).
+ * Saves the explicit third-party disclosure decision, scoped recipients and consent receipt.
+ * No sends an empty list; Yes requires at least one complete person and explicit consent.
+ * Each successful save records the actor, language and current text version.
  */
-export function saveLeadTrustedPersons(leadId: string, persons: TrustedPerson[]): Promise<LeadRequest> {
+export function saveLeadTrustedPersons(leadId: string, disclosure: LeadDisclosureInput): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/trusted-persons`, {
     method: "POST",
-    body: JSON.stringify({ persons }),
+    body: JSON.stringify(disclosure),
   });
 }
 

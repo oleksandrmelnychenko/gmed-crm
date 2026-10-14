@@ -25886,6 +25886,82 @@ pub(crate) async fn generate_lead_document(
         })
 }
 
+/// The scoped release is printed from the immutable cabinet receipt, never
+/// inferred from a contact or an older generic Anlage 1 checkbox.
+fn append_third_party_disclosure_pdf(
+    layout: &mut TreatmentPlanPdfLayout,
+    choice: Option<&crate::consent_choices::OwnConsentChoice>,
+) {
+    let Some(choice) = choice else {
+        return;
+    };
+    let Some(disclosure) = &choice.disclosure else {
+        return;
+    };
+    layout.text_block(
+        "Auskunft an Dritte",
+        12.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        3.0,
+        2.0,
+    );
+    if disclosure.access_kind == "guardian" {
+        fc_body(
+            layout,
+            "Die folgenden Angaben und die Einwilligung erklärt die vertretende Person für die oben bezeichnete Person.",
+        );
+    }
+    fc_body(
+        layout,
+        "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.",
+    );
+    fc_body(layout, "Soll eine weitere Person Auskunft erhalten dürfen?");
+    adult_legal_checkbox(
+        layout,
+        !disclosure.allow_disclosure,
+        "Nein, nur ich selbst.",
+    );
+    adult_legal_checkbox(
+        layout,
+        disclosure.allow_disclosure,
+        "Ja, folgende Person(en) dürfen Auskunft erhalten:",
+    );
+    if disclosure.allow_disclosure {
+        for line in choice.recipient_lines() {
+            fc_body(layout, &line);
+        }
+        fc_body(
+            layout,
+            "Einwilligung (nur auszufüllen, wenn Sie oben „Ja“ gewählt haben)",
+        );
+        adult_legal_checkbox(
+            layout,
+            disclosure.consent_given,
+            &crate::consent_choices::disclosure_consent_text("de", &disclosure.company_name),
+        );
+    }
+    fc_body(
+        layout,
+        "Hinweis: Nur die hier genannten Personen dürfen Auskunft erhalten. Änderungen oder den Widerruf teilen Sie uns bitte einfach kurz mit.",
+    );
+    let date = crate::app_time::local(disclosure.chosen_at)
+        .format("%d.%m.%Y %H:%M")
+        .to_string();
+    let who = disclosure
+        .chosen_by_name
+        .as_deref()
+        .unwrap_or("die erklärende Person");
+    fc_body(
+        layout,
+        &format!(
+            "Auswahl und Einwilligung im Kundenkabinett: {who}, {date} Uhr; Textversion {}, Sprache {}.",
+            disclosure.version, disclosure.language
+        ),
+    );
+}
+
 fn build_adult_privacy_consents_pdf(
     party: &DocPartyBlock,
     agency: &AgencyContractSettings,
@@ -25992,6 +26068,7 @@ fn build_adult_privacy_consents_pdf(
     if let Some(choice) = own_choice {
         fc_body(&mut layout, &choice.printed_note());
     }
+    append_third_party_disclosure_pdf(&mut layout, own_choice);
     fc_body(
         &mut layout,
         "Ich bin mir der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
@@ -26286,6 +26363,7 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     if let Some(choice) = own_choice {
         admin_block(&mut layout, &choice.printed_note(), 0.0, 1.0);
     }
+    append_third_party_disclosure_pdf(&mut layout, own_choice);
     admin_block(
         &mut layout,
         &format!(
@@ -35383,6 +35461,23 @@ mod tests {
 
     /// QA 2026-10-12, A2-06: the minor's form ticks what the parent chose in
     /// the cabinet and names that parent; the child stays the data subject.
+    fn disclosure_test_receipt(
+        choice: &crate::consent_choices::OwnConsentChoice,
+    ) -> crate::consent_choices::DisclosureDecision {
+        crate::consent_choices::DisclosureDecision {
+            allow_disclosure: true,
+            consent_given: true,
+            version: crate::consent_choices::DISCLOSURE_VERSION.into(),
+            language: "de".into(),
+            chosen_at: choice.chosen_at,
+            chosen_by: choice.chosen_by.unwrap_or_default(),
+            chosen_by_name: Some("Original Disclosure Chooser".into()),
+            access_kind: choice.access_kind.clone().unwrap_or_else(|| "self".into()),
+            company_name: "GMED Test".into(),
+            consent_text: crate::consent_choices::disclosure_consent_text("de", "GMED Test"),
+        }
+    }
+
     #[test]
     fn child_consent_prints_the_parents_own_choice_and_names_who_chose() {
         let choice = crate::consent_choices::OwnConsentChoice {
@@ -35395,6 +35490,7 @@ mod tests {
                 ..Default::default()
             },
             recipients: Vec::new(),
+            disclosure: None,
             chosen_at: Utc.with_ymd_and_hms(2026, 10, 12, 9, 6, 0).unwrap(),
             source: "lead_portal".into(),
             access_kind: Some("guardian".into()),
@@ -35466,7 +35562,9 @@ mod tests {
             name: "Chosen Clinic".into(),
             relation: "clinic".into(),
             contact: Some("chosen@example.test".into()),
+            scope: Some("Nur organisatorische Informationen".into()),
         }];
+        selected.disclosure = Some(disclosure_test_receipt(selected));
         let selected_text = normalized_pdf_text(&build_consent_pdf(&context).unwrap());
         assert!(selected_text.contains("Chosen Clinic"), "{selected_text}");
         assert!(
@@ -35474,6 +35572,27 @@ mod tests {
             "{selected_text}"
         );
         assert!(!selected_text.contains("Oma Beispiel"), "{selected_text}");
+        assert!(
+            selected_text.contains("Umfang der Auskunft: Nur organisatorische Informationen"),
+            "{selected_text}"
+        );
+        assert!(
+            selected_text.contains("Auskunft an Dritte"),
+            "{selected_text}"
+        );
+        assert!(
+            selected_text.contains("Ich willige ausdrücklich ein"),
+            "{selected_text}"
+        );
+        let disclosure = context
+            .own_choice
+            .as_mut()
+            .unwrap()
+            .disclosure
+            .as_mut()
+            .unwrap();
+        disclosure.allow_disclosure = false;
+        disclosure.consent_given = false;
         context
             .own_choice
             .as_mut()
@@ -35482,6 +35601,10 @@ mod tests {
             .named_recipients = false;
         let unchecked = normalized_pdf_text(&build_consent_pdf(&context).unwrap());
         assert!(!unchecked.contains("Chosen Clinic"), "{unchecked}");
+        assert!(
+            unchecked.contains("[x] Nein, nur ich selbst."),
+            "{unchecked}"
+        );
     }
 
     /// QA 2026-10-12 (round 3): the second parent's signature line stood
@@ -35773,6 +35896,7 @@ mod tests {
                 ..Default::default()
             },
             recipients: Vec::new(),
+            disclosure: None,
             chosen_at: chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 10, 12, 8, 5, 0)
                 .unwrap(),
             source: "lead_portal".into(),
@@ -35824,7 +35948,9 @@ mod tests {
             name: "Chosen Adult Recipient".into(),
             relation: "spouse".into(),
             contact: Some("chosen@example.test".into()),
+            scope: Some("Nur Rechnungen".into()),
         }];
+        named.disclosure = Some(disclosure_test_receipt(&named));
         let selected = build_adult_privacy_consents_pdf(
             &party,
             &agency,
@@ -35835,6 +35961,22 @@ mod tests {
         .unwrap();
         let selected_text = normalized_pdf_text(&selected);
         assert!(
+            selected_text.contains("Umfang der Auskunft: Nur Rechnungen"),
+            "{selected_text}"
+        );
+        assert!(
+            selected_text.contains("Auskunft an Dritte"),
+            "{selected_text}"
+        );
+        assert!(
+            selected_text.contains("Ich willige ausdrücklich ein, dass GMED Test"),
+            "{selected_text}"
+        );
+        assert!(
+            selected_text.contains("Original Disclosure Chooser"),
+            "{selected_text}"
+        );
+        assert!(
             selected_text.contains("Chosen Adult Recipient"),
             "{selected_text}"
         );
@@ -35843,6 +35985,8 @@ mod tests {
             "{selected_text}"
         );
         named.choices.named_recipients = false;
+        named.disclosure.as_mut().unwrap().allow_disclosure = false;
+        named.disclosure.as_mut().unwrap().consent_given = false;
         let unchecked = build_adult_privacy_consents_pdf(
             &party,
             &agency,
@@ -35852,6 +35996,7 @@ mod tests {
         )
         .unwrap();
         assert!(!normalized_pdf_text(&unchecked).contains("Chosen Adult Recipient"));
+        assert!(normalized_pdf_text(&unchecked).contains("[x] Nein, nur ich selbst."));
         // A representative's choice is never "meine eigene Auswahl".
         let represented = crate::consent_choices::OwnConsentChoice {
             access_kind: Some("guardian".into()),
