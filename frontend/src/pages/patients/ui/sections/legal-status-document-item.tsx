@@ -3,8 +3,11 @@ import { AlertTriangle, CheckCircle2, Clock3, FilePlus2, ShieldOff } from "lucid
 import { Button } from "@/components/ui/button";
 import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { uiText, type Lang } from "@/lib/i18n";
+import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
+import { DocumentSignatureAction, SIGNING_ROLES } from "@/pages/documents/ui/document-signature-action";
+import { useSignatureSummary } from "@/pages/documents/data/use-signature-summary";
 
 import {
   legalStatusDocumentStateText,
@@ -79,6 +82,10 @@ export function LegalStatusDocumentItem({
 }) {
   const text = (key: string, values?: Record<string, string>) => uiText(key, lang, values);
   const { state, pendingDocument } = evidence;
+  const { user } = useAuth();
+  const summary = useSignatureSummary(user && SIGNING_ROLES.includes(user.role) ? user.id : undefined, pendingDocument?.id);
+  const demoSigned = state === "missing" && summary?.test_mode
+    && summary.status === "completed" && Boolean(summary.result_document_id);
   const tone = TONES[state];
   const Icon = ICONS[state];
   const showActions = canAct && state !== "signed";
@@ -103,12 +110,14 @@ export function LegalStatusDocumentItem({
           data-testid={`legal-status-document-${kind}-state`}
           className={cn("break-words text-xs leading-5", tone.text)}
         >
-          {legalStatusDocumentStateText(evidence, lang)}
+          {demoSigned
+            ? lang === "de" ? "DEMO-Unterschrift gespeichert. Kein rechtswirksamer Nachweis." : "DEMO-подпись сохранена. Юридическое подтверждение отсутствует."
+            : legalStatusDocumentStateText(evidence, lang)}
         </p>
         {hintKey ? (
           <p className="break-words text-xs leading-5 text-muted-foreground">{text(hintKey)}</p>
         ) : null}
-        {showActions && pendingDocument ? (
+        {showActions && pendingDocument && !demoSigned ? (
           <p className="break-words text-xs leading-5 text-muted-foreground">
             {text("patient_legal_doc_to_sign", { name: pendingDocument.name })}
             {pendingDocument.signaturePending ? ` · ${text("patient_legal_doc_signature_pending")}` : ""}
@@ -116,10 +125,13 @@ export function LegalStatusDocumentItem({
         ) : null}
       </div>
       <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
-        <StatusChip tone={tone.chip}>
-          {text(STATUS_KEYS[state])}
+        <StatusChip tone={demoSigned ? "info" : tone.chip}>
+          {demoSigned ? lang === "de" ? "DEMO · Unterzeichnet" : "DEMO · Подписано" : text(STATUS_KEYS[state])}
         </StatusChip>
-        {showActions && pendingDocument && !pendingDocument.signaturePending ? (
+        {demoSigned && pendingDocument ? (
+          <DocumentSignatureAction documentId={pendingDocument.id} title={pendingDocument.name} onDone={onSigned} />
+        ) : null}
+        {showActions && pendingDocument && !pendingDocument.signaturePending && !demoSigned ? (
           <PaperSignatureConfirmButton
             documentId={pendingDocument.id}
             title={pendingDocument.name}

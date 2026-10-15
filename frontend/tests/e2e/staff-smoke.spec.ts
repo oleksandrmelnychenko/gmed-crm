@@ -1733,6 +1733,27 @@ test.describe("staff smoke flows", () => {
     await expect(page.getByRole("link", { name: /Dashboard/i })).toBeVisible();
   });
 
+  test("converted patient documents show DEMO signatures for all package members and the bundle", async ({ page }) => {
+    const patientId = "00000000-0000-0000-0000-000000000301";
+    const documents = Array.from({ length: 7 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-00000000100${index}`,
+      filename: `DEMO document ${index + 1}.pdf`, auto_name: `DEMO document ${index + 1}`,
+      patient_id: patientId, status: "active", category: "consent", is_medical: false,
+      created_at: "2026-10-15T09:00:00Z", mime_type: "application/pdf", signed_at: null,
+    }));
+    const bundleId = documents[6].id;
+    await page.route(`**/api/v1/patients/${patientId}/documents`, route => json(route, documents));
+    await page.route("**/api/v1/document-signatures/statuses?*", route => json(route, documents.map(doc => ({
+      document_id: doc.id, status: "completed", test_mode: true, result_document_id: bundleId,
+    }))));
+    await page.goto(`/patients/${patientId}?tab=documents`);
+    for (const doc of documents) {
+      await expect(page.getByTestId(`document-demo-signature-${doc.id}`)).toHaveText("DEMO · Unterzeichnet");
+      await expect(page.locator(`[data-document-signature-id="${doc.id}"]:visible`)).toHaveAttribute("data-signature-status", "completed");
+    }
+    await page.screenshot({ path: "../artifacts/design-qa/patient-demo-documents.png" });
+  });
+
   test("staff can open dashboard, patients, appointments, documents and invoices", async ({
     page,
   }) => {

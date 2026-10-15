@@ -1640,17 +1640,38 @@ async fn demo_conversion(repeat: bool) {
     sqlx::query("UPDATE documents SET order_intake_context=repeat_order_document_context(order_id) WHERE lead_id=$1 AND order_id IS NOT NULL")
         .bind(lead).execute(pool).await.unwrap();
     let result = Uuid::new_v4();
-    sqlx::query("INSERT INTO documents(id,lead_id,auto_name,art,category,mime_type,storage_key,version_root_document_id,uploaded_by,ursprung) VALUES($1,$2,'TEST synthetic result','signature_evidence','signature','application/pdf','synthetic-result.pdf',$1,$3,'electronic_signature_package')")
-        .bind(result).bind(lead).bind(app.patient_manager_id).execute(pool).await.unwrap();
     let request = Uuid::new_v4();
+    let result_key = format!("dev-onboarding-result-{result}.pdf");
+    let report_key = format!("dev-onboarding-report-{request}.pdf");
+    sqlx::query("INSERT INTO documents(id,lead_id,auto_name,art,category,mime_type,storage_key,version_root_document_id,uploaded_by,ursprung) VALUES($1,$2,'TEST synthetic result','signature_evidence','signature','application/pdf',$4,$1,$3,'electronic_signature_package')")
+        .bind(result).bind(lead).bind(app.patient_manager_id).bind(&result_key).execute(pool).await.unwrap();
     // The immutable snapshot mirrors the context the provider verified.
     let context_sql = "jsonb_build_object('patient_id',d.patient_id,'lead_id',d.lead_id,'order_id',d.order_id,'appointment_id',d.appointment_id,'art',d.art,'template',d.generated_template_id,'bindings',d.generated_bindings,'storage_key',d.storage_key,'version_root',d.version_root_document_id,'version',d.version_number)";
-    sqlx::query(&format!("INSERT INTO document_signature_requests(id,source_document_id,requested_by,source_sha256,source_context,signers,provider_account,test_mode,status,result_document_id,report_storage_key,report_sha256,signed_sha256,is_package) SELECT $1,d.id,$3,$4,{context_sql},'[]','synthetic-demo',true,'pending',$5,'synthetic-report.pdf',$4,$4,true FROM documents d WHERE d.id=$2"))
-        .bind(request).bind(source_ids[0]).bind(app.patient_manager_id).bind(&hash).bind(result).execute(pool).await.unwrap();
+    sqlx::query(&format!("INSERT INTO document_signature_requests(id,source_document_id,requested_by,source_sha256,source_context,signers,provider_account,test_mode,status,result_document_id,report_storage_key,report_sha256,signed_sha256,is_package) SELECT $1,d.id,$3,$4,{context_sql},'[]','synthetic-demo',true,'pending',$5,$6,$4,$4,true FROM documents d WHERE d.id=$2"))
+        .bind(request).bind(source_ids[0]).bind(app.patient_manager_id).bind(&hash).bind(result).bind(&report_key).execute(pool).await.unwrap();
     for (position, id) in source_ids.iter().enumerate() {
         sqlx::query(&format!("INSERT INTO document_signature_members(request_id,document_id,position,sha256,source_context) SELECT $1,d.id,$3,$4,{context_sql} FROM documents d WHERE d.id=$2"))
             .bind(request).bind(id).bind((position+1) as i16).bind(&hash).execute(pool).await.unwrap();
     }
+    for key in [&result_key, &report_key] {
+        let path = std::path::Path::new("uploads/documents").join(key);
+        tokio::fs::write(
+            &path,
+            gmed_server::crypto::shared_registry()
+                .unwrap()
+                .seal_blob(bytes)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        blob_paths.push(path);
+    }
+    let all_document_ids: Vec<Uuid> =
+        sqlx::query_scalar("SELECT id FROM documents WHERE lead_id=$1")
+            .bind(lead)
+            .fetch_all(pool)
+            .await
+            .unwrap();
     let dev_state = app
         .suite
         .state
@@ -1767,6 +1788,101 @@ async fn demo_conversion(repeat: bool) {
     .await
     .unwrap();
     assert!(!effects);
+    // The card retains every original and the complete DEMO bundle. The
+    // signatures keep their request IDs after the document owner changes.
+    let (status, card) = json_request(
+        &dev,
+        "GET",
+        &format!("/api/v1/patients/{patient}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{card}");
+    assert_eq!(card["legal_status"]["demo_onboarding"]["applied"], true);
+    assert_eq!(card["legal_status"]["dsgvo_signed"], false);
+    let (status, documents) = json_request(
+        &dev,
+        "GET",
+        &format!("/api/v1/patients/{patient}/documents"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{documents}");
+    for id in &all_document_ids {
+        assert!(
+            documents
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|doc| doc["id"] == id.to_string()),
+            "document {id} missing from patient card: {documents}"
+        );
+    }
+    let mut signed_ids = source_ids.clone();
+    signed_ids.push(result);
+    let ids = signed_ids
+        .iter()
+        .map(Uuid::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let (status, summaries) = json_request(
+        &dev,
+        "GET",
+        &format!("/api/v1/document-signatures/statuses?ids={ids}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{summaries}");
+    for id in &signed_ids {
+        let summary = summaries
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["document_id"] == id.to_string())
+            .unwrap();
+        assert_eq!(summary["status"], "completed");
+        assert_eq!(summary["test_mode"], true);
+        assert_eq!(summary["result_document_id"], result.to_string());
+        let (status, history) = json_request(
+            &dev,
+            "GET",
+            &format!("/api/v1/documents/{id}/signature-requests"),
+            &pm,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{history}");
+        assert_eq!(history["scope"]["patient_id"], patient.to_string());
+        assert_eq!(history["requests"][0]["id"], request.to_string());
+        assert_eq!(history["requests"][0]["has_report"], true);
+    }
+    for path in signed_ids
+        .iter()
+        .map(|id| format!("/api/v1/documents/{id}/download"))
+        .chain(std::iter::once(format!(
+            "/api/v1/document-signature-requests/{request}/report"
+        )))
+    {
+        let response = dev
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(&path)
+                    .header("Authorization", &pm)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let downloaded = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(&downloaded[..], bytes, "{path}");
+    }
     let audit:Value = sqlx::query_scalar("SELECT context FROM audit_log WHERE action='convert_lead' AND entity_id=$1 ORDER BY created_at DESC LIMIT 1").bind(lead).fetch_one(pool).await.unwrap();
     assert_eq!(audit["demo_onboarding"]["applied"], true);
     for path in blob_paths {

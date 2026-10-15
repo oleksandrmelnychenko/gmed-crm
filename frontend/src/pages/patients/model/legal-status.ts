@@ -43,6 +43,7 @@ const PATIENT_CONTRACT_STATUS_LABEL_KEYS = {
   expired: "patient_contract_status_expired",
   not_started: "patient_contract_status_not_started",
   pending: "patient_contract_status_pending",
+  unsigned: "patient_contract_status_pending",
   sent: "patient_contract_status_sent",
   signed: "patient_contract_status_signed",
   terminated: "patient_contract_status_terminated",
@@ -105,7 +106,8 @@ export function normalizePatientLegalStatus(value: unknown): PatientLegalStatus 
   }
 
   const record = asRecord(value);
-  const contractStatus = readString(record, "contract_status");
+  const storedContractStatus = readString(record, "contract_status");
+  const contractStatus = storedContractStatus === "unsigned" ? "pending" : storedContractStatus;
 
   return {
     dsgvoSigned: readBool(record, "dsgvo_signed"),
@@ -124,6 +126,13 @@ export function normalizePatientLegalStatus(value: unknown): PatientLegalStatus 
         : DEFAULT_PATIENT_LEGAL_STATUS.contractStatus,
     notes: readString(record, "notes"),
   };
+}
+
+/** Historical onboarding evidence, separate from the patient's current legal status. */
+export function patientHasDemoOnboarding(value: unknown): boolean {
+  const demo = asRecord(asRecord(value)?.demo_onboarding);
+  return demo?.enabled === true && demo.applied === true
+    && Array.isArray(demo.request_ids) && demo.request_ids.length > 0;
 }
 
 /**

@@ -195,7 +195,7 @@ const words = {
   },
 } as const;
 
-async function mount(page: Page, lang: Lang, width: Width, options: { dsgvoRevoked?: boolean } = {}) {
+async function mount(page: Page, lang: Lang, width: Width, options: { dsgvoRevoked?: boolean; demo?: boolean } = {}) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
@@ -214,7 +214,15 @@ async function mount(page: Page, lang: Lang, width: Width, options: { dsgvoRevok
       });
     }
     if (path === `/patients/${patientId}` && request.method() === "GET") {
-      return route.fulfill({ json: patientDetail(state.releaseSigned, options.dsgvoRevoked) });
+      const detail = patientDetail(state.releaseSigned, options.dsgvoRevoked);
+      return route.fulfill({ json: options.demo ? { ...detail, legal_status: {
+        ...detail.legal_status, contract_status: "unsigned",
+        demo_onboarding: { enabled: true, applied: true, request_ids: ["synthetic-demo-request"] },
+      } } : detail });
+    }
+    if (path === "/document-signatures/statuses" && options.demo) {
+      return route.fulfill({ json: [{ document_id: releaseId, test_mode: true,
+        status: "completed", result_document_id: "synthetic-demo-bundle" }] });
     }
     if (path === `/patients/${patientId}/update` && request.method() === "POST") {
       state.updates.push(request.postDataJSON() as Record<string, unknown>);
@@ -266,6 +274,21 @@ async function expectNoHorizontalScroll(page: Page, width: Width) {
 }
 
 for (const lang of ["ru", "de"] as const) {
+  test(`patient card explains completed DEMO onboarding without changing legal proof ${lang}`, async ({ page }) => {
+    const { errors, state } = await mount(page, lang, 390, { demo: true });
+    await expect(page.getByTestId("patient-demo-onboarding")).toContainText("DEMO");
+    const release = page.getByTestId("legal-status-document-confidentiality_release");
+    await expect(release).toHaveAttribute("data-state", "missing");
+    await expect(release).toContainText(lang === "de" ? "DEMO · Unterzeichnet" : "DEMO · Подписано");
+    await expect(release.getByRole("button", { name: /Elektronische Unterschrift|Электронная подпись/ })).toBeEnabled();
+    await expect(release.getByRole("button", { name: words[lang].paperSigned })).toHaveCount(0);
+    await expectNoHorizontalScroll(page, 390);
+    await release.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `../artifacts/design-qa/patient-demo-card-${lang}.png` });
+    expect(state.paperSignatures).toEqual([]);
+    expect(state.updates).toEqual([]);
+    expect(errors).toEqual([]);
+  });
   for (const width of [1440, 390] as const) {
     const w = words[lang];
 

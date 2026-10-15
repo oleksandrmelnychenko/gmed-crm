@@ -9,10 +9,21 @@ import {
   legalStatusDocumentStateText,
   normalizePatientLegalStatus,
   normalizePatientLegalStatusEvidence,
+  patientHasDemoOnboarding,
   serializePatientLegalStatus,
 } from "../model/legal-status";
 
 describe("normalizePatientLegalStatus", () => {
+  it("keeps DEMO onboarding separate from legal completion and shows an unsigned contract as pending", () => {
+    const legal = { contract_status: "unsigned", demo_onboarding: {
+      enabled: true, applied: true, request_ids: ["synthetic-request"],
+    } };
+    expect(patientHasDemoOnboarding(legal)).toBe(true);
+    expect(normalizePatientLegalStatus(legal).contractStatus).toBe("pending");
+    expect(isPatientLegalStatusComplete(normalizePatientLegalStatus(legal))).toBe(false);
+    expect(patientHasDemoOnboarding({ demo_onboarding: { enabled: true, applied: false, request_ids: [] } })).toBe(false);
+    expect(patientHasDemoOnboarding(null)).toBe(false);
+  });
   it("normalizes partial backend payloads into a stable form state", () => {
     expect(
       normalizePatientLegalStatus({

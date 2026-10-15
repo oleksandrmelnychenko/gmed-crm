@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Banner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { countryNameForDisplay } from "@/components/ui/country-select";
@@ -42,6 +43,7 @@ import {
   complianceRevocationNote,
   complianceRevocationText,
   normalizePatientLegalStatusEvidence,
+  patientHasDemoOnboarding,
   type PatientLegalStatus,
 } from "../../model/legal-status";
 import type { PatientOption as DocumentPatientOption } from "@/pages/documents/model/types";
@@ -1187,6 +1189,16 @@ function usePatientProfileTabContent({
             {t.access_hidden}
           </p>
         ) : <>
+        {patientHasDemoOnboarding(detail.legal_status) ? (
+          <Banner tone="warning">
+            <div data-testid="patient-demo-onboarding" className="space-y-1">
+              <p className="font-medium">{lang === "de" ? "DEV · Aufnahme mit DEMO-Unterschriften abgeschlossen" : "DEV · Оформление завершено с DEMO-подписями"}</p>
+              <p>{lang === "de"
+                ? "Bei der Patientenanlage wurden Testunterschriften angerechnet. Originale, signiertes Testpaket und Signaturbericht sind unter Dokumente verfügbar. Die rechtlichen Bestätigungen werden separat geführt."
+                : "При создании пациента зачтены тестовые подписи. Оригиналы, подписанный тестовый пакет и отчёт о подписях доступны в разделе «Документы». Юридические подтверждения учитываются отдельно."}</p>
+            </div>
+          </Banner>
+        ) : null}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[
             {
