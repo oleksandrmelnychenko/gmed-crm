@@ -9395,7 +9395,7 @@ ${serviceCommentLines.join("\n")}`
                           done={signedPatient}
                           label={signedPatient
                             ? tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")
-                            : tx("Клиент ещё не подписал заказ", "Auftrag noch nicht vom Kunden unterzeichnet")}
+                            : tx("Юридическая подпись заказа ещё не подтверждена", "Rechtswirksame Auftragsunterschrift noch nicht bestätigt")}
                         />
                         <p className={cn("text-xs", manualOnly ? "text-amber-800 dark:text-amber-300" : "text-muted-foreground")}>
                           {manualOnly
@@ -9407,12 +9407,12 @@ ${serviceCommentLines.join("\n")}`
                               ? tx("По подписанному документу заказа.", "Laut unterschriebenem Einzelauftrag.")
                               : needsDocument
                                 ? tx(
-                                    "Сначала создайте документ заказа. Подпись клиента фиксируется только подписанным документом: электронно в пакете договора или сканом подписанного экземпляра.",
-                                    "Erstellen Sie zuerst den Einzelauftrag. Die Unterschrift des Kunden zählt nur mit unterschriebenem Dokument: elektronisch im Vertragspaket oder als Scan des unterschriebenen Exemplars.",
+                                    "Сначала создайте документ заказа. Юридическое подтверждение — завершённое электронное подписание пакета или скан подписанного экземпляра.",
+                                    "Erstellen Sie zuerst den Einzelauftrag. Als rechtswirksamer Nachweis gilt die abgeschlossene elektronische Paketunterzeichnung oder der Scan des unterschriebenen Exemplars.",
                                   )
                                 : tx(
-                                    "Подпись клиента фиксируется только подписанным документом: электронно в пакете договора или сканом подписанного экземпляра («Подписано на бумаге»).",
-                                    "Die Unterschrift des Kunden zählt nur mit unterschriebenem Dokument: elektronisch im Vertragspaket oder als Scan des unterschriebenen Exemplars („Auf Papier unterschrieben“).",
+                                    "Юридическое подтверждение — завершённое электронное подписание пакета или скан подписанного экземпляра («Подписано на бумаге»). DEMO не подтверждает подпись заказа.",
+                                    "Als rechtswirksamer Nachweis gilt die abgeschlossene elektronische Paketunterzeichnung oder der Scan des unterschriebenen Exemplars („Auf Papier unterschrieben“). DEMO bestätigt keine rechtswirksame Auftragsunterschrift.",
                                   )}
                         </p>
                         {signedVersionNote ? (

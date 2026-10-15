@@ -4578,7 +4578,7 @@ test.describe("responsive staff workspace", () => {
     // one-click checkbox; it follows the signed order document (scan or QES).
     await expect(wizard.getByRole("checkbox", { name: "Auftrag vom Kunden unterzeichnet" })).toHaveCount(0);
     await expect(wizard.getByTestId("lead-order-client-signature")).toContainText(
-      "Auftrag noch nicht vom Kunden unterzeichnet",
+      "Rechtswirksame Auftragsunterschrift noch nicht bestätigt",
     );
     await expect(wizard.getByTestId("lead-order-client-signature")).toContainText(
       "Erstellen Sie zuerst den Einzelauftrag",

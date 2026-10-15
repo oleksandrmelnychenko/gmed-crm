@@ -1,9 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { normalizeLeadPayerPackageState, type LeadPayerPackageState } from "../data/lead-payer-package-api";
 import { LeadPayerPackagePanel } from "./lead-payer-package-panel";
 import { LeadPayerSignatureFlow } from "./lead-payer-section";
+
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { id: "synthetic-staff", role: "ceo" } }) }));
+vi.mock("@/pages/documents/data/use-signature-summary", () => ({ useSignatureSummary: () => undefined }));
 
 const ru = (text: string) => text;
 const de = (_ru: string, text: string) => text;
