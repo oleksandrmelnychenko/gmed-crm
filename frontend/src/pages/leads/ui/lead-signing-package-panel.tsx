@@ -11,9 +11,9 @@ import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature
  * - a new framework contract: contract, order, the patient form once the
  *   lead sent the request (`lead_self_disclosure`), Schweigepflichtsentbindung
  *   and DSGVO consents (the guardians' declaration for a minor);
- * - no new contract (a signed contract of the patient still applies, or none
- *   is generated yet): the order with the patient form, the
- *   Schweigepflichtsentbindung and the DSGVO consents;
+ * - no unsigned contract (the current contract is already signed, a signed
+ *   contract of the patient still applies, or none is generated yet): the
+ *   order with the patient form, Schweigepflichtsentbindung and DSGVO consents;
  * - neither: the lead's package composer with a free choice.
  * The action renders only for roles that may send invitations (CEO, patient
  * manager).
@@ -35,21 +35,29 @@ export function LeadSigningPackagePanel({
 }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
-  const source = contractDocument ?? orderDocument;
+  // The entity may still say "signed" after a new, unsigned PDF version was
+  // created. Choose by the current documents' proof, and keep signed documents
+  // available for history once there is nothing left to sign.
+  const currentContractSigned = contractDocument ? Boolean(contractDocument.signed_at) : contractSigned;
+  const source = (contractDocument && !contractDocument.signed_at ? contractDocument : null)
+    ?? (orderDocument && !orderDocument.signed_at ? orderDocument : null)
+    ?? contractDocument
+    ?? orderDocument;
+  const sourceIsContract = Boolean(source && source.id === contractDocument?.id);
   const title = source?.original_filename
-    || (contractDocument
+    || (sourceIsContract
       ? tx("Рамочный договор", "Rahmenvertrag")
-      : orderDocument
+      : source
         ? tx("Заказ", "Auftrag")
         : tx("Документы обращения", "Unterlagen der Anfrage"));
 
-  const description = contractDocument
+  const description = sourceIsContract
     ? tx(
         "Договор, заказ, анкета (если создана), освобождение от тайны и согласие DSGVO — одно приглашение. Сначала клиент, затем GMED.",
         "Vertrag, Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung – eine Einladung. Zuerst der Kunde, danach GMED.",
       )
     : orderDocument
-      ? inheritedContract
+      ? inheritedContract || currentContractSigned
         ? tx(
             "Ранее подписанный договор действует. Заказ, анкета (если создана), освобождение от тайны и согласие DSGVO — одно приглашение.",
             "Der bereits unterzeichnete Vertrag gilt. Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung – eine Einladung.",
@@ -73,7 +81,7 @@ export function LeadSigningPackagePanel({
           <AdminSectionTitle>
             {tx("Электронная подпись пакета", "Elektronische Unterschrift des Pakets")}
           </AdminSectionTitle>
-          {contractSigned ? (
+          {currentContractSigned ? (
             <StatusChip tone="success">{tx("Договор подписан", "Vertrag unterzeichnet")}</StatusChip>
           ) : null}
         </div>
@@ -84,7 +92,7 @@ export function LeadSigningPackagePanel({
           <DocumentSignatureAction
             documentId={source.id}
             title={title}
-            signed={contractDocument ? contractSigned : false}
+            signed={Boolean(source.signed_at)}
             onDone={onDone}
           />
         ) : (
