@@ -483,7 +483,8 @@ describe("labels of the representation", () => {
     expect(representativeRoleLabel({ role: "legal_representative", relation: "parent" }, ru)).toBe("Родитель");
     expect(representativeRoleLabel({ role: "legal_representative", relation: "Guardian" }, de)).toBe("Vormund");
     // A relation staff typed freely.
-    expect(representativeRoleLabel({ role: "legal_representative", relation: "Mutter" }, ru)).toBe("Законный представитель");
+    expect(representativeRoleLabel({ role: "legal_representative", relation: "Mutter" }, ru)).toBe("Мать");
+    expect(representativeRoleLabel({ role: "legal_representative", relation: "father" }, de)).toBe("Vater");
     expect(representativeRoleLabel({ role: "authorised_representative", relation: "representative" }, ru)).toBe(
       "Уполномоченный представитель",
     );

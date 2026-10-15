@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, Copy, FileText, KeyRound, LoaderCircle, Mail } from "lucide-react";
+import { Check, Copy, FileText, KeyRound, LoaderCircle, Mail, ShieldCheck, UserRound, UsersRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
@@ -281,12 +281,14 @@ export function LeadPortalAccessDetail({
   }
 
   return (
-    <div className="@container space-y-4 border-y border-l-2 border-border border-l-primary bg-muted px-4 py-4 text-xs" data-testid="lead-portal-access">
+    <div className="@container space-y-4 border-y border-l-2 border-zinc-200 border-l-primary bg-zinc-100 px-4 py-4 text-[13px] text-foreground dark:border-zinc-700 dark:border-l-primary dark:bg-zinc-900/60" data-testid="lead-portal-access">
       {/* Portal state and grouped actions stay visually separate. */}
       <div className="grid items-center gap-3 @[64rem]:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <AdminSectionTitle>{de ? "Patientenportal" : "Портал пациента"}</AdminSectionTitle>
-          <StatusChip tone={leadPortalStatusTone(status)}>{leadPortalStatusLabel(status, lang)}</StatusChip>
+          <StatusChip tone={minor === true ? "neutral" : leadPortalStatusTone(status)}>
+            {minor === true ? <><UsersRound aria-hidden="true" />{de ? "Zugang über Eltern" : "Вход через родителей"}</> : leadPortalStatusLabel(status, lang)}
+          </StatusChip>
         </div>
         <div className="grid w-full grid-cols-1 items-stretch gap-2 @[32rem]:grid-cols-[9rem_minmax(0,14rem)_10rem] @[64rem]:w-auto" role="group" aria-label={de ? "Portalaktionen" : "Действия с порталом"}>
           {canOffer ? (
@@ -392,19 +394,15 @@ export function LeadPortalAccessDetail({
             </>
           ) : null}
         </dl>
-      ) : minor === true || !lead.email ? (
-        <p className="text-muted-foreground">
-          {minor === true
-            ? de
-              ? "Das Kind hat keinen eigenen Zugang: Die Eltern erhalten ihren Zugang unten."
-              : "У ребёнка нет своего доступа: доступ получают родители (ниже)."
-            : de
+      ) : minor !== true && !lead.email ? (
+        <p className="leading-6 text-slate-700 dark:text-slate-300">
+          {de
               ? "Ohne E-Mail-Adresse kann kein Zugang angelegt werden."
               : "Без электронной почты доступ создать нельзя."}
         </p>
       ) : null}
       {ownLoginClosed && status !== "none" ? (
-        <p className="text-muted-foreground" data-testid="lead-portal-own-login-closed">
+        <p className="leading-6 text-slate-700 dark:text-slate-300" data-testid="lead-portal-own-login-closed">
           {de
             ? "Der eigene Zugang des Kindes ist gesperrt: Die Anfrage füllen die Eltern mit ihrem Zugang (unten) aus. Wird das Geburtsdatum auf 18 Jahre oder älter korrigiert, gilt er wieder."
             : "Собственный вход ребёнка закрыт: заявку заполняют родители через свой доступ (ниже). Если дату рождения исправить на 18 лет и старше, вход снова заработает."}
@@ -911,34 +909,37 @@ export function LeadGuardianAccess({
   if (!intake || (!intake.minor && links.length === 0)) return null;
 
   return (
-    <div className="w-full space-y-1.5 border-t border-border/60 pt-2" data-testid="lead-guardian-access">
-      <p className="font-medium text-foreground">
+    <div className="w-full space-y-3 border-t border-slate-200 pt-4 dark:border-slate-700" data-testid="lead-guardian-access">
+      <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        <UsersRound aria-hidden="true" className="size-4 text-slate-600 dark:text-slate-300" />
         {tx("Доступ родителей (несовершеннолетний)", "Zugang der Eltern (minderjährig)")}
       </p>
       {links.map((link) => {
         // The relation stays beside the name once the login exists (QA 2026-10-11, N-10).
         const relation = guardianLinkRelation(link, allCandidates);
         return (
-          <div key={link.access_id} className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span>
-              {link.name ?? "—"}{" "}
-              <span className="text-muted-foreground">
-                {[relation ? trustedContactRelationLabel(relation, tx) : null, link.email]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </span>
-            <span className="text-muted-foreground">
-              {tx("Последний вход: ", "Letzte Anmeldung: ")}
-              {link.last_login_at ? formatAppDateTime(link.last_login_at) : "—"}
-            </span>
+          <div key={link.access_id} className="grid min-w-0 items-center gap-3 rounded-xl border border-slate-300 bg-card p-3.5 shadow-xs dark:border-slate-600 @[48rem]:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground"><UserRound aria-hidden="true" className="size-4 shrink-0 text-slate-600 dark:text-slate-300" /><span className="break-words">{link.name ?? "—"}</span></span>
+                <StatusChip tone={link.is_active ? "success" : "warning"}>
+                  {link.is_active ? <ShieldCheck aria-hidden="true" /> : null}
+                  {link.is_active ? tx("Доступ выдан", "Zugang erteilt") : tx("Аккаунт отключён", "Konto deaktiviert")}
+                </StatusChip>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-700 dark:text-slate-300">
+                {relation ? <span>{trustedContactRelationLabel(relation, tx)}</span> : null}
+                <span className="inline-flex min-w-0 items-center gap-1.5"><Mail aria-hidden="true" className="size-3.5 shrink-0" /><span className="break-all">{link.email}</span></span>
+                <span>{tx("Последний вход: ", "Letzte Anmeldung: ")}{link.last_login_at ? formatAppDateTime(link.last_login_at) : tx("ещё не входил", "noch nie")}</span>
+              </div>
+            </div>
             {canIssue ? (
-              <span className="ml-auto flex gap-1.5">
+              <span className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-7 gap-1.5 rounded-md text-xs"
+                  className="h-9 gap-1.5 rounded-lg border-slate-300 bg-background px-3 text-xs text-foreground hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
                   disabled={busy !== null}
                   onClick={() => void run(`reset-${link.access_id}`, () => resetLeadGuardianPassword(lead.id, link.access_id), link.name)}
                 >
@@ -947,9 +948,9 @@ export function LeadGuardianAccess({
                 </Button>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  className="h-7 rounded-md text-xs text-rose-700"
+                  className="h-9 rounded-lg border-rose-200 bg-rose-50 px-3 text-xs text-rose-800 hover:border-rose-300 hover:bg-rose-100 hover:text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/70 dark:hover:text-rose-100"
                   disabled={busy !== null}
                   data-testid="lead-guardian-revoke"
                   onClick={() => setRevoking({ accessId: link.access_id, name: link.name ?? "" })}
@@ -964,24 +965,23 @@ export function LeadGuardianAccess({
       {candidates.map((candidate) => {
         const contactId = candidate.trusted_contact_id;
         return (
-          <div key={contactId ?? candidate.name ?? ""} className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span>
-              {candidate.name ?? "—"}{" "}
-              <span className="text-muted-foreground">
-                {[
-                  candidate.relation ? trustedContactRelationLabel(candidate.relation, tx) : null,
-                  candidate.email ?? tx("нет e-mail", "keine E-Mail"),
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </span>
+          <div key={contactId ?? candidate.name ?? ""} className="grid min-w-0 items-center gap-3 rounded-xl border border-slate-300 bg-card p-3.5 shadow-xs dark:border-slate-600 @[48rem]:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground"><UserRound aria-hidden="true" className="size-4 shrink-0 text-slate-600 dark:text-slate-300" /><span className="break-words">{candidate.name ?? "—"}</span></span>
+                <StatusChip tone="warning">{tx("Доступ не выдан", "Zugang nicht erteilt")}</StatusChip>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-700 dark:text-slate-300">
+                {candidate.relation ? <span>{trustedContactRelationLabel(candidate.relation, tx)}</span> : null}
+                <span className="inline-flex min-w-0 items-center gap-1.5"><Mail aria-hidden="true" className="size-3.5 shrink-0" /><span className="break-all">{candidate.email ?? tx("нет e-mail", "keine E-Mail")}</span></span>
+              </div>
+            </div>
             {canIssue && contactId && candidate.email ? (
               <Button
                 type="button"
-                variant="outline"
+                variant="default"
                 size="sm"
-                className="ml-auto h-7 gap-1.5 rounded-md text-xs"
+                className="h-9 w-fit gap-1.5 rounded-lg bg-slate-900 px-3 text-xs text-white shadow-xs hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
                 disabled={busy !== null}
                 onClick={() => void run(`issue-${contactId}`, () => issueLeadGuardianAccess(lead.id, contactId), candidate.name)}
               >
@@ -993,15 +993,15 @@ export function LeadGuardianAccess({
         );
       })}
       {links.length === 0 && candidates.length === 0 ? (
-        <p className="text-muted-foreground">
+        <p className="rounded-lg border border-dashed border-slate-300 bg-card p-3 leading-6 text-slate-700 dark:border-slate-600 dark:text-slate-300">
           {tx(
             "Добавьте в шаге «Данные клиента» мать, отца или законного представителя с e-mail.",
             "Unter „Personendaten“ Mutter, Vater oder gesetzlichen Vertreter mit E-Mail ergänzen.",
           )}
         </p>
       ) : null}
-      {notice ? <p className="text-emerald-700">{notice}</p> : null}
-      {error ? <p className="text-rose-700">{error}</p> : null}
+      {notice ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 leading-5 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200" role="status">{notice}</p> : null}
+      {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 leading-5 text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200" role="alert">{error}</p> : null}
       <LeadConfirmDialog
         open={revoking !== null}
         title={tx("Отозвать доступ родителя к этой заявке?", "Zugang des Elternteils zu dieser Anfrage widerrufen?")}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   TRUSTED_CONTACT_RELATIONS,
+  isParentOrGuardianRelation,
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
   storedTrustedContactDrafts,
@@ -21,8 +22,13 @@ describe("the relation of a trusted contact", () => {
     expect(trustedContactRelationLabel("guardian", de)).toBe("Vormund/Betreuer");
     expect(trustedContactRelationLabel("representative", ru)).toBe("Уполномоченный представитель");
     expect(trustedContactRelationLabel("representative", de)).toBe("Bevollmächtigte Person");
-    expect(trustedContactRelationLabel("parent", ru)).toBe("Мать / отец");
-    expect(trustedContactRelationLabel("parent", de)).toBe("Mutter / Vater");
+    expect(trustedContactRelationLabel("parent", ru)).toBe("Родитель — роль не уточнена");
+    expect(trustedContactRelationLabel("parent", de)).toBe("Elternteil — Rolle nicht angegeben");
+    expect(trustedContactRelationLabel("mother", ru)).toBe("Мать");
+    expect(trustedContactRelationLabel("father", ru)).toBe("Отец");
+    expect(trustedContactRelationLabel("Mutter", ru)).toBe("Мать");
+    expect(trustedContactRelationLabel("Vater", de)).toBe("Vater");
+    expect(TRUSTED_CONTACT_RELATIONS).not.toContain("parent");
     for (const relation of TRUSTED_CONTACT_RELATIONS) {
       expect(trustedContactRelationLabel(relation, ru)).not.toBe(relation);
       expect(trustedContactRelationLabel(relation, de)).not.toBe(relation);
@@ -31,6 +37,11 @@ describe("the relation of a trusted contact", () => {
 
   it("shows a relation typed as text in older data as it is", () => {
     expect(trustedContactRelationLabel("Tante", de)).toBe("Tante");
+  });
+
+  it("keeps explicit mothers and fathers in the minor's representative block", () => {
+    for (const relation of ["mother", "father", "parent", "guardian", " Mutter ", "Vater"]) expect(isParentOrGuardianRelation(relation)).toBe(true);
+    for (const relation of ["spouse", "representative", "relative", "other", ""]) expect(isParentOrGuardianRelation(relation)).toBe(false);
   });
 });
 import { patientEventChangesLeadData } from "./use-lead-step1-portal";

@@ -760,6 +760,43 @@ for (const lang of ["ru", "de"] as const) {
   });
 }
 
+test("staff explicitly choose the parent's role and linking a patient preserves it", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", step: "master" });
+  const linkedId = "44444444-4444-4444-8444-444444444444";
+  await page.route("**/api/v1/leads/referrer-patients**", (route) => route.fulfill({ json: [{ id: linkedId, pid: "P-SYNTHETIC", first_name: "Existing", last_name: "Mother", birth_date: "1985-05-01", email: "existing.mother@example.test", phone: "+49 30 100009" }] }));
+  const parents = wizard.locator("#lead-wizard-guardian");
+  await parents.getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
+  const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(editor).toContainText("Укажите, кто представляет ребёнка: мать, отец или опекун");
+  expect(calls.updates).toEqual([]);
+  await editor.getByLabel("Кем приходится клиенту").click();
+  await page.getByRole("option", { name: "Мать", exact: true }).click();
+  await editor.getByLabel("Связать с существующим пациентом").click();
+  await page.getByRole("option", { name: /Existing Mother/ }).click();
+  await expect(editor.getByLabel("Кем приходится клиенту")).toContainText("Мать");
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect.poll(() => (calls.updates.at(-1)?.trusted_contacts as Json[] | undefined)?.find((contact) => contact.id === ANNA_ID)?.relation).toBe("mother");
+  const written = (calls.updates.at(-1)?.trusted_contacts as Json[]).find((contact) => contact.id === ANNA_ID)!;
+  expect(written.related_patient_id).toBe(linkedId);
+  await expect(parents.getByRole("listitem").filter({ hasText: "Existing Mother" })).toContainText("Мать");
+});
+
+test("a new parent's role has no default and an explicit father stays in the parents list", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", step: "master", motherOnly: true });
+  const parents = wizard.locator("#lead-wizard-guardian");
+  await wizard.getByRole("button", { name: "Добавить", exact: true }).click();
+  const editor = page.locator("form").filter({ hasText: "Добавить родителя или законного представителя" });
+  await editor.getByLabel("Имя и фамилия").fill("New Father");
+  await editor.getByRole("button", { name: "Добавить", exact: true }).click();
+  await expect(editor).toContainText("Укажите, кто представляет ребёнка: мать, отец или опекун");
+  await editor.getByLabel("Кем приходится клиенту").click();
+  await page.getByRole("option", { name: "Отец", exact: true }).click();
+  await editor.getByRole("button", { name: "Добавить", exact: true }).click();
+  await expect.poll(() => (calls.updates.at(-1)?.trusted_contacts as Json[] | undefined)?.find((contact) => contact.name === "New Father")?.relation).toBe("father");
+  await expect(parents.getByRole("listitem").filter({ hasText: "New Father" })).toContainText("Отец");
+});
+
 test("a failed removal keeps the parent on the first step", async ({ page }) => {
   const { wizard, state } = await mount(page, { lang: "ru", step: "master", refuseContactRemoval: true });
   const parents = wizard.locator("#lead-wizard-guardian");
@@ -829,12 +866,14 @@ test("a second parent added in the cabinet appears in the open wizard and surviv
   // Opened from the parents' block: the editor is titled for a parent (QA 2026-10-10).
   const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
   await editor.getByLabel("E-Mail").fill("ben.muster@example.com");
+  await editor.getByLabel("Кем приходится клиенту").click();
+  await page.getByRole("option", { name: "Отец", exact: true }).click();
   await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect.poll(() => calls.updates.length).toBeGreaterThan(savesBefore);
   const sent = calls.updates.at(-1)?.trusted_contacts as Json[];
   expect(sent).toEqual([
     { ...annaContact, name: "Anna Maria Muster" },
-    { ...benContact, email: "ben.muster@example.com" },
+    { ...benContact, email: "ben.muster@example.com", relation: "father" },
   ]);
 
   // The documents step knows both parents as well.

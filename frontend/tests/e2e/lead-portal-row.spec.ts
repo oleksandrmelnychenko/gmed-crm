@@ -436,7 +436,7 @@ test("a minor without a login is offered no access of his own: the parents get t
   await page.getByTestId(`lead-expand-${leads[0].id}`).first().click();
   const minor = page.getByTestId("lead-portal-access").first();
   await expect(minor.getByTestId("lead-guardian-access")).toContainText("Anna Muster");
-  await expect(minor).toContainText("У ребёнка нет своего доступа: доступ получают родители (ниже).");
+  await expect(minor).not.toContainText("У ребёнка нет своего доступа: доступ получают родители (ниже).");
   await expect(minor.getByRole("button", { name: "Создать доступ" })).toHaveCount(0);
   await expect(minor.getByTestId("lead-portal-send-email")).toHaveCount(0);
 });

@@ -11,16 +11,31 @@
  */
 
 /** The relations the wizard offers for a trusted contact, in the order of its list. */
-export const TRUSTED_CONTACT_RELATIONS = ["parent", "guardian", "representative", "spouse", "relative", "other"] as const;
+export const TRUSTED_CONTACT_RELATIONS = ["mother", "father", "guardian", "representative", "spouse", "relative", "other"] as const;
+
+/** Explicit parent roles and legacy values still identify the child's representatives. */
+export function isParentOrGuardianRelation(relation: string): boolean {
+  return ["parent", "mother", "father", "guardian", "mutter", "vater", "мать", "мати", "отец", "батько"].includes(relation.trim().toLowerCase());
+}
 
 /**
  * How a trusted contact is related to the client, as staff read it. A stored
  * value the list does not know (free text of older data) is shown as it is.
  */
 export function trustedContactRelationLabel(relation: string, tx: (ru: string, de: string) => string): string {
-  switch (relation.trim()) {
+  switch (relation.trim().toLowerCase()) {
+    case "mother":
+    case "mutter":
+    case "мать":
+    case "мати":
+      return tx("Мать", "Mutter");
+    case "father":
+    case "vater":
+    case "отец":
+    case "батько":
+      return tx("Отец", "Vater");
     case "parent":
-      return tx("Мать / отец", "Mutter / Vater");
+      return tx("Родитель — роль не уточнена", "Elternteil — Rolle nicht angegeben");
     case "guardian":
       // A minor's Vormund or an adult's Betreuer (rechtliche Betreuung).
       return tx("Опекун", "Vormund/Betreuer");

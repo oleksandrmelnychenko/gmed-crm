@@ -7,6 +7,7 @@
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { appDateKeyOf, formatAppDateTime } from "@/lib/app-time-zone";
 import { formatMoneyLabel } from "@/lib/money";
+import { trustedContactRelationLabel } from "./lead-trusted-contacts";
 
 import type {
   LeadComplianceFlag,
@@ -403,6 +404,7 @@ export function representativeRoleLabel(person: Pick<LeadRepresentative, "role" 
   }
   if (person.role === "legal_guardian") return tx("Опекун (Betreuer)", "Betreuer/in");
   const relation = person.relation?.trim().toLowerCase();
+  if (relation && ["mother", "father", "mutter", "vater", "мать", "мати", "отец", "батько"].includes(relation)) return trustedContactRelationLabel(relation, tx);
   if (relation === "parent") return tx("Родитель", "Elternteil");
   if (relation === "guardian") return tx("Опекун", "Vormund");
   return tx("Законный представитель", "Gesetzliche/r Vertreter/in");

@@ -111,6 +111,7 @@ import {
 import { representativeName } from "../model/lead-gwg-statements";
 import {
   TRUSTED_CONTACT_RELATIONS,
+  isParentOrGuardianRelation,
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
   storedTrustedContactDrafts,
@@ -3213,6 +3214,7 @@ export function LeadWizard({
   const [deleteError, setDeleteError] = useState("");
   const [trustedContactEditor, setTrustedContactEditor] = useState<TrustedContactDraft | null>(null);
   const [trustedContactEditorError, setTrustedContactEditorError] = useState("");
+  const [trustedContactRelationError, setTrustedContactRelationError] = useState("");
   // Whether the editor was opened from the minor's parent / legal representative block.
   const [trustedContactEditorGuardian, setTrustedContactEditorGuardian] = useState(false);
   // The trusted contacts as the server stores them, as far as this wizard
@@ -5301,16 +5303,18 @@ export function LeadWizard({
   };
 
   // `guardian`: opened from the block "Родитель или законный представитель" of
-  // a minor — the editor is titled for a parent and offers only parent / guardian.
+  // a minor — the editor asks explicitly for mother, father or guardian.
   const openNewTrustedContact = (guardian = false) => {
     setTrustedContactEditorError("");
+    setTrustedContactRelationError("");
     setGuardianSearch("");
     setTrustedContactEditorGuardian(guardian);
-    setTrustedContactEditor(guardian ? { ...emptyTrustedContact(), relation: "parent" } : emptyTrustedContact());
+    setTrustedContactEditor(emptyTrustedContact());
   };
 
   const openTrustedContact = (contact: TrustedContactDraft, guardian = false) => {
     setTrustedContactEditorError("");
+    setTrustedContactRelationError("");
     setGuardianSearch("");
     setTrustedContactEditorGuardian(guardian);
     setTrustedContactEditor({ ...contact });
@@ -5319,6 +5323,7 @@ export function LeadWizard({
   const closeTrustedContactEditor = () => {
     setTrustedContactEditor(null);
     setTrustedContactEditorError("");
+    setTrustedContactRelationError("");
   };
 
   const patchTrustedContactEditor = <K extends keyof TrustedContactDraft>(
@@ -5326,6 +5331,7 @@ export function LeadWizard({
     value: TrustedContactDraft[K],
   ) => {
     if (key === "name" && trustedContactEditorError) setTrustedContactEditorError("");
+    if (key === "relation") setTrustedContactRelationError("");
     setTrustedContactEditor((current) => current ? { ...current, [key]: value } : current);
   };
 
@@ -5339,7 +5345,6 @@ export function LeadWizard({
         name: [selected.first_name, selected.last_name].filter(Boolean).join(" "),
         email: selected.email ?? "",
         phone: selected.phone ?? "",
-        relation: current.relation === "guardian" ? "guardian" : "parent",
       } : {}),
     } : current);
   };
@@ -5350,6 +5355,10 @@ export function LeadWizard({
     const name = trustedContactEditor.name.trim();
     if (!name) {
       setTrustedContactEditorError(tx("Укажите имя контактного лица", "Name der Kontaktperson angeben"));
+      return;
+    }
+    if (trustedContactEditorGuardian && !["mother", "father", "guardian"].includes(trustedContactEditor.relation)) {
+      setTrustedContactRelationError(tx("Укажите, кто представляет ребёнка: мать, отец или опекун", "Bitte Mutter, Vater oder Vormund auswählen"));
       return;
     }
 
@@ -7813,18 +7822,18 @@ ${serviceCommentLines.join("\n")}`
                         onSaved={step1Portal.applyRepresentation}
                       />
                     ) : null}
-                    {draft.trustedContacts.filter((contact) => ["parent", "guardian"].includes(contact.relation)).length === 0 ? (
+                    {draft.trustedContacts.filter((contact) => isParentOrGuardianRelation(contact.relation)).length === 0 ? (
                       <EmptyCell>{tx("Представитель не указан", "Kein Vertreter angegeben")}</EmptyCell>
                     ) : (
                       <ul className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
                         {draft.trustedContacts
-                          .filter((contact) => ["parent", "guardian"].includes(contact.relation))
+                          .filter((contact) => isParentOrGuardianRelation(contact.relation))
                           .map((contact) => (
                             <li key={contact.id} className="flex items-center gap-3 px-3 py-3">
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-medium">{contact.name}</p>
                                 <p className="truncate text-xs text-muted-foreground">
-                                  {[contact.email, contact.phone].filter(Boolean).join(" · ")}
+                                  {[trustedContactRelationLabel(contact.relation, tx), contact.email, contact.phone].filter(Boolean).join(" · ")}
                                 </p>
                               </div>
                               <Button type="button" variant="ghost" size="icon-sm" onClick={() => openTrustedContact(contact, true)} aria-label={tx("Редактировать представителя", "Vertreter bearbeiten")}>
@@ -10386,20 +10395,23 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchTrustedContactEditor("phone", event.target.value)}
                     />
                   </Field>
-                  <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")}>
+                  <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")} required={trustedContactEditorGuardian} error={trustedContactRelationError || undefined} errorId="trusted-contact-relation-error">
                     <NativeComboboxSelect
                       className={selectClass}
                       value={trustedContactEditor.relation}
+                      aria-invalid={Boolean(trustedContactRelationError)}
+                      aria-describedby={trustedContactRelationError ? "trusted-contact-relation-error" : undefined}
                       onChange={(event) => patchTrustedContactEditor("relation", event.target.value)}
                     >
                       <option value="">{tx("Выберите", "Auswählen")}</option>
                       {trustedContactEditor.relation && !(TRUSTED_CONTACT_RELATIONS as readonly string[]).includes(trustedContactEditor.relation) ? (
-                        <option value={trustedContactEditor.relation}>{trustedContactEditor.relation}</option>
+                        <option value={trustedContactEditor.relation}>{trustedContactRelationLabel(trustedContactEditor.relation, tx)}</option>
                       ) : null}
-                      {/* The same labels as the list of contacts; a parent block offers parent and guardian only. */}
+                      {/* A parent block names the specific role; legacy values remain visible until clarified. */}
                       {TRUSTED_CONTACT_RELATIONS.filter((relation) => (
                         !trustedContactEditorGuardian
-                        || relation === "parent"
+                        || relation === "mother"
+                        || relation === "father"
                         || relation === "guardian"
                         || relation === trustedContactEditor.relation
                       )).map((relation) => (
