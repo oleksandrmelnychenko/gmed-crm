@@ -20,6 +20,7 @@ export type SignatureRequestMember = {
   result_document_id: string | null; accessible: boolean; title: string | null; template: string | null; version: number | null;
 };
 export type SignatureRequest = {
+  paper_signed_document_ids?: string[];
   id: string; status: SignatureStatus; test_mode: boolean; signers: Signer[];
   source_document_id?: string;
   result_document_id: string | null; has_report: boolean; last_error: string | null; created_at: string;
@@ -46,7 +47,15 @@ export type SignatureRequest = {
   evidence: { signatures?: { email: string; status: string; signed_at: string | null }[] };
 };
 export type SigningPackage = { template: string; templates?: string[]; documents: { id: string; title: string; version: number; template?: string | null }[] };
+export type OnboardingManifest = {
+  expected_count: number;
+  items: { template: string; document_id: string | null; title: string | null; version: number | null;
+    state: "missing" | "blocked" | "ready" | "signed"; reason: string | null;
+    paper_signed: boolean; pending_elsewhere: boolean }[];
+};
 export type SignatureState = {
+  onboarding_manifest?: OnboardingManifest | null;
+  paper_resign_available?: boolean;
   enabled: boolean; region: "DE"; test_mode: boolean; can_send: boolean; can_configure: boolean;
   signer_policy?: SignerPolicy;
   minimum_level?: SignatureLevel;
@@ -61,6 +70,7 @@ export type SignatureState = {
   signing_packages?: SigningPackage[];
 };
 export type PackageCandidate = {
+  paper_signed?: boolean;
   id: string; title: string; template: string | null; art: string; version: number; order_id: string | null; size: number | null;
   signer_policy: SignerPolicy; minimum_level: SignatureLevel; frame_roles: string[]; has_frames: boolean;
   companion: "privacy_information" | "cost_estimate" | null; is_medical: boolean; pending_elsewhere: boolean;
@@ -68,6 +78,7 @@ export type PackageCandidate = {
 };
 export type PackageAttachmentCandidate = { id: string; title: string; template: string | null; art: string; version: number; order_id: string | null; size: number | null };
 export type PackageCandidates = {
+  onboarding_manifest?: OnboardingManifest | null;
   scope: { patient_id: string | null; lead_id: string | null };
   documents: PackageCandidate[];
   attachments: PackageAttachmentCandidate[];
@@ -78,6 +89,7 @@ export type PackageCandidates = {
   limits: { max_documents: number; max_bundle_bytes: number; max_expiry_days: number; max_message_chars: number };
 };
 export type PackageDraft = {
+  paper_signed_document_ids?: string[];
   document_ids: string[]; signers: Signer[]; attachment_ids: string[];
   level: SignatureLevel; expires_at?: string | null; message?: string; language?: string;
 };
@@ -110,6 +122,7 @@ export const createSignaturePackage = (draft: PackageDraft) => apiFetch<{ id: st
   method: "POST", timeoutMs: CREATE_SIGNATURE_REQUEST_TIMEOUT_MS,
   body: JSON.stringify({
     document_ids: draft.document_ids, signers: draft.signers, attachment_ids: draft.attachment_ids, level: draft.level,
+    ...(draft.paper_signed_document_ids?.length ? { paper_signed_document_ids: draft.paper_signed_document_ids } : {}),
     ...(draft.expires_at ? { expires_at: draft.expires_at } : {}),
     ...(draft.message?.trim() ? { message: draft.message.trim() } : {}),
     ...(draft.language ? { language: draft.language } : {}),
@@ -330,6 +343,11 @@ export function signatureErrorText(
       return tx("Несовершеннолетний подписывает только вместе с законным представителем.", "Minderjährige unterschreiben nur zusammen mit der gesetzlichen Vertretung.");
     case "signature_already_pending":
       return tx("Один из документов уже отправлен на подпись в другом запросе.", "Eines der Dokumente ist bereits in einer anderen Anfrage zur Unterschrift versendet.");
+    case "onboarding_package_incomplete":
+      return tx("Комплект первичного оформления неполный. Обновите окно, создайте недостающие документы и включите все неподписанные PDF.", "Das Paket der Erstaufnahme ist unvollständig. Laden Sie das Fenster neu, erstellen Sie fehlende Dokumente und nehmen Sie alle unsignierten PDFs auf.");
+    case "invalid_paper_signature_selection":
+    case "paper_signature_required":
+      return tx("Проверьте ручной выбор бумажных копий и актуальные версии документов.", "Prüfen Sie die ausdrückliche Auswahl der Papierkopien und die aktuellen Dokumentversionen.");
     case "signature_bundle_too_large":
       return tx("Пакет слишком большой для подписи (максимум 18 МБ). Уберите документы или отправьте их отдельно.", "Das Paket ist zu groß für die Signatur (höchstens 18 MB). Entfernen Sie Dokumente oder versenden Sie sie einzeln.");
     case "signature_pdf_already_signed":

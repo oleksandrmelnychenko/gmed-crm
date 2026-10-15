@@ -11,14 +11,15 @@ const MINOR_CONSENTS: &[&str] = &["consent_data_release_child", "consent_data_re
 
 /// The lead's patient form ("Patientenformular – Angaben und Erklärungen",
 /// owner request 2026-10-08): signed by the patient side inside the lead's
-/// package. It exists only once the lead sent the request, so its slot may
-/// stay empty: a package without it is complete.
+/// package. Initial onboarding requires it; standalone consent requests and
+/// repeat orders keep the flexible preset behavior below.
 const LEAD_SELF_DISCLOSURE: &str = "lead_self_disclosure";
 
 /// The consent form «Einverständniserklärung zur Datenübermittlung»: it goes
 /// into an electronic package only with the person's own choice of its
 /// options (2026-10-12, `crate::consent_choices`); without one it is signed
-/// on paper, so a package may go without it. The same holds for the minor's
+/// on paper. An existing signature can satisfy initial completeness without
+/// resending the PDF; a missing form cannot. The same holds for the minor's
 /// forms ([`MINOR_CONSENTS`], the parent's or guardian's choice, QA
 /// 2026-10-12 A2-06).
 const PRIVACY_CONSENTS: &str = crate::consent_choices::TEMPLATE;
@@ -500,8 +501,15 @@ where
 /// Whether a stored document still has the context and bytes it was sent
 /// with. A storage read error is returned as an error (transient), not as a
 /// change.
-async fn unchanged(row: &PgRow, context_value: &Value, hash: &str) -> Result<bool, &'static str> {
-    if eligibility(row).is_some() || context(row) != *context_value {
+async fn unchanged(
+    row: &PgRow,
+    context_value: &Value,
+    hash: &str,
+    paper_resign: bool,
+) -> Result<bool, &'static str> {
+    if eligibility_with_paper(row, paper_resign).is_some()
+        || signing_context(row, paper_resign) != *context_value
+    {
         return Ok(false);
     }
     Ok(current_source_bytes(row)
@@ -514,6 +522,7 @@ pub(super) async fn signing_sources_current(
     request: &PgRow,
     source: &PgRow,
 ) -> Result<bool, &'static str> {
+    let paper_ids = paper_resigning_ids(request);
     let primary_hash = request
         .get::<Option<String>, _>("primary_source_sha256")
         .unwrap_or_else(|| request.get::<String, _>("source_sha256"));
@@ -521,6 +530,7 @@ pub(super) async fn signing_sources_current(
         source,
         &request.get::<Value, _>("source_context"),
         &primary_hash,
+        paper_ids.contains(&source.get("id")),
     )
     .await?
     {
@@ -539,6 +549,7 @@ pub(super) async fn signing_sources_current(
             &current,
             &member.get::<Value, _>("source_context"),
             &member.get::<String, _>("sha256"),
+            paper_ids.contains(&member.get("document_id")),
         )
         .await?
         {
@@ -553,6 +564,7 @@ pub(super) async fn signing_sources_current_in_transaction(
     request: &PgRow,
     source: &PgRow,
 ) -> Result<bool, &'static str> {
+    let paper_ids = paper_resigning_ids(request);
     let primary_hash = request
         .get::<Option<String>, _>("primary_source_sha256")
         .unwrap_or_else(|| request.get::<String, _>("source_sha256"));
@@ -560,6 +572,7 @@ pub(super) async fn signing_sources_current_in_transaction(
         source,
         &request.get::<Value, _>("source_context"),
         &primary_hash,
+        paper_ids.contains(&source.get("id")),
     )
     .await?
     {
@@ -578,6 +591,7 @@ pub(super) async fn signing_sources_current_in_transaction(
             &current,
             &member.get::<Value, _>("source_context"),
             &member.get::<String, _>("sha256"),
+            paper_ids.contains(&member.get("document_id")),
         )
         .await?
         {
@@ -929,6 +943,7 @@ pub(super) async fn sync(
                 &source,
                 &attachment.get::<Value, _>("source_context"),
                 &expected_hash,
+                false,
             )
             .await?
             {
@@ -972,6 +987,7 @@ pub(super) async fn sync(
                 &current,
                 &attachment.get::<Value, _>("source_context"),
                 &attachment.get::<String, _>("sha256"),
+                false,
             )
             .await?
             {

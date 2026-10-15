@@ -14,6 +14,7 @@ import { SignatureConnectionDialog } from "./signature-connection-dialog";
 import { SignatureSignerFields } from "./signature-signer-fields";
 import { SignatureSigners } from "./signature-signers";
 import { SignatureProgressChips } from "./signature-progress-chips";
+import { OnboardingSignatureManifest } from "./onboarding-signature-manifest";
 import { signatureSignerProgress } from "./signature-signer-status";
 import { SignaturePackageComposer, emptyPackageSelection, expiryInstant, resolvePackage, type PackageSelection } from "./signature-package-composer";
 import {
@@ -227,7 +228,8 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
 
   const pending = state?.requests.some(r => isSignaturePending(r.status));
   const completed = state?.requests.some(r => r.status === "completed");
-  const composing = Boolean(state?.enabled && state.can_send && !pending && !state.ineligible_reason && (!completed || composeNew));
+  const paperSourceConfirmed = Boolean(state?.paper_resign_available && selection.paperSignedDocumentIds?.includes(documentId));
+  const composing = Boolean(state?.enabled && state.can_send && !pending && (!state.ineligible_reason || paperSourceConfirmed) && (!completed || composeNew));
   const resolved = resolvePackage(candidates, selection);
   // The document's own rules come from its signature state; added documents
   // bring theirs from the candidate list.
@@ -290,11 +292,13 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
       .then(next => {
         if (cancelled) return;
         setCandidates(next);
-        const preset = next.preset_document_ids.filter(id => id !== documentId && next.documents.some(document => document.id === id && !document.ineligible_reason));
-        const suggested = { ...emptyPackageSelection(documentId, next.suggested_language), documentIds: [documentId, ...preset] };
+        const preset = next.preset_document_ids.filter(id => id !== documentId && next.documents.some(document => document.id === id && !document.ineligible_reason && !document.paper_signed));
+        const current = selectionRef.current;
+        const paperSignedDocumentIds = current.paperSignedDocumentIds?.filter(id => next.documents.some(document => document.id === id && document.paper_signed && !document.ineligible_reason));
+        const suggested = { ...emptyPackageSelection(documentId, next.suggested_language), documentIds: [documentId, ...preset],
+          ...(paperSignedDocumentIds?.length ? { paperSignedDocumentIds } : {}) };
         setSuggestedSelection(JSON.stringify(suggested));
         // A reload after an action keeps the staff's choice while it is still possible.
-        const current = selectionRef.current;
         const stillPossible = current.documentIds.every(id => next.documents.some(document => document.id === id && !document.ineligible_reason));
         if (current.documentIds.length > 1 && stillPossible) return;
         if (JSON.stringify(current) !== JSON.stringify(suggested)) setConfirmed(false);
@@ -478,6 +482,11 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
           {state.can_send && !pending && state.ineligible_reason && !state.requests.some(r => r.result_document_id) ? <p className="rounded-xl border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground shadow-xs">{tx(...(ineligibleMessages[state.ineligible_reason] ?? ["Документ сейчас недоступен для подписания.", "Das Dokument kann derzeit nicht unterzeichnet werden."]))}{state.electronic_form_excluded ? ` (${state.electronic_form_excluded})` : ""}</p> : null}
 
           {state.enabled && state.can_send && !pending && !state.ineligible_reason && completed && !composeNew ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => { setComposeNew(true); onComposeNew?.(); }}><Plus className="size-4" />{tx("Новый запрос подписи", "Neue Signaturanfrage")}</Button> : null}
+          {!composing && state.onboarding_manifest ? <OnboardingSignatureManifest manifest={state.onboarding_manifest} /> : null}
+          {state.enabled && state.can_send && !pending && state.paper_resign_available && !composing ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => {
+            setSelection(current => ({ ...current, paperSignedDocumentIds: [...new Set([...(current.paperSignedDocumentIds ?? []), documentId])] }));
+            setComposeNew(true); setConfirmed(false); onComposeNew?.();
+          }}>{tx("Электронно подписать бумажную копию", "Papierkopie zusätzlich elektronisch unterschreiben")}</Button> : null}
           {composing ? <section className="rounded-xl border border-border/70 bg-card shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
               <AdminSectionTitle>{tx("Новый запрос подписи", "Neue Signaturanfrage")}</AdminSectionTitle>
@@ -537,9 +546,11 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
                 <Button type="button" className="h-9 rounded-lg" disabled={!canSend} onClick={() => void run(async () => {
                   await createSignaturePackage({
                     document_ids: selection.documentIds, signers: selectedSigners, attachment_ids: resolved.attachmentIds,
+                    paper_signed_document_ids: selection.paperSignedDocumentIds?.filter(id => selection.documentIds.includes(id)),
                     level: selection.level, expires_at: expiryInstant(selection.expiresOn), message: selection.message, language: selection.language,
                   });
                   previousPending.current = true; setSigners(baseline); setExcludedSigners([]); setConfirmed(false); setComposeNew(false);
+                  setSelection(current => ({ ...current, paperSignedDocumentIds: undefined }));
                 })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{busy ? tx("Отправка…", "Wird versendet…") : isPackage ? tx("Отправить пакет на подпись", "Paket zur Unterschrift senden") : tx("Отправить на подпись", "Zur Unterschrift senden")}</Button>
               </div>
             </div>

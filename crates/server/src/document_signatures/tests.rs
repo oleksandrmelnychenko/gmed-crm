@@ -235,7 +235,7 @@ fn enhanced_due_diligence_requires_only_gmed_signature() {
     );
 }
 
-fn provider(demo: bool) -> provider::Provider {
+pub(super) fn provider(demo: bool) -> provider::Provider {
     provider::Provider::new(
         if demo {
             "api_demo_test"
@@ -1168,6 +1168,13 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
     }
     // Connection configuration is encrypted, admin-only, and cannot strand active requests.
     verify_review_package_and_manager_acknowledgement(&pool, &auth, &mut created_keys).await;
+    onboarding_tests::verify_initial_manifest_and_paper_opt_in(
+        &pool,
+        &auth,
+        &endpoint,
+        &mut created_keys,
+    )
+    .await;
     let connection_state = AppState::new(
         pool.clone(),
         "test",
@@ -1370,7 +1377,7 @@ async fn verify_partial_notification_acl(
         .bind(manager).bind(source).execute(pool).await.unwrap();
 }
 
-async fn wait_for_status(pool: &sqlx::PgPool, id: Uuid, expected: &str) {
+pub(super) async fn wait_for_status(pool: &sqlx::PgPool, id: Uuid, expected: &str) {
     for _ in 0..150 {
         let status: String =
             sqlx::query_scalar("SELECT status FROM document_signature_requests WHERE id=$1")

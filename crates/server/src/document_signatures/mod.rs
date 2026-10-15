@@ -6,6 +6,7 @@ pub(crate) mod defaults;
 mod effects;
 pub(crate) mod frames;
 mod legal;
+mod onboarding;
 pub(crate) mod package;
 mod paper;
 mod progress;
@@ -14,6 +15,8 @@ pub mod retention;
 mod review;
 mod summary;
 
+#[cfg(test)]
+mod onboarding_tests;
 #[cfg(test)]
 mod tests;
 
@@ -96,7 +99,34 @@ fn context(row: &PgRow) -> Value {
         "version_root":row.get::<Uuid,_>("version_root_document_id"),"version":row.get::<i32,_>("version_number")})
 }
 
+fn paper_signed(row: &PgRow) -> bool {
+    row.get::<Option<DateTime<Utc>>, _>("signed_at").is_some()
+        && row.get::<Option<String>, _>("ursprung").as_deref() == Some("paper_signature")
+}
+
+fn paper_resigning_ids(request: &PgRow) -> Vec<Uuid> {
+    request
+        .try_get("paper_signed_document_ids")
+        .unwrap_or_default()
+}
+
+fn signing_context(row: &PgRow, paper_resign: bool) -> Value {
+    let mut value = context(row);
+    if paper_resign {
+        value["paper_signature_proof"] = json!({
+            "signed_at": row.get::<Option<DateTime<Utc>>, _>("signed_at"),
+            "signed_by": row.get::<Option<Uuid>, _>("signed_by"),
+            "origin": row.get::<Option<String>, _>("ursprung"),
+        });
+    }
+    value
+}
+
 fn eligibility(row: &PgRow) -> Option<&'static str> {
+    eligibility_with_paper(row, false)
+}
+
+fn eligibility_with_paper(row: &PgRow, paper_resign: bool) -> Option<&'static str> {
     if row
         .get::<Option<DateTime<Utc>>, _>("file_deleted_at")
         .is_some()
@@ -107,7 +137,8 @@ fn eligibility(row: &PgRow) -> Option<&'static str> {
     if !row.get::<bool, _>("is_latest_version") {
         return Some("document_superseded");
     }
-    if row.get::<Option<DateTime<Utc>>, _>("signed_at").is_some() {
+    let signed_paper = paper_resign && paper_signed(row);
+    if row.get::<Option<DateTime<Utc>>, _>("signed_at").is_some() && !signed_paper {
         return Some("document_already_signed");
     }
     if row.get::<Option<String>, _>("mime_type").as_deref() != Some("application/pdf")
@@ -118,6 +149,11 @@ fn eligibility(row: &PgRow) -> Option<&'static str> {
     // The consent form needs the person's own choice of its options: with an
     // electronic signature nobody can tick a box (2026-10-12). Paper stays
     // possible (`paper::refusal` does not ask for it).
+    // The explicitly selected scan already contains the person's paper
+    // declaration. Send those exact bytes; never fill in consent choices.
+    if signed_paper {
+        return None;
+    }
     crate::consent_choices::electronic_signing_refusal(
         template_of(row).as_deref(),
         row.get::<Option<Value>, _>("generated_bindings").as_ref(),
@@ -130,7 +166,15 @@ async fn current_eligibility(
     state: &AppState,
     row: &PgRow,
 ) -> Result<Option<&'static str>, Response> {
-    if let Some(reason) = eligibility(row) {
+    current_eligibility_with_paper(state, row, false).await
+}
+
+async fn current_eligibility_with_paper(
+    state: &AppState,
+    row: &PgRow,
+    paper_resign: bool,
+) -> Result<Option<&'static str>, Response> {
+    if let Some(reason) = eligibility_with_paper(row, paper_resign) {
         return Ok(Some(reason));
     }
     crate::consent_choices::changed_since_generation(
@@ -409,6 +453,7 @@ pub(crate) async fn create_fixed_package(
         auth,
         create::Plan {
             document_ids: package.document_ids,
+            paper_signed_document_ids: vec![],
             signers,
             attachment_ids,
             level: Some(Level::Qes),
@@ -559,6 +604,7 @@ async fn public_request(
         "test_mode":row.get::<bool,_>("test_mode"),"signers":row.get::<Value,_>("signers"),
         "evidence":row.get::<Value,_>("evidence"),"result_document_id":row.get::<Option<Uuid>,_>("result_document_id"),
         "is_package":row.get::<bool,_>("is_package") || entries.len() > 1,
+        "paper_signed_document_ids":paper_resigning_ids(row),
         "members":members,
         "attachments":attachment_values,
         "level":request_level(row).as_str(),
@@ -621,6 +667,14 @@ async fn list(
     }
     let minimum = minimum_level(&source);
     let source_eligibility = current_eligibility(&state, &source).await?;
+    let paper_resign_available = can_send
+        && paper_signed(&source)
+        && electronic_form_excluded(&source).is_none()
+        && !legal::informational(template_of(&source).as_deref())
+        && current_eligibility_with_paper(&state, &source, true)
+            .await?
+            .is_none();
+    let onboarding_manifest = onboarding::manifest(&state, &auth, &source).await?;
     Ok(Json(json!({"enabled":provider.is_some(),"region":"DE",
         "can_configure":auth.can(gmed_domain::access::capabilities::Capability::AdminSignatures),
         "test_mode":provider.as_ref().is_none_or(|p| p.test_mode),"can_send":can_send,
@@ -629,9 +683,11 @@ async fn list(
         "suggested_signers":suggested_signers,
         "review_package":review_package,
         "signing_packages":signing_packages,
+        "onboarding_manifest":onboarding_manifest,
         "scope":{"patient_id":source.get::<Option<Uuid>,_>("patient_id"),"lead_id":source.get::<Option<Uuid>,_>("lead_id")},
         "electronic_form_excluded":electronic_form_excluded(&source),
         "can_sign_on_paper":can_send && paper::possible(&source),
+        "paper_resign_available":paper_resign_available,
         // An informational document (privacy information, cost estimate) is
         // attached for acknowledgement and never signed itself: saying so
         // here keeps the client from offering a composer that cannot send.
@@ -703,6 +759,7 @@ async fn create(
         &auth,
         create::Plan {
             document_ids,
+            paper_signed_document_ids: vec![],
             signers: body.signers,
             attachment_ids: body.attachment_document_id.into_iter().collect(),
             level: body.level,

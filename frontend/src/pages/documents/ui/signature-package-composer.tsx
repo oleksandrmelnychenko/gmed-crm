@@ -4,12 +4,14 @@ import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { useLang } from "@/lib/i18n";
+import { OnboardingSignatureManifest } from "./onboarding-signature-manifest";
 import {
   CONSENT_CHOICE_REASONS, blockingWarning, packageMinimumLevel, packageWarnings, requiredAttachmentTemplates,
   signatureErrorText, type PackageCandidate, type PackageCandidates, type PackageWarning, type SignatureLevel,
 } from "../data/document-signature-api";
 
 export type PackageSelection = {
+  paperSignedDocumentIds?: string[];
   documentIds: string[];
   attachments: Record<string, string>;
   level: SignatureLevel;
@@ -69,7 +71,7 @@ export function resolvePackage(candidates: PackageCandidates | null, selection: 
       const estimates = (candidates?.documents ?? []).filter(document =>
         document.template === "order_cost_estimate" && document.order_id === order.order_id);
       if (estimates.some(estimate => selection.documentIds.includes(estimate.id))) return [];
-      const eligible = estimates.find(estimate => !estimate.ineligible_reason);
+      const eligible = estimates.find(estimate => !estimate.ineligible_reason && !estimate.paper_signed);
       return eligible ? [{ orderDocumentId: order.id, estimateId: eligible.id }] : [];
     });
   const attachmentIds = required.flatMap(template => {
@@ -79,10 +81,14 @@ export function resolvePackage(candidates: PackageCandidates | null, selection: 
   });
   const warnings = candidates ? packageWarnings(selected, candidates.limits) : [];
   const minimumLevel = packageMinimumLevel(selected.map(document => document.minimum_level));
+  const paperConfirmationMissing = selected.filter(document => document.paper_signed && !selection.paperSignedDocumentIds?.includes(document.id));
+  const onboardingIncomplete = candidates?.onboarding_manifest?.items.some(item => item.state !== "signed"
+    && (item.state !== "ready" || item.pending_elsewhere || !item.document_id || !selection.documentIds.includes(item.document_id))) ?? false;
   return {
     selected, required, attachmentOptions, attachmentIds, warnings, minimumLevel, withoutCostCalculation, orderEstimates,
     complete: selected.length === selection.documentIds.length && attachmentIds.length === required.length,
-    blocked: warnings.some(blockingWarning),
+    blocked: warnings.some(blockingWarning) || onboardingIncomplete || paperConfirmationMissing.length > 0,
+    onboardingIncomplete, paperConfirmationMissing,
   };
 }
 
@@ -100,19 +106,26 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
   const resolved = resolvePackage(candidates, selection);
   const available = candidates.documents.filter(document => !selection.documentIds.includes(document.id));
   const update = (patch: Partial<PackageSelection>) => onChange({ ...selection, ...patch });
+  const include = (id: string) => update({ documentIds: [...selection.documentIds, id],
+    ...(candidates.documents.find(document => document.id === id)?.paper_signed
+      ? { paperSignedDocumentIds: [...new Set([...(selection.paperSignedDocumentIds ?? []), id])] } : {}) });
   const move = (index: number, delta: number) => {
     const next = [...selection.documentIds];
     const [moved] = next.splice(index, 1);
     next.splice(index + delta, 0, moved);
     update({ documentIds: next });
   };
-  const presetIds = candidates.preset_document_ids.filter(id => id !== documentId && candidates.documents.some(document => document.id === id));
+  const presetIds = candidates.preset_document_ids.filter(id => id !== documentId && candidates.documents.some(document => document.id === id && !document.paper_signed && !document.ineligible_reason));
   const presetApplied = presetIds.length > 0 && presetIds.every(id => selection.documentIds.includes(id));
   const minDate = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
   const maxDate = new Date(Date.now() + candidates.limits.max_expiry_days * 86_400_000).toISOString().slice(0, 10);
   const documentWarnings = (id: string) => resolved.warnings.filter(warning => warning.document_id === id);
 
   return <div className="space-y-4">
+    {candidates.onboarding_manifest ? <OnboardingSignatureManifest manifest={candidates.onboarding_manifest}
+      documentId={documentId} selectedIds={selection.documentIds} paperIds={selection.paperSignedDocumentIds}
+      availableIds={candidates.documents.filter(document => !document.ineligible_reason).map(document => document.id)}
+      disabled={disabled} onSelect={(documentIds, paperSignedDocumentIds) => update({ documentIds, paperSignedDocumentIds })} /> : null}
     <section aria-label={tx("Документы на подпись", "Dokumente zur Unterschrift")} className="space-y-3 rounded-lg border border-[var(--brand)]/30 bg-[var(--brand)]/[0.025] p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <AdminSectionTitle>{tx("Документы на подпись", "Dokumente zur Unterschrift")}</AdminSectionTitle>
@@ -137,12 +150,17 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
                 <p className="text-[11px] text-muted-foreground">{[index === 0 ? tx("основной документ", "Hauptdokument") : null, sizeLabel(document?.size ?? null), document?.minimum_level === "AES" ? tx("допустима AES", "AES zulässig") : "QES"].filter(Boolean).join(" · ")}</p>
                 {documentWarnings(id).map(warning => <p key={warning.kind} className={blockingWarning(warning) ? "text-xs text-destructive" : "text-xs text-amber-700 dark:text-amber-300"}>{warningText(warning, tx)}</p>)}
                 {!previewed ? <p className="text-[11px] text-muted-foreground">{tx("Ещё не просмотрен", "Noch nicht angesehen")}</p> : null}
+                {document?.paper_signed ? <label className="flex items-start gap-2 text-xs leading-5 text-foreground">
+                  <input type="checkbox" className="mt-1 size-4 accent-[var(--brand)]" checked={selection.paperSignedDocumentIds?.includes(id) ?? false} disabled={disabled}
+                    onChange={event => update({ paperSignedDocumentIds: event.target.checked ? [...new Set([...(selection.paperSignedDocumentIds ?? []), id])] : (selection.paperSignedDocumentIds ?? []).filter(other => other !== id) })} />
+                  {tx("Повторно подписать эту бумажную копию электронно. Исходный скан и его подпись сохранятся.", "Diese Papierkopie zusätzlich elektronisch unterschreiben. Der ursprüngliche Scan und seine Unterschrift bleiben erhalten.")}
+                </label> : null}
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {onPreview ? <Button type="button" variant="ghost" size="icon-sm" disabled={disabled} aria-label={`${tx("Просмотреть", "Ansehen")}: ${document?.title ?? id}`} onClick={() => onPreview(id, "signing")}><Eye className="size-3.5" /></Button> : null}
                 {index > 1 ? <Button type="button" variant="ghost" size="icon-sm" disabled={disabled} aria-label={tx("Выше", "Nach oben")} onClick={() => move(index, -1)}><ArrowUp className="size-3.5" /></Button> : null}
                 {index > 0 && index < selection.documentIds.length - 1 ? <Button type="button" variant="ghost" size="icon-sm" disabled={disabled} aria-label={tx("Ниже", "Nach unten")} onClick={() => move(index, 1)}><ArrowDown className="size-3.5" /></Button> : null}
-                {index > 0 ? <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" disabled={disabled} aria-label={`${tx("Убрать из пакета", "Aus dem Paket entfernen")}: ${document?.title ?? id}`} onClick={() => update({ documentIds: selection.documentIds.filter(other => other !== id) })}><Trash2 className="size-3.5" /></Button> : null}
+                {index > 0 ? <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" disabled={disabled} aria-label={`${tx("Убрать из пакета", "Aus dem Paket entfernen")}: ${document?.title ?? id}`} onClick={() => update({ documentIds: selection.documentIds.filter(other => other !== id), paperSignedDocumentIds: selection.paperSignedDocumentIds?.filter(other => other !== id) })}><Trash2 className="size-3.5" /></Button> : null}
               </div>
             </div>
           </li>;
@@ -162,9 +180,9 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
         "Zum Auftrag dieses Kostenvoranschlags gibt es keine vorläufige medizinische Kostenkalkulation – das Paket wird ohne sie versendet.",
       )}</p> : null}
       {available.length > 0 && selection.documentIds.length < candidates.limits.max_documents ? <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Добавить документ этого пациента/лида", "Dokument dieser Person hinzufügen")}
-        <NativeComboboxSelect className="h-9 bg-field text-sm font-normal text-foreground" value="" disabled={disabled} onChange={event => { const id = event.target.value; if (id) update({ documentIds: [...selection.documentIds, id] }); }}>
+        <NativeComboboxSelect className="h-9 bg-field text-sm font-normal text-foreground" value="" disabled={disabled} onChange={event => { const id = event.target.value; if (id) include(id); }}>
           <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
-          {available.map(document => <option key={document.id} value={document.id} disabled={Boolean(document.ineligible_reason)}>{document.title} · v{document.version}{document.pending_elsewhere ? tx(" · уже на подписи", " · bereits versendet") : document.electronic_form_excluded ? tx(" · только на бумаге", " · nur Papierform") : document.ineligible_reason && CONSENT_CHOICE_REASONS.has(document.ineligible_reason) ? tx(" · нет выбора пациента — на бумаге", " · ohne Auswahl des Patienten – Papierform") : ""}</option>)}
+          {available.map(document => <option key={document.id} value={document.id} disabled={Boolean(document.ineligible_reason)}>{document.title} · v{document.version}{document.pending_elsewhere ? tx(" · уже на подписи", " · bereits versendet") : document.electronic_form_excluded ? tx(" · только на бумаге", " · nur Papierform") : document.ineligible_reason && CONSENT_CHOICE_REASONS.has(document.ineligible_reason) ? tx(" · нет выбора пациента — на бумаге", " · ohne Auswahl des Patienten – Papierform") : document.paper_signed ? tx(" · повторно подписать бумажную копию", " · Papierkopie erneut unterschreiben") : ""}</option>)}
         </NativeComboboxSelect>
       </label> : null}
     </section>

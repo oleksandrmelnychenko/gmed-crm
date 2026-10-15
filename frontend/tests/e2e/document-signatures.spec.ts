@@ -240,6 +240,78 @@ async function prepare(page: Page, enabled = true) {
 }
 
 for (const lang of ["ru", "de"] as const) {
+  test(`paper scan is electronically re-signed only after explicit opt-in in ${lang}`, async ({ page }) => {
+    const fixture = await prepare(page);
+    await page.setViewportSize(lang === "ru" ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+    await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);
+    const tx = (ru: string, de: string) => lang === "de" ? de : ru;
+    const signers = [{ first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" },
+      { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" }];
+    await page.route("**/api/v1/signature-packages/candidates?*", route => route.fulfill({ json: {
+      ...candidatesFor(documentId, { paper_signed: true, signer_policy: "both_parties" }), suggested_signers: signers,
+    } }));
+    await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => {
+      if (fixture.packageSubmissions.length) return route.fallback();
+      return route.fulfill({ json: { enabled: true, region: "DE", test_mode: false, can_send: true, can_configure: true,
+        signer_policy: "both_parties", ineligible_reason: "document_already_signed", paper_resign_available: true, suggested_signers: signers, requests: [] } });
+    });
+    await page.goto(`/documents/${documentId}`);
+    await page.getByRole("button", { name: `${tx("Электронная подпись", "Elektronische Unterschrift")}: vertrag.pdf`, exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: tx("Электронная подпись", "Elektronische Unterschrift"), exact: true });
+    expect(fixture.packageSubmissions).toHaveLength(0);
+    await expect(dialog.getByRole("button", { name: tx("Отправить на подпись", "Zur Unterschrift senden"), exact: true })).toHaveCount(0);
+    await dialog.getByRole("button", { name: tx("Электронно подписать бумажную копию", "Papierkopie zusätzlich elektronisch unterschreiben"), exact: true }).click();
+    const paper = dialog.getByRole("checkbox", { name: /Повторно подписать эту бумажную копию|Diese Papierkopie zusätzlich/ });
+    await expect(paper).toBeChecked();
+    await page.screenshot({ path: `../.tmp/release-signature-progress-20261015/onboarding-paper-${lang}.png` });
+    await expect(dialog.getByRole("img", { name: /PDF, (Seite|страница) 1/ })).toBeVisible();
+    await dialog.getByRole("checkbox", { name: /Я проверил сохранённый PDF|Ich habe die gespeicherte PDF/ }).check();
+    const send = dialog.getByRole("button", { name: tx("Отправить на подпись", "Zur Unterschrift senden"), exact: true });
+    await expect(send).toBeEnabled();
+    await send.click();
+    await expect.poll(() => fixture.packageSubmissions.length).toBe(1);
+    expect(fixture.packageSubmissions[0]).toMatchObject({ document_ids: [documentId], paper_signed_document_ids: [documentId] });
+    await expect(send).toHaveCount(0);
+  });
+}
+
+test("initial onboarding manifest keeps missing forms visible and blocks incomplete sending", async ({ page }) => {
+  const fixture = await prepare(page);
+  const paperId = "ea3a0c15-792b-4a3a-9a7e-006300000077";
+  const manifest = { expected_count: 6, items: [
+    { template: "single_order", document_id: documentId, title: "Order", version: 1, state: "ready", reason: null, paper_signed: false, pending_elsewhere: false },
+    { template: "framework_contract", document_id: paperId, title: "Paper contract", version: 2, state: "signed", reason: null, paper_signed: true, pending_elsewhere: false },
+    ...["order_cost_estimate", "lead_self_disclosure", "confidentiality_release", "privacy_consents"].map(template => ({
+      template, document_id: null, title: null, version: null, state: "missing", reason: "document_missing", paper_signed: false, pending_elsewhere: false,
+    })),
+  ] };
+  const signers = [{ first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" }];
+  await page.route("**/api/v1/signature-packages/candidates?*", route => route.fulfill({ json: {
+    ...candidatesFor(documentId), onboarding_manifest: manifest, suggested_signers: signers,
+    documents: [...candidatesFor(documentId).documents, ...candidatesFor(paperId, { paper_signed: true, title: "Paper contract" }).documents],
+  } }));
+  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
+    enabled: true, region: "DE", test_mode: false, can_send: true, can_configure: true, ineligible_reason: null,
+    suggested_signers: signers, requests: [], onboarding_manifest: manifest,
+  } }));
+  await page.goto(`/documents/${documentId}`);
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  await expect(dialog.locator("[data-onboarding-manifest] li")).toHaveCount(6);
+  await expect(dialog.locator("[data-onboarding-manifest]")).toContainText("Patientenformular");
+  const paperChoice = dialog.getByRole("checkbox", { name: "In das elektronische Paket aufnehmen: Rahmenvertrag", exact: true });
+  await expect(paperChoice).not.toBeChecked();
+  await dialog.getByRole("button", { name: "Verfügbare auswählen, einschließlich Papierkopien", exact: true }).click();
+  await expect(paperChoice).toBeChecked();
+  await expect(dialog.locator(`[data-package-document="${paperId}"]`)).toBeVisible();
+  await expect(dialog.getByRole("img", { name: "vertrag.pdf. PDF, Seite 1", exact: true })).toBeVisible();
+  await page.screenshot({ path: "../.tmp/release-signature-progress-20261015/onboarding-manifest.png" });
+  await dialog.getByRole("checkbox", { name: /Ich habe alle PDFs/ }).check();
+  await expect(dialog.getByRole("button", { name: "Paket zur Unterschrift senden", exact: true })).toBeDisabled();
+  expect(fixture.packageSubmissions).toHaveLength(0);
+});
+
+for (const lang of ["ru", "de"] as const) {
   test(`individual signer states distinguish readiness, sequence and errors in ${lang}`, async ({ page }, testInfo) => {
     const fixture = await prepare(page);
     await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);

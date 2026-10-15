@@ -15,6 +15,7 @@ const MAX_EXPIRY_DAYS: i64 = 180;
 
 pub(super) struct Plan {
     pub(super) document_ids: Vec<Uuid>,
+    pub(super) paper_signed_document_ids: Vec<Uuid>,
     pub(super) signers: Vec<Signer>,
     pub(super) attachment_ids: Vec<Uuid>,
     pub(super) level: Option<Level>,
@@ -27,6 +28,8 @@ pub(super) struct Plan {
 #[serde(deny_unknown_fields)]
 pub(super) struct CreatePackageRequest {
     document_ids: Vec<Uuid>,
+    #[serde(default)]
+    paper_signed_document_ids: Vec<Uuid>,
     signers: Vec<Signer>,
     #[serde(default)]
     attachment_ids: Vec<Uuid>,
@@ -47,6 +50,7 @@ pub(super) async fn create_package(
         &auth,
         Plan {
             document_ids: body.document_ids,
+            paper_signed_document_ids: body.paper_signed_document_ids,
             signers: body.signers,
             attachment_ids: body.attachment_ids,
             level: body.level,
@@ -279,6 +283,18 @@ pub(super) async fn create_request(
         ));
     }
 
+    let mut paper_ids = plan.paper_signed_document_ids.clone();
+    paper_ids.sort();
+    paper_ids.dedup();
+    if paper_ids.len() != plan.paper_signed_document_ids.len()
+        || paper_ids.iter().any(|id| !plan.document_ids.contains(id))
+    {
+        return Err(error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_paper_signature_selection",
+        ));
+    }
+
     // Edit rights on every document: sending exports it and changes its state.
     let mut rows = Vec::with_capacity(plan.document_ids.len());
     for id in &plan.document_ids {
@@ -286,7 +302,16 @@ pub(super) async fn create_request(
     }
     for row in &rows {
         let id: Uuid = row.get("id");
-        if let Some(reason) = current_eligibility(state, row).await? {
+        if paper_ids.contains(&id) && !paper_signed(row) {
+            return Err(document_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "paper_signature_required",
+                id,
+            ));
+        }
+        if let Some(reason) =
+            current_eligibility_with_paper(state, row, paper_ids.contains(&id)).await?
+        {
             return Err(document_error(StatusCode::CONFLICT, reason, id));
         }
         if let Some(statute) = electronic_form_excluded(row) {
@@ -307,6 +332,18 @@ pub(super) async fn create_request(
         }
     }
     package_scope(&rows)?;
+    let onboarding_source = rows.iter().find(|row| {
+        matches!(
+            template_of(row).as_deref(),
+            Some("framework_contract" | "single_order" | "order_cost_estimate")
+        )
+    });
+    let onboarding_manifest = match onboarding_source {
+        Some(source) => onboarding::manifest(state, auth, source).await?,
+        None => None,
+    };
+    let onboarding_source_id = onboarding_source.map(|row| row.get::<Uuid, _>("id"));
+    onboarding::validate(onboarding_manifest.as_ref(), &plan.document_ids)?;
     let contract_stage = rows.iter().any(|row| {
         !documents::is_dsgvo_consent_or_identity_document(
             row.get::<Option<String>, _>("compliance_kind").as_deref(),
@@ -536,6 +573,37 @@ pub(super) async fn create_request(
         .collect();
     sqlx::query("SELECT id FROM leads WHERE id = ANY($1) OR prospect_patient_id = ANY($2) OR converted_patient_id = ANY($2) ORDER BY id FOR UPDATE")
         .bind(&scope_leads).bind(&scope_patients).fetch_all(&mut *tx).await.map_err(db_error)?;
+    // Lock the complete manifest, including documents whose paper/electronic
+    // signature already satisfies a required slot. A concurrent version insert
+    // must not make an old proof silently satisfy initial onboarding.
+    let mut locked_ids = unique.clone();
+    if let Some(manifest) = &onboarding_manifest {
+        locked_ids.extend(manifest.items.iter().filter_map(|item| item.document_id));
+    }
+    locked_ids.sort();
+    locked_ids.dedup();
+    sqlx::query("SELECT id FROM documents WHERE id=ANY($1) ORDER BY id FOR UPDATE")
+        .bind(&locked_ids)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(db_error)?;
+    if let Some(source) = members
+        .iter()
+        .map(|member| &member.row)
+        .find(|row| Some(row.get::<Uuid, _>("id")) == onboarding_source_id)
+    {
+        let current = onboarding::manifest(state, auth, source).await?;
+        onboarding::validate(current.as_ref(), &plan.document_ids)?;
+        if current.as_ref().is_some_and(|manifest| {
+            manifest
+                .items
+                .iter()
+                .filter_map(|item| item.document_id)
+                .any(|id| !locked_ids.contains(&id))
+        }) {
+            return Err(error(StatusCode::CONFLICT, "document_changed"));
+        }
+    }
     if contract_stage {
         for member in &members {
             let row = &member.row;
@@ -576,8 +644,11 @@ pub(super) async fn create_request(
         let id: Uuid = member.row.get("id");
         let current = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1 FOR UPDATE")
             .bind(id).fetch_one(&mut *tx).await.map_err(db_error)?;
-        if current_eligibility(state, &current).await?.is_some()
-            || context(&current) != context(&member.row)
+        let paper_resign = paper_ids.contains(&id);
+        if current_eligibility_with_paper(state, &current, paper_resign)
+            .await?
+            .is_some()
+            || signing_context(&current, paper_resign) != signing_context(&member.row, paper_resign)
         {
             return Err(document_error(
                 StatusCode::CONFLICT,
@@ -614,11 +685,12 @@ pub(super) async fn create_request(
         )
             .into_response());
     }
-    let inserted = sqlx::query("INSERT INTO document_signature_requests (id,source_document_id,requested_by,source_sha256,primary_source_sha256,source_context,signers,provider_account,test_mode,status,lease_until,level,minimum_level,expires_at,invitation_note,language,is_package,source_page_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'submitting',now()+interval '5 minutes',$10,$11,$12,$13,$14,$15,$16) ON CONFLICT DO NOTHING RETURNING id")
+    let inserted = sqlx::query("INSERT INTO document_signature_requests (id,source_document_id,requested_by,source_sha256,primary_source_sha256,source_context,signers,provider_account,test_mode,status,lease_until,level,minimum_level,expires_at,invitation_note,language,is_package,source_page_count,paper_signed_document_ids) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'submitting',now()+interval '5 minutes',$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT DO NOTHING RETURNING id")
         .bind(request_id).bind(source_id).bind(auth.user_id).bind(&source_hash).bind(&members[0].hash)
-        .bind(context(&members[0].row)).bind(json!(signers)).bind(&provider.account).bind(provider.test_mode)
+        .bind(signing_context(&members[0].row, paper_ids.contains(&source_id))).bind(json!(signers)).bind(&provider.account).bind(provider.test_mode)
         .bind(level.as_str()).bind(minimum.as_str()).bind(plan.expires_at).bind(&note).bind(&language)
         .bind(is_package).bind(members[0].pages.map(|pages| pages as i32))
+        .bind(&paper_ids)
         .fetch_optional(&mut *tx).await.map_err(db_error)?;
     if inserted.is_none() {
         return Err(error(StatusCode::CONFLICT, "signature_already_pending"));
@@ -628,7 +700,7 @@ pub(super) async fn create_request(
         let pages = member.pages.unwrap_or(1);
         sqlx::query("INSERT INTO document_signature_members(request_id,document_id,position,sha256,source_context,page_start,page_count) VALUES ($1,$2,$3,$4,$5,$6,$7)")
             .bind(request_id).bind(member.row.get::<Uuid,_>("id")).bind(index as i16).bind(&member.hash)
-            .bind(context(&member.row)).bind(page_start as i32).bind(pages as i32)
+            .bind(signing_context(&member.row, paper_ids.contains(&member.row.get::<Uuid,_>("id")))).bind(page_start as i32).bind(pages as i32)
             .execute(&mut *tx).await.map_err(db_error)?;
         page_start += pages;
     }
@@ -656,7 +728,8 @@ pub(super) async fn create_request(
                 Some(id.1),
                 json!({"request_id":request_id,"role":id.0,"position":position,
                     "document_ids":document_ids,"level":level.as_str(),"minimum_level":minimum.as_str(),
-                    "test_mode":provider.test_mode,"region":"DE"}),
+                    "test_mode":provider.test_mode,"region":"DE",
+                    "paper_signed_document_ids":paper_ids,"paper_resigning":paper_ids.contains(&id.1)}),
             ),
         )
         .await
@@ -763,7 +836,7 @@ pub(super) async fn candidates(
         sqlx::query_scalar(
             "SELECT d.id FROM documents d
              WHERE d.file_deleted_at IS NULL AND d.status <> 'archived'
-               AND d.signed_at IS NULL AND d.storage_key IS NOT NULL
+               AND (d.signed_at IS NULL OR d.ursprung='paper_signature') AND d.storage_key IS NOT NULL
                AND d.mime_type = 'application/pdf'
                AND COALESCE(d.ursprung, '') NOT IN ('electronic_signature', 'electronic_signature_package')
                -- Uploaded evidence is never a document to sign: medical files,
@@ -835,7 +908,8 @@ pub(super) async fn candidates(
         candidate["is_medical"] = json!(row.get::<bool, _>("is_medical"));
         candidate["pending_elsewhere"] = json!(pending.contains(&id));
         candidate["electronic_form_excluded"] = json!(electronic_form_excluded(&row));
-        let ineligible_reason = current_eligibility(&state, &row)
+        candidate["paper_signed"] = json!(paper_signed(&row));
+        let ineligible_reason = current_eligibility_with_paper(&state, &row, paper_signed(&row))
             .await?
             .or_else(|| electronic_form_excluded(&row).map(|_| "electronic_form_excluded"))
             .or_else(|| pending.contains(&id).then_some("signature_already_pending"));
@@ -845,7 +919,7 @@ pub(super) async fn candidates(
         }
         documents.push(candidate);
     }
-    let (presets, suggested_signers, language) = match &first_row {
+    let (mut presets, suggested_signers, language) = match &first_row {
         Some(row) => {
             let preset = match query.document_id {
                 Some(_) => package::preset_document_ids(&state, &auth, row).await?,
@@ -859,11 +933,31 @@ pub(super) async fn candidates(
         }
         None => (vec![], vec![], "de"),
     };
+    let onboarding_manifest = match &first_row {
+        Some(row) => onboarding::manifest(&state, &auth, row).await?,
+        None => None,
+    };
+    if let Some(manifest) = &onboarding_manifest {
+        // Initial defaults contain all current unsigned forms, never paper
+        // copies. Missing/blocked forms remain visible in the manifest.
+        presets = manifest
+            .items
+            .iter()
+            .filter(|item| item.state == "ready" && !item.pending_elsewhere)
+            .filter_map(|item| item.document_id)
+            .filter(|id| {
+                documents
+                    .iter()
+                    .any(|doc| doc["id"] == json!(id) && doc["ineligible_reason"].is_null())
+            })
+            .collect();
+    }
     Ok(Json(json!({
         "scope": {"patient_id": patient_id, "lead_id": lead_id},
         "documents": documents,
         "attachments": attachments,
         "preset_document_ids": presets,
+        "onboarding_manifest": onboarding_manifest,
         "suggested_signers": suggested_signers,
         "suggested_language": language,
         "languages": provider::LANGUAGES,

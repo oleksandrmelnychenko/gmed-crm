@@ -31,6 +31,38 @@ const client: Signer = { first_name: "Anna", last_name: "Beispiel", email: "anna
 const agency: Signer = { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" };
 
 describe("signature package composer rules", () => {
+  it("keeps already signed forms in initial completeness and blocks missing or unselected forms", () => {
+    const pool = candidates([candidate("order", { template: "single_order" })]);
+    pool.onboarding_manifest = { expected_count: 6, items: [
+      { template: "single_order", document_id: "order", title: "Order", version: 1, state: "ready", reason: null, paper_signed: false, pending_elsewhere: false },
+      { template: "framework_contract", document_id: "paper", title: "Contract", version: 2, state: "signed", reason: null, paper_signed: true, pending_elsewhere: false },
+    ] };
+    expect(resolvePackage(pool, emptyPackageSelection("order")).blocked).toBe(false);
+    pool.onboarding_manifest.items.push({ template: "lead_self_disclosure", document_id: null, title: null, version: null, state: "missing", reason: "document_missing", paper_signed: false, pending_elsewhere: false });
+    expect(resolvePackage(pool, emptyPackageSelection("order")).onboardingIncomplete).toBe(true);
+    const markup = renderToStaticMarkup(<SignaturePackageComposer documentId="order" candidates={pool} previewedDocumentIds={[]} selection={emptyPackageSelection("order")} onChange={() => undefined} />);
+    expect(markup).toContain("Vollständige Erstaufnahme");
+    expect(markup).toContain("Auf Papier unterschrieben");
+    expect(markup).toContain("Patientenformular");
+    expect(markup).toContain("Erstellen Sie zuerst dieses Dokument");
+  });
+
+  it("requires an explicit per-document opt-in to re-sign a paper PDF", () => {
+    const pool = candidates([candidate("paper", { paper_signed: true })]);
+    const initial = emptyPackageSelection("paper");
+    expect(resolvePackage(pool, initial).blocked).toBe(true);
+    expect(resolvePackage(pool, { ...initial, paperSignedDocumentIds: ["unrelated"] }).blocked).toBe(true);
+    expect(resolvePackage(pool, { ...initial, paperSignedDocumentIds: ["paper"] }).blocked).toBe(false);
+    const markup = renderToStaticMarkup(<SignaturePackageComposer documentId="paper" candidates={pool} previewedDocumentIds={[]} selection={initial} onChange={() => undefined} />);
+    expect(markup).toContain("ursprüngliche Scan und seine Unterschrift bleiben erhalten");
+  });
+
+  it("does not suggest automatically adding an already paper-signed cost estimate", () => {
+    const pool = candidates([candidate("order", { template: "single_order", order_id: "o" }),
+      candidate("estimate", { template: "order_cost_estimate", order_id: "o", paper_signed: true })]);
+    expect(resolvePackage(pool, emptyPackageSelection("order")).orderEstimates).toEqual([]);
+  });
+
   it("takes the strictest signer policy and the highest minimum level of the package", () => {
     expect(combinedSignerPolicy(["client_only", "flexible"])).toBe("client_only");
     expect(combinedSignerPolicy(["client_only", "both_parties"])).toBe("both_parties");

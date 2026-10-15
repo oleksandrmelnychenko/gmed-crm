@@ -468,7 +468,7 @@ async fn apply_one(
     let request_id: Uuid = request.get("id");
     let requested_by: Uuid = request.get("requested_by");
     let document = sqlx::query(
-        "SELECT id, patient_id, lead_id, order_id, generated_template_id, art, compliance_kind
+        "SELECT id, patient_id, lead_id, order_id, generated_template_id, art, compliance_kind, ursprung, signed_at
          FROM documents WHERE id=$1 FOR UPDATE",
     )
     .bind(document_id)
@@ -481,33 +481,36 @@ async fn apply_one(
     let lead_id: Option<Uuid> = document.get("lead_id");
     let order_id: Option<Uuid> = document.get("order_id");
     let kind = compliance_kind_for_signed_document(template.as_deref(), &art);
-    match kind {
-        Some(kind) => {
-            match record_document_signature_tx(
-                tx,
-                &DocumentSignatureRecord {
-                    document_id,
-                    patient_id,
-                    lead_id,
-                    compliance_kind: kind,
-                    signed_at,
-                    signed_by: None,
-                    actor_id: requested_by,
-                    consent_context: consent_context.clone(),
-                    converted_lead_is_error: false,
-                },
-            )
-            .await
-            {
-                Ok(_) => {}
-                Err(DocumentSignatureRecordError::ConvertedLead) => {}
-                Err(DocumentSignatureRecordError::Database(_)) => {
-                    return Err("signature_database_error");
+    let preserve_paper =
+        paper_resigning_ids(request).contains(&document_id) && paper_signed(&document);
+    if !preserve_paper {
+        match kind {
+            Some(kind) => {
+                match record_document_signature_tx(
+                    tx,
+                    &DocumentSignatureRecord {
+                        document_id,
+                        patient_id,
+                        lead_id,
+                        compliance_kind: kind,
+                        signed_at,
+                        signed_by: None,
+                        actor_id: requested_by,
+                        consent_context: consent_context.clone(),
+                        converted_lead_is_error: false,
+                    },
+                )
+                .await
+                {
+                    Ok(_) => {}
+                    Err(DocumentSignatureRecordError::ConvertedLead) => {}
+                    Err(DocumentSignatureRecordError::Database(_)) => {
+                        return Err("signature_database_error");
+                    }
                 }
             }
-        }
-        None => {
-            sqlx::query(
+            None => {
+                sqlx::query(
                 "UPDATE documents SET signed_at=$2, signed_by=NULL,
                         status=CASE WHEN status='draft' THEN 'active' ELSE status END, updated_at=now()
                  WHERE id=$1",
@@ -517,6 +520,7 @@ async fn apply_one(
             .execute(&mut **tx)
             .await
             .map_err(database)?;
+            }
         }
     }
     let mut effects = json!({
@@ -524,6 +528,7 @@ async fn apply_one(
         "signed_document_id": result_id,
         "compliance_kind": kind,
         "level": request_level(request).as_str(),
+        "paper_source_preserved": preserve_paper,
     });
     apply_business_effects(
         tx,
