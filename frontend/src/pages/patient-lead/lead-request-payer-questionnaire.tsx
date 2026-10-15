@@ -400,7 +400,7 @@ function PayerQuestionnaireForm({
       <div className="space-y-3 rounded-lg border border-border bg-muted/10 px-3 py-3" data-testid="lead-request-payer-notice">
         <p className="text-sm font-medium">{text.payerNoticeTitle}</p>
         <p className="whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{text.payerNotice}</p>
-        <a href={`/legal?lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
+        <a href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
           {text.privacyLink}
         </a>
         <label className="flex items-start gap-3 text-sm">

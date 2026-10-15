@@ -73,4 +73,12 @@ describe("inquiry privacy notice", () => {
     expect(html).not.toContain('data-testid="form-privacy-notice"');
     expect(html).toContain("GMED-CRM-System");
   });
+
+  it.each(["ru", "de"] as const)("shows the form notice to an existing patient following their child's %s inquiry link", (lang) => {
+    auth.user = { role: "patient", portal_mode: "patient" };
+    const html = renderToStaticMarkup(<MemoryRouter initialEntries={[`/legal?notice=form&lang=${lang}#privacy`]}><LegalNoticePage /></MemoryRouter>);
+    expect(html).toContain('data-testid="form-privacy-notice"');
+    for (const section of FORM_PRIVACY_SECTIONS[lang]) expect(html).toContain(section.title);
+    expect(html).not.toContain("GMED-CRM-System");
+  });
 });

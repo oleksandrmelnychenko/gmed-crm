@@ -78,7 +78,7 @@ export function PrivacyStep({
         {text.privacyNotice(questionnaire.patient_name, questionnaire.payer_type !== "person").map((paragraph) => (
           <p key={paragraph}>{paragraph}</p>
         ))}
-        <a href={`/legal?lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="inline-block text-sm text-[var(--brand)] underline">
+        <a href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="inline-block text-sm text-[var(--brand)] underline">
           {text.privacyLink}
         </a>
       </div>

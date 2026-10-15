@@ -132,7 +132,7 @@ export function LeadTrustedPersonsPage() {
                     <input type="checkbox" className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} data-testid="disclosure-consent" onChange={(event) => update({ consentGiven: event.currentTarget.checked })} />
                     <span>{text.consent(companyName)}</span>
                   </label>
-                  <a className="text-sm text-[var(--brand)] underline underline-offset-4" href={`/legal?lang=${lang}#privacy`} target="_blank" rel="noreferrer">{text.privacy}</a>
+                  <a className="text-sm text-[var(--brand)] underline underline-offset-4" href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer">{text.privacy}</a>
                 </fieldset>
               </> : null}
               {problem ? <p role="status" className="text-sm text-amber-800 dark:text-amber-300">{problem === "consent" ? text.consentRequired : text[problem]}</p> : null}

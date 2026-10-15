@@ -425,7 +425,7 @@ export function ConsentCheckbox({
         <span className="space-y-1">
           <span className="block leading-snug">{label}</span>
           {privacyLink ? (
-            <a href={`/legal?lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
+            <a href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
               {text.privacyLink}
             </a>
           ) : null}

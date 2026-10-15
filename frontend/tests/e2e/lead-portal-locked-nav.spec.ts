@@ -94,6 +94,21 @@ async function chooseRequest(page: Page, name: string) {
   await page.getByRole("option", { name, exact: true }).click();
 }
 
+for (const lang of ["ru", "de"] as const) {
+  test(`an existing patient opens the complete form notice from their child's inquiry (${lang})`, async ({ page }) => {
+    await setup(page, { lang, mode: "patient" });
+    await page.goto(`/legal?notice=form&lang=${lang}#privacy`);
+    const notice = page.getByTestId("form-privacy-notice");
+    await expect(notice).toBeVisible();
+    await expect(notice.getByRole("heading", { level: 3 })).toHaveCount(14);
+    await expect(notice).toContainText(lang === "ru"
+      ? "Настоящая политика конфиденциальности касается нашего опроса клиентов"
+      : "Diese Datenschutzerklärung gilt für unsere Kundenbefragung");
+    await expect(notice).toContainText("12.10.2026");
+    await expect(notice).toContainText("FiSaLis");
+  });
+}
+
 test.describe("Lead portal locked menu and package interest", () => {
   for (const lang of ["ru", "de"] as const) {
     test(`lead menu has active request/utilities, visible locks and no service catalogue (${lang})`, async ({ page }) => {

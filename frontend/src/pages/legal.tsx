@@ -58,7 +58,10 @@ export function LegalNoticePage() {
   const [notice, setNotice] = useState<LegalNotice | null>(null);
   const [failed, setFailed] = useState(false);
   const inPortal = user?.role === "patient" && !user.password_change_required;
-  const formNotice = !inPortal || isLeadPortalUser(user);
+  // A parent can also have their own patient record. A link from the child's
+  // inquiry must still show the inquiry notice, regardless of the account's
+  // current/default patient context.
+  const formNotice = new URLSearchParams(search).get("notice") === "form" || !inPortal || isLeadPortalUser(user);
 
   useEffect(() => {
     let cancelled = false;
