@@ -1766,6 +1766,135 @@ async fn the_representation_is_reached_only_through_the_own_request() {
 }
 
 #[tokio::test]
+async fn staff_remove_a_parent_with_portal_data_and_access_only_from_this_child() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let router = &app.suite.app;
+    let mother = Uuid::new_v4();
+    let father = Uuid::new_v4();
+    let mother_email = address("anna.parent.removal");
+    let mother_contact =
+        json!({"id":mother,"name":"Anna Muster","email":mother_email,"relation":"parent"});
+    let father_contact = json!({
+        "id":father,"name":"Ben Muster","email":address("ben.parent.removal"),"relation":"parent",
+        "related_patient_id":null,"phone":null,"birth_date":null,"address":null
+    });
+    let child = minor_lead(&app, json!([mother_contact, father_contact])).await;
+    let sibling = minor_lead(&app, json!([mother_contact])).await;
+    let (user_id, parent) = guardian_login(&app, child, mother).await;
+    let (shared_user_id, _) = guardian_login(&app, sibling, mother).await;
+    assert_eq!(user_id, shared_user_id);
+    give_inquiry_consent(router, child, &parent).await;
+    let (status, body) = upload_file(
+        router,
+        &format!("/api/v1/me/lead-requests/{child}/representatives/{mother}/identity-document"),
+        &parent,
+        "parent.pdf",
+        "application/pdf",
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let document = representative(&body, mother)["identity_documents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .parse::<Uuid>()
+        .unwrap();
+    let path = format!("/api/v1/leads/{child}/trusted-contacts/{mother}");
+    for denied in [&parent, &app.staff("concierge")] {
+        let (status, body) = json_request(router, "DELETE", &path, denied, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    }
+    let (status, body) =
+        json_request(router, "DELETE", &path, &app.staff("patient_manager"), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["representation"]["representatives"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        body["representation"]["representatives"][0]["id"],
+        json!(father)
+    );
+    let (contacts, legacy_name): (Value, Option<String>) =
+        sqlx::query_as("SELECT trusted_contacts, trusted_contact_name FROM leads WHERE id=$1")
+            .bind(child)
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(contacts, json!([father_contact]));
+    assert_eq!(legacy_name.as_deref(), Some("Ben Muster"));
+    let links: Vec<(Uuid, bool)> = sqlx::query_as("SELECT lead_id, revoked_at IS NOT NULL FROM lead_portal_access WHERE user_id=$1 ORDER BY lead_id")
+        .bind(user_id).fetch_all(&app.suite.pool).await.unwrap();
+    assert!(links.contains(&(child, true)));
+    assert!(links.contains(&(sibling, false)));
+    let (status, body) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{child}"),
+        &parent,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let (status, body) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{sibling}"),
+        &parent,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let kept: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM documents WHERE id=$1 AND file_deleted_at IS NULL AND storage_key IS NOT NULL)")
+        .bind(document).fetch_one(&app.suite.pool).await.unwrap();
+    assert!(
+        kept,
+        "the uploaded document must remain in the lead's records"
+    );
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_representatives WHERE lead_id=$1 AND contact_id=$2",
+    )
+    .bind(child)
+    .bind(mother)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(rows, 0);
+    let audit = audit_contexts(&app.suite.pool, "remove_lead_trusted_contact", child).await;
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0]["representative_id"], json!(mother));
+    assert_eq!(audit[0]["revoked_access_ids"].as_array().unwrap().len(), 1);
+    let (status, _) =
+        json_request(router, "DELETE", &path, &app.staff("patient_manager"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Removing the last contact also clears the legacy single-contact fields,
+    // so reopening the wizard cannot resurrect the parent through its fallback.
+    let (status, body) = json_request(
+        router,
+        "DELETE",
+        &format!("/api/v1/leads/{child}/trusted-contacts/{father}"),
+        &app.staff("sales"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (contacts, name): (Value, Option<String>) =
+        sqlx::query_as("SELECT trusted_contacts, trusted_contact_name FROM leads WHERE id=$1")
+            .bind(child)
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(contacts, json!([]));
+    assert!(name.is_none());
+}
+
+#[tokio::test]
 async fn a_paying_parent_snapshot_follows_representation_corrections_and_cannot_be_minor_self() {
     let Some(app) = test_app().await else {
         return;

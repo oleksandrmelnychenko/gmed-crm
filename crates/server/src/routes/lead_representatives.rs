@@ -3125,12 +3125,101 @@ pub(crate) async fn remove_lead_representative(
     Json(json!({ "representation": staff_payload(&loaded) })).into_response()
 }
 
+/// Explicit staff removal, separate from saving a possibly stale contact list.
+/// The contact, its extra identity data and this child's guardian access leave
+/// together. Uploaded documents and signed history remain in the lead record;
+/// the parent's account, patient record and access to other children stay.
+pub(crate) async fn remove_lead_trusted_contact(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, representative_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(response) = require_staff_editor(&auth) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin"),
+    };
+    if let Err(response) = lock_open_lead(&mut tx, lead_id).await {
+        return response;
+    }
+    let loaded = match load(&mut tx, lead_id).await {
+        Ok(Some(loaded)) => loaded,
+        Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(error) => return intake::internal(error, "load contact"),
+    };
+    let mut contacts = loaded.contacts;
+    let previous_len = contacts.len();
+    contacts.retain(|contact| entry_id(contact) != Some(representative_id));
+    if contacts.len() == previous_len {
+        return intake::err(StatusCode::NOT_FOUND, "Contact not found");
+    }
+    let written = async {
+        // Deleting the extra row unlinks uploads through their foreign key;
+        // it does not delete the documents or their audit history.
+        sqlx::query("DELETE FROM lead_representatives WHERE lead_id = $1 AND contact_id = $2")
+            .bind(lead_id)
+            .bind(representative_id)
+            .execute(&mut *tx)
+            .await?;
+        let revoked: Vec<Uuid> = sqlx::query_scalar(
+            r#"UPDATE lead_portal_access
+               SET revoked_at = now(), revoked_by = $3, revoked_reason = 'contact_removed'
+               WHERE lead_id = $1 AND trusted_contact_id = $2
+                 AND kind = 'guardian' AND revoked_at IS NULL
+               RETURNING id"#,
+        )
+        .bind(lead_id)
+        .bind(representative_id)
+        .bind(auth.user_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        store_lead(&mut tx, lead_id, Some(&contacts), &json!({})).await?;
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "remove_lead_trusted_contact",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({ "representative_id": representative_id, "revoked_access_ids": revoked }),
+            ),
+        )
+        .await?;
+        crate::risk::store::reassess(
+            &mut tx,
+            lead_id,
+            crate::risk::store::Cause::Staff,
+            Some(auth.user_id),
+        )
+        .await?;
+        let (_, remote) = crate::document_signatures::invalidate_representative_identity(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+        )
+        .await?;
+        let loaded = load(&mut tx, lead_id).await?.unwrap_or_default();
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>((loaded, remote))
+    }
+    .await;
+    let (loaded, remote) = match written {
+        Ok(result) => result,
+        Err(error) => return intake::internal(error, "remove trusted contact"),
+    };
+    crate::document_signatures::withdraw_invalidated_consents(&state, &remote).await;
+    publish_staff_change(&state, lead_id, auth.user_id).await;
+    Json(json!({ "representation": staff_payload(&loaded) })).into_response()
+}
+
 /// The wizard saves the whole list of trusted contacts. A stored entry the
 /// cabinet added to (it has a row) and that the incoming list does not name is
 /// kept: a save with a list loaded before the parent entered the second
 /// parent must not drop that person. Called in the transaction of the save;
 /// the lead row is locked here, so the list cannot change in between. To
-/// remove such a contact staff first remove its row.
+/// remove such a contact staff use the explicit trusted-contact DELETE.
 pub(crate) async fn keep_represented_contacts(
     conn: &mut PgConnection,
     lead_id: Uuid,

@@ -382,6 +382,10 @@ pub fn router() -> Router<AppState> {
             "/leads/{lead_id}/representatives/{representative_id}",
             delete(lead_representatives::remove_lead_representative),
         )
+        .route(
+            "/leads/{lead_id}/trusted-contacts/{representative_id}",
+            delete(lead_representatives::remove_lead_trusted_contact),
+        )
 }
 
 // ----------------------------------------------------------------------------

@@ -119,7 +119,7 @@ import {
   type TrustedContactPayload,
 } from "../model/lead-trusted-contacts";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
-import { removeLeadRepresentativeData } from "../data/lead-representation-api";
+import { removeLeadRepresentativeData, removeLeadTrustedContact } from "../data/lead-representation-api";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import { LeadCustodySelect } from "./lead-custody-select";
 import { LeadGwgSheetActions, gwgSheetBusyKey } from "./lead-gwg-sheet-actions";
@@ -3208,6 +3208,7 @@ export function LeadWizard({
   const [deleteDocument, setDeleteDocument] = useState<DocumentItem | null>(null);
   // The contact whose GwG data staff want to remove: the question is asked first.
   const [gwgDataRemoval, setGwgDataRemoval] = useState<TrustedContactDraft | null>(null);
+  const [trustedContactRemoval, setTrustedContactRemoval] = useState<TrustedContactDraft | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [trustedContactEditor, setTrustedContactEditor] = useState<TrustedContactDraft | null>(null);
@@ -5377,19 +5378,57 @@ export function LeadWizard({
     closeTrustedContactEditor();
   };
 
-  const removeTrustedContact = (contactId: string) => {
+  const removeTrustedContact = async (contact: TrustedContactDraft) => {
+    setBusy(`remove-contact-${contact.id}`);
     setError("");
     clearServerValidation();
-    setDraft((current) => current ? {
-      ...current,
-      trustedContacts: current.trustedContacts.filter((contact) => contact.id !== contactId),
-    } : current);
+    try {
+      // Serialize removal with autosave. A new contact not saved yet only
+      // leaves the draft; unrelated unfinished fields need not be valid.
+      const run = async () => {
+        const stored = lastSentTrustedContactsRef.current ?? trustedContactsBaseRef.current;
+        if (leadId && stored.some((item) => item.id === contact.id)) {
+          step1Portal.applyRepresentation(await removeLeadTrustedContact(leadId, contact.id));
+        }
+        const remaining = (autosaveSnapshot?.draft.trustedContacts ?? [])
+          .filter((item) => item.id !== contact.id);
+        const baseline = stored.filter((item) => item.id !== contact.id);
+        trustedContactsBaseRef.current = baseline;
+        lastSentTrustedContactsRef.current = baseline;
+        setTrustedContactsBase(baseline);
+        if (autosaveSnapshot) {
+          const signature = autosaveSnapshotSignature({
+            ...autosaveSnapshot,
+            draft: { ...autosaveSnapshot.draft, trustedContacts: remaining },
+          });
+          currentAutosaveSignatureRef.current = signature;
+          if (leadId && lastSavedAutosaveSignatureRef.current === autosaveSnapshotSignature(autosaveSnapshot)) {
+            lastSavedAutosaveSignatureRef.current = signature;
+          }
+        }
+        setDraft((current) => current ? {
+          ...current,
+          trustedContacts: current.trustedContacts.filter((item) => item.id !== contact.id),
+        } : current);
+        setRepresentationVersion((version) => version + 1);
+        setTrustedContactRemoval(null);
+        toast.success(tx(`Контакт «${contact.name}» удалён из обращения`, `Kontakt „${contact.name}“ aus der Anfrage entfernt`));
+      };
+      const queued = saveQueueRef.current.then(run, run);
+      saveQueueRef.current = queued.then(() => undefined, () => undefined);
+      await queued;
+    } catch (nextError) {
+      setTrustedContactRemoval(null);
+      showWizardError(nextError);
+    } finally {
+      setBusy(null);
+    }
   };
 
   /**
    * A contact whose GwG data were entered in the lead cabinet cannot simply be
-   * removed (the server keeps it). Staff first remove those data; the contact
-   * and the uploaded documents stay, and the contact can then be removed.
+   * removed through a list save (the server keeps it). This optional action
+   * clears only those data; the contact and uploaded documents stay.
    */
   const removeRepresentativeGwgData = async (contact: TrustedContactDraft) => {
     if (!leadId) return;
@@ -7791,6 +7830,18 @@ ${serviceCommentLines.join("\n")}`
                               <Button type="button" variant="ghost" size="icon-sm" onClick={() => openTrustedContact(contact, true)} aria-label={tx("Редактировать представителя", "Vertreter bearbeiten")}>
                                 <Pencil aria-hidden="true" className="size-3.5" />
                               </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="shrink-0 text-destructive hover:text-destructive"
+                                disabled={isBusy}
+                                title={tx("Удалить представителя", "Vertreter entfernen")}
+                                aria-label={`${tx("Удалить представителя", "Vertreter entfernen")}: ${contact.name}`}
+                                onClick={() => setTrustedContactRemoval(contact)}
+                              >
+                                <Trash2 aria-hidden="true" className="size-3.5" />
+                              </Button>
                             </li>
                           ))}
                       </ul>
@@ -8554,7 +8605,7 @@ ${serviceCommentLines.join("\n")}`
                               <Pencil aria-hidden="true" className="size-3.5" />
                             </Button>
                             {gwgDataContactIds.has(contact.id) ? (
-                              // The server keeps a contact with GwG data: they are removed first.
+                              // Clearing only the extra data remains separate from removing the contact.
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -8569,7 +8620,7 @@ ${serviceCommentLines.join("\n")}`
                                   : null}
                                 {tx("Убрать данные GwG", "GwG-Angaben entfernen")}
                               </Button>
-                            ) : (
+                            ) : null}
                             <Button
                               type="button"
                               variant="ghost"
@@ -8577,11 +8628,11 @@ ${serviceCommentLines.join("\n")}`
                               className="text-destructive hover:text-destructive"
                               title={tx("Удалить контакт", "Kontakt entfernen")}
                               aria-label={`${tx("Удалить контакт", "Kontakt entfernen")}: ${contact.name}`}
-                              onClick={() => removeTrustedContact(contact.id)}
+                              disabled={isBusy}
+                              onClick={() => setTrustedContactRemoval(contact)}
                             >
                               <Trash2 aria-hidden="true" className="size-3.5" />
                             </Button>
-                            )}
                           </div>
                         </li>
                       ))}
@@ -10886,6 +10937,26 @@ ${serviceCommentLines.join("\n")}`
         lang={lang}
         defaultLanguage={issuedPortalAccess?.language}
         onClose={() => setIssuedPortalAccess(null)}
+      />
+      <LeadConfirmDialog
+        open={Boolean(trustedContactRemoval)}
+        testId="lead-contact-remove-dialog"
+        title={tx(
+          `Удалить «${trustedContactRemoval?.name ?? ""}» из обращения?`,
+          `„${trustedContactRemoval?.name ?? ""}“ aus der Anfrage entfernen?`,
+        )}
+        description={tx(
+          "Контакт и его данные представителя будут удалены из обращения. Доступ к этой заявке будет отозван. Аккаунт, доступ к другим детям и сохранённые документы останутся.",
+          "Der Kontakt und seine Vertretungsdaten werden aus der Anfrage entfernt. Der Zugang zu dieser Anfrage wird widerrufen. Das Konto, der Zugang zu anderen Kindern und gespeicherte Dokumente bleiben erhalten.",
+        )}
+        confirmLabel={tx("Удалить", "Entfernen")}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        destructive
+        busy={Boolean(trustedContactRemoval && busy === `remove-contact-${trustedContactRemoval.id}`)}
+        onConfirm={() => {
+          if (trustedContactRemoval) void removeTrustedContact(trustedContactRemoval);
+        }}
+        onCancel={() => setTrustedContactRemoval(null)}
       />
       <LeadConfirmDialog
         open={Boolean(gwgDataRemoval)}

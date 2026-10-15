@@ -44,3 +44,15 @@ export async function removeLeadRepresentativeData(
     }),
   );
 }
+
+/** Removes a contact and its access to this request in one server transaction. */
+export async function removeLeadTrustedContact(
+  leadId: string,
+  contactId: string,
+): Promise<LeadRepresentation | null> {
+  return representationOf(
+    await apiFetch<unknown>(`${base(leadId)}/trusted-contacts/${encodeURIComponent(contactId)}`, {
+      method: "DELETE",
+    }),
+  );
+}

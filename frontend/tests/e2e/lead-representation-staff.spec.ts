@@ -205,6 +205,7 @@ type Mock = {
   /** When the lead (here: a parent) sent the request in the cabinet; not sent by default. */
   requestSentAt?: string;
   requestChanged?: boolean;
+  refuseContactRemoval?: boolean;
 };
 
 async function mount(page: Page, mock: Mock) {
@@ -232,6 +233,7 @@ async function mount(page: Page, mock: Mock) {
     generated: [] as Json[],
     custody: [] as unknown[],
     removedData: [] as string[],
+    removedContacts: [] as string[],
   };
   await page.addInitScript((value) => {
     localStorage.setItem("gmed_lang", value);
@@ -244,6 +246,7 @@ async function mount(page: Page, mock: Mock) {
     const path = decodeURIComponent(new URL(request.url()).pathname.replace("/api/v1", ""));
     const payment = path.match(/^\/leads\/[^/]+\/identification-status\/([^/]+)\/own-account-payment$/);
     const removal = path.match(/^\/leads\/[^/]+\/representatives\/([^/]+)$/);
+    const contactRemoval = path.match(/^\/leads\/[^/]+\/trusted-contacts\/([^/]+)$/);
     let response: unknown = [];
     if (path === "/me") {
       response = { id: "repr-user", email: "intake@example.com", name: "Intake QA", role: "ceo", created_at: "2026-01-01T00:00:00Z" };
@@ -252,8 +255,22 @@ async function mount(page: Page, mock: Mock) {
     } else if (path === `/leads/${leadId}`) {
       response = state.lead;
     } else if (path === `/leads/${leadId}/update` && method === "POST") {
-      calls.updates.push(request.postDataJSON() as Json);
+      const body = request.postDataJSON() as Json;
+      calls.updates.push(body);
+      if (body.trusted_contacts) state.lead.trusted_contacts = body.trusted_contacts;
       response = {};
+    } else if (contactRemoval && method === "DELETE") {
+      calls.removedContacts.push(contactRemoval[1]);
+      if (mock.refuseContactRemoval) {
+        await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ message: "The lead is converted", code: "lead_converted" }) });
+        return;
+      }
+      state.lead.trusted_contacts = (state.lead.trusted_contacts as Json[]).filter((item) => item.id !== contactRemoval[1]);
+      state.representation = {
+        ...state.representation,
+        representatives: state.representation.representatives.filter((item) => item.id !== contactRemoval[1]),
+      };
+      response = { representation: state.representation };
     } else if (path === `/leads/${leadId}/portal-intake`) {
       response = {
         lead_id: leadId,
@@ -666,8 +683,8 @@ test("the GwG data of a contact are removed before the contact itself", async ({
   const contacts = wizard.getByRole("list", { name: "Доверенные контакты" });
   const anna = contacts.getByRole("listitem").filter({ hasText: "Anna Muster" });
   await expect(anna.getByTestId("trusted-contact-gwg-badge")).toHaveText("Представитель (GwG)");
-  // The server keeps a contact with GwG data, so it has no remove button.
-  await expect(anna.getByRole("button", { name: "Удалить контакт: Anna Muster" })).toHaveCount(0);
+  // Staff may now remove the whole contact directly, or clear only its GwG data.
+  await expect(anna.getByRole("button", { name: "Удалить контакт: Anna Muster" })).toBeVisible();
   const removeData = anna.getByRole("button", { name: "Убрать данные GwG: Anna Muster" });
   await expect(removeData).toBeVisible();
   await contacts.scrollIntoViewIfNeeded();
@@ -713,6 +730,44 @@ test("the GwG data of a contact are removed before the contact itself", async ({
   await expect(ben.getByTestId("trusted-contact-gwg-badge")).toBeVisible();
   // Nothing of it went through a wizard save.
   expect(calls.updates).toEqual([]);
+});
+
+for (const lang of ["ru", "de"] as const) {
+  test(`staff remove an added parent directly from the first step (${lang})`, async ({ page }) => {
+    const { wizard, calls, state } = await mount(page, { lang, step: "master" });
+    const parents = wizard.locator("#lead-wizard-guardian");
+    const remove = parents.getByRole("button", { name: `${lang === "ru" ? "Удалить представителя" : "Vertreter entfernen"}: Anna Muster`, exact: true });
+    await remove.click();
+    const question = page.getByTestId("lead-contact-remove-dialog");
+    await expect(question).toBeVisible();
+    await question.getByRole("button", { name: lang === "ru" ? "Отмена" : "Abbrechen", exact: true }).click();
+    await expect(parents.getByRole("listitem")).toHaveCount(2);
+    expect(calls.removedContacts).toEqual([]);
+
+    await remove.click();
+    await question.getByRole("button", { name: lang === "ru" ? "Удалить" : "Entfernen", exact: true }).click();
+    await expect(question).toBeHidden();
+    await expect(parents.getByRole("listitem")).toHaveCount(1);
+    await expect(parents.getByRole("listitem")).toContainText("Ben Muster");
+    expect(calls.removedContacts).toEqual([ANNA_ID]);
+    // Wait past the autosave debounce: no stale snapshot restores the mother.
+    await page.waitForTimeout(1200);
+    expect(state.lead.trusted_contacts).toEqual([benContact]);
+    await page.reload();
+    await page.getByRole("button", { name: "Lead intake", exact: true }).click();
+    await expect(parents.getByRole("listitem")).toHaveCount(1);
+    await expect(parents.getByRole("listitem")).toContainText("Ben Muster");
+  });
+}
+
+test("a failed removal keeps the parent on the first step", async ({ page }) => {
+  const { wizard, state } = await mount(page, { lang: "ru", step: "master", refuseContactRemoval: true });
+  const parents = wizard.locator("#lead-wizard-guardian");
+  await parents.getByRole("button", { name: "Удалить представителя: Anna Muster", exact: true }).click();
+  await page.getByTestId("lead-contact-remove-dialog").getByRole("button", { name: "Удалить", exact: true }).click();
+  await expect(parents.getByRole("listitem")).toHaveCount(2);
+  expect(state.lead.trusted_contacts).toEqual([annaContact, benContact]);
+  await expect(wizard.getByRole("button", { name: "Удалить представителя: Anna Muster", exact: true })).toBeEnabled();
 });
 
 test("a second parent added in the cabinet appears in the open wizard and survives its saves", async ({ page }) => {
