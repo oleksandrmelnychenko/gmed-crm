@@ -2397,7 +2397,19 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{candidates}");
-    assert_eq!(candidates["preset_document_ids"], json!([order, child]));
+    assert_eq!(
+        candidates["preset_document_ids"],
+        json!([contract, order, child])
+    );
+    assert_eq!(candidates["onboarding_manifest"]["expected_count"], 5);
+    assert_eq!(
+        candidates["onboarding_manifest"]["items"][2]["state"],
+        "missing"
+    );
+    assert_eq!(
+        candidates["onboarding_manifest"]["items"][3]["state"],
+        "missing"
+    );
     let guardians: Vec<&str> = candidates["suggested_signers"]
         .as_array()
         .unwrap()
@@ -2423,6 +2435,13 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
         .execute(&env.pool)
         .await
         .unwrap();
+    let estimate = upload(&env, holder, Doc::new("order_cost_estimate", 1)).await;
+    sqlx::query("UPDATE documents SET patient_id=NULL,lead_id=$2 WHERE id=$1")
+        .bind(estimate)
+        .bind(lead)
+        .execute(&env.pool)
+        .await
+        .unwrap();
     let (status, candidates) = call(
         &env.app,
         "GET",
@@ -2434,11 +2453,11 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
     assert_eq!(status, StatusCode::OK, "{candidates}");
     assert_eq!(
         candidates["preset_document_ids"],
-        json!([order, form, child])
+        json!([contract, order, estimate, form, child])
     );
 
-    // The legacy endpoint accepts the minors' preset; the patient form is
-    // optional in it.
+    // An old, incomplete legacy request cannot omit the required patient
+    // form and estimate. The current composer sends all five explicitly.
     let signers = json!([
         signer("Anna", "anna@example.org", "client"),
         signer("Bernd", "bernd@example.org", "client"),
@@ -2448,8 +2467,16 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
     let (status, value) = call(&env.app, "POST", &format!("/api/v1/documents/{contract}/signature-requests"), &env.ceo, Some(json!({
         "signers": signers, "attachment_document_id": information, "signing_document_ids": [child, order],
     }))).await;
-    assert_eq!(status, StatusCode::ACCEPTED, "{value}");
-    let id = Uuid::parse_str(value["id"].as_str().unwrap()).unwrap();
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{value}");
+    assert_eq!(value["error"], "onboarding_package_incomplete");
+    let id = send_package(
+        &env,
+        json!({
+            "document_ids":[contract,order,estimate,form,child], "attachment_ids":[information],
+            "signers":signers,
+        }),
+    )
+    .await;
     until_pending(&env, id).await;
     // No two signers share a frame: the second guardian signs guardian_2 only.
     let put: Vec<Value> = env
@@ -2472,10 +2499,14 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
     let frames = |index: usize| created[index]["positions"].as_array().map_or(0, Vec::len);
     assert_eq!(
         frames(0),
-        2,
-        "first guardian: contract client frame and guardian_1"
+        3,
+        "first guardian: contract client frame and both guardian_1 declarations"
     );
-    assert_eq!(frames(1), 1, "second guardian: guardian_2 only");
+    assert_eq!(
+        frames(1),
+        2,
+        "second guardian: both guardian_2 declarations"
+    );
     assert_eq!(frames(2), 0, "the minor has no generated frame");
     assert_eq!(frames(3), 1, "agency frame");
     env.mock.set_status(id, "SIGNED");
