@@ -619,6 +619,43 @@ const next = (page: Page) => page.getByTestId("payer-link-next").click();
 const stepTitle = (page: Page) => page.getByTestId("payer-link-step-title");
 const merged = (patches: Record<string, unknown>[]) => Object.assign({}, ...patches) as Record<string, unknown>;
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 720 }]) {
+  test(`payer scroll: the summary and step navigation stay reachable at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const { calls } = await setup(page, {
+      acknowledged: true,
+      answers: completeAnswers("person"),
+      route: completeRoute(),
+      identityDocuments: [document("doc-id", "pass.pdf")],
+    });
+    await signIn(page);
+    await page.getByTestId("payer-link-language").getByRole("radio", { name: "RU", exact: true }).click();
+    await expect(page.getByTestId("payer-link-form")).toHaveAttribute("data-step", "summary");
+    const scroll = page.getByRole("main");
+    const header = page.getByTestId("payer-link-page").locator("header");
+    const submit = page.getByTestId("payer-link-submit");
+    await expect(submit).not.toBeInViewport();
+    await page.screenshot({ path: test.info().outputPath("summary-top.png") });
+
+    // A real wheel gesture must work; locator.click() would silently scroll
+    // overflow:hidden ancestors and hide a broken page from this regression.
+    await page.mouse.move(viewport.width / 2, 200);
+    await page.mouse.wheel(0, 20_000);
+    await expect.poll(() => scroll.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+    await expect(submit).toBeInViewport();
+    await expect(header).toBeInViewport();
+    await page.screenshot({ path: test.info().outputPath("summary-bottom.png") });
+
+    await page.getByTestId("payer-link-summary-declarations").getByRole("button").click();
+    await expect(page.getByTestId("payer-link-form")).toHaveAttribute("data-step", "declarations");
+    await expect(stepTitle(page)).toBeInViewport();
+    await next(page);
+    await expect(page.getByTestId("payer-link-form")).toHaveAttribute("data-step", "summary");
+    await expect(stepTitle(page)).toBeInViewport();
+    expect(calls.others).toEqual([]);
+  });
+}
+
 test("payer recheck: a queued edit keeps the server's corrected untouched answers", async ({ page }) => {
   let release = () => {};
   const response = new Promise<void>((resolve) => { release = resolve; });

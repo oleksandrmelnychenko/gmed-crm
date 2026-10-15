@@ -349,8 +349,8 @@ export function PayerLinkPage() {
   }
 
   return (
-    <div lang={lang} className="min-h-dvh bg-background text-foreground" data-testid="payer-link-page">
-      <header className="border-b border-border bg-card">
+    <div lang={lang} className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground" data-testid="payer-link-page">
+      <header className="shrink-0 border-b border-border bg-card">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-4 py-3">
           <span className="inline-flex shrink-0 items-center">
             <GmedWordmark className="h-6 w-auto text-[#04060c] dark:text-foreground" />
@@ -359,10 +359,12 @@ export function PayerLinkPage() {
           <LanguageSwitch lang={lang} label={text.language} onChange={setChosenLang} />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-5xl px-4 py-6 pb-16">
-        {/* Another link opened in this tab starts every step afresh. */}
-        <div key={generation} className="rounded-2xl border border-border bg-card px-4 py-5 shadow-sm sm:px-6 sm:py-6">
-          {body}
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="mx-auto w-full max-w-5xl px-4 py-6 pb-16">
+          {/* Another link opened in this tab starts every step afresh. */}
+          <div key={generation} className="rounded-2xl border border-border bg-card px-4 py-5 shadow-sm sm:px-6 sm:py-6">
+            {body}
+          </div>
         </div>
       </main>
     </div>
