@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { CircleAlert, LoaderCircle } from "lucide-react";
 
 import { StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { cn } from "@/lib/utils";
 
 import {
@@ -19,6 +20,7 @@ import {
   type Tx,
 } from "../model/lead-identification";
 import type { LeadIdentificationStatusState } from "../model/use-lead-identification-status";
+import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
 
 // A long label wraps on a phone instead of widening the wizard; on one line
 // it keeps the pill shape of the other badges.
@@ -70,16 +72,21 @@ export function LeadIdentificationStatusView({
   // A line captioned by a person's name needs more room than a role.
   const namedLines = status.minor || status.acting_persons.length > 0;
   return (
-    <div className="space-y-2 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-identification-status">
+    <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3.5" data-testid="lead-identification-status">
       <div className="text-xs font-semibold text-foreground">
         {tx("Идентификация по квалифицированной подписи", "Identifizierung per qualifizierter Signatur")}
       </div>
       {status.minor ? (
-        <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-identification-minor">
-          {tx(
-            "Пациент несовершеннолетний: подписывают и платят законные представители, у ребёнка своей строки нет.",
-            "Der Patient ist minderjährig: Es unterschreiben und zahlen die gesetzlichen Vertreter, das Kind hat keine eigene Zeile.",
-          )}
+        <p data-testid="lead-identification-minor">
+          <StatusChip tone="warning" className="items-start whitespace-normal text-left">
+            <CircleAlert aria-hidden="true" className="mt-0.5" />
+            <span>
+              {tx(
+                "Пациент несовершеннолетний: подписывают и платят законные представители, у ребёнка своей строки нет.",
+                "Der Patient ist minderjährig: Es unterschreiben und zahlen die gesetzlichen Vertreter, das Kind hat keine eigene Zeile.",
+              )}
+            </span>
+          </StatusChip>
         </p>
       ) : null}
       {identificationLacksRepresentative(status) ? (
@@ -98,17 +105,17 @@ export function LeadIdentificationStatusView({
           return (
             <li
               key={subject}
-              className="flex flex-wrap items-center gap-x-2 gap-y-1.5"
+              className="flex flex-wrap items-center gap-x-2 gap-y-2 rounded-lg border border-border/70 bg-card p-2.5 shadow-xs"
               data-testid={`lead-identification-${subject}`}
             >
               <span
                 className={cn(
-                  "w-full text-[13px] font-medium text-foreground",
+                  "inline-flex w-full flex-wrap items-center gap-1.5 text-[13px] font-semibold text-foreground",
                   wide ? "" : namedLines ? "sm:w-44 sm:shrink-0" : "sm:w-28 sm:shrink-0",
                 )}
               >
                 {role}
-                {detail ? <span className="font-normal text-muted-foreground">{` · ${detail}`}</span> : null}
+                {detail ? <StatusChip className={cn(PARENT_ROLE_CHIP_CLASS, "whitespace-normal")}>{detail}</StatusChip> : null}
               </span>
               <Label label={qualifiedSignatureLabel(person, tx)} testId={`lead-identification-qes-${subject}`} />
               <Label label={ownAccountPaymentLabel(person, tx, expected)} testId={`lead-identification-payment-${subject}`} />
@@ -148,11 +155,16 @@ export function LeadIdentificationStatusView({
       {errorMessage ? (
         <p role="alert" className="text-xs text-destructive" data-testid="lead-identification-error">{errorMessage}</p>
       ) : null}
-      <p className="text-xs leading-5 text-muted-foreground">
-        {tx(
-          "§ 12 Abs. 1 GwG: к квалифицированной подписи нужен платёж со счёта на имя этого человека. Это не блокирует работу.",
-          "§ 12 Abs. 1 GwG: Zur qualifizierten Signatur gehört eine Zahlung von einem Konto auf den Namen dieser Person. Das blockiert die Arbeit nicht.",
-        )}
+      <p>
+        <StatusChip tone="warning" className="items-start whitespace-normal text-left">
+          <CircleAlert aria-hidden="true" className="mt-0.5" />
+          <span>
+            {tx(
+              "§ 12 Abs. 1 GwG: к квалифицированной подписи нужен платёж со счёта на имя этого человека. Это не блокирует работу.",
+              "§ 12 Abs. 1 GwG: Zur qualifizierten Signatur gehört eine Zahlung von einem Konto auf den Namen dieser Person. Das blockiert die Arbeit nicht.",
+            )}
+          </span>
+        </StatusChip>
       </p>
     </div>
   );

@@ -11,6 +11,7 @@ import {
 } from "react";
 import { CalendarClock, LoaderCircle, Plus, RefreshCw, Send } from "lucide-react";
 
+import { PortalSection as Section, PortalSummary } from "./ui/portal-page-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,8 +22,6 @@ import {
   InfoRow,
   ListItem,
   PageHeader,
-  Section,
-  StatCard,
   StatusBadge,
   SuccessBanner,
   TabLoader,
@@ -377,7 +376,7 @@ function usePatientAppointmentsPageContent() {
   }
 
   return (
-    <TabShell className="mt-0 space-y-6">
+    <TabShell className="mx-auto mt-0 max-w-6xl space-y-4">
       <PageHeader
         title={t.portal_appointments_my_appointments}
         description={t.portal_appointments_review_scheduled_visits_and_send_new_appointment_requests_for_th}
@@ -399,25 +398,22 @@ function usePatientAppointmentsPageContent() {
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <StatCard label={t.portal_appointments_upcoming_visits} value={String(upcomingAppointments.length)} />
-        <StatCard label={t.portal_appointments_open_requests} value={String(openRequests.length)} />
-        <StatCard
-          label={t.portal_appointments_next_slot}
-          value={nextAppointment ? formatPortalDate(nextAppointment.date) : t.portal_appointments_not_set}
-          description={nextAppointment ? nextAppointment.title : t.portal_appointments_no_upcoming_visits}
-        />
-      </section>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="hidden text-lg font-semibold md:block">{t.portal_appointments_my_appointments}</h2>
+        <Button onClick={() => setRequestSheetOpen(true)}><Plus className="size-4" />{t.portal_appointments_send_appointment_request}</Button>
+      </div>
+      <PortalSummary items={[
+        { label: t.portal_appointments_upcoming_visits, value: upcomingAppointments.length, visible: upcomingAppointments.length > 0 },
+        { label: t.portal_appointments_open_requests, value: openRequests.length, visible: openRequests.length > 0 },
+        { label: t.portal_appointments_next_slot, value: nextAppointment ? formatPortalDate(nextAppointment.date) : "", visible: Boolean(nextAppointment) },
+      ]} />
 
-      <section className="grid gap-6 xl:grid-cols-[1.15fr_0.95fr]">
+      <section className="space-y-4">
         <section className="space-y-4">
           <Section
             title={t.portal_appointments_scheduled_visits}
-            accessory={<CountBadge>{appointments.length}</CountBadge>}
+            accessory={appointments.length > 0 ? <CountBadge>{appointments.length}</CountBadge> : undefined}
           >
-            <p className="text-sm text-muted-foreground">
-              {t.portal_appointments_your_non_internal_appointments_currently_linked_to_the_patient_r}
-            </p>
 
             {appointments.length === 0 ? (
               <EmptyCell>
@@ -468,13 +464,11 @@ function usePatientAppointmentsPageContent() {
             )}
           </Section>
 
+          {followupMilestones.length > 0 ? (
           <Section
             title={t.portal_appointments_follow_up_milestones}
             accessory={<CountBadge>{followupMilestones.length}</CountBadge>}
           >
-            <p className="text-sm text-muted-foreground">
-              {t.portal_appointments_post_care_milestones_linked_to_your_current_orders_even_when_the}
-            </p>
 
             {followupMilestones.length === 0 ? (
               <EmptyCell>
@@ -568,14 +562,13 @@ function usePatientAppointmentsPageContent() {
               </div>
             )}
           </Section>
+          ) : null}
 
+          {requests.length > 0 ? (
           <Section
             title={t.portal_appointments_request_history}
             accessory={<CountBadge>{requests.length}</CountBadge>}
           >
-            <p className="text-sm text-muted-foreground">
-              {t.portal_appointments_portal_appointment_requests_and_their_review_status}
-            </p>
 
             {requests.length === 0 ? (
               <EmptyCell>
@@ -659,26 +652,8 @@ function usePatientAppointmentsPageContent() {
               </div>
             )}
           </Section>
+          ) : null}
         </section>
-
-        <Section
-          title={t.portal_appointments_request_a_visit}
-          accessory={
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5"
-              onClick={() => setRequestSheetOpen(true)}
-            >
-              <Plus className="size-3.5" />
-              {t.portal_appointments_send_appointment_request}
-            </Button>
-          }
-        >
-          <p className="text-sm text-muted-foreground">
-            {t.portal_appointments_send_preferred_dates_and_context_the_care_team_reviews_and_conve}
-          </p>
-        </Section>
 
         <PatientSheetScaffold
           open={requestSheetOpen}

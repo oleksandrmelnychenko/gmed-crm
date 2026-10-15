@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
 import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +29,7 @@ import {
 } from "../model/lead-identity-document-data";
 import { idDocumentTypeLabel, representativeName, representativeRoleLabel } from "../model/lead-gwg-statements";
 import type { Tx } from "../model/lead-payer";
+import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
 
@@ -258,7 +260,7 @@ function RepresentativeForm({
     <details className="rounded-md border border-border/60 bg-background/50 p-2.5" open={!filled || expired}>
       <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-2 text-sm">
         <span className="font-semibold text-foreground">{representativeName(person) || "—"}</span>
-        <span className="text-xs text-muted-foreground">{representativeRoleLabel(person, tx)}</span>
+        <StatusChip className={cn(PARENT_ROLE_CHIP_CLASS, "whitespace-normal")}>{representativeRoleLabel(person, tx)}</StatusChip>
         {fileCount > 0 ? (
           <span className="text-xs text-muted-foreground">
             · {tx("файлов", "Dateien")}: {fileCount}

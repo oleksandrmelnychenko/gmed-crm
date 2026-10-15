@@ -763,10 +763,11 @@ function useLeadsPageContent() {
           lead={row}
           lang={lang}
           canIssue={canIssuePortalPassword}
+          refreshVersion={version}
           onChanged={() => setVersion((current) => current + 1)}
         />
       ) : null,
-    [canIssuePortalPassword, expandedLeadIds, lang],
+    [canIssuePortalPassword, expandedLeadIds, lang, version],
   );
   const leadColumns = useMemo<ColumnDef<LeadListItem>[]>(
     () => {
@@ -3362,6 +3363,7 @@ function useLeadsPageContent() {
             leadId={wizardLeadId}
             open
             createMode={newLeadWizardOpen}
+            onContactsSaved={reload}
             onCreated={(leadId) => {
               setNewLeadWizardOpen(false);
               setWizardLeadId(leadId);

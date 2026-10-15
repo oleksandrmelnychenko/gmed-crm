@@ -58,6 +58,8 @@ import {
 } from "lucide-react";
 
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
+import { TrustedContactRole } from "./trusted-contact-role";
 import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -359,6 +361,7 @@ type LeadWizardProps = {
   existingPatient?: PatientDetail | null;
   onOpenChange: (open: boolean) => void;
   onCreated?: (leadId: string) => void;
+  onContactsSaved?: () => void;
   onConverted?: (patientId: string) => void;
   onArchived?: () => void;
   onShowDetails?: (leadId: string) => void;
@@ -3043,11 +3046,14 @@ export function LeadWizard({
   existingPatient = null,
   onOpenChange,
   onCreated,
+  onContactsSaved,
   onConverted,
   onArchived,
   onShowDetails,
   onOrderCreated,
 }: LeadWizardProps) {
+  const onContactsSavedRef = useRef(onContactsSaved);
+  useEffect(() => { onContactsSavedRef.current = onContactsSaved; }, [onContactsSaved]);
   const {
     knownLeadProgramServiceLabel,
     leadLocationDetailedLabel,
@@ -4929,6 +4935,7 @@ export function LeadWizard({
           lastSentTrustedContactsRef.current ?? trustedContactsBase,
         );
         await updateLeadWizard(targetLeadId, update.body);
+        if (update.contacts) onContactsSavedRef.current?.();
         if (pendingParentProfileLeadRef.current === targetLeadId) pendingParentProfileLeadRef.current = null;
         if (hydrated.current !== targetLeadId) return;
         if (update.contacts) {
@@ -7832,9 +7839,10 @@ ${serviceCommentLines.join("\n")}`
                             <li key={contact.id} className="flex items-center gap-3 px-3 py-3">
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-medium">{contact.name}</p>
-                                <p className="truncate text-xs text-muted-foreground">
-                                  {[trustedContactRelationLabel(contact.relation, tx), contact.email, contact.phone].filter(Boolean).join(" · ")}
-                                </p>
+                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                  <TrustedContactRole relation={contact.relation} tx={tx} />
+                                  <span className="break-all">{[contact.email, contact.phone].filter(Boolean).join(" · ")}</span>
+                                </div>
                               </div>
                               <Button type="button" variant="ghost" size="icon-sm" onClick={() => openTrustedContact(contact, true)} aria-label={tx("Редактировать представителя", "Vertreter bearbeiten")}>
                                 <Pencil aria-hidden="true" className="size-3.5" />
@@ -8585,9 +8593,7 @@ ${serviceCommentLines.join("\n")}`
                             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                               <span className="break-words text-sm font-medium text-foreground">{contact.name}</span>
                               {contact.relation ? (
-                                <span className="text-xs text-muted-foreground" data-testid="trusted-contact-relation">
-                                  {trustedContactRelationLabel(contact.relation, tx)}
-                                </span>
+                                <TrustedContactRole relation={contact.relation} tx={tx} />
                               ) : null}
                               {gwgDataContactIds.has(contact.id) ? (
                                 <Badge variant="outline" className="border-border bg-muted/40 text-[10px] text-muted-foreground" data-testid="trusted-contact-gwg-badge">
@@ -10294,19 +10300,16 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
         </SheetContent>
       </Sheet>
-      <Sheet
+      <Dialog
         open={Boolean(trustedContactEditor)}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) closeTrustedContactEditor();
         }}
       >
-        <SheetContent
-          side="right"
-          className="w-full max-w-none gap-0 border-l border-border p-0 sm:max-w-2xl"
-        >
           {trustedContactEditor ? (
-            <form className="flex min-h-0 flex-1 flex-col" onSubmit={saveTrustedContact}>
-              <AdminSheetScaffold
+              <AdminDialogScaffold
+                testId="trusted-contact-editor"
+                onSubmit={saveTrustedContact}
                 title={trustedContactEditorGuardian
                   ? (editingTrustedContact
                       ? tx("Редактировать родителя или законного представителя", "Elternteil oder gesetzlichen Vertreter bearbeiten")
@@ -10333,9 +10336,10 @@ ${serviceCommentLines.join("\n")}`
                         "Der Kontakt wird im Lead gespeichert und bei der Konvertierung in die Patientenakte übernommen.",
                       )}
                 </p>
-                <div className="grid gap-4 md:grid-cols-2">
+                <AdminFormSection title={tx("Данные представителя", "Angaben zur Person")}>
+                <div className="grid gap-4 sm:grid-cols-2 [&>div]:min-w-0">
                   <Field
-                    className="md:col-span-2"
+                    className="sm:col-span-2"
                     label={tx("Связать с существующим пациентом", "Mit bestehender Patientenakte verknüpfen")}
                   >
                     <NativeComboboxSelect
@@ -10364,7 +10368,7 @@ ${serviceCommentLines.join("\n")}`
                   </Field>
                   <Field
                     required
-                    className="md:col-span-2"
+                    className="sm:col-span-2"
                     label={tx("Имя и фамилия", "Vor- und Nachname")}
                     error={trustedContactEditorError || undefined}
                     errorId="trusted-contact-name-error"
@@ -10430,7 +10434,7 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchTrustedContactEditor("birthDate", event.target.value)}
                     />
                   </Field>
-                  <Field className="md:col-span-2" label={tx("Адрес", "Adresse")}>
+                  <Field className="sm:col-span-2" label={tx("Адрес", "Adresse")}>
                     <Input
                       className={inputClass}
                       value={trustedContactEditor.address}
@@ -10438,11 +10442,10 @@ ${serviceCommentLines.join("\n")}`
                     />
                   </Field>
                 </div>
-              </AdminSheetScaffold>
-            </form>
+                </AdminFormSection>
+              </AdminDialogScaffold>
           ) : null}
-        </SheetContent>
-      </Sheet>
+      </Dialog>
       <Dialog
         open={serviceReportOpen}
         allowImplicitDismissal

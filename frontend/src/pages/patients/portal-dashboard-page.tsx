@@ -1,5 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useReducer } from "react";
 import {
+  ArrowUpRight,
   CalendarDays,
   Download,
   FileText,
@@ -12,6 +13,7 @@ import {
   Sparkles,
 } from "lucide-react";
 
+import { PortalSection as Section, PortalSummary, PortalComplete } from "./ui/portal-page-layout";
 import { Button } from "@/components/ui/button";
 import { OverflowMenu } from "@/components/ui/overflow-menu";
 import {
@@ -21,17 +23,14 @@ import {
   InfoRow,
   ListItem,
   PageHeader,
-  Section,
-  StatCard,
   StatusBadge,
-  SuccessBanner,
   TabLoader,
   TabShell,
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { formatPluralCount, formatUiText, useLang } from "@/lib/i18n";
+import { formatPluralCount, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -324,10 +323,6 @@ function usePatientDashboardPageContent() {
     () => invoices.reduce((sum, item) => sum + Number(item.balance_due ?? 0), 0),
     [invoices],
   );
-  const promoterCount = useMemo(
-    () => feedback.filter((item) => Number(item.nps_score) >= 9).length,
-    [feedback],
-  );
   const recentFeedback = useMemo(() => feedback.slice(0, 4), [feedback]);
   const recentDocuments = useMemo(() => documents.slice(0, 4), [documents]);
   // "Upcoming visits" lists only visits still ahead: not completed,
@@ -388,7 +383,7 @@ function usePatientDashboardPageContent() {
   }
 
   return (
-    <TabShell className="mt-0 min-h-0">
+    <TabShell className="mx-auto mt-0 min-h-0 max-w-7xl">
       <PageHeader
         title={`${greeting}, ${user?.name ?? patientLabel}`}
         description={t.portal_dashboard_only_explicitly_released_documents_and_privacy_workflows_are_sho}
@@ -438,37 +433,33 @@ function usePatientDashboardPageContent() {
 
       {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
 
-      <PatientPortalMobileAccess />
+      <nav aria-label={t.portal_dashboard_more_sections} className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[
+          { href: "/appointments", label: t.portal_dashboard_my_appointments, Icon: CalendarDays, count: upcomingAppointments },
+          { href: "/documents", label: t.portal_dashboard_my_documents, Icon: FileText, count: releasedDocuments },
+          { href: "/services", label: t.portal_dashboard_my_services, Icon: Sparkles, count: openServiceRequests },
+          { href: "/invoices", label: t.portal_dashboard_my_invoices, Icon: ReceiptText, count: openInvoiceCount },
+        ].map(({ href, label, Icon, count }) => (
+          <a key={href} href={href} className="group flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card p-4 text-sm font-medium transition hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <span className="rounded-lg bg-muted p-2"><Icon aria-hidden="true" className="size-4 text-primary" /></span>
+            <span className="min-w-0 flex-1 break-words">{label}</span>
+            {count > 0 ? <CountBadge>{count}</CountBadge> : <ArrowUpRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
+          </a>
+        ))}
+      </nav>
+      <PortalSummary items={[
+        { label: t.portal_dashboard_upcoming_visits, value: nextAppointment ? formatPortalDate(nextAppointment.date) : "", visible: Boolean(nextAppointment) },
+        { label: t.portal_documents_pending_confirmations, value: pendingConfirmations, visible: pendingConfirmations > 0 },
+        { label: t.portal_dashboard_outstanding_balance, value: formatPortalCurrency(outstandingBalance), visible: outstandingBalance > 0 },
+        { label: t.portal_dashboard_open_privacy_requests, value: openRequests, visible: openRequests > 0 },
+      ]} />
 
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
         documentAlerts.document_pack_complete ? (
-          <SuccessBanner>
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <p className={tokens.text.eyebrow}>
-                  {t.portal_dashboard_required_documents}
-                </p>
-                <p className="mt-2 text-sm font-semibold text-foreground">
-                  {t.portal_dashboard_your_minimum_document_pack_is_complete}
-                </p>
-                <p className={cn("mt-1", tokens.text.muted)}>
-                  {t.portal_dashboard_your_care_team_already_has_the_minimum_required_document_set}
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                <CountBadge>
-                  {t.portal_dashboard_fulfilled}:{" "}
-                  {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
-                  {documentAlerts.configured_rule_count}
-                </CountBadge>
-                <a href="/documents">
-                  <Button variant="outline" className={tokens.control.accessoryButton}>
-                    {t.portal_dashboard_open_documents}
-                  </Button>
-                </a>
-              </div>
-            </div>
-          </SuccessBanner>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 px-4 py-3">
+            <PortalComplete>{t.portal_dashboard_your_minimum_document_pack_is_complete}</PortalComplete>
+            <a href="/documents" className="text-sm font-medium text-primary hover:underline">{t.portal_dashboard_open_documents}</a>
+          </div>
         ) : (
           <Banner tone="warning" withIcon>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -534,23 +525,15 @@ function usePatientDashboardPageContent() {
         )
       ) : null}
 
-      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <section className={cn("grid items-start gap-4", recentRecommendations.length > 0 && "lg:grid-cols-2")}>
         <Section
           title={t.portal_dashboard_next_actions}
           accessory={
             <div className="flex flex-wrap items-center gap-2">
-              <CountBadge>
-                {t.portal_dashboard_priority}: {urgentNextActionCount} / {nextActions.length}
-              </CountBadge>
-              <a href="/recommendations" className="text-sm font-medium text-primary hover:underline">
-                {t.portal_dashboard_recommendations}
-              </a>
+              {urgentNextActionCount > 0 ? <CountBadge>{t.portal_dashboard_priority}: {urgentNextActionCount}</CountBadge> : null}
             </div>
           }
         >
-          <p className="text-sm text-muted-foreground">
-            {t.portal_dashboard_a_consolidated_block_from_appointments_recommendations_documents}
-          </p>
           {nextActionKindSummary.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {nextActionKindSummary.map(([kind, count]) => (
@@ -560,7 +543,7 @@ function usePatientDashboardPageContent() {
           ) : null}
           <div className="space-y-3">
             {topNextActions.length === 0 ? (
-              <EmptyCell>{t.portal_dashboard_no_open_portal_actions_right_now}</EmptyCell>
+              <div className="py-3"><PortalComplete>{t.portal_dashboard_no_open_portal_actions_right_now}</PortalComplete></div>
             ) : (
               topNextActions.map((item) => (
                 <ListItem key={item.id} className="space-y-3">
@@ -599,6 +582,7 @@ function usePatientDashboardPageContent() {
           </div>
         </Section>
 
+        {recentRecommendations.length > 0 ? (
         <Section
           title={t.portal_dashboard_recommendations}
           accessory={
@@ -607,9 +591,6 @@ function usePatientDashboardPageContent() {
             </a>
           }
         >
-          <p className="text-sm text-muted-foreground">
-            {t.portal_dashboard_care_team_recommendations_released_to_your_portal}
-          </p>
           <div className="space-y-3">
             {recentRecommendations.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_recommendations_released_yet}</EmptyCell>
@@ -639,67 +620,11 @@ function usePatientDashboardPageContent() {
             )}
           </div>
         </Section>
+        ) : null}
       </section>
 
-      {/* Each tile's sub-line counts the tile's own subject. */}
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-        <StatCard
-          label={t.portal_dashboard_upcoming_visits}
-          value={upcomingAppointments}
-          description={
-            nextAppointment
-              ? formatUiText(t.portal_dashboard_next_visit_on, { date: formatPortalDate(nextAppointment.date) })
-              : t.portal_dashboard_no_visit_planned
-          }
-        />
-        <StatCard
-          label={t.portal_dashboard_released_documents}
-          value={releasedDocuments}
-          description={formatPluralCount(lang, pendingConfirmations, {
-            one: t.portal_dashboard_awaiting_confirmation_one,
-            few: t.portal_dashboard_awaiting_confirmation_few,
-            many: t.portal_dashboard_awaiting_confirmation_many,
-          })}
-        />
-        <StatCard
-          label={t.portal_dashboard_open_service_requests}
-          value={openServiceRequests}
-          description={formatPluralCount(lang, services.length, {
-            one: t.portal_dashboard_concierge_entries_total_one,
-            few: t.portal_dashboard_concierge_entries_total_few,
-            many: t.portal_dashboard_concierge_entries_total_many,
-          })}
-        />
-        <StatCard
-          label={t.portal_dashboard_outstanding_balance}
-          value={formatPortalCurrency(outstandingBalance)}
-          description={formatPluralCount(lang, openInvoiceCount, {
-            one: t.portal_dashboard_open_invoices_count_one,
-            few: t.portal_dashboard_open_invoices_count_few,
-            many: t.portal_dashboard_open_invoices_count_many,
-          })}
-        />
-        <StatCard
-          label={t.portal_dashboard_open_privacy_requests}
-          value={openRequests}
-          description={formatPluralCount(lang, requests.length, {
-            one: t.portal_dashboard_privacy_requests_total_one,
-            few: t.portal_dashboard_privacy_requests_total_few,
-            many: t.portal_dashboard_privacy_requests_total_many,
-          })}
-        />
-        <StatCard
-          label={t.portal_dashboard_feedback_sent}
-          value={feedback.length}
-          description={
-            feedback.length > 0
-              ? formatUiText(t.portal_dashboard_high_ratings_count, { count: promoterCount })
-              : undefined
-          }
-        />
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-3 2xl:grid-cols-6">
+      <section className="grid items-start gap-4 lg:grid-cols-2">
+        {recentAppointments.length > 0 ? (
         <Section
           title={t.portal_dashboard_upcoming_visits}
           accessory={
@@ -708,9 +633,6 @@ function usePatientDashboardPageContent() {
             </a>
           }
         >
-          <p className="text-sm text-muted-foreground">
-            {t.portal_dashboard_scheduled_patient_facing_appointments}
-          </p>
           <div className="space-y-3">
             {recentAppointments.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_scheduled_visits_yet}</EmptyCell>
@@ -734,7 +656,9 @@ function usePatientDashboardPageContent() {
             )}
           </div>
         </Section>
+        ) : null}
 
+        {recentDocuments.length > 0 ? (
         <Section
           title={t.portal_dashboard_recent_documents}
           accessory={
@@ -743,9 +667,6 @@ function usePatientDashboardPageContent() {
             </a>
           }
         >
-          <p className="text-sm text-muted-foreground">
-            {t.portal_dashboard_files_released_by_your_care_team_for_portal_access}
-          </p>
           <div className="space-y-3">
             {recentDocuments.length === 0 ? (
               <EmptyCell>{t.portal_dashboard_no_documents_have_been_released_to_your_portal_yet}</EmptyCell>
@@ -771,7 +692,9 @@ function usePatientDashboardPageContent() {
             )}
           </div>
         </Section>
+        ) : null}
 
+        {recentInvoices.length > 0 ? (
         <Section
           title={t.portal_dashboard_recent_invoices}
           accessory={
@@ -808,7 +731,9 @@ function usePatientDashboardPageContent() {
             )}
           </div>
         </Section>
+        ) : null}
 
+        {recentServices.length > 0 ? (
         <Section
           title={t.portal_dashboard_my_services}
           accessory={
@@ -846,7 +771,9 @@ function usePatientDashboardPageContent() {
             )}
           </div>
         </Section>
+        ) : null}
 
+        {recentRequests.length > 0 ? (
         <Section
           title={t.portal_dashboard_privacy_request_history}
           accessory={
@@ -885,7 +812,9 @@ function usePatientDashboardPageContent() {
             )}
           </div>
         </Section>
+        ) : null}
 
+        {recentFeedback.length > 0 ? (
         <Section
           title={t.portal_dashboard_recent_feedback}
           accessory={
@@ -921,7 +850,9 @@ function usePatientDashboardPageContent() {
             )}
           </div>
         </Section>
+        ) : null}
       </section>
+      <PatientPortalMobileAccess />
     </TabShell>
   );
 }

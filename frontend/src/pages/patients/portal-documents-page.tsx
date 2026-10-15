@@ -2,6 +2,8 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { startTransition, useCallback, useEffect, useMemo, useReducer, useRef, type FormEvent } from "react";
 import { Download, IdCard, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
+import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
+import { PortalSection as Section, PortalComplete } from "./ui/portal-page-layout";
 import { Button } from "@/components/ui/button";
 import { FilePicker } from "@/components/ui/file-picker";
 import {
@@ -20,8 +22,6 @@ import {
   InfoRow,
   ListItem,
   PageHeader,
-  Section,
-  StatCard,
   StatusBadge,
   SuccessBanner,
   TabLoader,
@@ -123,6 +123,7 @@ interface PatientDocumentsState {
   error: string;
   notice: string;
   busyId: string | null;
+  uploadOpen: boolean;
   uploadBusy: boolean;
   uploadError: string;
   uploadKind: string;
@@ -152,6 +153,7 @@ const INITIAL_PATIENT_DOCUMENTS_STATE: PatientDocumentsState = {
   error: "",
   notice: "",
   busyId: null,
+  uploadOpen: false,
   uploadBusy: false,
   uploadError: "",
   uploadKind: "general",
@@ -212,6 +214,7 @@ function usePatientDocumentsPageContent() {
     translationLanguage,
     translationNote,
     translationRequests,
+    uploadOpen,
     uploadBusy,
     uploadError,
     uploadFile,
@@ -319,6 +322,7 @@ function usePatientDocumentsPageContent() {
       // stays selected and a second click sends it again.
       if (uploadFileInputRef.current) uploadFileInputRef.current.value = "";
       dispatchDocumentsState({
+        uploadOpen: false,
         notice: t.portal_documents_upload_sent_to_the_care_team,
         uploadFile: null,
         uploadName: "",
@@ -365,12 +369,15 @@ function usePatientDocumentsPageContent() {
     }
   }
 
+  useEffect(() => {
+    if (!uploadOpen || uploadKind !== IDENTITY_UPLOAD_KIND) return;
+    const frame = requestAnimationFrame(() => uploadFileInputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [uploadOpen, uploadKind]);
+
   /** The missing passport: pick the identity category and go to the file field. */
   function startIdentityUpload() {
-    dispatchDocumentsState({ uploadKind: IDENTITY_UPLOAD_KIND, uploadError: "" });
-    const input = uploadFileInputRef.current;
-    input?.scrollIntoView({ block: "center", behavior: "smooth" });
-    input?.focus({ preventScroll: true });
+    dispatchDocumentsState({ uploadOpen: true, uploadKind: IDENTITY_UPLOAD_KIND, uploadError: "" });
   }
 
   async function handleConfirm(documentId: string) {
@@ -460,18 +467,18 @@ function usePatientDocumentsPageContent() {
   }
 
   return (
-    <TabShell className="mt-0 space-y-6">
+    <TabShell className="mx-auto mt-0 max-w-6xl space-y-4">
       <PageHeader
         title={t.portal_documents_my_documents}
         description={t.portal_documents_only_files_explicitly_released_to_your_portal_are_visible_here}
         actions={
           <>
-            <CountBadge>
+            {pending > 0 ? <CountBadge>
               {t.portal_documents_pending_confirmations}: {pending}
-            </CountBadge>
-            <CountBadge>
+            </CountBadge> : null}
+            {uploads.length > 0 ? <CountBadge>
               {t.portal_documents_my_uploads}: {uploads.length}
-            </CountBadge>
+            </CountBadge> : null}
             <Button
               variant="outline"
               className="h-9 rounded-lg"
@@ -493,11 +500,10 @@ function usePatientDocumentsPageContent() {
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <StatCard label={t.portal_documents_released_to_me} value={String(documents.length)} />
-        <StatCard label={t.portal_documents_pending_confirmations} value={String(pending)} />
-        <StatCard label={t.portal_documents_my_uploads} value={String(uploads.length)} />
-      </section>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="hidden text-lg font-semibold md:block">{t.portal_documents_my_documents}</h2>
+        <Button onClick={() => dispatchDocumentsState({ uploadOpen: true })}><Upload className="size-4" />{t.portal_documents_upload_documents}</Button>
+      </div>
 
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
         <Section
@@ -510,14 +516,7 @@ function usePatientDocumentsPageContent() {
           }
         >
           {documentAlerts.document_pack_complete ? (
-            <SuccessBanner>
-              <p className="font-semibold">
-                {t.portal_documents_your_minimum_document_pack_is_complete}
-              </p>
-              <p className="mt-1 text-sm">
-                {t.portal_documents_you_already_uploaded_or_received_all_required_base_documents}
-              </p>
-            </SuccessBanner>
+            <PortalComplete>{t.portal_documents_your_minimum_document_pack_is_complete}</PortalComplete>
           ) : (
             <Banner tone="warning" withIcon>
               <div className="space-y-3">
@@ -567,7 +566,7 @@ function usePatientDocumentsPageContent() {
         </Section>
       ) : null}
 
-      <div className={cn("rounded-xl p-3", tokens.surface.softCard)}>
+      {documents.length > 0 ? <div className="rounded-xl border border-border/70 bg-card p-2">
         <div className="flex flex-wrap gap-2">
           {PORTAL_DOCUMENT_CATEGORY_TABS.map((tab) => {
             const count = categoryCounts.get(tab.key) ?? 0;
@@ -576,31 +575,29 @@ function usePatientDocumentsPageContent() {
               <button
                 key={tab.key}
                 type="button"
+                aria-pressed={activeCategory === tab.key}
                 onClick={() => dispatchDocumentsState({ activeCategory: tab.key })}
                 className={cn(
                   "inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm transition",
                   activeCategory === tab.key
-                    ? "border-ring bg-muted text-foreground"
+                    ? "border-primary/40 bg-primary/10 font-medium text-foreground"
                     : "border-border/60 bg-card text-muted-foreground hover:bg-muted/35",
                 )}
               >
                 <span>{label}</span>
-                <CountBadge>{count}</CountBadge>
+                {count > 0 ? <CountBadge>{count}</CountBadge> : null}
               </button>
             );
           })}
         </div>
-      </div>
+      </div> : null}
 
-      <section className="grid gap-6 xl:grid-cols-[1.2fr_0.9fr]">
+      <section className="space-y-4">
         <section className="space-y-4">
           <Section
             title={t.portal_documents_released_to_me}
-            accessory={<CountBadge>{visibleDocuments.length}</CountBadge>}
+            accessory={visibleDocuments.length > 0 ? <CountBadge>{visibleDocuments.length}</CountBadge> : undefined}
           >
-            <p className="text-sm text-muted-foreground">
-              {t.portal_documents_only_files_explicitly_released_by_your_care_team_are_visible_her}
-            </p>
 
             {visibleDocuments.length === 0 ? (
               <EmptyCell>
@@ -719,13 +716,13 @@ function usePatientDocumentsPageContent() {
         </section>
 
         <section className="space-y-4">
-          <Section
-            title={t.portal_documents_upload_documents}
-            accessory={<Upload className="size-4 text-muted-foreground" />}
-          >
-            <p className="text-sm text-muted-foreground">
-              {t.portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can}
-            </p>
+          <Dialog open={uploadOpen} onOpenChange={(open) => {
+            if (uploadBusy) return;
+            dispatchDocumentsState(open ? { uploadOpen: true } : {
+              uploadOpen: false, uploadError: "", uploadFile: null, uploadName: "", uploadNotes: "", uploadKind: "general",
+            });
+          }}>
+            <AdminDialogScaffold title={t.portal_documents_upload_documents} description={t.portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can}>
             <form className="space-y-4" onSubmit={(event) => void handleUpload(event)}>
               <Field label={t.portal_documents_category} htmlFor="portal-document-upload-kind">
                 <NativeComboboxSelect
@@ -780,15 +777,14 @@ function usePatientDocumentsPageContent() {
                 {t.portal_documents_send_upload}
               </Button>
             </form>
-          </Section>
+            </AdminDialogScaffold>
+          </Dialog>
 
+          {uploads.length > 0 ? (
           <Section
             title={t.portal_documents_my_uploads}
             accessory={<CountBadge>{uploads.length}</CountBadge>}
           >
-            <p className="text-sm text-muted-foreground">
-              {t.portal_documents_files_you_already_sent_from_the_portal}
-            </p>
             {uploads.length === 0 ? (
               <EmptyCell>
                 {t.portal_documents_no_portal_uploads_yet}
@@ -842,6 +838,7 @@ function usePatientDocumentsPageContent() {
               </div>
             )}
           </Section>
+          ) : null}
         </section>
       </section>
 

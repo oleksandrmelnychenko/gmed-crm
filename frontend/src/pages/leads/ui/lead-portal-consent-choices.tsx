@@ -43,7 +43,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
   const choice = (key: PortalConsentChoiceKey) => {
     const answer = form?.choices?.[key];
     return (
-      <StatusChip tone={answer === true ? "success" : "neutral"}>
+      <StatusChip tone={answer === true ? "success" : answer === false ? "neutral" : "warning"}>
         {answer === true ? tx("Разрешено", "Erlaubt") : answer === false ? tx("Не разрешено", "Nicht erlaubt") : tx("Не отвечено", "Nicht beantwortet")}
       </StatusChip>
     );

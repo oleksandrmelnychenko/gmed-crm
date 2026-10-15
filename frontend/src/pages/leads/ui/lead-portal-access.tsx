@@ -1,3 +1,4 @@
+import { TrustedContactRole } from "./trusted-contact-role";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Copy, FileText, KeyRound, LoaderCircle, Mail, ShieldCheck, UserRound, UsersRound } from "lucide-react";
 
@@ -44,7 +45,6 @@ import {
 import { currentGwgSheet, gwgSheetErrorText, gwgSheetRequest } from "../model/gwg-identification";
 import { guardianLinkRelation, medicalDocumentsFactLabel } from "../model/lead-portal-intake";
 import { leadErrorMessage } from "../model/leads-model";
-import { trustedContactRelationLabel } from "../model/lead-trusted-contacts";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import {
   fetchLeadPortalIntake,
@@ -119,11 +119,13 @@ export function LeadPortalAccessDetail({
   lead,
   lang,
   canIssue,
+  refreshVersion = 0,
   onChanged,
 }: {
   lead: Lead;
   lang: Lang;
   canIssue: boolean;
+  refreshVersion?: number;
   onChanged?: () => void;
 }) {
   const de = lang === "de";
@@ -409,7 +411,7 @@ export function LeadPortalAccessDetail({
         </p>
       ) : null}
       {error ? <p className="text-rose-700" role="alert">{error}</p> : null}
-      <LeadGuardianAccess lead={lead} lang={lang} canIssue={canIssue} onChanged={onChanged} onIntake={onPortalIntake} />
+      <LeadGuardianAccess lead={lead} lang={lang} canIssue={canIssue} refreshVersion={refreshVersion} onChanged={onChanged} onIntake={onPortalIntake} />
 
       <Dialog open={confirmOpen} onOpenChange={(open) => !busy && setConfirmOpen(open)}>
         <DialogContent className="max-w-md">
@@ -827,12 +829,14 @@ export function LeadGuardianAccess({
   lead,
   lang,
   canIssue,
+  refreshVersion = 0,
   onChanged,
   onIntake,
 }: {
   lead: Lead;
   lang: Lang;
   canIssue: boolean;
+  refreshVersion?: number;
   onChanged?: () => void;
   /** Receives the portal state after each load (null when it could not be read). */
   onIntake?: (intake: LeadPortalIntake | null) => void;
@@ -849,24 +853,28 @@ export function LeadGuardianAccess({
   // which an embedded browser dismisses silently (QA 2026-10-12, round 3).
   const [revoking, setRevoking] = useState<{ accessId: string; name: string } | null>(null);
   const onIntakeRef = useRef(onIntake);
+  const intakeLoadGeneration = useRef(0);
   useEffect(() => {
     onIntakeRef.current = onIntake;
   }, [onIntake]);
 
   const load = useCallback(async () => {
+    const generation = ++intakeLoadGeneration.current;
     let next: LeadPortalIntake | null = null;
     try {
       next = await fetchLeadPortalIntake(lead.id);
     } catch {
       next = null;
     }
+    if (generation !== intakeLoadGeneration.current) return;
     setIntake(next);
     onIntakeRef.current?.(next);
   }, [lead.id]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    return () => { intakeLoadGeneration.current += 1; };
+  }, [load, refreshVersion]);
 
   async function run(
     key: string,
@@ -928,7 +936,7 @@ export function LeadGuardianAccess({
                 </StatusChip>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-700 dark:text-slate-300">
-                {relation ? <span>{trustedContactRelationLabel(relation, tx)}</span> : null}
+                {relation ? <TrustedContactRole relation={relation} tx={tx} /> : null}
                 <span className="inline-flex min-w-0 items-center gap-1.5"><Mail aria-hidden="true" className="size-3.5 shrink-0" /><span className="break-all">{link.email}</span></span>
                 <span>{tx("Последний вход: ", "Letzte Anmeldung: ")}{link.last_login_at ? formatAppDateTime(link.last_login_at) : tx("ещё не входил", "noch nie")}</span>
               </div>
@@ -939,7 +947,7 @@ export function LeadGuardianAccess({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-9 gap-1.5 rounded-lg border-slate-300 bg-background px-3 text-xs text-foreground hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
+                  className="h-7 gap-1.5 rounded-md border-slate-300 bg-background px-2.5 text-xs text-foreground hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
                   disabled={busy !== null}
                   onClick={() => void run(`reset-${link.access_id}`, () => resetLeadGuardianPassword(lead.id, link.access_id), link.name)}
                 >
@@ -950,7 +958,7 @@ export function LeadGuardianAccess({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-9 rounded-lg border-rose-200 bg-rose-50 px-3 text-xs text-rose-800 hover:border-rose-300 hover:bg-rose-100 hover:text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/70 dark:hover:text-rose-100"
+                  className="h-7 rounded-md border-rose-200 bg-rose-50 px-2.5 text-xs text-rose-800 hover:border-rose-300 hover:bg-rose-100 hover:text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/70 dark:hover:text-rose-100"
                   disabled={busy !== null}
                   data-testid="lead-guardian-revoke"
                   onClick={() => setRevoking({ accessId: link.access_id, name: link.name ?? "" })}
@@ -972,7 +980,7 @@ export function LeadGuardianAccess({
                 <StatusChip tone="warning">{tx("Доступ не выдан", "Zugang nicht erteilt")}</StatusChip>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-700 dark:text-slate-300">
-                {candidate.relation ? <span>{trustedContactRelationLabel(candidate.relation, tx)}</span> : null}
+                {candidate.relation ? <TrustedContactRole relation={candidate.relation} tx={tx} /> : null}
                 <span className="inline-flex min-w-0 items-center gap-1.5"><Mail aria-hidden="true" className="size-3.5 shrink-0" /><span className="break-all">{candidate.email ?? tx("нет e-mail", "keine E-Mail")}</span></span>
               </div>
             </div>
@@ -981,7 +989,7 @@ export function LeadGuardianAccess({
                 type="button"
                 variant="default"
                 size="sm"
-                className="h-9 w-fit gap-1.5 rounded-lg bg-slate-900 px-3 text-xs text-white shadow-xs hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
+                className="h-7 w-fit gap-1.5 rounded-md bg-slate-900 px-2.5 text-xs text-white shadow-xs hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
                 disabled={busy !== null}
                 onClick={() => void run(`issue-${contactId}`, () => issueLeadGuardianAccess(lead.id, contactId), candidate.name)}
               >

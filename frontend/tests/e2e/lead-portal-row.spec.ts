@@ -528,3 +528,23 @@ test("a child's own login is closed while the parents have access; revoking asks
   expect(calls.filter((call) => call.path.endsWith("/revoke"))).toHaveLength(1);
   expect(nativeDialogs).toBe(0);
 });
+
+test("an expanded parent row refreshes its role after a list refresh without reopening", async ({ page }) => {
+  await setup(page, "ru", {}, leads[0].id);
+  let relation = "parent";
+  await page.route((url) => url.pathname === `/api/v1/leads/${leads[0].id}/portal-intake`, (route) => {
+    const intake = minorPortalIntake(leads[0].id);
+    intake.guardians.candidates[0].relation = relation;
+    return route.fulfill({ json: intake });
+  });
+  await page.goto("/leads");
+  await page.getByTestId(`lead-expand-${leads[0].id}`).first().click();
+  const role = page.getByTestId("lead-guardian-access").first().getByTestId("trusted-contact-relation");
+  await expect(role).toHaveText("Родитель — роль не уточнена");
+  for (const [value, label] of [["mother", "Мать"], ["father", "Отец"], ["guardian", "Опекун"]]) {
+    relation = value;
+    await page.getByRole("button", { name: "Обновить", exact: true }).click();
+    await expect(role).toHaveText(label);
+    await expect(role).toHaveClass(/bg-violet-50/);
+  }
+});

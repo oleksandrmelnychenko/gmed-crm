@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { CircleAlert, Download } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
-import { StatusBadge } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
 import { StatusChip } from "@/components/ui/status-chip";
 import { countryNameForDisplay } from "@/components/ui/country-select";
@@ -56,6 +55,7 @@ import {
 import { statedFundsSourceLabel, statedFundsSourcesLabel } from "../model/lead-payer";
 import { identityDocumentEnteredLine } from "../model/lead-identity-document-data";
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
+import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
 const STATEMENT_COLUMNS = "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
@@ -80,6 +80,7 @@ function Statement({
   testId,
   warning = false,
   sentence = false,
+  hideLabel = false,
   children,
 }: {
   label: string;
@@ -87,6 +88,7 @@ function Statement({
   testId?: string;
   warning?: boolean;
   sentence?: boolean;
+  hideLabel?: boolean;
   children?: ReactNode;
 }) {
   const empty = children === null || children === undefined || children === "";
@@ -95,8 +97,9 @@ function Statement({
       {/* Long German labels ("Staatsangehörigkeit") wrap inside a narrow column. */}
       <dt
         className={cn(
-          "break-words text-[11.5px] font-medium leading-snug text-muted-foreground",
+          "break-words text-[11.5px] font-medium leading-snug text-foreground/70",
           sentence && "max-w-prose",
+          hideLabel && "sr-only",
         )}
       >
         {label}
@@ -156,21 +159,21 @@ function RepresentativeStatements({
   const validity = idDocumentValidity(person.id_valid_until, today);
   return (
     <div
-      className="space-y-2 rounded-md border border-border/60 bg-background/50 p-2.5"
+      className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5 shadow-xs"
       data-testid={`lead-gwg-representative-${person.id}`}
     >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 pb-2.5">
         <span className="text-[13px] font-semibold text-foreground">{representativeName(person) || EMPTY_STATEMENT}</span>
-        <span className="text-xs text-muted-foreground">{representativeRoleLabel(person, tx)}</span>
+        <StatusChip className={cn(PARENT_ROLE_CHIP_CLASS, "whitespace-normal")}>{representativeRoleLabel(person, tx)}</StatusChip>
         {person.has_login ? (
           <span className="inline-flex" data-testid="lead-gwg-representative-login">
-            <StatusBadge tone="info">{tx("есть доступ в кабинет", "hat Zugang zum Portal")}</StatusBadge>
+            <StatusChip tone="info">{tx("есть доступ в кабинет", "hat Zugang zum Portal")}</StatusChip>
           </span>
         ) : null}
         {!person.has_data ? (
-          <span className="text-[11px] text-muted-foreground" data-testid="lead-gwg-representative-no-data">
+          <StatusChip tone="warning" className="whitespace-normal" data-testid="lead-gwg-representative-no-data">
             {tx("в кабинете ещё не заполнено", "im Portal noch nicht ausgefüllt")}
-          </span>
+          </StatusChip>
         ) : null}
       </div>
       <dl className={cn("grid gap-x-5 gap-y-2.5", STATEMENT_COLUMNS)}>
@@ -258,7 +261,7 @@ function RepresentationGroup({
       </div>
       <dl className="grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2">
         {statements.kind === "minor" ? (
-          <Statement label={tx("Кто представляет ребёнка", "Wer vertritt das Kind")} testId="lead-gwg-custody">
+          <Statement label={tx("Кто представляет ребёнка", "Wer vertritt das Kind")} hideLabel testId="lead-gwg-custody">
             {statements.custody}
           </Statement>
         ) : (
@@ -863,7 +866,7 @@ export function LeadGwgStatements({
 
   if (!identification || !hasGwgStatements(intake)) {
     return (
-      <div className="space-y-2.5 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-gwg-statements">
+      <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3.5" data-testid="lead-gwg-statements">
         <AdminSectionTitle>{title}</AdminSectionTitle>
         <ChangedSinceSubmitLine intake={intake} tx={tx} />
         <p className="text-xs text-muted-foreground" data-testid="lead-gwg-statements-empty">
@@ -906,7 +909,7 @@ export function LeadGwgStatements({
   const paymentBackgroundShown = asked("B") || Boolean(paymentBackground);
 
   return (
-    <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-gwg-statements">
+    <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3.5" data-testid="lead-gwg-statements">
       <div className="flex flex-wrap items-center gap-2">
         <AdminSectionTitle>{title}</AdminSectionTitle>
         <PatientFieldBadge marker={{ at: intake.identification_updated_at, access_kind: null }} tx={tx} />

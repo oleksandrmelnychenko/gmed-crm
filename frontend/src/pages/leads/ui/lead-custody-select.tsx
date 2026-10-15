@@ -1,9 +1,8 @@
 import { useState } from "react";
 
-import { selectClass, tokens } from "@/components/ui-shell";
+import { selectClass } from "@/components/ui-shell";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { ApiRequestError } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 import {
   LEAD_CUSTODY_VALUES,
@@ -70,7 +69,7 @@ export function LeadCustodySelect({
   return (
     <div className="max-w-md space-y-1.5" data-testid="lead-custody">
       <label className="block space-y-1.5">
-        <span className={cn(tokens.text.label, "block")}>{label}</span>
+        <span className="sr-only">{label}</span>
         <NativeComboboxSelect
           value={value}
           className={selectClass}
@@ -88,12 +87,6 @@ export function LeadCustodySelect({
           ))}
         </NativeComboboxSelect>
       </label>
-      <p className="text-xs leading-5 text-muted-foreground">
-        {tx(
-          "Указывает родитель в кабинете или сотрудник здесь — действует последнее изменение. От ответа зависит, данные скольких представителей запрашивает кабинет.",
-          "Gibt der Elternteil im Portal oder GMED hier an – es gilt die letzte Änderung. Davon hängt ab, für wie viele Vertreter das Portal die Angaben abfragt.",
-        )}
-      </p>
       {errorMessage ? (
         <p role="alert" className="text-xs text-destructive" data-testid="lead-custody-error">{errorMessage}</p>
       ) : null}

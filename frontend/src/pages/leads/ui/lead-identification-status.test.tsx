@@ -277,7 +277,7 @@ describe("LeadIdentificationStatusView", () => {
     const html = render({ ...MINOR, representatives: [] });
     expect(html).toContain("lead-identification-no-representative");
     expect(html).toContain("Добавьте родителя или законного представителя");
-    expect(html).not.toContain("<li");
+    expect(html).not.toMatch(/<li\b/);
     expect(html).not.toMatch(/<button\b/);
     expect(render({ ...MINOR, representatives: [] }, { lang: "de" })).toContain(
       "Bitte einen Elternteil oder eine gesetzliche Vertreterin / einen gesetzlichen Vertreter hinzufügen",

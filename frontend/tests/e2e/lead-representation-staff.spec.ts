@@ -882,3 +882,25 @@ test("a second parent added in the cabinet appears in the open wizard and surviv
   await expect(sheetActions.getByRole("button", { name: "Сформировать для Anna Maria Muster", exact: true })).toBeVisible();
   await expect(sheetActions.getByRole("button", { name: "Сформировать для Ben Muster", exact: true })).toBeVisible();
 });
+
+for (const width of [1440, 390]) {
+  test(`parent editor is a centered modal with guarded dismissal at ${width}px`, async ({ page }, testInfo) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width, height: 900 });
+    const { wizard, calls } = await mount(page, { lang: "ru", step: "master" });
+    await wizard.locator("#lead-wizard-guardian").getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
+    const editor = page.getByTestId("trusted-contact-editor");
+    await expect(editor).toBeVisible();
+    const box = await editor.boundingBox();
+    expect(box!.width).toBeLessThanOrEqual(Math.min(720, width - 16));
+    expect(Math.abs(box!.x + box!.width / 2 - width / 2)).toBeLessThan(2);
+    expect(box!.height).toBeLessThanOrEqual(884);
+    await page.screenshot({ path: testInfo.outputPath("parent-editor.png") });
+    await editor.getByLabel("Имя и фамилия").fill("Unsaved Parent");
+    await page.keyboard.press("Escape");
+    await expect(editor).toBeVisible();
+    expect(calls.updates).toEqual([]);
+    await expect(page.getByRole("alertdialog", { name: "Закрыть без сохранения?" })).toBeVisible();
+    await expect(editor.getByLabel("Имя и фамилия")).toHaveValue("Unsaved Parent");
+  });
+}

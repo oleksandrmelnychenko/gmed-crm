@@ -827,6 +827,7 @@ test.describe("patient portal smoke flows", () => {
       .getByRole("button", { name: /Herunterladen|Скачать|Download/i })
       .click();
     await releasedDownloadRequest;
+    await page.getByRole("button", { name: "Dokumente hochladen", exact: true }).click();
 
     await chooseComboboxOption(
       page,
@@ -903,6 +904,7 @@ test.describe("patient portal smoke flows", () => {
     await page.goto("/documents");
     await expect(page.getByText("Es fehlt noch 1 Pflichtdokument.", { exact: true })).toBeVisible();
 
+    await page.getByRole("button", { name: "Ausweis hochladen", exact: true }).click();
     // The categories read correctly (no "Schl?sse" / "?bersetzungen").
     const category = page.getByRole("combobox", { name: /Kategorie/i });
     await category.click();
@@ -910,8 +912,6 @@ test.describe("patient portal smoke flows", () => {
     await expect(page.getByRole("option", { name: "Übersetzungen", exact: true })).toBeVisible();
     await expect(page.getByRole("option", { name: "Reisepass / Ausweis", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
-
-    await page.getByRole("button", { name: "Ausweis hochladen", exact: true }).click();
     await expect(category).toContainText("Reisepass / Ausweis");
     await page.getByLabel(/Titel/i).fill("Reisepass Anna");
     const fileInput = page.locator("#portal-document-upload-file");
@@ -930,6 +930,7 @@ test.describe("patient portal smoke flows", () => {
     // The list and the requirement update without a reload; the sent file is no longer selected.
     await expect(page.locator("article").filter({ hasText: "Reisepass Anna" })).toBeVisible();
     await expect(page.getByText("Ihr Mindest-Dokumentenpaket ist vollständig.")).toBeVisible();
+    await page.getByRole("button", { name: "Dokumente hochladen", exact: true }).click();
     await expect(fileInput).toHaveValue("");
     await expect(category).toContainText("Allgemein");
     await page.screenshot({ path: testInfo.outputPath("patient-documents-after-passport.png"), fullPage: true });
@@ -976,11 +977,13 @@ test.describe("patient portal smoke flows", () => {
     const staleAnswered = new Promise<void>((resolve) => {
       markStaleAnswered = resolve;
     });
+    let releaseStale!: () => void;
+    const staleRelease = new Promise<void>((resolve) => { releaseStale = resolve; });
     await page.route("**/api/v1/me/documents/uploads", async (route) => {
       if (!holdNextUploadsList || route.request().method() !== "GET") return route.fallback();
       holdNextUploadsList = false;
       // The list as it was before the upload, delivered after it.
-      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await staleRelease;
       await json(route, []);
       markStaleAnswered();
     });
@@ -988,13 +991,6 @@ test.describe("patient portal smoke flows", () => {
     await page.goto("/documents");
     const uploadsCount = page.locator("#topbar-page-slot").getByText(/Meine hochgeladenen Dateien:\s*\d+/);
     await expect(uploadsCount).toHaveText(/:\s*1$/);
-    await page.getByLabel(/Titel/i).fill("Befund Mia Muster");
-    await page.locator("#portal-document-upload-file").setInputFiles({
-      name: "befund-mia.pdf",
-      mimeType: "application/pdf",
-      buffer: Buffer.from("befund"),
-    });
-
     // "Aktualisieren" asks the server (not the client cache); its answer is late.
     holdNextUploadsList = true;
     const staleRequest = page.waitForRequest((request) =>
@@ -1002,11 +998,20 @@ test.describe("patient portal smoke flows", () => {
     );
     await page.getByRole("button", { name: "Aktualisieren", exact: true }).click();
     await staleRequest;
+    await page.getByRole("button", { name: "Dokumente hochladen", exact: true }).click();
+    await page.getByLabel(/Titel/i).fill("Befund Mia Muster");
+    await page.locator("#portal-document-upload-file").setInputFiles({
+      name: "befund-mia.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("befund"),
+    });
+
     await page.getByRole("button", { name: "Datei senden", exact: true }).click();
     await expect(page.getByText("Datei wurde an das Betreuungsteam gesendet.")).toBeVisible();
     const sent = page.locator("article").filter({ hasText: "Befund Mia Muster" });
     await expect(sent).toBeVisible();
 
+    releaseStale();
     await staleAnswered;
     // Well before the page reads the list again (3.5 s): the late answer changed nothing.
     await page.waitForTimeout(300);
@@ -1042,10 +1047,10 @@ test.describe("patient portal smoke flows", () => {
       await page.screenshot({ path: testInfo.outputPath(`patient-dashboard-${width}.png`) });
     }
 
-    // Each tile's sub-line belongs to its own subject.
-    const tile = (label: string) => page.locator("main div").filter({ has: page.getByText(label, { exact: true }) }).last();
-    await expect(tile("Offene Datenschutzanfragen")).toContainText("1 Anfrage insgesamt");
-    await expect(tile("Freigegebene Dokumente")).toContainText("1 Dokument wartet auf Bestätigung");
+    // Compact summaries retain meaningful counts without a second set of KPI cards.
+    const summary = page.locator("main dl");
+    await expect(summary).toContainText("Offene Datenschutzanfragen");
+    await expect(summary).toContainText("1");
     await expect(page.getByText(/Unbekannter Wert/i)).toHaveCount(0);
 
     await slot.getByRole("button", { name: "Weitere Bereiche" }).click();
@@ -1163,6 +1168,7 @@ test.describe("patient portal smoke flows", () => {
   test("patient can request and cancel an additional service", async ({ page }) => {
     await page.goto("/services");
     await expect(page).toHaveURL(/\/services$/);
+    await page.getByRole("button", { name: "Service anfragen", exact: true }).click();
 
     await page.getByLabel(/Titel|Название|Title/i).fill("Hotel near clinic");
     await page
@@ -1210,6 +1216,53 @@ test.describe("patient portal smoke flows", () => {
       }),
     ).toHaveCount(0);
   });
+
+  for (const variant of [{ width: 1440, dark: false }, { width: 390, dark: false }, { width: 1440, dark: true }]) {
+    test(`quiet empty portal and on-demand forms at ${variant.width}px dark=${variant.dark}`, async ({ page }, testInfo) => {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.setViewportSize({ width: variant.width, height: 900 });
+      await page.addInitScript((dark) => { localStorage.setItem("gmed_theme", dark ? "dark" : "light"); }, variant.dark);
+      await page.route("**/api/v1/me/**", async (route) => {
+        const path = new URL(route.request().url()).pathname;
+        if (route.request().method() !== "GET") return route.fallback();
+        if (/\/(appointments|appointment-requests|followup-milestones|concierge-services|documents|uploads|invoices|recommendations|next-actions|privacy-requests|feedback|translation-requests)$/.test(path)) return json(route, []);
+        if (path.endsWith("/document-alerts")) return json(route, {
+          configured_rule_count: 2, document_pack_complete: true, missing_count: 0,
+          required_documents: [{ key: "passport", fulfilled: true }, { key: "consent", fulfilled: true }], missing_documents: [],
+        });
+        return route.fallback();
+      });
+      for (const [name, route] of [["dashboard", "/"], ["appointments", "/appointments"], ["documents", "/documents"], ["services", "/services"]]) {
+        await page.goto(route);
+        await expect(page.locator("main")).toBeVisible();
+        await page.waitForLoadState("networkidle");
+        // The theme is a DOM-only visual fixture; no account settings are changed.
+        await page.evaluate((dark) => document.documentElement.classList.toggle("dark", dark), variant.dark);
+        await expect(page.locator("main dl")).toHaveCount(0);
+        const geometry = await page.locator("main").evaluate((el) => ({ client: el.clientWidth, scroll: el.scrollWidth }));
+        expect(geometry.scroll).toBeLessThanOrEqual(geometry.client + 1);
+        if (name === "dashboard") {
+          await expect(page.locator("main nav a")).toHaveCount(4);
+          await expect(page.getByText("GMED auf dem Smartphone", { exact: true })).toBeVisible();
+          await expect(page.getByText("Im Browser-Menü „Zum Startbildschirm“ wählen.")).not.toBeVisible();
+        }
+        if (name === "documents" || name === "services") await expect(page.locator("main form")).toHaveCount(0);
+        await page.screenshot({ path: testInfo.outputPath(`${name}.png`), animations: "disabled" });
+        if (name === "documents" || name === "services") {
+          await page.getByRole("button", { name: name === "documents" ? "Dokumente hochladen" : "Service anfragen", exact: true }).click();
+          const dialog = page.getByRole("dialog");
+          await expect(dialog).toBeVisible();
+          await expect(dialog).toHaveCSS("opacity", "1");
+          const box = await dialog.boundingBox();
+          expect(box!.width).toBeLessThanOrEqual(variant.width - 16);
+          expect(box!.height).toBeLessThanOrEqual(884);
+          await page.screenshot({ path: testInfo.outputPath(`${name}-form.png`), animations: "disabled" });
+          await page.keyboard.press("Escape");
+          await expect(dialog).not.toBeVisible();
+        }
+      }
+    });
+  }
 
   test("patient can submit appointment-linked feedback and see it in history", async ({
     page,

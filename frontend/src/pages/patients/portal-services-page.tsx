@@ -3,12 +3,16 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type Dispatch,
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { Building2, LoaderCircle, RefreshCw, Send } from "lucide-react";
+import { Building2, LoaderCircle, Plus, RefreshCw, Send } from "lucide-react";
 
+import { Dialog } from "@/components/ui/dialog";
+import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
+import { PortalSection as Section, PortalSummary } from "./ui/portal-page-layout";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
@@ -21,9 +25,7 @@ import {
   inputClass,
   ListItem,
   PageHeader,
-  Section,
   selectClass,
-  StatCard,
   StatusBadge,
   SuccessBanner,
   TabLoader,
@@ -167,12 +169,7 @@ function PatientServicesRequestSection({
   onSubmit,
 }: PatientServicesRequestSectionProps) {
   return (
-    <Section
-      title={t.services_request_title}
-      accessory={<Send className="size-4 text-muted-foreground" />}
-    >
-      <p className="text-sm text-muted-foreground">{t.services_request_description}</p>
-
+    <AdminDialogScaffold title={t.services_request_title} description={t.services_request_description}>
       <form className="space-y-4" onSubmit={(event) => void onSubmit(event)}>
         <Field label={t.services_form_service_type}>
           <NativeComboboxSelect
@@ -300,11 +297,12 @@ function PatientServicesRequestSection({
           {t.services_submit}
         </Button>
       </form>
-    </Section>
+    </AdminDialogScaffold>
   );
 }
 
 export function PatientServicesPage() {
+  const [requestOpen, setRequestOpen] = useState(false);
   const {
     conciergeServiceKindLabel,
     conciergeServiceSourceLabel,
@@ -423,6 +421,7 @@ export function PatientServicesPage() {
         cost_estimate: form.costEstimate ? Number(form.costEstimate) : undefined,
         service_notes: form.serviceNotes || undefined,
       });
+      setRequestOpen(false);
       dispatchPageState((current) => ({
         notice: t.services_notice_created,
         form: blankServiceRequestForm(),
@@ -468,7 +467,7 @@ export function PatientServicesPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto max-w-6xl space-y-4">
       <PageHeader
         title={t.services_title}
         description={t.services_description}
@@ -487,19 +486,22 @@ export function PatientServicesPage() {
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <StatCard label={t.services_open_requests} value={String(openItems.length)} />
-        <StatCard label={t.services_booked_or_in_service} value={String(bookedItems.length)} />
-        <StatCard label={t.services_completed} value={String(completedItems.length)} />
-      </section>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="hidden text-lg font-semibold md:block">{t.services_title}</h2>
+        <Button onClick={() => setRequestOpen(true)}><Plus className="size-4" />{t.services_request_title}</Button>
+      </div>
+      <PortalSummary items={[
+        { label: t.services_open_requests, value: openItems.length, visible: openItems.length > 0 },
+        { label: t.services_booked_or_in_service, value: bookedItems.length, visible: bookedItems.length > 0 },
+        { label: t.services_completed, value: completedItems.length, visible: completedItems.length > 0 },
+      ]} />
 
-      <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <section className="space-y-4">
         <section className="space-y-4">
           <Section
             title={t.services_history_title}
-            accessory={<CountBadge>{services.length}</CountBadge>}
+            accessory={services.length > 0 ? <CountBadge>{services.length}</CountBadge> : undefined}
           >
-            <p className="text-sm text-muted-foreground">{t.services_history_description}</p>
 
             {services.length === 0 ? (
               <EmptyCell>
@@ -573,6 +575,11 @@ export function PatientServicesPage() {
           </Section>
         </section>
 
+        <Dialog open={requestOpen} onOpenChange={(open) => {
+          if (requestBusy) return;
+          setRequestOpen(open);
+          if (!open) dispatchPageState({ form: blankServiceRequestForm(), requestError: "" });
+        }}>
         <PatientServicesRequestSection
           form={form}
           taxonomyLeaves={taxonomyLeaves}
@@ -582,6 +589,7 @@ export function PatientServicesPage() {
           onFormChange={setForm}
           onSubmit={handleSubmit}
         />
+        </Dialog>
       </section>
     </div>
   );

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { BellRing, Download, Smartphone } from "lucide-react";
+import { BellRing, ChevronDown, Download, Smartphone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { CountBadge, Section } from "@/components/ui-shell";
+import { CountBadge } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
@@ -184,10 +184,12 @@ export function PatientPortalMobileAccess() {
   }
 
   return (
-    <Section
-      title={copy.title}
-      accessory={<Smartphone className="size-4 text-muted-foreground" />}
-    >
+    <details className="group rounded-lg border border-border/60 bg-card px-4 py-3">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
+        <Smartphone aria-hidden="true" className="size-4 text-muted-foreground" />{copy.title}
+        <ChevronDown aria-hidden="true" className="ml-auto size-4 text-muted-foreground transition group-open:rotate-180" />
+      </summary>
+      <div className="mt-4 space-y-3">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <p className="text-sm leading-6 text-muted-foreground">{copy.description}</p>
@@ -224,6 +226,7 @@ export function PatientPortalMobileAccess() {
       {notificationSupported && notificationPermission === "denied" ? (
         <p className="text-xs leading-5 text-amber-700">{copy.blocked}</p>
       ) : null}
-    </Section>
+      </div>
+    </details>
   );
 }
