@@ -482,7 +482,11 @@ pub(crate) fn merge_signing_pdfs(
     Ok(bytes)
 }
 
-async fn current_row<'e, E>(executor: E, id: Uuid, lock: bool) -> Result<PgRow, &'static str>
+pub(super) async fn current_row<'e, E>(
+    executor: E,
+    id: Uuid,
+    lock: bool,
+) -> Result<PgRow, &'static str>
 where
     E: sqlx::PgExecutor<'e>,
 {

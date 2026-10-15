@@ -37,6 +37,7 @@ pub struct AppState {
     pub mail_connection_cache: Arc<crate::mail::connection::Cache>,
     pub document_signatures: Option<Arc<crate::document_signatures::provider::Provider>>,
     pub document_signature_cache: Arc<crate::document_signatures::connection::Cache>,
+    pub dev_demo_onboarding: bool,
 }
 
 impl AppState {
@@ -78,6 +79,7 @@ impl AppState {
             mail_connection_cache: Arc::new(Mutex::new(None)),
             document_signatures: None,
             document_signature_cache: Arc::new(Mutex::new(None)),
+            dev_demo_onboarding: false,
         }
     }
 
@@ -106,6 +108,14 @@ impl AppState {
 
     pub fn jwt_secret(&self) -> &str {
         self.jwt_secret.expose_secret()
+    }
+
+    /// The flag alone cannot enable test onboarding on a production origin.
+    pub fn with_dev_demo_onboarding(mut self, enabled: bool) -> Self {
+        self.dev_demo_onboarding = enabled
+            && self.mail_config.console_url.as_deref()
+                == Some("https://console-dev.gmed-health.com");
+        self
     }
 
     pub fn with_document_signatures(

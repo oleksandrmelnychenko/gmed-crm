@@ -47,6 +47,32 @@ function render(value: PayerDeclarationStatus) {
 
 describe("LeadPayerSignatureFlow", () => {
   for (const lang of ["ru", "de"]) {
+    it(`shows accepted DEV evidence without pretending the legal flags changed in ${lang}`, () => {
+      signatureSummary.value = { document_id: "current-order", status: "completed", test_mode: true, result_document_id: "test-result" };
+      const value = status({ client_signed_order: false, agency_blocking: ["client_order_signature_missing", "payer_identity_incomplete"],
+        cost_assumption: { required: false, document_id: null, current: false, signed: false, signed_at: null } });
+      const html = renderToStaticMarkup(<LeadPayerSignatureFlow leadId="synthetic-lead" signatureDocumentId="current-order" status={value}
+        demoChecks={["order_signed_patient"]} documents={[]} disabled={false} canGenerate={false} tx={lang === "de" ? de : tx}
+        renderDocuments={() => null} onChanged={() => {}} errorText={() => "error"} />);
+      expect(html).toContain(lang === "ru" ? "Тестовые подписи зачтены для оформления" : "Testunterschriften für die Aufnahme angerechnet");
+      expect(html).toContain(lang === "ru" ? "Заполните данные плательщика" : "Angaben zum Kostenübernehmer ergänzen");
+      expect(html).not.toContain(lang === "ru" ? "Нужна юридически действительная подпись заказа" : "Eine rechtswirksame Auftragsunterschrift ist erforderlich");
+      expect(value.client_signed_order).toBe(false);
+    });
+    it(`explains completed DEMO without asking the client to sign the same test again in ${lang}`, () => {
+      signatureSummary.value = { document_id: "current-order", status: "completed", test_mode: true, result_document_id: "test-result" };
+      const value = status({ client_signed_order: false, agency_blocking: ["client_order_signature_missing"],
+        cost_assumption: { required: false, document_id: null, current: false, signed: false, signed_at: null } });
+      const html = renderToStaticMarkup(<LeadPayerSignatureFlow leadId="synthetic-lead" signatureDocumentId="current-order" status={value}
+        documents={[]} disabled={false} canGenerate={false} tx={lang === "de" ? de : tx} renderDocuments={() => null} onChanged={() => {}} errorText={() => "error"} />);
+      expect(html).toContain(lang === "ru" ? "DEMO · Тестовый пакет подписан" : "DEMO · Testpaket unterzeichnet");
+      expect(html).toContain(lang === "ru" ? "Для создания пациента нужны юридически действительные подписи" : "Für die Patientenanlage sind rechtswirksame Unterschriften erforderlich");
+      expect(html).not.toContain(lang === "ru" ? "Ожидается подпись клиента" : "Unterschrift des Kunden ausstehend");
+      expect(html).not.toContain(lang === "ru" ? "Сначала клиент подписывает заказ" : "Zuerst unterschreibt der Kunde");
+      expect(html).not.toContain(lang === "ru" ? "Создайте согласие плательщика" : "Kostenübernahmeerklärung erstellen");
+      expect(value.client_signed_order).toBe(false);
+      expect(value.agency_may_sign).toBe(false);
+    });
     it(`shows confirmed client DEMO progress without pretending it is a legal signature in ${lang}`, () => {
       signatureSummary.value = { document_id: "current-order", status: "pending", test_mode: true, result_document_id: null,
         progress: { signed: 1, total: 2, client_signed: 1, client_total: 1, agency_signed: 0, agency_total: 1 } };

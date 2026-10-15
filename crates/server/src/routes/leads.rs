@@ -2150,7 +2150,93 @@ async fn load_lead_conversion_readiness(
         .map_err(enhanced_check_failed)?;
     drop(conn);
     apply_repeat_patient_readiness(state, lead_id, &mut input).await?;
-    Ok(Some(evaluate_lead_conversion_readiness(&input)))
+    let legal_readiness = evaluate_lead_conversion_readiness(&input);
+    if !state.dev_demo_onboarding {
+        return Ok(Some(legal_readiness));
+    }
+    let proofs = crate::document_signatures::demo_onboarding::current_documents(state, lead_id)
+        .await
+        .map_err(|code| {
+            tracing::error!(code, %lead_id, "load DEV demo onboarding evidence");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load test signature evidence",
+            )
+        })?;
+    for document in &proofs {
+        let template: Option<String> = document
+            .try_get("generated_template_id")
+            .unwrap_or_default();
+        match template.as_deref() {
+            Some("framework_contract") if !input.contract_terminated => {
+                input.contract_signed = true
+            }
+            Some("single_order") => {
+                input.order_signed_patient = true;
+                input.order_signed_agency = true;
+            }
+            Some("privacy_consents") => input.dsgvo_document_signed = true,
+            Some("confidentiality_release") => input.confidentiality_release_signed = true,
+            Some(
+                "consent_data_release_child"
+                | "consent_data_release_single"
+                | "consent_data_release",
+            ) => {
+                input.dsgvo_document_signed = true;
+                input.confidentiality_release_signed = true;
+            }
+            Some("enhanced_due_diligence") => input.enhanced_due_diligence_document_signed = true,
+            Some("cost_coverage_declaration") => {
+                let payer = super::lead_payer::load_payer_state(
+                    &mut *state.db.acquire().await.map_err(enhanced_check_failed)?,
+                    lead_id,
+                )
+                .await
+                .map_err(enhanced_check_failed)?;
+                if payer.cost_assumption.current
+                    && payer.cost_assumption.document_id == Some(document.get("id"))
+                {
+                    input.payer.reasons.retain(|reason| {
+                        !matches!(
+                            reason,
+                            super::lead_payer::PayerReason::CostAssumptionUnsigned
+                        )
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    if input.dsgvo_document_signed && input.confidentiality_release_signed && !proofs.is_empty() {
+        input.compliance_status = "signed".into();
+    }
+    let mut readiness = evaluate_lead_conversion_readiness(&input);
+    let credited_checks: Vec<Value> = readiness.payload["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|check| {
+            check["passed"] == true
+                && legal_readiness.payload["checks"]
+                    .as_array()
+                    .is_some_and(|checks| {
+                        checks
+                            .iter()
+                            .any(|legal| legal["key"] == check["key"] && legal["passed"] == false)
+                    })
+        })
+        .map(|check| check["key"].clone())
+        .collect();
+    let request_ids: std::collections::BTreeSet<Uuid> = proofs
+        .iter()
+        .map(|document| document.get("demo_request_id"))
+        .collect();
+    readiness.payload["legal_checks"] = legal_readiness.payload["checks"].clone();
+    readiness.payload["demo_onboarding"] = json!({
+        "enabled": true, "applied": !credited_checks.is_empty(),
+        "credited_checks": credited_checks, "request_ids": request_ids,
+    });
+    Ok(Some(readiness))
 }
 
 // Reuse the patient's current confirmations and the contract selected on this
@@ -6337,13 +6423,27 @@ async fn convert_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    // DEV can complete the workflow using test evidence; it must never turn
+    // that evidence into legal confirmations on the resulting patient.
+    let legal_checks = readiness
+        .payload
+        .get("legal_checks")
+        .unwrap_or(&readiness.payload["checks"]);
+    let legal_passed = |key: &str| {
+        legal_checks.as_array().is_some_and(|checks| {
+            checks
+                .iter()
+                .any(|check| check["key"] == key && check["passed"] == true)
+        })
+    };
     let legal_status = json!({
-        "dsgvo_signed": true,
-        "confidentiality_release_signed": true,
-        "identity_verified": true,
-        "document_pack_complete": true,
-        "compliance_completed": true,
-        "contract_status": "signed",
+        "dsgvo_signed": legal_passed("dsgvo_document_signed"),
+        "confidentiality_release_signed": legal_passed("confidentiality_release_signed"),
+        "identity_verified": legal_passed("identity_document_verified"),
+        "document_pack_complete": legal_passed("dsgvo_document_signed") && legal_passed("confidentiality_release_signed") && legal_passed("identity_document_verified"),
+        "compliance_completed": legal_passed("compliance_completed"),
+        "contract_status": if legal_passed("contract_signed") { "signed" } else { "unsigned" },
+        "demo_onboarding": readiness.payload.get("demo_onboarding"),
         "aml_enhanced_due_diligence_required": enhanced_check_required,
         "aml_enhanced_due_diligence": wizard_state
             .get("aml_enhanced_due_diligence")
@@ -6384,7 +6484,11 @@ async fn convert_lead(
                            insurance_number = $16, insurance_type = $17,
                            emergency_contact_name = $18, emergency_contact_phone = $19,
                            emergency_contact_relation = $20, intake_profile = $21,
-                           legal_status = $22,
+                           legal_status = (COALESCE(legal_status, '{}'::jsonb) || $22::jsonb)
+                               - (CASE WHEN $22::jsonb->>'dsgvo_signed' = 'true'
+                                       THEN ARRAY['dsgvo_revoked_at'] ELSE ARRAY[]::text[] END
+                                  || CASE WHEN $22::jsonb->>'confidentiality_release_signed' = 'true'
+                                          THEN ARRAY['confidentiality_release_revoked_at'] ELSE ARRAY[]::text[] END),
                            notes = COALESCE(NULLIF(btrim(notes), ''), $23),
                            source_lead_id = $24, lead_snapshot = $25,
                            nationality = $26, passport_expiry = $27,
@@ -6457,11 +6561,13 @@ async fn convert_lead(
                                    )),
                                true
                            ),
-                           -- The conversion needs consents signed after any
-                           -- revocation, so a revocation is over (owner
-                           -- decision 2026-10-12).
+                           -- Only a real renewed signature ends a revocation;
+                           -- DEV test onboarding preserves these markers.
                            legal_status = (COALESCE(legal_status, '{}'::jsonb) || $5::jsonb)
-                               - ARRAY['dsgvo_revoked_at', 'confidentiality_release_revoked_at'],
+                               - (CASE WHEN $5::jsonb->>'dsgvo_signed' = 'true'
+                                       THEN ARRAY['dsgvo_revoked_at'] ELSE ARRAY[]::text[] END
+                                  || CASE WHEN $5::jsonb->>'confidentiality_release_signed' = 'true'
+                                          THEN ARRAY['confidentiality_release_revoked_at'] ELSE ARRAY[]::text[] END),
                            notes = COALESCE(NULLIF(btrim(notes), ''), $6),
                            nationality = COALESCE($7, nationality),
                            passport_expiry = COALESCE($8, passport_expiry),
@@ -7051,6 +7157,7 @@ async fn convert_lead(
                 "patient_id": patient_id,
                 "patient_pid": pid.clone(),
                 "conversion_confirmed": true,
+                "demo_onboarding": readiness.payload.get("demo_onboarding"),
             }),
         ),
     )

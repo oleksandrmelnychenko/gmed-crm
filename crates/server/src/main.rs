@@ -65,6 +65,7 @@ async fn main() {
     .with_medication_ai(cfg.medication_ai)
     .with_machine_translation(cfg.machine_translation)
     .with_mailer(cfg.mail)
+    .with_dev_demo_onboarding(cfg.dev_demo_onboarding)
     .with_document_signatures(signature_provider);
     gmed_server::document_signatures::spawn_worker(app_state.clone());
     gmed_server::mail::delivery::spawn_scheduler(app_state.clone());

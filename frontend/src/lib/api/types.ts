@@ -149,6 +149,7 @@ interface LeadLifecycle {
 }
 
 interface LeadReadiness {
+  demo_onboarding?: { enabled: boolean; applied: boolean; credited_checks: string[]; request_ids: string[] };
   qualification_ready: boolean;
   conversion_ready: boolean;
   qualification_reasons: string[];

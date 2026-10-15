@@ -29,6 +29,16 @@ function render(contractDocument: DocumentItem | null, orderDocument: DocumentIt
 }
 
 describe("lead signing package source", () => {
+  it("uses distinct DEMO statuses when DEV readiness credits test signatures", () => {
+    const html = renderToStaticMarkup(<LeadSigningPackagePanel leadId="synthetic-lead"
+      contractDocument={document("contract", false)} orderDocument={document("order", false)}
+      contractSigned={false} inheritedContract={false} demoChecks={["contract_signed", "order_signed_patient"]} onDone={() => {}} />);
+    expect(html).toContain("Рамочный договор: DEMO-подпись");
+    expect(html).toContain("Заказ: DEMO-подпись");
+    expect(html).not.toContain("Рамочный договор: не подписан");
+    expect(html).not.toContain("Заказ: не подписан");
+    expect(html).toContain('data-signed="false"');
+  });
   it("starts the complete package from the current unsigned contract", () => {
     const html = render(document("contract-v1", false), document("order-v1", false));
     expect(html).toContain('data-document-signature-id="contract-v1"');

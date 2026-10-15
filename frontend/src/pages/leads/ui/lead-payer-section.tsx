@@ -990,6 +990,7 @@ export function LeadPayerSignatureFlow({
   errorText,
   payerPackage,
   signatureDocumentId,
+  demoChecks = [],
 }: {
   leadId: string;
   status: PayerDeclarationStatus | null;
@@ -1002,6 +1003,7 @@ export function LeadPayerSignatureFlow({
   errorText: (error: unknown) => string;
   payerPackage?: LeadPayerSignatureFlowPackage | null;
   signatureDocumentId?: string;
+  demoChecks?: readonly string[];
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1012,6 +1014,12 @@ export function LeadPayerSignatureFlow({
   const { user } = useAuth();
   const summary = useSignatureSummary(user && ["ceo", "patient_manager"].includes(user.role) ? user.id : undefined, signatureDocumentId);
   const operationalProgress = summary?.document_id === signatureDocumentId && summary?.status === "pending" && summary.progress?.total ? summary.progress : null;
+  const completedDemo = summary?.document_id === signatureDocumentId && summary?.status === "completed" && summary.test_mode;
+  const signatureEvidenceShown = Boolean(operationalProgress || completedDemo);
+  const demoAccepted = completedDemo && demoChecks.length > 0;
+  const agencyBlocking = status?.agency_blocking.filter((code) =>
+    !(demoAccepted && ((code === "client_order_signature_missing" && demoChecks.includes("order_signed_patient"))
+      || (code === "cost_assumption_unsigned" && demoChecks.includes("cost_assumption_signed"))))) ?? [];
   const required = Boolean(status?.cost_assumption.required);
   const orderId = status?.order_id ?? null;
   const standaloneKept = standaloneCostAssumptionKept(packageState);
@@ -1062,11 +1070,17 @@ export function LeadPayerSignatureFlow({
         </Button>
       ) : undefined}
     >
-      {operationalProgress && summary ? <div className="space-y-2">
-        <SignatureProgressChips progress={operationalProgress} testMode={summary.test_mode} lang={tx("ru", "de")} />
-        <StatusChip tone="neutral">{summary.test_mode
-          ? tx("DEMO не подтверждает юридическую подпись заказа", "DEMO bestätigt keine rechtswirksame Auftragsunterschrift")
-          : tx("Заказ: подписание пакета ещё не завершено", "Auftrag: Paketunterzeichnung noch nicht abgeschlossen")}</StatusChip>
+      {signatureEvidenceShown && summary ? <div className="space-y-2">
+        {completedDemo
+          ? <StatusChip tone="success">{tx("DEMO · Тестовый пакет подписан", "DEMO · Testpaket unterzeichnet")}</StatusChip>
+          : operationalProgress ? <SignatureProgressChips progress={operationalProgress} testMode={summary.test_mode} lang={tx("ru", "de")} /> : null}
+        <StatusChip tone="neutral">{demoAccepted
+          ? tx("DEV · Тестовые подписи зачтены для оформления. Выполните остальные проверки готовности.", "DEV · Testunterschriften für die Aufnahme angerechnet. Die übrigen Bereitschaftsprüfungen abschließen.")
+          : completedDemo
+          ? tx("Для создания пациента нужны юридически действительные подписи. DEMO не подтверждает договор, заказ и согласия.", "Für die Patientenanlage sind rechtswirksame Unterschriften erforderlich. DEMO bestätigt Vertrag, Auftrag und Einwilligungen nicht.")
+          : summary.test_mode
+            ? tx("DEMO не подтверждает юридическую подпись заказа", "DEMO bestätigt keine rechtswirksame Auftragsunterschrift")
+            : tx("Заказ: подписание пакета ещё не завершено", "Auftrag: Paketunterzeichnung noch nicht abgeschlossen")}</StatusChip>
       </div> : <div className="flex flex-wrap items-center gap-x-2 gap-y-1" aria-label={tx("Порядок подписания", "Reihenfolge der Unterschriften")}>
         <SequenceStep state={sequence.client} actor="client" tx={tx} />
         <ArrowRight aria-hidden="true" className="size-3.5 text-muted-foreground" />
@@ -1111,18 +1125,18 @@ export function LeadPayerSignatureFlow({
           {errorText(packageController.error)}
         </p>
       ) : null}
-      {status && !status.agency_signed_order && status.agency_blocking.length > 0 ? (
+      {status && !status.agency_signed_order && agencyBlocking.length > 0 ? (
         <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2">
           <CircleAlert aria-hidden="true" className="mt-0.5" />
           <span className="min-w-0">
-            <span className="block font-semibold">{operationalProgress
+            <span className="block font-semibold">{signatureEvidenceShown
               ? tx("Для юридического подтверждения заказа:", "Für die rechtswirksame Bestätigung des Auftrags:")
               : tx("GMED сможет подписать, когда:", "GMED kann unterschreiben, sobald:")}</span>
             <span role="list" className="mt-1 block space-y-0.5">
-              {status.agency_blocking.map((code) => (
+              {agencyBlocking.map((code) => (
                 <span role="listitem" key={code} className="flex items-start gap-1.5">
                   <span aria-hidden="true">·</span>
-                  <span>{operationalProgress && code === "client_order_signature_missing"
+                  <span>{signatureEvidenceShown && code === "client_order_signature_missing"
                     ? summary?.test_mode
                       ? tx("Нужна юридически действительная подпись заказа", "Eine rechtswirksame Auftragsunterschrift ist erforderlich")
                       : tx("Завершите подписание пакета в Skribble", "Paketunterzeichnung in Skribble abschließen")

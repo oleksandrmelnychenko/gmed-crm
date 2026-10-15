@@ -18,6 +18,7 @@ export function LeadSigningPackagePanel({
   contractSigned,
   inheritedContract,
   onDone,
+  demoChecks = [],
 }: {
   leadId: string;
   contractDocument: DocumentItem | null;
@@ -25,6 +26,7 @@ export function LeadSigningPackagePanel({
   contractSigned: boolean;
   inheritedContract: boolean;
   onDone: () => void;
+  demoChecks?: readonly string[];
 }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
@@ -71,12 +73,16 @@ export function LeadSigningPackagePanel({
               ? tx("Рамочный договор: подписан на бумаге", "Rahmenvertrag: auf Papier unterzeichnet")
               : tx("Рамочный договор: подписан", "Rahmenvertrag: unterzeichnet")}</StatusChip>
           ) : contractDocument ? (
-            <StatusChip tone="warning">{tx("Рамочный договор: не подписан", "Rahmenvertrag: nicht unterzeichnet")}</StatusChip>
+            <StatusChip tone={demoChecks.includes("contract_signed") ? "info" : "warning"}>{demoChecks.includes("contract_signed")
+              ? tx("Рамочный договор: DEMO-подпись", "Rahmenvertrag: DEMO-Unterschrift")
+              : tx("Рамочный договор: не подписан", "Rahmenvertrag: nicht unterzeichnet")}</StatusChip>
           ) : null}
           {orderDocument ? (
-            <StatusChip tone={orderDocument.signed_at ? "success" : "warning"}>{orderDocument.signed_at
+            <StatusChip tone={orderDocument.signed_at ? "success" : demoChecks.includes("order_signed_patient") ? "info" : "warning"}>{orderDocument.signed_at
               ? tx("Заказ: подписан", "Auftrag: unterzeichnet")
-              : tx("Заказ: не подписан", "Auftrag: nicht unterzeichnet")}</StatusChip>
+              : demoChecks.includes("order_signed_patient")
+                ? tx("Заказ: DEMO-подпись", "Auftrag: DEMO-Unterschrift")
+                : tx("Заказ: не подписан", "Auftrag: nicht unterzeichnet")}</StatusChip>
           ) : null}
         </div>
         {summary && summary.document_id === source?.id ? <div className="space-y-1.5" data-current-package-status>

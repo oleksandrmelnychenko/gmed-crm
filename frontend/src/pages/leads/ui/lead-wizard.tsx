@@ -2350,8 +2350,8 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Primary concern is missing": tx("Укажите причину обращения", "Anliegen angeben"),
     "Requested specialty is missing": tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
     "Identity document is not verified": tx("Подтвердите документ, удостоверяющий личность", "Ausweisdokument bestätigen"),
-    "Signed DSGVO document is missing": tx("Создайте и подтвердите документ согласий", "Einwilligungsdokument erstellen und bestätigen"),
-    "Signed confidentiality release is missing": tx("Создайте и подтвердите освобождение от медицинской тайны", "Schweigepflichtsentbindung erstellen und bestätigen"),
+    "Signed DSGVO document is missing": tx("Нужен подписанный документ согласий", "Unterzeichnetes Einwilligungsdokument erforderlich"),
+    "Signed confidentiality release is missing": tx("Нужно подписанное освобождение от медицинской тайны", "Unterzeichnete Schweigepflichtsentbindung erforderlich"),
     "Enhanced due diligence document is missing": tx("Заполните усиленную AML-проверку и создайте документ", "Verstärkte AML-Sorgfaltsprüfung ausfüllen und Dokument erstellen"),
     "Enhanced due diligence document is not signed": tx("Получите подпись на документе усиленной AML-проверки", "Unterschrift für die verstärkte AML-Sorgfaltsprüfung einholen"),
     "Risk assessment waits for a staff decision": tx("Нужно решение по оценке риска (документы → «Оценка риска»)", "Entscheidung zur Risikobewertung nötig (Unterlagen → „Risikobewertung“)"),
@@ -6925,6 +6925,7 @@ ${serviceCommentLines.join("\n")}`
   const renderPayerSignatureFlow = (packagePanel: boolean) => leadId ? (
     <LeadPayerSignatureFlow
       leadId={leadId}
+      demoChecks={lead?.readiness.demo_onboarding?.credited_checks}
       signatureDocumentId={sortWizardDocumentsNewestFirst(commercialDocuments.single_order)[0]?.id
         ?? (inheritedContract ? undefined : sortWizardDocumentsNewestFirst(commercialDocuments.framework_contract)[0]?.id)}
       status={payer.data?.status ?? null}
@@ -6970,6 +6971,7 @@ ${serviceCommentLines.join("\n")}`
   const previousStep = STEPS[stepIndex - 1];
   const nextStep = STEPS[stepIndex + 1];
   const commercialReady = Boolean(readiness.get("commercial")) && quoteAndPrepaymentReady;
+  const demoSignatureChecks = lead?.readiness.demo_onboarding?.credited_checks ?? [];
   const conversionReady = Boolean(lead?.readiness.conversion_ready) && quoteAndPrepaymentReady;
   const visibleCommercialSaveFeedback = commercialSaveFeedback?.followsReadiness
     ? commercialReadinessFeedback(lead?.readiness, tx)
@@ -9110,6 +9112,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               {leadId ? (
                 <LeadSigningPackagePanel
+                  demoChecks={lead?.readiness.demo_onboarding?.credited_checks}
                   leadId={leadId}
                   contractDocument={inheritedContract ? null : sortWizardDocumentsNewestFirst(commercialDocuments.framework_contract)[0] ?? null}
                   orderDocument={sortWizardDocumentsNewestFirst(commercialDocuments.single_order)[0] ?? null}
@@ -9125,7 +9128,9 @@ ${serviceCommentLines.join("\n")}`
                     <span className="inline-flex flex-wrap items-center gap-2">
                       <span>{tx("Рамочный договор", "Rahmenvertrag")}</span>
                       <StatusBadge tone={contract?.status === "signed" ? "success" : "neutral"}>
-                        {contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")}
+                        {contract?.status === "signed" ? tx("Подписан", "Unterzeichnet")
+                          : demoSignatureChecks.includes("contract_signed") ? tx("DEMO-подпись", "DEMO-Unterschrift")
+                            : tx("Ожидает подписи", "Unterschrift offen")}
                       </StatusBadge>
                     </span>
                   )}
@@ -9392,13 +9397,17 @@ ${serviceCommentLines.join("\n")}`
                     >
                       <div className="min-w-0 flex-1 space-y-1">
                         <StateMark
-                          done={signedPatient}
-                          label={signedPatient
+                          done={signedPatient || demoSignatureChecks.includes("order_signed_patient")}
+                          label={demoSignatureChecks.includes("order_signed_patient")
+                            ? tx("DEV · Клиент подписал тестовый заказ", "DEV · Kunde hat den Testauftrag unterzeichnet")
+                            : signedPatient
                             ? tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")
                             : tx("Юридическая подпись заказа ещё не подтверждена", "Rechtswirksame Auftragsunterschrift noch nicht bestätigt")}
                         />
                         <p className={cn("text-xs", manualOnly ? "text-amber-800 dark:text-amber-300" : "text-muted-foreground")}>
-                          {manualOnly
+                          {demoSignatureChecks.includes("order_signed_patient")
+                            ? tx("Тестовая подпись зачтена для оформления на DEV.", "Testunterschrift für die Aufnahme auf DEV angerechnet.")
+                            : manualOnly
                             ? tx(
                                 "Отмечено вручную, подписанный документ заказа отсутствует. Отметка продолжает действовать; загрузите скан подписанного экземпляра.",
                                 "Manuell markiert, kein unterschriebener Einzelauftrag vorhanden. Die Markierung zählt weiterhin; laden Sie den Scan des unterschriebenen Exemplars hoch.",
@@ -9429,7 +9438,7 @@ ${serviceCommentLines.join("\n")}`
                           </p>
                         ) : null}
                       </div>
-                      {documentToSign ? (
+                      {documentToSign && !demoSignatureChecks.includes("order_signed_patient") ? (
                         <PaperSignatureConfirmButton
                           documentId={documentToSign.id}
                           title={wizardDocumentFilename(documentToSign)}
@@ -9444,7 +9453,9 @@ ${serviceCommentLines.join("\n")}`
                     </div>
                   );
                 })()}
-                <ToggleRow
+                {demoSignatureChecks.includes("order_signed_agency")
+                  ? <StatusChip tone="info">{tx("DEV · GMED подписал тестовый заказ", "DEV · GMED hat den Testauftrag unterzeichnet")}</StatusChip>
+                  : <ToggleRow
                   checked={signedAgency}
                   disabled={isBusy}
                   onChange={(checked) => {
@@ -9455,7 +9466,7 @@ ${serviceCommentLines.join("\n")}`
                     );
                   }}
                   label={tx("Агентство подтвердило заказ", "Auftrag von der Agentur bestätigt")}
-                />
+                />}
                 </div>
               </Section>
               <Section

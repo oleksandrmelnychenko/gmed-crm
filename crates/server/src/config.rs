@@ -35,6 +35,8 @@ pub struct Config {
     /// Outgoing e-mail through Mittaro (transactional e-mail API hosted in
     /// Germany). Without an API key no e-mail is sent.
     pub mail: MailConfig,
+    /// Explicit DEV-only test onboarding; never grants legal signature effects.
+    pub dev_demo_onboarding: bool,
 }
 
 /// Default send endpoint of the Mittaro API.
@@ -236,6 +238,7 @@ impl Config {
                 service_url: machine_translation_url,
             },
             mail,
+            dev_demo_onboarding: env_flag("GMED_DEV_DEMO_ONBOARDING").0,
         }
     }
 }

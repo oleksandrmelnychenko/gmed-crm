@@ -3,6 +3,7 @@ pub mod closure;
 pub mod connection;
 mod create;
 pub(crate) mod defaults;
+pub(crate) mod demo_onboarding;
 mod effects;
 pub(crate) mod frames;
 mod legal;

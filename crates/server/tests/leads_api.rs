@@ -1548,6 +1548,232 @@ async fn full_lead_lifecycle() {
     assert!(body["message"].as_str().unwrap().contains("already"));
 }
 
+#[tokio::test]
+async fn completed_demo_allows_dev_conversion_without_creating_legal_signature_proof() {
+    demo_conversion(false).await;
+}
+
+#[tokio::test]
+async fn demo_repeat_conversion_preserves_revoked_consents() {
+    demo_conversion(true).await;
+}
+
+async fn demo_conversion(repeat: bool) {
+    use sha2::{Digest, Sha256};
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let lead = insert_patient_first_wizard_lead(&app, "demo-conversion").await;
+    sqlx::query("UPDATE leads SET intake_model='legacy' WHERE id=$1")
+        .bind(lead)
+        .execute(pool)
+        .await
+        .unwrap();
+    let artifacts = seed_complete_lead_onboarding(&app, lead).await;
+    let repeat_patient = if repeat {
+        let patient = seed_repeat_patient(&app, true).await;
+        sqlx::query("UPDATE patients SET legal_status=jsonb_build_object('dsgvo_revoked_at',now(),'confidentiality_release_revoked_at',now()) WHERE id=$1")
+            .bind(patient).execute(pool).await.unwrap();
+        sqlx::query(
+            "UPDATE leads SET intake_model='patient_first',prospect_patient_id=$2 WHERE id=$1",
+        )
+        .bind(lead)
+        .bind(patient)
+        .execute(pool)
+        .await
+        .unwrap();
+        Some(patient)
+    } else {
+        None
+    };
+    sqlx::query("UPDATE leads SET compliance_status='documents_sent' WHERE id=$1")
+        .bind(lead)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE framework_contracts SET status='sent',signed_at=NULL WHERE id=$1")
+        .bind(artifacts.contract_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE orders SET signed_patient=false,signed_agency=false,signed_patient_at=NULL,signed_agency_at=NULL,signed_at=NULL,client_terms_changed_at=NULL WHERE id=$1").bind(artifacts.order_id).execute(pool).await.unwrap();
+    sqlx::query("UPDATE documents SET signed_at=NULL,signed_by=NULL,generated_template_id=CASE compliance_kind WHEN 'dsgvo' THEN 'privacy_consents' WHEN 'confidentiality_release' THEN 'confidentiality_release' ELSE generated_template_id END WHERE lead_id=$1 AND compliance_kind IS DISTINCT FROM 'identity'")
+        .bind(lead).execute(pool).await.unwrap();
+
+    let source_ids: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM documents WHERE lead_id=$1 AND compliance_kind IS DISTINCT FROM 'identity' AND generated_template_id IS DISTINCT FROM 'cost_estimate' ORDER BY generated_template_id")
+        .bind(lead).fetch_all(pool).await.unwrap();
+    let bytes = b"%PDF-1.7\nSynthetic DEV test document\n%%EOF";
+    let hash = hex::encode(Sha256::digest(bytes));
+    let own_choice = json!({"_own_consent_choice": {
+        "id":Uuid::new_v4(), "choices":{"agency_processing":true,"doctors_to_agency":true,"data_system":true},
+        "recipients":[], "chosen_at":chrono::Utc::now(), "source":"lead_portal", "access_kind":"self"
+    }});
+    sqlx::query("INSERT INTO consent_form_choices(id,template_id,lead_id,choices,access_kind,source,language,text_version,chosen_at) VALUES($1,'privacy_consents',$2,$3,'self','lead_portal','de','synthetic-dev-test',$4)")
+        .bind(Uuid::parse_str(own_choice["_own_consent_choice"]["id"].as_str().unwrap()).unwrap())
+        .bind(lead).bind(&own_choice["_own_consent_choice"]["choices"])
+        .bind(chrono::DateTime::parse_from_rfc3339(own_choice["_own_consent_choice"]["chosen_at"].as_str().unwrap()).unwrap())
+        .execute(pool).await.unwrap();
+    let mut blob_paths = Vec::new();
+    tokio::fs::create_dir_all("uploads/documents")
+        .await
+        .unwrap();
+    for id in &source_ids {
+        let key = format!("dev-onboarding-{id}.pdf");
+        let path = std::path::Path::new("uploads/documents").join(&key);
+        tokio::fs::write(
+            &path,
+            gmed_server::crypto::shared_registry()
+                .unwrap()
+                .seal_blob(bytes)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        blob_paths.push(path);
+        sqlx::query("UPDATE documents SET storage_key=$2,generated_bindings=COALESCE(generated_bindings,'{}'::jsonb) || $3::jsonb WHERE id=$1")
+            .bind(id)
+            .bind(key)
+            .bind(&own_choice)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query("UPDATE documents SET order_intake_context=repeat_order_document_context(order_id) WHERE lead_id=$1 AND order_id IS NOT NULL")
+        .bind(lead).execute(pool).await.unwrap();
+    let result = Uuid::new_v4();
+    sqlx::query("INSERT INTO documents(id,lead_id,auto_name,art,category,mime_type,storage_key,version_root_document_id,uploaded_by,ursprung) VALUES($1,$2,'TEST synthetic result','signature_evidence','signature','application/pdf','synthetic-result.pdf',$1,$3,'electronic_signature_package')")
+        .bind(result).bind(lead).bind(app.patient_manager_id).execute(pool).await.unwrap();
+    let request = Uuid::new_v4();
+    // The immutable snapshot mirrors the context the provider verified.
+    let context_sql = "jsonb_build_object('patient_id',d.patient_id,'lead_id',d.lead_id,'order_id',d.order_id,'appointment_id',d.appointment_id,'art',d.art,'template',d.generated_template_id,'bindings',d.generated_bindings,'storage_key',d.storage_key,'version_root',d.version_root_document_id,'version',d.version_number)";
+    sqlx::query(&format!("INSERT INTO document_signature_requests(id,source_document_id,requested_by,source_sha256,source_context,signers,provider_account,test_mode,status,result_document_id,report_storage_key,report_sha256,signed_sha256,is_package) SELECT $1,d.id,$3,$4,{context_sql},'[]','synthetic-demo',true,'pending',$5,'synthetic-report.pdf',$4,$4,true FROM documents d WHERE d.id=$2"))
+        .bind(request).bind(source_ids[0]).bind(app.patient_manager_id).bind(&hash).bind(result).execute(pool).await.unwrap();
+    for (position, id) in source_ids.iter().enumerate() {
+        sqlx::query(&format!("INSERT INTO document_signature_members(request_id,document_id,position,sha256,source_context) SELECT $1,d.id,$3,$4,{context_sql} FROM documents d WHERE d.id=$2"))
+            .bind(request).bind(id).bind((position+1) as i16).bind(&hash).execute(pool).await.unwrap();
+    }
+    let dev_state = app
+        .suite
+        .state
+        .clone()
+        .with_mailer(gmed_server::config::MailConfig {
+            console_url: Some("https://console-dev.gmed-health.com".into()),
+            ..Default::default()
+        })
+        .with_dev_demo_onboarding(true);
+    assert!(dev_state.dev_demo_onboarding);
+    let production_state = app
+        .suite
+        .state
+        .clone()
+        .with_mailer(gmed_server::config::MailConfig {
+            console_url: Some("https://console.gmed-health.com".into()),
+            ..Default::default()
+        })
+        .with_dev_demo_onboarding(true);
+    assert!(!production_state.dev_demo_onboarding);
+    let peer = axum::Extension(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+        [127, 0, 0, 1],
+        40123,
+    ))));
+    let dev = gmed_server::build_app_for_role_contract_tests(dev_state).layer(peer);
+    let production = gmed_server::build_app_for_role_contract_tests(production_state).layer(peer);
+    let pm = app.auth_header("patient_manager");
+    let path = format!("/api/v1/leads/{lead}");
+    let (status, pending) = json_request(&dev, "GET", &path, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{pending}");
+    assert_eq!(pending["readiness"]["conversion_ready"], false, "{pending}");
+    sqlx::query(
+        "UPDATE document_signature_requests SET status='completed',signed_at=now() WHERE id=$1",
+    )
+    .bind(request)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (_, live) = json_request(&production, "GET", &path, &pm, None).await;
+    assert_eq!(live["readiness"]["conversion_ready"], false, "{live}");
+    let (_, ready) = json_request(&dev, "GET", &path, &pm, None).await;
+    assert_eq!(ready["readiness"]["conversion_ready"], true, "{ready}");
+    assert_eq!(ready["readiness"]["demo_onboarding"]["applied"], true);
+
+    // Changing the terms or the source file invalidates the archived test proof.
+    sqlx::query("UPDATE orders SET client_terms_changed_at=now() WHERE id=$1")
+        .bind(artifacts.order_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (_, changed) = json_request(&dev, "GET", &path, &pm, None).await;
+    assert_eq!(changed["readiness"]["conversion_ready"], false, "{changed}");
+    sqlx::query("UPDATE orders SET client_terms_changed_at=NULL WHERE id=$1")
+        .bind(artifacts.order_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    tokio::fs::write(&blob_paths[0], b"%PDF-1.7\nchanged source\n%%EOF")
+        .await
+        .unwrap();
+    let (_, changed) = json_request(&dev, "GET", &path, &pm, None).await;
+    assert_eq!(changed["readiness"]["conversion_ready"], false, "{changed}");
+    tokio::fs::write(
+        &blob_paths[0],
+        gmed_server::crypto::shared_registry()
+            .unwrap()
+            .seal_blob(bytes)
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let (status, converted) = json_request(
+        &dev,
+        "POST",
+        &format!("{path}/wizard-convert"),
+        &pm,
+        Some(json!({"confirmed":true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    let patient = Uuid::parse_str(converted["patient_id"].as_str().unwrap()).unwrap();
+    if let Some(existing) = repeat_patient {
+        assert_eq!(patient, existing);
+    }
+    let legal: Value = sqlx::query_scalar("SELECT legal_status FROM patients WHERE id=$1")
+        .bind(patient)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(legal["dsgvo_signed"], false, "{legal}");
+    assert_eq!(legal["confidentiality_release_signed"], false);
+    assert_eq!(legal["contract_status"], "unsigned");
+    assert_eq!(legal["demo_onboarding"]["applied"], true);
+    if repeat {
+        assert!(legal["dsgvo_revoked_at"].is_string(), "{legal}");
+        assert!(
+            legal["confidentiality_release_revoked_at"].is_string(),
+            "{legal}"
+        );
+    }
+    let signed: bool =
+        sqlx::query_scalar("SELECT signed_patient OR signed_agency FROM orders WHERE id=$1")
+            .bind(artifacts.order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(!signed);
+    let effects: bool = sqlx::query_scalar(
+        "SELECT effects_applied_at IS NOT NULL FROM document_signature_requests WHERE id=$1",
+    )
+    .bind(request)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(!effects);
+    let audit:Value = sqlx::query_scalar("SELECT context FROM audit_log WHERE action='convert_lead' AND entity_id=$1 ORDER BY created_at DESC LIMIT 1").bind(lead).fetch_one(pool).await.unwrap();
+    assert_eq!(audit["demo_onboarding"]["applied"], true);
+    for path in blob_paths {
+        tokio::fs::remove_file(path).await.unwrap();
+    }
+}
+
 // ── Stats tests ─────────────────────────────────────────────
 
 #[tokio::test]
