@@ -23,6 +23,7 @@ use axum::extract::{ConnectInfo, Request as AxumRequest, State};
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
+use base64::Engine;
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -104,6 +105,7 @@ struct Mock {
     owner: String,
     requests: Arc<Mutex<HashMap<String, Value>>>,
     payloads: Arc<Mutex<Vec<Value>>>,
+    attachments: Arc<Mutex<HashMap<String, Vec<u8>>>>,
 }
 
 impl Mock {
@@ -189,6 +191,13 @@ async fn mock_handler(State(mock): State<Mock>, request: AxumRequest) -> Respons
             mock.requests.lock().unwrap().insert(id, value.clone());
             axum::Json(value).into_response()
         }
+        ("PUT", ["signature-requests"]) => {
+            let id = parsed["id"].as_str().unwrap().to_string();
+            let mut requests = mock.requests.lock().unwrap();
+            let value = requests.get_mut(&id).unwrap();
+            value["signatures"] = signatures_of(&parsed["signatures"]);
+            axum::Json(value.clone()).into_response()
+        }
         ("GET", ["signature-requests"]) => axum::Json(json!(
             mock.requests
                 .lock()
@@ -202,6 +211,40 @@ async fn mock_handler(State(mock): State<Mock>, request: AxumRequest) -> Respons
             Some(value) => axum::Json(value.clone()).into_response(),
             None => StatusCode::NOT_FOUND.into_response(),
         },
+        ("POST", ["signature-requests", id, "attachments"]) => {
+            let attachment_id = Uuid::new_v4().to_string();
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(parsed["content"].as_str().unwrap())
+                .unwrap();
+            mock.attachments
+                .lock()
+                .unwrap()
+                .insert(attachment_id.clone(), bytes);
+            let mut requests = mock.requests.lock().unwrap();
+            let value = requests.get_mut(*id).unwrap();
+            value["attachments"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"filename":parsed["filename"],"attachment_id":attachment_id}));
+            axum::Json(value.clone()).into_response()
+        }
+        (
+            "GET",
+            [
+                "signature-requests",
+                _,
+                "attachments",
+                attachment,
+                "content",
+            ],
+        ) => mock
+            .attachments
+            .lock()
+            .unwrap()
+            .get(*attachment)
+            .cloned()
+            .map(IntoResponse::into_response)
+            .unwrap_or_else(|| StatusCode::NOT_FOUND.into_response()),
         ("POST", ["signature-requests", id, "withdraw"]) => {
             if let Some(value) = mock.requests.lock().unwrap().get_mut(*id) {
                 value["status_overall"] = json!("WITHDRAWN");
@@ -763,7 +806,16 @@ async fn until_pending(app: &App, id: Uuid) {
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
-    panic!("request {id} did not become pending");
+    let last_error: Option<String> =
+        sqlx::query_scalar("SELECT last_error FROM document_signature_requests WHERE id = $1")
+            .bind(id)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    panic!(
+        "request {id} reached {} instead of pending ({last_error:?})",
+        request_status(app.pool(), id).await
+    );
 }
 
 /// Polls the provider until the request is completed.
@@ -1450,23 +1502,142 @@ async fn a_change_makes_the_package_outdated_and_it_is_prepared_again() {
     assert_eq!(status, StatusCode::ACCEPTED, "{resent}");
     assert_ne!(resent["package"]["request_id"], request_id.to_string());
 
-    // The client's own estimate can be out for the client's signature while
-    // the payer's package is: two documents, two requests.
+    // The client's estimate belongs to the complete initial client packet.
+    // It is independent of the payer's copy and its separate packet.
+    let payer_package = package(&app, lead_id).await;
+    let client_estimate = payer_package["cost_estimate_document_id"].clone();
+    let client_email: String = sqlx::query_scalar("SELECT email FROM leads WHERE id=$1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let client_signers = json!([
+        { "first_name": "Mia", "last_name": "Muster", "email": client_email, "role": "client" },
+        { "first_name": "Max", "last_name": "Beispiel", "email": "max.beispiel@example.com", "role": "agency" }
+    ]);
+    let (status, incomplete) = with_login(
+        &app,
+        "POST",
+        "/api/v1/signature-packages",
+        &app.ceo(),
+        Some(json!({ "document_ids": [client_estimate], "signers": client_signers })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{incomplete}");
+    assert_eq!(incomplete["error"], "onboarding_package_incomplete");
+    assert_eq!(incomplete["onboarding_manifest"]["expected_count"], 6);
+
+    // The client chooses the core consents before their PDFs are generated.
+    let (status, chosen) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/consent-choices"),
+        &ready.patient,
+        Some(json!({
+            "choices": { "agency_processing": true, "doctors_to_agency": true, "data_system": true },
+            "version": "2026-10-12", "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{chosen}");
+    // The patient form records the latest sent answers, after the edits above.
+    request_sent(&app, lead_id).await;
+    let mut client_documents = Vec::new();
+    let mut attachments = Vec::new();
+    for template in [
+        "framework_contract",
+        "single_order",
+        "order_cost_estimate",
+        "lead_self_disclosure",
+        "confidentiality_release",
+        "privacy_consents",
+        "privacy_information",
+    ] {
+        if template == "order_cost_estimate" {
+            client_documents.push(client_estimate.clone());
+            continue;
+        }
+        let (status, generated) = with_login(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &app.ceo(),
+            Some(json!({
+                "template_id": template, "lead_id": lead_id,
+                "order_id": ready.order_id, "language": "de"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{template}: {generated}");
+        if template == "privacy_information" {
+            attachments.push(generated["id"].clone());
+        } else {
+            client_documents.push(generated["id"].clone());
+        }
+    }
+    // The complete packet includes the framework contract: GMED may sign it
+    // only after the payer's cost assumption. Signing the payer's copy must
+    // leave the client's own estimate unsigned and available for its packet.
+    let payer_request = Uuid::parse_str(resent["package"]["request_id"].as_str().unwrap()).unwrap();
+    until_pending(&app, payer_request).await;
+    app.mock.sign(payer_request);
+    until_completed(&app, payer_request).await;
+    let client_signed_at: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT signed_at FROM documents WHERE id=$1")
+            .bind(Uuid::parse_str(client_estimate.as_str().unwrap()).unwrap())
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(client_signed_at.is_none());
+    assert_eq!(package(&app, lead_id).await["package"]["status"], "signed");
     let (status, client) = with_login(
         &app,
         "POST",
         "/api/v1/signature-packages",
         &app.ceo(),
         Some(json!({
-            "document_ids": [package(&app, lead_id).await["cost_estimate_document_id"]],
-            "signers": [
-                { "first_name": "Mia", "last_name": "Muster", "email": "mia.client@example.com", "role": "client" },
-                { "first_name": "Max", "last_name": "Beispiel", "email": "max.beispiel@example.com", "role": "agency" }
-            ]
+            "document_ids": client_documents,
+            "attachment_ids": attachments,
+            "signers": client_signers
         })),
     )
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{client}");
+    let client_request = Uuid::parse_str(client["id"].as_str().unwrap()).unwrap();
+    assert_ne!(client_request, payer_request);
+    until_pending(&app, client_request).await;
+    assert_eq!(request_status(pool, payer_request).await, "completed");
+    let client_members: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT source_document_id FROM document_signature_requests WHERE id=$1
+         UNION ALL SELECT document_id FROM document_signature_members WHERE request_id=$1",
+    )
+    .bind(client_request)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let payer_members: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT source_document_id FROM document_signature_requests WHERE id=$1
+         UNION ALL SELECT document_id FROM document_signature_members WHERE request_id=$1",
+    )
+    .bind(payer_request)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(client_members.len(), 6);
+    assert_eq!(payer_members.len(), 4);
+    assert!(client_members.contains(&Uuid::parse_str(client_estimate.as_str().unwrap()).unwrap()));
+    let payer_estimate = Uuid::parse_str(
+        slot(&payer_package, "cost_estimate")["document_id"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(payer_members.contains(&payer_estimate));
+    assert!(client_members.iter().all(|id| !payer_members.contains(id)));
+    assert_eq!(
+        package(&app, lead_id).await["package"]["request_id"],
+        payer_request.to_string()
+    );
     let _ = (&ready.token, &ready.order_number);
 }
 
