@@ -270,6 +270,15 @@ async fn stored_choice(
     })
 }
 
+/// Explicit contractual choice, shared by patient and unconverted-lead documents.
+pub(crate) async fn selected_kind(
+    conn: &mut PgConnection,
+    order_id: Option<Uuid>,
+    contract_id: Option<Uuid>,
+) -> Result<Option<PartyKind>, sqlx::Error> {
+    Ok(stored_choice(conn, order_id, contract_id).await?.kind)
+}
+
 /// The patient's recorded parents and guardians, or the named relations.
 pub async fn load_representatives(
     conn: &mut PgConnection,

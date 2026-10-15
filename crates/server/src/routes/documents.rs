@@ -6937,6 +6937,16 @@ fn wrap_text_to_width_precise(
     font_size_pt: f32,
     available_width_mm: f32,
 ) -> Vec<String> {
+    wrap_text_measured(text, available_width_mm, |line| {
+        approx_text_width_mm(line, font_size_pt)
+    })
+}
+
+fn wrap_text_measured(
+    text: &str,
+    available_width_mm: f32,
+    measure: impl Fn(&str) -> f32,
+) -> Vec<String> {
     let normalized = text.trim();
     if normalized.is_empty() {
         return Vec::new();
@@ -6951,7 +6961,7 @@ fn wrap_text_to_width_precise(
         } else {
             format!("{current} {word}")
         };
-        if approx_text_width_mm(&candidate, font_size_pt) <= available_width_mm {
+        if measure(&candidate) <= available_width_mm {
             current = candidate;
             continue;
         }
@@ -6960,7 +6970,7 @@ fn wrap_text_to_width_precise(
             lines.push(std::mem::take(&mut current));
         }
 
-        if approx_text_width_mm(word, font_size_pt) <= available_width_mm {
+        if measure(word) <= available_width_mm {
             current.push_str(word);
             continue;
         }
@@ -6968,9 +6978,7 @@ fn wrap_text_to_width_precise(
         let mut chunk = String::new();
         for ch in word.chars() {
             let candidate = format!("{chunk}{ch}");
-            if !chunk.is_empty()
-                && approx_text_width_mm(&candidate, font_size_pt) > available_width_mm
-            {
+            if !chunk.is_empty() && measure(&candidate) > available_width_mm {
                 lines.push(std::mem::take(&mut chunk));
             }
             chunk.push(ch);
@@ -11305,112 +11313,140 @@ fn build_patient_sticker_html(context: &GeneratedPatientStickerContext) -> Strin
     )
 }
 
+const PATIENT_STICKER_TOO_MUCH_TEXT: &str =
+    "Patient label content does not fit; choose a larger label format";
+
+struct PatientStickerLine {
+    text: String,
+    size_pt: f32,
+    bold: bool,
+    muted: bool,
+    baseline_mm: f32,
+}
+
+struct PatientStickerLayout {
+    margin_mm: f32,
+    width_mm: f32,
+    cursor_mm: f32,
+    lines: Vec<PatientStickerLine>,
+}
+
+impl PatientStickerLayout {
+    fn push(&mut self, text: &str, size_pt: f32, bold: bool, muted: bool, gap_mm: f32) {
+        let font_bytes = if bold {
+            PDF_ARIAL_BOLD_BYTES
+        } else {
+            PDF_ARIAL_REGULAR_BYTES
+        };
+        let face = ttf_parser::Face::parse(font_bytes, 0).ok();
+        let measure = |line: &str| {
+            let Some(face) = &face else {
+                return approx_text_width_mm(line, size_pt);
+            };
+            let units: u32 = line
+                .chars()
+                .map(|character| {
+                    face.glyph_index(character)
+                        .and_then(|glyph| face.glyph_hor_advance(glyph))
+                        .unwrap_or(face.units_per_em() / 2) as u32
+                })
+                .sum();
+            pt_to_mm(size_pt) * units as f32 / face.units_per_em() as f32
+        };
+        for text in wrap_text_measured(text, self.width_mm, measure) {
+            self.lines.push(PatientStickerLine {
+                text,
+                size_pt,
+                bold,
+                muted,
+                baseline_mm: self.cursor_mm - pt_to_mm(size_pt),
+            });
+            self.cursor_mm -= pdf_line_height_mm(size_pt, 1.25);
+        }
+        self.cursor_mm -= gap_mm;
+    }
+}
+
+/// Fit complete lines before drawing: never clip a contact below the label or
+/// silently drop it. Keep a readable minimum font and preserve the paper size.
+fn patient_sticker_layout(
+    context: &GeneratedPatientStickerContext,
+) -> Result<PatientStickerLayout, &'static str> {
+    let compact = context.format.height_mm <= 40;
+    let margin_mm = if compact { 2.5 } else { 5.0 };
+    let salutation = patient_sticker_salutation_line(context);
+    let name = patient_sticker_title_line(context);
+    let meta = patient_sticker_meta_lines(context);
+    let agency = patient_sticker_agency_line(context);
+    for step in 0..=14 {
+        let scale = 1.0 - step as f32 * 0.025;
+        let id_size = if compact { 10.0 } else { 11.5 } * scale;
+        let name_size = if compact { 10.5 } else { 13.0 } * scale;
+        let body_size = if compact { 6.5 } else { 7.8 } * scale;
+        if body_size < 5.0 {
+            break;
+        }
+        let mut layout = PatientStickerLayout {
+            margin_mm,
+            width_mm: context.format.width_mm as f32 - 2.0 * margin_mm,
+            cursor_mm: context.format.height_mm as f32 - margin_mm,
+            lines: Vec::new(),
+        };
+        layout.push(
+            &format!("ID: {}", context.patient_pid),
+            id_size,
+            true,
+            false,
+            0.4 * scale,
+        );
+        layout.push(&salutation, body_size, false, false, 0.0);
+        layout.push(&name, name_size, true, false, 0.5 * scale);
+        for line in &meta {
+            layout.push(line, body_size, false, false, 0.0);
+        }
+        layout.cursor_mm -= 0.5 * scale;
+        layout.push(&agency, body_size, false, true, 0.0);
+        if layout.cursor_mm >= margin_mm {
+            return Ok(layout);
+        }
+    }
+    Err(PATIENT_STICKER_TOO_MUCH_TEXT)
+}
+
 fn build_patient_sticker_pdf(
     context: &GeneratedPatientStickerContext,
 ) -> Result<Vec<u8>, &'static str> {
+    let layout = patient_sticker_layout(context)?;
     let mut document = PdfDocument::new(&context.auto_name);
     let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
-
-    let width_mm = context.format.width_mm as f32;
-    let height_mm = context.format.height_mm as f32;
-    let left_margin_mm = 5.0;
-    let right_margin_mm = 5.0;
-    let top_margin_mm = 5.0;
-    let _bottom_margin_mm = 5.0;
-    let content_width_mm = (width_mm - left_margin_mm - right_margin_mm).max(30.0);
-    let mut y_mm = height_mm - top_margin_mm;
-    let compact = context.format.height_mm <= 40;
-    let id_size = if compact { 10.0 } else { 11.5 };
-    let name_size = if compact { 10.5 } else { 13.0 };
-    let body_size = if compact { 6.5 } else { 7.8 };
-
-    let salutation_line = patient_sticker_salutation_line(context);
-    let title_line = patient_sticker_title_line(context);
-    let meta_lines = patient_sticker_meta_lines(context);
-    let agency_line = patient_sticker_agency_line(context);
-
     let mut ops = Vec::new();
-
-    let push_wrapped = |ops: &mut Vec<Op>,
-                        text: &str,
-                        font: &PdfFontHandle,
-                        size_pt: f32,
-                        color: TreatmentPlanPdfColor,
-                        y_mm_ref: &mut f32| {
-        for line in wrap_text_to_width(text, size_pt, content_width_mm) {
-            append_pdf_text_line(ops, &line, left_margin_mm, *y_mm_ref, size_pt, font, color);
-            *y_mm_ref -= pdf_line_height_mm(size_pt, 1.18);
-        }
-    };
-
-    // ID line ("ID: <pid>")
-    push_wrapped(
-        &mut ops,
-        &format!("ID: {}", context.patient_pid),
-        &bold_handle,
-        id_size,
-        TreatmentPlanPdfColor::Body,
-        &mut y_mm,
-    );
-    y_mm -= 0.8;
-    // Salutation on its own row (Herr/Frau), when known
-    if !salutation_line.is_empty() {
-        push_wrapped(
+    for line in &layout.lines {
+        append_pdf_text_line(
             &mut ops,
-            &salutation_line,
-            &regular_handle,
-            body_size,
-            TreatmentPlanPdfColor::Body,
-            &mut y_mm,
-        );
-        // The name below is set in a much larger font; reserve the remainder of its line
-        // height so its ascenders don't overlap the salutation row above it.
-        y_mm -=
-            (pdf_line_height_mm(name_size, 1.18) - pdf_line_height_mm(body_size, 1.18)).max(0.0);
-    }
-    // Name: "Lastname, Firstname"
-    push_wrapped(
-        &mut ops,
-        if title_line.is_empty() {
-            &context.patient_pid
-        } else {
-            &title_line
-        },
-        &bold_handle,
-        name_size,
-        TreatmentPlanPdfColor::Body,
-        &mut y_mm,
-    );
-    y_mm -= 0.8;
-    // Meta rows: geb. am / KT1 / KT2 / cost code
-    for line in &meta_lines {
-        push_wrapped(
-            &mut ops,
-            line,
-            &regular_handle,
-            body_size,
-            TreatmentPlanPdfColor::Body,
-            &mut y_mm,
+            &line.text,
+            layout.margin_mm,
+            line.baseline_mm,
+            line.size_pt,
+            if line.bold {
+                &bold_handle
+            } else {
+                &regular_handle
+            },
+            if line.muted {
+                TreatmentPlanPdfColor::Muted
+            } else {
+                TreatmentPlanPdfColor::Body
+            },
         );
     }
-    y_mm -= 1.0;
-    // Agency contact block
-    if !agency_line.is_empty() {
-        push_wrapped(
-            &mut ops,
-            &agency_line,
-            &regular_handle,
-            body_size,
-            TreatmentPlanPdfColor::Muted,
-            &mut y_mm,
-        );
-    }
-
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
-    let save_options = pdf_text_save_options();
     Ok(document
-        .with_pages(vec![PdfPage::new(Mm(width_mm), Mm(height_mm), ops)])
-        .save(&save_options, &mut save_warnings))
+        .with_pages(vec![PdfPage::new(
+            Mm(context.format.width_mm as f32),
+            Mm(context.format.height_mm as f32),
+            ops,
+        )])
+        .save(&pdf_text_save_options(), &mut save_warnings))
 }
 
 fn provider_template_body_for_language<'a>(
@@ -16084,6 +16120,62 @@ async fn generate_document(
         None
     };
 
+    // Resolve contractual parties before reuse as well as rendering. The
+    // ordinary intake snapshot does not contain the current custody/parents.
+    let prepared_contract_id = if template.id == "framework_contract" && order_id.is_some() {
+        // Preserve the framework template's existing fallback to the patient's
+        // latest contract when the order has no explicit contract link.
+        match sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT COALESCE((SELECT contract_id FROM orders WHERE id=$1),
+                (SELECT id FROM framework_contracts WHERE patient_id=$2
+                 ORDER BY created_at DESC,id DESC LIMIT 1))",
+        )
+        .bind(order_id)
+        .bind(patient_uuid)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(id) => id,
+            Err(error) => {
+                tracing::error!(error = %error, "load contractual party framework context");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load framework contract context",
+                );
+            }
+        }
+    } else {
+        None
+    };
+    let prepared_contracting = if order_id.is_some()
+        && matches!(
+            template.id,
+            "framework_contract"
+                | "single_order"
+                | "order_cost_estimate"
+                | "payer_cost_estimate"
+                | "cost_coverage_declaration"
+        ) {
+        match load_contracting_doc(
+            &state,
+            patient_uuid,
+            lead_id,
+            order_id,
+            prepared_contract_id,
+            crate::app_time::today(),
+        )
+        .await
+        {
+            Ok(value) => Some(value),
+            Err(response) => return response,
+        }
+    } else {
+        None
+    };
+    let contracting_fingerprint = prepared_contracting
+        .as_ref()
+        .map(ContractingDoc::fingerprint);
+
     // The payer's copy of the cost estimate names the payer of the moment and
     // the client's estimate it was made from: it is made anew every time.
     if let (Some(context), Some(guard), false) = (
@@ -16100,9 +16192,10 @@ async fn generate_document(
              FROM documents d WHERE order_id=$1 AND order_intake_context=$2
                 AND generated_template_id=$3 AND document_language=$4
                 AND status<>'archived' AND file_deleted_at IS NULL
+                AND ($5::text IS NULL OR d.generated_bindings->>'_contracting_party_fingerprint'=$5)
                 AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)
              ORDER BY created_at DESC,id DESC LIMIT 1")
-            .bind(order_id).bind(context).bind(template.id).bind(language)
+            .bind(order_id).bind(context).bind(template.id).bind(language).bind(contracting_fingerprint.as_deref())
             .fetch_optional(&mut **guard).await;
         match existing {
             Ok(Some(document)) => return Json(document).into_response(),
@@ -16450,6 +16543,10 @@ async fn generate_document(
         }
     }
     let mut generated_bindings_snapshot = generated_binding_snapshot(&bindings);
+    if let Some(fingerprint) = contracting_fingerprint {
+        generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_contracting_party_fingerprint"] =
+            json!(fingerprint);
+    }
     if let Some(context) = intake_context.as_ref().or(repeat_context.as_ref()) {
         generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_order_intake_context"] =
             context.clone();
@@ -16847,7 +16944,7 @@ async fn generate_document(
                         r#"SELECT id, contract_number, status, signed_at, valid_from, valid_to, conditions
                            FROM framework_contracts
                            WHERE patient_id = $1
-                           ORDER BY created_at DESC
+                           ORDER BY created_at DESC, id DESC
                            LIMIT 1"#,
                     )
                     .bind(patient_uuid)
@@ -16900,15 +16997,19 @@ async fn generate_document(
                     "Framework contract template requires an existing framework contract in scope",
                 );
             };
-            let contracting = match load_contracting_doc(
-                &state,
-                patient_uuid,
-                order_id,
-                contract_row.try_get::<Uuid, _>("id").ok(),
-                crate::app_time::today(),
-            )
-            .await
-            {
+            let contracting = match if let Some(value) = &prepared_contracting {
+                Ok(value.clone())
+            } else {
+                load_contracting_doc(
+                    &state,
+                    patient_uuid,
+                    lead_id,
+                    order_id,
+                    contract_row.try_get::<Uuid, _>("id").ok(),
+                    crate::app_time::today(),
+                )
+                .await
+            } {
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
@@ -17209,6 +17310,12 @@ async fn generate_document(
             let preview_html = build_patient_sticker_html(&context);
             let pdf_bytes = match build_patient_sticker_pdf(&context) {
                 Ok(bytes) => bytes,
+                Err(PATIENT_STICKER_TOO_MUCH_TEXT) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        PATIENT_STICKER_TOO_MUCH_TEXT,
+                    );
+                }
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build generated patient sticker PDF");
                     return err(StatusCode::INTERNAL_SERVER_ERROR, message);
@@ -17228,15 +17335,19 @@ async fn generate_document(
                     "The payer's copy of the cost estimate is generated for a lead",
                 );
             }
-            let contracting = match load_contracting_doc(
-                &state,
-                patient_uuid,
-                order_id,
-                None,
-                crate::app_time::today(),
-            )
-            .await
-            {
+            let contracting = match if let Some(value) = &prepared_contracting {
+                Ok(value.clone())
+            } else {
+                load_contracting_doc(
+                    &state,
+                    patient_uuid,
+                    lead_id,
+                    order_id,
+                    None,
+                    crate::app_time::today(),
+                )
+                .await
+            } {
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
@@ -17496,15 +17607,19 @@ async fn generate_document(
             (preview, pdf_bytes)
         }
         "cost_coverage_declaration" => {
-            let contracting = match load_contracting_doc(
-                &state,
-                patient_uuid,
-                order_id,
-                None,
-                crate::app_time::today(),
-            )
-            .await
-            {
+            let contracting = match if let Some(value) = &prepared_contracting {
+                Ok(value.clone())
+            } else {
+                load_contracting_doc(
+                    &state,
+                    patient_uuid,
+                    lead_id,
+                    order_id,
+                    None,
+                    crate::app_time::today(),
+                )
+                .await
+            } {
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
@@ -19354,6 +19469,20 @@ struct ContractSigner {
 }
 
 impl ContractingDoc {
+    fn fingerprint(&self) -> String {
+        use sha2::Digest;
+        let snapshot = json!({
+            "version":1,
+            "kind":self.kind.as_str(),
+            "representatives":self.representatives.iter().map(|person| json!({
+                "name":person.name,"first_name":person.first_name,"last_name":person.last_name,
+                "birth_date":person.birth_date,"street":person.street,"zip":person.zip,
+                "city":person.city,"country":person.country,"email":person.email,"phone":person.phone
+            })).collect::<Vec<_>>()
+        });
+        hex::encode(sha2::Sha256::digest(snapshot.to_string().as_bytes()))
+    }
+
     fn from_party(party: &crate::services::contracting_party::ContractingParty) -> Self {
         Self {
             kind: party.kind,
@@ -19521,6 +19650,7 @@ fn contract_signature_rows(
 async fn load_contracting_doc(
     state: &AppState,
     patient_id: Uuid,
+    lead_id: Option<Uuid>,
     order_id: Option<Uuid>,
     contract_id: Option<Uuid>,
     on: NaiveDate,
@@ -19533,6 +19663,75 @@ async fn load_contracting_doc(
         )
     };
     let mut conn = state.db.acquire().await.map_err(failed)?;
+    let lead_id = match (lead_id, order_id) {
+        (Some(lead_id), _) => Some(lead_id),
+        (None, Some(order_id)) => super::lead_payer::open_lead_of_order(&mut conn, order_id)
+            .await
+            .map_err(failed)?,
+        (None, None) => None,
+    };
+    // An unconverted (including repeat) inquiry has its own current custody
+    // and representatives. Patient relations cannot stand in for that record.
+    if let Some(lead_id) = lead_id {
+        let loaded = super::lead_representatives::load_on(&mut conn, lead_id, on)
+            .await
+            .map_err(failed)?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "Lead not found"))?;
+        let representation = &loaded.representation;
+        if representation.minor {
+            let representatives = representation
+                .representatives
+                .iter()
+                .filter(|person| person.slot.is_some())
+                .collect::<Vec<_>>();
+            let expected =
+                if representation.answers.custody() == super::lead_representatives::CUSTODY_JOINT {
+                    2
+                } else {
+                    1
+                };
+            if representatives.len() != expected
+                || representatives
+                    .iter()
+                    .any(|person| person.name().is_empty())
+            {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "The child's current legal representatives are required for this document",
+                ));
+            }
+            let kind =
+                crate::services::contracting_party::selected_kind(&mut conn, order_id, contract_id)
+                    .await
+                    .map_err(failed)?
+                    .unwrap_or(PartyKind::LegalRepresentatives);
+            if kind == PartyKind::Patient {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "A minor's contracting party must include the legal representatives",
+                ));
+            }
+            return Ok(ContractingDoc {
+                kind,
+                representatives: representatives
+                    .into_iter()
+                    .map(|person| DocPartyBlock {
+                        name: person.name(),
+                        first_name: Some(person.first_name.clone()),
+                        last_name: Some(person.last_name.clone()),
+                        birth_date: person.date_of_birth,
+                        street: person.extras.street.clone(),
+                        zip: person.extras.zip.clone(),
+                        city: person.extras.city.clone(),
+                        country: person.extras.country.clone(),
+                        email: person.email.clone(),
+                        phone: person.phone.clone(),
+                        ..DocPartyBlock::default()
+                    })
+                    .collect(),
+            });
+        }
+    }
     let party = crate::services::contracting_party::resolve(
         &mut conn,
         patient_id,
@@ -20342,10 +20541,19 @@ fn cost_coverage_order_suffix(context: &GeneratedCostCoverageContext) -> String 
 
 fn cost_coverage_summary_lines(context: &GeneratedCostCoverageContext) -> Vec<String> {
     let mut lines = vec![
-        format!("Auftraggeber: {}", context.patient.name_with_title()),
+        format!(
+            "Auftraggeber: {}",
+            context.contracting.debtor_name(&context.patient)
+        ),
         format!("Kostenübernehmer: {}", context.payer.name_with_title()),
         format!("Einzelauftrag vom: {}", fmt_de_date(context.order_date)),
     ];
+    if context.contracting.parents_contract() {
+        lines.insert(
+            1,
+            format!("Patient: {}", context.patient.name_with_salutation()),
+        );
+    }
     if let Some(total) = context.total_gross.as_deref() {
         lines.push(format!("Gesamtsumme: {total}"));
     }
@@ -20662,6 +20870,11 @@ fn build_cost_coverage_pdf(
             "bezüglich des {ordinal}. Einzelauftrags{order_suffix} zwischen dem Auftragnehmer und dem Auftraggeber – {} – im Rahmen des bestehenden Rahmendienstleistungsvertrags vom {}.",
             if context.contracting.parents_contract() {
                 context.contracting.debtor_name(&context.patient)
+            } else if let Some(represented_by) = context.contracting.represented_by_line() {
+                format!(
+                    "{}, {represented_by}",
+                    cost_coverage_party_accusative(&context.patient)
+                )
             } else {
                 cost_coverage_party_accusative(&context.patient)
             },
@@ -20967,11 +21180,24 @@ fn build_cost_coverage_pdf(
         0.0,
         0.5,
     );
+    if context.contracting.parents_contract() {
+        admin_block(
+            &mut layout,
+            &format!("Patient: {}", context.patient.name_with_salutation()),
+            0.0,
+            0.5,
+        );
+    }
     if let Some(birth) = context.patient.birth_date {
         admin_block(
             &mut layout,
             &format!(
-                "Geburtsdatum des Auftraggebers: {}",
+                "{}: {}",
+                if context.contracting.parents_contract() {
+                    "Geburtsdatum des Patienten"
+                } else {
+                    "Geburtsdatum des Auftraggebers"
+                },
                 birth.format("%d.%m.%Y")
             ),
             0.0,
@@ -35865,6 +36091,97 @@ mod tests {
         context.agency.care_of = "Heorhii Hudiiev".to_string();
         let agency_line = patient_sticker_agency_line(&context);
         assert_eq!(agency_line.matches("Heorhii Hudiiev").count(), 1);
+    }
+
+    #[test]
+    fn patient_sticker_long_names_fit_all_physical_formats_without_dropping_fields() {
+        for (tag, first, last) in [
+            ("short", "Anna", "Testova"),
+            ("middle", "Oleksandr Oleksandrovych", "Melnychenko"),
+            (
+                "long",
+                "Alexandra Maria Katharina Elisabeth",
+                "von Hohenlohe-Langenburg",
+            ),
+        ] {
+            for format in PATIENT_LABEL_FORMATS.iter().copied() {
+                let mut context = GeneratedPatientStickerContext {
+                    patient_pid: format!("PT-QA-{tag}"),
+                    patient_title: None,
+                    patient_salutation: "Frau".into(),
+                    patient_first_name: first.into(),
+                    patient_last_name: last.into(),
+                    birth_date: NaiveDate::from_ymd_opt(1990, 1, 1).unwrap(),
+                    country_code: Some("DE".into()),
+                    insurance_provider: None,
+                    kt1: Some("TK".into()),
+                    kt2: Some("Privat".into()),
+                    cost_code: Some("FRA".into()),
+                    agency: PatientLabelAgencySettings {
+                        name: "GMED - Agentur für Patientenbetreuung".into(),
+                        care_of: "Heorhii Hudiiev".into(),
+                        address: Some("Albert-Schweitzer-Straße 56 81735 München".into()),
+                        phone: Some("+4917622570962".into()),
+                        email: Some("office@gmed-health.com".into()),
+                        website: None,
+                    },
+                    format,
+                    auto_name: format!("QA label {tag}"),
+                    language: "de".into(),
+                    generated_at: Utc::now(),
+                };
+                let layout = super::patient_sticker_layout(&context).unwrap();
+                assert!(layout.cursor_mm >= layout.margin_mm);
+                assert!(layout.lines.iter().all(|line| line.size_pt >= 5.0));
+                for line in &layout.lines {
+                    assert!(
+                        line.baseline_mm - super::pt_to_mm(line.size_pt) * 0.25
+                            >= layout.margin_mm - 0.01
+                    );
+                    assert!(
+                        line.baseline_mm + super::pt_to_mm(line.size_pt)
+                            <= format.height_mm as f32 - layout.margin_mm + 0.01
+                    );
+                }
+                let bytes = build_patient_sticker_pdf(&context).unwrap();
+                let text = normalized_pdf_text(&bytes);
+                for required in [
+                    format!("ID: PT-QA-{tag}"),
+                    format!("{last}, {first}"),
+                    "01.01.1990".into(),
+                    "KT1: TK".into(),
+                    "KT2: Privat".into(),
+                    "FRA".into(),
+                    "Heorhii Hudiiev".into(),
+                    "Albert-Schweitzer-Straße 56 81735 München".into(),
+                    "+4917622570962".into(),
+                    "office@gmed-health.com".into(),
+                ] {
+                    assert!(
+                        text.contains(&required),
+                        "{tag} {}x{} missing {required}: {text}",
+                        format.width_mm,
+                        format.height_mm
+                    );
+                }
+                if let Ok(directory) = std::env::var("GMED_STICKER_QA_DIR") {
+                    std::fs::create_dir_all(&directory).unwrap();
+                    std::fs::write(
+                        std::path::Path::new(&directory).join(format!(
+                            "label-{tag}-{}x{}.pdf",
+                            format.width_mm, format.height_mm
+                        )),
+                        bytes,
+                    )
+                    .unwrap();
+                }
+                context.patient_first_name = "Longname ".repeat(300);
+                assert_eq!(
+                    super::patient_sticker_layout(&context).err(),
+                    Some(super::PATIENT_STICKER_TOO_MUCH_TEXT)
+                );
+            }
+        }
     }
 
     #[test]

@@ -5855,10 +5855,20 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
             "{template_id}"
         );
         assert_eq!(
-            bindings_without_signature_anchors(&detail_body["generated_bindings"]),
+            bindings_without_generation_metadata(&detail_body["generated_bindings"]),
             expected_bindings,
             "{template_id} must persist its exact binding snapshot"
         );
+        if matches!(
+            template_id,
+            "single_order" | "order_cost_estimate" | "cost_coverage_declaration"
+        ) {
+            let fingerprint = detail_body["generated_bindings"]["_contracting_party_fingerprint"]
+                .as_str()
+                .expect("contractual documents record their current party fingerprint");
+            assert_eq!(fingerprint.len(), 64);
+            assert!(fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        }
         let expected_sensitivity = if matches!(
             template_id,
             "single_order" | "order_cost_estimate" | "cost_coverage_declaration" | "cost_estimate"
@@ -6213,13 +6223,16 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     // Patient stickers render "ID: <patient_id>" as a single line; the default ~40-char
     // test id wraps to "ID:\n<id>" and only breaks the PDF text assertion (not generation).
-    // Use a realistically short MRN so the label and value stay on one line.
-    sqlx::query("UPDATE patients SET patient_id = $2 WHERE id = $1")
-        .bind(patient_id)
-        .bind(format!("PT-{}", &tag[tag.len().saturating_sub(6)..]))
-        .execute(&pool)
-        .await
-        .unwrap();
+    // Keep this all-template smoke fixture printable on the smallest label.
+    // Long names and overflow rejection have their own physical-format tests.
+    sqlx::query(
+        "UPDATE patients SET patient_id = $2,first_name='Anna',last_name='Testova' WHERE id = $1",
+    )
+    .bind(patient_id)
+    .bind(format!("PT-{}", &tag[tag.len().saturating_sub(6)..]))
+    .execute(&pool)
+    .await
+    .unwrap();
     configure_patient_label_profile(&pool, patient_id).await;
 
     let provider_id = seed_provider(&pool, &tag).await;
@@ -6790,7 +6803,7 @@ async fn single_order_and_order_cost_estimate_are_generated_as_separate_document
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        bindings_without_signature_anchors(&detail["generated_bindings"]),
+        bindings_without_generation_metadata(&detail["generated_bindings"]),
         bindings
     );
     assert!(
@@ -10927,12 +10940,14 @@ async fn document_translations_are_saved_as_children_with_a_translated_document(
     );
 }
 
-/// Generated documents also store the Skribble signature frames they reserve
-/// (`_signature_anchors`); binding assertions compare the caller's values only.
-fn bindings_without_signature_anchors(bindings: &Value) -> Value {
+/// Signature frames and cache fingerprints are validated separately; business
+/// binding assertions compare the caller's values only.
+fn bindings_without_generation_metadata(bindings: &Value) -> Value {
     let mut bindings = bindings.clone();
     if let Some(object) = bindings.as_object_mut() {
         object.remove("_signature_anchors");
+        // Render metadata is validated independently; business bindings stay exact.
+        object.remove("_contracting_party_fingerprint");
     }
     bindings
 }
@@ -11632,6 +11647,302 @@ async fn minor_single_order_names_both_parents_and_their_signature_frames() {
     assert!(text.contains("Erika Muster"), "{text}");
     assert!(text.contains("Max Muster"), "{text}");
     assert!(text.contains("zugunsten des Patienten"), "{text}");
+}
+
+/// Unconverted and repeat inquiries use their current custody and representative
+/// records, even before there is a patient (or while patient relations are stale).
+#[tokio::test]
+async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
+    let Some((app, pool, admin, bearer)) = test_context().await else {
+        return;
+    };
+    for repeat in [false, true] {
+        for (scenario, custody, people) in [
+            ("mother", "sole_parent", vec![("Anna", "Mutter", "mother")]),
+            ("father", "sole_parent", vec![("Boris", "Vater", "father")]),
+            (
+                "guardian",
+                "guardian",
+                vec![("Carla", "Vormund", "guardian")],
+            ),
+            (
+                "joint",
+                "joint",
+                vec![("Anna", "Mutter", "mother"), ("Boris", "Vater", "father")],
+            ),
+        ] {
+            let tag = unique_tag(&format!("lead-family-{scenario}-{repeat}"));
+            let contacts = people
+                .iter()
+                .map(|(first, last, relation)| {
+                    json!({
+                        "id": Uuid::new_v4(), "name": format!("{first} {last}"),
+                        "relation": relation, "birth_date": "1985-03-02",
+                        "email": format!("{first}-{tag}@example.test"), "phone": "+49 30 1234567"
+                    })
+                })
+                .collect::<Vec<_>>();
+            let patient = if repeat {
+                let id = seed_patient(&pool, admin, &tag).await;
+                sqlx::query("UPDATE patients SET first_name='Mia',last_name=$2,birth_date='2015-06-07' WHERE id=$1")
+                    .bind(id)
+                    .bind(format!("Kind-{scenario}"))
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                sqlx::query("INSERT INTO patient_relations(patient_id,related_name,relation_type) VALUES($1,'Veralteter Kontakt','parent')")
+                    .bind(id).execute(&pool).await.unwrap();
+                Some(id)
+            } else {
+                None
+            };
+            let lead: Uuid = sqlx::query_scalar(
+                "INSERT INTO leads(first_name,last_name,date_of_birth,email,legal_sex,street_address,zip_code,city,country,citizenships,trusted_contacts,portal_submitted_at,created_by,repeat_patient_id) VALUES('Mia',$1,'2015-06-07',$2,'female','Kinderweg 11','10115','Berlin','DE','{DE}',$3,now(),$4,$5) RETURNING id"
+            ).bind(format!("Kind-{scenario}")).bind(format!("child-{tag}@example.test"))
+                .bind(json!(contacts)).bind(admin).bind(patient).fetch_one(&pool).await.unwrap();
+            sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,custody) VALUES($1,$2)")
+                .bind(lead)
+                .bind(custody)
+                .execute(&pool)
+                .await
+                .unwrap();
+            for (index, (first, last, _)) in people.iter().enumerate() {
+                let contact: Uuid = contacts[index]["id"].as_str().unwrap().parse().unwrap();
+                sqlx::query(
+                    "INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_issued_on,id_valid_until) VALUES($1,$2,'legal_representative','staff',$3,$4,'{DE}',$5,'80331','München','DE','passport',$6,'Stadt München','DE','2020-01-02','2035-01-02')"
+                ).bind(lead).bind(contact).bind(first).bind(last)
+                    .bind(format!("Elternweg {}", index+21)).bind(format!("QA-{scenario}-{index}"))
+                    .execute(&pool).await.unwrap();
+                for kind in ["representative_identity", "representative_authority"] {
+                    let document = Uuid::new_v4();
+                    sqlx::query("INSERT INTO documents(id,lead_id,auto_name,original_filename,art,category,status,visibility,is_medical,mime_type,version_root_document_id,version_number,uploaded_by) VALUES($1,$2,'Synthetic proof','proof.pdf',$3,'identity','active','internal',false,'application/pdf',$1,1,$4)")
+                        .bind(document).bind(lead).bind(kind).bind(admin).execute(&pool).await.unwrap();
+                    sqlx::query("INSERT INTO lead_portal_uploads(document_id,lead_id,uploaded_by,access_kind,kind,representative_id) VALUES($1,$2,$3,'guardian',$4,$5)")
+                        .bind(document).bind(lead).bind(admin).bind(kind).bind(contact).execute(&pool).await.unwrap();
+                }
+            }
+            let contract: Uuid = sqlx::query_scalar("INSERT INTO framework_contracts(lead_id,contract_number,status,created_by) VALUES($1,$2,'draft',$3) RETURNING id")
+                .bind(lead).bind(format!("FC-{tag}")).bind(admin).fetch_one(&pool).await.unwrap();
+            let order: Uuid = sqlx::query_scalar("INSERT INTO orders(source_lead_id,patient_id,contract_id,order_number,created_by) VALUES($1,$2,$3,$4,$5) RETURNING id")
+                .bind(lead).bind(patient).bind(contract).bind(format!("AUF-{tag}")).bind(admin).fetch_one(&pool).await.unwrap();
+            sqlx::query("INSERT INTO lead_payer_declarations(lead_id,payer_kind,payer_type,first_name,last_name,date_of_birth,street,zip,city,country,citizenships,relationship_kind,email,source_of_funds,payer_informed_at,acts_on_own_account,own_account_answered,payment_method,account_country,account_holder,bank_name,via_third_party) VALUES($1,'third_party','person','Externer','Kostenträger','1970-05-01','Zahlweg 1','10115','Berlin','DE','{DE}','relative','payer@example.test','employment',now(),true,true,'bank_transfer','DE','Externer Kostenträger','Musterbank',false)")
+                .bind(lead).execute(&pool).await.unwrap();
+            seed_quote_for_order(&pool, order, admin, &tag).await;
+            for patient_entry in [false, true]
+                .into_iter()
+                .filter(|patient_entry| !patient_entry || repeat)
+            {
+                for represented in [false, true] {
+                    sqlx::query("UPDATE orders SET contracting_party=$2 WHERE id=$1")
+                        .bind(order)
+                        .bind(represented.then_some("patient_represented"))
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                    for template in [
+                        "framework_contract",
+                        "single_order",
+                        "order_cost_estimate",
+                        "cost_coverage_declaration",
+                    ] {
+                        let mut payload = json!({"template_id":template,"order_id":order,"language":"de",
+                        "bindings":{"payer_name":"Externer Kostenträger","payer_street":"Zahlweg 1","payer_zip":"10115","payer_city":"Berlin","payer_country":"DE"}});
+                        if patient_entry {
+                            payload["patient_id"] = json!(patient.unwrap());
+                        } else {
+                            payload["lead_id"] = json!(lead);
+                        }
+                        let (status, body) = json_request(
+                            &app,
+                            "POST",
+                            "/api/v1/documents/generate",
+                            &bearer,
+                            Some(payload.clone()),
+                        )
+                        .await;
+                        assert_eq!(
+                            status,
+                            StatusCode::OK,
+                            "{scenario} repeat={repeat} {template}: {body}"
+                        );
+                        let id = body["id"].as_str().unwrap();
+                        let (_, detail) = json_request(
+                            &app,
+                            "GET",
+                            &format!("/api/v1/documents/{id}"),
+                            &bearer,
+                            None,
+                        )
+                        .await;
+                        let (status, bytes) = bytes_request(
+                            &app,
+                            "GET",
+                            &format!("/api/v1/documents/{id}/download"),
+                            &bearer,
+                        )
+                        .await;
+                        assert_eq!(status, StatusCode::OK);
+                        let text = extract_pdf_text(&bytes);
+                        assert!(!text.contains("Veralteter Kontakt"), "{text}");
+                        if !represented && matches!(template, "framework_contract" | "single_order")
+                        {
+                            assert!(text.contains("zugunsten des Patienten"), "{text}");
+                        }
+                        if repeat && template == "order_cost_estimate" {
+                            let (status, unchanged) = json_request(
+                                &app,
+                                "POST",
+                                "/api/v1/documents/generate",
+                                &bearer,
+                                Some(payload),
+                            )
+                            .await;
+                            assert_eq!(status, StatusCode::OK, "{unchanged}");
+                            assert_eq!(unchanged["id"], body["id"]);
+                            assert_eq!(unchanged["reused"], true);
+                        }
+                        for (index, (first, last, _)) in people.iter().enumerate() {
+                            assert!(
+                                text.contains(&format!("{first} {last}")),
+                                "{template}: {text}"
+                            );
+                            if matches!(template, "framework_contract" | "single_order")
+                                && !represented
+                            {
+                                assert!(
+                                    text.contains(&format!("Elternweg {}", index + 21)),
+                                    "{template}: {text}"
+                                );
+                            }
+                        }
+                        let roles = detail["generated_bindings"]["_signature_anchors"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .filter_map(|anchor| anchor["role"].as_str())
+                            .collect::<Vec<_>>();
+                        if template == "cost_coverage_declaration" {
+                            assert!(roles.contains(&"payer"), "{detail}");
+                            assert!(!roles.contains(&"client"), "{detail}");
+                            assert!(text.contains(&format!("Mia Kind-{scenario}")), "{text}");
+                            if represented {
+                                assert!(text.contains("gesetzlich vertreten durch"), "{text}");
+                                assert!(
+                                    text.contains("Geburtsdatum des Auftraggebers: 07.06.2015"),
+                                    "{text}"
+                                );
+                            } else {
+                                assert!(
+                                    text.contains("Geburtsdatum des Patienten: 07.06.2015"),
+                                    "{text}"
+                                );
+                                assert!(
+                                    !text.contains("Geburtsdatum des Auftraggebers: 07.06.2015"),
+                                    "{text}"
+                                );
+                                if let Some(preview) = body["preview_html"].as_str() {
+                                    for (first, last, _) in &people {
+                                        assert!(
+                                            preview.contains(&format!("{first} {last}")),
+                                            "{preview}"
+                                        );
+                                    }
+                                } else {
+                                    assert_eq!(body["reused"], true);
+                                }
+                            }
+                        } else {
+                            assert!(
+                                text.contains(&format!("Mia Kind-{scenario}")),
+                                "{template}: {text}"
+                            );
+                            assert_eq!(
+                                roles,
+                                if people.len() == 2 {
+                                    vec!["guardian_1", "agency", "guardian_2"]
+                                } else {
+                                    vec!["guardian_1", "agency"]
+                                },
+                                "{detail}"
+                            );
+                        }
+                    }
+                }
+            }
+            if let Some(patient) = patient {
+                sqlx::query("UPDATE framework_contracts SET patient_id=$2,lead_id=NULL,contracting_party='patient_represented' WHERE id=$1")
+                    .bind(contract).bind(patient).execute(&pool).await.unwrap();
+                sqlx::query(
+                    "UPDATE orders SET contract_id=NULL,contracting_party=NULL WHERE id=$1",
+                )
+                .bind(order)
+                .execute(&pool)
+                .await
+                .unwrap();
+                let (status, body) = json_request(
+                    &app, "POST", "/api/v1/documents/generate", &bearer,
+                    Some(json!({"template_id":"framework_contract","patient_id":patient,"order_id":order,"language":"de"})),
+                ).await;
+                assert_eq!(status, StatusCode::OK, "{body}");
+                let (_, bytes) = bytes_request(
+                    &app,
+                    "GET",
+                    &format!(
+                        "/api/v1/documents/{}/download",
+                        body["id"].as_str().unwrap()
+                    ),
+                    &bearer,
+                )
+                .await;
+                assert!(extract_pdf_text(&bytes).contains("gesetzlich vertreten durch"));
+                sqlx::query("UPDATE orders SET contract_id=$2 WHERE id=$1")
+                    .bind(order)
+                    .bind(contract)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                sqlx::query("UPDATE framework_contracts SET patient_id=NULL,lead_id=$2,contracting_party=NULL WHERE id=$1")
+                    .bind(contract).bind(lead)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+            sqlx::query("UPDATE orders SET contracting_party='patient' WHERE id=$1")
+                .bind(order)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let (status, _) = json_request(
+                &app,
+                "POST",
+                "/api/v1/documents/generate",
+                &bearer,
+                Some(json!({"template_id":"order_cost_estimate","lead_id":lead,"order_id":order})),
+            )
+            .await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            sqlx::query("UPDATE orders SET contracting_party=NULL WHERE id=$1")
+                .bind(order)
+                .execute(&pool)
+                .await
+                .unwrap();
+            // The draft may not silently fall back to the child's own signature.
+            sqlx::query("UPDATE leads SET trusted_contacts='[]' WHERE id=$1")
+                .bind(lead)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let (status, _) = json_request(
+                &app,
+                "POST",
+                "/api/v1/documents/generate",
+                &bearer,
+                Some(json!({"template_id":"order_cost_estimate","lead_id":lead,"order_id":order})),
+            )
+            .await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        }
+    }
 }
 
 /// § 15 Abs. 4 Nr. 2 GwG: the proofs of the origin of the assets are uploaded

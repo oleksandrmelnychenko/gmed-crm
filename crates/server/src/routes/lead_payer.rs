@@ -1288,7 +1288,7 @@ fn database_error(error: sqlx::Error, context: &'static str) -> Response {
 }
 
 /// The unconverted lead an order was created for, if any.
-async fn open_lead_of_order(
+pub(crate) async fn open_lead_of_order(
     conn: &mut PgConnection,
     order_id: Uuid,
 ) -> Result<Option<Uuid>, sqlx::Error> {
