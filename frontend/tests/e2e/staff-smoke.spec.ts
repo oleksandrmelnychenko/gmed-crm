@@ -1751,6 +1751,19 @@ test.describe("staff smoke flows", () => {
       await expect(page.getByTestId(`document-demo-signature-${doc.id}`)).toHaveText("DEMO · Unterzeichnet");
       await expect(page.locator(`[data-document-signature-id="${doc.id}"]:visible`)).toHaveAttribute("data-signature-status", "completed");
     }
+    const statusCell = page.getByTestId(`document-demo-signature-${documents[0].id}`).locator('xpath=ancestor::*[@role="cell"]');
+    await statusCell.scrollIntoViewIfNeeded();
+    const statusMargins = await statusCell.evaluate(cell => {
+      const bounds = cell.getBoundingClientRect();
+      return [...cell.querySelectorAll("span")].map(badge => {
+        const rect = badge.getBoundingClientRect();
+        return [rect.top - bounds.top, bounds.bottom - rect.bottom, rect.left - bounds.left, bounds.right - rect.right];
+      });
+    });
+    expect(statusMargins).toHaveLength(2);
+    for (const margins of statusMargins) {
+      for (const margin of margins) expect(margin).toBeGreaterThanOrEqual(0);
+    }
     await page.screenshot({ path: "../artifacts/design-qa/patient-demo-documents.png" });
   });
 

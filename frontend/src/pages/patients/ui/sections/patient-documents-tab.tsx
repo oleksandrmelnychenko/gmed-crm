@@ -62,7 +62,7 @@ import type {
 import { PatientDocumentGenerateDialog } from "../sheets/patient-document-generate-dialog";
 import { PatientDocumentEditSheet } from "../sheets/patient-document-edit-sheet";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
-import { DocumentDemoSignatureBadge } from "@/pages/documents/ui/document-demo-signature-badge";
+import { DocumentStatusBadges } from "@/pages/documents/ui/document-demo-signature-badge";
 import {
   DocumentTranslationDialog,
   type DocumentTranslationEditTarget,
@@ -564,21 +564,17 @@ export function PatientDocumentsTab({
           label: statusLabel(status),
         })),
         sortable: true,
-        width: 150,
+        width: 300,
         render: (doc) => (
-          <div className="flex flex-col items-start gap-1">
-            <Badge
-              variant="outline"
-              className={cn(
-                "rounded-full",
-                statusColors[doc.status ?? ""] ??
-                  "border-border/60 bg-muted/25 text-muted-foreground",
-              )}
-            >
-              {doc.status ? statusLabel(doc.status) : commonNotSet}
-            </Badge>
-            <DocumentDemoSignatureBadge documentId={doc.id} />
-          </div>
+          <DocumentStatusBadges
+            documentId={doc.id}
+            statusLabel={doc.status ? statusLabel(doc.status) : commonNotSet}
+            statusClassName={cn(
+              "rounded-full",
+              statusColors[doc.status ?? ""] ??
+                "border-border/60 bg-muted/25 text-muted-foreground",
+            )}
+          />
         ),
       },
       {
