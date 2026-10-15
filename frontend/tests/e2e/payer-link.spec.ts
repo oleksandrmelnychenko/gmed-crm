@@ -790,7 +790,7 @@ test.describe("payer link", () => {
     await expect(page.getByTestId("payer-link-notice")).toHaveText("Bitte bestätigen Sie zuerst die Datenschutzhinweise.");
     await expect(page.getByTestId("payer-link-step-privacy")).toBeVisible();
     await expect(page.getByTestId("payer-link-privacy-notice")).toContainText("§§ 10–12 GwG");
-    await expect(page.getByRole("link", { name: "Vollständige Datenschutzhinweise" })).toHaveAttribute("href", "/legal?lang=de#privacy");
+    await expect(page.getByRole("link", { name: "Vollständige Datenschutzhinweise" })).toHaveAttribute("href", "/legal?notice=form&lang=de#privacy");
 
     // A reload keeps the session of this tab: no new code.
     await page.reload();
