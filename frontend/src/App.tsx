@@ -440,6 +440,7 @@ function AppRoutes() {
           <Route path="/account/password-required" element={<AccountPasswordRequiredPage />} />
           <Route path="/account/two-factor-required" element={<AccountTwoFactorRequiredPage />} />
           <Route path="/payer" element={<PayerLinkPage />} />
+          <Route path="/payer/completed" element={<PayerLinkPage />} />
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="notifications" element={<PatientNotificationsPage />} />

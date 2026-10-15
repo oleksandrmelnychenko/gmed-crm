@@ -619,7 +619,62 @@ const next = (page: Page) => page.getByTestId("payer-link-next").click();
 const stepTitle = (page: Page) => page.getByTestId("payer-link-step-title");
 const merged = (patches: Record<string, unknown>[]) => Object.assign({}, ...patches) as Record<string, unknown>;
 
+test("payer completion: a completion URL cannot turn a draft into a submitted form", async ({ page }) => {
+  const { calls } = await setup(page);
+  await page.goto(`/payer/completed#${TOKEN}`);
+  await page.getByTestId("payer-link-send-code").click(lazyPageLoad);
+  await page.getByLabel("Bestätigungscode (6 Ziffern)").fill(CODE);
+  await page.getByTestId("payer-link-verify").click();
+  await expect(page).toHaveURL(/\/payer$/);
+  await expect(page.getByTestId("payer-link-form")).toBeVisible();
+  await expect(page.getByTestId("payer-link-thanks")).toHaveCount(0);
+  expect(calls.payer.some((call) => call.path.endsWith("/submit"))).toBe(false);
+  expect(calls.others).toEqual([]);
+});
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 720 }]) {
+  test(`payer completion: submission opens a separate confirmation at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    let release = () => {};
+    const response = new Promise<void>((resolve) => { release = resolve; });
+    const { q, calls } = await setup(page, {
+      acknowledged: true,
+      answers: completeAnswers("person"),
+      route: completeRoute(),
+      identityDocuments: [document("doc-id", "pass.pdf")],
+      beforeSubmit: () => response,
+    });
+    await signIn(page);
+    if (viewport.width === 390) await page.getByTestId("payer-link-language").getByRole("radio", { name: "RU", exact: true }).click();
+    await page.getByTestId("payer-link-confirm").check();
+    await page.getByTestId("payer-link-submit").click();
+    await expect.poll(() => calls.payer.filter((call) => call.path.endsWith("/submit")).length).toBe(1);
+    expect(new URL(page.url()).pathname).toBe("/payer");
+    expect(q.state).toBe("draft");
+    release();
+    await expect(page).toHaveURL(/\/payer\/completed$/);
+    const thanks = page.getByTestId("payer-link-thanks");
+    await expect(thanks.getByRole("heading", { level: 1 })).toBeInViewport();
+    await expect(page.getByTestId("payer-link-form")).toHaveCount(0);
+    await expect(page.getByTestId("payer-link-summary")).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath("completion.png") });
+
+    await page.getByTestId("payer-link-view-submitted").click();
+    const details = page.getByTestId("payer-link-submitted-details");
+    await expect(details.getByTestId("payer-link-summary-details")).toContainText("Viktor");
+    await expect(details.getByTestId("payer-link-summary").getByRole("button")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(details).toHaveCount(0);
+    await page.reload();
+    await expect(thanks).toBeVisible(lazyPageLoad);
+    await expect(page.getByTestId("payer-link-summary")).toHaveCount(0);
+    await page.goto("/payer");
+    await expect(page).toHaveURL(/\/payer\/completed$/);
+    await expect(page.getByTestId("payer-link-form")).toHaveCount(0);
+    expect(calls.payer.filter((call) => call.path.endsWith("/submit"))).toHaveLength(1);
+    expect(calls.others).toEqual([]);
+  });
+
   test(`payer scroll: the summary and step navigation stay reachable at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport);
     const { calls } = await setup(page, {
@@ -1120,8 +1175,12 @@ test.describe("payer link", () => {
     const thanks = page.getByTestId("payer-link-thanks");
     await expect(thanks).toContainText("Vielen Dank. Ihre Angaben sind bei GMED eingegangen.");
     await expect(thanks).toContainText("Gesendet am 06.10.2026");
-    await expect(thanks.getByTestId("payer-link-summary")).toContainText("Ingenieur");
-    await expect(thanks.getByRole("button", { name: "Ändern" })).toHaveCount(0);
+    await expect(page.getByTestId("payer-link-summary")).toHaveCount(0);
+    await page.getByTestId("payer-link-view-submitted").click();
+    const sentDetails = page.getByTestId("payer-link-submitted-details");
+    await expect(sentDetails.getByTestId("payer-link-summary")).toContainText("Ingenieur");
+    await expect(sentDetails.getByRole("button", { name: "Ändern" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
     expect(calls.payer.find((call) => call.path.endsWith("/submit"))?.body).toEqual({ declared_correct: true });
 
     // Only changed keys, never a key of an organisation, a refused value not repeated.
@@ -1343,6 +1402,7 @@ test.describe("payer link", () => {
     await page.getByTestId("payer-link-confirm").check();
     await page.getByTestId("payer-link-submit").click();
     await expect(page.getByTestId("payer-link-thanks")).toBeVisible();
+    await page.getByTestId("payer-link-view-submitted").click();
     await expect(page.getByTestId("payer-link-summary-funds")).toContainText("kontoauszug.pdf");
     expect(calls.others).toEqual([]);
   });

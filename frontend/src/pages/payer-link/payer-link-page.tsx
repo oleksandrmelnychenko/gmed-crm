@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
+import { Navigate, useLocation } from "react-router-dom";
 
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { Button } from "@/components/ui/button";
@@ -36,11 +37,13 @@ import { payerLinkText } from "./payer-link-text";
  * The payer's own page (contract phase 3a, 5.1): reached by the link in the
  * invitation e-mail, `/payer#<token>`, without an account. The token is taken
  * out of the address at once and kept for this tab only; the questionnaire
- * opens after a code mailed to the payer. Nothing of the staff app (session,
+ * opens after a code mailed to the payer. Submission replaces this route by
+ * `/payer/completed`. Nothing of the staff app (session,
  * menu, `/me`) is used here.
  */
 
 const PAYER_PATH = "/payer";
+const COMPLETED_PATH = "/payer/completed";
 
 let secretsOfTab: PayerSecrets | null = null;
 
@@ -51,17 +54,18 @@ function tabSecrets(): PayerSecrets {
 }
 
 /**
- * Reads the token from `#<token>`, keeps it, and replaces the address by
- * `/payer` so the token is neither in the history nor in a bookmark nor in a
+ * Reads the token from `#<token>`, keeps it, and removes it from the address
+ * so the token is neither in the history nor in a bookmark nor in a
  * referrer. Safe to run twice (strict mode): the second run finds the stored token.
  */
 function takeLinkFromAddress(secrets: PayerSecrets): string | null {
   if (typeof window === "undefined") return secrets.get(LINK_STORAGE_KEY);
   const { hash, search, pathname } = window.location;
   const token = captureLinkToken(hash, secrets);
-  if (hash || search || pathname !== PAYER_PATH) {
+  const path = pathname === COMPLETED_PATH ? COMPLETED_PATH : PAYER_PATH;
+  if (hash || search || pathname !== path) {
     try {
-      window.history.replaceState(window.history.state, "", PAYER_PATH);
+      window.history.replaceState(window.history.state, "", path);
     } catch {
       // An address that cannot be replaced still shows the page; the token is kept anyway.
     }
@@ -92,12 +96,20 @@ type View =
 type OpenLink = { token: string | null; generation: number };
 
 export function PayerLinkPage() {
+  const location = useLocation();
+  const mainRef = useRef<HTMLElement>(null);
   const secrets = tabSecrets();
   // Before anything is shown: the token leaves the address.
   const [link, setLink] = useState<OpenLink>(() => ({ token: takeLinkFromAddress(secrets), generation: 0 }));
   const [view, setView] = useState<View>(() =>
     link.token ? { kind: "loading" } : { kind: "fatal", reason: "link_incomplete" },
   );
+  const completed = view.kind === "form" && view.questionnaire.state === "submitted";
+  const draftLoaded = view.kind === "form" && view.questionnaire.state !== "submitted";
+  const destination = completed ? COMPLETED_PATH : draftLoaded ? PAYER_PATH : null;
+  useEffect(() => {
+    if (completed) mainRef.current?.scrollTo({ top: 0 });
+  }, [completed]);
   const [chosenLang, setChosenLang] = useState<LeadCabinetLang | null>(null);
   const [linkLang, setLinkLang] = useState<LeadCabinetLang | null>(null);
   const [fallbackLang] = useState(browserLang);
@@ -330,10 +342,10 @@ export function PayerLinkPage() {
     case "form":
       body = (
         <div className="space-y-5">
-          <div className="space-y-1">
+          {!completed ? <div className="space-y-1">
             <h1 className="text-xl font-semibold leading-tight">{text.pageTitle}</h1>
             <p className="text-sm leading-6 text-muted-foreground">{text.namedYou(view.questionnaire.patient_name, view.questionnaire.payer_type !== "person")}</p>
-          </div>
+          </div> : null}
           <PayerLinkForm
             questionnaire={view.questionnaire}
             client={client}
@@ -349,25 +361,28 @@ export function PayerLinkPage() {
   }
 
   return (
-    <div lang={lang} className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground" data-testid="payer-link-page">
-      <header className="shrink-0 border-b border-border bg-card">
-        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-4 py-3">
-          <span className="inline-flex shrink-0 items-center">
-            <GmedWordmark className="h-6 w-auto text-[#04060c] dark:text-foreground" />
-            <span className="sr-only">GMED</span>
-          </span>
-          <LanguageSwitch lang={lang} label={text.language} onChange={setChosenLang} />
-        </div>
-      </header>
-      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain">
-        <div className="mx-auto w-full max-w-5xl px-4 py-6 pb-16">
-          {/* Another link opened in this tab starts every step afresh. */}
-          <div key={generation} className="rounded-2xl border border-border bg-card px-4 py-5 shadow-sm sm:px-6 sm:py-6">
-            {body}
+    <>
+      {destination && location.pathname !== destination ? <Navigate to={destination} replace /> : null}
+      <div lang={lang} className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground" data-testid="payer-link-page">
+        <header className="shrink-0 border-b border-border bg-card">
+          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-4 py-3">
+            <span className="inline-flex shrink-0 items-center">
+              <GmedWordmark className="h-6 w-auto text-[#04060c] dark:text-foreground" />
+              <span className="sr-only">GMED</span>
+            </span>
+            <LanguageSwitch lang={lang} label={text.language} onChange={setChosenLang} />
           </div>
-        </div>
-      </main>
-    </div>
+        </header>
+        <main ref={mainRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className={cn("mx-auto w-full px-4 py-6 pb-16", completed ? "max-w-2xl sm:pt-12" : "max-w-5xl")}>
+            {/* Another link opened in this tab starts every step afresh. */}
+            <div key={generation} className="rounded-2xl border border-border bg-card px-4 py-5 shadow-sm sm:px-6 sm:py-6">
+              {body}
+            </div>
+          </div>
+        </main>
+      </div>
+    </>
   );
 }
 

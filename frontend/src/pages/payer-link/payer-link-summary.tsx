@@ -1,7 +1,9 @@
-import { useState } from "react";
-import { CheckCircle2, LoaderCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CheckCircle2, FileCheck2, LoaderCircle } from "lucide-react";
 
+import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { countryLabel } from "@/components/ui/country-select";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
@@ -24,7 +26,7 @@ import { DocumentList, Notice } from "./payer-link-parts";
 import { fieldLabel, missingLabel, stepTitle, type PayerLabelField, type PayerLinkText } from "./payer-link-text";
 
 // Step 8 of the payer page: what is still missing, everything entered, the
-// confirmation and "send"; afterwards the thanks with the same summary.
+// confirmation and "send"; submitted answers are available on request only.
 
 type Row = { label: string; value: string };
 
@@ -369,7 +371,7 @@ function SignatureStatus({ signature, text }: { signature: PayerSignaturePackage
   );
 }
 
-/** After "send": the thanks, where the documents for signing stand, and the read-only summary. */
+/** The completion screen; submitted details open separately, read-only. */
 export function ThankYou({
   questionnaire,
   steps,
@@ -383,23 +385,42 @@ export function ThankYou({
   lang: string;
   signature?: PayerSignaturePackage | null;
 }) {
+  const [viewAnswers, setViewAnswers] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus({ preventScroll: true });
+  }, []);
   return (
     <div className="space-y-5" data-testid="payer-link-thanks">
-      <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-900/50 dark:bg-emerald-950/30">
-        <CheckCircle2 aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-emerald-600" />
-        <div className="min-w-0 space-y-1">
-          <p className="text-base font-semibold text-emerald-900 dark:text-emerald-100">
-            {text.thanksTitle} {text.thanksBody}
-          </p>
+      <div className="flex flex-col items-center gap-4 py-3 text-center sm:py-5">
+        <span className="flex size-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400">
+          <CheckCircle2 aria-hidden="true" className="size-7" />
+        </span>
+        <div className="min-w-0 space-y-2">
+          <h1 ref={headingRef} tabIndex={-1} className="text-xl font-semibold leading-snug outline-none sm:text-2xl">
+            {text.thanksTitle} <span className="block">{text.thanksBody}</span>
+          </h1>
           {questionnaire.submitted_at ? (
-            <p className="text-sm text-emerald-900/80 dark:text-emerald-200/80">{text.submittedAt(formatAppDateTime(questionnaire.submitted_at))}</p>
+            <p className="font-mono text-xs text-muted-foreground">{text.submittedAt(formatAppDateTime(questionnaire.submitted_at))}</p>
           ) : null}
-          <p className="text-sm text-emerald-900/80 dark:text-emerald-200/80">{text.thanksNext}</p>
         </div>
       </div>
       {signature ? <SignatureStatus signature={signature} text={text} /> : null}
-      <h2 className="text-sm font-semibold">{text.summaryTitle}</h2>
-      <AnswersSummary questionnaire={questionnaire} steps={steps.filter((step) => step !== "summary")} text={text} lang={lang} />
+      <div className="space-y-2 rounded-xl border border-border bg-muted/40 px-4 py-4 text-center text-sm leading-6 text-muted-foreground">
+        <p className="font-medium text-foreground">{text.completionClose}</p>
+        <p>{text.thanksNext}</p>
+      </div>
+      <div className="flex justify-center border-t border-border pt-4">
+        <Button type="button" variant="outline" className="h-auto min-h-9 whitespace-normal py-2" onClick={() => setViewAnswers(true)} data-testid="payer-link-view-submitted">
+          <FileCheck2 aria-hidden="true" className="size-4 shrink-0" />
+          {text.viewSubmitted}
+        </Button>
+      </div>
+      <Dialog open={viewAnswers} onOpenChange={setViewAnswers}>
+        {viewAnswers ? <AdminDialogScaffold title={text.summaryTitle} description={text.thanksBody} maxWidthClassName="sm:max-w-3xl" testId="payer-link-submitted-details">
+          <AnswersSummary questionnaire={questionnaire} steps={steps.filter((step) => step !== "summary")} text={text} lang={lang} />
+        </AdminDialogScaffold> : null}
+      </Dialog>
     </div>
   );
 }
