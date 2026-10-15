@@ -591,10 +591,11 @@ test.describe("lead cabinet stepper and follow-up", () => {
     const { calls } = await setup(page);
     await page.goto("/");
 
-    // Five steps without open blocks: no "Ergänzende Angaben"; the contact is part of the first step, the
+    // Six steps without open blocks, including disclosure: no "Ergänzende Angaben"; the contact is part of the first step, the
     // declarations are follow-up block L (owner 2026-10-09) and who pays is part of step 3 (owner 2026-10-11).
     const tabs = page.getByTestId("lead-request-steps").getByRole("tab");
-    await expect(tabs).toHaveCount(5);
+    await expect(tabs).toHaveCount(6);
+    await expect(tab(page, "disclosure")).toBeVisible();
     await expect(tab(page, "payer")).toHaveCount(0);
     await expect(tab(page, "follow_up")).toHaveCount(0);
     await expect(tab(page, "contact")).toHaveCount(0);

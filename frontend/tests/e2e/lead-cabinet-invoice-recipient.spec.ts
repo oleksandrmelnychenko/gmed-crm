@@ -532,7 +532,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await setup(page);
     await page.goto("/");
     const tabs = page.getByTestId("lead-request-steps").getByRole("tab");
-    await expect(tabs).toHaveText([/Einwilligung & Person/, /Ausweis/, /Versicherung & Rechnung/, /Anliegen & Unterlagen/, /Prüfen & Senden/]);
+    await expect(tabs).toHaveText([/Einwilligung & Person/, /Ausweis/, /Versicherung & Rechnung/, /Auskunft an Dritte/, /Anliegen & Unterlagen/, /Prüfen & Senden/]);
     await expect(tabs.nth(2)).toHaveAttribute("data-step", "billing");
     await expect(page.locator('[data-step="payer"]')).toHaveCount(0);
     await step(page, "billing");
