@@ -164,6 +164,27 @@ sys.exit(int(os.environ.get("MOCK_COSIGN_EXIT", "0")))
         self.assertEqual(self.events(), [["build", "backend"], ["build-ended"]])
         self.assert_running()
 
+    def test_http_health_requires_a_working_api_proxy(self):
+        curl = self.root / "curl"
+        curl.write_text(f"#!{sys.executable}\n" + '''
+import os, sys
+if sys.argv[-1].endswith("/auth/sessions"):
+    print(os.environ["MOCK_API_STATUS"], end="")
+else:
+    sys.exit(int(os.environ.get("MOCK_FRONTEND_CURL_EXIT", "0")))
+''')
+        curl.chmod(0o755)
+        for status in ("502", "404", "200", "000"):
+            with self.subTest(status=status):
+                result = self.run_guard("dev_http_healthy", MOCK_API_STATUS=status)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+        result = self.run_guard("dev_http_healthy", MOCK_API_STATUS="401")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.run_guard(
+            "dev_http_healthy", MOCK_API_STATUS="401", MOCK_FRONTEND_CURL_EXIT="22",
+        )
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+
     def valid_pins(self):
         names = {
             "GMED_BACKEND_IMAGE": "server", "GMED_FRONTEND_IMAGE": "frontend",

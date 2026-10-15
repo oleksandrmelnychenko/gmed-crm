@@ -24,6 +24,7 @@ RELEASE_ENV="${RELEASE_ENV:-$REPO_DIR/release.env}"
 CADDY_HOSTNAME_VALUE="${CADDY_HOSTNAME_VALUE:-console-dev.gmed-health.com}"
 GMED_CORS_ORIGIN_VALUE="${GMED_CORS_ORIGIN_VALUE:-https://console-dev.gmed-health.com,https://localhost,capacitor://localhost}"
 HEALTH_URL="${HEALTH_URL:-https://console-dev.gmed-health.com/health}"
+API_PROBE_URL="${API_PROBE_URL:-https://console-dev.gmed-health.com/api/v1/auth/sessions}"
 GMED_DEV_MIGRATION_MODE="${GMED_DEV_MIGRATION_MODE:-rehearse}"
 case "$GMED_DEV_MIGRATION_MODE" in
   rehearse|direct) ;;
@@ -227,6 +228,14 @@ trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+
+dev_http_healthy() {
+  local api_status
+  # The frontend /health alone cannot detect a broken connection to the API.
+  # This protected read must reach the server and reject an anonymous request.
+  api_status=$(curl --connect-timeout 5 --max-time 10 -sS -o /dev/null -w '%{http_code}' "$API_PROBE_URL" || true)
+  curl --connect-timeout 5 --max-time 10 -fsS "$HEALTH_URL" >/dev/null && [[ "$api_status" == 401 ]]
+}
 
 mkdir -p "$BACKUP_DIR" "$FAILED_DIR" "$(dirname "$LOG_FILE")"
 touch "$LOG_FILE"
@@ -457,14 +466,14 @@ compose "$REPO_DIR" up -d --no-build --remove-orphans
 
 healthy=0
 for _attempt in $(seq 1 30); do
-  if curl -fsS "$HEALTH_URL" >/dev/null; then
+  if dev_http_healthy; then
     healthy=1
     break
   fi
   sleep 2
 done
 if [[ "$healthy" -ne 1 ]]; then
-  echo "ERROR: DEV health check failed: $HEALTH_URL" >&2
+  echo "ERROR: DEV health check failed: $HEALTH_URL or $API_PROBE_URL" >&2
   exit 1
 fi
 
