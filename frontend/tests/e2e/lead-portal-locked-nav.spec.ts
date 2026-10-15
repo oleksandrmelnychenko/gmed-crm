@@ -106,8 +106,24 @@ for (const lang of ["ru", "de"] as const) {
       : "Diese Datenschutzerklärung gilt für unsere Kundenbefragung");
     await expect(notice).toContainText("12.10.2026");
     await expect(notice).toContainText("FiSaLis");
+    await notice.getByRole("heading", { level: 3 }).last().scrollIntoViewIfNeeded();
+    await expect(notice.getByRole("heading", { level: 3 }).last()).toBeInViewport();
   });
 }
+
+test("the public form notice scrolls to section 14 on desktop and mobile", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("gmed_lang", "ru"));
+  await page.route("**/api/v1/**", (route) => route.fulfill({ status: route.request().url().endsWith("/me") ? 401 : 200, json: {} }));
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/legal?notice=form&lang=ru#privacy");
+    const scroller = page.getByTestId("legal-public-scroll");
+    await expect(scroller).toBeVisible();
+    await scroller.press("Control+End");
+    await expect(page.locator("#form-privacy-section-14")).toBeInViewport();
+    expect(await scroller.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  }
+});
 
 test.describe("Lead portal locked menu and package interest", () => {
   for (const lang of ["ru", "de"] as const) {
