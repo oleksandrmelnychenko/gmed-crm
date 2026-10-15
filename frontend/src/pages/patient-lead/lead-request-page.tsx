@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Clock, LoaderCircle } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
 import { Banner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { cn } from "@/lib/utils";
 
 import { LEAD_REQUEST_ACCESS_CHANGED, fetchMyLeadRequestList, type LeadRequest } from "./lead-request-api";
 import { FollowUpStep } from "./lead-request-follow-up";
+import { DisclosureStep } from "./lead-request-disclosure-step";
 import { AutosaveFlushContext, createRequestQueue, type AutosaveFlush, type RequestQueue } from "./lead-request-parts";
 import { SendStep } from "./lead-request-send-step";
 import {
@@ -58,6 +60,7 @@ function storedCabinetLang(): LeadCabinetLang | null {
 }
 
 export function LeadRequestPage() {
+  const [, setSearchParams] = useSearchParams();
   const { lang: portalLang, setLang: setPortalLang } = useLang();
   const { user } = useAuth();
   const accountLang = user?.preferred_language ?? null;
@@ -212,7 +215,14 @@ export function LeadRequestPage() {
                   ? "border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand)]"
                   : "border-border text-muted-foreground",
               )}
-              onClick={() => { void switchAfterSave(request.lead_id, () => setSelected(item.lead_id)); }}
+              onClick={() => { void switchAfterSave(request.lead_id, () => {
+                setSelected(item.lead_id);
+                setSearchParams((current) => {
+                  const params = new URLSearchParams(current);
+                  params.set("lead", item.lead_id);
+                  return params;
+                }, { replace: true });
+              }); }}
             >
               {[item.personal_data.first_name, item.personal_data.last_name].filter(Boolean).join(" ")}
             </button>
@@ -315,7 +325,9 @@ function LeadRequestView({
   switchAfterSave: (leadId: string, action: () => void) => Promise<void>;
 }) {
   const guardian = request.access_kind === "guardian";
-  const [chosenStep, setChosenStep] = useState<StepId>(() => initialStep(request));
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedStep = searchParams.get("step");
+  const [chosenStep, setChosenStep] = useState<StepId>(() => visibleSteps(request).find((step) => step === requestedStep) ?? initialStep(request));
   useEffect(() => {
     const reload = () => { void onAccessLost(); };
     window.addEventListener(LEAD_REQUEST_ACCESS_CHANGED, reload);
@@ -351,6 +363,12 @@ function LeadRequestView({
   const go = useCallback((next: StepId) => {
     void switchAfterSave(request.lead_id, () => {
       setChosenStep(next);
+      setSearchParams((current) => {
+        const params = new URLSearchParams(current);
+        params.set("lead", request.lead_id);
+        params.set("step", next);
+        return params;
+      }, { replace: true });
       if (next === "send") setSendOpened(true);
       // A long step was left at its bottom: the next one starts at its top.
       const top = topRef.current;
@@ -359,7 +377,7 @@ function LeadRequestView({
         top.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
       }
     });
-  }, [switchAfterSave, request.lead_id]);
+  }, [switchAfterSave, request.lead_id, setSearchParams]);
 
   const nav: StepNav = {
     index: position + 1,
@@ -433,6 +451,7 @@ function LeadRequestView({
             />
           ) : null}
           {step === "documents" ? <DocumentsStep {...props} /> : null}
+          {step === "disclosure" ? <DisclosureStep {...props} /> : null}
           {step === "send" ? (
             <SendStep
               request={request}

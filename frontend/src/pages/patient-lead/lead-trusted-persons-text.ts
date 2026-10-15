@@ -2,6 +2,7 @@ import { asLeadCabinetLang } from "./lead-request-text";
 
 const texts = {
   de: {
+    personsHeading: "Benannte Personen",
     title: "Auskunft an Dritte",
     introduction: "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.",
     guardianContext: (child: string) => `Sie entscheiden als Elternteil oder gesetzliche Vertretung für ${child}. Die folgenden Angaben und die Einwilligung beziehen sich auf die Daten dieses Kindes.`,
@@ -18,6 +19,7 @@ const texts = {
     consentRequired: "Bitte bestätigen Sie die Einwilligung für die oben genannten Personen und den angegebenen Umfang.", outdated: "Die Einwilligung wurde aktualisiert. Laden Sie die Seite neu und bestätigen Sie den aktuellen Text.",
   },
   en: {
+    personsHeading: "Named people",
     title: "Information for third parties",
     introduction: "We provide information about your personal and medical data only to you personally. This also applies to people close to you who are not involved in organising your care or treatment, such as your spouse, partner, friends, children or other relatives. Without your explicit designation, we may not provide these people with any information.",
     guardianContext: (child: string) => `You are deciding as a parent or legal representative for ${child}. The following details and consent relate to this child's data.`,
@@ -33,6 +35,7 @@ const texts = {
     consentRequired: "Please confirm consent for the people and scope specified above.", outdated: "The consent has been updated. Reload the page and confirm the current text.",
   },
   uk: {
+    personsHeading: "Зазначені особи",
     title: "Надання інформації третім особам",
     introduction: "Ми надаємо інформацію про Ваші персональні та медичні дані лише Вам особисто. Це стосується й людей із Вашого оточення, які не беруть участі в організації та лікуванні, наприклад чоловіка чи дружини, партнера, друзів, дітей або інших родичів. Без Вашої прямої вказівки ми не маємо права надавати цим особам жодної інформації.",
     guardianContext: (child: string) => `Ви приймаєте рішення як один із батьків або законний представник дитини ${child}. Наведені нижче відомості та згода стосуються даних цієї дитини.`,
@@ -48,6 +51,7 @@ const texts = {
     consentRequired: "Підтвердьте згоду для зазначених вище осіб та обсягу інформації.", outdated: "Текст згоди оновлено. Перезавантажте сторінку та підтвердьте поточний текст.",
   },
   ru: {
+    personsHeading: "Указанные лица",
     title: "Предоставление информации третьим лицам",
     introduction: "Мы предоставляем информацию о Ваших персональных и медицинских данных только Вам лично. Это касается и людей из Вашего окружения, которые не участвуют в организации и лечении, например супруга(и), партнёра, друзей, детей или других родственников. Без Вашего прямого указания мы не вправе предоставлять этим лицам никакую информацию.",
     guardianContext: (child: string) => `Вы принимаете решение как родитель или законный представитель ребёнка ${child}. Приведённые ниже сведения и согласие относятся к данным этого ребёнка.`,

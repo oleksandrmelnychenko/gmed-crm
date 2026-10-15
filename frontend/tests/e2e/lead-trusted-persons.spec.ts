@@ -6,6 +6,8 @@ type Person = { name: string; relation: string; contact: string | null; scope?: 
 function request(id = "child-a", firstName = "Anna") {
   return {
     lead_id: id, access_kind: "guardian", minor: true,
+    created_at: "2026-10-14T08:00:00Z", submitted_at: null, changed_since_submit: false,
+    progress: { filled: 0, total: 12, missing_for_submit: [] }, consents: {}, documents: [], identity_documents: [],
     personal_data: { first_name: firstName, last_name: "Muster", primary_language: "en" },
     trusted_persons: [] as Person[], disclosure: null as LeadDisclosure | null, disclosure_company_name: "Example Care GmbH",
     consent_form: { version: "v1", choices: { ...core }, chosen_at: "2026-10-14T08:00:00Z", chosen_by_me: true, recipients: [] as Person[] },
@@ -65,6 +67,42 @@ async function addFriend(page: Page, name = "Eva Friend") {
   await page.getByTestId("disclosure-consent").check();
 }
 
+test("old bookmark opens the disclosure step inside Your request without a separate menu item", async ({ page }) => {
+  await setup(page);
+  await expect(page).toHaveURL(/\/\?step=disclosure/);
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "disclosure");
+  await expect(page.getByTestId("lead-request-steps").locator('[data-step="disclosure"]')).toHaveAttribute("aria-current", "step");
+  await expect(page.locator('a[href="/trusted-persons"]')).toHaveCount(0);
+});
+
+test("a failed save keeps the step and draft; retrying a step tab saves before navigation", async ({ page }) => {
+  const { calls } = await setup(page, { failSave: true });
+  await addFriend(page);
+  const tabs = page.getByTestId("lead-request-steps");
+  await tabs.locator('[data-step="send"]').click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "disclosure");
+  await expect(page.getByTestId("lead-request-save-blocked")).toBeVisible();
+  await expect(page.getByLabel("Last name, first name")).toHaveValue("Eva Friend");
+  await tabs.locator('[data-step="send"]').click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "send");
+  await expect(page.getByTestId("lead-request-send")).toBeVisible();
+  await tabs.locator('[data-step="disclosure"]').click();
+  await expect(page.getByTestId("disclosure-consent")).toBeChecked();
+  await expect(page.getByLabel("Last name, first name")).toHaveValue("Eva Friend");
+  expect(calls).toHaveLength(2);
+});
+
+test("an incomplete choice is not discarded when another step is selected", async ({ page }) => {
+  const { calls } = await setup(page);
+  await page.getByTestId("disclosure-yes").check();
+  await page.getByTestId("trusted-person-add").click();
+  await page.getByLabel("Last name, first name").fill("Unfinished person");
+  await page.getByTestId("lead-request-steps").locator('[data-step="identity"]').click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "disclosure");
+  await expect(page.getByLabel("Last name, first name")).toHaveValue("Unfinished person");
+  expect(calls).toHaveLength(0);
+});
+
 test("explicit save keeps failed drafts and retries; reload restores decision, scope and receipt", async ({ page }) => {
   const { calls } = await setup(page, { failSave: true });
   await expect(page.getByTestId("disclosure-no")).not.toBeChecked();
@@ -108,27 +146,21 @@ test("Yes requires person, scope and checkbox; editing details requires fresh co
   await expect(page.getByLabel("Scope of information", { exact: false })).toHaveValue("Invoices only");
 });
 
-test("a guardian with multiple children retains separate drafts and saves only the selected request", async ({ page }) => {
+test("switching children saves the current decision and keeps each child's people separate", async ({ page }) => {
   const { calls } = await setup(page, { requests: [request(), request("child-b", "Ben")], selected: "child-b", patientMode: true });
   await expect(page.locator("#portal-patient")).toHaveCount(0);
   await expect(page.getByText("You are deciding as a parent", { exact: false })).toContainText("Ben Muster");
   await addFriend(page, "Ben Friend");
-  const selector = page.getByTestId("trusted-persons-request").getByRole("combobox");
-  await selector.click();
-  await page.getByRole("option", { name: "Anna Muster", exact: true }).click();
+  await page.getByRole("tab", { name: "Anna Muster", exact: true }).click();
   await expect(page.getByTestId("trusted-person-editor")).toHaveCount(0);
   await addFriend(page, "Anna Friend");
-  await selector.click();
-  await page.getByRole("option", { name: "Ben Muster", exact: true }).click();
+  await page.getByRole("tab", { name: "Ben Muster", exact: true }).click();
   await expect(page.getByTestId("trusted-person-editor").getByLabel("Last name, first name")).toHaveValue("Ben Friend");
-  await page.getByTestId("trusted-persons-save").click();
   await expect(page.getByTestId("trusted-persons-save-state")).toHaveText("Saved");
-  expect(calls.map((call) => call.id)).toEqual(["child-b"]);
-  await expect(page.getByRole("link", { name: "Open request", exact: true })).toHaveAttribute("href", "/request?lead=child-b");
-  await selector.click();
-  await page.getByRole("option", { name: "Anna Muster", exact: true }).click();
+  expect(calls.map((call) => call.id)).toEqual(["child-b", "child-a"]);
+  await page.getByRole("tab", { name: "Anna Muster", exact: true }).click();
   await expect(page.getByTestId("trusted-person-editor").getByLabel("Last name, first name")).toHaveValue("Anna Friend");
-  await expect(page.getByTestId("trusted-persons-save-state")).toHaveText("Changes not saved yet");
+  await expect(page.getByTestId("trusted-persons-save-state")).toHaveText("Saved");
 });
 
 test("No clears existing people and records an explicit refusal without changing core consents", async ({ page }) => {
@@ -197,7 +229,7 @@ test("loading can be retried, and all four cabinet languages remain selectable",
   await expect(page.getByTestId("disclosure-yes")).toBeVisible();
   for (const [radio, heading] of [["DE", "Auskunft an Dritte"], ["UA", "Надання інформації третім особам"], ["RU", "Предоставление информации третьим лицам"], ["EN", "Information for third parties"]]) {
     await page.getByTestId("lead-cabinet-language").getByRole("radio", { name: radio, exact: true }).click();
-    await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 3, name: heading, exact: true })).toBeVisible();
   }
 });
 

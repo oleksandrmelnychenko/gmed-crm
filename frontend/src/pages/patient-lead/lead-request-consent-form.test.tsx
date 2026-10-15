@@ -180,7 +180,7 @@ describe("read-only disclosure decision", () => {
     expect(html).toContain("An earlier choice is on record");
     expect(html).toContain("Old Recipient");
     expect(html).not.toContain('data-consent-option="named_recipients"');
-    expect(html).toContain('href="/trusted-persons?lead=lead-1"');
+    expect(html).toContain('href="/request?lead=lead-1&amp;step=disclosure"');
     expect(consentFormChanged({ ...CORE, named_recipients: true }, CORE)).toBe(false);
   });
   it("uses explicit disclosure even before the core consents are saved and shows each person's scope", () => {

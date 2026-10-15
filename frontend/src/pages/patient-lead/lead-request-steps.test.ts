@@ -41,9 +41,15 @@ const followUp = (overrides: Partial<LeadRequestFollowUp>): LeadRequestFollowUp 
 });
 
 describe("lead cabinet steps", () => {
+  it("marks disclosure complete only after a current valid explicit decision", () => {
+    const current = { ...request(), disclosure: { allow_disclosure: false, consent_given: false, version: "2026-10-14", language: "de", chosen_at: "2026-10-15T08:00:00Z", chosen_by: "viewer", access_kind: "self", company_name: "GMED" } } as LeadRequest;
+    expect(stepDone(request(), "disclosure")).toBe(false);
+    expect(stepDone(current, "disclosure")).toBe(true);
+    expect(stepDone({ ...current, disclosure: { ...current.disclosure!, allow_disclosure: true } }, "disclosure")).toBe(false);
+  });
   it("inserts a live country step before first submission and completes it by autosaved answers", () => {
     const preview = request({ follow_up: followUp({ before_submit: true, blocks: ["A", "L", "I"], missing: { A: ["funds_source"], L: ["pep_self"], I: ["id_document_upload"] } }) });
-    expect(visibleSteps(preview)).toEqual(["person", "identity", "billing", "follow_up", "documents", "send"]);
+    expect(visibleSteps(preview)).toEqual(["person", "identity", "billing", "follow_up", "disclosure", "documents", "send"]);
     expect(stepMissingCount(preview, "follow_up")).toBe(2);
     expect(stepDone(preview, "follow_up")).toBe(false);
     expect(stepDone(preview, "send")).toBe(false);
@@ -66,11 +72,12 @@ describe("lead cabinet steps", () => {
       "billing",
       "declarations",
       "follow_up",
+      "disclosure",
       "documents",
       "send",
     ]);
     // "contact" is part of the first tab, the declarations are follow-up block L (owner 2026-10-09).
-    expect(visibleSteps(request())).toEqual(["person", "identity", "billing", "documents", "send"]);
+    expect(visibleSteps(request())).toEqual(["person", "identity", "billing", "disclosure", "documents", "send"]);
     const sent = "2026-10-07T09:00:00Z";
     expect(visibleSteps(request({ submitted_at: sent, follow_up: undefined }))).not.toContain("follow_up");
     expect(visibleSteps(request({ submitted_at: sent, follow_up: followUp({ blocks: ["A"] }) }))).toContain("follow_up");

@@ -38,7 +38,8 @@ export function storedTrustedPersons(request: Pick<LeadRequest, "trusted_persons
 }
 
 export function trustedPersonsPath(leadId: string): string {
-  return `/trusted-persons?lead=${encodeURIComponent(leadId)}`;
+  // /request is also accepted in lead mode as the wizard's canonical deep link.
+  return `/request?lead=${encodeURIComponent(leadId)}&step=disclosure`;
 }
 
 export function requestForLead(requests: readonly LeadRequest[], selected: string | null): LeadRequest | null {

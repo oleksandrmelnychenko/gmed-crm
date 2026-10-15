@@ -26,7 +26,7 @@ import { TrustedPersonsList } from "./lead-trusted-persons-editor";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 
 export function savedDisclosureAllowed(request: Pick<LeadRequest, "disclosure" | "consent_form">): boolean {
-  // Unrelated consent edits preserve a historical choice; only the dedicated page grants a new one.
+  // Unrelated consent edits preserve a historical choice; only the disclosure step grants a new one.
   return request.disclosure ? request.disclosure.allow_disclosure && request.disclosure.consent_given : request.consent_form?.choices?.named_recipients === true;
 }
 

@@ -198,6 +198,7 @@ describe("lead cabinet languages", () => {
       declarations: "Erklärungen",
       follow_up: "Ergänzende Angaben",
       documents: "Anliegen & Unterlagen",
+      disclosure: "Auskunft an Dritte",
       send: "Prüfen & Senden",
     });
     // After sending, one short neutral pointer to the open blocks (QA 2026-10-10: no title).

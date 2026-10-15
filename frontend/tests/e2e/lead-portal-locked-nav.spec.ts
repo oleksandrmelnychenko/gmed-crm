@@ -132,7 +132,7 @@ test.describe("Lead portal locked menu and package interest", () => {
       const { reads, posts, unexpected } = await setup(page, { lang });
       const nav = page.locator("nav");
       await expect(nav).toContainText(lang === "de" ? "Anfrageportal" : "Кабинет заявки");
-      for (const path of ["/", "/trusted-persons", "/account", "/legal"]) await expect(nav.locator(`a[href="${path}"]`)).toBeVisible();
+      for (const path of ["/", "/account", "/legal"]) await expect(nav.locator(`a[href="${path}"]`)).toBeVisible();
       for (const module of MODULES) {
         const control = nav.getByTestId(`lead-portal-locked-${module}`);
         await expect(control).toBeVisible();

@@ -1026,7 +1026,7 @@ test.describe("lead cabinet", () => {
     await expect(block).toContainText("Einwilligung zur Datenübermittlung (Anlage 1)");
     // Three core consents and four channels; third-party disclosure is chosen on its own page.
     await expect(block.getByRole("checkbox")).toHaveCount(7);
-    await expect(block.getByTestId("lead-request-consent-recipients").getByRole("link")).toHaveAttribute("href", /trusted-persons/);
+    await expect(block.getByTestId("lead-request-consent-recipients").getByRole("link")).toHaveAttribute("href", /step=disclosure/);
     for (const box of await block.getByRole("checkbox").all()) await expect(box).not.toBeChecked();
     await expect(block).toContainText("Noch keine Auswahl gespeichert.");
     const save = page.getByTestId("lead-request-consent-form-save");
@@ -2259,8 +2259,8 @@ test.describe("lead cabinet", () => {
     expect(await overflow()).toBeLessThanOrEqual(1);
     // The dots carry no names on a phone: the current step is named below them.
     await step(page, "person");
-    // Six steps with the follow-up open: who pays is part of step 3 since 2026-10-11.
-    await expect(page.getByTestId("lead-request-step-title")).toContainText("Schritt 1 von 6 · Einwilligung & Person");
+    // Disclosure is part of the request; the live follow-up adds a seventh step.
+    await expect(page.getByTestId("lead-request-step-title")).toContainText("Schritt 1 von 7 · Einwilligung & Person");
     expect(await widestOverhang(page, "lead-request-step-person")).toBeLessThanOrEqual(1);
     // The long legal questions wrap instead of widening the page.
     await step(page, "follow_up");

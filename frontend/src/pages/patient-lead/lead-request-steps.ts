@@ -4,6 +4,7 @@ import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpSho
 import { SUBMIT_FIELDS, changedSinceSubmit, consentGiven } from "./lead-request-model";
 import { isRecipientField } from "./lead-request-recipient-model";
 import { representativeSubmitPart } from "./lead-request-representation-model";
+import { disclosureDraft, disclosureProblem } from "./lead-trusted-persons-model";
 
 // The lead cabinet as a stepper of short tabs (trigger flow 2026-10-07,
 // contract section 6 and 13.3): each step shows what it still misses and a
@@ -23,6 +24,7 @@ export const STEP_IDS = [
   "billing",
   "declarations",
   "follow_up",
+  "disclosure",
   "documents",
   "send",
 ] as const;
@@ -178,11 +180,12 @@ export function stepMissingCount(
 
 /** Whether a step is complete: nothing missing, and for "send" sent and unchanged since. */
 export function stepDone(
-  request: Pick<LeadRequest, "progress" | "follow_up" | "consents" | "submitted_at" | "changed_since_submit" | "documents">,
+  request: Pick<LeadRequest, "progress" | "follow_up" | "consents" | "submitted_at" | "changed_since_submit" | "documents" | "disclosure">,
   step: StepId,
   missing: Record<StepId, string[]> = missingByStep(request),
 ): boolean {
   if (step === "send") return Boolean(request.submitted_at) && !changedSinceSubmit(request);
+  if (step === "disclosure") return Boolean(request.disclosure) && disclosureProblem(disclosureDraft(request)) === null;
   if (step === "follow_up") return followUpBeforeSubmit(request) ? followUpMissingAll(request).length === 0 : followUpAnswered(request);
   return stepMissingCount(request, step, missing) === 0;
 }
