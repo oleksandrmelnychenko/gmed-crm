@@ -550,7 +550,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await expect(notice).toContainText("Datenschutzhinweis für die zahlende Person");
     await expect(notice).toContainText("Verantwortlich für die Verarbeitung ist GMED.");
     await expect(notice).toContainText("§ 8 Abs. 4 GwG");
-    await expect(notice.getByRole("link", { name: "Datenschutzhinweise" })).toHaveAttribute("href", "/legal?lang=de#privacy");
+    await expect(notice.getByRole("link", { name: "Datenschutzhinweise" })).toHaveAttribute("href", "/legal?notice=form&lang=de#privacy");
     // Why the fields wait only after a press (QA 2026-10-10: no hint before "Weiter").
     await expect(section.getByTestId("lead-request-payer-notice-first")).toHaveCount(0);
     await expect(section.getByTestId("lead-request-payer-fields")).toHaveCount(0);
@@ -569,8 +569,8 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     expect(calls.patches).toEqual([]);
 
     // Only the payer-only keys, each saved when it changed.
-    await choose(page, fields.getByRole("combobox", { name: "Anrede" }), "Frau");
-    await expect.poll(() => calls.patches.at(-1)).toEqual({ salutation: "ms" });
+    await expect(fields.getByRole("combobox", { name: "Anrede" })).toHaveCount(0);
+    await expect(fields.getByRole("textbox", { name: /Geburtsname/ })).toHaveCount(0);
     await fields.getByRole("textbox", { name: /Beruf \/ Tätigkeit/ }).fill("Ingenieurin");
     await expect.poll(() => calls.patches.at(-1)).toEqual({ occupation: "Ingenieurin" });
     await fields.getByRole("checkbox", { name: "Gehalt / nichtselbständige Arbeit" }).check();
@@ -589,6 +589,8 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     const legal = section.getByTestId("lead-request-payer-legal");
     await choose(page, legal.getByRole("combobox", { name: /Üben Sie ein hochrangiges öffentliches Amt aus/ }), "Ja");
     await expect.poll(() => calls.patches.at(-1)).toEqual({ pep_self: true });
+    await choose(page, fields.getByRole("combobox", { name: "Anrede" }), "Frau");
+    await expect.poll(() => calls.patches.at(-1)).toEqual({ salutation: "ms" });
     await legal.getByRole("textbox", { name: /Amt, Land und Zeitraum/ }).fill("Stadträtin 2020–2024");
     await expect.poll(() => calls.patches.at(-1)).toEqual({ pep_self_details: "Stadträtin 2020–2024" });
     for (const question of [/Ist ein unmittelbares Familienmitglied/, /Haben Sie oder eine beteiligte Person Wohnsitz/, /Bestehen Verbindungen zu Personen/]) {

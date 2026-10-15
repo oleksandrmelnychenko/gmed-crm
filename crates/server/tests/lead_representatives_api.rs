@@ -347,6 +347,181 @@ fn complete_parent_details() -> Value {
     })
 }
 
+#[tokio::test]
+async fn an_invoice_names_the_chosen_parent_and_never_another_childs_contact() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let mother = Uuid::new_v4();
+    let father = Uuid::new_v4();
+    let mother_email = address("anna.invoice");
+    let father_email = address("ben.invoice");
+    let lead = minor_lead(
+        &app,
+        json!([
+            {"id":mother,"name":"Anna Muster","relation":"mother","email":mother_email},
+            {"id":father,"name":"Ben Muster","relation":"father","email":father_email}
+        ]),
+    )
+    .await;
+    let (_, login) = guardian_login(&app, lead, mother).await;
+    let (_, father_login) = guardian_login(&app, lead, father).await;
+    give_inquiry_consent(router, lead, &login).await;
+    let base = format!("/api/v1/me/lead-requests/{lead}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/billing"),
+        &login,
+        Some(json!({"invoice_recipient":"self"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(missing(&body).contains(&"recipient_representative_id".into()));
+
+    // Choosing a parent does not expand the short initial form into passport/address questions.
+    let (status, short) = json_request(
+        router,
+        "POST",
+        &format!("{base}/billing"),
+        &login,
+        Some(json!({"recipient_representative_id":father,"recipient_first_name":"Forged"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{short}");
+    assert_eq!(short["billing"]["recipient"]["name"], "Ben Muster");
+    assert!(!missing(&short).contains(&"recipient_representative_id".into()));
+    assert!(!missing(&short).contains(&"rep2_street".into()));
+    for (id, actor) in [(mother, &login), (father, &father_login)] {
+        let mut details = complete_parent_details();
+        details["street"] = json!(if id == father {
+            "Vaterweg 2"
+        } else {
+            "Mutterweg 1"
+        });
+        let (status, body) = json_request(
+            router,
+            "POST",
+            &format!("{base}/representatives/{id}"),
+            actor,
+            Some(details),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let mother_payer = json!({"payer_kind":"third_party","payer_type":"person",
+        "first_name":"Anna","last_name":"Muster","email":mother_email,
+        "date_of_birth":"1985-03-02","country":"DE","citizenships":["DE"],"relationship_kind":"parent"});
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/payer"),
+        &login,
+        Some(mother_payer),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["invoice_to"], "other");
+    assert_eq!(body["billing"]["invoice_name"], "Ben Muster");
+    assert_eq!(body["billing"]["invoice_street"], "Vaterweg 2");
+    assert_eq!(body["billing"]["invoice_email"], json!(father_email));
+    assert!(
+        missing(&body).contains(&"payer_kind".into()),
+        "Choosing the father cannot silently leave the mother as payer: {body}"
+    );
+    let (status, separate) = json_request(
+        router,
+        "POST",
+        &format!("{base}/billing"),
+        &login,
+        Some(json!({"invoice_recipient_is_payer":false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{separate}");
+    assert!(
+        !missing(&separate).contains(&"payer_kind".into()),
+        "The mother may pay while the father receives the invoice: {separate}"
+    );
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &format!("{base}/billing"),
+        &login,
+        Some(json!({"invoice_recipient_is_payer":true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(router, "POST", &format!("{base}/payer"), &login,
+        Some(json!({"payer_kind":"third_party","payer_type":"person","first_name":"Ben","last_name":"Muster",
+            "email":father_email,"date_of_birth":"1985-03-02","country":"DE","citizenships":["DE"],"relationship_kind":"parent"}))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!missing(&body).contains(&"payer_kind".into()), "{body}");
+    assert_eq!(
+        body["billing"]["payment_route_by"], "payer",
+        "The other parent's private questionnaire stays on their own access"
+    );
+    let (status, delivered) = json_request(
+        router,
+        "POST",
+        &format!("{base}/billing"),
+        &login,
+        Some(json!({"recipient_email":"invoice-office@example.com"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{delivered}");
+    assert_eq!(
+        delivered["billing"]["invoice_email"],
+        "invoice-office@example.com"
+    );
+    assert!(
+        !missing(&delivered).contains(&"payer_kind".into()),
+        "Invoice delivery does not change the payer: {delivered}"
+    );
+
+    let (status, saved) = json_request(router, "GET", &base, &login, None).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        saved["billing"]["recipient"]["representative_id"],
+        json!(father)
+    );
+    let foreign = Uuid::new_v4();
+    let _other = minor_lead(&app, json!([{ "id":foreign,"name":"Foreign Parent","relation":"mother","email":address("foreign.invoice") }])).await;
+    let (status, error) = json_request(
+        router,
+        "POST",
+        &format!("{base}/billing"),
+        &login,
+        Some(json!({"recipient_representative_id":foreign})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["field"], "recipient_representative_id");
+    let (status, changed) = json_request(
+        router,
+        "POST",
+        &format!("{base}/representatives/{father}"),
+        &father_login,
+        Some(json!({"street":"Vaterweg 3"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(changed["billing"]["invoice_name"], "Ben Muster");
+    assert_eq!(changed["billing"]["invoice_street"], "Vaterweg 3");
+    let (status, removed) = json_request(
+        router,
+        "DELETE",
+        &format!("/api/v1/leads/{lead}/trusted-contacts/{father}"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    let (status, after) = json_request(router, "GET", &base, &login, None).await;
+    assert_eq!(status, StatusCode::OK, "{after}");
+    assert!(after["billing"]["invoice_to"].is_null(), "{after}");
+    assert!(missing(&after).contains(&"recipient_representative_id".into()));
+}
+
 async fn audit_contexts(pool: &PgPool, action: &str, lead_id: Uuid) -> Vec<Value> {
     sqlx::query_scalar(
         "SELECT context FROM audit_log WHERE action = $1 AND entity_id = $2 ORDER BY id",

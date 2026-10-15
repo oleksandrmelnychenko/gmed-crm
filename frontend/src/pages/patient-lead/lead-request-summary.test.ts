@@ -723,8 +723,6 @@ describe("lead request summary", () => {
       { label: "Vorname", value: "Anna" },
       { label: "Nachname", value: "Muster" },
       { label: "Geburtsdatum", value: "02.03.1985" },
-      { label: "Geburtsort", value: "Kyiv" },
-      { label: "Geburtsland", value: "Ukraine" },
       { label: "Staatsangehörigkeit(en)", value: "Ukraine" },
       { label: "E-Mail", value: "anna.muster@example.com" },
     ]);

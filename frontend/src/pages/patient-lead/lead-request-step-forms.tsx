@@ -700,7 +700,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
   // The payment method belongs to the payer named: asked once somebody is.
   const recipient = draftFromRecipient(request.billing);
   const payerNamed = Boolean(request.payer) && (!flowKnown || payerFitsFlow(flowOf(recipient), request.payer, recipient,
-    payerAnswer(request.payer, request.payer_self_template) === "guardian" || request.billing?.payment_route_by === "guardian"));
+    payerAnswer(request.payer, request.payer_self_template) === "guardian" || request.billing?.payment_route_by === "guardian", request.representation?.representatives));
   return (
     <StepFrame testId="lead-request-step-billing" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
       <Section title={childSectionTitle(text, "insurance", request.minor)}>

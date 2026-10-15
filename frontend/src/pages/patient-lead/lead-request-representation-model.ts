@@ -253,11 +253,12 @@ export function hasRepresentativeEntries(draft: RepresentativeDraft): boolean {
 }
 
 /**
- * Whether a field is asked of a person of this slot. An adult's
- * representative or guardian is not asked for the country of birth.
+ * Birth details are requested only in the separate sanctions follow-up,
+ * never in the representative's ordinary personal-data form.
  */
 export function asksRepresentativeField(slot: RepresentativeSlot, field: RepresentativeField): boolean {
-  return field !== "birth_country" || slot === "rep1" || slot === "rep2";
+  void slot;
+  return field !== "birth_country" && field !== "birth_place";
 }
 
 /** What the request cannot be sent without (contract 2.6), per kind of person. */
@@ -273,7 +274,6 @@ const ADULT_REQUIRED: ReadonlySet<RepresentativeField> = new Set([
 
 const MINOR_REQUIRED: ReadonlySet<RepresentativeField> = new Set([
   ...ADULT_REQUIRED,
-  "birth_place",
   "citizenships",
   "email",
   "phone",

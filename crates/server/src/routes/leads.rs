@@ -4347,6 +4347,17 @@ async fn update_lead(
         }
     }
     let representative_invites = if representative_changed {
+        if let Err(error) = super::lead_invoice_recipient::sync_section_seven(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+            "staff",
+        )
+        .await
+        {
+            tracing::error!(%error, %lead_id, "derive invoice parent after contact update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
         match crate::document_signatures::invalidate_representative_identity(
             &mut tx,
             lead_id,

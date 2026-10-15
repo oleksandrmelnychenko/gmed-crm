@@ -403,6 +403,8 @@ test.describe("Parent country follow-up", () => {
     await expect(page.locator("#lead-request-rep1_date_of_birth")).toHaveValue("02.03.1985");
     await expect(page.locator("#lead-request-rep2_date_of_birth")).toHaveValue("02.03.1985");
     await expect(page.locator("#lead-request-rep1_street")).toHaveValue("Synthetic street 1");
+    await expect(page.locator("#lead-request-rep1_birth_place")).toHaveCount(0);
+    await expect(page.locator("#lead-request-rep1_birth_country")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-rep1-identity-upload")).toBeVisible();
     await expect(page.getByTestId("lead-request-rep2-identity-upload")).toBeVisible();
   });

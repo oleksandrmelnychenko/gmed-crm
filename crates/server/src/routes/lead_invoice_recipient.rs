@@ -47,9 +47,10 @@ const RELATIONSHIP_KIND_OTHER: &str = "other";
 
 /// The keys of `POST /me/lead-requests/{id}/billing` that belong to the
 /// recipient (taken out of the body before section 7 and 8 are read).
-pub(crate) const RECIPIENT_KEYS: [&str; 17] = [
+pub(crate) const RECIPIENT_KEYS: [&str; 18] = [
     "invoice_recipient",
     "invoice_recipient_is_payer",
+    "recipient_representative_id",
     "recipient_type",
     "recipient_first_name",
     "recipient_last_name",
@@ -70,6 +71,10 @@ pub(crate) const RECIPIENT_KEYS: [&str; 17] = [
 /// The answers of step 3 about the invoice recipient.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Recipient {
+    pub(crate) representative_contact_id: Option<Uuid>,
+    // Resolved from the child's current parent, never accepted from the body.
+    pub(crate) parent_email: Option<String>,
+    pub(crate) parent_date_of_birth: Option<chrono::NaiveDate>,
     /// [`RECIPIENT_SELF`] or [`RECIPIENT_THIRD_PARTY`]; `None` until answered.
     pub(crate) recipient: Option<String>,
     /// "Der Rechnungsempfänger ist auch der Zahler" (a checkbox, `true` by
@@ -102,6 +107,7 @@ impl Recipient {
     fn from_row(row: &PgRow) -> Self {
         let text = |column: &str| row.try_get::<Option<String>, _>(column).ok().flatten();
         Self {
+            representative_contact_id: row.try_get("representative_contact_id").ok().flatten(),
             recipient: text("recipient"),
             is_payer: row.try_get("recipient_is_payer").ok().flatten(),
             recipient_type: text("recipient_type"),
@@ -120,6 +126,7 @@ impl Recipient {
             relationship: text("relationship"),
             payment_reason: text("payment_reason"),
             legacy_name: None,
+            ..Self::default()
         }
     }
 
@@ -134,7 +141,7 @@ impl Recipient {
     /// The recipient's name: the organisation's, "First Last" of a person, or
     /// the name section 7 of an older request holds.
     pub(crate) fn name(&self) -> Option<String> {
-        if !self.is_third_party() {
+        if !self.is_third_party() && self.representative_contact_id.is_none() {
             return None;
         }
         let name = if self.is_organisation() {
@@ -156,7 +163,7 @@ impl Recipient {
     /// The data of a third-party recipient (`recipient` of the request object
     /// and of the staff view).
     fn party_json(&self) -> Value {
-        json!({
+        let mut party = json!({
             "type": self.recipient_type,
             "name": self.name(),
             "first_name": self.first_name,
@@ -168,12 +175,16 @@ impl Recipient {
             "zip": self.zip,
             "city": self.city,
             "country": self.country,
-            "email": self.email,
+            "email": self.email.as_ref().or(self.parent_email.as_ref()),
             "phone": self.phone,
             "relationship_kind": self.relationship_kind,
             "relationship": self.relationship,
             "payment_reason": self.payment_reason,
-        })
+        });
+        if let Some(id) = self.representative_contact_id {
+            party["representative_id"] = json!(id);
+        }
+        party
     }
 
     /// The keys the cabinet's `billing` gets: the two answers and the
@@ -338,6 +349,19 @@ pub(crate) fn apply(
                     }
                 };
             }
+            "recipient_representative_id" => {
+                let text = text_value(value, "recipient_representative_id")?;
+                next.representative_contact_id = if text.trim().is_empty() {
+                    None
+                } else {
+                    Some(Uuid::parse_str(text.trim()).map_err(|_| {
+                        field_error(
+                            "recipient_representative_id",
+                            "A representative id is expected",
+                        )
+                    })?)
+                };
+            }
             "recipient_type" => {
                 next.recipient_type = choice(
                     value,
@@ -440,7 +464,10 @@ pub(crate) fn apply(
     }
     // Another recipient: the e-mail named for the one before goes, unless
     // the body names one.
-    if next.recipient != current.recipient && !body.contains_key("recipient_email") {
+    if (next.recipient != current.recipient
+        || next.representative_contact_id != current.representative_contact_id)
+        && !body.contains_key("recipient_email")
+    {
         next.email = None;
     }
     // "Der Rechnungsempfänger ist auch der Zahler" is a checkbox, ticked as
@@ -454,11 +481,15 @@ pub(crate) fn apply(
     if !next.is_third_party() {
         let email = next.email.take();
         next = Recipient {
+            representative_contact_id: next.representative_contact_id,
             recipient: next.recipient,
             is_payer: next.is_payer,
             email,
             ..Recipient::default()
         };
+    }
+    if next.recipient.as_deref() != Some(RECIPIENT_SELF) {
+        next.representative_contact_id = None;
     }
     match next.recipient_type.as_deref() {
         Some(RECIPIENT_TYPE_ORGANISATION) => {
@@ -495,6 +526,7 @@ pub(crate) fn changed_keys(before: &Recipient, after: &Recipient) -> Vec<&'stati
         changed.push("invoice_recipient_is_payer");
     }
     for (key, field) in [
+        ("recipient_representative_id", "representative_id"),
         ("recipient_type", "type"),
         ("recipient_first_name", "first_name"),
         ("recipient_last_name", "last_name"),
@@ -529,9 +561,9 @@ pub(crate) async fn store(
         r#"INSERT INTO lead_invoice_recipients (
                lead_id, recipient, recipient_is_payer, recipient_type, first_name, last_name,
                organisation_name, legal_form, contact_name, street, zip, city, country, email,
-               phone, relationship_kind, relationship, payment_reason, updated_by)
+               phone, relationship_kind, relationship, payment_reason, updated_by, representative_contact_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                   $17, $18, $19)
+                   $17, $18, $19, $20)
            ON CONFLICT (lead_id) DO UPDATE SET
                recipient = EXCLUDED.recipient,
                recipient_is_payer = EXCLUDED.recipient_is_payer,
@@ -551,6 +583,7 @@ pub(crate) async fn store(
                relationship = EXCLUDED.relationship,
                payment_reason = EXCLUDED.payment_reason,
                updated_by = EXCLUDED.updated_by,
+               representative_contact_id = EXCLUDED.representative_contact_id,
                updated_at = now()"#,
     )
     .bind(lead_id)
@@ -572,6 +605,7 @@ pub(crate) async fn store(
     .bind(&recipient.relationship)
     .bind(&recipient.payment_reason)
     .bind(actor)
+    .bind(recipient.representative_contact_id)
     .execute(conn)
     .await
     .map(|_| ())
@@ -607,6 +641,18 @@ impl SectionSeven {
 
     pub(crate) fn of_recipient(recipient: &Recipient, declaration: &Declaration) -> Self {
         match (recipient.recipient.as_deref(), recipient.is_payer) {
+            (Some(RECIPIENT_SELF), _) if recipient.representative_contact_id.is_some() => Self {
+                invoice_to: Some(INVOICE_TO_OTHER.into()),
+                invoice_name: recipient.name(),
+                invoice_street: recipient.street.clone(),
+                invoice_zip: recipient.zip.clone(),
+                invoice_city: recipient.city.clone(),
+                invoice_country: recipient.country.clone(),
+                invoice_email: recipient
+                    .email
+                    .clone()
+                    .or_else(|| recipient.parent_email.clone()),
+            },
             (Some(RECIPIENT_SELF), _) => Self {
                 invoice_to: Some(INVOICE_TO_SELF.into()),
                 invoice_email: recipient.email.clone(),
@@ -646,14 +692,22 @@ pub(crate) async fn sync_section_seven(
     actor: Uuid,
     access_kind: &str,
 ) -> Result<Vec<&'static str>, sqlx::Error> {
-    let Some(recipient) = load(conn, lead_id).await? else {
+    let Some(mut recipient) = load(conn, lead_id).await? else {
         return Ok(Vec::new());
     };
     let Some(declaration) = lead_payer::load_declaration(conn, lead_id).await? else {
         return Ok(Vec::new());
     };
     let before = SectionSeven::of_declaration(&declaration);
-    let after = SectionSeven::of_recipient(&recipient, &declaration);
+    let representation = super::lead_representatives::load(conn, lead_id)
+        .await?
+        .unwrap_or_default();
+    let after = if resolve_parent(&mut recipient, &representation.representation).is_ok() {
+        SectionSeven::of_recipient(&recipient, &declaration)
+    } else {
+        // A removed representative can no longer receive a new invoice.
+        SectionSeven::default()
+    };
     let changed: Vec<&'static str> = [
         ("invoice_to", before.invoice_to != after.invoice_to),
         ("invoice_name", before.invoice_name != after.invoice_name),
@@ -711,6 +765,83 @@ pub(crate) async fn sync_section_seven(
     Ok(changed)
 }
 
+/// Resolve a selected parent from the same canonical representation used for
+/// signatures. The browser sends only an id, never authoritative identity data.
+pub(crate) fn resolve_parent(
+    recipient: &mut Recipient,
+    representation: &super::lead_representatives::Representation,
+) -> Result<(), FieldError> {
+    let id = match recipient.representative_contact_id {
+        Some(id) => id,
+        None if representation.minor && recipient.recipient.as_deref() == Some(RECIPIENT_SELF) => {
+            let parents: Vec<_> = representation
+                .representatives
+                .iter()
+                .filter(|person| matches!(person.slot, Some("rep1" | "rep2")))
+                .collect();
+            if parents.len() != 1 {
+                return Ok(());
+            }
+            recipient.representative_contact_id = Some(parents[0].id);
+            parents[0].id
+        }
+        None => return Ok(()),
+    };
+    let person = representation
+        .representatives
+        .iter()
+        .find(|person| person.id == id && matches!(person.slot, Some("rep1" | "rep2")));
+    let Some(person) = person
+        .filter(|_| representation.minor && recipient.recipient.as_deref() == Some(RECIPIENT_SELF))
+    else {
+        return Err(field_error(
+            "recipient_representative_id",
+            "Choose a current parent or legal guardian of this child",
+        ));
+    };
+    recipient.recipient_type = Some(RECIPIENT_TYPE_PERSON.into());
+    recipient.first_name = Some(person.first_name.clone());
+    recipient.last_name = Some(person.last_name.clone());
+    recipient.street = person.extras.street.clone();
+    recipient.zip = person.extras.zip.clone();
+    recipient.city = person.extras.city.clone();
+    recipient.country = person.extras.country.clone();
+    recipient.phone = person.phone.clone();
+    recipient.parent_email = person.email.clone();
+    recipient.parent_date_of_birth = person.date_of_birth;
+    Ok(())
+}
+
+pub(crate) fn parent_choice_missing(
+    recipient: &Recipient,
+    representation: &super::lead_representatives::Representation,
+) -> bool {
+    if !representation.minor || recipient.recipient.as_deref() != Some(RECIPIENT_SELF) {
+        return false;
+    }
+    let parents: Vec<_> = representation
+        .representatives
+        .iter()
+        .filter(|person| matches!(person.slot, Some("rep1" | "rep2")))
+        .collect();
+    match recipient.representative_contact_id {
+        Some(id) => !parents.iter().any(|person| person.id == id),
+        None => parents.len() > 1,
+    }
+}
+
+pub(crate) fn parent_recipient_missing(
+    recipient: &Recipient,
+    representation: &super::lead_representatives::Representation,
+) -> Vec<String> {
+    if parent_choice_missing(recipient, representation) {
+        return vec!["recipient_representative_id".into()];
+    }
+    // The first inquiry keeps the short parent form. Address and document
+    // details are enforced by the existing contract-stage parent gates.
+    Vec::new()
+}
+
 /// Whether the payer named in the declaration answers step 3 as the lead
 /// answered it: with the patient side as recipient who pays, the patient
 /// himself or a minor's paying parent (`paying_parent`); as recipient who
@@ -729,6 +860,32 @@ pub(crate) fn payer_fits(
         return false;
     };
     let third_party = declaration.is_third_party();
+    if recipient.recipient.as_deref() == Some(RECIPIENT_SELF)
+        && recipient.representative_contact_id.is_some()
+    {
+        let same = !declaration.is_organisation()
+            && match (
+                recipient.parent_email.as_deref(),
+                declaration.email.as_deref(),
+            ) {
+                (Some(parent), Some(payer)) if !parent.is_empty() && !payer.is_empty() => {
+                    parent.trim().eq_ignore_ascii_case(payer.trim())
+                }
+                _ => {
+                    recipient.parent_date_of_birth.is_some()
+                        && recipient.parent_date_of_birth == declaration.date_of_birth
+                        && match (recipient.name(), declaration.payer_name()) {
+                            (Some(recipient), Some(payer)) => same_name(&recipient, &payer),
+                            _ => false,
+                        }
+                }
+            };
+        return match recipient.is_payer {
+            Some(true) => third_party && same,
+            Some(false) => third_party && !same,
+            None => false,
+        };
+    }
     match (recipient.recipient.as_deref(), recipient.is_payer) {
         (Some(RECIPIENT_SELF), Some(true)) => !third_party || paying_parent,
         (Some(RECIPIENT_SELF), Some(false)) => third_party && !paying_parent,

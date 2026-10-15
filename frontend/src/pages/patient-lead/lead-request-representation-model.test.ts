@@ -341,15 +341,17 @@ describe("the body of a save", () => {
 describe("what is needed about a person", () => {
   it("asks an adult's person for less than a minor's representative", () => {
     expect(asksRepresentativeField("agent", "birth_country")).toBe(false);
-    expect(asksRepresentativeField("guardian", "birth_place")).toBe(true);
-    expect(asksRepresentativeField("rep1", "birth_country")).toBe(true);
-    // Place of birth, citizenship and contact are asked of an adult's person, but not required.
-    for (const field of ["birth_place", "citizenships", "email", "phone"] as const) {
+    expect(asksRepresentativeField("guardian", "birth_place")).toBe(false);
+    expect(asksRepresentativeField("rep1", "birth_country")).toBe(false);
+    // Birth details belong to sanctions follow-up; citizenship and contact
+    // remain required for parents in the ordinary form.
+    for (const field of ["citizenships", "email", "phone"] as const) {
       expect(requiresRepresentativeField("agent", field), field).toBe(false);
       expect(requiresRepresentativeField("rep2", field), field).toBe(true);
     }
     for (const slot of ["agent", "guardian", "rep1", "rep2"] as const) {
       expect(requiresRepresentativeField(slot, "last_name")).toBe(true);
+      expect(requiresRepresentativeField(slot, "birth_place")).toBe(false);
       expect(requiresRepresentativeField(slot, "birth_country")).toBe(false);
     }
     // The first step asks a minor's parents for names and contacts only; the rest is block G.
@@ -389,7 +391,6 @@ describe("what is missing about the representation", () => {
     "first_name",
     "last_name",
     "date_of_birth",
-    "birth_place",
     "citizenships",
     "street",
     "zip",
@@ -451,7 +452,6 @@ describe("what is missing about the representation", () => {
       },
     });
     expect(missing).toEqual([
-      "rep1_birth_place",
       "rep1_citizenships",
       "rep1_authority_upload",
       "rep2_last_name",
@@ -461,7 +461,6 @@ describe("what is missing about the representation", () => {
       "payer_kind",
     ]);
     expect(missing.map((field) => submitFieldLabel(de, field, true))).toEqual([
-      "1. Vertreter/in: Geburtsort",
       "1. Vertreter/in: Staatsangehörigkeit(en)",
       "1. Vertreter/in: Bestallungsurkunde",
       "2. Vertreter/in: Nachname",

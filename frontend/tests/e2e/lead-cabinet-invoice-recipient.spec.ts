@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { startClockAt } from "./helpers";
+import type { LeadRequestRepresentation } from "../../src/pages/patient-lead/lead-request-api";
 
 // Lead cabinet, step 3 "Versicherung & Rechnung" (owner spec 2026-10-11): the
 // invoice recipient comes first and absorbs "who pays". "Wer ist
@@ -10,6 +11,7 @@ import { startClockAt } from "./helpers";
 // (`routes/lead_invoice_recipient.rs`), synthetic data.
 
 type Party = {
+  representative_id: string | null;
   type: string | null;
   name: string | null;
   first_name: string | null;
@@ -31,6 +33,7 @@ type Party = {
 type Payer = Record<string, unknown> & { payer_kind: "self" | "third_party" };
 
 const PARTY_KEYS: (keyof Party)[] = [
+  "representative_id",
   "type",
   "first_name",
   "last_name",
@@ -134,9 +137,9 @@ function leadRequest(minor: boolean) {
         can_delete: true,
       },
     ],
-    representation: minor
+    representation: (minor
       ? undefined
-      : { has_representative: false, under_guardianship: null, custody: null, custody_stated: false, representatives: [] },
+      : { has_representative: false, under_guardianship: null, custody: null, custody_stated: false, representatives: [] }) as LeadRequestRepresentation | undefined,
     billing: {
       invoice_to: null as string | null,
       invoice_name: null as string | null,
@@ -222,6 +225,11 @@ function payerFits(request: Request): boolean {
   const third = payer.payer_kind === "third_party";
   const answer = billing.invoice_recipient;
   const pays = billing.invoice_recipient_is_payer;
+  if (answer === "self" && billing.recipient.representative_id) {
+    const parent = request.representation?.representatives.find((person) => person.id === billing.recipient.representative_id);
+    const same = third && parent?.email === payer.email;
+    return pays === true ? same : pays === false && third && !same;
+  }
   if (answer === "self" && pays === true) return !third || parentPays(request);
   if (answer === "self" && pays === false) return third && !parentPays(request);
   if (answer === "third_party" && pays === true) return third && Boolean(billing.recipient.type) && payerName(payer).toLowerCase() === recipientName(billing.recipient).toLowerCase();
@@ -236,12 +244,18 @@ function recompute(request: Request) {
   const billing = request.billing;
   const payer = request.payer;
   const party = billing.recipient;
-  party.name = billing.invoice_recipient === "third_party" ? recipientName(party) || null : null;
+  const selectedParent = request.representation?.representatives.find((parent) => parent.id === party.representative_id);
+  if (selectedParent) {
+    Object.assign(party, { type: "person", first_name: selectedParent.first_name, last_name: selectedParent.last_name,
+      street: selectedParent.street, zip: selectedParent.zip, city: selectedParent.city, country: selectedParent.country,
+      email: party.email ?? selectedParent.email });
+  }
+  party.name = billing.invoice_recipient === "third_party" || selectedParent ? recipientName(party) || null : null;
   // Section 7 follows the answers once somebody is named as payer.
   if (payer) {
     const answer = billing.invoice_recipient;
     billing.invoice_to =
-      answer === "self"
+      selectedParent ? "other" : answer === "self"
         ? "self"
         : answer === "third_party" && billing.invoice_recipient_is_payer === true && payer.payer_kind === "third_party"
           ? "payer"
@@ -381,8 +395,9 @@ async function setup(page: Page, options: {
       else if (billing.invoice_recipient_is_payer === null) billing.invoice_recipient_is_payer = true;
       if (billing.invoice_recipient !== before && !("recipient_email" in patch)) party.email = null;
       if (billing.invoice_recipient !== "third_party") {
-        for (const key of PARTY_KEYS) if (key !== "email") party[key] = null;
+        for (const key of PARTY_KEYS) if (key !== "email" && key !== "representative_id") party[key] = null;
       }
+      if (billing.invoice_recipient !== "self") party.representative_id = null;
       if (party.type === "organisation") {
         party.first_name = null;
         party.last_name = null;
@@ -457,6 +472,60 @@ const PAYER_TYPE = "Zahler ist";
 const PATIENT_PAYS = "Zahler ist die Patientin / der Patient";
 const OTHER_PAYS = "Zahler ist eine andere Person oder Organisation";
 const METHOD = "Welche Zahlungsart für Rechnungen bevorzugen Sie?";
+
+test("two parents: choose the named invoice parent, preserve it on reload and switch the payer deliberately", async ({ page }) => {
+  const mother = "11111111-1111-4111-8111-111111111111";
+  const father = "22222222-2222-4222-8222-222222222222";
+  const { request, calls } = await setup(page, { minor: true, prepare: (request) => {
+    request.representation = { document_stage: false, has_representative: null, under_guardianship: null,
+      custody: "joint", custody_stated: true, representatives: [mother, father].map((id, index) => ({
+        id, slot: index === 0 ? "rep1" : "rep2", role: "legal_representative", relation: "parent",
+        mine: index === 0, email_locked: index === 0, can_remove: false,
+        first_name: index === 0 ? "Maria" : "Ben", last_name: "Muster", date_of_birth: "1985-04-12",
+        birth_place: null, birth_country: null, citizenships: ["DE"],
+        street: index === 0 ? "Mutterweg 1" : "Vaterweg 2", zip: "10115", city: "Berlin", country: "DE",
+        email: index === 0 ? "maria.muster@example.com" : "ben.muster@example.com", phone: "+4930000000",
+        identity_documents: [], authority_documents: [],
+      })) };
+    request.billing.invoice_recipient = "self";
+    request.billing.invoice_recipient_is_payer = true;
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  const parent = page.getByRole("combobox", { name: "Welcher Elternteil erhält die Rechnung?" });
+  await expect(parent).toBeVisible();
+  expect(calls.payer).toEqual([]);
+  await choose(page, parent, "Ben Muster");
+  await expect.poll(() => request.billing.recipient.representative_id).toBe(father);
+  await expect.poll(() => request.payer?.email).toBe("ben.muster@example.com");
+  expect(calls.billing.some((patch) => patch.recipient_representative_id === father)).toBe(true);
+  expect(calls.payer.at(-1)).toMatchObject({ first_name: "Ben", last_name: "Muster", street: "Vaterweg 2", relationship_kind: "parent" });
+  expect(request.billing.invoice_to).toBe("other");
+  expect(request.billing.invoice_name).toBe("Ben Muster");
+  await step(page, "send");
+  await expect(page.getByTestId("lead-request-summary-billing")).toContainText("Ben Muster");
+  await step(page, "billing");
+  await page.getByRole("checkbox", { name: IS_PAYER }).uncheck();
+  await choose(page, page.getByRole("combobox", { name: PAYER_TYPE }), "Ich (als Elternteil)");
+  await expect.poll(() => request.payer?.email).toBe("maria.muster@example.com");
+  expect(request.billing.invoice_name).toBe("Ben Muster");
+  await page.getByRole("checkbox", { name: IS_PAYER }).check();
+  await expect.poll(() => request.payer?.email).toBe("ben.muster@example.com");
+  await expect.poll(() => request.billing.invoice_recipient_is_payer).toBe(true);
+  await page.reload();
+  await step(page, "billing");
+  await expect(parent).toContainText("Ben Muster");
+  await choose(page, parent, "Maria Muster");
+  await expect.poll(() => request.billing.recipient.representative_id).toBe(mother);
+  await expect.poll(() => request.payer?.email).toBe("maria.muster@example.com");
+  expect(calls.payer.at(-1)).toMatchObject({ first_name: "Maria", street: "Mutterweg 1" });
+  await expect(page.getByRole("combobox", { name: METHOD })).toBeVisible();
+  await page.locator("#lead-request-recipient_email").fill("invoices@example.com");
+  await expect.poll(() => request.billing.recipient.email).toBe("invoices@example.com");
+  await expect(page.getByRole("combobox", { name: METHOD })).toBeVisible();
+  await step(page, "send");
+  await expect(page.getByTestId("lead-request-summary-billing")).toContainText("Maria Muster");
+});
 
 test.describe("lead cabinet: step 3, the invoice recipient first", () => {
   test("the steps: who pays is part of step 3, in the owner's words", async ({ page }) => {

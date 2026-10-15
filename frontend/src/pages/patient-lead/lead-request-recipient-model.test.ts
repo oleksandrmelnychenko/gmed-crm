@@ -70,6 +70,20 @@ const viktor: LeadRequestPayer = {
 };
 
 describe("step 3: the invoice recipient first (owner spec 2026-10-11)", () => {
+  it("stores the selected parent id and treats the other parent as a separate payer", () => {
+    const saved = draftFromRecipient(billing({ invoice_recipient: "self", invoice_recipient_is_payer: true }));
+    const father = { ...saved, representative_id: "parent-father", type: "person", first_name: "Viktor", last_name: "Zahler", email: viktor.email ?? "" };
+    const parents = [{ id: father.representative_id, slot: "rep1" as const, first_name: "Viktor", last_name: "Zahler", email: viktor.email ?? null, date_of_birth: viktor.date_of_birth ?? null }];
+    expect(recipientPatch(saved, { ...saved, representative_id: father.representative_id })).toEqual({ recipient_representative_id: "parent-father" });
+    expect(payerFitsFlow(flowOf(father), viktor, father, false, parents)).toBe(true);
+    expect(payerFitsFlow(flowOf(father), viktor, { ...father, email: "invoices@example.com" }, false, parents)).toBe(true);
+    const mother = { ...viktor, email: "another-parent@example.com" };
+    expect(payerFitsFlow(flowOf(father), mother, father, true, parents)).toBe(false);
+    expect(payerFitsFlow({ recipient: "self", isPayer: "no" }, mother, father, true, parents)).toBe(true);
+    expect(payerFitsFlow({ recipient: "self", isPayer: "no" }, viktor, father, false, parents)).toBe(false);
+    expect(withRecipientAnswer(father, "third_party").representative_id).toBe("");
+    expect(recipientFieldOf("recipient_representative_id")).toBe("representative_id");
+  });
   it("reads the answers and sends only what changed", () => {
     const saved = draftFromRecipient(billing());
     expect(flowOf(saved)).toEqual({ recipient: "", isPayer: "" });

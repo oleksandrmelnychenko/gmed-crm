@@ -208,7 +208,6 @@ const MINOR_REQUIRED = [
   "first_name",
   "last_name",
   "date_of_birth",
-  "birth_place",
   "citizenships",
   "street",
   "zip",
@@ -600,8 +599,8 @@ test.describe("lead cabinet: who acts for an adult", () => {
     // The person's details are a card of their own (owner 2026-10-09).
     await expect(agent.getByRole("heading", { name: "Angaben zur vertretenden Person" })).toBeVisible();
     await expect(page.getByTestId("lead-request-representative-guardian")).toHaveCount(0);
-    // An adult's representative is asked for the place of birth and the citizenship, not for the country of birth.
-    await expect(agent.getByRole("textbox", { name: "Geburtsort" })).toBeVisible();
+    // Birth details are reserved for the separate sanctions follow-up.
+    await expect(agent.getByRole("textbox", { name: "Geburtsort" })).toHaveCount(0);
     await expect(page.locator("#lead-request-agent_citizenships")).toBeVisible();
     await expect(agent.getByRole("combobox", { name: "Geburtsland" })).toHaveCount(0);
     await expect(agent.getByRole("button", { name: "Adresse des Kindes übernehmen" })).toHaveCount(0);
@@ -843,7 +842,8 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(firstEmail).toHaveAttribute("readonly", "");
     await expect(first).not.toContainText("Ihre Anmeldeadresse");
     await expect(first.getByRole("button", { name: "Entfernen" })).toHaveCount(0);
-    await expect(first.getByRole("combobox", { name: "Geburtsland" })).toBeVisible();
+    await expect(first.getByRole("combobox", { name: "Geburtsland" })).toHaveCount(0);
+    await expect(first.getByRole("textbox", { name: "Geburtsort" })).toHaveCount(0);
     // Parents with joint custody show no proof of authority.
     await expect(page.getByTestId("lead-request-rep1-authority-upload")).toHaveCount(0);
 
@@ -888,7 +888,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     // The summary shows both parents; what is missing carries the caption of the person.
     await page.locator('[data-step="send"]').click();
     const missing = page.getByTestId("lead-request-missing");
-    await expect(missing).toContainText("1. Vertreter/in: Geburtsort");
+    await expect(missing).not.toContainText("1. Vertreter/in: Geburtsort");
     await expect(missing).toContainText("1. Vertreter/in: Foto oder Scan des Ausweises");
     await expect(missing).toContainText("2. Vertreter/in: Geburtsdatum");
     await expect(missing).toContainText("2. Vertreter/in: Telefon");

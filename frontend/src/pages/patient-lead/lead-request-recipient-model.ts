@@ -3,6 +3,7 @@ import type {
   LeadRequest,
   LeadRequestBilling,
   LeadRequestPayer,
+  LeadRequestRepresentative,
   PayerSelfTemplate,
   RecipientPatch,
   RecipientType,
@@ -33,6 +34,7 @@ export const RECIPIENT_TYPES = ["person", "organisation"] as const satisfies rea
 export type RecipientDraft = {
   /** "self", "third_party" or "". */
   recipient: string;
+  representative_id: string;
   /** "Is the recipient the payer?": "yes", "no" or "". */
   is_payer: string;
   /** "person", "organisation" or "". */
@@ -57,6 +59,7 @@ export type RecipientField = Exclude<keyof RecipientDraft, "recipient" | "is_pay
 
 /** The data fields of a third-party recipient in form order, with the key the server takes. */
 export const RECIPIENT_FIELDS: readonly RecipientField[] = [
+  "representative_id",
   "type",
   "first_name",
   "last_name",
@@ -82,6 +85,7 @@ export function draftFromRecipient(billing: LeadRequestBilling | null | undefine
   const answer = billing?.invoice_recipient_is_payer;
   return {
     recipient: billing?.invoice_recipient ?? "",
+    representative_id: party?.representative_id ?? "",
     is_payer: answer == null ? "" : answer ? "yes" : "no",
     type: party?.type ?? "",
     first_name: party?.first_name ?? "",
@@ -154,6 +158,7 @@ export function recipientFieldOf(key: string): keyof RecipientDraft | null {
 function withoutParty(draft: RecipientDraft): RecipientDraft {
   return {
     ...draft,
+    representative_id: "",
     type: "",
     first_name: "",
     last_name: "",
@@ -288,9 +293,21 @@ export function payerFitsFlow(
   payer: LeadRequestPayer | null | undefined,
   recipient: RecipientDraft,
   parentPays: boolean,
+  representatives: readonly Pick<LeadRequestRepresentative, "id" | "slot" | "email" | "first_name" | "last_name" | "date_of_birth">[] = [],
 ): boolean {
   if (!payer) return false;
   const thirdParty = payer.payer_kind === "third_party";
+  if (flow.recipient === "self" && recipient.representative_id) {
+    const parent = representatives.find((person) => person.id === recipient.representative_id && (person.slot === "rep1" || person.slot === "rep2"));
+    if (!parent) return false;
+    // The optional invoice delivery address does not identify the payer.
+    const same = thirdParty && (payer.payer_type == null || payer.payer_type === "person")
+      && (parent.email && payer.email
+        ? parent.email.trim().toLowerCase() === payer.email.trim().toLowerCase()
+        : Boolean(parent.date_of_birth) && parent.date_of_birth === payer.date_of_birth
+          && sameName(payerName(payer), [parent.first_name, parent.last_name].filter(Boolean).join(" ")));
+    return flow.isPayer === "yes" ? Boolean(same) : flow.isPayer === "no" && thirdParty && !same;
+  }
   if (flow.recipient === "self" && flow.isPayer === "yes") return !thirdParty || parentPays;
   if (flow.recipient === "self" && flow.isPayer === "no") return thirdParty && !parentPays;
   if (flow.recipient === "third_party" && flow.isPayer === "yes") {
@@ -320,6 +337,7 @@ export function recipientPayerReady(recipient: RecipientDraft): boolean {
 /** Keys of step 3's recipient in `progress.missing_for_submit`. */
 export type RecipientSubmitField =
   | "invoice_recipient"
+  | "recipient_representative_id"
   | "invoice_recipient_is_payer"
   | "recipient_type"
   | "recipient_first_name"
@@ -340,6 +358,7 @@ export type RecipientSubmitField =
 /** Everything the server can name as missing about the recipient, in form order. */
 export const RECIPIENT_SUBMIT_FIELDS: RecipientSubmitField[] = [
   "invoice_recipient",
+  "recipient_representative_id",
   "recipient_type",
   "recipient_first_name",
   "recipient_last_name",

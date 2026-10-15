@@ -780,7 +780,7 @@ async fn a_short_parent_form_can_send_the_child_request_but_cannot_create_a_cont
         ),
         (
             "billing",
-            json!({"invoice_to":"self","payment_method":"bank_transfer","account_country":"DE","account_holder":"Anna Synthetic","bank_name":"Synthetic bank","via_third_party":false}),
+            json!({"invoice_recipient":"self","recipient_representative_id":app.first,"payment_method":"bank_transfer","account_country":"DE","account_holder":"Anna Synthetic","bank_name":"Synthetic bank","via_third_party":false}),
         ),
         (
             "identification",

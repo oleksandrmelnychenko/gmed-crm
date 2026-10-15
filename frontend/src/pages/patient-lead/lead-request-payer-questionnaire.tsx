@@ -38,6 +38,7 @@ import {
   draftFromPayerQuestionnaire,
   fundsDescriptionRequired,
   normalizeLeadPayerQuestionnaire,
+  payerAdditionalIdentityNeeded,
   payerMissingParts,
   payerNoticeAcknowledged,
   payerQuestionnairePatch,
@@ -195,6 +196,11 @@ function PayerQuestionnaireForm({
   const acknowledged = payerNoticeAcknowledged(questionnaire);
   const submitted = payerQuestionnaireSubmitted(questionnaire);
   const [draft, setDraft] = useState<PayerQuestionnaireDraft>(() => draftFromPayerQuestionnaire(questionnaire));
+  const showAdditionalIdentity = payerAdditionalIdentityNeeded(
+    questionnaire,
+    request.follow_up,
+    request.representation?.representatives.find((person) => person.mine)?.id,
+  );
   const savedRef = useRef<PayerQuestionnaireDraft>(draftFromPayerQuestionnaire(questionnaire));
   const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<RefusedValues>({ values: {}, codes: {} });
@@ -455,6 +461,7 @@ function PayerQuestionnaireForm({
       ) : (
         <fieldset disabled={readOnly} className="min-w-0 space-y-5" data-testid="lead-request-payer-fields">
           <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+            {showAdditionalIdentity ? <>
             <LabeledField id={fieldId("salutation")} label={labelOf("salutation")} error={errorFor("salutation")}>
               <NativeComboboxSelect
                 {...control("salutation")}
@@ -480,6 +487,7 @@ function PayerQuestionnaireForm({
                 onChange={(event) => set("former_names", event.target.value)}
               />
             </LabeledField>
+            </> : null}
             <LabeledField
               id={fieldId("habitual_residence_country")}
               label={labelOf("habitual_residence_country")}

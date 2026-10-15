@@ -2603,9 +2603,10 @@ pub(crate) async fn request_payload(
     let paying_parent =
         lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
             .is_some();
-    let recipient =
+    let mut recipient =
         lead_invoice_recipient::effective(stored_recipient.as_ref(), payer.as_ref(), paying_parent);
-    let missing = with_invoice_recipient(
+    let _ = lead_invoice_recipient::resolve_parent(&mut recipient, &representation.representation);
+    let mut missing = with_invoice_recipient(
         missing_for_submit(
             &data,
             payer.as_ref(),
@@ -2625,6 +2626,10 @@ pub(crate) async fn request_payload(
             .as_deref()
             .is_some_and(|reason| !reason.trim().is_empty()),
     );
+    missing.extend(lead_invoice_recipient::parent_recipient_missing(
+        &recipient,
+        &representation.representation,
+    ));
     // The follow-up blocks of the risk assessment: which blocks to answer
     // and what each still misses, the answers kept on the payer declaration
     // and the proofs — never why (P2, § 47 GwG).
@@ -3478,12 +3483,19 @@ async fn update_my_billing(
         let paying_parent =
             lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
                 .is_some();
-        let current =
+        let mut current =
             lead_invoice_recipient::effective(stored.as_ref(), payer.as_ref(), paying_parent);
-        let next = match lead_invoice_recipient::apply(&current, &recipient_body) {
+        let _ =
+            lead_invoice_recipient::resolve_parent(&mut current, &representation.representation);
+        let mut next = match lead_invoice_recipient::apply(&current, &recipient_body) {
             Ok(next) => next,
             Err(error) => return error.into_response(),
         };
+        if let Err(error) =
+            lead_invoice_recipient::resolve_parent(&mut next, &representation.representation)
+        {
+            return error.into_response();
+        }
         let changed = lead_invoice_recipient::changed_keys(&current, &next);
         if !changed.is_empty() || stored.is_none() {
             if let Err(error) =
@@ -5596,7 +5608,10 @@ async fn submit_my_lead_request(
         lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
             .is_some();
     let today = crate::app_time::today();
-    let missing = with_invoice_recipient(
+    let mut recipient =
+        lead_invoice_recipient::effective(stored_recipient.as_ref(), payer.as_ref(), paying_parent);
+    let _ = lead_invoice_recipient::resolve_parent(&mut recipient, &representation.representation);
+    let mut missing = with_invoice_recipient(
         missing_for_submit(
             &data,
             payer.as_ref(),
@@ -5612,11 +5627,7 @@ async fn submit_my_lead_request(
             today,
             &base,
         ),
-        &lead_invoice_recipient::effective(
-            stored_recipient.as_ref(),
-            payer.as_ref(),
-            paying_parent,
-        ),
+        &recipient,
         payer.as_ref(),
         paying_parent,
         identification
@@ -5624,6 +5635,10 @@ async fn submit_my_lead_request(
             .as_deref()
             .is_some_and(|reason| !reason.trim().is_empty()),
     );
+    missing.extend(lead_invoice_recipient::parent_recipient_missing(
+        &recipient,
+        &representation.representation,
+    ));
     if !missing.is_empty() {
         return coded(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -6267,11 +6282,13 @@ async fn get_lead_portal_intake(
                     declaration.as_ref(),
                 )
                 .is_some();
-                let recipient = lead_invoice_recipient::effective(
+                let mut recipient = lead_invoice_recipient::effective(
                     stored_recipient.as_ref(),
                     declaration.as_ref(),
                     paying_parent,
                 );
+                let _ =
+                    lead_invoice_recipient::resolve_parent(&mut recipient, &loaded.representation);
                 crate::risk::cabinet::merge_into(&mut billing, recipient.portal_json());
                 billing["recipient_updated_at"] = json!(
                     updates

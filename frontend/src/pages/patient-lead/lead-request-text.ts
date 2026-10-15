@@ -219,6 +219,7 @@ export type LeadRequestText = {
    */
   recipient: {
     section: string;
+    parentQuestion: string;
     confirmPayerChange: string;
     replacePayerHint: string;
     question: string;
@@ -568,6 +569,8 @@ export function payerFieldLabel(
 /** Label of a field of a third-party invoice recipient (step 3); address and names reuse the patient's labels. */
 export function recipientFieldLabel(text: LeadRequestText, field: keyof RecipientDraft): string {
   switch (field) {
+    case "representative_id":
+      return text.recipient.parentQuestion;
     case "recipient":
       return text.recipient.question;
     case "is_payer":
@@ -987,6 +990,7 @@ const de: LeadRequestText = {
     confirmPayerChange: "Diesen Rechnungsempfänger als Zahler bestätigen",
     replacePayerHint: "Bitte vervollständigen Sie die Angaben und bestätigen Sie den neuen Zahler. Die bisherigen Zahlerangaben und Antworten werden ersetzt.",
     question: "Wer ist Rechnungsempfänger?",
+    parentQuestion: "Welcher Elternteil erhält die Rechnung?",
     options: { self: "Ich", third_party: "Eine andere Person oder Organisation" },
     optionsGuardian: {
       self: "Ich (als Elternteil / gesetzliche Vertretung)",
@@ -1510,6 +1514,7 @@ const ru: LeadRequestText = {
     confirmPayerChange: "Подтвердить этого получателя как плательщика",
     replacePayerHint: "Заполните данные и подтвердите нового плательщика. Данные и ответы прежнего плательщика будут заменены.",
     question: "Кто является получателем счёта?",
+    parentQuestion: "Кто из родителей получит счёт?",
     options: { self: "Я", third_party: "Третье лицо или организация" },
     optionsGuardian: {
       self: "Я (как родитель / законный представитель)",
@@ -1671,7 +1676,7 @@ const ru: LeadRequestText = {
   identityNote:
     "Одной копии может быть недостаточно, если человек не присутствует лично. Мы свяжемся с вами по поводу идентификации.",
   noIdentityDocuments: "Документ ещё не загружен.",
-  identityFiles: "Фото или скан документа",
+  identityFiles: "Фото или скан документа, удостоверяющего личность",
   idDocumentExpired: "Срок действия документа истёк. Пожалуйста, укажите действующий документ.",
   sectionRepresentation: "Представительство",
   hasRepresentativeQuestion: "Действует ли кто-то от вашего имени?",
@@ -2033,6 +2038,7 @@ const uk: LeadRequestText = {
     confirmPayerChange: "Підтвердити цього отримувача як платника",
     replacePayerHint: "Заповніть дані й підтвердьте нового платника. Дані та відповіді попереднього платника буде замінено.",
     question: "Хто є отримувачем рахунку?",
+    parentQuestion: "Хто з батьків отримає рахунок?",
     options: { self: "Я", third_party: "Третя особа або організація" },
     optionsGuardian: {
       self: "Я (як один із батьків / законний представник)",
@@ -2194,7 +2200,7 @@ const uk: LeadRequestText = {
   identityNote:
     "Самої копії може бути недостатньо, якщо людина не присутня особисто. Ми зв'яжемося з вами щодо ідентифікації.",
   noIdentityDocuments: "Документ ще не завантажено.",
-  identityFiles: "Фото або скан документа",
+  identityFiles: "Фото або скан документа, що посвідчує особу",
   idDocumentExpired: "Термін дії документа минув. Будь ласка, вкажіть дійсний документ.",
   sectionRepresentation: "Представництво",
   hasRepresentativeQuestion: "Чи діє хтось від вашого імені?",
@@ -2556,6 +2562,7 @@ const en: LeadRequestText = {
     confirmPayerChange: "Confirm this recipient as the payer",
     replacePayerHint: "Complete the details and confirm the new payer. The previous payer’s details and answers will be replaced.",
     question: "Who is the invoice recipient?",
+    parentQuestion: "Which parent will receive the invoice?",
     options: { self: "Me", third_party: "Another person or an organisation" },
     optionsGuardian: {
       self: "Me (as a parent / legal representative)",
@@ -2711,7 +2718,7 @@ const en: LeadRequestText = {
   identityNote:
     "A copy alone may not be enough if the person is not present in person. We will get in touch about the identification.",
   noIdentityDocuments: "No identity document uploaded yet.",
-  identityFiles: "Photo or scan of the document",
+  identityFiles: "Photo or scan of an identity document",
   idDocumentExpired: "The document has expired. Please enter a valid document.",
   sectionRepresentation: "Representation",
   hasRepresentativeQuestion: "Does anyone act on your behalf?",

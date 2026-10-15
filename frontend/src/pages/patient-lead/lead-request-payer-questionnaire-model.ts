@@ -4,6 +4,7 @@ import type {
   LeadPayerQuestionnaire,
   LeadPayerSignaturePackage,
   LeadRequestPayerQuestionnaireSummary,
+  LeadRequestFollowUp,
   PayerQuestionnairePatch,
 } from "./lead-request-api";
 
@@ -62,6 +63,19 @@ export const PAYER_QUESTIONNAIRE_FIELDS = [
 ] as const satisfies readonly (keyof LeadPayerAnswers)[];
 
 export type PayerQuestionnaireField = (typeof PAYER_QUESTIONNAIRE_FIELDS)[number];
+
+/** Optional identity details belong to triggered checks, not the ordinary payer form. */
+export function payerAdditionalIdentityNeeded(
+  questionnaire: Pick<LeadPayerQuestionnaire, "answers" | "funds_proof_required">,
+  followUp?: LeadRequestFollowUp | null,
+  representativeId?: string,
+): boolean {
+  const answers = questionnaire.answers;
+  return questionnaire.funds_proof_required
+    || [answers.pep_self, answers.pep_related, answers.high_risk_country, answers.sanctions_links].some((answer) => answer === true)
+    || Boolean(followUp?.blocks.some((block) => ["F", "H", "J", "K", "L"].includes(block)))
+    || Boolean(representativeId && followUp?.representatives?.some((person) => person.id === representativeId));
+}
 
 /** The questionnaire as the parent types it: texts, the sources as a list, answers as "yes", "no" or "". */
 export type PayerQuestionnaireDraft = {

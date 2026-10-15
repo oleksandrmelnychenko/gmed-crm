@@ -156,7 +156,7 @@ describe("lead cabinet languages", () => {
       "Запитання за законом: Політично значуща близька особа",
     );
     expect(submitFieldLabel(leadRequestText("en"), "id_document_upload")).toBe(
-      "Identity document: Photo or scan of the document",
+      "Identity document: Photo or scan of an identity document",
     );
     // The reason of the request in the owner's words (13.1).
     expect(LEAD_CABINET_LANGS.map((option) => submitFieldLabel(leadRequestText(option.value), "request_reason"))).toEqual([

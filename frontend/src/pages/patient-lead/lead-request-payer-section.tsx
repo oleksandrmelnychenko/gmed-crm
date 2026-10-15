@@ -226,7 +226,7 @@ export function PayerSection({
   const answered = payerAnsweredByPayer(request);
   const [draft, setDraft] = useState<PayerDraft>(() => {
     const parentPays = payerAnswer(request.payer, template) === "guardian";
-    const fits = !flow || !recipient || payerFitsFlow(flow, request.payer, recipient, parentPays);
+    const fits = !flow || !recipient || payerFitsFlow(flow, request.payer, recipient, parentPays, request.representation?.representatives);
     const stored = fits ? draftFromPayer(request.payer, template) : unansweredPayerDraft(request.payer);
     // A stored answer the list does not offer is no answer here.
     const choice = payerChoiceOf(stored);

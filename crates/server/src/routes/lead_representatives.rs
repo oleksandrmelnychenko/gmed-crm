@@ -136,11 +136,10 @@ const ADULT_REQUIRED: [&str; 14] = [
 
 /// What "send to the manager" needs of a legal representative of a minor. A
 /// guardian (Vormund) also needs the appointment deed (`authority_upload`).
-const MINOR_REQUIRED: [&str; 17] = [
+const MINOR_REQUIRED: [&str; 16] = [
     "first_name",
     "last_name",
     "date_of_birth",
-    "birth_place",
     "citizenships",
     "street",
     "zip",
@@ -1690,6 +1689,7 @@ async fn finish_cabinet_write(
     if let Some(contacts) = contacts {
         store_lead(&mut *tx, lead_id, Some(contacts), &json!({})).await?;
     }
+    super::lead_invoice_recipient::sync_section_seven(tx, lead_id, actor, kind.as_str()).await?;
     let state = load(&mut *tx, lead_id).await?.unwrap_or_default();
     let now = intake::portal_update_time(&mut *tx).await?;
     let marker = json!({
@@ -2999,6 +2999,13 @@ pub(crate) async fn set_lead_custody(
             .bind(&custody)
             .execute(&mut *tx)
             .await?;
+            super::lead_invoice_recipient::sync_section_seven(
+                &mut tx,
+                lead_id,
+                auth.user_id,
+                "staff",
+            )
+            .await?;
             audit::write_in_transaction(
                 &mut tx,
                 &audit::domain_event(
@@ -3102,6 +3109,12 @@ pub(crate) async fn remove_lead_representative(
         Ok(false) => return intake::err(StatusCode::NOT_FOUND, "Representative not found"),
         Err(error) => return intake::internal(error, "remove representative"),
     }
+    if let Err(error) =
+        super::lead_invoice_recipient::sync_section_seven(&mut tx, lead_id, auth.user_id, "staff")
+            .await
+    {
+        return intake::internal(error, "derive invoice recipient");
+    }
     let invalidated = match crate::document_signatures::invalidate_representative_identity(
         &mut tx,
         lead_id,
@@ -3176,6 +3189,8 @@ pub(crate) async fn remove_lead_trusted_contact(
         .fetch_all(&mut *tx)
         .await?;
         store_lead(&mut tx, lead_id, Some(&contacts), &json!({})).await?;
+        super::lead_invoice_recipient::sync_section_seven(&mut tx, lead_id, auth.user_id, "staff")
+            .await?;
         audit::write_in_transaction(
             &mut tx,
             &audit::domain_event(
@@ -3675,7 +3690,6 @@ mod tests {
         let full = missing_for_contract(&child, today());
         for key in [
             "rep1_date_of_birth",
-            "rep1_birth_place",
             "rep1_street",
             "rep1_id_document_number",
             "rep1_id_upload",

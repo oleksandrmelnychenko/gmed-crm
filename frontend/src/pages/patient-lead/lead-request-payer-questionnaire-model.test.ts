@@ -6,6 +6,7 @@ import {
   draftFromPayerQuestionnaire,
   fundsDescriptionRequired,
   normalizeLeadPayerQuestionnaire,
+  payerAdditionalIdentityNeeded,
   normalizePayerSignaturePackage,
   payerMissingParts,
   payerNoticeAcknowledged,
@@ -19,6 +20,22 @@ import {
   withRejectedPayerField,
 } from "./lead-request-payer-questionnaire-model";
 import { leadRequestText, payerQuestionnaireFieldLabel, LEAD_CABINET_LANGS } from "./lead-request-text";
+
+describe("additional payer identity details", () => {
+  it("keeps the ordinary form short without clearing saved details", () => {
+    const person = normalizeLeadPayerQuestionnaire(raw({}, { salutation: "ms", former_names: "Earlier Name" }))!;
+    expect(payerAdditionalIdentityNeeded(person)).toBe(false);
+    expect(person.answers.former_names).toBe("Earlier Name");
+    expect(payerAdditionalIdentityNeeded({ ...person, funds_proof_required: true })).toBe(true);
+    expect(payerAdditionalIdentityNeeded({ ...person, answers: { ...person.answers, sanctions_links: true } })).toBe(true);
+  });
+  it("shows details for a triggered identity check, while contract preparation alone keeps them hidden", () => {
+    const person = normalizeLeadPayerQuestionnaire(raw())!;
+    const followUp = { required: true, blocks: ["G"], missing: {}, answered_at: null };
+    expect(payerAdditionalIdentityNeeded(person, followUp)).toBe(false);
+    expect(payerAdditionalIdentityNeeded(person, { ...followUp, blocks: ["K"] })).toBe(true);
+  });
+});
 
 /** The questionnaire of a paying parent as the server answers it (contract 3.5, cabinet variant). */
 function raw(patch: Record<string, unknown> = {}, answers: Record<string, unknown> = {}) {

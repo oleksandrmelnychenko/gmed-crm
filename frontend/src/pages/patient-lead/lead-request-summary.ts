@@ -286,7 +286,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     const recipient = billing.recipient;
     const third = billing.invoice_recipient === "third_party";
     const recipientDraft = draftFromRecipient(billing);
-    const paying = billing.invoice_recipient_is_payer === true && payerFitsFlow(flowOf(recipientDraft), payer, recipientDraft, billing.payment_route_by === "guardian");
+    const paying = billing.invoice_recipient_is_payer === true && payerFitsFlow(flowOf(recipientDraft), payer, recipientDraft, billing.payment_route_by === "guardian", request.representation?.representatives);
+    const invoiceParent = request.representation?.representatives.find((person) => person.id === recipient?.representative_id);
     const party = third && !paying && recipient ? recipient : null;
     const organisation = party?.type === "organisation";
     const kind = option(text.payerRelationshipOptions, party?.relationship_kind);
@@ -303,6 +304,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         billing.invoice_recipient ? (guardian ? text.recipient.optionsGuardian : text.recipient.options)[billing.invoice_recipient] : "",
       ],
       [text.recipient.typeQuestion, third && recipient?.type ? text.recipient.typeOptions[recipient.type] : ""],
+      [text.recipient.parentQuestion, invoiceParent ? [invoiceParent.first_name, invoiceParent.last_name].filter(Boolean).join(" ") : ""],
       [organisation ? text.recipient.organisationName : text.recipient.missingPrefix, name],
       [text.recipient.legalForm, organisation ? party?.legal_form : ""],
       [text.recipient.contactName, organisation ? party?.contact_name : ""],

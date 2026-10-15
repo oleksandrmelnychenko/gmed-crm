@@ -512,6 +512,7 @@ export type RecipientType = "person" | "organisation";
 
 /** The data of a third-party invoice recipient as stored for step 3. */
 export type LeadRequestRecipient = {
+  representative_id?: string | null;
   type: RecipientType | null;
   /** "First Last" or the organisation's name, also of an older request's "another address". */
   name: string | null;
@@ -537,6 +538,7 @@ export type LeadRequestRecipient = {
 export type RecipientPatch = Partial<
   Record<
     | "invoice_recipient"
+    | "recipient_representative_id"
     | "recipient_type"
     | "recipient_first_name"
     | "recipient_last_name"

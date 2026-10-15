@@ -121,6 +121,18 @@ export function InvoiceRecipientSection({
   const answered = payerAnsweredByPayer(request);
   const onRecipientState = partState("recipient");
   const [draft, setDraft] = useState<RecipientDraft>(() => draftFromRecipient(request.billing));
+  const parents = guardian ? request.representation?.representatives.filter((person) => person.slot === "rep1" || person.slot === "rep2") ?? [] : [];
+  const invoiceParent = parents.find((person) => person.id === draft.representative_id);
+  const parentChoiceNeeded = !invoiceParent && (parents.length > 1 || Boolean(draft.representative_id));
+  const selectedParentRequest: LeadRequest = invoiceParent ? {
+    ...request,
+    payer_self_template: {
+      first_name: invoiceParent.first_name, last_name: invoiceParent.last_name,
+      date_of_birth: invoiceParent.date_of_birth, email: invoiceParent.email, phone: invoiceParent.phone,
+      citizenships: invoiceParent.citizenships, street: invoiceParent.street, zip: invoiceParent.zip,
+      city: invoiceParent.city, country: invoiceParent.country,
+    },
+  } : request;
   const savedRef = useRef<RecipientDraft>(draftFromRecipient(request.billing));
   const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<Refused>({});
@@ -188,7 +200,7 @@ export function InvoiceRecipientSection({
     payerAnswer(request.payer, template) === "guardian" || request.billing?.payment_route_by === "guardian";
   const [partyChoice, setPartyChoice] = useState<PayerParty | null>(null);
   const storedParty =
-    third && flow.isPayer === "no" && payerFitsFlow(flow, request.payer, draft, parentPays)
+    third && flow.isPayer === "no" && payerFitsFlow(flow, request.payer, draft, parentPays, request.representation?.representatives)
       ? payerPartyOf(request.payer, parentPays)
       : "";
   const party = partyChoice ?? storedParty;
@@ -285,7 +297,7 @@ export function InvoiceRecipientSection({
                         update((current) => withRecipientAnswer(current, answer));
                       }}
                     />
-                    <span className="min-w-0">{options[answer]}</span>
+                    <span className="min-w-0">{guardian && parents.length > 1 && answer === "self" ? text.sectionLegalRepresentatives : options[answer]}</span>
                   </label>
                 );
               })}
@@ -296,6 +308,21 @@ export function InvoiceRecipientSection({
               </p>
             ) : null}
           </div>
+
+          {guardian && flow.recipient === "self" && parents.length > 0 ? (
+            <LabeledField {...labeled("representative_id", parents.length > 1 || parentChoiceNeeded)}>
+              <NativeComboboxSelect
+                {...control("representative_id")}
+                className={selectClass}
+                value={draft.representative_id}
+                disabled={locked}
+                onChange={(event) => update((current) => ({ ...current, representative_id: event.target.value, email: "" }))}
+              >
+                <option value="">{text.choose}</option>
+                {parents.map((person) => <option key={person.id} value={person.id}>{[person.first_name, person.last_name].filter(Boolean).join(" ")}</option>)}
+              </NativeComboboxSelect>
+            </LabeledField>
+          ) : null}
 
           {third ? (
             <div className="space-y-3" data-testid="lead-request-recipient-party">
@@ -496,7 +523,7 @@ export function InvoiceRecipientSection({
       ) : flow.isPayer === "no" && (flow.recipient === "self" || party === "other") ? (
         <PayerSection
           // Another flow: the payer form starts anew with what fits it.
-          key={`payer-other-${flow.recipient}`}
+          key={`payer-other-${flow.recipient}-${draft.representative_id}`}
           request={request}
           text={text}
           lang={lang}
@@ -504,7 +531,7 @@ export function InvoiceRecipientSection({
           enqueue={enqueue}
           onChange={onChange}
           onSaveState={partState("payer")}
-          choices={OTHER_PAYER_CHOICES}
+          choices={guardian && invoiceParent && !invoiceParent.mine ? ["guardian", ...OTHER_PAYER_CHOICES] : OTHER_PAYER_CHOICES}
           flow={flow}
           recipient={draft}
           question={text.recipient.payerTypeQuestion}
@@ -532,10 +559,11 @@ export function InvoiceRecipientSection({
           onChange={onChange}
           onSaveState={partState("payer")}
         />
-      ) : flow.isPayer === "yes" && flow.recipient === "self" ? (
+      ) : flow.isPayer === "yes" && flow.recipient === "self" && !parentChoiceNeeded ? (
         <PatientSidePayer
-          key="payer-own"
-          request={request}
+          key={`payer-own-${draft.representative_id}`}
+          request={selectedParentRequest}
+          parentSelected={Boolean(invoiceParent)}
           text={text}
           lang={lang}
           identification={identification}
@@ -555,6 +583,7 @@ export function InvoiceRecipientSection({
  */
 function PatientSidePayer({
   request,
+  parentSelected = false,
   text,
   lang,
   identification,
@@ -563,6 +592,7 @@ function PatientSidePayer({
   onSaveState,
 }: {
   request: LeadRequest;
+  parentSelected?: boolean;
   text: LeadRequestText;
   lang: string;
   identification?: IdentificationForm;
@@ -572,7 +602,7 @@ function PatientSidePayer({
 }) {
   const guardian = request.access_kind === "guardian";
   const template = guardian ? (request.payer_self_template ?? null) : null;
-  if (guardian && (!template || request.payer?.payer_kind === "self")) {
+  if (guardian && (!template || (request.payer?.payer_kind === "self" && !parentSelected))) {
     // A parent's login without own data on file names the parent who pays.
     return (
       <PayerSection
@@ -587,7 +617,7 @@ function PatientSidePayer({
       />
     );
   }
-  return <OwnPayer request={request} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />;
+  return <OwnPayer request={request} parentSelected={parentSelected} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />;
 }
 
 /**
@@ -598,20 +628,25 @@ function PatientSidePayer({
  */
 function OwnPayer({
   request,
+  parentSelected = false,
   enqueue,
   onChange,
   onSaveState,
 }: {
   request: LeadRequest;
+  parentSelected?: boolean;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
 }) {
   const guardian = request.access_kind === "guardian";
   const template = guardian ? (request.payer_self_template ?? null) : null;
-  const [draft] = useState<PayerDraft>(() =>
-    withPayerChoice(draftFromPayer(request.payer, template), guardian && template ? "guardian" : "self", template),
-  );
+  const [draft] = useState<PayerDraft>(() => {
+    const sameParent = payerAnswer(request.payer, template) === "guardian"
+      && request.payer?.email?.trim().toLowerCase() === template?.email?.trim().toLowerCase();
+    const payer = parentSelected && !sameParent ? null : request.payer;
+    return withPayerChoice(draftFromPayer(payer, template), guardian && template ? "guardian" : "self", template);
+  });
   usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
   return null;
 }
@@ -648,6 +683,7 @@ function RecipientPayer({
     request.payer,
     recipient,
     payerAnswer(request.payer, template) === "guardian",
+    request.representation?.representatives,
   );
   const [base] = useState<PayerDraft>(() => fits ? draftFromPayer(request.payer) : unansweredPayerDraft(request.payer));
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
