@@ -13,7 +13,7 @@ use std::sync::{
 };
 use tower::ServiceExt;
 
-fn signers() -> Vec<Signer> {
+pub(super) fn signers() -> Vec<Signer> {
     normalize_signers(vec![
         Signer {
             first_name: "Erika".into(),
@@ -696,6 +696,13 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         .fetch_one(&pool)
         .await
         .unwrap();
+    // Production migrations disable bootstrap accounts. This isolated fixture
+    // authenticates that CEO and must explicitly activate its notice recipient.
+    sqlx::query("UPDATE users SET is_active=true WHERE id=$1")
+        .bind(actor)
+        .execute(&pool)
+        .await
+        .unwrap();
     let linked_provider: Uuid = sqlx::query_scalar("SELECT id FROM providers ORDER BY id LIMIT 1")
         .fetch_one(&pool)
         .await
@@ -824,6 +831,69 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         assert_eq!(duplicate.status(), StatusCode::CONFLICT);
         assert_signature_file_protected(&app, &pool, source_id).await;
         let before_count = mock.creates.load(Ordering::SeqCst);
+        if matches!(scenario, "live" | "demo") {
+            // Partial client signature: notify immediately, before GMED signs,
+            // while keeping the document legally unsigned (especially DEMO).
+            mock.value.lock().unwrap()["signatures"][0]["status_code"] = json!("SIGNED");
+            for _ in 0..2 {
+                sqlx::query(
+                    "UPDATE document_signature_requests SET next_poll_at=now() WHERE id=$1",
+                )
+                .bind(request_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+                assert!(poll_one(&state, Some(request_id)).await.unwrap());
+            }
+            let notices: Vec<Value> = sqlx::query_scalar("SELECT params FROM user_notifications WHERE user_id=$1 AND kind='signature_client_signed' AND params->>'request_id'=$2")
+                .bind(actor).bind(request_id.to_string()).fetch_all(&pool).await.unwrap();
+            assert_eq!(notices.len(), 1, "poll retry must not duplicate notices");
+            assert_eq!(
+                notices[0]["outcome"],
+                if demo {
+                    "test_client_signed"
+                } else {
+                    "client_signed"
+                }
+            );
+            assert_eq!(notices[0]["signed"], 1);
+            assert_eq!(notices[0]["total"], 2);
+            let signed_at: Option<DateTime<Utc>> =
+                sqlx::query_scalar("SELECT signed_at FROM documents WHERE id=$1")
+                    .bind(source_id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert!(
+                signed_at.is_none(),
+                "partial operational progress is not a legal signature"
+            );
+            let summary = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/document-signatures/statuses?ids={source_id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(summary.status(), StatusCode::OK);
+            let summary: Value =
+                serde_json::from_slice(&to_bytes(summary.into_body(), 10000).await.unwrap())
+                    .unwrap();
+            assert_eq!(summary[0]["progress"]["signed"], 1);
+            assert_eq!(summary[0]["status"], "pending");
+            assert_eq!(summary[0]["test_mode"], demo);
+            if !demo {
+                verify_partial_notification_acl(&state, &pool, request_id, source_id, actor).await;
+            }
+            sqlx::query("UPDATE document_signature_requests SET next_poll_at=now() WHERE id=$1")
+                .bind(request_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
         if scenario == "unknown" {
             sqlx::query("UPDATE document_signature_requests SET status='submission_unknown',provider_request_id=NULL WHERE id=$1").bind(request_id).execute(&pool).await.unwrap();
         }
@@ -1230,6 +1300,74 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         .await
         .unwrap();
     admin.close().await;
+}
+
+async fn verify_partial_notification_acl(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    request: Uuid,
+    source: Uuid,
+    actor: Uuid,
+) {
+    let manager: Uuid =
+        sqlx::query_scalar("SELECT id FROM users WHERE role='patient_manager' LIMIT 1")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    sqlx::query("UPDATE users SET is_active=true WHERE id=$1")
+        .bind(manager)
+        .execute(pool)
+        .await
+        .unwrap();
+    for capability in ["view", "download"] {
+        sqlx::query("INSERT INTO staff_user_access_rules(user_id,granted_for_role,resource_type,scope_type,resource_id,capability,effect,reason,granted_by) VALUES($1,'patient_manager','document','record',$2,$3,'allow','signature partial notice ACL test',$4)")
+            .bind(manager).bind(source).bind(capability).bind(actor).execute(pool).await.unwrap();
+    }
+    let row = sqlx::query("SELECT id, source_document_id, $2::uuid AS requested_by, false AS test_mode, '{}'::jsonb AS evidence FROM document_signature_requests WHERE id=$1")
+        .bind(request).bind(manager).fetch_one(pool).await.unwrap();
+    let evidence = json!({"signatures":[{"email":"erika@example.org","status":"SIGNED"},{"email":"max@example.org","status":"OPEN"}]});
+    let mut tx = pool.begin().await.unwrap();
+    let notices = progress::notify_client_signatures(state, &mut tx, &row, &signers(), &evidence)
+        .await
+        .unwrap();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].0, manager);
+    tx.rollback().await.unwrap();
+    // Transaction rollback cannot leave a bell notice without its evidence.
+    let mut tx = pool.begin().await.unwrap();
+    let notices = progress::notify_client_signatures(state, &mut tx, &row, &signers(), &evidence)
+        .await
+        .unwrap();
+    assert_eq!(notices.len(), 1);
+    tx.commit().await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    assert!(
+        progress::notify_client_signatures(state, &mut tx, &row, &signers(), &evidence)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    tx.commit().await.unwrap();
+    sqlx::query("DELETE FROM user_notifications WHERE user_id=$1 AND kind='signature_client_signed' AND params->>'request_id'=$2")
+        .bind(manager).bind(request.to_string()).execute(pool).await.unwrap();
+    sqlx::query("UPDATE staff_user_access_rules SET effect='deny' WHERE user_id=$1 AND resource_id=$2 AND capability='download' AND reason='signature partial notice ACL test'")
+        .bind(manager).bind(source).execute(pool).await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    assert!(
+        progress::notify_client_signatures(state, &mut tx, &row, &signers(), &evidence)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    tx.commit().await.unwrap();
+    let leaked: i64 = sqlx::query_scalar("SELECT count(*) FROM user_notifications n JOIN users u ON u.id=n.user_id WHERE n.kind='signature_client_signed' AND n.params->>'request_id'=$1 AND u.role<>'ceo'")
+        .bind(request.to_string()).fetch_one(pool).await.unwrap();
+    assert_eq!(
+        leaked, 0,
+        "unrelated staff or a sender without document access must not receive a notice"
+    );
+    sqlx::query("DELETE FROM staff_user_access_rules WHERE user_id=$1 AND resource_id=$2 AND reason='signature partial notice ACL test'")
+        .bind(manager).bind(source).execute(pool).await.unwrap();
 }
 
 async fn wait_for_status(pool: &sqlx::PgPool, id: Uuid, expected: &str) {

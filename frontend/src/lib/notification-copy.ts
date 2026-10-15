@@ -405,6 +405,17 @@ const LEGACY_SIGNATURE_TITLES: Record<string, string> = {
 
 function signature(item: NotificationFacts, lang: Lang): NotificationCopy | null {
   const outcome = text(item, "outcome") ?? LEGACY_SIGNATURE_TITLES[item.title] ?? "";
+  if (item.kind === "signature_client_signed") {
+    const demo = outcome === "test_client_signed";
+    return {
+      title: (demo ? "DEMO · " : "") + pick({ ru: "Подпись клиента получена", de: "Kundenunterschrift eingegangen" }, lang),
+      body: fill({
+        ru: "Skribble: получено подписей {signed}/{total}. Откройте документ, чтобы проверить остальных подписантов.",
+        de: "Skribble: {signed}/{total} Unterschriften erhalten. Öffnen Sie das Dokument, um die übrigen Unterzeichnenden zu prüfen.",
+      }, lang, { signed: num(item, "signed") ?? 0, total: num(item, "total") ?? 0 })
+        + (demo ? pick({ ru: " Тестовая подпись не имеет юридической силы.", de: " Die Testsignatur hat keine Rechtswirkung." }, lang) : ""),
+    };
+  }
   const copy = SIGNATURE_OUTCOMES[outcome];
   if (!copy) return null;
   const days = num(item, "days") ?? Number(legacy(item.body, /for (\d+) days/)?.[1] ?? 0);
@@ -688,6 +699,7 @@ export function notificationCopyFromFacts(
     case "signature_request_failed":
     case "signature_review_required":
     case "signature_completed":
+    case "signature_client_signed":
       return signature(item, lang);
     case "medication_expiry_confirmation":
       return medicationExpiry(item, lang);

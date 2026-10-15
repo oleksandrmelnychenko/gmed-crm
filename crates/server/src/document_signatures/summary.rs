@@ -27,20 +27,20 @@ pub(super) async fn list(
         return Err(error(StatusCode::BAD_REQUEST, "invalid_document_ids"));
     }
     let rows = sqlx::query(
-        "SELECT DISTINCT ON (document_id) document_id, status, test_mode, result_document_id
+        "SELECT DISTINCT ON (document_id) document_id, status, test_mode, result_document_id, signers, evidence
          FROM (
-           SELECT source_document_id AS document_id, status, test_mode, result_document_id, created_at, id
+           SELECT source_document_id AS document_id, status, test_mode, result_document_id, created_at, id, signers, evidence
            FROM document_signature_requests WHERE source_document_id = ANY($1)
            UNION ALL
-           SELECT result_document_id AS document_id, status, test_mode, result_document_id, created_at, id
+           SELECT result_document_id AS document_id, status, test_mode, result_document_id, created_at, id, signers, evidence
            FROM document_signature_requests WHERE result_document_id = ANY($1)
            UNION ALL
-           SELECT m.document_id, r.status, r.test_mode, COALESCE(m.result_document_id,r.result_document_id) AS result_document_id, r.created_at, r.id
+           SELECT m.document_id, r.status, r.test_mode, COALESCE(m.result_document_id,r.result_document_id) AS result_document_id, r.created_at, r.id, r.signers, r.evidence
            FROM document_signature_requests r
            JOIN document_signature_members m ON m.request_id=r.id
            WHERE m.document_id = ANY($1)
            UNION ALL
-           SELECT m.result_document_id AS document_id, r.status, r.test_mode, m.result_document_id, r.created_at, r.id
+           SELECT m.result_document_id AS document_id, r.status, r.test_mode, m.result_document_id, r.created_at, r.id, r.signers, r.evidence
            FROM document_signature_requests r
            JOIN document_signature_members m ON m.request_id=r.id
            WHERE m.result_document_id = ANY($1)
@@ -59,7 +59,8 @@ pub(super) async fn list(
             "document_id": id,
             "status": row.get::<String,_>("status"),
             "test_mode": row.get::<bool,_>("test_mode"),
-            "result_document_id": row.get::<Option<Uuid>,_>("result_document_id")
+            "result_document_id": row.get::<Option<Uuid>,_>("result_document_id"),
+            "progress": progress::summary(&serde_json::from_value::<Vec<Signer>>(row.get("signers")).map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR,"signature_database_error"))?, &row.get::<Value,_>("evidence"))
         }));
     }
     Ok(Json(json!(summaries)))

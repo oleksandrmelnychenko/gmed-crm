@@ -1,7 +1,7 @@
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { normalizeLeadPortalEnhancedDetails, normalizeLeadPortalIntake, type LeadPortalEnhancedDetails, type LeadPortalIntake } from "../data/lead-portal-intake-api";
 import { payerDeclarationChanged } from "../model/use-lead-payer-declaration";
@@ -10,6 +10,10 @@ import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-paye
 
 const tx = (ru: string) => ru;
 const de = (_ru: string, german: string) => german;
+const signatureSummary = vi.hoisted(() => ({ value: undefined as import("@/pages/documents/data/use-signature-summary").SignatureSummary | undefined }));
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { id: "synthetic-staff", role: "ceo" } }) }));
+vi.mock("@/pages/documents/data/use-signature-summary", () => ({ useSignatureSummary: () => signatureSummary.value }));
+beforeEach(() => { signatureSummary.value = undefined; });
 
 const status = (patch: Partial<PayerDeclarationStatus> = {}): PayerDeclarationStatus => ({
   complete: false,
@@ -42,11 +46,39 @@ function render(value: PayerDeclarationStatus) {
 }
 
 describe("LeadPayerSignatureFlow", () => {
+  for (const lang of ["ru", "de"]) {
+    it(`shows confirmed client DEMO progress without pretending it is a legal signature in ${lang}`, () => {
+      signatureSummary.value = { document_id: "current-order", status: "pending", test_mode: true, result_document_id: null,
+        progress: { signed: 1, total: 2, client_signed: 1, client_total: 1, agency_signed: 0, agency_total: 1 } };
+      const value = status({ client_signed_order: false, agency_blocking: ["client_order_signature_missing"],
+        cost_assumption: { required: false, document_id: null, current: false, signed: false, signed_at: null } });
+      const html = renderToStaticMarkup(<LeadPayerSignatureFlow leadId="synthetic-lead" signatureDocumentId="current-order" status={value}
+        documents={[]} disabled={false} canGenerate={false} tx={lang === "de" ? de : tx} renderDocuments={() => null} onChanged={() => {}} errorText={() => "error"} />);
+      expect(html).toContain(lang === "ru" ? "Клиент подписал · ожидается GMED" : "Kunde hat unterschrieben · GMED steht aus");
+      expect(html).toContain(lang === "ru" ? "DEMO не подтверждает юридическую подпись заказа" : "DEMO bestätigt keine rechtswirksame Auftragsunterschrift");
+      expect(html).not.toContain(lang === "ru" ? "Ожидается подпись клиента" : "Unterschrift des Kunden ausstehend");
+      expect(html).not.toContain(lang === "ru" ? "Сначала клиент подписывает заказ" : "Zuerst unterschreibt der Kunde");
+      expect(value.client_signed_order).toBe(false);
+      expect(value.agency_may_sign).toBe(false);
+    });
+    it(`does not claim unsigned parties have signed in ${lang}`, () => {
+      const value = status({ client_signed_order: false,
+        cost_assumption: { required: false, document_id: null, current: false, signed: false, signed_at: null },
+        agency_blocking: ["client_order_signature_missing"] });
+      const html = renderToStaticMarkup(<LeadPayerSignatureFlow leadId="synthetic-lead" status={value} documents={[]}
+        disabled={false} canGenerate={false} tx={lang === "de" ? de : tx} renderDocuments={() => null} onChanged={() => {}} errorText={() => "error"} />);
+      expect(html).toContain(lang === "ru" ? "Ожидается подпись клиента" : "Unterschrift des Kunden ausstehend");
+      expect(html).toContain(lang === "ru" ? "Согласие плательщика не требуется" : "Kostenübernahmeerklärung nicht erforderlich");
+      expect(html).toContain(lang === "ru" ? "GMED: подпись пока недоступна" : "GMED: Unterschrift noch gesperrt");
+      expect(html).not.toContain(lang === "ru" ? "Клиент подписал" : "Kunde hat den Auftrag unterzeichnet");
+      expect(html).not.toContain(lang === "ru" ? "Плательщик подписал" : "Kostenübernehmer hat unterschrieben");
+    });
+  }
   it("shows the signing order and why GMED waits", () => {
     const html = render(status());
     expect(html).toContain("Клиент подписал");
-    expect(html).toContain("Плательщик подписал согласие");
-    expect(html).toContain("GMED подписывает");
+    expect(html).toContain("Ожидается согласие плательщика");
+    expect(html).toContain("GMED: подпись пока недоступна");
     expect(html).toContain("Создайте согласие плательщика (Kostenübernahmeerklärung)");
     expect(html).toContain("Создать согласие плательщика");
   });

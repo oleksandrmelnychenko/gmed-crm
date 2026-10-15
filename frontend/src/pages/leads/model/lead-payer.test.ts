@@ -538,7 +538,9 @@ describe("payer AML and signing order", () => {
   });
 
   it("shows client, payer and GMED in signing order", () => {
-    expect(payerSignatureSequence(status())).toEqual({ client: "pending", payer: "pending", agency: "pending" });
+    expect(payerSignatureSequence(null).agency).toBe("blocked");
+    expect(payerSignatureSequence(status())).toEqual({ client: "pending", payer: "pending", agency: "blocked" });
+    expect(payerSignatureSequence(status({ agency_may_sign: true })).agency).toBe("pending");
     expect(payerSignatureSequence(status({
       client_signed_order: true,
       cost_assumption: { required: true, document_id: "d", current: true, signed: true, signed_at: "x" },

@@ -8,6 +8,7 @@ pub(crate) mod frames;
 mod legal;
 pub(crate) mod package;
 mod paper;
+mod progress;
 pub mod provider;
 pub mod retention;
 mod review;
@@ -1055,8 +1056,40 @@ async fn sync_claim(state: &AppState, row: &PgRow, token: Uuid) -> Result<(), &'
         },
         level,
     )?;
-    sqlx::query("UPDATE document_signature_requests SET provider_request_id=$3,status='pending',evidence=$4 WHERE id=$1 AND lease_token=$2")
-        .bind(id).bind(token).bind(verified.id).bind(&verified.evidence).execute(&state.db).await.map_err(|_|"signature_database_error")?;
+    let mut receipt_tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|_| "signature_database_error")?;
+    let receipt = sqlx::query("UPDATE document_signature_requests SET provider_request_id=$3,status='pending',evidence=$4 WHERE id=$1 AND lease_token=$2")
+        .bind(id).bind(token).bind(verified.id).bind(&verified.evidence).execute(&mut *receipt_tx).await.map_err(|_|"signature_database_error")?;
+    let notices = if receipt.rows_affected() > 0 {
+        progress::notify_client_signatures(
+            state,
+            &mut receipt_tx,
+            row,
+            &signers,
+            &verified.evidence,
+        )
+        .await
+        .map_err(|_| "signature_database_error")?
+    } else {
+        Vec::new()
+    };
+    receipt_tx
+        .commit()
+        .await
+        .map_err(|_| "signature_database_error")?;
+    for (user_id, notification_id) in notices {
+        crate::realtime::publish_notification_event(
+            state,
+            user_id,
+            "notification.created",
+            Some(notification_id),
+            json!({"entity_type":"document"}),
+        )
+        .await;
+    }
     if verified.status == "SIGNED" {
         let pdf = provider.pdf(verified.document_id, false).await?;
         let report = provider.pdf(verified.id, true).await?;

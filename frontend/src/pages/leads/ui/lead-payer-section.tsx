@@ -26,11 +26,14 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { ApiRequestError } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { generateDocument, uploadDocument } from "@/pages/documents/data/document-api";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
+import { useSignatureSummary } from "@/pages/documents/data/use-signature-summary";
+import { SignatureProgressChips } from "@/pages/documents/ui/signature-progress-chips";
 import { normalizeLeadPortalBilling, type LeadPortalEnhancedDetails, type LeadPortalIntake, type PatientFieldMarker } from "../data/lead-portal-intake-api";
 import { billingStatements, payerOrganisationStatements, portalInvoiceTo } from "../model/lead-gwg-statements";
 import { createPayerAutosave, type PayerAutosave, type PayerAutosaveState } from "../model/lead-payer-autosave";
@@ -940,23 +943,17 @@ export function LeadPayerDeclarationSection({
   );
 }
 
-function SequenceStep({ state, label, tx }: { state: SignatureStepState; label: string; tx: Tx }) {
-  if (state === "not_required") {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <Check aria-hidden="true" className="size-3.5" />
-        {label} · {tx("не требуется", "entfällt")}
-      </span>
-    );
-  }
-  return (
-    <span className={cn("inline-flex items-center gap-1 text-xs", state === "done" ? "text-emerald-700" : "text-muted-foreground")}>
-      {state === "done"
-        ? <Check aria-hidden="true" className="size-3.5" />
-        : <span aria-hidden="true" className="size-3.5 rounded-full border border-current" />}
-      {label}
-    </span>
-  );
+function SequenceStep({ state, actor, tx }: { state: SignatureStepState; actor: "client" | "payer" | "agency"; tx: Tx }) {
+  const label = actor === "client"
+    ? state === "done" ? tx("Клиент подписал заказ", "Kunde hat den Auftrag unterzeichnet") : tx("Ожидается подпись клиента", "Unterschrift des Kunden ausstehend")
+    : actor === "payer"
+      ? state === "not_required" ? tx("Согласие плательщика не требуется", "Kostenübernahmeerklärung nicht erforderlich")
+        : state === "done" ? tx("Плательщик подписал согласие", "Kostenübernehmer hat unterschrieben") : tx("Ожидается согласие плательщика", "Unterschrift des Kostenübernehmers ausstehend")
+      : state === "done" ? tx("GMED подписал заказ", "GMED hat den Auftrag unterzeichnet")
+        : state === "blocked" ? tx("GMED: подпись пока недоступна", "GMED: Unterschrift noch gesperrt") : tx("GMED: можно подписывать", "GMED: Unterschrift möglich");
+  return <StatusChip data-signature-step={actor} data-step-state={state} tone={state === "done" ? "success" : state === "not_required" ? "neutral" : "warning"}>
+    {state === "done" ? <Check aria-hidden="true" className="size-3.5" /> : null}{label}
+  </StatusChip>;
 }
 
 /** The payer's signature package in the signing order (contract phase 3b). */
@@ -972,8 +969,7 @@ export type LeadPayerSignatureFlowPackage = {
 };
 
 /**
- * The signing order in the commercial step: "Клиент подписал ✓ → Плательщик
- * подписал согласие ✓ → GMED подписывает", the payer's
+ * The actual legal document states in the commercial signing order, the payer's
  * Kostenübernahmeerklärung and why GMED may not sign yet. The server enforces
  * the same order (409 `payer_gate_blocked`).
  *
@@ -993,6 +989,7 @@ export function LeadPayerSignatureFlow({
   onChanged,
   errorText,
   payerPackage,
+  signatureDocumentId,
 }: {
   leadId: string;
   status: PayerDeclarationStatus | null;
@@ -1004,6 +1001,7 @@ export function LeadPayerSignatureFlow({
   onChanged: () => void;
   errorText: (error: unknown) => string;
   payerPackage?: LeadPayerSignatureFlowPackage | null;
+  signatureDocumentId?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1011,6 +1009,9 @@ export function LeadPayerSignatureFlow({
   const packageState = packageController.data;
   const packagePanelShown = Boolean(payerPackage?.panel && packageState?.mode);
   const sequence = payerSignatureSequence(status);
+  const { user } = useAuth();
+  const summary = useSignatureSummary(user && ["ceo", "patient_manager"].includes(user.role) ? user.id : undefined, signatureDocumentId);
+  const operationalProgress = summary?.document_id === signatureDocumentId && summary?.status === "pending" && summary.progress?.total ? summary.progress : null;
   const required = Boolean(status?.cost_assumption.required);
   const orderId = status?.order_id ?? null;
   const standaloneKept = standaloneCostAssumptionKept(packageState);
@@ -1061,17 +1062,22 @@ export function LeadPayerSignatureFlow({
         </Button>
       ) : undefined}
     >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1" aria-label={tx("Порядок подписания", "Reihenfolge der Unterschriften")}>
-        <SequenceStep state={sequence.client} label={tx("Клиент подписал", "Kunde hat unterschrieben")} tx={tx} />
+      {operationalProgress && summary ? <div className="space-y-2">
+        <SignatureProgressChips progress={operationalProgress} testMode={summary.test_mode} lang={tx("ru", "de")} />
+        <StatusChip tone="neutral">{summary.test_mode
+          ? tx("DEMO не подтверждает юридическую подпись заказа", "DEMO bestätigt keine rechtswirksame Auftragsunterschrift")
+          : tx("Заказ: подписание пакета ещё не завершено", "Auftrag: Paketunterzeichnung noch nicht abgeschlossen")}</StatusChip>
+      </div> : <div className="flex flex-wrap items-center gap-x-2 gap-y-1" aria-label={tx("Порядок подписания", "Reihenfolge der Unterschriften")}>
+        <SequenceStep state={sequence.client} actor="client" tx={tx} />
         <ArrowRight aria-hidden="true" className="size-3.5 text-muted-foreground" />
-        <SequenceStep state={sequence.payer} label={tx("Плательщик подписал согласие", "Kostenübernehmer hat unterschrieben")} tx={tx} />
+        <SequenceStep state={sequence.payer} actor="payer" tx={tx} />
         <ArrowRight aria-hidden="true" className="size-3.5 text-muted-foreground" />
         <SequenceStep
           state={sequence.agency}
-          label={sequence.agency === "done" ? tx("GMED подписал", "GMED hat unterschrieben") : tx("GMED подписывает", "GMED unterschreibt")}
+          actor="agency"
           tx={tx}
         />
-      </div>
+      </div>}
       {required ? (
         documents.length > 0
           ? renderDocuments(documents)
@@ -1109,12 +1115,20 @@ export function LeadPayerSignatureFlow({
         <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2">
           <CircleAlert aria-hidden="true" className="mt-0.5" />
           <span className="min-w-0">
-            <span className="block font-semibold">{tx("GMED сможет подписать, когда:", "GMED kann unterschreiben, sobald:")}</span>
+            <span className="block font-semibold">{operationalProgress
+              ? tx("Для юридического подтверждения заказа:", "Für die rechtswirksame Bestätigung des Auftrags:")
+              : tx("GMED сможет подписать, когда:", "GMED kann unterschreiben, sobald:")}</span>
             <span role="list" className="mt-1 block space-y-0.5">
               {status.agency_blocking.map((code) => (
                 <span role="listitem" key={code} className="flex items-start gap-1.5">
                   <span aria-hidden="true">·</span>
-                  <span>{payerReasonLabel(code, tx)}</span>
+                  <span>{operationalProgress && code === "client_order_signature_missing"
+                    ? summary?.test_mode
+                      ? tx("Нужна юридически действительная подпись заказа", "Eine rechtswirksame Auftragsunterschrift ist erforderlich")
+                      : tx("Завершите подписание пакета в Skribble", "Paketunterzeichnung in Skribble abschließen")
+                    : operationalProgress && code === "cost_assumption_unsigned"
+                      ? tx("Юридический статус согласия плательщика ещё не подтверждён", "Die rechtswirksame Kostenübernahmeerklärung ist noch nicht bestätigt")
+                      : payerReasonLabel(code, tx)}</span>
                 </span>
               ))}
             </span>

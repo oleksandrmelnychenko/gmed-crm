@@ -4,7 +4,9 @@ import { isSignaturePending, type SignatureStatus } from "./document-signature-a
 
 export type SignatureSummary = {
   document_id: string; status: SignatureStatus; test_mode: boolean; result_document_id: string | null;
+  progress?: SignatureProgress;
 };
+export type SignatureProgress = { signed: number; total: number; client_signed: number; client_total: number; agency_signed: number; agency_total: number };
 const updatedEvent = "gmed:signature-updated";
 export const refreshSignatureSummaries = () => window.dispatchEvent(new Event(updatedEvent));
 

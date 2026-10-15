@@ -885,7 +885,7 @@ export function payerAmlCountries(response: PayerDeclarationResponse | null | un
   ]);
 }
 
-export type SignatureStepState = "done" | "pending" | "not_required";
+export type SignatureStepState = "done" | "pending" | "blocked" | "not_required";
 
 /**
  * The signing order shown in the commercial step:
@@ -896,13 +896,13 @@ export function payerSignatureSequence(status: PayerDeclarationStatus | null | u
   payer: SignatureStepState;
   agency: SignatureStepState;
 } {
-  if (!status) return { client: "pending", payer: "pending", agency: "pending" };
+  if (!status) return { client: "pending", payer: "pending", agency: "blocked" };
   return {
     client: status.client_signed_order ? "done" : "pending",
     payer: status.cost_assumption.required
       ? (status.cost_assumption.signed ? "done" : "pending")
       : "not_required",
-    agency: status.agency_signed_order ? "done" : "pending",
+    agency: status.agency_signed_order ? "done" : status.agency_may_sign ? "pending" : "blocked",
   };
 }
 

@@ -116,6 +116,17 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
       .toBe("Dokument unterschrieben");
   });
 
+  it("localizes partial client signatures and explicitly distinguishes DEMO", () => {
+    for (const lang of ["ru", "de"] as const) {
+      const result = notificationCopyFromFacts(notice("signature_client_signed", "Client signature received", "fallback", { outcome: "client_signed", signed: 1, total: 2 }), lang);
+      expect(result?.title).toBe(lang === "ru" ? "Подпись клиента получена" : "Kundenunterschrift eingegangen");
+      expect(result?.body).toContain("1/2");
+      const demo = notificationCopyFromFacts(notice("signature_client_signed", "DEMO", "fallback", { outcome: "test_client_signed", signed: 1, total: 2 }), lang);
+      expect(demo?.title).toMatch(/^DEMO · /);
+      expect(demo?.body).toContain(lang === "ru" ? "не имеет юридической силы" : "keine Rechtswirkung");
+    }
+  });
+
   it("uses Russian plural forms for the retention notice", () => {
     const sweep = (count: number) =>
       notificationCopyFromFacts(

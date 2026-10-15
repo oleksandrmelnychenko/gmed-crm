@@ -6925,6 +6925,8 @@ ${serviceCommentLines.join("\n")}`
   const renderPayerSignatureFlow = (packagePanel: boolean) => leadId ? (
     <LeadPayerSignatureFlow
       leadId={leadId}
+      signatureDocumentId={sortWizardDocumentsNewestFirst(commercialDocuments.single_order)[0]?.id
+        ?? (inheritedContract ? undefined : sortWizardDocumentsNewestFirst(commercialDocuments.framework_contract)[0]?.id)}
       status={payer.data?.status ?? null}
       documents={costAssumptionDocuments}
       disabled={isBusy}

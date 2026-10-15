@@ -21,10 +21,8 @@ export function SignatureSigners({ request, lang }: { request: SignatureRequest;
         </span>
       </div>;
     })}
-    {request.status === "pending" ? <p data-signature-provider-receipt className="text-xs leading-5 text-muted-foreground">
-      {request.test_mode
-        ? tx("DEMO: тестовый запрос передан Skribble. Доставка E-Mail не подтверждена.", "DEMO: Die Testanfrage wurde an Skribble übergeben. Die E-Mail-Zustellung ist nicht bestätigt.")
-        : tx("Запрос передан Skribble. Доставка E-Mail не подтверждена. После подписания PDF появится здесь автоматически.", "Die Anfrage wurde an Skribble übergeben. Die E-Mail-Zustellung ist nicht bestätigt. Nach der Unterschrift erscheint die PDF hier automatisch.")}
+    {request.status === "pending" && !request.test_mode ? <p data-signature-provider-receipt className="text-xs leading-5 text-muted-foreground">
+      {tx("Запрос передан Skribble. Доставка E-Mail не подтверждена. После подписания PDF появится здесь автоматически.", "Die Anfrage wurde an Skribble übergeben. Die E-Mail-Zustellung ist nicht bestätigt. Nach der Unterschrift erscheint die PDF hier automatisch.")}
     </p> : null}
   </>;
 }

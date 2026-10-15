@@ -1,5 +1,6 @@
 import type { StatusChipTone } from "@/components/ui/status-chip";
 import type { SignatureRequest, Signer } from "../data/document-signature-api";
+import type { SignatureProgress } from "../data/use-signature-summary";
 
 type SignerState = "ready" | "waiting" | "signed" | "declined" | "error" | "withdrawn" | "expired" | "unconfirmed";
 type SignerPresentation = { state: SignerState; label: string; tone: StatusChipTone; detail?: string };
@@ -10,6 +11,15 @@ function providerStatus(request: SignatureRequest, signer: Signer) {
   const matches = request.evidence.signatures?.filter(item => normalEmail(item.email) === normalEmail(signer.email));
   // Missing or ambiguous evidence must not imply readiness or a signature.
   return matches?.length === 1 ? matches[0].status : undefined;
+}
+
+export function signatureSignerProgress(request: SignatureRequest): SignatureProgress {
+  const signed = (signer: Signer) => providerStatus(request, signer) === "SIGNED";
+  const clients = request.signers.filter(signer => signer.role === "client");
+  const agency = request.signers.filter(signer => signer.role === "agency");
+  return { signed: request.signers.filter(signed).length, total: request.signers.length,
+    client_signed: clients.filter(signed).length, client_total: clients.length,
+    agency_signed: agency.filter(signed).length, agency_total: agency.length };
 }
 
 /** A request being open does not mean every person can already sign it. */

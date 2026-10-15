@@ -5,8 +5,11 @@ import type { DocumentItem } from "@/pages/documents/model/types";
 import { LeadSigningPackagePanel } from "./lead-signing-package-panel";
 
 const language = vi.hoisted(() => ({ lang: "ru" }));
+const summary = vi.hoisted(() => ({ value: undefined as import("@/pages/documents/data/use-signature-summary").SignatureSummary | undefined }));
 vi.mock("@/lib/i18n", () => ({ useLang: () => language }));
-beforeEach(() => { language.lang = "ru"; });
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: { id: "synthetic-staff", role: "ceo" } }) }));
+vi.mock("@/pages/documents/data/use-signature-summary", () => ({ useSignatureSummary: () => summary.value }));
+beforeEach(() => { language.lang = "ru"; summary.value = undefined; });
 vi.mock("@/pages/documents/ui/document-signature-action", () => ({
   DocumentSignatureAction: ({ documentId, scope, signed, title }: {
     documentId?: string; scope?: { leadId?: string }; signed?: boolean; title: string;
@@ -104,6 +107,23 @@ for (const lang of ["ru", "de"]) {
       expect(html).not.toContain(lang === "ru" ? "подписан на бумаге" : "auf Papier unterzeichnet");
       expect(html).toContain('data-document-signature-id="new-contract"');
       expect(render(document("electronic-contract", true), null)).not.toContain(lang === "ru" ? "на бумаге" : "auf Papier");
+    });
+
+    it("separates current DEMO partial progress from the unsigned order and ignores closed requests", () => {
+      language.lang = lang;
+      summary.value = { document_id: "new-order", status: "pending", test_mode: true, result_document_id: null,
+        progress: { signed: 1, total: 2, client_signed: 1, client_total: 1, agency_signed: 0, agency_total: 1 } };
+      const html = render(document("paper-contract", true), document("new-order", false));
+      expect(html).toContain(lang === "ru" ? "DEMO · Подписи" : "DEMO · Unterschriften");
+      expect(html).toContain("1/2");
+      expect(html).toContain(lang === "ru" ? "Клиент подписал · ожидается GMED" : "Kunde hat unterschrieben · GMED steht aus");
+      expect(html).toContain(lang === "ru" ? "Заказ: не подписан" : "Auftrag: nicht unterzeichnet");
+      expect(html).toContain('data-signed="false"');
+      summary.value.status = "withdrawn";
+      expect(render(null, document("new-order", false))).not.toContain("data-signature-progress");
+      summary.value.status = "submission_unknown";
+      expect(render(null, document("new-order", false))).toContain(lang === "ru" ? "Проверяем отправку" : "Versand wird geprüft");
+      expect(render(null, document("new-order-v2", false))).not.toContain("data-current-package-status");
     });
   });
 }

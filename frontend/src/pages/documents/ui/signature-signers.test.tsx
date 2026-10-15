@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { SignatureRequest, Signer } from "../data/document-signature-api";
 import { signatureSignerPresentation } from "./signature-signer-status";
 import { SignatureSigners } from "./signature-signers";
+import { SignatureProgressChips } from "./signature-progress-chips";
+import { signatureSignerProgress } from "./signature-signer-status";
 
 const client: Signer = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
 const agency: Signer = { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" };
@@ -49,13 +51,18 @@ for (const lang of ["ru", "de"]) {
     it("keeps DEMO explicit and does not imply a legally valid signature or delivered invitation", () => {
       const html = renderToStaticMarkup(<SignatureSigners request={request(["SIGNED", "OPEN"], { test_mode: true })} lang={lang} />);
       expect(html).toContain(lang === "ru" ? "DEMO · Подписано" : "DEMO · Unterzeichnet");
-      expect(html).toContain(lang === "ru" ? "DEMO: тестовый запрос" : "DEMO: Die Testanfrage");
-      expect(html).toContain(lang === "ru" ? "Доставка E-Mail не подтверждена." : "Die E-Mail-Zustellung ist nicht bestätigt.");
+      expect(html).not.toContain("data-signature-provider-receipt");
     });
   });
 }
 
 describe("signer evidence and request lifecycle", () => {
+  it("does not say only GMED is awaited while a payer or minor still has to sign", () => {
+    const progress = { ...signatureSignerProgress(request(["SIGNED", "OPEN"])), total: 3 };
+    const html = renderToStaticMarkup(<SignatureProgressChips progress={progress} testMode={false} lang="ru" />);
+    expect(html).toContain("Ожидаются подписи");
+    expect(html).not.toContain("ожидается GMED");
+  });
   it("matches emails case-insensitively and refuses duplicate or unrelated evidence", () => {
     const item = request(["OPEN", "WAITING"]);
     item.evidence.signatures![1].email = " MAX@EXAMPLE.ORG ";

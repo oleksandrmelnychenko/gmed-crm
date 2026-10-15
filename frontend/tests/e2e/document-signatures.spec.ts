@@ -325,11 +325,11 @@ for (const lang of ["ru", "de"] as const) {
     const check = dialog.getByRole("button", { name: lang === "ru" ? "Проверить статус" : "Status prüfen", exact: true });
     await check.click();
     await expect(dialog.getByText(lang === "ru" ? /Проверка запрошена/ : /Prüfung angefordert/)).toBeVisible();
-    await expect(dialog.getByText(lang === "ru" ? /Проверено: получено подписей 0 из 2/ : /Geprüft: 0 von 2/)).toBeVisible({ timeout: 12000 });
+    await expect(dialog.locator('[data-signature-progress]')).toContainText(lang === "ru" ? "Подписи: 0/2" : "Unterschriften: 0/2", { timeout: 12000 });
     await check.click();
     await expect(dialog.getByText(lang === "ru" ? /Проверка не завершена/ : /Prüfung nicht abgeschlossen/)).toBeVisible({ timeout: 12000 });
     await check.click();
-    await expect(dialog.getByText(lang === "ru" ? /Проверено: получено подписей 1 из 2/ : /Geprüft: 1 von 2/)).toBeVisible({ timeout: 12000 });
+    await expect(dialog.locator('[data-signature-progress]')).toContainText(lang === "ru" ? "Подписи: 1/2" : "Unterschriften: 1/2", { timeout: 12000 });
     expect(checks).toBe(3);
     await dialog.screenshot({ path: `../artifacts/design-qa/signature-status-check-${lang}.png` });
   });
@@ -1309,7 +1309,7 @@ test("a pending request says whether the signature frames are placed in the docu
     await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
     return page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
   };
-  await expect((await open()).locator('[data-signature-frames="all"]')).toContainText("Zum Unterzeichnen genügt ein Klick");
+  await expect((await open()).locator('[data-signature-frames="all"]')).toHaveCount(0);
   positions = [];
   await expect((await open()).locator('[data-signature-frames="none"]')).toContainText("platziert ihre Unterschrift selbst");
 });

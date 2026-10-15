@@ -13,6 +13,8 @@ import { PaperSignatureSection } from "./paper-signature-section";
 import { SignatureConnectionDialog } from "./signature-connection-dialog";
 import { SignatureSignerFields } from "./signature-signer-fields";
 import { SignatureSigners } from "./signature-signers";
+import { SignatureProgressChips } from "./signature-progress-chips";
+import { signatureSignerProgress } from "./signature-signer-status";
 import { SignaturePackageComposer, emptyPackageSelection, expiryInstant, resolvePackage, type PackageSelection } from "./signature-package-composer";
 import {
   abandonSignatureRequest, combinedSignerPolicy, createSignaturePackage, packageMinimumLevel, downloadSignatureReport, fetchPackageCandidates, fetchSignatureState,
@@ -414,21 +416,20 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
             <div className="space-y-2 p-4">
               <SignatureRequestMembers request={request} documentId={documentId} />
               {request.expires_at || request.invitation_note ? <p className="text-xs text-foreground">{request.expires_at ? `${tx("Подписать до", "Unterschreiben bis")} ${formatAppDate(request.expires_at)}` : ""}{request.expires_at && request.invitation_note ? " · " : ""}{request.invitation_note ?? ""}</p> : null}
-              {refreshCheck?.id === request.id ? <p role="status" className="text-xs leading-5 text-foreground">
+              {refreshCheck?.id === request.id ? <div role="status" className="text-xs leading-5 text-foreground">
                 {request.updated_at && request.updated_at !== refreshCheck.before
                   ? request.last_error
                     ? tx("Проверка не завершена: не удалось получить результат от Skribble. Повторная попытка выполнится автоматически.", "Prüfung nicht abgeschlossen: Das Ergebnis konnte nicht von Skribble abgerufen werden. Ein neuer Versuch erfolgt automatisch.")
                     : request.status === "pending"
-                      ? tx(`Проверено: получено подписей ${request.evidence.signatures?.filter(s => s.status === "SIGNED").length ?? 0} из ${request.signers.length}. Ожидаем остальных подписантов.`, `Geprüft: ${request.evidence.signatures?.filter(s => s.status === "SIGNED").length ?? 0} von ${request.signers.length} Unterschriften erhalten. Weitere Unterschriften stehen aus.`)
+                      ? <SignatureProgressChips progress={signatureSignerProgress(request)} testMode={request.test_mode} lang={lang} />
                       : tx("Статус обновлён.", "Status aktualisiert.")
                   : tx("Проверка запрошена. Ожидаем ответ Skribble…", "Prüfung angefordert. Antwort von Skribble wird erwartet…")}
-              </p> : null}
+              </div> : null}
               <SignatureSigners request={request} lang={lang} />
               {request.status === "pending" && !request.last_error ? (() => {
                 const frames = signatureFrameCoverage(request.signers);
-                return <p data-signature-frames={frames} className={frames === "all" ? "text-xs leading-5 text-foreground" : "text-xs leading-5 text-amber-700"}>{frames === "all"
-                  ? tx("Места подписи размечены в документе: подписанту достаточно нажать «Подписать».", "Die Unterschriftsfelder sind im Dokument gesetzt: Zum Unterzeichnen genügt ein Klick.")
-                  : frames === "some"
+                if (frames === "all") return null;
+                return <p data-signature-frames={frames} className="text-xs leading-5 text-amber-700">{frames === "some"
                     ? tx("Места подписи размечены не для всех подписантов: остальные разместят подпись в документе сами.", "Die Unterschriftsfelder sind nicht für alle Personen gesetzt: Die übrigen platzieren ihre Unterschrift selbst.")
                     : tx("Места подписи в документе не размечены: подписант разместит подпись сам.", "Im Dokument sind keine Unterschriftsfelder gesetzt: Die Person platziert ihre Unterschrift selbst.")}</p>;
               })() : null}

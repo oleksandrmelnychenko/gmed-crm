@@ -1,6 +1,10 @@
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { StatusChip } from "@/components/ui/status-chip";
 import { useLang } from "@/lib/i18n";
+import { useAuth } from "@/lib/auth";
+import { useSignatureSummary } from "@/pages/documents/data/use-signature-summary";
+import { SignatureProgressChips } from "@/pages/documents/ui/signature-progress-chips";
+import { signatureStatusText } from "@/pages/documents/ui/signature-status";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 
@@ -33,6 +37,8 @@ export function LeadSigningPackagePanel({
     ?? contractDocument
     ?? orderDocument;
   const sourceIsContract = Boolean(source && source.id === contractDocument?.id);
+  const { user } = useAuth();
+  const summary = useSignatureSummary(user && ["ceo", "patient_manager"].includes(user.role) ? user.id : undefined, source?.id);
   const title = source?.original_filename
     || (sourceIsContract
       ? tx("Рамочный договор", "Rahmenvertrag")
@@ -73,6 +79,15 @@ export function LeadSigningPackagePanel({
               : tx("Заказ: не подписан", "Auftrag: nicht unterzeichnet")}</StatusChip>
           ) : null}
         </div>
+        {summary && summary.document_id === source?.id ? <div className="space-y-1.5" data-current-package-status>
+          <StatusChip tone={summary.status === "completed" ? "success" : ["declined", "error", "needs_review"].includes(summary.status) ? "error" : "warning"}>
+            {summary.test_mode ? "DEMO · " : ""}{summary.status === "pending"
+              ? tx("Запрос принят Skribble", "Anfrage von Skribble angenommen")
+              : signatureStatusText(summary.status, lang)}
+          </StatusChip>
+          {summary.status === "pending" && summary.progress && summary.progress.total > 0
+            ? <SignatureProgressChips progress={summary.progress} testMode={summary.test_mode} lang={lang} /> : null}
+        </div> : null}
         <p className="text-xs leading-5 text-muted-foreground">{description}</p>
       </div>
       <div className="shrink-0">
