@@ -240,6 +240,57 @@ async function prepare(page: Page, enabled = true) {
 }
 
 for (const lang of ["ru", "de"] as const) {
+  test(`individual signer states distinguish readiness, sequence and errors in ${lang}`, async ({ page }, testInfo) => {
+    const fixture = await prepare(page);
+    await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);
+    const tx = (ru: string, de: string) => lang === "de" ? de : ru;
+    const signers = [
+      { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" },
+      { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" },
+    ];
+    let agencyStatus = "WAITING";
+    let checks = 0;
+    await page.route("**/api/v1/document-signature-requests/sequence-fixture/refresh", route => {
+      checks++;
+      return route.fulfill({ json: { ok: true } });
+    });
+    await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
+      enabled: true, region: "DE", test_mode: false, can_send: true, can_configure: true,
+      ineligible_reason: null, requests: [{
+        id: "sequence-fixture", source_document_id: documentId, status: "pending", test_mode: false, signers,
+        evidence: { signatures: signers.map((signer, index) => ({ email: signer.email, status: index === 0 ? "OPEN" : agencyStatus, signed_at: null })) },
+        has_report: false, result_document_id: null, last_error: null, created_at: document.created_at,
+        updated_at: `2026-09-07T12:00:0${checks}Z`,
+      }],
+    } }));
+    await page.goto(`/documents/${documentId}`);
+    await page.locator(`[data-document-signature-id="${documentId}"]`).click();
+    const dialog = page.getByRole("dialog", { name: tx("Электронная подпись", "Elektronische Unterschrift"), exact: true });
+    await expect(dialog.locator('[data-signature-signer="ready"]')).toContainText("Erika Mustermann");
+    await expect(dialog.locator('[data-signature-signer="waiting"]')).toContainText("Max Muster");
+    await expect(dialog.locator('[data-signature-signer="waiting"]')).toContainText(tx("Сначала ожидаются подписи: Erika Mustermann.", "Zuerst ausstehende Unterschriften: Erika Mustermann."));
+    await expect(dialog.locator('[data-signature-provider-receipt]')).toContainText(tx("Доставка E-Mail не подтверждена.", "Die E-Mail-Zustellung ist nicht bestätigt."));
+    await expect(dialog.getByText(tx("Приглашение отправлено на E-Mail.", "Die Einladung wurde per E-Mail versendet."), { exact: false })).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
+    await dialog.screenshot({ path: testInfo.outputPath(`signer-sequence-${lang}-mobile.png`) });
+    const refresh = dialog.getByRole("button", { name: tx("Проверить статус", "Status prüfen"), exact: true });
+    for (const [providerStatus, uiStatus, label] of [
+      ["ERROR", "error", tx("Ошибка подписания", "Signatur fehlgeschlagen")],
+      ["DECLINED", "declined", tx("Подпись отклонена", "Unterschrift abgelehnt")],
+      ["UNKNOWN_NEW_STATE", "unconfirmed", tx("Статус требует проверки", "Status muss geprüft werden")],
+      ["SIGNED", "signed", tx("Подписано", "Unterzeichnet")],
+    ]) {
+      agencyStatus = providerStatus;
+      await refresh.click();
+      await expect(dialog.locator(`[data-signature-signer="${uiStatus}"]`)).toContainText(label);
+      await expect(dialog.locator('[data-signature-signer="waiting"]')).toHaveCount(0);
+    }
+    expect(fixture.submissions).toEqual([]);
+    expect(fixture.packageSubmissions).toEqual([]);
+    await expect(dialog.getByRole("button", { name: tx("Отправить на подпись", "Zur Unterschrift senden"), exact: true })).toHaveCount(0);
+  });
+
   test(`manual status check reports the pending result and sync errors in ${lang}`, async ({ page }) => {
     await prepare(page);
     await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);
@@ -1186,7 +1237,7 @@ for (const lang of ["ru", "de"] as const) {
     expect(summaries.some(ids => ids.includes(documentId) && ids.includes(otherId))).toBe(true);
     await action.click();
     const dialog = page.getByRole("dialog", { name: tx("Электронная подпись", "Elektronische Unterschrift"), exact: true });
-    await expect(dialog.getByText(tx("Ожидает подписи", "Unterschrift ausstehend"), { exact: true })).toBeVisible();
+    await expect(dialog.getByText(`DEMO · ${tx("Готов к подписи", "Zur Unterschrift bereit")}`, { exact: true })).toBeVisible();
     await expect(dialog.getByRole("button", { name: tx("Открыть PDF", "PDF öffnen"), exact: true })).toHaveCount(0);
     completed = true;
     await expect(dialog.getByRole("button", { name: tx("Открыть PDF", "PDF öffnen"), exact: true })).toBeVisible({ timeout: 12_000 });

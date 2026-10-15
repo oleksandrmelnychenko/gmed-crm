@@ -4,20 +4,9 @@ import { useLang } from "@/lib/i18n";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 
-/**
- * Where the onboarding package of a lead is sent for e-signature; the client
- * signs first, GMED second. The package source decides what the composer
- * preselects (backend `signing_companions`):
- * - a new framework contract: contract, order, the patient form once the
- *   lead sent the request (`lead_self_disclosure`), Schweigepflichtsentbindung
- *   and DSGVO consents (the guardians' declaration for a minor);
- * - no unsigned contract (the current contract is already signed, a signed
- *   contract of the patient still applies, or none is generated yet): the
- *   order with the patient form, Schweigepflichtsentbindung and DSGVO consents;
- * - neither: the lead's package composer with a free choice.
- * The action renders only for roles that may send invitations (CEO, patient
- * manager).
- */
+/** Opens the current unsigned source, or signed history. The composer loads
+ * actual candidates from the server; this summary must not promise a fixed
+ * package, because already signed companions can be excluded. */
 export function LeadSigningPackagePanel({
   leadId,
   contractDocument,
@@ -51,25 +40,13 @@ export function LeadSigningPackagePanel({
         ? tx("Заказ", "Auftrag")
         : tx("Документы обращения", "Unterlagen der Anfrage"));
 
-  const description = sourceIsContract
-    ? tx(
-        "Договор, заказ, анкета (если создана), освобождение от тайны и согласие DSGVO — одно приглашение. Сначала клиент, затем GMED.",
-        "Vertrag, Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung – eine Einladung. Zuerst der Kunde, danach GMED.",
-      )
-    : orderDocument
-      ? inheritedContract || currentContractSigned
-        ? tx(
-            "Ранее подписанный договор действует. Заказ, анкета (если создана), освобождение от тайны и согласие DSGVO — одно приглашение.",
-            "Der bereits unterzeichnete Vertrag gilt. Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung – eine Einladung.",
-          )
-        : tx(
-            "Заказ, анкета (если создана), освобождение от тайны и согласие DSGVO — один пакет. Создайте договор ниже, чтобы добавить его к ним.",
-            "Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung – ein Paket. Vertrag unten erstellen, um ihn hinzuzufügen.",
-          )
-      : tx(
-          "Создайте договор и заказ ниже. Документы для общего приглашения выбираются в окне подписи.",
-          "Vertrag und Auftrag unten erstellen. Die Dokumente für die gemeinsame Einladung wählen Sie im Unterschriftsfenster.",
-        );
+  const contractApplies = currentContractSigned || (!contractDocument && inheritedContract);
+  const description = source
+    ? tx("Проверьте состав пакета в окне подписи.", "Prüfen Sie den Paketinhalt im Unterschriftsfenster.")
+    : tx(
+        "Создайте договор и заказ ниже. Документы для общего приглашения выбираются в окне подписи.",
+        "Vertrag und Auftrag unten erstellen. Die Dokumente für die gemeinsame Einladung wählen Sie im Unterschriftsfenster.",
+      );
 
   return (
     <section
@@ -81,8 +58,19 @@ export function LeadSigningPackagePanel({
           <AdminSectionTitle>
             {tx("Электронная подпись пакета", "Elektronische Unterschrift des Pakets")}
           </AdminSectionTitle>
-          {currentContractSigned ? (
-            <StatusChip tone="success">{tx("Договор подписан", "Vertrag unterzeichnet")}</StatusChip>
+        </div>
+        <div className="flex flex-wrap gap-2" data-signing-document-statuses>
+          {contractApplies ? (
+            <StatusChip tone="success">{contractDocument?.ursprung === "paper_signature" && contractDocument.signed_at
+              ? tx("Рамочный договор: подписан на бумаге", "Rahmenvertrag: auf Papier unterzeichnet")
+              : tx("Рамочный договор: подписан", "Rahmenvertrag: unterzeichnet")}</StatusChip>
+          ) : contractDocument ? (
+            <StatusChip tone="warning">{tx("Рамочный договор: не подписан", "Rahmenvertrag: nicht unterzeichnet")}</StatusChip>
+          ) : null}
+          {orderDocument ? (
+            <StatusChip tone={orderDocument.signed_at ? "success" : "warning"}>{orderDocument.signed_at
+              ? tx("Заказ: подписан", "Auftrag: unterzeichnet")
+              : tx("Заказ: не подписан", "Auftrag: nicht unterzeichnet")}</StatusChip>
           ) : null}
         </div>
         <p className="text-xs leading-5 text-muted-foreground">{description}</p>

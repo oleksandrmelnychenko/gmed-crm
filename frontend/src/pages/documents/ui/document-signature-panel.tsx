@@ -12,6 +12,7 @@ import { downloadDocumentFile } from "../data/document-api";
 import { PaperSignatureSection } from "./paper-signature-section";
 import { SignatureConnectionDialog } from "./signature-connection-dialog";
 import { SignatureSignerFields } from "./signature-signer-fields";
+import { SignatureSigners } from "./signature-signers";
 import { SignaturePackageComposer, emptyPackageSelection, expiryInstant, resolvePackage, type PackageSelection } from "./signature-package-composer";
 import {
   abandonSignatureRequest, combinedSignerPolicy, createSignaturePackage, packageMinimumLevel, downloadSignatureReport, fetchPackageCandidates, fetchSignatureState,
@@ -422,17 +423,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
                       : tx("Статус обновлён.", "Status aktualisiert.")
                   : tx("Проверка запрошена. Ожидаем ответ Skribble…", "Prüfung angefordert. Antwort von Skribble wird erwartet…")}
               </p> : null}
-              {request.signers.map(signer => {
-                const signed = request.evidence.signatures?.some(s => s.email.toLowerCase() === signer.email.toLowerCase() && s.status === "SIGNED");
-                return <div key={signer.email} data-signature-signer={signed ? "signed" : request.status === "pending" ? "waiting" : "unconfirmed"} className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between">
-                  <span className="min-w-0">
-                    <span className="block break-words font-semibold text-foreground">{signer.first_name} {signer.last_name}</span>
-                    <span className="block break-all text-foreground">{signer.email}</span>
-                  </span>
-                  <StatusBadge tone={signed ? "success" : request.status === "pending" ? "warning" : "neutral"} className={signed || request.status === "pending" ? "shrink-0 self-start sm:self-center" : "shrink-0 self-start text-foreground sm:self-center"}>{signed ? tx("Подписано", "Unterzeichnet") : request.status === "pending" ? tx("Ожидает подписи", "Unterschrift ausstehend") : tx("Подпись не подтверждена", "Unterschrift nicht bestätigt")}</StatusBadge>
-                </div>;
-              })}
-              {request.status === "pending" && !request.last_error ? <p className="text-xs leading-5 text-foreground">{tx("Приглашение отправлено на E-Mail. После подписания PDF появится здесь автоматически.", "Die Einladung wurde per E-Mail versendet. Nach der Unterschrift erscheint die PDF hier automatisch.")}</p> : null}
+              <SignatureSigners request={request} lang={lang} />
               {request.status === "pending" && !request.last_error ? (() => {
                 const frames = signatureFrameCoverage(request.signers);
                 return <p data-signature-frames={frames} className={frames === "all" ? "text-xs leading-5 text-foreground" : "text-xs leading-5 text-amber-700"}>{frames === "all"
