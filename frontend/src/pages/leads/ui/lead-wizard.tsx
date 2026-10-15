@@ -2587,6 +2587,7 @@ function documentsValidationIssues(
   existingChecks?: Map<string, boolean>,
   /** Owner rule 2026-10-07: the server's enhanced check (or an unsaved black-list country). */
   amlRequired = false,
+  demoChecks: readonly string[] = [],
 ): ValidationIssue[] {
   if (!draft) return [];
   const issues: ValidationIssue[] = [];
@@ -2606,7 +2607,7 @@ function documentsValidationIssues(
       fieldId: HEALTHCARE_CONSENT_ID,
     });
   }
-  if (!existingChecks?.get("confidentiality_release_signed") && !documents.confidentiality_release.some((document) => (
+  if (!demoChecks.includes("confidentiality_release_signed") && !existingChecks?.get("confidentiality_release_signed") && !documents.confidentiality_release.some((document) => (
     document.signed_at && document.compliance_kind === "confidentiality_release"
   )) && !documents.privacy_consents.some((document) => (
     // The minor's consent form carries the Schweigepflichtsentbindung (owner decision 2026-10-12).
@@ -2620,7 +2621,7 @@ function documentsValidationIssues(
       fieldId: CONFIDENTIALITY_RELEASE_ID,
     });
   }
-  if (!existingChecks?.get("dsgvo_document_signed") && !documents.privacy_consents.some((document) => (
+  if (!demoChecks.includes("dsgvo_document_signed") && !existingChecks?.get("dsgvo_document_signed") && !documents.privacy_consents.some((document) => (
     document.signed_at && document.compliance_kind === "dsgvo"
   ))) {
     issues.push({
@@ -2641,7 +2642,7 @@ function documentsValidationIssues(
     });
   }
   // A PEP or a country of the high-risk list no longer requires the check.
-  if (amlRequired && !documents.enhanced_due_diligence.some((document) => (
+  if (amlRequired && !demoChecks.includes("enhanced_due_diligence_document_signed") && !documents.enhanced_due_diligence.some((document) => (
     document.signed_at && document.compliance_kind === "enhanced_due_diligence"
   ))) {
     const documentGenerated = documents.enhanced_due_diligence.length > 0;
@@ -4575,7 +4576,7 @@ export function LeadWizard({
       return issues;
     }
     if (validationContext.kind === "documents") {
-      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired);
+      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks);
     }
     if (validationContext.kind === "order") {
       return orderIssues;
@@ -4586,7 +4587,7 @@ export function LeadWizard({
       message: readinessReasonLabel(reason, tx),
       fieldId: readinessReasonFieldId(reason, draft),
     }));
-  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, amlRequired]);
+  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, amlRequired, lead?.readiness.demo_onboarding?.credited_checks]);
   const visibleOrderErrors = orderValidationAttempted ? orderIssues : [];
   const orderFieldError = (...keys: string[]) =>
     visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
@@ -5625,7 +5626,7 @@ export function LeadWizard({
       window.requestAnimationFrame(() => document.getElementById(SERVICE_CONCERN_ID)?.focus());
       return null;
     }
-    const documentIssues = documentsValidationIssues(intakeDraft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired);
+    const documentIssues = documentsValidationIssues(intakeDraft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks);
     if (documentIssues.length > 0) {
       setValidationContext({ kind: "documents" });
       setStep("documents");

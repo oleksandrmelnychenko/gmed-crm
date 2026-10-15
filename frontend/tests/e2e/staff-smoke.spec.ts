@@ -55,10 +55,11 @@ async function loginAsStaff(page: Page, email: string) {
 
 /**
  * A lead whose only release blocker is the unconfirmed intake, with signed consents and a verified
- * identity document. Confirming the intake from the release step posts /qualify, which answers
+ * identity document. With demoAccepted specified, consent PDFs have no legal signatures and
+ * only the true case supplies server-authorized DEV credit. Confirming the intake posts /qualify, which answers
  * with `qualifyBlockers` (422). Returns the recorded /qualify payloads.
  */
-async function mockLeadAwaitingIntakeConfirmation(page: Page, leadId: string, qualifyBlockers: string[]) {
+async function mockLeadAwaitingIntakeConfirmation(page: Page, leadId: string, qualifyBlockers: string[], demoAccepted?: boolean) {
   const qualifyRequests: unknown[] = [];
   await page.route(`**/api/v1/leads/${leadId}/qualify`, (route) => {
     qualifyRequests.push(route.request().postDataJSON());
@@ -71,7 +72,7 @@ async function mockLeadAwaitingIntakeConfirmation(page: Page, leadId: string, qu
   await page.route(`**/api/v1/leads/${leadId}`, (route) => route.request().method() !== "GET" ? route.fallback() : json(route, {
     id: leadId, first_name: "Ready", last_name: "Lead", email: "ready.lead@example.com",
     phone: "+49 30 100002", country: "DE", street_address: "Hauptstr. 1", city: "Berlin", zip_code: "10115",
-    qualification_status: "in_progress", compliance_status: "signed", date_of_birth: "1990-01-01",
+    qualification_status: "in_progress", compliance_status: demoAccepted === undefined ? "signed" : "documents_sent", date_of_birth: "1990-01-01",
     legal_sex: "female", primary_concern_text: "Orthopedic consultation",
     additional_concerns: "Initial medical history", requested_specialties: [], services: [],
     consent_healthcare: true, consent_privacy_practices: true, attachments: [],
@@ -79,6 +80,11 @@ async function mockLeadAwaitingIntakeConfirmation(page: Page, leadId: string, qu
     readiness: {
       qualification_ready: true, conversion_ready: false, qualification_reasons: [],
       blocking_reasons: ["Lead must be qualified before conversion"], checks: [],
+      ...(demoAccepted ? { demo_onboarding: {
+        enabled: true, applied: true,
+        credited_checks: ["dsgvo_document_signed", "confidentiality_release_signed"],
+        request_ids: ["00000000-0000-0000-0000-000000000994"],
+      } } : {}),
       steps: ["master_data", "medical", "service", "documents", "commercial", "release"]
         .map((key) => ({ key, label: key, ready: key !== "release" })),
     },
@@ -90,7 +96,7 @@ async function mockLeadAwaitingIntakeConfirmation(page: Page, leadId: string, qu
     auto_name: kind, original_filename: `${kind}.pdf`, art: kind, category: kind, status: "active",
     mime_type: "application/pdf", file_size: 2048, has_stored_file: true, is_latest_version: true,
     file_deleted_at: null, created_at: "2026-09-05T10:00:00Z", generated_template_id: template,
-    compliance_kind: kind, signed_at: "2026-09-05T11:00:00Z",
+    compliance_kind: kind, signed_at: demoAccepted !== undefined && kind !== "identity" ? null : "2026-09-05T11:00:00Z",
   });
   await page.route(`**/api/v1/documents?lead_id=${leadId}&include_archived_versions=true`, (route) => json(route, [
     signedDocument("991", "dsgvo", "privacy_consents"),
@@ -3277,6 +3283,24 @@ test.describe("lead onboarding wizard", () => {
     await expect(russianWizard.getByText("Выберите пол по документам", { exact: true })).toBeVisible();
     await expect(russianWizard.getByText("Invalid legal_sex", { exact: true })).toHaveCount(0);
   });
+
+  for (const demoAccepted of [true, false]) {
+    test(`intake confirmation accepts unsigned DEMO documents only with DEV credit: ${demoAccepted}`, async ({ page }) => {
+      const leadId = "00000000-0000-0000-0000-000000000902";
+      const qualifyRequests = await mockLeadAwaitingIntakeConfirmation(page, leadId, [], demoAccepted);
+      await page.goto(`/leads?lead=${leadId}&view=wizard`);
+      const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+      await wizard.getByRole("tab", { name: /Freigabe/i }).click();
+      await wizard.getByTestId("completion-blockers")
+        .getByRole("button", { name: "Angaben zum Anliegen bestätigen", exact: true }).click();
+      if (demoAccepted) {
+        await expect.poll(() => qualifyRequests).toEqual([{ status: "qualified" }]);
+      } else {
+        await expect(wizard.getByRole("tab", { name: /Unterlagen/i })).toHaveAttribute("aria-current", "step");
+        expect(qualifyRequests).toEqual([]);
+      }
+    });
+  }
 
   test("wizard lists every server-side field blocking qualification", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
