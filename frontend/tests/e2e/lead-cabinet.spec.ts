@@ -2375,7 +2375,9 @@ test.describe("patient portal after conversion", () => {
   test("a patient login keeps the full portal and gets the request page when it fills one in", async ({ page }) => {
     await setup(page, "patient", { leadRequests: 1 });
     await page.goto("/");
-    const nav = page.locator("nav");
+    // The dashboard repeats document links; check the side menu after it loads.
+    await expect(page.getByRole("main").getByRole("navigation").getByRole("link", { name: "Meine Dokumente" })).toBeVisible();
+    const nav = page.getByRole("navigation").filter({ has: page.getByRole("link", { name: "Ihre Anfrage", exact: true }) });
     await expect(nav.getByRole("link", { name: "Meine Dokumente" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
     await nav.getByRole("link", { name: "Ihre Anfrage" }).click();
