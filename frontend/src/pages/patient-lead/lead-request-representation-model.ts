@@ -219,10 +219,10 @@ export const REPRESENTATIVE_FIELDS: RepresentativeField[] = [
 ];
 
 /**
- * Minimal fields for compatibility with older servers. Current servers list
- * the whole representative in the base form's missing keys.
+ * The short intake form also exposes the address, so a parent can enter it
+ * or copy the child's address before the document stage.
  */
-export const BASE_REPRESENTATIVE_FIELDS: readonly RepresentativeField[] = ["first_name", "last_name", "email", "phone", "country", "citizenships"];
+export const BASE_REPRESENTATIVE_FIELDS: readonly RepresentativeField[] = ["first_name", "last_name", "email", "phone", "country", "citizenships", "street", "zip", "city"];
 
 export function draftFromRepresentative(person: LeadRequestRepresentative | null | undefined): RepresentativeDraft {
   return {

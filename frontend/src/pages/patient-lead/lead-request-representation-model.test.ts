@@ -354,8 +354,8 @@ describe("what is needed about a person", () => {
       expect(requiresRepresentativeField(slot, "birth_place")).toBe(false);
       expect(requiresRepresentativeField(slot, "birth_country")).toBe(false);
     }
-    // The first step asks a minor's parents for names and contacts only; the rest is block G.
-    expect(BASE_REPRESENTATIVE_FIELDS).toEqual(["first_name", "last_name", "email", "phone", "country", "citizenships"]);
+    // Parents can provide their own address in the short first-step form.
+    expect(BASE_REPRESENTATIVE_FIELDS).toEqual(["first_name", "last_name", "email", "phone", "country", "citizenships", "street", "zip", "city"]);
   });
 
   it("asks for the proof of authority that fits the person", () => {

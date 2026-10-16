@@ -357,7 +357,7 @@ test.describe("Parent country follow-up", () => {
     await page.screenshot({ path: testInfo.outputPath("parent-country-390.png"), fullPage: true, animations: "disabled" });
   });
 
-  test("short parent form shows six basic fields and expands saved document details without resaving", async ({ page }, testInfo) => {
+  test("short parent form shows contact and address fields and expands document details without resaving", async ({ page }, testInfo) => {
     const { dataCalls, request } = await setup(page);
     await page.goto("/");
     await step(page, "person");
@@ -369,7 +369,7 @@ test.describe("Parent country follow-up", () => {
     await expect(mother.locator("#lead-request-rep1_citizenships")).toBeVisible();
     await expect(mother.getByRole("combobox", { name: leadRequestText("de").fields.country, exact: true })).toBeVisible();
     await expect(mother.locator("#lead-request-rep1_date_of_birth")).toHaveCount(0);
-    await expect(mother.locator("#lead-request-rep1_street")).toHaveCount(0);
+    await expect(mother.locator("#lead-request-rep1_street")).toHaveValue("Synthetic street 1");
     await expect(page.getByTestId("lead-request-rep1-identity-upload")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-rep2-identity-upload")).toHaveCount(0);
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -386,10 +386,38 @@ test.describe("Parent country follow-up", () => {
     await expect(page.getByTestId("lead-request-rep2-identity-upload")).toBeVisible();
     await page.getByTestId("lead-request-parent-document-details").click();
     await expect(mother.locator("#lead-request-rep1_date_of_birth")).toHaveCount(0);
-    await expect(mother.locator("#lead-request-rep1_street")).toHaveCount(0);
+    await expect(mother.locator("#lead-request-rep1_street")).toHaveValue("Synthetic street 1");
     expect(dataCalls).toEqual([]);
     expect(request.representation.representatives[0].date_of_birth).toBe("1985-03-02");
     expect(request.representation.representatives[0].street).toBe("Synthetic street 1");
+  });
+
+  test("a parent can copy the child's address in the short form and Next clears the missing address", async ({ page }) => {
+    const { request } = await setup(page, (request) => {
+      Object.assign(request.representation.representatives[0], { street: "", zip: "", city: "" });
+      request.progress.missing_for_submit = ["rep1_street", "rep1_zip", "rep1_city"];
+    });
+    const writes: Record<string, unknown>[] = [];
+    await page.route(`**/me/lead-requests/lead-1/representatives/${ANNA}`, (route) => {
+      const patch = route.request().postDataJSON();
+      writes.push(patch);
+      Object.assign(request.representation.representatives[0], patch);
+      request.progress.missing_for_submit = [];
+      return route.fulfill({ json: request });
+    });
+    await page.goto("/");
+    await step(page, "person");
+    const parent = page.getByTestId("lead-request-representative-rep1");
+    await parent.getByRole("button", { name: "Adresse des Kindes übernehmen" }).click();
+    await page.getByRole("button", { name: "Weiter", exact: true }).click();
+    await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "identity");
+    expect(writes).toEqual([{ street: "Synthetic street 1", zip: "00000", city: "Berlin", country: "DE" }]);
+    await step(page, "person");
+    await expect(parent.locator("#lead-request-rep1_street")).toHaveValue("Synthetic street 1");
+    await expect(parent.locator("#lead-request-rep1_zip")).toHaveValue("00000");
+    await expect(parent.locator("#lead-request-rep1_city")).toHaveValue("Berlin");
+    await expect(parent.locator("#lead-request-rep1_date_of_birth")).toHaveCount(0);
+    expect(writes).toHaveLength(1);
   });
 
   test("document stage keeps the full representative form and required uploads visible", async ({ page }) => {
@@ -416,7 +444,7 @@ test.describe("Parent country follow-up", () => {
     await page.getByTestId("lead-request-parent-document-details").click();
     await page.locator("#lead-request-rep1_street").fill("New synthetic street 7");
     await page.getByTestId("lead-request-parent-document-details").click();
-    await expect(page.locator("#lead-request-rep1_street")).toHaveCount(0);
+    await expect(page.locator("#lead-request-rep1_street")).toHaveValue("New synthetic street 7");
     await page.getByTestId("lead-request-parent-document-details").click();
     await expect(page.locator("#lead-request-rep1_street")).toHaveValue("New synthetic street 7");
     await expect.poll(() => request.representation.representatives[0].street).toBe("New synthetic street 7");

@@ -527,7 +527,10 @@ function RepresentativeBlock({
     id: fieldId(field),
     label: representativeFieldLabel(text, field),
     error: form.errorFor(field),
-    required: requiresRepresentativeField(slot, field),
+    required: requiresRepresentativeField(slot, field) && (
+      uploads || !minor || !["street", "zip", "city"].includes(field)
+      || request.progress.missing_for_submit.includes(`${slot}_${field}`)
+    ),
     className,
   });
   const textInput = (
