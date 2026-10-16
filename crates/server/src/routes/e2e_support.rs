@@ -96,6 +96,7 @@ async fn seed_full_smoke(state: &AppState) -> Result<serde_json::Value, String> 
 
     let contract = create_contract(state, patient.id, pm.id, &tag).await?;
     let order = create_order(state, patient.id, contract.id, pm.id, &tag).await?;
+    create_portal_subscription(state, patient.id, order.id, &tag).await?;
     create_agency_service_catalog_item(
         state,
         MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY,
@@ -598,6 +599,34 @@ async fn create_order(
     .map_err(|error| format!("insert order leistung: {error}"))?;
 
     Ok(SeededOrder { id })
+}
+
+async fn create_portal_subscription(
+    state: &AppState,
+    patient_id: Uuid,
+    order_id: Uuid,
+    tag: &str,
+) -> Result<(), String> {
+    // Paid-module smoke scenarios need the same order-backed entitlement as
+    // real patients. A patient assignment alone only grants basic access.
+    sqlx::query(
+        r#"WITH package AS (
+               INSERT INTO service_packages (package_key, name)
+               VALUES ($1, 'Synthetic Portal Subscription')
+               RETURNING id
+           )
+           INSERT INTO patient_service_packages (
+               patient_id, order_id, package_id, status, portal_visible
+           )
+           SELECT $2, $3, id, 'active', true FROM package"#,
+    )
+    .bind(format!("GMED_ONE_Programm-{tag}"))
+    .bind(patient_id)
+    .bind(order_id)
+    .execute(&state.db)
+    .await
+    .map_err(|error| format!("insert portal subscription: {error}"))?;
+    Ok(())
 }
 
 async fn create_agency_service_catalog_item(
