@@ -2692,7 +2692,7 @@ function validateMasterDraft(
   }
   if (isMinor(draft.birthDate, new Date())) {
     const guardian = draft.trustedContacts.find((contact) => (
-      ["parent", "guardian"].includes(contact.relation)
+      isParentOrGuardianRelation(contact.relation)
       && contact.name.trim()
       && (contact.email.trim() || contact.phone.trim())
     ));

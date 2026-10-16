@@ -3174,6 +3174,50 @@ test.describe("lead onboarding wizard", () => {
     }
   });
 
+  for (const [relation, label, width] of [["mother", "Mutter", 1440], ["father", "Vater", 390], ["guardian", "Vormund/Betreuer", 1440]] as const) {
+    test(`a child lead can be created with an explicit ${relation}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      const creates: Record<string, unknown>[] = [];
+      page.on("request", request => {
+        if (request.method() === "POST" && new URL(request.url()).pathname === "/api/v1/leads") {
+          creates.push(request.postDataJSON());
+        }
+      });
+      await page.goto("/leads");
+      await page.getByRole("button", { name: "Neuer Lead" }).click();
+      const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme", exact: true });
+      await wizard.locator("#lead-wizard-first-name").fill("Mia");
+      await wizard.locator("#lead-wizard-last-name").fill("Example");
+      await setDatePickerValue(wizard.locator("#lead-wizard-birth-date"), "2016-06-15");
+      await chooseComboboxOption(page, wizard.getByRole("combobox", { name: "Geschlecht laut Ausweisdokument" }), "Weiblich");
+      const medicalStep = wizard.locator('[data-step="medical"]');
+      // A child still requires a representative with contact information.
+      await medicalStep.click();
+      await expect(wizard.locator("#lead-wizard-guardian")).toContainText("Für Minderjährige");
+      expect(creates).toEqual([]);
+      await wizard.getByRole("button", { name: "Hinzufügen", exact: true }).click();
+      const editor = page.getByTestId("trusted-contact-editor");
+      await editor.getByRole("textbox", { name: "Vor- und Nachname" }).fill("Alex Example");
+      await editor.getByRole("textbox", { name: "E-Mail", exact: true }).fill("parent@example.invalid");
+      await chooseComboboxOption(page, editor.getByRole("combobox", { name: "Beziehung zur Person" }), label);
+      await editor.getByRole("button", { name: "Hinzufügen", exact: true }).click();
+      await expect(editor).toBeHidden();
+      await medicalStep.click();
+      await expect(medicalStep).toHaveAttribute("aria-selected", "true");
+      expect(creates).toHaveLength(1);
+      expect(creates[0]).toMatchObject({
+        first_name: "Mia", last_name: "Example", date_of_birth: "2016-06-15", email: null,
+        trusted_contacts: [{ name: "Alex Example", email: "parent@example.invalid", relation }],
+      });
+      await expect(page.getByRole("dialog", { name: "Zugang für den Patienten angelegt" })).toHaveCount(0);
+      await wizard.locator('[data-step="master_data"]').click();
+      await expect(wizard.locator("#lead-wizard-guardian")).toContainText(label);
+      await expect(wizard.locator("#lead-wizard-guardian")).toContainText("Alex Example");
+      await wizard.locator("#lead-wizard-guardian").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: test.info().outputPath(`child-with-${relation}.png`) });
+    });
+  }
+
   test("new lead starts in the wizard and is created after valid master data", async ({
     page,
     context,
