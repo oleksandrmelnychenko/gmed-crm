@@ -308,6 +308,25 @@ async fn can_receive_event(
     if !release_workspace_allows_realtime_event(auth.role, &event.event_type) {
         return Ok(false);
     }
+    // Live updates and replay follow the same service entitlement as HTTP.
+    // A package for another family member cannot unlock this patient's data.
+    if auth.role == Role::Patient
+        && !matches!(
+            event.entity_type.as_str(),
+            "document" | "invoice" | "privacy_request" | "user" | "session" | "security"
+        )
+    {
+        let patient_id = match event.patient_id {
+            Some(id) => id,
+            None => match super::me::resolve_linked_patient_id(state, auth).await? {
+                Some(id) => id,
+                None => return Ok(false),
+            },
+        };
+        if !super::portal_subscription::has_active_subscription(state, patient_id).await? {
+            return Ok(false);
+        }
+    }
 
     // Patient-scoped persisted events must always be checked against current
     // access. A historical direct target or role target must not resurrect an

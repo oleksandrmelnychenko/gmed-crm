@@ -50,6 +50,7 @@ async function setup(page: Page, options: Options = {}) {
       id: "parent-user", email: "parent@example.com", name: "Synthetic Parent", role: "patient",
       capabilities: [], preferred_language: lang, password_change_required: false,
       portal_mode: mode, lead_portal: mode === "lead" ? { requests: requests.length } : null,
+      patients: mode === "patient" ? [{ id: "patient-record", name: "Synthetic Parent", patient_number: "P-1", has_active_subscription: true }] : [],
       created_at: "2026-10-15T08:00:00Z",
     } });
     if (path === "/me/lead-requests") {

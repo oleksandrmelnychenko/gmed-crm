@@ -103,7 +103,9 @@ async fn announcements_reach_only_their_audience() {
     };
     let it_admin = auth_header_for(seed_user(&ctx.pool, "it_admin").await, "it_admin");
     let billing = auth_header_for(seed_user(&ctx.pool, "billing").await, "billing");
-    let patient = auth_header_for(seed_user(&ctx.pool, "patient").await, "patient");
+    let patient_user = seed_user(&ctx.pool, "patient").await;
+    support::seed_subscribed_patient_for_user(&ctx.pool, patient_user, ctx.admin_id).await;
+    let patient = auth_header_for(patient_user, "patient");
 
     let everyone = create_announcement(&ctx.app, &it_admin, "Everyone", "info", None).await;
     let staff = create_announcement(&ctx.app, &it_admin, "Staff", "info", Some("staff")).await;

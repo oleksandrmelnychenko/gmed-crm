@@ -62,6 +62,9 @@ import {
 } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
 import { LeadPortalPlanDialog } from "@/components/lead-portal-plan-dialog";
+import { PortalSubscriptionLock } from "@/components/portal-subscription-lock";
+import { hasPortalSubscription, isBasicPortalRoute } from "@/lib/portal-subscription";
+import { usePortalPatientId } from "@/lib/portal-patient-context";
 
 interface NavItem {
   id: string;
@@ -158,6 +161,12 @@ export function NavPanel() {
   const { collapsed, toggle } = useNavState();
   const isPatientPortal = user?.role === "patient";
   const isLeadPortal = isLeadPortalUser(user);
+  const patientId = usePortalPatientId(user?.id);
+  const subscribed = hasPortalSubscription(user, patientId);
+  // An ambiguous family login first opens the patient chooser in the shell;
+  // no service module mounts until a person is selected.
+  const needsPatientSelection = (user?.patients?.length ?? 0) > 1
+    && !user?.patients?.some((patient) => patient.id === patientId);
   const [lockedModule, setLockedModule] = useState<{ id: string; label: string } | null>(null);
   // A parent's login in the lead cabinet is no patient: the cabinet names it.
   const portalAccountLabel = usePortalAccountLabel(isPatientPortal ? user?.id : null);
@@ -173,7 +182,8 @@ export function NavPanel() {
             .map((item) => ({ ...toPatientNavItem(item), locked: true })),
           ...listLeadPortalNavItems().filter((item) => item.id === "account" || item.id === "legal").map(toPatientNavItem),
         ]
-      : listPatientPortalNavItems({ leadRequests: Boolean(user?.lead_portal?.requests) }).map(toPatientNavItem)
+      : listPatientPortalNavItems({ leadRequests: Boolean(user?.lead_portal?.requests) })
+        .map((item) => ({ ...toPatientNavItem(item), locked: !needsPatientSelection && !subscribed && !isBasicPortalRoute(item.to) }))
     : [];
   const staffNavBySection =
     user && user.role !== "patient"
@@ -263,6 +273,7 @@ export function NavPanel() {
       moduleLabel={lockedModule.label}
       onClose={() => setLockedModule(null)}
     /> : null}
+    {!isLeadPortal && lockedModule ? <PortalSubscriptionLock label={lockedModule.label} onClose={() => setLockedModule(null)} /> : null}
     </>
   );
 }

@@ -81,7 +81,7 @@ fn auth_header_for(user_id: Uuid, role: &str) -> String {
 }
 
 async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
-    sqlx::query_scalar(
+    let patient_id = sqlx::query_scalar(
         r#"INSERT INTO patients (
                 patient_id, first_name, last_name, birth_date, gender, created_by
            ) VALUES (
@@ -94,7 +94,9 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .bind(created_by)
     .fetch_one(pool)
     .await
-    .unwrap()
+    .unwrap();
+    support::seed_active_portal_subscription(pool, patient_id, created_by).await;
+    patient_id
 }
 
 async fn seed_patient_assignment(pool: &PgPool, patient_id: Uuid, user_id: Uuid, by: Uuid) {

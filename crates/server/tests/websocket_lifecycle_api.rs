@@ -327,6 +327,7 @@ async fn family_realtime_replay_uses_the_explicit_patient_context() {
     let first = seed_patient(pool, server.user_id).await;
     let second = seed_patient(pool, server.user_id).await;
     for patient in [first, second] {
+        support::seed_active_portal_subscription(pool, patient, server.user_id).await;
         sqlx::query(
             "INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$3)",
         )
@@ -384,4 +385,64 @@ async fn family_realtime_replay_uses_the_explicit_patient_context() {
         }
         client.close(None).await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn patient_chat_requires_a_subscription_and_closes_before_sending_after_revocation() {
+    let Some(server) = TestServer::start().await else {
+        return;
+    };
+    let pool = &server.suite.pool;
+    let user = seed_user(pool, "patient").await;
+    let patient = seed_patient(pool, server.user_id).await;
+    sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$3)")
+        .bind(patient)
+        .bind(user)
+        .bind(server.user_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let token = jwt::issue_access_token(SECRET, user, "patient", Uuid::new_v4()).unwrap();
+    let mut blocked = server.connect_with("/messages/ws", &token).await;
+    let frame = tokio::time::timeout(Duration::from_secs(5), blocked.next())
+        .await
+        .unwrap();
+    assert!(
+        !matches!(frame, Some(Ok(Message::Text(_)))),
+        "unsubscribed chat acknowledged readiness"
+    );
+
+    support::seed_active_portal_subscription(pool, patient, server.user_id).await;
+    let mut active = server.connect_with("/messages/ws", &token).await;
+    let frame = tokio::time::timeout(Duration::from_secs(5), active.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let acknowledgement: Value = serde_json::from_str(frame.to_text().unwrap()).unwrap();
+    assert_eq!(acknowledgement["type"], "messages.connected");
+    sqlx::query("UPDATE patient_service_packages SET status='cancelled' WHERE patient_id=$1")
+        .bind(patient)
+        .execute(pool)
+        .await
+        .unwrap();
+    server
+        .suite
+        .state
+        .message_events
+        .send(json!({
+            "type": "message.created", "user_id": user, "message": "Must not be delivered"
+        }))
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(frame) = active.next().await {
+            match frame {
+                Ok(Message::Text(text)) => panic!("revoked subscription received chat: {text}"),
+                Ok(Message::Close(_)) | Err(_) => break,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("revoked chat closes without delivering the queued message");
 }

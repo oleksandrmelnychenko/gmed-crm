@@ -108,17 +108,20 @@ async fn get_me(
                 && !password_change_required
                 && !totp_enrolment_required
             {
-                match sqlx::query(
-                    "SELECT p.id, p.patient_id, p.first_name, p.last_name, a.source
+                match sqlx::query(&format!(
+                    "SELECT p.id, p.patient_id, p.first_name, p.last_name, a.source,
+                            {} AS has_active_subscription
                      FROM patient_assignments a JOIN patients p ON p.id = a.patient_id
                      WHERE a.user_id = $1 AND a.revoked_at IS NULL
                        AND p.lifecycle_status = 'active' AND p.is_active = true
                      ORDER BY p.last_name, p.first_name, p.id",
-                ).bind(auth.user_id).fetch_all(&state.db).await {
+                    super::portal_subscription::ACTIVE_SUBSCRIPTION_SQL,
+                )).bind(auth.user_id).fetch_all(&state.db).await {
                     Ok(rows) => rows.into_iter().map(|row| serde_json::json!({
                         "id": row.get::<Uuid, _>("id"),
                         "patient_number": row.get::<String, _>("patient_id"),
                         "access_kind": if row.get::<String,_>("source") == "lead_guardian" { "guardian" } else { "self" },
+                        "has_active_subscription": row.get::<bool, _>("has_active_subscription"),
                         "name": format!("{} {}", row.get::<String, _>("first_name"), row.get::<String, _>("last_name")),
                     })).collect::<Vec<_>>(),
                     Err(error) => {

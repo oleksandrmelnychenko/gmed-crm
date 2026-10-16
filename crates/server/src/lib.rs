@@ -112,6 +112,10 @@ fn build_app_inner(app_state: state::AppState) -> Router {
     let protected_routes = routes::protected_router()
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
+            routes::portal_subscription::middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
             routes::lead_portal_intake::lead_portal_guard,
         ))
         // After the sanctions gate: the risk assessment holds the guarded

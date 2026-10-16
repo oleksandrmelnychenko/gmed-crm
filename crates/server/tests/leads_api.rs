@@ -7972,6 +7972,9 @@ async fn two_children_keep_the_shared_guardian_portal_working() {
             .unwrap();
         (status, serde_json::from_slice(&bytes).unwrap())
     }
+    for patient in [first, second] {
+        support::seed_active_portal_subscription(&app.suite.pool, patient, app.ceo_id).await;
+    }
     for patient in [first, second, first] {
         let selected = patient.to_string();
         let (status, exported) =

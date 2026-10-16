@@ -13,6 +13,8 @@ import {
   Users,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { hasPortalSubscription } from "@/lib/portal-subscription";
+import { usePortalPatientId } from "@/lib/portal-patient-context";
 import { clearApiCache } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
 import { canAccessStaffRoute, isLeadPortalUser, staffHrefIfAllowed } from "@/lib/staff-route-access";
@@ -164,6 +166,8 @@ export function Topbar() {
   const isPatientPortal = user?.role === "patient";
   // The lead cabinet has no notifications (owner decision 2026-10-03).
   const leadCabinet = isLeadPortalUser(user);
+  const portalPatientId = usePortalPatientId(user?.id);
+  const notificationsLocked = leadCabinet || !hasPortalSubscription(user, portalPatientId);
   const showLeadShortcut = Boolean(
     user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities),
   );
@@ -293,7 +297,7 @@ export function Topbar() {
     let cancelled = false;
 
     function load() {
-      if (cancelled || leadCabinet) return;
+      if (cancelled || notificationsLocked) return;
       if (isPatientPortal) {
         void fetchUnreadNotificationCount().then((count) => {
           if (!cancelled) setUnread(count);
@@ -316,14 +320,14 @@ export function Topbar() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [isPatientPortal, leadCabinet]);
+  }, [isPatientPortal, notificationsLocked]);
 
   useDebouncedRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (_event, events) => {
     if (events.some((event) => event.type.startsWith("announcement."))) {
       clearApiCache("/announcements/active");
     }
     if (events.every((event) => event.type.startsWith("announcement."))) return;
-    if (leadCabinet) return;
+    if (notificationsLocked) return;
 
     clearApiCache("/notifications");
     clearApiCache("/notifications/unread-count");
@@ -545,7 +549,7 @@ export function Topbar() {
           ) : null}
 
           {/* Notifications */}
-          {leadCabinet ? null : (
+          {notificationsLocked ? null : (
           <TopbarIconButton
             onClick={() => {
               setNotifOpen(!notifOpen);
@@ -614,7 +618,7 @@ export function Topbar() {
       </header>
 
       {/* Notification panel */}
-      {notifOpen && !leadCabinet && (
+        {notifOpen && !notificationsLocked && (
         <NotificationPanel
           onClose={() => setNotifOpen(false)}
           onUnreadChange={setUnread}

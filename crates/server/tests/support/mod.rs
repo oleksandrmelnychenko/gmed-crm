@@ -14,6 +14,57 @@ use gmed_server::state::AppState;
 
 static TEST_BACKEND: Mutex<Weak<TestDatabaseBackend>> = Mutex::new(Weak::new());
 const TEST_AUDIT_IP_SALT: &str = "test-audit-ip-salt";
+
+/// Explicit entitlement for fixtures testing a paid portal module. Tests of
+/// basic access and subscription gating deliberately do not call this helper.
+#[allow(dead_code)]
+pub async fn seed_active_portal_subscription(pool: &PgPool, patient_id: Uuid, actor: Uuid) {
+    let tag = Uuid::new_v4();
+    let order: Uuid = sqlx::query_scalar(
+        "INSERT INTO orders(order_number,patient_id,phase,status,created_by)
+         VALUES($1,$2,'execution','active',$3) RETURNING id",
+    )
+    .bind(format!("PORTAL-{tag}"))
+    .bind(patient_id)
+    .bind(actor)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let package: Uuid = sqlx::query_scalar(
+        "INSERT INTO service_packages(package_key,name) VALUES($1,'Synthetic Portal Subscription') RETURNING id",
+    ).bind(format!("GMED_ONE_Programm-{tag}")).fetch_one(pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO patient_service_packages(patient_id,order_id,package_id,status,portal_visible)
+        VALUES($1,$2,$3,'active',true)",
+    )
+    .bind(patient_id)
+    .bind(order)
+    .bind(package)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[allow(dead_code)]
+pub async fn seed_subscribed_patient_for_user(pool: &PgPool, user_id: Uuid, actor: Uuid) {
+    let patient: Uuid = sqlx::query_scalar(
+        "INSERT INTO patients(patient_id,first_name,last_name,birth_date,gender,created_by)
+        VALUES($1,'Synthetic','Subscriber','1990-01-01','diverse',$2) RETURNING id",
+    )
+    .bind(format!("P-{}", Uuid::new_v4()))
+    .bind(actor)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$3)")
+        .bind(patient)
+        .bind(user_id)
+        .bind(actor)
+        .execute(pool)
+        .await
+        .unwrap();
+    seed_active_portal_subscription(pool, patient, actor).await;
+}
 const TEST_PEER_ADDR: std::net::SocketAddr = std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
     std::net::Ipv4Addr::LOCALHOST,
     40123,

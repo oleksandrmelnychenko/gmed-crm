@@ -67,6 +67,7 @@ pub mod patient_portal_access;
 pub mod patient_recommendations;
 pub mod patients;
 pub mod personnel;
+pub mod portal_subscription;
 pub mod projects;
 pub mod provider_documents;
 pub mod provider_people;

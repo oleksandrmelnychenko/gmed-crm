@@ -509,14 +509,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return me;
   };
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     const accessToken = getAccessToken();
     if (!accessToken) return null;
     clearApiCache("/me");
     const me = await fetchMe(accessToken);
+    // Ignore a response from an account that signed out while /me was loading.
+    if (getAccessTokenSubject(getAccessToken()) !== me.id) return null;
     dispatchAuthState({ user: me });
     return me;
-  };
+  }, []);
+
+  useEffect(() => {
+    if (user?.role !== "patient" || user.portal_mode === "lead"
+      || user.password_change_required || user.totp_enrolment_required) return;
+    let pending = false;
+    const refresh = () => {
+      if (pending || document.visibilityState === "hidden") return;
+      pending = true;
+      void refreshUser().catch(() => { /* Server authorization remains authoritative. */ })
+        .finally(() => { pending = false; });
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const timer = window.setInterval(refresh, 60_000);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      window.clearInterval(timer);
+    };
+  }, [user?.id, user?.role, user?.portal_mode, user?.password_change_required, user?.totp_enrolment_required, refreshUser]);
 
   const checkPending = async (pendingId: string): Promise<PendingLoginStatus> => {
     try {

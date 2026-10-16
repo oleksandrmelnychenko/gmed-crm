@@ -67,7 +67,7 @@ async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
 }
 
 async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
-    sqlx::query_scalar(
+    let patient_id = sqlx::query_scalar(
         r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
            VALUES ($1, $2, $3, '1990-01-01', 'diverse', $4)
            RETURNING id"#,
@@ -78,7 +78,9 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .bind(created_by)
     .fetch_one(pool)
     .await
-    .unwrap()
+    .unwrap();
+    support::seed_active_portal_subscription(pool, patient_id, created_by).await;
+    patient_id
 }
 
 async fn seed_patient_assignment(

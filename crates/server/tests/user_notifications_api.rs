@@ -75,6 +75,7 @@ async fn patient_notifications_are_self_scoped_and_presence_is_staff_only() {
         return;
     };
     let patient_id = seed_user(&ctx.pool, "patient").await;
+    support::seed_subscribed_patient_for_user(&ctx.pool, patient_id, ctx.admin_id).await;
     let other_patient_id = seed_user(&ctx.pool, "patient").await;
     let own_notification = seed_notification(&ctx.pool, patient_id, "Own update").await;
     let other_notification = seed_notification(&ctx.pool, other_patient_id, "Other update").await;

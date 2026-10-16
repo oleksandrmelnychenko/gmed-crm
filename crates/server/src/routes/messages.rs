@@ -114,6 +114,9 @@ async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
     };
     if !release_workspace_allows_path(auth.role, "/messages/ws")
         || ensure_chat_workspace_role(&auth).is_err()
+        || super::portal_subscription::require_subscription(&state, &auth)
+            .await
+            .is_err()
     {
         return;
     }
@@ -161,6 +164,9 @@ async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
                         if release_workspace_allows_path(current.role, "/messages/ws")
                             && ensure_chat_workspace_role(&current).is_ok() => {
                         auth = current;
+                        if super::portal_subscription::require_subscription(&state, &auth).await.is_err() {
+                            break;
+                        }
                         if last_pong.elapsed() >= PONG_TIMEOUT
                             || !send_before_expiry(
                                 &mut socket,
@@ -198,6 +204,12 @@ async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
             _ => break,
         };
 
+        if super::portal_subscription::require_subscription(&state, &auth)
+            .await
+            .is_err()
+        {
+            break;
+        }
         if !send_before_expiry(
             &mut socket,
             WsMessage::Text(event.to_string().into()),

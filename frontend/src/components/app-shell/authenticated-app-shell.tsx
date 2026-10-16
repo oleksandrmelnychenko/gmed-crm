@@ -16,6 +16,8 @@ import { resolveWorkspaceRailKind } from "./workspace-rail-resolver";
 import { TwoFactorReminder } from "@/components/two-factor-reminder";
 import { clearApiCache } from "@/lib/api";
 import { selectPortalPatient, usePortalPatientId } from "@/lib/portal-patient-context";
+import { hasPortalSubscription, isBasicPortalRoute } from "@/lib/portal-subscription";
+import { PortalSubscriptionLock } from "@/components/portal-subscription-lock";
 
 export function AuthenticatedAppShell() {
   const { user, loading, signOut } = useAuth();
@@ -71,6 +73,8 @@ function AuthenticatedAppShellContent() {
     (path) => location.pathname === path || location.pathname.startsWith(`${path}/`),
   );
   const needsPatient = !accountPage && patients.length > 1 && !patients.some((patient) => patient.id === patientId);
+  const subscriptionLocked = user?.role === "patient" && !isLeadPortalUser(user)
+    && !hasPortalSubscription(user, patientId) && !isBasicPortalRoute(location.pathname);
 
   if (
     user &&
@@ -115,7 +119,7 @@ function AuthenticatedAppShellContent() {
         <p className="p-6 text-muted-foreground">
           {lang === "de" ? "Wählen Sie, für wen Sie das Portal öffnen möchten." : "Выберите, для кого открыть кабинет."}
         </p>
-      ) : <Outlet />}
+      ) : subscriptionLocked ? <PortalSubscriptionLock /> : <Outlet />}
     </AppShellFrame>
   );
 }

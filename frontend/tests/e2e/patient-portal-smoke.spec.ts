@@ -231,7 +231,8 @@ async function installPatientPortalMocks(page: Page, patients?: Array<{ id: stri
         email: "patient@gmed.de",
         name: "Anna Portal",
         role: "patient",
-        patients,
+        patients: (patients ?? [{ id: "00000000-0000-0000-0000-000000009001", name: "Anna Portal", patient_number: "P-1" }])
+          .map((patient) => ({ ...patient, has_active_subscription: true })),
         created_at: "2026-01-01T00:00:00Z",
       });
     }
@@ -806,7 +807,7 @@ test.describe("patient portal smoke flows", () => {
       page.locator("#topbar-page-slot").getByText(
         /Ausstehende Bestätigungen:\s*0|Pending confirmations:\s*0/i,
       ),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(releasedCard.getByText(/Bestätigt|Confirmed/i)).toBeVisible();
   });
 

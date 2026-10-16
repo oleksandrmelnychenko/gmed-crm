@@ -1040,6 +1040,7 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
 
     let tag = unique_tag("privacy-third-party-revoke");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    support::seed_active_portal_subscription(&pool, patient_id, admin_id).await;
     let patient_user_id = seed_user(&pool, &format!("{tag}-patient"), "patient").await;
     let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;

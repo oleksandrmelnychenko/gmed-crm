@@ -41,7 +41,7 @@ async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
 }
 
 async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
-    sqlx::query_scalar(
+    let patient_id = sqlx::query_scalar(
         r#"INSERT INTO patients (
                 patient_id, first_name, last_name, birth_date, gender, created_by
            ) VALUES (
@@ -54,7 +54,9 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .bind(created_by)
     .fetch_one(pool)
     .await
-    .unwrap()
+    .unwrap();
+    support::seed_active_portal_subscription(pool, patient_id, created_by).await;
+    patient_id
 }
 
 async fn seed_patient_assignment(
@@ -991,12 +993,13 @@ async fn patient_message_mark_read_sets_per_message_read_timestamps() {
 
 #[tokio::test]
 async fn message_key_fingerprint_cannot_be_claimed_by_another_account() {
-    let Some((app, pool, _)) = test_context().await else {
+    let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
 
     let tag = unique_tag("chat-key-owner");
     let first_user = seed_user(&pool, &tag, "patient").await;
+    support::seed_subscribed_patient_for_user(&pool, first_user, admin_id).await;
     let second_user = seed_user(&pool, &format!("{tag}-second"), "concierge").await;
     let first_auth = auth_header_for(first_user, "patient");
     let second_auth = auth_header_for(second_user, "concierge");
@@ -1730,7 +1733,7 @@ async fn revoked_patient_identity_is_not_reactivated_by_chat_email_fallback() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(status, StatusCode::FORBIDDEN);
 
     let revoked_at: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
         "SELECT revoked_at FROM patient_assignments WHERE patient_id = $1 AND user_id = $2",
