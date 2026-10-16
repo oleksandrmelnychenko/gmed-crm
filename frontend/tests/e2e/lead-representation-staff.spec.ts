@@ -453,18 +453,27 @@ test("staff read who represents a minor, as the cabinet knows it", async ({ page
   await expect(ben.getByTestId(`lead-gwg-representative-valid-until-${BEN_ID}`)).not.toHaveAttribute("data-warning", "true");
   await expect(ben.getByTestId(`lead-gwg-representative-authority-documents-${BEN_ID}`)).toContainText("—");
 
-  // After the child's identity document, before the economic interest; nothing can be edited.
-  const identityBox = await statements.getByTestId("lead-gwg-identity-documents").boundingBox();
-  const groupBox = await group.boundingBox();
-  const interestBox = await statements.getByTestId("lead-gwg-own-account").boundingBox();
-  expect(identityBox!.y).toBeLessThan(groupBox!.y);
-  expect(groupBox!.y + groupBox!.height).toBeLessThanOrEqual(interestBox!.y);
-  await expect(statements.locator("input, textarea, select, button")).toHaveCount(0);
+  // Desktop cards use four columns; the data stays read-only below the disclosure control.
+  const grid = statements.getByTestId("lead-gwg-statements-grid");
+  await expect.poll(() => grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").length)).toBe(4);
+  const content = statements.getByTestId("lead-gwg-statements-content");
+  await expect(content.locator("input, textarea, select, button")).toHaveCount(0);
+  await statements.getByRole("button", { name: "Свернуть данные пациента" }).click();
+  await expect(content).toBeHidden();
+  await statements.getByRole("button", { name: "Развернуть данные пациента" }).click();
+  await expect(group).toBeVisible();
 
   await group.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-representation-statements-ru-desktop.png"), animations: "disabled" });
   // On a phone the group must not widen the wizard.
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").length)).toBe(1);
+  // The single-column mobile layout preserves the identity, representation, interest order.
+  const identityBox = await statements.getByTestId("lead-gwg-identity-documents").boundingBox();
+  const groupBox = await group.boundingBox();
+  const interestBox = await statements.getByTestId("lead-gwg-own-account").boundingBox();
+  expect(identityBox!.y).toBeLessThan(groupBox!.y);
+  expect(groupBox!.y + groupBox!.height).toBeLessThanOrEqual(interestBox!.y);
   expect(await wizard.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
   await group.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-representation-statements-ru-mobile.png"), animations: "disabled" });
