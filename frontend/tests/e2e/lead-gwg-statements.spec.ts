@@ -188,7 +188,7 @@ test("staff read the lead's GwG statements beside the identification sheet", asy
   await expect(block.getByTestId("lead-gwg-declared-correct")).toHaveText("Подтвердил правильность: 05.10.2026 11:30");
 
   // Read-only beneath the sheet actions; the redundant explanatory label was removed.
-  await expect(block.locator("input, textarea, select, button")).toHaveCount(0);
+  await expect(block.getByTestId("lead-gwg-statements-content").locator("input, textarea, select, button")).toHaveCount(0);
   await expect(wizard.getByText(/^Заполняется из заявки:/)).toHaveCount(0);
   const actions = wizard.getByTestId("gwg-identification-actions");
   await expect(actions).toBeVisible();
@@ -377,7 +377,8 @@ test("the invoice recipient and the payment route follow the economic interest; 
   const groupBox = await group.boundingBox();
   const legalBox = await block.getByTestId("lead-gwg-answer-pep_self").boundingBox();
   expect(ownAccountBox!.y).toBeLessThan(groupBox!.y);
-  expect(groupBox!.y + groupBox!.height).toBeLessThanOrEqual(legalBox!.y);
+  // The four-column layout can place these cards beside one another.
+  expect(groupBox!.y).toBeLessThanOrEqual(legalBox!.y);
 
   // Section 7: the other address with the country's name, the staff fields.
   await expect(group.getByTestId("lead-gwg-billing-invoice_to")).toContainText("по другому адресу");

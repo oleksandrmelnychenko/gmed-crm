@@ -352,12 +352,10 @@ test("staff add USt-IdNr. and Steuernummer of the invoice recipient; where the i
   await page.setViewportSize({ width: 1440, height: 1100 });
   const { section, saves } = await mount(page, "ru", billedCompany);
 
-  // Section 7 as the lead chose it: read-only, with the note that it was chosen in the cabinet.
+  // Section 7 remains read-only, without the redundant routing sentence.
   const recipient = section.getByTestId("lead-payer-invoice-recipient");
   await expect(recipient).toContainText("Получатель счёта (раздел 7 анкеты)");
-  await expect(recipient.getByTestId("lead-payer-invoice-to")).toHaveText(
-    "Счёт направляется: плательщику · выбрал пациент в кабинете",
-  );
+  await expect(recipient.getByTestId("lead-payer-invoice-to")).toHaveCount(0);
   await expect(recipient.locator("select, [role=radio], [role=combobox]")).toHaveCount(0);
   // The two staff inputs, empty so far.
   const vatId = recipient.getByLabel(/^USt-IdNr\. получателя счёта/);
@@ -392,16 +390,15 @@ test("the lead's choice of another address is named, in German", async ({ page }
   const { section } = await mount(page, "de", { ...billedCompany, invoice_to: "other", invoice_name: "Beispiel Stiftung", invoice_vat_id: "DE987654321" });
   const recipient = section.getByTestId("lead-payer-invoice-recipient");
   await expect(recipient).toContainText("Rechnungsempfänger (Abschnitt 7)");
-  await expect(recipient.getByTestId("lead-payer-invoice-to")).toHaveText(
-    "Rechnung geht an: an eine andere Adresse — Beispiel Stiftung · vom Patienten im Portal gewählt",
-  );
+  await expect(recipient.getByTestId("lead-payer-invoice-to")).toHaveCount(0);
+  await expect(recipient.getByTestId("lead-payer-recipient-invoice_name")).toContainText("Beispiel Stiftung");
   await expect(recipient.getByLabel(/^USt-IdNr\. des Rechnungsempfängers/)).toHaveValue("DE987654321");
   await expect(recipient.getByLabel(/^Steuernummer des Rechnungsempfängers/)).toHaveValue("");
 });
 
 test("a lead who has not chosen where the invoice goes yet", async ({ page }) => {
   const { section } = await mount(page, "de", { ...billedCompany, invoice_to: null });
-  await expect(section.getByTestId("lead-payer-invoice-to")).toHaveText("Rechnung geht an: nicht angegeben · wählt der Patient im Portal");
+  await expect(section.getByTestId("lead-payer-invoice-to")).toHaveCount(0);
   await expect(section.getByLabel(/^USt-IdNr\. des Rechnungsempfängers/)).toHaveValue("");
 });
 

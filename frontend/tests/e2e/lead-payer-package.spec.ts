@@ -334,9 +334,8 @@ test("a blocked package names the reason; 'Wer zahlt' shows the lead's cost esti
   );
   await expect(section.getByTestId("lead-payer-cost-estimate-consent")).toHaveAttribute("data-state", "missing");
   // The payer answered: the link panel names the package and where it is made.
-  await expect(section.getByTestId("lead-payer-link-package")).toHaveText(
-    "Unterschriftenpaket: noch nicht erstellt (Schritt „Vertrag & Angebot“)",
-  );
+  await expect(section.getByTestId("lead-payer-link-package")).toContainText("noch nicht erstellt");
+  await expect(section.getByTestId("lead-payer-link-package")).toContainText("Vertrag & Angebot");
 
   await openCommercial();
   await expect(panel).toBeVisible();
@@ -356,7 +355,7 @@ test("staff prepare the four documents and send them; the payer section waits fo
   const { wizard, panel, calls, openCommercial, openDocuments } = await mount(page, "de", packageState());
 
   await openCommercial();
-  await expect(panel).toContainText(
+  await expect(panel).not.toContainText(
     "Der Zahler erhält ein Paket mit vier Dokumenten zur qualifizierten elektronischen Signatur (QES) über Skribble. Die QES identifiziert den Zahler zugleich nach dem GwG.",
   );
   await expect(panel.getByTestId("lead-payer-package-signer")).toHaveText("Unterschreibt: Viktor Zahler · viktor.zahler@example.com");
@@ -420,9 +419,8 @@ test("staff prepare the four documents and send them; the payer section waits fo
   await openDocuments();
   const section = wizard.locator("#lead-wizard-payer-declaration");
   await expect(section.getByTestId("lead-payer-status-badge")).toHaveText("wartet auf Unterschrift des Zahlers");
-  await expect(section.getByTestId("lead-payer-link-package")).toHaveText(
-    "Unterschriftenpaket: gesendet am 06.10.2026, wartet auf Unterschrift (Schritt „Vertrag & Angebot“)",
-  );
+  await expect(section.getByTestId("lead-payer-link-package")).toContainText("gesendet am 06.10.2026, wartet auf Unterschrift");
+  await expect(section.getByTestId("lead-payer-link-package")).toContainText("Vertrag & Angebot");
   await expect(section.getByTestId("lead-payer-cost-estimate-consent")).toHaveText(
     "Einwilligung zur Weitergabe des Kostenvoranschlags: erteilt am 05.10.2026",
   );

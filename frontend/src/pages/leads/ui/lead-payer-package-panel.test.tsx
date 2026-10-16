@@ -82,7 +82,7 @@ describe("LeadPayerPackagePanel", () => {
   it("lists the four documents before preparing and offers to prepare them", () => {
     const html = render(state());
     expect(html).toContain("Документы плательщику на подпись");
-    expect(html).toContain("Плательщик получает один пакет из четырёх документов для квалифицированной электронной подписи (QES) через Skribble.");
+    expect(html).not.toContain("Плательщик получает один пакет из четырёх документов");
     for (const label of ["Анкета плательщика", "Согласие плательщика", "Данные пациента о плательщике", "Смета для плательщика"]) {
       expect(html).toContain(label);
     }

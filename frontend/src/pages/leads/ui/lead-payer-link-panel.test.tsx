@@ -47,7 +47,7 @@ function render(value: LeadPayerLinkState, options: { canEdit?: boolean; tx?: ty
 }
 
 describe("LeadPayerLinkPanel", () => {
-  it("offers the first link in the lead's language, highlighted, with the amount", () => {
+  it("offers the first link in the lead's language, without a separate amount", () => {
     const html = render(state());
     expect(html).toContain("Ссылка для плательщика");
     expect(html).toContain("Ссылка ещё не отправлялась");
@@ -57,8 +57,7 @@ describe("LeadPayerLinkPanel", () => {
     expect(html).not.toContain("Отозвать ссылку");
     // The lead speaks Ukrainian: UA is the language of the invitation.
     expect(html).toMatch(/aria-pressed="true"[^>]*>UA</);
-    expect(html).toContain("Ожидаемая общая сумма, EUR");
-    // Owner rule 2026-10-07: the amount is information only, no threshold asks for a proof.
+    expect(html).not.toContain("Ожидаемая общая сумма, EUR");
     expect(html).not.toContain("подтверждение источника средств");
   });
 
@@ -83,7 +82,7 @@ describe("LeadPayerLinkPanel", () => {
     expect(html).toContain("Link widerrufen");
     expect(html).not.toContain("Zur Korrektur öffnen");
     expect(html).toMatch(/aria-pressed="true"[^>]*>DE</);
-    expect(html).toContain('value="12000,00"');
+    expect(html).not.toContain('value="12000,00"');
   });
 
   it("asks for 'reopen' after the payer answered and names a blocked reason", () => {
@@ -95,7 +94,8 @@ describe("LeadPayerLinkPanel", () => {
       { tx: de },
     );
     expect(answered).toContain("Zur Korrektur öffnen");
-    expect(answered).toContain("Angaben eingegangen am 06.10.2026 12:30");
+    expect(answered).toContain("Vom Zahler am 06.10.2026 12:30");
+    expect(answered).not.toContain('data-testid="lead-payer-link-status"');
     expect(answered).toContain("Die Angaben sind eingegangen: Für einen neuen Link „Zur Korrektur öffnen“ wählen");
     const blocked = render(state({ can_send: false, blocked_reason: "request_not_submitted" }));
     expect(blocked).toContain("Пациенту нужно отправить актуальную заявку из кабинета. После изменения плательщика или согласия заявку нужно отправить повторно");
@@ -114,7 +114,7 @@ describe("LeadPayerLinkPanel", () => {
   it("offers no writes without leads.edit", () => {
     const html = render(state({ link: { status: "opened", sent_at: "2026-10-06T10:00:00Z" } }), { canEdit: false });
     expect(html).not.toMatch(/<button/);
-    expect(html).toMatch(/<input[^>]*readonly=""/i);
+    expect(html).not.toMatch(/<input/);
     expect(html).toContain("Открыта · отправлена 06.10.2026 12:00");
   });
 
@@ -135,9 +135,10 @@ describe("LeadPayerLinkPanel", () => {
           packageSummary={summary}
         />,
       );
-    expect(line(null)).toContain("Пакет на подпись: <span class=\"font-medium text-foreground\">ещё не подготовлен</span> (шаг «Договор и смета»)");
+    expect(line(null)).toContain("ещё не подготовлен");
+    expect(line(null)).toContain("Договор и смета");
     expect(line({ status: "pending", outdated: false, sent_at: "2026-10-06T11:00:00Z", signed_at: null }, de)).toContain(
-      "Unterschriftenpaket: <span class=\"font-medium text-foreground\">gesendet am 06.10.2026, wartet auf Unterschrift</span> (Schritt „Vertrag &amp; Angebot“)",
+      "gesendet am 06.10.2026, wartet auf Unterschrift",
     );
     // An older server sends no package: nothing.
     expect(line(undefined)).not.toContain("lead-payer-link-package");

@@ -339,7 +339,7 @@ async function mount(
 const noOverflow = (locator: ReturnType<Page["getByTestId"]>) =>
   locator.evaluate((node) => node.scrollWidth <= node.clientWidth + 1);
 
-test("staff send the payer link in the chosen language and enter the expected total", async ({ page }, testInfo) => {
+test("staff send the payer link in the chosen language without a separate expected total", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   const { wizard, panel, calls } = await mount(page, "de", freshState());
 
@@ -379,23 +379,9 @@ test("staff send the payer link in the chosen language and enter the expected to
   // The invitation informed the payer: the declaration is loaded afresh and says so.
   await expect(informed).toBeChecked();
 
-  // The amount is saved when the field is left; German grouping is read.
-  // Information only (owner rule 2026-10-07): no amount asks for a proof of funds.
-  const total = panel.getByTestId("lead-payer-estimated-total");
-  await expect(panel).not.toContainText("Nachweis der Herkunft der Mittel vor");
-  await total.fill("12.500");
-  await total.press("Tab");
-  await expect.poll(() => calls.estimates).toEqual([{ estimated_total_eur: "12500.00" }]);
-  await expect(total).toHaveValue("12500,00");
-  // Something that is no amount is not sent.
-  await total.fill("zwölftausend");
-  await total.press("Tab");
-  await expect(panel.getByTestId("lead-payer-estimated-total-error")).toContainText("Bitte den Betrag prüfen");
-  // Cleared, it is sent as null.
-  await total.fill("");
-  await total.press("Tab");
-  await expect.poll(() => calls.estimates.at(-1)).toEqual({ estimated_total_eur: null });
-  expect(calls.estimates).toHaveLength(2);
+  // Amounts belong in the cost estimate, not in the payer-link block.
+  await expect(panel.getByTestId("lead-payer-estimated-total")).toHaveCount(0);
+  expect(calls.estimates).toEqual([]);
 
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-payer-link-sent-de-desktop.png"), animations: "disabled" });
@@ -417,10 +403,9 @@ test("after the payer answered, a new link needs 'reopen for correction'", async
   );
 
   await expect(panel.getByTestId("lead-payer-link-badge")).toHaveText("Angaben eingegangen");
-  await expect(panel.getByTestId("lead-payer-link-status")).toHaveText(
-    "Angaben eingegangen am 06.10.2026 12:30 · gesendet am 06.10.2026 12:00 an viktor.zahler@example.com (Intake QA)",
-  );
-  await expect(panel.getByTestId("lead-payer-estimated-total")).toHaveValue("12000,00");
+  await expect(panel.getByTestId("lead-payer-link-status")).toHaveCount(0);
+  await expect(panel.getByTestId("lead-payer-questionnaire-preview")).toContainText("Vom Zahler am 06.10.2026 12:30");
+  await expect(panel.getByTestId("lead-payer-estimated-total")).toHaveCount(0);
   const resend = panel.getByRole("button", { name: "Erneut senden" });
   await expect(resend).toBeDisabled();
   await expect(panel.getByTestId("lead-payer-link-blocked")).toHaveText(
@@ -538,8 +523,7 @@ test("a paying parent with a cabinet login gets a note, no link", async ({ page 
   );
   await expect(panel.getByRole("button", { name: "Отправить ссылку плательщику" })).toHaveCount(0);
   await expect(panel.getByTestId("lead-payer-link-blocked")).toHaveCount(0);
-  // The expected total still decides the parent's check level.
-  await expect(panel.getByTestId("lead-payer-estimated-total")).toBeVisible();
+  await expect(panel.getByTestId("lead-payer-estimated-total")).toHaveCount(0);
 });
 
 test("the payer's answers stand after invoice and payment: a PEP in amber, level 2 without proof", async ({ page }, testInfo) => {

@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { CircleAlert, LoaderCircle, Mail, Undo2 } from "lucide-react";
+import { CircleAlert, FileSignature, LoaderCircle, Mail, Undo2 } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
-import { Banner, checkboxClass, inputClass } from "@/components/ui-shell";
+import { Banner, checkboxClass } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { StatusChip } from "@/components/ui/status-chip";
+import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { cn } from "@/lib/utils";
 
 import {
@@ -13,11 +12,9 @@ import {
   type LeadPayerLinkState,
   type PayerLinkLanguage,
 } from "../data/lead-payer-link-api";
-import type { PayerPackageSummary } from "../data/lead-payer-package-api";
+import type { PayerPackageStatus, PayerPackageSummary } from "../data/lead-payer-package-api";
 import { payerPackageSummaryText } from "../model/lead-payer-package";
 import {
-  estimatedTotalInput,
-  parseEstimatedTotal,
   payerLinkActions,
   payerLinkCabinetNote,
   payerLinkErrorText,
@@ -28,8 +25,13 @@ import {
 } from "../model/lead-payer-link";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
+import { LeadPayerQuestionnairePreview } from "./lead-payer-questionnaire-preview";
 
 const LANGUAGE_LABELS: Record<PayerLinkLanguage, string> = { de: "DE", en: "EN", uk: "UA", ru: "RU" };
+const PACKAGE_TONES: Record<PayerPackageStatus, StatusChipTone> = {
+  prepared: "success", sending: "info", pending: "info", signed: "success",
+  needs_review: "warning", declined: "error", withdrawn: "neutral", expired: "warning", error: "error",
+};
 
 /** The lead's language as a language of the invitation; German when it is none of the four. */
 export function payerLinkLanguageOf(value: string | null | undefined): PayerLinkLanguage {
@@ -43,8 +45,7 @@ export function payerLinkLanguageOf(value: string | null | undefined): PayerLink
  * the payer's own link with its times, the language of the invitation, send,
  * send again (with "reopen for correction" once the payer answered) and
  * revoke, each disabled with the reason; a note instead for a paying parent
- * who answers in the cabinet; and the expected total amount, which decides
- * whether the payer must prove the source of the funds. Writes only for
+ * who answers in the cabinet. Amounts belong in the cost estimate. Writes only for
  * `canEdit` (leads.edit); the server checks the same.
  */
 export function LeadPayerLinkPanel({
@@ -61,7 +62,7 @@ export function LeadPayerLinkPanel({
 }: {
   leadId: string;
   state: LeadPayerLinkState;
-  controller: Pick<LeadPayerLinkController, "send" | "revoke" | "saveEstimatedTotal" | "reload">;
+  controller: Pick<LeadPayerLinkController, "send" | "revoke" | "reload">;
   canEdit: boolean;
   disabled?: boolean;
   /** The lead's language: the first choice for the invitation. */
@@ -139,13 +140,15 @@ export function LeadPayerLinkPanel({
         ) : null}
       </div>
 
+      <LeadPayerQuestionnairePreview key={leadId} state={state} tx={tx} />
+
       {actions.cabinet ? (
         <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-payer-link-cabinet">
           {payerLinkCabinetNote(tx)}
         </p>
       ) : (
         <>
-          {status ? (
+          {state.questionnaire?.submitted_at ? null : status ? (
             <p className="break-words text-xs leading-5 text-muted-foreground" data-testid="lead-payer-link-status">
               {status.text}
             </p>
@@ -245,24 +248,17 @@ export function LeadPayerLinkPanel({
       )}
 
       {state.questionnaire?.submitted_at && packageSummary !== undefined ? (
-        <p className="break-words text-xs leading-5 text-muted-foreground" data-testid="lead-payer-link-package" data-status={packageSummary?.status ?? "none"}>
-          {tx("Пакет на подпись: ", "Unterschriftenpaket: ")}
-          <span className="font-medium text-foreground">{payerPackageSummaryText(packageSummary, tx)}</span>
-          {" "}
-          {tx("(шаг «Договор и смета»)", "(Schritt „Vertrag & Angebot“)")}
-        </p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-border/50 pt-3" data-testid="lead-payer-link-package" data-status={packageSummary?.status ?? "none"}>
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <FileSignature aria-hidden="true" className="size-3.5" />
+            {tx("Пакет на подпись", "Unterschriftenpaket")}
+          </span>
+          <StatusChip tone={packageSummary?.outdated ? "warning" : packageSummary ? PACKAGE_TONES[packageSummary.status] : "neutral"}>
+            {payerPackageSummaryText(packageSummary, tx)}
+          </StatusChip>
+          <StatusChip>{tx("Договор и смета", "Vertrag & Angebot")}</StatusChip>
+        </div>
       ) : null}
-
-      <EstimatedTotalField
-        key={state.estimated_total_eur ?? "none"}
-        leadId={leadId}
-        stored={state.estimated_total_eur}
-        canEdit={canEdit}
-        disabled={disabled}
-        tx={tx}
-        save={controller.saveEstimatedTotal}
-        errorText={message}
-      />
 
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? (
@@ -295,98 +291,6 @@ export function LeadPayerLinkPanel({
         onConfirm={() => void send()}
         onCancel={() => setConfirm(null)}
       />
-    </div>
-  );
-}
-
-/**
- * The expected total amount in EUR, saved when the field is left; an empty
- * field clears it. The stored value is the field's start (the parent gives a
- * new key when it changes). Information for staff only: since the owner's
- * rule of 2026-10-07 no amount asks the payer for a proof of funds.
- */
-function EstimatedTotalField({
-  leadId,
-  stored,
-  canEdit,
-  disabled,
-  tx,
-  save,
-  errorText,
-}: {
-  leadId: string;
-  stored: string | null;
-  canEdit: boolean;
-  disabled: boolean;
-  tx: Tx;
-  save: (value: string | null) => Promise<unknown>;
-  errorText: (error: unknown) => string;
-}) {
-  const [value, setValue] = useState(() => estimatedTotalInput(stored));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const id = `lead-payer-estimated-total-${leadId}`;
-
-  async function commit() {
-    const parsed = parseEstimatedTotal(value);
-    if (parsed === undefined) {
-      setError(
-        tx(
-          "Проверьте сумму: число от 0, не больше двух знаков после запятой",
-          "Bitte den Betrag prüfen: eine Zahl ab 0 mit höchstens zwei Nachkommastellen",
-        ),
-      );
-      return;
-    }
-    setError("");
-    if (parsed === stored) {
-      setValue(estimatedTotalInput(parsed));
-      return;
-    }
-    setSaving(true);
-    try {
-      await save(parsed);
-    } catch (cause) {
-      setError(errorText(cause));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="space-y-1.5 border-t border-border/50 pt-3">
-      <label htmlFor={id} className="block text-[11.5px] leading-tight text-muted-foreground">
-        {tx("Ожидаемая общая сумма, EUR", "Voraussichtlicher Gesamtbetrag, EUR")}
-      </label>
-      <div className="flex items-center gap-2">
-        <Input
-          id={id}
-          className={cn(inputClass, "h-9 w-full max-w-[12rem] bg-field text-[13px]")}
-          inputMode="decimal"
-          autoComplete="off"
-          value={value}
-          readOnly={!canEdit}
-          disabled={disabled || saving}
-          aria-invalid={error ? true : undefined}
-          data-testid="lead-payer-estimated-total"
-          onChange={(event) => {
-            setError("");
-            setValue(event.target.value);
-          }}
-          onBlur={() => {
-            if (canEdit) void commit();
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-          }}
-        />
-        {saving ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin text-muted-foreground" /> : null}
-      </div>
-      {error ? (
-        <p role="alert" className="text-xs text-destructive" data-testid="lead-payer-estimated-total-error">
-          {error}
-        </p>
-      ) : null}
     </div>
   );
 }

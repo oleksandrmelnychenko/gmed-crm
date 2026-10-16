@@ -270,13 +270,12 @@ describe("LeadPayerDeclarationSection: invoice recipient (section 7)", () => {
     expect(html).not.toContain("HRB 55501");
   });
 
-  it("shows where the invoice goes, read-only, and the two staff inputs with the stored values", () => {
+  it("keeps the recipient details and staff inputs without the redundant routing sentence", () => {
     const html = renderSection(selfPayer);
     const block = recipientBlock(html);
     expect(block).toContain("Получатель счёта (раздел 7 анкеты)");
-    expect(block).toContain("Счёт направляется: ");
-    expect(block).toContain("пациенту");
-    expect(block).toContain("выбрал пациент в кабинете");
+    expect(block).not.toContain("Счёт направляется: ");
+    expect(block).not.toContain("выбрал пациент в кабинете");
     expect(block).toContain("USt-IdNr. получателя счёта");
     expect(block).toContain("Steuernummer получателя счёта");
     expect(block).toMatch(/<input[^>]*value="DE123456789"/);
@@ -285,13 +284,12 @@ describe("LeadPayerDeclarationSection: invoice recipient (section 7)", () => {
     expect(block).not.toMatch(/<(select|input[^>]*type="radio")/);
   });
 
-  it("names the other address the lead gave and says so while nothing is chosen yet", () => {
+  it("keeps the other recipient's name without the routing sentence or unanswered placeholder", () => {
     const other = renderSection({ ...selfPayer, invoice_to: "other", invoice_name: "Beispiel GmbH" });
-    expect(recipientBlock(other)).toContain("по другому адресу");
-    expect(recipientBlock(other)).toContain(" — Beispiel GmbH");
+    expect(recipientBlock(other)).toContain("Beispiel GmbH");
+    expect(recipientBlock(other)).not.toContain("Счёт направляется");
     const open = renderSection({ ...selfPayer, invoice_to: null });
-    expect(recipientBlock(open)).toContain("не указано");
-    expect(recipientBlock(open)).toContain("выбирает пациент в кабинете");
+    expect(recipientBlock(open)).not.toContain("выбирает пациент в кабинете");
   });
 
   it("offers neither the line nor the inputs on an older server", () => {
@@ -312,9 +310,8 @@ describe("LeadPayerDeclarationSection: invoice recipient (section 7)", () => {
   it("speaks German", () => {
     const block = recipientBlock(renderSection({ ...selfPayer, invoice_to: "payer" }, de));
     expect(block).toContain("Rechnungsempfänger (Abschnitt 7)");
-    expect(block).toContain("Rechnung geht an: ");
-    expect(block).toContain("an die zahlende Person / Organisation");
-    expect(block).toContain("vom Patienten im Portal gewählt");
+    expect(block).not.toContain("Rechnung geht an: ");
+    expect(block).not.toContain("vom Patienten im Portal gewählt");
     expect(block).toContain("USt-IdNr. des Rechnungsempfängers");
     expect(block).toContain("Steuernummer des Rechnungsempfängers");
   });

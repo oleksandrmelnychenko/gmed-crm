@@ -52,7 +52,6 @@ import {
   SOURCE_OF_FUNDS,
   costEstimateConsentLine,
   invoiceTaxFieldsShown,
-  invoiceToLabel,
   isOrganisationPayerForm,
   payerDeclarationPrefillForm,
   payerDeclarationToForm,
@@ -303,9 +302,6 @@ export function LeadPayerDeclarationSection({
   const cabinetBilling = cabinet?.billing ?? null;
   const organisationMask = cabinet?.payer_organisation ?? null;
   const invoiceTo = cabinetBilling ? portalInvoiceTo(cabinetBilling) : data?.declaration?.invoice_to;
-  const invoiceName = cabinetBilling
-    ? cabinetBilling.invoice_recipient === "third_party" ? cabinetBilling.recipient?.name : cabinetBilling.invoice_name
-    : data?.declaration?.invoice_name;
   const invoiceToKnown = invoiceTo !== undefined;
   const invoiceTaxShown = invoiceTaxFieldsShown(form);
   const recipientBilling = cabinetHidden
@@ -847,16 +843,10 @@ export function LeadPayerDeclarationSection({
                 {errorText(payerLink.error)}
               </p>
             ) : null}
-            <p className="max-w-3xl text-[11.5px] leading-5 text-muted-foreground">
-              {tx(
-                "Плательщик подписывает согласие на оплату (Kostenübernahmeerklärung, присоединение к долгу). Документ создаётся на шаге «Договор и смета», когда заказ уже есть.",
-                "Der Kostenübernehmer unterschreibt die Kostenübernahmeerklärung (Schuldbeitritt). Sie wird im Schritt „Vertrag & Angebot“ erstellt, sobald der Auftrag besteht.",
-              )}
-            </p>
           </div>
         ) : null}
 
-        {invoiceToKnown || invoiceTaxShown ? (
+        {recipientStatements.length > 0 || invoiceTaxShown ? (
           <div className="space-y-3 border-t border-border/60 pt-3" data-testid="lead-payer-invoice-recipient">
             <AdminSectionTitle>
               {tx("Получатель счёта (раздел 7 анкеты)", "Rechnungsempfänger (Abschnitt 7)")}
@@ -865,19 +855,6 @@ export function LeadPayerDeclarationSection({
               <span className="inline-flex" data-testid="lead-payer-recipient-updated">
                 <PatientFieldBadge marker={{ at: cabinetBilling.recipient_updated_at, access_kind: null }} tx={tx} />
               </span>
-            ) : null}
-            {invoiceToKnown ? (
-              <p className="text-xs text-muted-foreground" data-testid="lead-payer-invoice-to">
-                {tx("Счёт направляется: ", "Rechnung geht an: ")}
-                <span className="font-medium text-foreground">{invoiceToLabel(invoiceTo, tx)}</span>
-                {invoiceTo === "other" && invoiceName ? (
-                  <span className="font-medium text-foreground">{` — ${invoiceName}`}</span>
-                ) : null}
-                {" · "}
-                {invoiceTo
-                  ? tx("выбрал пациент в кабинете", "vom Patienten im Portal gewählt")
-                  : tx("выбирает пациент в кабинете", "wählt der Patient im Portal")}
-              </p>
             ) : null}
             {recipientStatements.length > 0 ? (
               <dl className="grid gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-payer-recipient-snapshot">

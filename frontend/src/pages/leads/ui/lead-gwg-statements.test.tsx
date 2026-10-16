@@ -78,7 +78,7 @@ describe("LeadGwgStatements", () => {
     expect(statement(html, "lead-gwg-payer-organisation-register_number")).toContain("HRB 55501");
     expect(statement(html, "lead-gwg-payer-organisation-contact_name")).toContain("Ben Muster");
     expect(html).toContain("vom Patienten · 12.10.2026 10:15");
-    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+    expect(html.slice(html.indexOf('data-testid="lead-gwg-statements-content"'))).not.toMatch(/<(input|textarea|select|button)\b/);
     expect(render({ ...intake, identification_hidden: true })).toBe("");
   });
 
@@ -170,7 +170,7 @@ describe("LeadGwgStatements", () => {
     expect(statement(html, "lead-gwg-id-valid-until")).not.toContain('data-warning="true"');
     expect(html).not.toContain("lead-gwg-statements-empty");
     // Nothing can be edited.
-    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+    expect(html.slice(html.indexOf('data-testid="lead-gwg-statements-content"'))).not.toMatch(/<(input|textarea|select|button)\b/);
   });
 
   it("emphasises a yes with its details and leaves the other answers plain", () => {
@@ -479,7 +479,7 @@ describe("LeadGwgStatements: who acts for the lead", () => {
     expect(statement(html, `lead-gwg-representative-valid-until-${BEN_ID}`)).toContain("не указано");
     expect(statement(html, `lead-gwg-representative-identity-documents-${BEN_ID}`)).toContain("—");
     // Still nothing can be edited.
-    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+    expect(html.slice(html.indexOf('data-testid="lead-gwg-statements-content"'))).not.toMatch(/<(input|textarea|select|button)\b/);
   });
 
   it("warns when the number of representatives does not fit the custody", () => {
@@ -674,7 +674,7 @@ describe("LeadGwgStatements: invoice recipient and payment route", () => {
     expect(group).not.toContain("lead-gwg-billing-flag");
     expect(group).not.toContain("lead-gwg-billing-by-payer");
     // Still nothing can be edited.
-    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+    expect(html.slice(html.indexOf('data-testid="lead-gwg-statements-content"'))).not.toMatch(/<(input|textarea|select|button)\b/);
   });
 
   it("flags cash and a payment through a third party in amber, names the other address and the staff fields", () => {
@@ -832,7 +832,7 @@ describe("LeadGwgStatements: the payer's answers", () => {
     // The payer stated section 8: the line says when, and the rows are shown.
     expect(part(html, "lead-gwg-billing-by-payer", "</p>")).toContain("Zahlungsweg: angegeben vom Zahler am 06.10.2026 10:30");
     expect(statement(html, "lead-gwg-billing-payment_method")).toContain("Überweisung");
-    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+    expect(html.slice(html.indexOf('data-testid="lead-gwg-statements-content"'))).not.toMatch(/<(input|textarea|select|button)\b/);
   });
 
   it("says the payer states the route through the link until the answers are in", () => {
@@ -914,7 +914,7 @@ describe("LeadGwgStatements: the extra step «Дополнительные св�
     expect(proof).toContain("gehaltsnachweis.pdf");
     expect(html).not.toContain("lead-self-funds-proof-missing");
     expect(html.indexOf("lead-gwg-own-account")).toBeLessThan(html.indexOf("lead-gwg-enhanced-details"));
-    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+    expect(html.slice(html.indexOf('data-testid="lead-gwg-statements-content"'))).not.toMatch(/<(input|textarea|select|button)\b/);
   });
 
   it("warns in amber while the enhanced check requires the proof and none is uploaded", () => {

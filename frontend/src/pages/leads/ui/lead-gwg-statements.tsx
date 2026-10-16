@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
-import { CircleAlert, Download } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
+import { ChevronDown, CircleAlert, Download } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
@@ -59,13 +60,57 @@ import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
 const STATEMENT_COLUMNS = "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
+const STATEMENT_CARD = "min-w-0 space-y-3 rounded-xl border border-border/60 bg-background p-3.5";
+const STATEMENT_SECTION = "space-y-2.5 border-t border-border/50 pt-3";
+
+function PatientStatementsPanel({ title, marker, tx, children }: {
+  title: string;
+  marker?: PatientFieldMarker;
+  tx: Tx;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  const contentId = useId();
+
+  return (
+    <section className="min-w-0 rounded-xl border border-border/70 bg-muted/20" data-testid="lead-gwg-statements">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 p-3.5">
+        <AdminSectionTitle>{title}</AdminSectionTitle>
+        {marker ? (
+          <div className="order-last w-full sm:order-none sm:w-auto">
+            <PatientFieldBadge marker={marker} tx={tx} />
+          </div>
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground hover:text-foreground"
+          aria-label={open ? tx("Свернуть данные пациента", "Patientenangaben einklappen") : tx("Развернуть данные пациента", "Patientenangaben ausklappen")}
+          aria-expanded={open}
+          aria-controls={contentId}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? tx("Свернуть", "Einklappen") : tx("Развернуть", "Ausklappen")}
+          <ChevronDown aria-hidden="true" className={cn("size-4 transition-transform", open && "rotate-180")} />
+        </Button>
+      </div>
+      <div id={contentId} hidden={!open} className="space-y-3 px-3.5 pb-3.5" data-testid="lead-gwg-statements-content">
+        {children}
+      </div>
+    </section>
+  );
+}
 
 /** One group of statements: a caption and its facts as a definition list. */
-function StatementGroup({ title, columns, children }: { title: string; columns: string; children: ReactNode }) {
+function StatementGroup({ title, columns, children, card = false, wide = false, footer }: {
+  title: string; columns: string; children: ReactNode; card?: boolean; wide?: boolean; footer?: ReactNode;
+}) {
   return (
-    <div className="space-y-2.5 border-t border-border/50 pt-3">
+    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && wide && "md:col-span-2")}>
       <h4 className="text-xs font-semibold text-foreground">{title}</h4>
-      <dl className={cn("grid gap-x-5 gap-y-2.5", columns)}>{children}</dl>
+      <dl className={cn("grid gap-x-5 gap-y-2.5", card && !wide ? "grid-cols-1" : columns)}>{children}</dl>
+      {footer}
     </div>
   );
 }
@@ -123,13 +168,13 @@ function UploadedFiles({ documents, tx, onDownload }: {
   onDownload?: (document: LeadIdentityDocument) => void;
 }) {
   return (
-    <ul className="space-y-0.5">
+    <ul className="min-w-0 space-y-1 break-words text-[13px] leading-5 [overflow-wrap:anywhere]">
       {documents.map((document) => (
         <li key={document.id}>
           {onDownload ? (
-            <button type="button" className="inline-flex items-center gap-1.5 text-left underline decoration-border underline-offset-4 hover:text-[var(--brand)]" onClick={() => onDownload(document)}>
-              <Download aria-hidden="true" className="size-3.5 shrink-0" />
-              {document.file_name || EMPTY_STATEMENT}
+            <button type="button" className="inline-flex max-w-full items-start gap-1.5 text-left underline decoration-border underline-offset-4 hover:text-[var(--brand)]" onClick={() => onDownload(document)}>
+              <Download aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0">{document.file_name || EMPTY_STATEMENT}</span>
             </button>
           ) : document.file_name || EMPTY_STATEMENT}
           <span className="font-normal text-muted-foreground">
@@ -239,16 +284,18 @@ function RepresentationGroup({
   tx,
   lang,
   today,
+  card = false,
 }: {
   statements: RepresentationStatements;
   updatedAt: string | null;
   tx: Tx;
   lang: string;
   today: string;
+  card?: boolean;
 }) {
   const minor = statements.kind === "minor";
   return (
-    <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-gwg-representation">
+    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && statements.persons.length > 0 && "md:col-span-2")} data-testid="lead-gwg-representation">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <h4 className="text-xs font-semibold text-foreground">
           {minor ? tx("Законные представители", "Gesetzliche Vertreter") : tx("Представительство", "Vertretung")}
@@ -259,7 +306,7 @@ function RepresentationGroup({
           </span>
         ) : null}
       </div>
-      <dl className="grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2">
+      <dl className={cn("grid grid-cols-1 gap-x-5 gap-y-2.5", !card && "sm:grid-cols-2")}>
         {statements.kind === "minor" ? (
           <Statement label={tx("Кто представляет ребёнка", "Wer vertritt das Kind")} hideLabel testId="lead-gwg-custody">
             {statements.custody}
@@ -337,20 +384,22 @@ function PayerOrganisationGroup({
   mask,
   marker,
   tx,
+  card = false,
 }: {
   mask: Parameters<typeof payerOrganisationStatements>[0];
   marker: PatientFieldMarker | null;
   tx: Tx;
+  card?: boolean;
 }) {
   return (
-    <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-gwg-payer-organisation">
+    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "md:col-span-2")} data-testid="lead-gwg-payer-organisation">
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-xs font-semibold text-foreground">
           {tx("Плательщик — данные организации из кабинета", "Zahler – Organisationsangaben aus dem Portal")}
         </h4>
         {marker ? <PatientFieldBadge marker={marker} tx={tx} /> : null}
       </div>
-      <dl className={cn("grid gap-x-5 gap-y-2.5", STATEMENT_COLUMNS)}>
+      <dl className={cn("grid gap-x-5 gap-y-2.5", card ? "grid-cols-1 sm:grid-cols-2" : STATEMENT_COLUMNS)}>
         {payerOrganisationStatements(mask, tx).map((row) => (
           <Statement key={row.key} label={row.label} testId={`lead-gwg-payer-organisation-${row.key}`}>
             {row.value}
@@ -375,6 +424,7 @@ function BillingGroup({
   payerLink,
   tx,
   lang,
+  card = false,
 }: {
   billing: LeadPortalBilling;
   updatedAt: string | null;
@@ -382,11 +432,12 @@ function BillingGroup({
   payerLink: LeadPortalPayerLink | null;
   tx: Tx;
   lang: string;
+  card?: boolean;
 }) {
   const payerAnswered = Boolean(payerLink?.submitted_at);
   const statements = billingStatements(billing, tx, lang, payerAnswered);
   return (
-    <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-gwg-billing">
+    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "md:col-span-2")} data-testid="lead-gwg-billing">
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-xs font-semibold text-foreground">
           {tx("Счёт и оплата (разделы 7–8 анкеты)", "Rechnung und Zahlung (Abschnitte 7–8)")}
@@ -397,13 +448,13 @@ function BillingGroup({
           </span>
         ) : null}
         {billing.recipient_updated_at ? (
-          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="lead-gwg-recipient-updated">
+          <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="lead-gwg-recipient-updated">
             {tx("Получатель счёта:", "Rechnungsempfänger:")}
             <PatientFieldBadge marker={{ at: billing.recipient_updated_at, access_kind: null }} tx={tx} />
           </span>
         ) : null}
       </div>
-      <dl className={cn("grid gap-x-5 gap-y-2.5", STATEMENT_COLUMNS)}>
+      <dl className={cn("grid gap-x-5 gap-y-2.5", card ? "grid-cols-1 sm:grid-cols-2" : STATEMENT_COLUMNS)}>
         {statements.invoice.map((statement) => (
           <BillingStatementRow key={statement.key} statement={statement} />
         ))}
@@ -414,7 +465,7 @@ function BillingGroup({
         </p>
       ) : null}
       {statements.payment.length > 0 ? (
-        <dl className={cn("grid gap-x-5 gap-y-2.5", STATEMENT_COLUMNS)}>
+        <dl className={cn("grid gap-x-5 gap-y-2.5", card ? "grid-cols-1 sm:grid-cols-2" : STATEMENT_COLUMNS)}>
           {statements.payment.map((statement) => (
             <BillingStatementRow
               key={statement.key}
@@ -476,10 +527,12 @@ function LeadGwgFollowUpAnswers({
   identification,
   tx,
   lang,
+  cards = false,
 }: {
   identification: LeadGwgIdentification;
   tx: Tx;
   lang: string;
+  cards?: boolean;
 }) {
   const country = (code: string | null | undefined) => countryNameForDisplay(code ?? null, lang);
   const stay = [
@@ -502,37 +555,37 @@ function LeadGwgFollowUpAnswers({
   ].some(Boolean);
   if (!stay && !pep && !sanctions && !identification.relationship_since) return null;
   return (
-    <div className="space-y-3" data-testid="lead-gwg-follow-up-answers">
+    <div className={cards ? "contents" : "space-y-3"} data-testid="lead-gwg-follow-up-answers">
       {stay ? (
-        <StatementGroup title={tx("Проживание и гражданства (доп. сведения)", "Aufenthalt und Staatsangehörigkeiten (ergänzend)")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup card={cards} title={tx("Проживание и гражданства (доп. сведения)", "Aufenthalt und Staatsangehörigkeiten (ergänzend)")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Проживает там с", "Wohnhaft dort seit")} testId="lead-gwg-residence-since">{identification.residence_since}</Statement>
           <Statement label={tx("Другие места проживания", "Weitere Wohnsitze")}>{identification.other_residences}</Statement>
           <Statement label={tx("Прежние гражданства", "Frühere Staatsangehörigkeiten")}>
             {(identification.former_citizenships ?? []).map((code) => country(code)).join(", ")}
           </Statement>
-          <Statement label={tx("Причина пребывания", "Aufenthaltsgrund")} className="sm:col-span-2">
+          <Statement label={tx("Причина пребывания", "Aufenthaltsgrund")} className={cards ? "col-span-full" : "sm:col-span-2"}>
             {[stayReasonLabel(identification.stay_reason, tx), identification.stay_reason_details].filter(Boolean).join(" — ")}
           </Statement>
         </StatementGroup>
       ) : null}
       {identification.relationship_since ? (
-        <StatementGroup title={tx("Отношение к плательщику (доп. сведения)", "Beziehung zum Zahler (ergänzend)")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup card={cards} title={tx("Отношение к плательщику (доп. сведения)", "Beziehung zum Zahler (ergänzend)")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Знакомы с", "Bekannt seit")} testId="lead-gwg-relationship-since">{identification.relationship_since}</Statement>
         </StatementGroup>
       ) : null}
       {pep ? (
-        <StatementGroup title={tx("PEP: подробности", "PEP: Einzelheiten")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup card={cards} title={tx("PEP: подробности", "PEP: Einzelheiten")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Должность", "Amt / Funktion")} testId="lead-gwg-pep-office">{identification.pep_office}</Statement>
           <Statement label={tx("Страна", "Land")}>{country(identification.pep_country)}</Statement>
           <Statement label={tx("Период", "Zeitraum")}>{identification.pep_period}</Statement>
           <Statement label={tx("Кем приходится PEP", "Beziehung zur PEP")}>{identification.pep_relationship}</Statement>
-          <Statement label={tx("Происхождение состояния", "Herkunft des Vermögens")} className="sm:col-span-2">
+          <Statement label={tx("Происхождение состояния", "Herkunft des Vermögens")} className={cards ? "col-span-full" : "sm:col-span-2"}>
             {identification.pep_wealth_origin ? <span className="whitespace-pre-line">{identification.pep_wealth_origin}</span> : null}
           </Statement>
         </StatementGroup>
       ) : null}
       {sanctions ? (
-        <StatementGroup title={tx("Связи с санкционными лицами: подробности", "Sanktionsbezug: Einzelheiten")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup card={cards} title={tx("Связи с санкционными лицами: подробности", "Sanktionsbezug: Einzelheiten")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Лицо или организация", "Person oder Organisation")} testId="lead-gwg-sanctions-link-name">
             {identification.sanctions_link_name}
           </Statement>
@@ -555,7 +608,7 @@ function LeadGwgFollowUpAnswers({
  * the enhanced check is; an amber line says when it is missing then.
  * Read-only.
  */
-function EnhancedDetailsGroup({ details, tx }: { details: LeadPortalEnhancedDetails; tx: Tx }) {
+function EnhancedDetailsGroup({ details, tx, card = false }: { details: LeadPortalEnhancedDetails; tx: Tx; card?: boolean }) {
   const answers = details.answers;
   const proofMissing = enhancedFundsProofMissing(details);
   const ownFunds = details.asks.funds || answers.funds_sources.length > 0 || Boolean(answers.funds_description)
@@ -565,7 +618,7 @@ function EnhancedDetailsGroup({ details, tx }: { details: LeadPortalEnhancedDeta
     details.asks.funds_proof ? tx("обязательно", "erforderlich") : tx("необязательно", "optional")
   }`;
   return (
-    <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-gwg-enhanced-details">
+    <div className={card ? STATEMENT_CARD : STATEMENT_SECTION} data-testid="lead-gwg-enhanced-details">
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-xs font-semibold text-foreground">
           {tx("Дополнительные сведения", "Zusätzliche Angaben")}
@@ -581,13 +634,13 @@ function EnhancedDetailsGroup({ details, tx }: { details: LeadPortalEnhancedDeta
           </span>
         ) : null}
       </div>
-      <dl className={cn("grid gap-x-5 gap-y-2.5", STATEMENT_COLUMNS)}>
+      <dl className={cn("grid gap-x-5 gap-y-2.5", card ? "grid-cols-1" : STATEMENT_COLUMNS)}>
         {ownFunds ? (
           <>
             <Statement label={tx("Источник средств (пациент платит сам)", "Herkunft der Mittel (Selbstzahler)")} testId="lead-gwg-self-funds-sources">
               {statedFundsSourcesLabel(answers.funds_sources, tx)}
             </Statement>
-            <Statement label={tx("Описание", "Beschreibung")} className="sm:col-span-2" testId="lead-gwg-self-funds-description">
+            <Statement label={tx("Описание", "Beschreibung")} className={card ? "col-span-full" : "sm:col-span-2"} testId="lead-gwg-self-funds-description">
               {answers.funds_description ? <span className="whitespace-pre-line">{answers.funds_description}</span> : null}
             </Statement>
           </>
@@ -642,17 +695,18 @@ function EnhancedDetailsGroup({ details, tx }: { details: LeadPortalEnhancedDeta
 }
 
 /** The saved proof of the payer relationship, also before any other extra answer. */
-function RelationshipProofGroup({ details, tx, onDownload, fallbackRequested }: {
+function RelationshipProofGroup({ details, tx, onDownload, fallbackRequested, card = false }: {
   details: LeadPortalEnhancedDetails | null | undefined;
   tx: Tx;
   onDownload?: (document: LeadIdentityDocument) => void;
   fallbackRequested: boolean;
+  card?: boolean;
 }) {
   const documents = details?.relationship_proof_documents ?? [];
   const requested = details?.relationship_proof_requested ?? fallbackRequested;
   if (!requested && documents.length === 0) return null;
   return (
-    <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-gwg-relationship-proof">
+    <div className={card ? STATEMENT_CARD : STATEMENT_SECTION} data-testid="lead-gwg-relationship-proof">
       <h4 className="text-xs font-semibold text-foreground">
         {tx("Подтверждение связи с плательщиком", "Nachweis der Beziehung zum Zahler")}
       </h4>
@@ -700,7 +754,7 @@ function PayerStatement({ statement, tx }: { statement: PayerStatementRow; tx: T
  * rule 2026-10-07 is required), an amber line while level 2 lacks the proof
  * of funds, and when the payer acknowledged the privacy notice. Read-only.
  */
-function PayerAnswersGroup({
+export function PayerAnswersGroup({
   state,
   tx,
   lang,
@@ -844,9 +898,11 @@ export function LeadGwgStatements({
   if (!intake || intake.identification_hidden) return null;
   const identification = intake.identification;
   const title = tx("Данные от пациента", "Angaben des Patienten");
+  const cards = Boolean(identification && hasGwgStatements(intake));
   const representation = representationStatements(intake, tx);
   const representationGroup = representation ? (
     <RepresentationGroup
+      card={cards}
       statements={representation}
       updatedAt={intake.representation_updated_at}
       tx={tx}
@@ -858,16 +914,15 @@ export function LeadGwgStatements({
     <PayerAnswersGroup state={payerLink} tx={tx} lang={lang} today={today} />
   ) : null;
   const organisationGroup = intake.payer_organisation ? (
-    <PayerOrganisationGroup mask={intake.payer_organisation} marker={intake.patient_payer} tx={tx} />
+    <PayerOrganisationGroup card={cards} mask={intake.payer_organisation} marker={intake.patient_payer} tx={tx} />
   ) : null;
   const billingGroup = intake.billing ? (
-    <BillingGroup billing={intake.billing} updatedAt={intake.billing_updated_at} payerLink={intake.payer_link} tx={tx} lang={lang} />
+    <BillingGroup card={cards} billing={intake.billing} updatedAt={intake.billing_updated_at} payerLink={intake.payer_link} tx={tx} lang={lang} />
   ) : null;
 
   if (!identification || !hasGwgStatements(intake)) {
     return (
-      <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3.5" data-testid="lead-gwg-statements">
-        <AdminSectionTitle>{title}</AdminSectionTitle>
+      <PatientStatementsPanel key={intake.lead_id} title={title} tx={tx}>
         <ChangedSinceSubmitLine intake={intake} tx={tx} />
         <p className="text-xs text-muted-foreground" data-testid="lead-gwg-statements-empty">
           {tx(
@@ -881,7 +936,7 @@ export function LeadGwgStatements({
         {organisationGroup}
         {hasBillingStatements(intake) ? billingGroup : null}
         <RelationshipProofGroup details={intake.enhanced_details} tx={tx} onDownload={onDownloadDocument} fallbackRequested={askedBlocks.includes("B") && payer?.payer_kind === "third_party"} />
-      </div>
+      </PatientStatementsPanel>
     );
   }
 
@@ -909,129 +964,128 @@ export function LeadGwgStatements({
   const paymentBackgroundShown = asked("B") || Boolean(paymentBackground);
 
   return (
-    <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3.5" data-testid="lead-gwg-statements">
-      <div className="flex flex-wrap items-center gap-2">
-        <AdminSectionTitle>{title}</AdminSectionTitle>
-        <PatientFieldBadge marker={{ at: intake.identification_updated_at, access_kind: null }} tx={tx} />
-      </div>
+    <PatientStatementsPanel key={intake.lead_id} title={title} marker={{ at: intake.identification_updated_at, access_kind: null }} tx={tx}>
       <ChangedSinceSubmitLine intake={intake} tx={tx} />
 
-      <StatementGroup title={tx("Личность", "Person")} columns={STATEMENT_COLUMNS}>
-        <Statement label={tx("Обращение", "Anrede")}>{salutationLabel(identification.salutation, tx)}</Statement>
-        {birthRows.map((item) => (
-          <Statement key={item.key} label={item.label} testId={`lead-gwg-${item.key}`}>{item.value}</Statement>
-        ))}
-        {habitualResidence ? (
-          <Statement
-            label={tx("Страна обычного пребывания (если другая)", "Gewöhnlicher Aufenthalt (falls abweichend)")}
-            testId="lead-gwg-habitual-residence"
-          >
-            {habitualResidence}
+      <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="lead-gwg-statements-grid">
+        <StatementGroup card title={tx("Личность", "Person")} columns={STATEMENT_COLUMNS}>
+          <Statement label={tx("Обращение", "Anrede")}>{salutationLabel(identification.salutation, tx)}</Statement>
+          {birthRows.map((item) => (
+            <Statement key={item.key} label={item.label} testId={`lead-gwg-${item.key}`}>{item.value}</Statement>
+          ))}
+          {habitualResidence ? (
+            <Statement
+              label={tx("Страна обычного пребывания (если другая)", "Gewöhnlicher Aufenthalt (falls abweichend)")}
+              testId="lead-gwg-habitual-residence"
+            >
+              {habitualResidence}
+            </Statement>
+          ) : null}
+          <Statement label={tx("Каналы связи", "Kontaktwege")}>
+            {contactChannelsLabel(identification.contact_channels, tx)}
           </Statement>
-        ) : null}
-        <Statement label={tx("Каналы связи", "Kontaktwege")}>
-          {contactChannelsLabel(identification.contact_channels, tx)}
-        </Statement>
-      </StatementGroup>
-
-      <StatementGroup title={tx("Документ, удостоверяющий личность", "Ausweisdokument")} columns={STATEMENT_COLUMNS}>
-        <Statement label={tx("Вид документа", "Art des Dokuments")}>
-          {idDocumentTypeLabel(identification.id_document_type, tx)}
-        </Statement>
-        <Statement label={tx("Номер", "Nummer")}>{identification.id_document_number}</Statement>
-        <Statement label={tx("Кем выдан", "Ausstellende Behörde")}>{identification.id_issuing_authority}</Statement>
-        <Statement label={tx("Страна выдачи", "Ausstellungsland")}>{country(identification.id_issuing_country)}</Statement>
-        <Statement label={tx("Дата выдачи", "Ausgestellt am")}>{formatAppDate(identification.id_issued_on)}</Statement>
-        <Statement label={tx("Действителен до", "Gültig bis")} warning={validity !== "valid"} testId="lead-gwg-id-valid-until">
-          {validity === "missing"
-            ? tx("не указано", "nicht angegeben")
-            : validity === "expired"
-              ? `${formatAppDate(identification.id_valid_until)} · ${tx("срок истёк", "abgelaufen")}`
-              : formatAppDate(identification.id_valid_until)}
-        </Statement>
-        <Statement label={tx("Загруженные файлы", "Hochgeladene Dateien")} className="col-span-full" testId="lead-gwg-identity-documents">
-          {intake.identity_documents.length > 0 ? <UploadedFiles documents={intake.identity_documents} tx={tx} /> : null}
-        </Statement>
-      </StatementGroup>
-      {/* Since 2026-10-07 the document data are entered by staff from the scan. */}
-      {identityDocumentEnteredLine(identification, tx) || identification.id_document_unreadable ? (
-        <p className="-mt-1.5 text-[11px] text-muted-foreground" data-testid="lead-gwg-id-entered-by">
-          {identityDocumentEnteredLine(identification, tx)}
-          {identification.id_document_unreadable ? (
-            <span className={cn("font-medium", WARNING_TEXT)}>
-              {identityDocumentEnteredLine(identification, tx) ? " · " : ""}
-              {tx("документ нечитаем", "Ausweis unleserlich")}
-            </span>
-          ) : null}
-        </p>
-      ) : null}
-
-      {representationGroup}
-
-      {ownAccountShown || paymentBackgroundShown ? (
-        <StatementGroup
-          title={tx("Экономический интерес (раздел «Кто платит»)", "Wirtschaftliches Interesse (Abschnitt „Wer zahlt“)")}
-          columns="grid-cols-1 sm:grid-cols-3"
-        >
-          {ownAccountShown ? (
-            <Statement
-              label={tx("В собственных экономических интересах", "Im eigenen wirtschaftlichen Interesse")}
-              warning={ownAccount.answer === false}
-              testId="lead-gwg-own-account"
-            >
-              {answerLabel(ownAccount.answer, tx)}
-            </Statement>
-          ) : null}
-          {ownAccount.answer === false ? (
-            <Statement label={tx("В чьих интересах", "Wirtschaftlich Berechtigter")} className="sm:col-span-2">
-              {ownAccount.beneficialOwner}
-            </Statement>
-          ) : null}
-          {paymentBackgroundShown ? (
-            <Statement
-              label={tx("Почему платит третье лицо", "Hintergrund der Zahlung durch Dritte")}
-              className="col-span-full"
-              testId="lead-gwg-payment-background"
-            >
-              {paymentBackground}
-            </Statement>
-          ) : null}
         </StatementGroup>
-      ) : null}
 
-      {enhancedDetailsShown(intake.enhanced_details) ? <EnhancedDetailsGroup details={intake.enhanced_details} tx={tx} /> : null}
-      <RelationshipProofGroup details={intake.enhanced_details} tx={tx} onDownload={onDownloadDocument} fallbackRequested={askedBlocks.includes("B") && payer?.payer_kind === "third_party"} />
-
-      <LeadGwgFollowUpAnswers identification={identification} tx={tx} lang={lang} />
-
-
-      {billingGroup}
-
-      {payerGroup}
-      {organisationGroup}
-
-      {legalAnswers.length > 0 ? (
-      <StatementGroup title={tx("Юридические вопросы", "Rechtliche Fragen")} columns="grid-cols-1 sm:grid-cols-2">
-        {legalAnswers.map((item) => (
-          <Statement
-            key={item.key}
-            label={item.question}
-            sentence
-            warning={item.answer === true}
-            testId={`lead-gwg-answer-${item.key}`}
-          >
-            <span className={item.answer === true ? "font-semibold" : undefined}>{answerLabel(item.answer, tx)}</span>
-            {item.details ? <span className="mt-0.5 block whitespace-pre-line">{item.details}</span> : null}
+        <StatementGroup card title={tx("Документ, удостоверяющий личность", "Ausweisdokument")} columns={STATEMENT_COLUMNS}
+          footer={identityDocumentEnteredLine(identification, tx) || identification.id_document_unreadable ? (
+            <p className="border-t border-border/50 pt-2 text-[11px] text-muted-foreground" data-testid="lead-gwg-id-entered-by">
+              {identityDocumentEnteredLine(identification, tx)}
+              {identification.id_document_unreadable ? (
+                <span className={cn("font-medium", WARNING_TEXT)}>
+                  {identityDocumentEnteredLine(identification, tx) ? " · " : ""}
+                  {tx("документ нечитаем", "Ausweis unleserlich")}
+                </span>
+              ) : null}
+            </p>
+          ) : null}
+        >
+          <Statement label={tx("Вид документа", "Art des Dokuments")}>
+            {idDocumentTypeLabel(identification.id_document_type, tx)}
           </Statement>
-        ))}
-      </StatementGroup>
-      ) : null}
+          <Statement label={tx("Номер", "Nummer")}>{identification.id_document_number}</Statement>
+          <Statement label={tx("Кем выдан", "Ausstellende Behörde")}>{identification.id_issuing_authority}</Statement>
+          <Statement label={tx("Страна выдачи", "Ausstellungsland")}>{country(identification.id_issuing_country)}</Statement>
+          <Statement label={tx("Дата выдачи", "Ausgestellt am")}>{formatAppDate(identification.id_issued_on)}</Statement>
+          <Statement label={tx("Действителен до", "Gültig bis")} warning={validity !== "valid"} testId="lead-gwg-id-valid-until">
+            {validity === "missing"
+              ? tx("не указано", "nicht angegeben")
+              : validity === "expired"
+                ? `${formatAppDate(identification.id_valid_until)} · ${tx("срок истёк", "abgelaufen")}`
+                : formatAppDate(identification.id_valid_until)}
+          </Statement>
+          <Statement label={tx("Загруженные файлы", "Hochgeladene Dateien")} className="col-span-full" testId="lead-gwg-identity-documents">
+            {intake.identity_documents.length > 0 ? <UploadedFiles documents={intake.identity_documents} tx={tx} /> : null}
+          </Statement>
+        </StatementGroup>
+
+        {representationGroup}
+
+        {ownAccountShown || paymentBackgroundShown ? (
+          <StatementGroup
+            card
+            title={tx("Экономический интерес (раздел «Кто платит»)", "Wirtschaftliches Interesse (Abschnitt „Wer zahlt“)")}
+            columns="grid-cols-1 sm:grid-cols-3"
+          >
+            {ownAccountShown ? (
+              <Statement
+                label={tx("В собственных экономических интересах", "Im eigenen wirtschaftlichen Interesse")}
+                warning={ownAccount.answer === false}
+                testId="lead-gwg-own-account"
+              >
+                {answerLabel(ownAccount.answer, tx)}
+              </Statement>
+            ) : null}
+            {ownAccount.answer === false ? (
+              <Statement label={tx("В чьих интересах", "Wirtschaftlich Berechtigter")} className="col-span-full">
+                {ownAccount.beneficialOwner}
+              </Statement>
+            ) : null}
+            {paymentBackgroundShown ? (
+              <Statement
+                label={tx("Почему платит третье лицо", "Hintergrund der Zahlung durch Dritte")}
+                className="col-span-full"
+                testId="lead-gwg-payment-background"
+              >
+                {paymentBackground}
+              </Statement>
+            ) : null}
+          </StatementGroup>
+        ) : null}
+
+        {enhancedDetailsShown(intake.enhanced_details) ? <EnhancedDetailsGroup card details={intake.enhanced_details} tx={tx} /> : null}
+        <RelationshipProofGroup card details={intake.enhanced_details} tx={tx} onDownload={onDownloadDocument} fallbackRequested={askedBlocks.includes("B") && payer?.payer_kind === "third_party"} />
+
+        <LeadGwgFollowUpAnswers cards identification={identification} tx={tx} lang={lang} />
+
+
+        {billingGroup}
+
+        {payerGroup ? <div className="col-span-full min-w-0">{payerGroup}</div> : null}
+        {organisationGroup}
+
+        {legalAnswers.length > 0 ? (
+        <StatementGroup card wide title={tx("Юридические вопросы", "Rechtliche Fragen")} columns="grid-cols-1 sm:grid-cols-2">
+          {legalAnswers.map((item) => (
+            <Statement
+              key={item.key}
+              label={item.question}
+              sentence
+              warning={item.answer === true}
+              testId={`lead-gwg-answer-${item.key}`}
+            >
+              <span className={item.answer === true ? "font-semibold" : undefined}>{answerLabel(item.answer, tx)}</span>
+              {item.details ? <span className="mt-0.5 block whitespace-pre-line">{item.details}</span> : null}
+            </Statement>
+          ))}
+        </StatementGroup>
+        ) : null}
+      </div>
 
       <p className="border-t border-border/50 pt-3 text-xs text-muted-foreground" data-testid="lead-gwg-declared-correct">
         {identification.declared_correct_at
           ? `${tx("Подтвердил правильность:", "Richtigkeit bestätigt am")} ${formatAppDateTime(identification.declared_correct_at)}`
           : `${tx("Подтвердил правильность:", "Richtigkeit bestätigt:")} ${tx("ещё нет", "noch nicht")}`}
       </p>
-    </div>
+    </PatientStatementsPanel>
   );
 }

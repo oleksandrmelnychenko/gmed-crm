@@ -3,6 +3,7 @@ import { Check, FileSignature, FileText, LoaderCircle, Send, ShieldCheck } from 
 
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
@@ -120,7 +121,7 @@ export function LeadPayerPackagePanel({
         </span>
         {status ? (
           <span className="inline-flex" data-testid="lead-payer-package-badge" data-status={pkg?.status}>
-            <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+            <StatusChip tone={pkg?.status === "prepared" ? "success" : status.tone === "brand" ? "info" : status.tone}>{status.label}</StatusChip>
           </span>
         ) : null}
         {pkg?.test_mode ? (
@@ -129,12 +130,6 @@ export function LeadPayerPackagePanel({
           </span>
         ) : null}
       </div>
-      <p className="text-xs leading-5 text-muted-foreground">
-        {tx(
-          "Плательщик получает один пакет из четырёх документов для квалифицированной электронной подписи (QES) через Skribble. QES одновременно идентифицирует плательщика по GwG.",
-          "Der Zahler erhält ein Paket mit vier Dokumenten zur qualifizierten elektronischen Signatur (QES) über Skribble. Die QES identifiziert den Zahler zugleich nach dem GwG.",
-        )}
-      </p>
       {signer ? (
         <p className="break-words text-xs leading-5 text-foreground" data-testid="lead-payer-package-signer">
           <span className="text-muted-foreground">{tx("Подписывает: ", "Unterschreibt: ")}</span>
