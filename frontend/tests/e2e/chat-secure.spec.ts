@@ -292,6 +292,7 @@ async function installSecureChatApiMocks(
         email: meEmail,
         name: meName,
         role: meRole,
+        patients: meRole === "patient" ? [{ id: "subscribed-patient", name: meName, patient_number: "P-1", has_active_subscription: true }] : [],
         created_at: "2026-01-01T00:00:00Z",
       });
     }
