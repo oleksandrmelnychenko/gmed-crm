@@ -100,11 +100,16 @@ test("cabinet edits, upload, submission and staff data survive a real API round 
   const consent = page.getByTestId("lead-request-consent-form");
   const core = consent.locator("label").filter({ has: page.locator("[data-consent-required]") });
   expect(await core.count()).toBe(3);
-  for (const label of await core.all()) await label.getByRole("checkbox").check();
   await settleDisposableClock(lead.id);
-  await page.getByTestId("lead-request-consent-form-save").click();
-  await expect(page.getByTestId("lead-request-consent-form-save")).toBeDisabled();
-  await page.locator('[data-step="send"]').click();
+  const consentSaved = page.waitForResponse((response) =>
+    response.url().endsWith(`/me/lead-requests/${lead.id}/consent-choices`) &&
+    response.request().method() === "POST",
+  );
+  for (const label of await core.all()) await label.getByRole("checkbox").check();
+  await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
+  // Next flushes the choices, including a click before the autosave debounce.
+  await page.getByRole("button", { name: "Weiter", exact: true }).click();
+  expect((await consentSaved).ok()).toBe(true);
   await expect(page.getByTestId("lead-request-changed")).toBeVisible();
   await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
   await settleDisposableClock(lead.id);
@@ -113,6 +118,9 @@ test("cabinet edits, upload, submission and staff data survive a real API round 
   const final = await getJson(request, base, patientHeaders);
   expect(final.changed_since_submit).toBe(false);
   expect(final.consent_form.chosen_at).toBeTruthy();
+  expect(final.consent_form.choices).toMatchObject({
+    agency_processing: true, doctors_to_agency: true, data_system: true,
+  });
   const reviewed = await getJson(request, `${api}/api/v1/leads/${lead.id}/portal-intake`, staffHeaders);
   expect(reviewed.consent_form.choices).toEqual(final.consent_form.choices);
 });
