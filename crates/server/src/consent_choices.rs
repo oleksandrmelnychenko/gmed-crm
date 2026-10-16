@@ -26,7 +26,7 @@
 //!   does not consent simply saves nothing; the form then goes on paper
 //!   (QA 2026-10-12, A2-02).
 //! * A generated form prints «[x]» only for what was chosen and «[ ]» for the
-//!   rest, names who chose and when, and keeps the choice in its
+//!   rest and keeps who chose, when and the choice itself in its
 //!   `generated_bindings` ([`BINDING_KEY`]). The adult form
 //!   (`privacy_consents`) and the minor's forms ([`CHILD_TEMPLATES`], the
 //!   parents or the guardian declare for the child) use the same options.
@@ -56,6 +56,8 @@ pub const CHILD_TEMPLATES: [&str; 2] =
     ["consent_data_release_child", "consent_data_release_single"];
 /// Key of the choice inside `documents.generated_bindings`.
 pub const BINDING_KEY: &str = "_own_consent_choice";
+/// Marks patient forms that reproduce the scoped disclosure (since 2026-10-16).
+pub const PATIENT_FORM_DISCLOSURE_KEY: &str = "_third_party_disclosure_recorded";
 /// Version of the option texts shown in the cabinet.
 pub const TEXT_VERSION: &str = "2026-10-12";
 /// Refusal of an electronic signature: no own choice in the document.
@@ -309,10 +311,10 @@ pub struct OwnConsentChoice {
     /// The login that chose.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chosen_by: Option<Uuid>,
-    /// The name printed in the note, resolved when the form is generated.
+    /// The chooser's name, resolved when the form is generated and kept as evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chosen_by_name: Option<String>,
-    /// The chooser's role printed after the name ("Personensorgeberechtigte/r").
+    /// The chooser's role ("Personensorgeberechtigte/r"), kept as evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chosen_by_role: Option<String>,
     /// The chooser's e-mail addresses (login and contact, lower case): one of
@@ -348,37 +350,6 @@ impl OwnConsentChoice {
             .and_then(|bindings| bindings.get(BINDING_KEY))
             .cloned()
             .and_then(|value| serde_json::from_value(value).ok())
-    }
-
-    /// The line under the boxes: who chose, and the date and time
-    /// (Europe/Berlin) of the choice.
-    pub fn printed_note(&self) -> String {
-        let local = crate::app_time::local(self.chosen_at);
-        let (date, time) = (local.format("%d.%m.%Y"), local.format("%H:%M"));
-        let name = self
-            .chosen_by_name
-            .as_deref()
-            .map(str::trim)
-            .filter(|name| !name.is_empty());
-        match name {
-            Some(name) => {
-                let who = match self
-                    .chosen_by_role
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|role| !role.is_empty())
-                {
-                    Some(role) => format!("{name} ({role})"),
-                    None => name.to_string(),
-                };
-                format!(
-                    "Die Auswahl hat {who} am {date} um {time} Uhr selbst im GMED-Kundenkabinett getroffen; angekreuzt ist nur diese Auswahl."
-                )
-            }
-            None => format!(
-                "Die Auswahl hat die unterzeichnende Person am {date} um {time} Uhr selbst im GMED-Kundenkabinett getroffen; angekreuzt ist nur, was sie gewählt hat."
-            ),
-        }
     }
 
     /// Whether one of `signer_emails` is the person who chose. `true` when
@@ -517,7 +488,7 @@ where
     ))
 }
 
-/// The person who chose, as the generated form names it: for the lead's own
+/// The person who chose, as the generated form records it: for the lead's own
 /// login the person the form is about (`subject_name`, `subject_email`); for
 /// a parent's, guardian's or representative's login the representative the
 /// login belongs to, with the role the form gives them. Fills
@@ -628,6 +599,18 @@ pub async fn changed_since_generation(
     lead_id: Option<Uuid>,
     patient_id: Option<Uuid>,
 ) -> Result<Option<&'static str>, sqlx::Error> {
+    if template == Some("lead_self_disclosure") {
+        // Existing signed patient forms predate the disclosure section.
+        // Preserve their evidence; only new forms promise this snapshot.
+        if bindings.and_then(|value| value.get(PATIENT_FORM_DISCLOSURE_KEY))
+            != Some(&Value::Bool(true))
+        {
+            return Ok(None);
+        }
+        let recorded = OwnConsentChoice::from_bindings(bindings);
+        let current = current_for(db, lead_id, patient_id).await?;
+        return Ok(disclosure_changed(recorded.as_ref(), current.as_ref()).then_some(CHANGED));
+    }
     if !needs_own_choice(template) {
         return Ok(None);
     }
@@ -636,6 +619,25 @@ pub async fn changed_since_generation(
     };
     let current = current_for(db, lead_id, patient_id).await?;
     Ok((current.map(|choice| choice.id) != Some(recorded.id)).then_some(CHANGED))
+}
+
+/// The patient form reproduces the disclosure, not unrelated channel choices.
+fn disclosure_changed(
+    recorded: Option<&OwnConsentChoice>,
+    current: Option<&OwnConsentChoice>,
+) -> bool {
+    let snapshot = |choice: Option<&OwnConsentChoice>| {
+        choice
+            .filter(|choice| choice.disclosure.is_some() || choice.choices.named_recipients)
+            .map(|choice| {
+                (
+                    choice.disclosure.clone(),
+                    choice.recipients.clone(),
+                    choice.choices.named_recipients,
+                )
+            })
+    };
+    snapshot(recorded) != snapshot(current)
 }
 
 /// The consent forms of a package whose chooser is not among the client
@@ -686,6 +688,61 @@ mod tests {
             chosen_by_emails: Vec::new(),
             lead_id: None,
         }
+    }
+
+    #[test]
+    fn patient_form_checks_the_same_disclosure_people_and_scope_as_the_consent() {
+        let mut recorded = choice();
+        recorded.choices.named_recipients = true;
+        recorded.recipients = vec![ConsentRecipient {
+            name: "Max Muster".into(),
+            relation: "friend".into(),
+            contact: Some("max@example.test".into()),
+            scope: Some("Nur Rechnungen".into()),
+        }];
+        recorded.disclosure = Some(DisclosureDecision {
+            allow_disclosure: true,
+            consent_given: true,
+            version: DISCLOSURE_VERSION.into(),
+            language: "de".into(),
+            chosen_at: recorded.chosen_at,
+            chosen_by: Uuid::nil(),
+            chosen_by_name: Some("Anna Muster".into()),
+            access_kind: "self".into(),
+            company_name: "GMED Test".into(),
+            consent_text: disclosure_consent_text("de", "GMED Test"),
+        });
+        let mut current = recorded.clone();
+        current.id = Uuid::new_v4();
+        current.choices.channel_whatsapp = !current.choices.channel_whatsapp;
+        assert!(!disclosure_changed(Some(&recorded), Some(&current)));
+        for key in ["name", "relation", "contact", "scope"] {
+            let mut changed = current.clone();
+            let person = &mut changed.recipients[0];
+            match key {
+                "name" => person.name = "Different Person".into(),
+                "relation" => person.relation = "spouse".into(),
+                "contact" => person.contact = Some("other@example.test".into()),
+                "scope" => person.scope = Some("Medizinische Informationen".into()),
+                _ => unreachable!(),
+            }
+            assert!(disclosure_changed(Some(&recorded), Some(&changed)), "{key}");
+        }
+        assert!(disclosure_changed(None, Some(&recorded)));
+        assert!(disclosure_changed(Some(&recorded), None));
+        assert!(!disclosure_changed(None, None));
+        let mut legacy = recorded.clone();
+        legacy.disclosure = None;
+        assert!(!disclosure_changed(Some(&legacy), Some(&legacy)));
+        assert!(disclosure_changed(None, Some(&legacy)));
+        let mut edited_legacy = legacy.clone();
+        edited_legacy.recipients[0].scope = Some("Andere Informationen".into());
+        assert!(disclosure_changed(Some(&legacy), Some(&edited_legacy)));
+        current.disclosure.as_mut().unwrap().allow_disclosure = false;
+        current.disclosure.as_mut().unwrap().consent_given = false;
+        current.choices.named_recipients = false;
+        current.recipients.clear();
+        assert!(disclosure_changed(Some(&recorded), Some(&current)));
     }
 
     #[test]
@@ -883,7 +940,7 @@ mod tests {
     }
 
     #[test]
-    fn the_recorded_choice_round_trips_and_prints_its_date_in_berlin_time() {
+    fn the_recorded_choice_round_trips_with_its_timestamp() {
         let recorded = choice();
         let bindings = json!({ "_signature_anchors": [], BINDING_KEY: recorded.binding() });
         assert_eq!(
@@ -892,10 +949,7 @@ mod tests {
         );
         assert!(recorded.choices.any_channel());
         assert!(!ConsentChoices::default().any_channel());
-        let note = recorded.printed_note();
-        assert!(note.contains("12.10.2026"), "{note}");
-        assert!(note.contains("10:05"), "{note}");
-        assert!(note.contains("unterzeichnende Person"), "{note}");
+        assert_eq!(bindings[BINDING_KEY]["chosen_at"], "2026-10-12T08:05:00Z");
         // An unknown option is no valid choice.
         let tampered = json!({ BINDING_KEY: {
             "id": Uuid::nil(), "chosen_at": "2026-10-12T08:05:00Z", "source": "lead_portal",
@@ -905,19 +959,18 @@ mod tests {
     }
 
     #[test]
-    fn the_note_names_who_chose_and_only_that_person_may_sign() {
+    fn the_record_keeps_who_chose_and_only_that_person_may_sign() {
         let mut parent = choice();
         parent.access_kind = Some("guardian".into());
         parent.chosen_by = Some(Uuid::nil());
         parent.chosen_by_name = Some("Maria MusterAR".into());
         parent.chosen_by_role = Some("Personensorgeberechtigte/r".into());
         parent.chosen_by_emails = vec!["maria.parent@example.com".into()];
-        let note = parent.printed_note();
-        assert!(
-            note.contains("Die Auswahl hat Maria MusterAR (Personensorgeberechtigte/r) am 12.10.2026 um 10:05 Uhr"),
-            "{note}"
+        assert_eq!(parent.binding()["chosen_by_name"], "Maria MusterAR");
+        assert_eq!(
+            parent.binding()["chosen_by_role"],
+            "Personensorgeberechtigte/r"
         );
-        assert!(!note.contains("unterzeichnende Person"), "{note}");
         let restored =
             OwnConsentChoice::from_bindings(Some(&json!({ BINDING_KEY: parent.binding() })))
                 .unwrap();

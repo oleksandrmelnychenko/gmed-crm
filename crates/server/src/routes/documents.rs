@@ -18137,6 +18137,12 @@ async fn generate_document(
                 Ok(disclosure) => disclosure,
                 Err(response) => return response,
             };
+            generated_bindings_snapshot.get_or_insert_with(|| json!({}))
+                [crate::consent_choices::PATIENT_FORM_DISCLOSURE_KEY] = json!(true);
+            if let Some(choice) = &disclosure.consent_choice {
+                generated_bindings_snapshot.get_or_insert_with(|| json!({}))
+                    [crate::consent_choices::BINDING_KEY] = choice.binding();
+            }
             let agency = match load_agency_contract_settings(&state).await {
                 Ok(value) => value,
                 Err(resp) => return resp,
@@ -24991,6 +24997,8 @@ struct LeadDisclosureRecipient {
 #[derive(Clone, Debug, Default)]
 struct LeadSelfDisclosure {
     submitted_at: chrono::DateTime<chrono::Utc>,
+    /// The same immutable decision and recipients as the consent document.
+    consent_choice: Option<crate::consent_choices::OwnConsentChoice>,
     /// When the follow-up answers were sent, if after the request: the form
     /// says so beside the request's time (QA 2026-10-12, round 3).
     follow_up_sent_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -25195,6 +25203,9 @@ async fn load_lead_self_disclosure(
     .map_err(|error| failed(error, "follow-up answers"))?
     .flatten()
     .filter(|answered_at| *answered_at > submitted_at);
+    let consent_choice = crate::consent_choices::current_for(&mut *conn, Some(lead_id), None)
+        .await
+        .map_err(|error| failed(error, "third-party disclosure"))?;
     conn.commit()
         .await
         .map_err(|error| failed(error, "snapshot complete"))?;
@@ -25327,6 +25338,7 @@ async fn load_lead_self_disclosure(
         .map(fmt_money_de);
     Ok(LeadSelfDisclosure {
         submitted_at,
+        consent_choice,
         follow_up_sent_at,
         invoice_recipient,
         payment_route,
@@ -26047,7 +26059,33 @@ fn build_lead_self_disclosure_pdf(
         ],
     );
 
-    // 7. The declaration of § 11 Abs. 6 GwG and the signature of the
+    if let Some(choice) = data
+        .consent_choice
+        .as_ref()
+        .filter(|choice| choice.disclosure.is_none())
+    {
+        // An older named-recipient choice has its own wording, not a new
+        // disclosure decision. Reproduce its people without adding consent.
+        let recipients = choice.recipient_lines();
+        if !recipients.is_empty() {
+            layout.ensure_space(20.0);
+            layout.text_block(
+                "Empfänger der Datenübermittlung",
+                12.0,
+                true,
+                0.0,
+                TreatmentPlanPdfColor::Body,
+                3.0,
+                2.0,
+            );
+            for line in recipients {
+                fc_body(&mut layout, &line);
+            }
+        }
+    }
+    append_third_party_disclosure_pdf(&mut layout, data.consent_choice.as_ref());
+
+    // The declaration of § 11 Abs. 6 GwG and the signature of the
     // patient side: the patient, for a minor every legal representative
     // (frames `guardian_1`, `guardian_2` like the minors' consent).
     let representatives = data
@@ -26226,6 +26264,35 @@ fn append_third_party_disclosure_pdf(
     let Some(disclosure) = &choice.disclosure else {
         return;
     };
+    let intro = "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
+    let guardian_intro = "Die folgenden Angaben und die Einwilligung erklärt die vertretende Person für die oben bezeichnete Person.";
+    let question = "Soll eine weitere Person Auskunft erhalten dürfen?";
+    let no = "Nein, nur ich selbst.";
+    let yes = "Ja, folgende Person(en) dürfen Auskunft erhalten:";
+    let recipients = choice.recipient_lines();
+    let checkbox_height = |text: &str| {
+        wrap_text_to_width_precise(&format!("[x]  {text}"), 10.5, layout.available_width(4.0)).len()
+            as f32
+            * pdf_line_height_mm(10.5, 1.45)
+            + 1.5
+    };
+    let opening_height = 5.0
+        + pdf_line_height_mm(12.0, 1.45)
+        + admin_block_height_mm(layout, intro, 0.0, 2.0)
+        + if disclosure.access_kind == "guardian" {
+            admin_block_height_mm(layout, guardian_intro, 0.0, 2.0)
+        } else {
+            0.0
+        };
+    let answers_height = admin_block_height_mm(layout, question, 0.0, 2.0)
+        + checkbox_height(no)
+        + checkbox_height(yes)
+        + recipients
+            .first()
+            .map(|line| admin_block_height_mm(layout, line, 0.0, 2.0))
+            .unwrap_or(0.0);
+    // Keep the heading with its explanation, then the answers with their question.
+    layout.ensure_space(opening_height);
     layout.text_block(
         "Auskunft an Dritte",
         12.0,
@@ -26236,28 +26303,15 @@ fn append_third_party_disclosure_pdf(
         2.0,
     );
     if disclosure.access_kind == "guardian" {
-        fc_body(
-            layout,
-            "Die folgenden Angaben und die Einwilligung erklärt die vertretende Person für die oben bezeichnete Person.",
-        );
+        fc_body(layout, guardian_intro);
     }
-    fc_body(
-        layout,
-        "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.",
-    );
-    fc_body(layout, "Soll eine weitere Person Auskunft erhalten dürfen?");
-    adult_legal_checkbox(
-        layout,
-        !disclosure.allow_disclosure,
-        "Nein, nur ich selbst.",
-    );
-    adult_legal_checkbox(
-        layout,
-        disclosure.allow_disclosure,
-        "Ja, folgende Person(en) dürfen Auskunft erhalten:",
-    );
+    fc_body(layout, intro);
+    layout.ensure_space(answers_height);
+    fc_body(layout, question);
+    adult_legal_checkbox(layout, !disclosure.allow_disclosure, no);
+    adult_legal_checkbox(layout, disclosure.allow_disclosure, yes);
     if disclosure.allow_disclosure {
-        for line in choice.recipient_lines() {
+        for line in recipients {
             fc_body(layout, &line);
         }
         fc_body(
@@ -26273,20 +26327,6 @@ fn append_third_party_disclosure_pdf(
     fc_body(
         layout,
         "Hinweis: Nur die hier genannten Personen dürfen Auskunft erhalten. Änderungen oder den Widerruf teilen Sie uns bitte einfach kurz mit.",
-    );
-    let date = crate::app_time::local(disclosure.chosen_at)
-        .format("%d.%m.%Y %H:%M")
-        .to_string();
-    let who = disclosure
-        .chosen_by_name
-        .as_deref()
-        .unwrap_or("die erklärende Person");
-    fc_body(
-        layout,
-        &format!(
-            "Auswahl und Einwilligung im Kundenkabinett: {who}, {date} Uhr; Textversion {}, Sprache {}.",
-            disclosure.version, disclosure.language
-        ),
     );
 }
 
@@ -26313,17 +26353,14 @@ fn build_adult_privacy_consents_pdf(
         "Einverständniserklärung zur Datenübermittlung",
     );
     adult_legal_identity_block(&mut layout, party, true);
-    // "meine eigene Auswahl" only when the person chose with the own login;
-    // a representative's choice is named as such in the note below (QA
-    // 2026-10-12, A2-06).
+    // Choice provenance stays in generated_bindings and the audit history,
+    // rather than adding system instructions to the signed consent text.
     fc_body(
         &mut layout,
-        match own_choice {
-            Some(choice) if choice.access_kind.as_deref() == Some("guardian") => {
-                "bin damit einverstanden (angekreuzt ist die im GMED-Kundenkabinett getroffene Auswahl):"
-            }
-            Some(_) => "bin damit einverstanden (angekreuzt ist meine eigene Auswahl):",
-            None => "bin damit einverstanden (bitte ankreuzen):",
+        if own_choice.is_some() {
+            "bin damit einverstanden:"
+        } else {
+            "bin damit einverstanden (bitte ankreuzen):"
         },
     );
     adult_legal_checkbox(
@@ -26393,9 +26430,6 @@ fn build_adult_privacy_consents_pdf(
     ] {
         adult_legal_channel(&mut layout, picked, channel);
     }
-    if let Some(choice) = own_choice {
-        fc_body(&mut layout, &choice.printed_note());
-    }
     append_third_party_disclosure_pdf(&mut layout, own_choice);
     fc_body(
         &mut layout,
@@ -26423,10 +26457,10 @@ fn build_adult_privacy_consents_pdf(
         &mut layout,
         "Die Verarbeitung von personenbezogenen und Gesundheitsdaten bleibt bis zum Zeitpunkt des Widerrufs oder solange gesetzliche Aufbewahrungsfristen bestehen rechtmäßig.",
     );
-    fc_body(
-        &mut layout,
-        "Die Aufklärung gemäß EU-Datenschutz-Grundverordnung (DS-GVO) ist erfolgt. Ich wurde darüber aufgeklärt, dass ich ein Recht auf Auskunft, Berichtigung, Löschung oder Einschränkung der Verarbeitung meiner personenbezogenen Daten habe und diese Rechte jederzeit geltend machen kann.",
-    );
+    let closing = "Die Aufklärung gemäß EU-Datenschutz-Grundverordnung (DS-GVO) ist erfolgt. Ich wurde darüber aufgeklärt, dass ich ein Recht auf Auskunft, Berichtigung, Löschung oder Einschränkung der Verarbeitung meiner personenbezogenen Daten habe und diese Rechte jederzeit geltend machen kann.";
+    let closing_height = admin_block_height_mm(&layout, closing, 0.0, 2.0);
+    keep_closing_with_signature_rows(&mut layout, closing_height, 1);
+    fc_body(&mut layout, closing);
     adult_legal_signature_line(&mut layout, party, bindings);
 
     Ok(finalize_generated_pdf(document, layout))
@@ -26585,14 +26619,11 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     let chosen = own_choice.map(|choice| choice.choices).unwrap_or_default();
     admin_block(
         &mut layout,
-        &format!(
-            "{verb} damit einverstanden ({}):",
-            if own_choice.is_some() {
-                "angekreuzt ist die im GMED-Kundenkabinett getroffene Auswahl"
-            } else {
-                "bitte ankreuzen"
-            }
-        ),
+        &if own_choice.is_some() {
+            format!("{verb} damit einverstanden:")
+        } else {
+            format!("{verb} damit einverstanden (bitte ankreuzen):")
+        },
         0.0,
         1.0,
     );
@@ -26687,9 +26718,6 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
         ("Telegram-Messenger", chosen.channel_telegram),
     ] {
         adult_legal_channel(&mut layout, picked, channel);
-    }
-    if let Some(choice) = own_choice {
-        admin_block(&mut layout, &choice.printed_note(), 0.0, 1.0);
     }
     append_third_party_disclosure_pdf(&mut layout, own_choice);
     admin_block(
@@ -35787,8 +35815,19 @@ mod tests {
         assert!(!text.contains("GMED-Kundenkabinett"), "{text}");
     }
 
-    /// QA 2026-10-12, A2-06: the minor's form ticks what the parent chose in
-    /// the cabinet and names that parent; the child stays the data subject.
+    fn write_consent_review_sample(name: &str, pdf: &super::GeneratedPdf) {
+        for page in normalized_pdf_pages(pdf) {
+            if page.contains("Soll eine weitere Person") {
+                assert!(page.contains("Nein, nur ich selbst."), "{page}");
+                assert!(page.contains("Ja, folgende Person(en)"), "{page}");
+            }
+        }
+        if let Ok(dir) = std::env::var("GMED_SAMPLE_PDF_DIR") {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(std::path::Path::new(&dir).join(name), pdf).unwrap();
+        }
+    }
+
     fn disclosure_test_receipt(
         choice: &crate::consent_choices::OwnConsentChoice,
     ) -> crate::consent_choices::DisclosureDecision {
@@ -35807,7 +35846,7 @@ mod tests {
     }
 
     #[test]
-    fn child_consent_prints_the_parents_own_choice_and_names_who_chose() {
+    fn child_consent_prints_the_parents_choice_without_system_notes() {
         let choice = crate::consent_choices::OwnConsentChoice {
             id: Uuid::nil(),
             choices: crate::consent_choices::ConsentChoices {
@@ -35858,10 +35897,7 @@ mod tests {
             text.contains("von meinem Kind: Mia MusterAR, geb. am 10.05.2015"),
             "{text}"
         );
-        assert!(
-            text.contains("bin damit einverstanden (angekreuzt ist die im GMED-Kundenkabinett getroffene Auswahl)"),
-            "{text}"
-        );
+        assert!(text.contains("bin damit einverstanden:"), "{text}");
         assert!(text.contains("[x] dass alle behandelnden Ärzte"), "{text}");
         assert!(
             text.contains("[ ] dass personenbezogene und medizinische Daten von meinem Kind an"),
@@ -35870,10 +35906,8 @@ mod tests {
         assert!(!text.contains("Oma Beispiel"), "{text}");
         assert!(text.contains("[x] E-mail"), "{text}");
         assert!(text.contains("[ ] WhatsApp-Messenger"), "{text}");
-        assert!(
-            text.contains("Die Auswahl hat Maria MusterAR (Personensorgeberechtigte/r) am 12.10.2026 um 11:06 Uhr"),
-            "{text}"
-        );
+        assert!(!text.contains("GMED-Kundenkabinett"), "{text}");
+        assert!(!text.contains("Die Auswahl hat"), "{text}");
         // Never the adult first-person wording in the child's name.
         assert!(!text.contains("Ich, Mia MusterAR"), "{text}");
         assert!(!text.contains("meine eigene Auswahl"), "{text}");
@@ -35893,7 +35927,16 @@ mod tests {
             scope: Some("Nur organisatorische Informationen".into()),
         }];
         selected.disclosure = Some(disclosure_test_receipt(selected));
-        let selected_text = normalized_pdf_text(&build_consent_pdf(&context).unwrap());
+        let selected_pdf = build_consent_pdf(&context).unwrap();
+        write_consent_review_sample("child-consent-third-parties-yes.pdf", &selected_pdf);
+        let selected_text = normalized_pdf_text(&selected_pdf);
+        assert!(
+            selected_text
+                .contains("[x] dass personenbezogene und medizinische Daten von meinem Kind an"),
+            "{selected_text}"
+        );
+        assert!(!selected_text.contains("Kundenkabinett"), "{selected_text}");
+        assert!(!selected_text.contains("Textversion"), "{selected_text}");
         assert!(selected_text.contains("Chosen Clinic"), "{selected_text}");
         assert!(
             selected_text.contains("chosen@example.test"),
@@ -35927,7 +35970,14 @@ mod tests {
             .unwrap()
             .choices
             .named_recipients = false;
-        let unchecked = normalized_pdf_text(&build_consent_pdf(&context).unwrap());
+        let unchecked_pdf = build_consent_pdf(&context).unwrap();
+        write_consent_review_sample("child-consent-third-parties-no.pdf", &unchecked_pdf);
+        let unchecked = normalized_pdf_text(&unchecked_pdf);
+        assert!(
+            unchecked
+                .contains("[ ] dass personenbezogene und medizinische Daten von meinem Kind an"),
+            "{unchecked}"
+        );
         assert!(!unchecked.contains("Chosen Clinic"), "{unchecked}");
         assert!(
             unchecked.contains("[x] Nein, nur ich selbst."),
@@ -36305,7 +36355,7 @@ mod tests {
         assert!(!consent_text.contains('?'));
 
         // The person's own choice from the lead cabinet: «[x]» only for what
-        // they chose, with the date of the choice (2026-10-12).
+        // they chose; evidence stays in generated bindings.
         let own = crate::consent_choices::OwnConsentChoice {
             id: Uuid::nil(),
             choices: crate::consent_choices::ConsentChoices {
@@ -36349,14 +36399,10 @@ mod tests {
         assert!(chosen_text.contains("[ ] Threema-Messenger"));
         assert!(chosen_text.contains("[x] WhatsApp-Messenger"));
         assert!(chosen_text.contains("[ ] Telegram-Messenger"));
-        assert!(chosen_text.contains("angekreuzt ist meine eigene Auswahl"));
-        assert!(chosen_text.contains("12.10.2026 um 10:05 Uhr"));
-        assert!(chosen_text.contains("GMED-Kundenkabinett"));
-        // The note names who chose (QA 2026-10-12).
-        assert!(
-            chosen_text.contains("Die Auswahl hat Erika Beispiel am 12.10.2026 um 10:05 Uhr"),
-            "{chosen_text}"
-        );
+        assert!(chosen_text.contains("bin damit einverstanden:"));
+        assert!(!chosen_text.contains("angekreuzt ist"));
+        assert!(!chosen_text.contains("GMED-Kundenkabinett"));
+        assert!(!chosen_text.contains("Die Auswahl hat"));
         assert!(!chosen_text.contains("Maria Beispiel, Vertrauenskontakt"));
         assert!(!chosen_text.contains('?'));
         // Even with a saved selection, neither staff nor legacy contacts are
@@ -36378,7 +36424,19 @@ mod tests {
             Some(&named),
         )
         .unwrap();
+        write_consent_review_sample("adult-consent-third-parties-yes.pdf", &selected);
+        assert!(
+            normalized_pdf_pages(&selected)
+                .last()
+                .unwrap()
+                .contains("Die Aufklärung gemäß")
+        );
         let selected_text = normalized_pdf_text(&selected);
+        assert!(
+            selected_text
+                .contains("[x] dass meine personenbezogenen und medizinischen Daten an folgende"),
+            "{selected_text}"
+        );
         assert!(
             selected_text.contains("Umfang der Auskunft: Nur Rechnungen"),
             "{selected_text}"
@@ -36392,9 +36450,11 @@ mod tests {
             "{selected_text}"
         );
         assert!(
-            selected_text.contains("Original Disclosure Chooser"),
+            !selected_text.contains("Original Disclosure Chooser"),
             "{selected_text}"
         );
+        assert!(!selected_text.contains("Kundenkabinett"), "{selected_text}");
+        assert!(!selected_text.contains("Textversion"), "{selected_text}");
         assert!(
             selected_text.contains("Chosen Adult Recipient"),
             "{selected_text}"
@@ -36414,6 +36474,11 @@ mod tests {
             Some(&named),
         )
         .unwrap();
+        write_consent_review_sample("adult-consent-third-parties-no.pdf", &unchecked);
+        assert!(
+            normalized_pdf_text(&unchecked)
+                .contains("[ ] dass meine personenbezogenen und medizinischen Daten an folgende")
+        );
         assert!(!normalized_pdf_text(&unchecked).contains("Chosen Adult Recipient"));
         assert!(normalized_pdf_text(&unchecked).contains("[x] Nein, nur ich selbst."));
         // A representative's choice is never "meine eigene Auswahl".
@@ -36438,7 +36503,11 @@ mod tests {
             "{represented_text}"
         );
         assert!(
-            represented_text.contains("Die Auswahl hat Viktor Zahler (bevollmächtigte Person) am"),
+            !represented_text.contains("Die Auswahl hat"),
+            "{represented_text}"
+        );
+        assert!(
+            !represented_text.contains("Kundenkabinett"),
             "{represented_text}"
         );
 
@@ -37291,6 +37360,66 @@ mod tests {
             super::lead_funds_source_label("asset_sale"),
             "Verkauf von Vermögenswerten"
         );
+    }
+
+    #[test]
+    fn the_lead_self_disclosure_and_consent_print_the_same_named_people() {
+        let mut choice: crate::consent_choices::OwnConsentChoice = serde_json::from_value(json!({
+            "id": Uuid::nil(), "choices": { "agency_processing": true,
+                "doctors_to_agency": true, "data_system": true, "named_recipients": true },
+            "chosen_at": "2026-10-16T12:00:00Z", "source": "lead_portal",
+            "recipients": [
+                { "name": "Max Named", "relation": "friend", "contact": "max@example.test", "scope": "Nur Rechnungen" },
+                { "name": "Olga Named", "relation": "relative", "contact": "+49 151 000000", "scope": "Nur Termine" }
+            ]
+        })).unwrap();
+        choice.disclosure = Some(disclosure_test_receipt(&choice));
+        let mut data = anna_lead_disclosure();
+        data.consent_choice = Some(choice.clone());
+        let agency = legal_test_agency();
+        let form =
+            super::build_lead_self_disclosure_pdf(&data, &agency, None, "FORM-NAMED").unwrap();
+        let consent = build_adult_privacy_consents_pdf(
+            &legal_test_party("Germany"),
+            &agency,
+            &DocumentBindingOverrides::default(),
+            "CONSENT-NAMED",
+            Some(&choice),
+        )
+        .unwrap();
+        assert_signature_frames_detected(&form);
+        for pdf in [&form, &consent] {
+            let text = normalized_pdf_text(pdf);
+            for line in choice.recipient_lines() {
+                assert!(text.contains(&line), "{line}: {text}");
+            }
+            assert!(text.contains("[x] Ja, folgende Person(en)"), "{text}");
+            assert!(!text.contains("Kundenkabinett"), "{text}");
+            assert!(!text.contains("Textversion"), "{text}");
+        }
+        write_consent_review_sample("patient-form-third-parties-yes.pdf", &form);
+        let mut legacy = data.clone();
+        legacy.consent_choice.as_mut().unwrap().disclosure = None;
+        let legacy_form =
+            super::build_lead_self_disclosure_pdf(&legacy, &agency, None, "FORM-LEGACY").unwrap();
+        let legacy_text = normalized_pdf_text(&legacy_form);
+        for line in choice.recipient_lines() {
+            assert!(legacy_text.contains(&line), "{legacy_text}");
+        }
+        assert!(
+            !legacy_text.contains("Ich willige ausdrücklich ein"),
+            "no fabricated new decision: {legacy_text}"
+        );
+        let choice = data.consent_choice.as_mut().unwrap();
+        choice.choices.named_recipients = false;
+        choice.disclosure.as_mut().unwrap().allow_disclosure = false;
+        choice.disclosure.as_mut().unwrap().consent_given = false;
+        let withdrawn =
+            super::build_lead_self_disclosure_pdf(&data, &agency, None, "FORM-NO").unwrap();
+        let text = normalized_pdf_text(&withdrawn);
+        assert!(text.contains("[x] Nein, nur ich selbst."), "{text}");
+        assert!(!text.contains("Max Named"), "{text}");
+        assert!(!text.contains("Olga Named"), "{text}");
     }
 
     #[test]

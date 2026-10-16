@@ -806,6 +806,7 @@ pub(crate) async fn invalidate_consent_choices(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
     actor: Uuid,
+    disclosure_changed: bool,
 ) -> Result<(usize, Vec<(Uuid, String)>), sqlx::Error> {
     let rows = sqlx::query(r#"UPDATE document_signature_requests r
         SET status = 'error', last_error = 'consent_choice_changed', closed_kind = 'abandoned',
@@ -815,9 +816,10 @@ pub(crate) async fn invalidate_consent_choices(
           AND EXISTS (SELECT 1 FROM documents d
               WHERE (d.id = r.source_document_id OR EXISTS (SELECT 1 FROM document_signature_members m WHERE m.request_id = r.id AND m.document_id = d.id))
                 AND (d.lead_id = $1 OR d.patient_id IN (SELECT prospect_patient_id FROM leads WHERE id = $1 UNION SELECT converted_patient_id FROM leads WHERE id = $1))
-                AND d.generated_template_id IN ('privacy_consents','consent_data_release_child','consent_data_release_single'))
+                AND (d.generated_template_id IN ('privacy_consents','consent_data_release_child','consent_data_release_single')
+                     OR ($3 AND d.generated_template_id = 'lead_self_disclosure')))
         RETURNING r.id, r.source_document_id, r.provider_request_id, r.provider_account"#)
-        .bind(lead_id).bind(actor).fetch_all(&mut **tx).await?;
+        .bind(lead_id).bind(actor).bind(disclosure_changed).fetch_all(&mut **tx).await?;
     let count = rows.len();
     let mut remote = Vec::new();
     for row in rows {

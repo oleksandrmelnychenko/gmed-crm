@@ -462,11 +462,10 @@ Anlage 1) має поля для позначок: три основні зго�
   `20261012173200_consent_form_choices.sql`.
 - **Документ.** Генерація `privacy_consents` бере найновіший власний вибір
   ліда/пацієнта: «[x]» лише для обраних варіантів (поле «Kommunikationsmedien» —
-  якщо обрано хоч один канал), «[ ]» для решти, рядок «bin damit
-  einverstanden (angekreuzt ist meine eigene Auswahl)» і під полями — дата й
-  час вибору (Europe/Berlin): «Die Auswahl hat die unterzeichnende Person am
-  DD.MM.YYYY um HH:MM Uhr selbst im GMED-Kundenkabinett getroffen; angekreuzt
-  ist nur, was sie gewählt hat.» Вибір записується в `generated_bindings`
+  якщо обрано хоч один канал), «[ ]» для решти та рядок «bin damit
+  einverstanden:». За уточненням власника від 16.10.2026 службові рядки про
+  вибір у кабінеті, дату, версію та мову не друкуються у згоді.
+  Вибір разом з особою, роллю та часом записується в `generated_bindings`
   (`_own_consent_choice`: id, варіанти, час, джерело). Без власного вибору
   форма як і раніше друкує всі поля порожніми з «bitte ankreuzen».
   Персонал позначок не ставить ніколи: застарілі ручні прив'язки
@@ -545,13 +544,11 @@ Anlage 1) має поля для позначок: три основні зго�
   лишається безумовним текстом форми. Блок кабінету для батьків/опікуна
   неповнолітнього говорить про дані дитини («данные моего ребёнка» /
   «Daten meines Kindes»).
-- **Хто обрав — той названий і підписує.** Рядок під полями називає особу,
+- **Хто обрав — той підписує.** Метадані документа зберігають особу,
   яка зберегла вибір (з логіна кабінету): для власного логіна — ім'я особи
   з форми, для логіна батьків/опікуна/представника — ім'я представника і
   роль («Personensorgeberechtigte/r», «Vormund», «bevollmächtigte Person»,
-  «rechtliche Betreuung»): «Die Auswahl hat Maria MusterAR
-  (Personensorgeberechtigte/r) am … um … Uhr selbst im GMED-Kundenkabinett
-  getroffen; angekreuzt ist nur diese Auswahl.» Ця особа стоїть першою
+  «rechtliche Betreuung»). Ця особа стоїть першою
   серед батьків у формі й у запропонованих підписантах; e-підпис форми без
   неї серед підписантів-клієнтів (за адресою логіна або контакту)
   відхиляється — 422 `consent_chooser_must_sign` з `document_id`. Документи,
@@ -559,12 +556,21 @@ Anlage 1) має поля для позначок: три основні зго�
 - Порожні адреса, телефон і e-mail у формах згоди друкуються з пропуском,
   що вміщується в рядок (раніше «__» переносився на окремий рядок).
 - Тести: `consent_choices::tests`,
-  `documents::tests::child_consent_prints_the_parents_own_choice_and_names_who_chose`,
+  `documents::tests::child_consent_prints_the_parents_choice_without_system_notes`,
   `documents::tests::empty_consent_fields_get_blanks_that_fit_the_line`,
   інтеграційні `lead_portal_api::a_minor_leads_consent_form_is_the_childs_and_names_the_parent_who_chose`,
   `lead_portal_api::the_lead_chooses_the_consent_form_options_and_the_form_records_the_choice`
   (порожній вибір → 422); фронтенд `lead-request-consent-form.test.tsx`,
   `wizard-document-signing.test.ts`, e2e `lead-cabinet.spec.ts`.
+
+- **Треті особи у формулярі та згоді (16.10.2026).** Обидва PDF друкують
+  рішення «Auskunft an Dritte» з одного незмінного запису `consent_form_choices`:
+  ім'я, зв'язок, контакт та обсяг інформації. Четвертий пункт згоди позначається
+  лише за дозволом на передачу названим третім особам. Зміна рішення або
+  списку робить попередній формуляр застарілим для нового e-підпису і закриває
+  відкриті запрошення; зміна лише каналів зв'язку не робить формуляр застарілим.
+  Перевірка нового блоку позначається `_third_party_disclosure_recorded`;
+  історичні підписані формуляри, які не містили цього блоку, зберігаються.
 
 #### Уточнення після QA 2026-10-12, раунд 3 (A3-01)
 

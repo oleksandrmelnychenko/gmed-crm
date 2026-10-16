@@ -6595,14 +6595,9 @@ async fn a_minor_leads_consent_form_is_the_childs_and_names_the_parent_who_chose
         text.contains("von unserem Kind: Mia MusterKid, geb. am 10.05.2015"),
         "{text}"
     );
-    assert!(
-        text.contains("sind damit einverstanden (angekreuzt ist die im GMED-Kundenkabinett getroffene Auswahl)"),
-        "{text}"
-    );
-    assert!(
-        text.contains("Die Auswahl hat Ben Muster (Personensorgeberechtigte/r) am"),
-        "{text}"
-    );
+    assert!(text.contains("sind damit einverstanden:"), "{text}");
+    assert!(!text.contains("Die Auswahl hat"), "{text}");
+    assert!(!text.contains("Kundenkabinett"), "{text}");
     assert!(text.contains("[x] E-mail"), "{text}");
     assert!(text.contains("[ ] WhatsApp-Messenger"), "{text}");
     // Trusted contacts are not recipients of an explicit consent choice;
@@ -7031,8 +7026,9 @@ async fn a_minors_own_login_is_closed_while_the_parents_have_access() {
     assert_eq!(recorded["chosen_by"], json!(guardian), "{recorded}");
     assert_eq!(recorded["choices"], mine, "{recorded}");
     let text = document_pdf_text(router, document_id, &pm).await;
-    assert!(text.contains("Die Auswahl hat Maria Muster"), "{text}");
-    assert!(!text.contains("Die Auswahl hat Mia"), "{text}");
+    assert_eq!(recorded["chosen_by_name"], "Maria Muster", "{recorded}");
+    assert!(!text.contains("Die Auswahl hat"), "{text}");
+    assert!(!text.contains("Kundenkabinett"), "{text}");
     let (status, state) = json_request(
         router,
         "GET",
@@ -7860,6 +7856,157 @@ fn assert_disclosure_receipt(receipt: &Value, allow: bool, chooser: Uuid, kind: 
             .as_str()
             .is_some_and(|name| !name.trim().is_empty()),
         "{receipt}"
+    );
+}
+
+#[tokio::test]
+async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_stale_people() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    let (lead, user, patient) = lead_with_login(&app, "Form", "form.disclosure@example.com").await;
+    let persons = json!([
+        { "name": "Max Named", "relation": "friend", "contact": "max@example.test", "scope": "Nur Rechnungen" },
+        { "name": "Olga Named", "relation": "relative", "contact": "+49 151 000000", "scope": "Nur Termine" }
+    ]);
+    let (status, decision) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(persons.clone(), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{decision}");
+    let choices = json!({"agency_processing":true,"doctors_to_agency":true,"data_system":true,"named_recipients":true});
+    let (status, chosen) = choose(router, lead, &patient, &choices).await;
+    assert_eq!(status, StatusCode::CREATED, "{chosen}");
+    sqlx::query("UPDATE leads SET portal_submitted_at=clock_timestamp(),portal_submitted_by=$2,portal_field_updates='{}' WHERE id=$1")
+        .bind(lead).bind(user).execute(pool).await.unwrap();
+    let mut generated_ids = Vec::new();
+    for template in ["lead_self_disclosure", "privacy_consents"] {
+        let (status, generated) = json_request(
+            router,
+            "POST",
+            "/api/v1/documents/generate",
+            &pm,
+            Some(json!({"template_id":template,"lead_id":lead,"language":"de"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{generated}");
+        let id: Uuid = generated["id"].as_str().unwrap().parse().unwrap();
+        generated_ids.push(id);
+        let recorded: Value = sqlx::query_scalar(
+            "SELECT generated_bindings->'_own_consent_choice' FROM documents WHERE id=$1",
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(recorded["recipients"], persons, "{recorded}");
+        assert_eq!(recorded["disclosure"], decision["disclosure"], "{recorded}");
+        let text = document_pdf_text(router, id, &pm).await;
+        for person in persons.as_array().unwrap() {
+            for field in ["name", "contact", "scope"] {
+                assert!(
+                    text.contains(person[field].as_str().unwrap()),
+                    "{field}: {text}"
+                );
+            }
+        }
+        assert!(text.contains("[x] Ja, folgende Person(en)"), "{text}");
+        assert!(!text.contains("Kundenkabinett"), "{text}");
+        assert!(!text.contains("Textversion"), "{text}");
+    }
+    let form = generated_ids[0];
+    let marked: bool = sqlx::query_scalar("SELECT (generated_bindings->>'_third_party_disclosure_recorded')::boolean FROM documents WHERE id=$1")
+        .bind(form).fetch_one(pool).await.unwrap();
+    assert!(marked);
+    let invitation = Uuid::new_v4();
+    sqlx::query(r#"INSERT INTO document_signature_requests (id,source_document_id,requested_by,source_sha256,
+        source_context,signers,provider_account,test_mode,status,level,minimum_level)
+        VALUES($1,$2,$3,$4,'{}','[]','trusted-persons-test',true,'pending','QES','QES')"#)
+        .bind(invitation).bind(form).bind(app.patient_manager_id).bind("a".repeat(64)).execute(pool).await.unwrap();
+    let mut channel_change = choices.clone();
+    channel_change["channel_email"] = json!(true);
+    let (status, changed) = choose(router, lead, &patient, &channel_change).await;
+    assert_eq!(status, StatusCode::CREATED, "{changed}");
+    let (_, current) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/documents/{form}/signature-requests"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(current["ineligible_reason"], Value::Null, "{current}");
+    let pending: String =
+        sqlx::query_scalar("SELECT status FROM document_signature_requests WHERE id=$1")
+            .bind(invitation)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        pending, "pending",
+        "channel edits must preserve this invitation"
+    );
+    let changed_persons = json!([{ "name": "Different Named", "relation": "spouse", "contact": "other@example.test", "scope": "Medizinische Informationen" }]);
+    let (status, changed) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(changed_persons, true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    for id in generated_ids {
+        let (_, state) = json_request(
+            router,
+            "GET",
+            &format!("/api/v1/documents/{id}/signature-requests"),
+            &pm,
+            None,
+        )
+        .await;
+        assert_eq!(
+            state["ineligible_reason"], "consent_choice_changed",
+            "{state}"
+        );
+    }
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM document_signature_requests WHERE id=$1")
+            .bind(invitation)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "error");
+    let mut legacy: Value =
+        sqlx::query_scalar("SELECT generated_bindings FROM documents WHERE id=$1")
+            .bind(form)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove(gmed_server::consent_choices::PATIENT_FORM_DISCLOSURE_KEY);
+    assert_eq!(
+        gmed_server::consent_choices::changed_since_generation(
+            pool,
+            Some("lead_self_disclosure"),
+            Some(&legacy),
+            Some(lead),
+            None,
+        )
+        .await
+        .unwrap(),
+        None,
+        "legacy signed forms keep their original evidence"
+    );
+    let text = document_pdf_text(router, form, &pm).await;
+    assert!(
+        text.contains("Max Named") && !text.contains("Different Named"),
+        "old PDFs remain immutable: {text}"
     );
 }
 

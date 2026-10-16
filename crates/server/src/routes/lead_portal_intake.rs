@@ -4240,8 +4240,13 @@ async fn save_consent_choices(
         return internal(error, "mark consent choice update");
     }
     let (invalidated_count, invalidated) =
-        match crate::document_signatures::invalidate_consent_choices(&mut tx, lead_id, auth.user_id)
-            .await
+        match crate::document_signatures::invalidate_consent_choices(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+            false,
+        )
+        .await
         {
             Ok(requests) => requests,
             Err(error) => return internal(error, "invalidate earlier consent invitations"),
@@ -4532,6 +4537,7 @@ async fn save_trusted_persons(
         &mut tx,
         lead_id,
         auth.user_id,
+        true,
     )
     .await
     {
