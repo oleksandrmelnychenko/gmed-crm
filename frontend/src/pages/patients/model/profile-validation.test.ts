@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   blankPatientForm,
+  patientTrustedContactsFromRelations,
+  patientTrustedContactsToPayload,
   type PatientContactFormState,
   type PatientTrustedContactFormState,
 } from "./list-model";
@@ -28,10 +30,37 @@ function contact(id: string, contactKind: "phone" | "email", value: string): Pat
 }
 
 function trusted(id: string, name: string, phone = "", notes = ""): PatientTrustedContactFormState {
-  return { id, persistedId: null, name, phone, relation: "other", notes };
+  return { id, persistedId: null, relatedPatientId: null, name, phone, email: "", relation: "other", notes };
 }
 
 describe("validatePatientProfileForm", () => {
+  it("round-trips a linked mother with e-mail only without losing identity or role", () => {
+    const contacts = patientTrustedContactsFromRelations([{
+      id: "relation-mother", related_patient_id: "patient-mother",
+      related_name: "Anna Muster", relation_type: "mother", is_emergency_contact: true,
+      email: "anna@example.test", phone: null,
+    }]);
+    expect(validatePatientProfileForm(person, [], contacts, true, messages)).toEqual({});
+    expect(patientTrustedContactsToPayload(withMinorGuardianRelations(contacts, true))[0]).toMatchObject({
+      persistedId: "relation-mother", relatedPatientId: "patient-mother",
+      relation: "mother", email: "anna@example.test", phone: "",
+    });
+    expect(validateNewPatientForm({ ...blankPatientForm(), ...person, trustedContacts: contacts }, true, {
+      ...messages, zipGermany: "zip", zipInvalid: "zip", minorNeedsGuardian: "guardian",
+    })).toEqual({});
+  });
+
+  it("retains both explicit parent roles and rejects malformed contact channels", () => {
+    const contacts = [
+      { ...trusted("mother", "Anna", "abc"), relation: "mother", email: "bad@x" },
+      { ...trusted("father", "Ben", "+49 151 1234567"), relation: "father" },
+    ];
+    expect(withMinorGuardianRelations(contacts, true).map(c => c.relation)).toEqual(["mother", "father"]);
+    expect(validatePatientProfileForm(person, [], contacts, true, messages)).toEqual({
+      [patientProfileFieldKey.trustedPhone("mother")]: messages.invalidPhone,
+      [patientProfileFieldKey.trustedEmail("mother")]: messages.invalidEmail,
+    });
+  });
   it("rejects the e-mail and phone the lead wizard rejects", () => {
     const errors = validatePatientProfileForm(
       person,

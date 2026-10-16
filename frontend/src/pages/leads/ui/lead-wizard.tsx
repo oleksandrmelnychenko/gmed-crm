@@ -142,7 +142,7 @@ import { toast } from "@/components/ui/toast";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatMoneyLabel, formatMoneyRange, moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
-import { appDateKey, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput, parseDateKey } from "@/lib/app-time-zone";
 import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -339,6 +339,8 @@ import {
   createLeadProspect,
   fetchLeadDetail,
   fetchLeadReferrerPatients,
+  fetchLeadGuardianCandidates,
+  type LeadGuardianCandidate,
   importLeadAttachments,
   resolveFailedLead,
   updateLeadStatus,
@@ -465,6 +467,7 @@ type Draft = {
   programDateFrom: string;
   programDateTo: string;
   frameworkContractId: string;
+  contractValidFrom: string;
   costThreshold: string;
   privacyConsent: boolean;
   healthcareConsent: boolean;
@@ -1120,6 +1123,7 @@ function autosavePayload(
       program_date_from: draft.programDateFrom,
       program_date_to: draft.programDateTo,
       framework_contract_id: draft.frameworkContractId || null,
+      contract_valid_from: draft.contractValidFrom,
       cost_threshold: draft.costThreshold,
       registration_country: draft.citizenships[0] ?? "",
       passport_expiry: draft.passportExpiry,
@@ -1771,6 +1775,7 @@ function draftFromLead(lead: LeadDetail): Draft {
     programDateFrom: inputString(lead.wizard_state?.["program_date_from"]),
     programDateTo: inputString(lead.wizard_state?.["program_date_to"]),
     frameworkContractId: inputString(lead.wizard_state?.["framework_contract_id"]),
+    contractValidFrom: inputString(lead.wizard_state?.["contract_valid_from"]) || appDateKey(),
     costThreshold: inputString(lead.wizard_state?.["cost_threshold"]),
     privacyConsent: lead.consent_privacy_practices,
     healthcareConsent: lead.consent_healthcare,
@@ -1824,6 +1829,7 @@ function blankDraft(): Draft {
     programDateFrom: "",
     programDateTo: "",
     frameworkContractId: "",
+    contractValidFrom: appDateKey(),
     costThreshold: "",
     privacyConsent: false,
     healthcareConsent: false,
@@ -3151,7 +3157,8 @@ export function LeadWizard({
   const [referrerPatientsError, setReferrerPatientsError] = useState("");
   const [guardianSearch, setGuardianSearch] = useState("");
   const deferredGuardianSearch = useDeferredValue(guardianSearch);
-  const [guardianPatients, setGuardianPatients] = useState<LeadReferrerPatientOption[]>([]);
+  const [guardianPatients, setGuardianPatients] = useState<LeadGuardianCandidate[]>([]);
+  const [selectedGuardianCandidate, setSelectedGuardianCandidate] = useState("");
   const [guardianPatientsLoading, setGuardianPatientsLoading] = useState(false);
   const [guardianPatientsError, setGuardianPatientsError] = useState("");
   const [step, setStep] = useState<StepId>("master_data");
@@ -3366,16 +3373,16 @@ export function LeadWizard({
     let active = true;
     setGuardianPatientsLoading(true);
     setGuardianPatientsError("");
-    void fetchLeadReferrerPatients(deferredGuardianSearch)
+    void fetchLeadGuardianCandidates(deferredGuardianSearch, leadId)
       .then((patients) => {
-        if (active) setGuardianPatients(patients.filter((patient) => !isMinor(patient.birth_date, new Date())));
+        if (active) setGuardianPatients(patients);
       })
       .catch(() => {
         if (!active) return;
         setGuardianPatients([]);
         setGuardianPatientsError(tx(
-          "Не удалось загрузить список пациентов",
-          "Patientenliste konnte nicht geladen werden",
+          "Не удалось загрузить список представителей",
+          "Vertreterliste konnte nicht geladen werden",
         ));
       })
       .finally(() => {
@@ -3385,7 +3392,10 @@ export function LeadWizard({
     return () => {
       active = false;
     };
-  }, [deferredGuardianSearch, open, trustedContactEditor?.id, tx]);
+  }, [deferredGuardianSearch, leadId, open, trustedContactEditor?.id, tx]);
+  useEffect(() => {
+    setSelectedGuardianCandidate("");
+  }, [trustedContactEditor?.id]);
   const selectedSpecializationItems = useMemo(() => {
     const values = new Set(draft?.specialties ?? []);
     return specialties.filter((item) => values.has(specializationValue(item)));
@@ -5343,16 +5353,25 @@ export function LeadWizard({
     setTrustedContactEditor((current) => current ? { ...current, [key]: value } : current);
   };
 
-  const changeGuardianPatient = (patientId: string) => {
-    const selected = guardianPatients.find((patient) => patient.id === patientId);
+  const guardianCandidateLabel = (candidate: LeadGuardianCandidate) => [
+    candidate.source === "lead" ? tx("Лид", "Lead") : candidate.display_id,
+    [candidate.first_name, candidate.last_name].filter(Boolean).join(" "),
+    candidate.email,
+  ].filter(Boolean).join(" · ");
+
+  const changeGuardianPatient = (candidateId: string) => {
+    const selected = guardianPatients.find((patient) => `${patient.source}:${patient.id}` === candidateId);
+    setSelectedGuardianCandidate(candidateId);
     setTrustedContactEditor((current) => current ? {
       ...current,
-      relatedPatientId: patientId,
-      relatedPatientLabel: selected ? referrerPatientOptionLabel(selected) : "",
+      relatedPatientId: selected?.patient_record_id ?? "",
+      relatedPatientLabel: selected ? guardianCandidateLabel(selected) : "",
       ...(selected ? {
         name: [selected.first_name, selected.last_name].filter(Boolean).join(" "),
         email: selected.email ?? "",
         phone: selected.phone ?? "",
+        birthDate: selected.birth_date ?? "",
+        address: selected.address,
       } : {}),
     } : current);
   };
@@ -5985,9 +6004,13 @@ ${serviceCommentLines.join("\n")}`
     }
     let contractId = contract?.id;
     if (!contractId) {
+      if (!parseDateKey(draft.contractValidFrom)) {
+        throw new Error(tx("Укажите корректную дату начала действия договора", "Geben Sie ein gültiges Datum für den Vertragsbeginn an"));
+      }
       contractId = (await createContract({
         lead_id: leadId,
         status: "sent",
+        valid_from: draft.contractValidFrom,
         client_reference: "lead-onboarding:" + leadId + ":framework",
       })).id;
     }
@@ -9143,6 +9166,17 @@ ${serviceCommentLines.join("\n")}`
                   )}
                 >
                 <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={tx("Начало действия договора", "Vertragsbeginn")} htmlFor="lead-contract-valid-from">
+                    <Input
+                      id="lead-contract-valid-from"
+                      type="date"
+                      required
+                      className={inputClass}
+                      value={contract ? contract.valid_from ?? "" : draft.contractValidFrom}
+                      disabled={isBusy || Boolean(contract)}
+                      onChange={(event) => patch("contractValidFrom", event.target.value)}
+                    />
+                  </Field>
                   <Field
                     label={tx(
                       "Граница согласования превышения бюджета",
@@ -10354,20 +10388,20 @@ ${serviceCommentLines.join("\n")}`
                 <div className="grid gap-4 sm:grid-cols-2 [&>div]:min-w-0">
                   <Field
                     className="sm:col-span-2"
-                    label={tx("Связать с существующим пациентом", "Mit bestehender Patientenakte verknüpfen")}
+                    label={tx("Выбрать из пациентов или лидов", "Aus Patienten oder Leads auswählen")}
                   >
                     <NativeComboboxSelect
-                      value={trustedContactEditor.relatedPatientId}
+                      value={selectedGuardianCandidate || (trustedContactEditor.relatedPatientId ? `patient:${trustedContactEditor.relatedPatientId}` : "")}
                       className={selectClass}
-                      searchPlaceholder={tx("Найти взрослого пациента по имени или PID", "Erwachsene Person nach Name oder PID suchen")}
+                      searchPlaceholder={tx("Найти по имени, e-mail или PID", "Nach Name, E-Mail oder PID suchen")}
                       onSearchChange={setGuardianSearch}
                       missingValueLabel={() => trustedContactEditor.relatedPatientLabel || trustedContactEditor.relatedPatientId}
                       onChange={(event) => changeGuardianPatient(event.target.value)}
                     >
                       <option value="">{tx("Внести данные вручную", "Daten manuell eingeben")}</option>
-                      {filterPatientsBySearch(guardianPatients, guardianSearch).map((patient) => (
-                        <option key={patient.id} value={patient.id} data-search-text={patientSearchText(patient)}>
-                          {referrerPatientOptionLabel(patient)}
+                      {guardianPatients.map((patient) => (
+                        <option key={`${patient.source}:${patient.id}`} value={`${patient.source}:${patient.id}`} data-search-text={`${guardianCandidateLabel(patient)} ${patient.phone ?? ""}`}>
+                          {guardianCandidateLabel(patient)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -10376,8 +10410,8 @@ ${serviceCommentLines.join("\n")}`
                       guardianPatientsError ? "text-destructive" : "text-muted-foreground",
                     )}>
                       {guardianPatientsError || (guardianPatientsLoading
-                        ? tx("Загрузка пациентов…", "Patienten werden geladen…")
-                        : tx("Связь подтверждает допустимое использование общего email или телефона ребёнка и представителя.", "Die Verknüpfung bestätigt die zulässige gemeinsame Nutzung von E-Mail oder Telefon durch Kind und Vertreter."))}
+                        ? tx("Загрузка представителей…", "Vertreter werden geladen…")
+                        : tx("Данные выбранного человека заполнятся автоматически. Доступ к заявке выдаётся отдельно.", "Die Angaben der ausgewählten Person werden übernommen. Der Zugang zur Anfrage wird separat vergeben."))}
                     </p>
                   </Field>
                   <Field

@@ -168,8 +168,10 @@ export type PatientContactPayload = {
 export type PatientTrustedContactFormState = {
   id: string;
   persistedId: string | null;
+  relatedPatientId: string | null;
   name: string;
   phone: string;
+  email: string;
   relation: string;
   notes: string;
 };
@@ -337,8 +339,10 @@ export function makePatientTrustedContactForm(
   return {
     id: makePatientContactFormId("trusted-contact"),
     persistedId: null,
+    relatedPatientId: null,
     name: "",
     phone: "",
+    email: "",
     relation,
     notes: "",
   };
@@ -347,7 +351,9 @@ export function makePatientTrustedContactForm(
 export function normalizePatientTrustedContactRelation(value: string) {
   const normalized = value.trim().toLocaleLowerCase();
   if (/spouse|partner|ehe|супруг/.test(normalized)) return "spouse";
-  if (/parent|father|mother|vater|mutter|родител|мам|пап/.test(normalized)) return "parent";
+  if (/mother|mutter|мать|мам|мати/.test(normalized)) return "mother";
+  if (/father|vater|отец|пап|батьк/.test(normalized)) return "father";
+  if (/parent|eltern|родител/.test(normalized)) return "parent";
   if (/child|son|daughter|kind|ребен|сын|доч/.test(normalized)) return "child";
   if (/sibling|brother|sister|bruder|schwester|брат|сестр/.test(normalized)) return "sibling";
   if (/guardian|vormund|опек/.test(normalized)) return "guardian";
@@ -360,11 +366,13 @@ export function normalizePatientTrustedContactRelation(value: string) {
 export function patientTrustedContactsFromRelations(
   relations: ReadonlyArray<{
     id: string;
+    related_patient_id?: string | null;
     related_name: string;
     related_display_name?: string | null;
     relation_type: string;
     is_emergency_contact: boolean;
     phone?: string | null;
+    email?: string | null;
     notes?: string | null;
   }>,
 ): PatientTrustedContactFormState[] {
@@ -373,8 +381,10 @@ export function patientTrustedContactsFromRelations(
     .map((relation) => ({
       id: relation.id,
       persistedId: relation.id,
+      relatedPatientId: relation.related_patient_id ?? null,
       name: relation.related_display_name || relation.related_name,
       phone: relation.phone ?? "",
+      email: relation.email ?? "",
       relation: normalizePatientTrustedContactRelation(relation.relation_type),
       notes: relation.notes ?? "",
     }));
@@ -386,12 +396,14 @@ export function patientTrustedContactsToPayload(
   return contacts.flatMap((contact) => {
     const name = contact.name.trim();
     const phone = contact.phone.trim();
+    const email = contact.email.trim();
     const notes = contact.notes.trim();
-    if (!name && !phone && !notes) return [];
+    if (!name && !phone && !email && !notes) return [];
     return [{
       ...contact,
       name,
       phone,
+      email,
       relation: contact.relation.trim() || "other",
       notes,
     }];

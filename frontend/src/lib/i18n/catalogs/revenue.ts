@@ -199,6 +199,7 @@ export interface RevenueTranslations {
   revenue_agency_service_create: string;
   revenue_contracts_section_patient_status: string;
   revenue_contracts_section_contract_dates: string;
+  contracts_valid_from: string;
   revenue_contracts_section_conditions: string;
   revenue_contracts_linked_patient_card_description: string;
   revenue_contracts_linked_orders_card_description: string;
@@ -1078,7 +1079,8 @@ export const revenueRu: RevenueTranslations = {
   revenue_agency_service_save: "Сохранить позицию каталога",
   revenue_agency_service_create: "Создать позицию каталога",
   revenue_contracts_section_patient_status: "Пациент и статус",
-  revenue_contracts_section_contract_dates: "Подписание",
+  revenue_contracts_section_contract_dates: "Даты договора",
+  contracts_valid_from: "Начало действия договора",
   revenue_contracts_section_conditions: "Условия",
   revenue_contracts_linked_patient_card_description:
     "Откройте карточку пациента, связанного с этим рамочным договором.",
@@ -1494,7 +1496,8 @@ export const revenueDe: RevenueTranslations = {
   revenue_agency_service_save: "Katalogposition speichern",
   revenue_agency_service_create: "Katalogposition anlegen",
   revenue_contracts_section_patient_status: "Patient und Status",
-  revenue_contracts_section_contract_dates: "Unterzeichnung",
+  revenue_contracts_section_contract_dates: "Vertragsdaten",
+  contracts_valid_from: "Vertragsbeginn",
   revenue_contracts_section_conditions: "Bedingungen",
   revenue_contracts_linked_patient_card_description:
     "Patientenakte öffnen, die mit diesem Rahmenvertrag verknüpft ist.",

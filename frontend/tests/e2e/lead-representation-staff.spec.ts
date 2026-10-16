@@ -772,7 +772,7 @@ for (const lang of ["ru", "de"] as const) {
 test("staff explicitly choose the parent's role and linking a patient preserves it", async ({ page }) => {
   const { wizard, calls } = await mount(page, { lang: "ru", step: "master" });
   const linkedId = "44444444-4444-4444-8444-444444444444";
-  await page.route("**/api/v1/leads/referrer-patients**", (route) => route.fulfill({ json: [{ id: linkedId, pid: "P-SYNTHETIC", first_name: "Existing", last_name: "Mother", birth_date: "1985-05-01", email: "existing.mother@example.test", phone: "+49 30 100009" }] }));
+  await page.route("**/api/v1/leads/guardian-candidates**", (route) => route.fulfill({ json: [{ id: linkedId, source: "patient", patient_record_id: linkedId, display_id: "P-SYNTHETIC", address: "Testweg 1", first_name: "Existing", last_name: "Mother", birth_date: "1985-05-01", email: "existing.mother@example.test", phone: "+49 30 100009" }] }));
   const parents = wizard.locator("#lead-wizard-guardian");
   await parents.getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
   const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
@@ -781,7 +781,7 @@ test("staff explicitly choose the parent's role and linking a patient preserves 
   expect(calls.updates).toEqual([]);
   await editor.getByLabel("Кем приходится клиенту").click();
   await page.getByRole("option", { name: "Мать", exact: true }).click();
-  await editor.getByLabel("Связать с существующим пациентом").click();
+  await editor.getByLabel("Выбрать из пациентов или лидов").click();
   await page.getByRole("option", { name: /Existing Mother/ }).click();
   await expect(editor.getByLabel("Кем приходится клиенту")).toContainText("Мать");
   await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
@@ -913,3 +913,25 @@ for (const width of [1440, 390]) {
     await expect(editor.getByLabel("Имя и фамилия")).toHaveValue("Unsaved Parent");
   });
 }
+
+test("staff reuse a mother who is still a lead without creating a patient link", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", step: "master", motherOnly: true });
+  await page.route("**/api/v1/leads/guardian-candidates**", route => route.fulfill({ json: [{
+    id: "55555555-5555-4555-8555-555555555555", source: "lead", patient_record_id: null, display_id: null,
+    first_name: "Existing", last_name: "Leadmother", birth_date: "1985-05-01",
+    email: "existing.leadmother@example.test", phone: null, address: "Testweg 2, Berlin",
+  }] }));
+  const parents = wizard.locator("#lead-wizard-guardian");
+  await parents.getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
+  const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
+  await editor.getByLabel("Кем приходится клиенту").click();
+  await page.getByRole("option", { name: "Мать", exact: true }).click();
+  await editor.getByLabel("Выбрать из пациентов или лидов").click();
+  await page.getByRole("option", { name: /Existing Leadmother/ }).click();
+  await expect(editor.getByLabel("E-Mail", { exact: true })).toHaveValue("existing.leadmother@example.test");
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect.poll(() => (calls.updates.at(-1)?.trusted_contacts as Json[] | undefined)?.find(c => c.id === ANNA_ID)?.name).toBe("Existing Leadmother");
+  const written = (calls.updates.at(-1)?.trusted_contacts as Json[]).find(c => c.id === ANNA_ID)!;
+  expect(written).toMatchObject({ relation: "mother", email: "existing.leadmother@example.test", birth_date: "1985-05-01" });
+  expect(written.related_patient_id ?? null).toBeNull();
+});

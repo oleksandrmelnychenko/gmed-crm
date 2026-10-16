@@ -69,6 +69,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/leads", get(list_leads).post(create_lead))
         .route("/leads/referrer-patients", get(list_lead_referrer_patients))
+        .route("/leads/guardian-candidates", get(list_guardian_candidates))
         .route(
             "/patients/{patient_id}/repeat-intake",
             post(retired_repeat_patient_intake),
@@ -344,6 +345,70 @@ struct ListLeadsQuery {
 #[derive(Deserialize)]
 struct ReferrerPatientsQuery {
     search: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GuardianCandidatesQuery {
+    search: Option<String>,
+    exclude_lead_id: Option<Uuid>,
+}
+
+/// Reuse a known adult's contact data without creating a patient or granting access.
+async fn list_guardian_candidates(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<GuardianCandidatesQuery>,
+) -> Result<Json<Value>, axum::response::Response> {
+    auth.require_capability(Capability::LeadsEdit)?;
+    let rows = sqlx::query(
+        r#"WITH candidates AS (
+            SELECT id, 'patient'::text AS source, id AS patient_record_id,
+                   patient_id AS display_id, first_name, last_name, birth_date, email,
+                   phone_primary AS phone,
+                   concat_ws(', ', NULLIF(address_street, ''), NULLIF(address_zip, ''),
+                             NULLIF(address_city, ''), NULLIF(address_country, '')) AS address
+            FROM patients WHERE is_active AND lifecycle_status = 'active'
+            UNION ALL
+            SELECT id, 'lead', NULL::uuid, NULL::text, first_name, last_name,
+                   date_of_birth, email, phone,
+                   concat_ws(', ', NULLIF(street_address, ''), NULLIF(zip_code, ''), NULLIF(city, ''), NULLIF(country, ''))
+            FROM leads
+            WHERE converted_patient_id IS NULL
+              AND qualification_status NOT IN ('converted', 'archived', 'deleted')
+              AND ($3::uuid IS NULL OR id <> $3)
+        )
+        SELECT * FROM candidates
+        WHERE (birth_date IS NULL OR birth_date <= ($2::date - INTERVAL '18 years')::date)
+          AND ($1::text = '%%' OR de_normalize(concat_ws(' ', display_id, first_name, last_name, email, phone)) LIKE de_normalize($1))
+        ORDER BY lower(last_name), lower(first_name), source, id LIMIT 50"#,
+    )
+    .bind(format!("%{}%", query.search.unwrap_or_default().trim()))
+    .bind(crate::app_time::today())
+    .bind(query.exclude_lead_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, "list guardian candidates");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load guardian candidates")
+    })?;
+    Ok(Json(Value::Array(
+        rows.into_iter()
+            .map(|row| {
+                json!({
+                    "id": row.get::<Uuid, _>("id"),
+                    "source": row.get::<String, _>("source"),
+                    "patient_record_id": row.get::<Option<Uuid>, _>("patient_record_id"),
+                    "display_id": row.get::<Option<String>, _>("display_id"),
+                    "first_name": row.get::<String, _>("first_name"),
+                    "last_name": row.get::<String, _>("last_name"),
+                    "birth_date": row.get::<Option<NaiveDate>, _>("birth_date"),
+                    "email": row.get::<Option<String>, _>("email"),
+                    "phone": row.get::<Option<String>, _>("phone"),
+                    "address": row.get::<String, _>("address"),
+                })
+            })
+            .collect(),
+    )))
 }
 
 async fn list_lead_referrer_patients(
@@ -966,7 +1031,7 @@ fn readiness_line_signatures(value: &Value) -> Vec<String> {
     signatures
 }
 
-fn normalized_patient_relation_type(value: Option<&str>) -> &'static str {
+pub(crate) fn normalized_patient_relation_type(value: Option<&str>) -> &'static str {
     let normalized = value.unwrap_or_default().trim().to_lowercase();
     if normalized.contains("spouse")
         || normalized.contains("partner")
@@ -976,13 +1041,18 @@ fn normalized_patient_relation_type(value: Option<&str>) -> &'static str {
         || normalized.contains("друж")
     {
         "spouse"
-    } else if normalized.contains("father")
-        || normalized.contains("mother")
-        || normalized.contains("parent")
-        || normalized.contains("vater")
-        || normalized.contains("mutter")
-        || normalized.contains("пап")
-        || normalized.contains("мам")
+    } else if ["mother", "mutter", "мать", "мам", "мати"]
+        .iter()
+        .any(|value| normalized.contains(value))
+    {
+        "mother"
+    } else if ["father", "vater", "отец", "пап", "батьк"]
+        .iter()
+        .any(|value| normalized.contains(value))
+    {
+        "father"
+    } else if normalized.contains("parent")
+        || normalized.contains("eltern")
         || normalized.contains("родител")
         || normalized.contains("бать")
     {
@@ -1036,7 +1106,7 @@ fn normalized_patient_relation_type(value: Option<&str>) -> &'static str {
 pub(crate) fn is_parent_or_guardian_relation(value: Option<&str>) -> bool {
     matches!(
         normalized_patient_relation_type(value),
-        "parent" | "guardian"
+        "parent" | "mother" | "father" | "guardian"
     )
 }
 
@@ -1193,7 +1263,7 @@ async fn validate_lead_contact_identity(
                           FROM patient_relations pr
                           LEFT JOIN patients rp ON rp.id = pr.related_patient_id
                          WHERE pr.patient_id = p.id
-                           AND pr.relation_type IN ('parent', 'guardian')
+                           AND pr.relation_type IN ('parent', 'mother', 'father', 'guardian')
                       ), '[]'::jsonb) AS guardians
                  FROM patients p
                 WHERE p.lifecycle_status IN ('prospective', 'active', 'inactive')

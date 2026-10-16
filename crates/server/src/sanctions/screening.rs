@@ -1370,7 +1370,7 @@ pub fn relation_subjects(
         } else if minor
             && matches!(
                 json_text(row, "relation_type").as_str(),
-                "parent" | "guardian"
+                "parent" | "mother" | "father" | "guardian"
             )
         {
             RELATION_ROLE_LEGAL_REPRESENTATIVE

@@ -12911,7 +12911,7 @@ async fn ensure_appointment_order_link_allowed(
         r#"SELECT EXISTS(
                SELECT 1
                FROM patient_relations pr
-               WHERE pr.relation_type IN ('parent', 'child', 'spouse', 'sibling', 'relative', 'guardian', 'caregiver')
+               WHERE pr.relation_type IN ('parent', 'mother', 'father', 'child', 'spouse', 'sibling', 'relative', 'guardian', 'caregiver')
                  AND (
                    (pr.patient_id = $1 AND pr.related_patient_id = $2)
                    OR (pr.patient_id = $2 AND pr.related_patient_id = $1)

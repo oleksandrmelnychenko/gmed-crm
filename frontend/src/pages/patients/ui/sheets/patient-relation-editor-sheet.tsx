@@ -43,6 +43,8 @@ import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 const RELATION_TYPE_OPTIONS = [
   "spouse",
   "parent",
+  "mother",
+  "father",
   "child",
   "sibling",
   "relative",

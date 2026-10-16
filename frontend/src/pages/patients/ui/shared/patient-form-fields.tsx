@@ -32,7 +32,7 @@ import {
 } from "./patient-form-primitives";
 
 function isGuardianOrParentRelation(value: string) {
-  return value.trim() === "guardian" || value.trim() === "parent";
+  return ["guardian", "parent", "mother", "father"].includes(value.trim());
 }
 
 /**
@@ -133,6 +133,8 @@ export function PatientFormFields({
   const trustedRelationOptions = [
     ["spouse", t.patient_relation_type_spouse],
     ["parent", t.patient_relation_type_parent],
+    ["mother", t.patient_relation_type_mother],
+    ["father", t.patient_relation_type_father],
     ["child", t.patient_relation_type_child],
     ["sibling", t.patient_relation_type_sibling],
     ["relative", t.patient_relation_type_relative],
@@ -369,7 +371,7 @@ export function PatientFormFields({
           <div className="space-y-2.5">
             {form.trustedContacts.map((contact, index) => {
               const contactHasData = Boolean(
-                contact.name.trim() || contact.phone.trim() || contact.notes.trim(),
+                  contact.name.trim() || contact.phone.trim() || contact.email.trim() || contact.notes.trim(),
               );
               const relationOptions = isMinor
                 ? trustedRelationOptions.filter(([value]) => isGuardianOrParentRelation(value))
@@ -411,7 +413,7 @@ export function PatientFormFields({
                     </Field>
                     <Field
                       label={t.patients_emergency_phone}
-                      required={isMinor}
+                      required={isMinor && !contact.email.trim()}
                       htmlFor={fieldDomId(newPatientFieldKey.trustedPhone(contact.id), fieldErrors)}
                     >
                       <Input
@@ -420,9 +422,20 @@ export function PatientFormFields({
                         onChange={(event) => updateTrustedContact(contact.id, { phone: event.target.value })}
                         className={formInputClassName}
                         disabled={readOnly}
-                        required={isMinor}
+                        required={isMinor && !contact.email.trim()}
                       />
                       <FieldErrorText fieldKey={newPatientFieldKey.trustedPhone(contact.id)} fieldErrors={fieldErrors} />
+                    </Field>
+                    <Field label={t.field_email} htmlFor={fieldDomId(newPatientFieldKey.trustedEmail(contact.id), fieldErrors)}>
+                      <Input
+                        {...fieldErrorProps(newPatientFieldKey.trustedEmail(contact.id), fieldErrors)}
+                        type="email"
+                        value={contact.email}
+                        onChange={(event) => updateTrustedContact(contact.id, { email: event.target.value })}
+                        className={formInputClassName}
+                        disabled={readOnly}
+                      />
+                      <FieldErrorText fieldKey={newPatientFieldKey.trustedEmail(contact.id)} fieldErrors={fieldErrors} />
                     </Field>
                     <Field label={t.patients_emergency_relation} required>
                       <NativeComboboxSelect

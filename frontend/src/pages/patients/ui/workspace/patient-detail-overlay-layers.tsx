@@ -52,7 +52,7 @@ type PatientDetailOverlayLayersProps = {
   canManageInvoices: boolean;
   canManageRelations: boolean;
   contractBusy: boolean;
-  contractCreateForm: ContractFormState;
+  contractCreateForm: ContractFormState & { validFrom: string };
   contractCreateOpen: boolean;
   contractStatusForm: ContractFormState;
   contractStatusId: string;
@@ -78,6 +78,7 @@ type PatientDetailOverlayLayersProps = {
   onCloseInvoiceManager: () => void;
   onContractCreateOpenChange: (open: boolean) => void;
   onContractCreateSignedAtChange: (value: string) => void;
+  onContractCreateValidFromChange: (value: string) => void;
   onContractCreateStatusChange: (value: string) => void;
   onContractCreateSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onContractStatusSignedAtChange: (value: string) => void;
@@ -135,6 +136,7 @@ export function PatientDetailOverlayLayers({
   onCloseInvoiceManager,
   onContractCreateOpenChange,
   onContractCreateSignedAtChange,
+  onContractCreateValidFromChange,
   onContractCreateStatusChange,
   onContractCreateSubmit,
   onContractStatusSignedAtChange,
@@ -244,6 +246,7 @@ export function PatientDetailOverlayLayers({
             onCloseInvoiceManager={onCloseInvoiceManager}
             onContractCreateOpenChange={onContractCreateOpenChange}
             onContractCreateSignedAtChange={onContractCreateSignedAtChange}
+            onContractCreateValidFromChange={onContractCreateValidFromChange}
             onContractCreateStatusChange={onContractCreateStatusChange}
             onContractCreateSubmit={onContractCreateSubmit}
             onContractStatusSignedAtChange={onContractStatusSignedAtChange}

@@ -25,11 +25,14 @@ function PatientProfileEditorFixture() {
   const { t, lang } = useLang();
   const [open, setOpen] = useState(true);
   const [saved, setSaved] = useState(false);
+  const detail = new URLSearchParams(location.search).has("minor")
+    ? { ...patient, birth_date: "2016-07-06" }
+    : patient;
   return <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale={lang}>
     <button onClick={() => setOpen(true)}>Open profile editor</button>
     {saved ? <p role="status">Profile saved</p> : null}
     <MemoizedPatientProfileEditorSheet
-      open={open} patientId={patient.id} detail={patient}
+      open={open} patientId={patient.id} detail={detail}
       dictionary={t as unknown as Record<string, string>} lang={lang} statusLabel={status => status}
       onOpenChange={setOpen} onSaved={() => setSaved(true)} onError={() => {}}
     />

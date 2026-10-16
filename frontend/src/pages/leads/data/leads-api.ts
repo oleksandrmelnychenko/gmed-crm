@@ -57,6 +57,25 @@ export function fetchLeadReferrerPatients(search = "") {
   });
 }
 
+export type LeadGuardianCandidate = {
+  id: string;
+  source: "patient" | "lead";
+  patient_record_id: string | null;
+  display_id: string | null;
+  first_name: string;
+  last_name: string;
+  birth_date: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string;
+};
+
+export function fetchLeadGuardianCandidates(search = "", excludeLeadId?: string | null) {
+  const query = new URLSearchParams({ search: search.trim() });
+  if (excludeLeadId) query.set("exclude_lead_id", excludeLeadId);
+  return apiFetch<LeadGuardianCandidate[]>(`/leads/guardian-candidates?${query}`);
+}
+
 /** Patient login issued for a lead; the password only for CEO / patient managers. */
 export type LeadPortalAccountIssued = {
   user_id: string;

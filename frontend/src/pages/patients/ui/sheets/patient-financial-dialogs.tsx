@@ -60,7 +60,7 @@ type PatientFinancialDialogsProps = {
   canManageInvoices: boolean;
   cancelLabel: string;
   contractBusy: boolean;
-  contractCreateForm: ContractFormState;
+  contractCreateForm: ContractFormState & { validFrom: string };
   contractCreateOpen: boolean;
   contractStatusForm: ContractFormState;
   contractStatusId: string;
@@ -80,6 +80,7 @@ type PatientFinancialDialogsProps = {
   onCloseInvoiceManager: () => void;
   onContractCreateOpenChange: (open: boolean) => void;
   onContractCreateSignedAtChange: (value: string) => void;
+  onContractCreateValidFromChange: (value: string) => void;
   onContractCreateStatusChange: (value: string) => void;
   onContractCreateSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onContractStatusSignedAtChange: (value: string) => void;
@@ -186,6 +187,7 @@ type ContractCreateDialogProps = Pick<
   | "l"
   | "onContractCreateOpenChange"
   | "onContractCreateSignedAtChange"
+  | "onContractCreateValidFromChange"
   | "onContractCreateStatusChange"
   | "onContractCreateSubmit"
   | "patientDetailStatusLabel"
@@ -200,10 +202,12 @@ function ContractCreateDialog({
   l,
   onContractCreateOpenChange,
   onContractCreateSignedAtChange,
+  onContractCreateValidFromChange,
   onContractCreateStatusChange,
   onContractCreateSubmit,
   patientDetailStatusLabel,
 }: ContractCreateDialogProps) {
+  const { t } = useLang();
   return (
     <PatientSheetScaffold presentation="dialog" open={contractCreateOpen} onOpenChange={onContractCreateOpenChange} width="narrow" onSubmit={onContractCreateSubmit}
       title={l("patients_create_framework_contract")}
@@ -219,6 +223,16 @@ function ContractCreateDialog({
     >
       <PatientFormSection title={l("patients_contract")}>
         <div className="grid gap-3 md:grid-cols-2">
+          <FormField label={t.contracts_valid_from} htmlFor="contract-valid-from" className="md:col-span-2">
+            <Input
+              id="contract-valid-from"
+              type="date"
+              required
+              value={contractCreateForm.validFrom}
+              onChange={(event) => onContractCreateValidFromChange(event.target.value)}
+              className={inputClass}
+            />
+          </FormField>
           <FormField label={l("patients_status")} htmlFor="contract-status">
           <NativeComboboxSelect
             id="contract-status"

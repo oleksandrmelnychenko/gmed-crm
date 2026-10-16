@@ -1782,6 +1782,7 @@ function useContractsPageContent() {
       const payload = {
         patient_id: createContractForm.patientId,
         status: createContractForm.status,
+        valid_from: createContractForm.validFrom,
         signed_at: toOptional(createContractForm.signedAt)
           ? berlinLocalInputToIso(createContractForm.signedAt)
           : null,
@@ -2732,7 +2733,19 @@ function useContractsPageContent() {
                 <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractDates)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <Field label={t.contracts_signed_at} className="sm:col-span-2">
+                    <Field label={t.contracts_valid_from} required>
+                      <Input
+                        id="create-contract-valid-from"
+                        type="date"
+                        required
+                        className={shellInputClassName}
+                        value={createContractForm.validFrom}
+                        onChange={(event) =>
+                          setCreateContractForm((current) => ({ ...current, validFrom: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={t.contracts_signed_at}>
                       <Input
                         type="datetime-local"
                         className={shellInputClassName}
@@ -2926,6 +2939,10 @@ function useContractsPageContent() {
                         <ContractSummaryLine
                           label={text.updatedAt}
                           value={formatDateTime(contractDetail.updated_at, locale, t.common_not_set)}
+                        />
+                        <ContractSummaryLine
+                          label={t.contracts_valid_from}
+                          value={formatDate(contractDetail.valid_from, locale, t.common_not_set)}
                         />
                         <ContractSummaryLine
                           label={t.contracts_signed_at}

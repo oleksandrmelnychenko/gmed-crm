@@ -302,6 +302,7 @@ export function PatientContractsTab({
                     {statusLabel(selectedContract.status)}
                   </Badge>,
                 ],
+                [t.contracts_valid_from, formatDate(selectedContract.valid_from, commonNotSet)],
                 [l("patients_signed"), formatDateTime(selectedContract.signed_at, commonNotSet)],
                 [t.users_created, formatDateTime(selectedContract.created_at, commonNotSet)],
               ].map(([label, value]) => (

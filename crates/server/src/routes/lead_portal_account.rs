@@ -678,21 +678,18 @@ pub(crate) async fn link_guardian_relationships_in_tx(
         if let Some(child) = row.try_get::<Option<Uuid>, _>("converted_patient_id")?
             && child != own_patient
         {
-            let relation = if super::leads::is_legal_guardian_relation(
+            let relation = super::leads::normalized_patient_relation_type(
                 contact.get("relation").and_then(Value::as_str),
-            ) {
-                "guardian"
-            } else {
-                "parent"
-            };
+            );
             sqlx::query(
-                "UPDATE patient_relations SET related_patient_id=$2 WHERE patient_id=$1 AND related_patient_id IS NULL AND related_name=$3 AND relation_type=$4",
+                "UPDATE patient_relations SET related_patient_id=$2, relation_type=$4 WHERE patient_id=$1 AND (related_patient_id IS NULL OR related_patient_id=$2) AND related_name=$3 AND (relation_type=$4 OR (relation_type='parent' AND $4 IN ('mother','father')))",
             ).bind(child).bind(own_patient).bind(name).bind(relation).execute(&mut **tx).await?;
             sqlx::query(
-                r#"INSERT INTO patient_relations(patient_id,related_patient_id,related_name,relation_type,phone)
-                   SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS(SELECT 1 FROM patient_relations WHERE patient_id=$1 AND related_patient_id=$2 AND relation_type=$4)"#,
+                r#"INSERT INTO patient_relations(patient_id,related_patient_id,related_name,relation_type,phone,email)
+                   SELECT $1,$2,$3,$4,$5,$6 WHERE NOT EXISTS(SELECT 1 FROM patient_relations WHERE patient_id=$1 AND related_patient_id=$2 AND relation_type=$4)"#,
             ).bind(child).bind(own_patient).bind(name).bind(relation)
-                .bind(contact.get("phone").and_then(Value::as_str)).execute(&mut **tx).await?;
+                .bind(contact.get("phone").and_then(Value::as_str))
+                .bind(contact.get("email").and_then(Value::as_str)).execute(&mut **tx).await?;
         }
         audit::write_in_transaction(
             tx,

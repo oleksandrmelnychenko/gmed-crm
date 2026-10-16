@@ -193,6 +193,8 @@ export interface PatientsPortalTranslations {
   patient_relation_type_guardian: string;
   patient_relation_type_other: string;
   patient_relation_type_parent: string;
+  patient_relation_type_mother: string;
+  patient_relation_type_father: string;
   patient_relation_type_relative: string;
   patient_relation_type_sibling: string;
   patient_relation_type_spouse: string;
@@ -1178,6 +1180,8 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_relation_type_guardian: "Опекун",
   patient_relation_type_other: "Другое",
   patient_relation_type_parent: "Родитель",
+  patient_relation_type_mother: "Мать",
+  patient_relation_type_father: "Отец",
   patient_relation_type_relative: "Родственник",
   patient_relation_type_sibling: "Брат или сестра",
   patient_relation_type_spouse: "Супруг(а)",
@@ -1684,7 +1688,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_form_choose_gender: "Выберите пол",
   patient_form_zip_invalid_germany: "Немецкий индекс — 5 цифр",
   patient_form_zip_invalid: "Только буквы, цифры, пробел и дефис (до 10 знаков)",
-  patient_form_minor_needs_guardian: "Для несовершеннолетнего добавьте родителя или опекуна с телефоном",
+  patient_form_minor_needs_guardian: "Для несовершеннолетнего добавьте родителя или опекуна с телефоном или e-mail",
   patients_list_count_one: "{count} пациент",
   patients_list_count_few: "{count} пациента",
   patients_list_count_many: "{count} пациентов",
@@ -2150,6 +2154,8 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_relation_type_guardian: "Vormund",
   patient_relation_type_other: "Sonstiges",
   patient_relation_type_parent: "Elternteil",
+  patient_relation_type_mother: "Mutter",
+  patient_relation_type_father: "Vater",
   patient_relation_type_relative: "Angehörige/r",
   patient_relation_type_sibling: "Geschwister",
   patient_relation_type_spouse: "Ehepartner/in",
@@ -2656,7 +2662,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_form_choose_gender: "Geschlecht wählen",
   patient_form_zip_invalid_germany: "Deutsche PLZ: 5 Ziffern",
   patient_form_zip_invalid: "Nur Buchstaben, Ziffern, Leerzeichen und Bindestrich (bis 10 Zeichen)",
-  patient_form_minor_needs_guardian: "Für Minderjährige einen Elternteil oder Vormund mit Telefonnummer hinzufügen",
+  patient_form_minor_needs_guardian: "Für Minderjährige einen Elternteil oder Vormund mit Telefonnummer oder E-Mail hinzufügen",
   patients_list_count_one: "{count} Patient",
   patients_list_count_few: "{count} Patienten",
   patients_list_count_many: "{count} Patienten",

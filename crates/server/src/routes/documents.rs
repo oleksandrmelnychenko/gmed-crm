@@ -18302,7 +18302,7 @@ async fn generate_document(
                        FROM patient_relations pr
                        LEFT JOIN patients rp ON rp.id = pr.related_patient_id
                        WHERE pr.patient_id = $1
-                         AND pr.relation_type IN ('parent', 'guardian')
+                         AND pr.relation_type IN ('parent', 'mother', 'father', 'guardian')
                        ORDER BY pr.created_at"#,
                 )
                 .bind(patient_uuid)

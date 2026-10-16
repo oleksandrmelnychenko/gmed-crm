@@ -72,6 +72,8 @@ const PATIENT_RELATION_TYPE_LABEL_KEYS = {
   guardian: "patient_relation_type_guardian",
   other: "patient_relation_type_other",
   parent: "patient_relation_type_parent",
+  mother: "patient_relation_type_mother",
+  father: "patient_relation_type_father",
   relative: "patient_relation_type_relative",
   sibling: "patient_relation_type_sibling",
   spouse: "patient_relation_type_spouse",

@@ -502,7 +502,8 @@ function PatientDetailSheet({
         const persisted = await upsertPatientRelation(
           detail.id,
           {
-            related_patient_id: null,
+            ...(contact.persistedId ? {} : { related_patient_id: contact.relatedPatientId }),
+            email: contact.email,
             related_name: contact.name,
             relation_type: contact.relation,
             is_emergency_contact: true,

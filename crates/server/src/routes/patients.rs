@@ -2156,7 +2156,7 @@ fn has_guardian_or_parent_contact(
 }
 
 fn is_guardian_or_parent_relation_type(value: &str) -> bool {
-    matches!(value.trim(), "guardian" | "parent")
+    matches!(value.trim(), "guardian" | "parent" | "mother" | "father")
 }
 
 fn validate_relation_payload_fields(body: &UpsertRelationRequest) -> Result<(), &'static str> {
@@ -2165,8 +2165,8 @@ fn validate_relation_payload_fields(body: &UpsertRelationRequest) -> Result<(), 
     }
 
     match body.relation_type.trim() {
-        "spouse" | "parent" | "child" | "sibling" | "relative" | "guardian" | "caregiver"
-        | "friend" | "other" => {}
+        "spouse" | "parent" | "mother" | "father" | "child" | "sibling" | "relative"
+        | "guardian" | "caregiver" | "friend" | "other" => {}
         _ => return Err("Invalid relation type"),
     }
 
@@ -3343,8 +3343,8 @@ async fn create_patient(
             sqlx::query(
                 r#"INSERT INTO patient_relations (
                         patient_id, related_patient_id, related_name, relation_type,
-                        is_emergency_contact, phone, notes
-                   ) VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+                        is_emergency_contact, phone, notes, email
+                   ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
             )
             .bind(row.id)
             .bind(relation.related_patient_id)
@@ -3353,6 +3353,7 @@ async fn create_patient(
             .bind(relation.is_emergency_contact.unwrap_or(false))
             .bind(relation.phone.as_deref())
             .bind(relation.notes.as_deref())
+            .bind(relation.email.as_deref())
             .execute(&state.db)
             .await
             .map_err(|e| {
@@ -3848,7 +3849,7 @@ async fn update_patient(
                    SELECT 1
                    FROM patient_relations
                    WHERE patient_id = $1
-                     AND relation_type IN ('guardian', 'parent')
+                     AND relation_type IN ('guardian', 'parent', 'mother', 'father')
                      AND btrim(related_name) <> ''
                )"#,
         )
@@ -10204,11 +10205,16 @@ async fn update_relation(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((patient_uuid, relation_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<UpsertRelationRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<Json<Value>, axum::response::Response> {
     const FAILED: &str = "Failed to update patient relation";
     auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
     ensure_patient_editable(&state, &auth, patient_uuid).await?;
+    // Profile edits do not reassign a relationship. Only an explicit link field
+    // can change it; this also protects links hidden by patient access rules.
+    let link_was_supplied = payload.get("related_patient_id").is_some();
+    let mut body: UpsertRelationRequest = serde_json::from_value(payload)
+        .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid patient relation"))?;
     validate_relation_request(&body, patient_uuid)?;
 
     if let Some(related_patient_id) = body.related_patient_id {
@@ -10238,6 +10244,13 @@ async fn update_relation(
     let current_related = current
         .try_get::<Option<Uuid>, _>("related_patient_id")
         .unwrap_or_default();
+    if !link_was_supplied {
+        body.related_patient_id = current_related;
+    }
+    let linked_patient_visible = match body.related_patient_id {
+        Some(id) if !link_was_supplied => has_patient_use_access(&state, &auth, id).await?,
+        _ => true,
+    };
     if current_related != body.related_patient_id {
         let count = relation_released_invoice_count(&mut transaction, relation_id)
             .await
@@ -10340,7 +10353,7 @@ async fn update_relation(
         }),
     ));
 
-    Ok(Json(build_relation_json(row, true)))
+    Ok(Json(build_relation_json(row, linked_patient_visible)))
 }
 
 async fn delete_relation(

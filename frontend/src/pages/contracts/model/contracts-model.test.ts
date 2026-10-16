@@ -24,6 +24,7 @@ import {
   type ContractFormValidationMessages,
 } from "./contracts-model";
 import type { AgencyServiceItem, ContractItem } from "./types";
+import { appDateKey } from "@/lib/app-time-zone";
 
 describe("orderOptionLabel (QA C2-05)", () => {
   const order = { id: "o1", order_number: "A-20261012-0007", patient_id: "", patient_name: "Mia Muster", patient_pid: "", phase: "intake", status: "active" };
@@ -175,10 +176,18 @@ describe("validateCreateContractForm", () => {
     ).toBe("Conditions must be valid JSON.");
   });
 
-  it("accepts an open-ended contract without any validity dates", () => {
+  it("defaults the start to today while keeping the contract open-ended", () => {
     expect(validateCreateContractForm(blankContractForm("patient-1"), messages)).toBe("");
-    expect(blankContractForm("patient-1")).not.toHaveProperty("validFrom");
+    expect(blankContractForm("patient-1").validFrom).toBe(appDateKey());
     expect(blankContractForm("patient-1")).not.toHaveProperty("validTo");
+  });
+
+  it("requires a real start date and accepts a future date independently of signing", () => {
+    const form = blankContractForm("patient-1");
+    for (const validFrom of ["", "2026-02-30", "not-a-date"]) {
+      expect(validateCreateContractForm({ ...form, validFrom }, messages)).toBe(messages.invalidDate);
+    }
+    expect(validateCreateContractForm({ ...form, validFrom: "2030-01-15", signedAt: "" }, messages)).toBe("");
   });
 });
 

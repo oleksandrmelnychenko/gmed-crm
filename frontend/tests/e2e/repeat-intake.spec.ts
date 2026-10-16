@@ -335,6 +335,8 @@ test("lead entry preserves an already selected patient contract without starting
   const {wizard, reviewReads, writes} = await mount(page, "ru", undefined, false, true, true, false, "active");
   await wizard.getByRole("tab", {name: /Договор и смета/}).click();
   await expect(wizard.getByText(/Используется подписанный договор.*FC-PREVIOUS/)).toBeVisible();
+  await expect(wizard.locator("#lead-contract-valid-from")).toHaveValue("01.01.2025");
+  await expect(wizard.locator("#lead-contract-valid-from")).toBeDisabled();
   await expect(wizard.getByText("Сохранённые договоры пациента", {exact: true})).toHaveCount(0);
   expect(reviewReads).toEqual([]);
   expect(writes.filter(item => item.path.startsWith("/framework-contracts"))).toEqual([]);

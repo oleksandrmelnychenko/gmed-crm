@@ -307,7 +307,7 @@ pub async fn load_representatives(
            ) own
            WHERE relation.patient_id = $1
              AND (
-                 (cardinality($2::uuid[]) = 0 AND relation.relation_type IN ('parent', 'guardian'))
+                 (cardinality($2::uuid[]) = 0 AND relation.relation_type IN ('parent', 'mother', 'father', 'guardian'))
                  OR relation.id = ANY($2::uuid[])
              )
            ORDER BY CASE WHEN cardinality($2::uuid[]) > 0

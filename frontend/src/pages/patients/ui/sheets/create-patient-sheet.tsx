@@ -151,7 +151,9 @@ function CreatePatientSheet({
       );
       const primaryTrustedContact = trustedContacts[0];
       const patientRelations = trustedContacts.map((contact) => ({
+        related_patient_id: contact.relatedPatientId,
         related_name: contact.name,
+        email: toOptional(contact.email),
         relation_type: contact.relation,
         is_emergency_contact: true,
         phone: toOptional(contact.phone),

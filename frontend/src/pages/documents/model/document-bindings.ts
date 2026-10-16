@@ -160,7 +160,7 @@ export function childConsentBindingDefaults(
 ): DocumentBindingForm {
   if (!MINOR_ONLY_TEMPLATE_IDS.has(templateId)) return {};
   const guardians = (relations ?? [])
-    .filter((relation) => relation.relation_type === "parent" || relation.relation_type === "guardian")
+    .filter((relation) => ["parent", "mother", "father", "guardian"].includes(relation.relation_type ?? ""))
     .slice()
     .sort((left, right) => (left.created_at ?? "").localeCompare(right.created_at ?? ""));
   const [first, second] = guardians;

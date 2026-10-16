@@ -269,7 +269,7 @@ pub(super) async fn suggested(
                           ))
                           FROM patient_relations pr
                           LEFT JOIN patients rp ON rp.id = pr.related_patient_id
-                          WHERE pr.patient_id = p.id AND pr.relation_type IN ('parent', 'guardian')
+                          WHERE pr.patient_id = p.id AND pr.relation_type IN ('parent', 'mother', 'father', 'guardian')
                         ), '[]'::jsonb) AS guardian_contacts
                       FROM patients p WHERE p.id=$1 AND p.is_active=true"#)
                 .bind(id).fetch_optional(&state.db).await.map_err(db_error)?

@@ -4,6 +4,7 @@ import {
   formatAppDate,
   formatAppDateTime,
   isoToBerlinLocalInput,
+  parseDateKey,
 } from "@/lib/app-time-zone";
 import { serviceDescriptionItems } from "@/lib/service-description";
 import { hasFormChanges } from "@/lib/form-changes";
@@ -46,7 +47,7 @@ export function hasAgencyServiceFormChanges(current: AgencyServiceFormState, ini
 
 /**
  * Every status a framework contract row can carry (filters and labels). A
- * framework contract has no dates, so there is no "expired" status (retired
+ * framework contract has a start date but no end date, so there is no "expired" status (retired
  * 2026-09-28; former rows are terminated).
  */
 export const CONTRACT_STATUSES: ContractStatus[] = [
@@ -277,6 +278,7 @@ export function blankContractForm(patientId = ""): ContractFormState {
   return {
     patientId,
     status: "draft",
+    validFrom: appDateKey(),
     signedAt: "",
     conditionsText: "",
   };
@@ -359,6 +361,7 @@ export function validateCreateContractForm(
   messages: ContractFormValidationMessages,
 ) {
   if (!form.patientId) return messages.patientRequired;
+  if (!parseDateKey(form.validFrom)) return messages.invalidDate;
   if (form.conditionsText.trim()) {
     try {
       JSON.parse(form.conditionsText);

@@ -39,12 +39,12 @@ describe("template defaults from the patient's relations (QA 2026-10-12 B3-06, B
     },
     {
       related_name: "Ben Muster",
-      relation_type: "parent",
+      relation_type: "father",
       created_at: "2026-10-12T10:00:00Z",
     },
     {
       related_name: "Anna Muster",
-      relation_type: "parent",
+      relation_type: "mother",
       address_street: "Musterweg 1",
       address_zip: "10115",
       address_city: "Berlin",

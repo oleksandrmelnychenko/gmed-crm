@@ -51,6 +51,7 @@ import { cn } from "@/lib/utils";
 import {
   contractActionErrorMessage,
   validateContractStatusForm,
+  validateCreateContractForm,
   type ContractFormValidationMessages,
 } from "@/pages/contracts/model/contracts-model";
 import {
@@ -204,6 +205,7 @@ type ContractStatus = "draft" | "sent" | "signed" | "expired" | "terminated";
 
 type ContractFormState = {
   status: ContractStatus;
+  validFrom: string;
   signedAt: string;
 };
 
@@ -459,6 +461,7 @@ const INVOICE_STATUS_OPTIONS: InvoiceStatus[] = [
 function blankContractForm(): ContractFormState {
   return {
     status: "draft",
+    validFrom: appDateKey(),
     signedAt: "",
   };
 }
@@ -466,6 +469,7 @@ function blankContractForm(): ContractFormState {
 function contractToForm(contract: ContractItem): ContractFormState {
   return {
     status: (contract.status as ContractStatus) ?? "draft",
+    validFrom: contract.valid_from ?? "",
     signedAt: isoToBerlinLocalInput(contract.signed_at),
   };
 }
@@ -1732,8 +1736,8 @@ function usePatientDetailPageContent() {
   async function handleCreateContract(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!id) return;
-    const validationError = validateContractStatusForm(
-      { ...contractCreateForm, conditionsText: "" },
+    const validationError = validateCreateContractForm(
+      { ...contractCreateForm, patientId: id, conditionsText: "" },
       contractValidationMessages,
     );
     if (validationError) {
@@ -1746,6 +1750,7 @@ function usePatientDetailPageContent() {
       await createFrameworkContract({
         patient_id: id,
         status: contractCreateForm.status,
+        valid_from: contractCreateForm.validFrom,
         signed_at: berlinLocalInputToIso(contractCreateForm.signedAt),
       });
       toast.success(t.common_active);
@@ -2252,6 +2257,7 @@ function usePatientDetailPageContent() {
             onCloseInvoiceManager={() => setInvoiceManageId("")}
             onContractCreateOpenChange={setContractCreateOpen}
             onContractCreateSignedAtChange={(value) => setContractCreateForm((current) => ({ ...current, signedAt: value }))}
+            onContractCreateValidFromChange={(value) => setContractCreateForm((current) => ({ ...current, validFrom: value }))}
             onContractCreateStatusChange={(value) => setContractCreateForm((current) => ({ ...current, status: value as ContractStatus }))}
             onContractCreateSubmit={handleCreateContract}
             onContractStatusSignedAtChange={(value) => setContractStatusForm((current) => ({ ...current, signedAt: value }))}

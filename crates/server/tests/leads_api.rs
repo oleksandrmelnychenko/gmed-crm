@@ -7750,6 +7750,18 @@ async fn minor_conversion_explicitly_links_both_guardians_and_never_the_child_lo
     let artifacts = seed_complete_lead_onboarding(&app, lead).await;
     declare_mother_as_payer_and_sign(&app, lead, artifacts.order_id).await;
     let patient = convert_ready_lead(&app, lead).await;
+    let roles: Vec<String> = sqlx::query_scalar(
+        "SELECT relation_type FROM patient_relations WHERE patient_id=$1 ORDER BY relation_type",
+    )
+    .bind(patient)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        roles,
+        vec!["father", "mother"],
+        "Conversion must preserve each parent's explicit role"
+    );
     for user in &parents {
         let assignments: i64=sqlx::query_scalar("SELECT count(*) FROM patient_assignments WHERE patient_id=$1 AND user_id=$2 AND revoked_at IS NULL AND source='lead_guardian'")
             .bind(patient).bind(user).fetch_one(pool).await.unwrap();
@@ -7861,7 +7873,7 @@ async fn converting_a_child_preserves_the_mothers_own_patient_and_links_the_same
         links.contains(&(child_patient, "lead_guardian".to_string())),
         "{links:?}"
     );
-    let related: Uuid=sqlx::query_scalar("SELECT related_patient_id FROM patient_relations WHERE patient_id=$1 AND related_name='Anna Muster' AND relation_type='parent'")
+    let related: Uuid=sqlx::query_scalar("SELECT related_patient_id FROM patient_relations WHERE patient_id=$1 AND related_name='Anna Muster' AND relation_type='mother'")
         .bind(child_patient).fetch_one(pool).await.unwrap();
     assert_eq!(related, own_patient);
     let password: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id=$1")
@@ -8021,4 +8033,66 @@ async fn two_children_keep_the_shared_guardian_portal_working() {
     assert_eq!(status, StatusCode::OK, "{me}");
     assert_eq!(me["patients"].as_array().unwrap().len(), 1);
     assert_eq!(me["patients"][0]["id"], json!(second));
+}
+
+#[tokio::test]
+async fn guardian_candidates_include_adult_leads_without_creating_patients_or_access() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let mut adult = Uuid::nil();
+    for (name, birth, status) in [
+        ("Mother", "1985-05-01", "new"),
+        ("Child", "2020-05-01", "new"),
+        ("Archived", "1985-05-01", "archived"),
+    ] {
+        let id: Uuid = sqlx::query_scalar("INSERT INTO leads(first_name,last_name,email,date_of_birth,qualification_status,street_address,zip_code,city,country,created_by) VALUES($1,$2,$3,$4::text::date,$5,'Testweg 1','10115','Berlin','DE',$6) RETURNING id")
+            .bind(name).bind(&tag).bind(format!("{name}-{tag}@example.test"))
+            .bind(birth).bind(status).bind(app.patient_manager_id).fetch_one(pool).await.unwrap();
+        if name == "Mother" {
+            adult = id;
+        }
+    }
+    let patient: Uuid = sqlx::query_scalar("INSERT INTO patients(patient_id,first_name,last_name,birth_date,gender,created_by) VALUES($1,'Father',$2,'1980-01-01','male',$3) RETURNING id")
+        .bind(format!("P-{tag}")).bind(&tag).bind(app.patient_manager_id).fetch_one(pool).await.unwrap();
+    let path = format!("/api/v1/leads/guardian-candidates?search={tag}");
+    let (status, found) = json_request(
+        &app,
+        "GET",
+        &path,
+        &app.auth_header("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    let items = found.as_array().unwrap();
+    assert_eq!(items.len(), 2, "Only active adults are candidates: {found}");
+    let mother = items.iter().find(|row| row["id"] == json!(adult)).unwrap();
+    assert_eq!(mother["source"], "lead");
+    assert!(mother["patient_record_id"].is_null());
+    assert_eq!(mother["email"], format!("Mother-{tag}@example.test"));
+    assert_eq!(mother["address"], "Testweg 1, 10115, Berlin, DE");
+    assert!(
+        items
+            .iter()
+            .any(|row| row["patient_record_id"] == json!(patient))
+    );
+    let (status, excluded) = json_request(
+        &app,
+        "GET",
+        &format!("{path}&exclude_lead_id={adult}"),
+        &app.auth_header("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{excluded}");
+    assert_eq!(excluded.as_array().unwrap().len(), 1);
+    let (status, _) = json_request(&app, "GET", &path, &app.auth_header("billing"), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let links: i64 = sqlx::query_scalar("SELECT count(*) FROM lead_portal_access WHERE lead_id=$1")
+        .bind(adult)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(links, 0, "Looking up a parent must never grant access");
 }

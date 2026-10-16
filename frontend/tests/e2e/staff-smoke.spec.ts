@@ -4538,6 +4538,7 @@ test.describe("responsive staff workspace", () => {
     const quoteId = "00000000-0000-0000-0000-000000000963";
     let quoteCreated = false;
     let orderCreated = false;
+    let contractCreatePayload: Record<string, unknown> | null = null;
     let orderCreatePayload: {
       needs_description?: string;
       date_from?: string;
@@ -4569,6 +4570,7 @@ test.describe("responsive staff workspace", () => {
 
     await page.route("**/api/v1/framework-contracts", (route) => {
       if (route.request().method() === "POST") {
+        contractCreatePayload = route.request().postDataJSON();
         return json(route, { id: contractId, status: "sent" }, 201);
       }
       return json(route, []);
@@ -4688,9 +4690,12 @@ test.describe("responsive staff workspace", () => {
     const agencyConfirmationToggle = wizard.getByRole("checkbox", {
       name: "Auftrag von der Agentur bestätigt",
     });
+    await setDatePickerValue(wizard.locator("#lead-contract-valid-from"), "2026-08-20");
     // The first save creates the order.
     await agencyConfirmationToggle.check();
     await expect.poll(() => commercialBasisRequests).toBe(1);
+    expect(contractCreatePayload).toMatchObject({ valid_from: "2026-08-20" });
+    expect(contractCreatePayload).not.toHaveProperty("valid_to");
     expect(orderCreatePayload?.needs_description).toContain("Kundennachricht");
     expect(orderCreatePayload?.needs_description).toContain("Kann anreisen: Ja");
     expect(orderCreatePayload?.needs_description).toContain("Reisedokumente: Ja");

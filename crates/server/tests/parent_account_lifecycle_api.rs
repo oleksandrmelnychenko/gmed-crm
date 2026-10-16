@@ -270,6 +270,9 @@ async fn direct_patient_access_reuses_guardian_login_and_links_the_exact_parent_
     };
     let family = family(&suite.pool, suite.admin_id).await;
     let child = converted_child(&suite.pool, suite.admin_id, &family, "lead_guardian").await;
+    // Older conversions collapsed an explicit mother to generic parent.
+    sqlx::query("UPDATE leads SET trusted_contacts=(SELECT jsonb_agg(c || jsonb_build_object('relation','mother')) FROM jsonb_array_elements(trusted_contacts)c) WHERE id=$1")
+        .bind(family.child).execute(&suite.pool).await.unwrap();
     let own = patient(
         &suite.pool,
         suite.admin_id,
@@ -293,8 +296,40 @@ async fn direct_patient_access_reuses_guardian_login_and_links_the_exact_parent_
     let links: Vec<(Uuid,String)>=sqlx::query_as("SELECT patient_id,source FROM patient_assignments WHERE user_id=$1 AND revoked_at IS NULL ORDER BY source").bind(family.mother).fetch_all(&suite.pool).await.unwrap();
     assert!(links.contains(&(child, "lead_guardian".into())));
     assert!(links.contains(&(own, "manual".into())));
-    let parent: Uuid=sqlx::query_scalar("SELECT related_patient_id FROM patient_relations WHERE patient_id=$1 AND relation_type='parent'").bind(child).fetch_one(&suite.pool).await.unwrap();
+    let parent: Uuid=sqlx::query_scalar("SELECT related_patient_id FROM patient_relations WHERE patient_id=$1 AND relation_type='mother'").bind(child).fetch_one(&suite.pool).await.unwrap();
     assert_eq!(parent, own);
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM patient_relations WHERE patient_id=$1")
+            .bind(child)
+            .fetch_one(&suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        count, 1,
+        "Clarifying the mother's role must not duplicate her relationship"
+    );
+    let relation: Uuid = sqlx::query_scalar("SELECT id FROM patient_relations WHERE patient_id=$1")
+        .bind(child)
+        .fetch_one(&suite.pool)
+        .await
+        .unwrap();
+    let (status, saved) = request(
+        &suite.app,
+        "POST",
+        &format!("/api/v1/patients/{child}/relations/{relation}/update"),
+        &bearer(suite.admin_id, "ceo"),
+        json!({"related_name":"Anna Mother","relation_type":"mother","is_emergency_contact":true,
+               "email":family.email,"phone":null}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        saved["related_patient_id"],
+        json!(own),
+        "An omitted link must survive a contact-only edit"
+    );
+    assert_eq!(saved["relation_type"], "mother");
+    assert_eq!(saved["email"], family.email);
     let linked: String=sqlx::query_scalar("SELECT c->>'related_patient_id' FROM leads l CROSS JOIN LATERAL jsonb_array_elements(l.trusted_contacts)c WHERE l.id=$1 AND c->>'id'=$2").bind(family.child).bind(family.contact.to_string()).fetch_one(&suite.pool).await.unwrap();
     assert_eq!(linked, own.to_string());
 }
@@ -701,4 +736,48 @@ async fn proven_existing_parent_uses_activation_and_repeat_intake_without_a_dupl
         "Profile reuse must not copy consents or files"
     );
     assert_login_preserved(&suite.pool, &family).await;
+}
+
+#[tokio::test]
+async fn parent_role_migration_only_recovers_unambiguous_identity_matches() {
+    let Some(suite) = support::suite_context(SECRET).await else {
+        return;
+    };
+    let family = family(&suite.pool, suite.admin_id).await;
+    let child = converted_child(&suite.pool, suite.admin_id, &family, "lead_guardian").await;
+    sqlx::query("UPDATE leads SET trusted_contacts=(SELECT jsonb_agg(c || jsonb_build_object('relation','mother')) FROM jsonb_array_elements(trusted_contacts)c) WHERE id=$1")
+        .bind(family.child).execute(&suite.pool).await.unwrap();
+    sqlx::query("UPDATE patient_relations SET email=$2 WHERE patient_id=$1")
+        .bind(child)
+        .bind(&family.email)
+        .execute(&suite.pool)
+        .await
+        .unwrap();
+    let unproven: Uuid = sqlx::query_scalar("INSERT INTO patient_relations(patient_id,related_name,relation_type,email) VALUES($1,'Anna Mother','parent','different-person@example.test') RETURNING id")
+        .bind(child).fetch_one(&suite.pool).await.unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20261017090000_patient_parent_roles.sql"
+    ))
+    .execute(&suite.pool)
+    .await
+    .unwrap();
+    let proven: String = sqlx::query_scalar(
+        "SELECT relation_type FROM patient_relations WHERE patient_id=$1 AND email=$2",
+    )
+    .bind(child)
+    .bind(&family.email)
+    .fetch_one(&suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(proven, "mother");
+    let unchanged: String =
+        sqlx::query_scalar("SELECT relation_type FROM patient_relations WHERE id=$1")
+            .bind(unproven)
+            .fetch_one(&suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        unchanged, "parent",
+        "A matching name alone must not infer the role"
+    );
 }

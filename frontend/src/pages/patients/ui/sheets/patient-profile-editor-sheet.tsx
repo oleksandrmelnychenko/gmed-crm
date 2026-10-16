@@ -110,8 +110,10 @@ function trustedContactsFromDetail(detail: PatientDetail): PatientTrustedContact
     return [{
       id: makePatientContactFormId("trusted-contact-lead"),
       persistedId: null,
+      relatedPatientId: trustedContactRecordString(contact, "related_patient_id") || null,
       name,
       phone: trustedContactRecordString(contact, "phone"),
+      email: trustedContactRecordString(contact, "email"),
       relation: normalizePatientTrustedContactRelation(trustedContactRecordString(contact, "relation")),
       notes: extraNotes,
     }];
@@ -144,7 +146,7 @@ function contactAddLabel(
 }
 
 function isGuardianOrParentRelation(value: string) {
-  return value.trim() === "guardian" || value.trim() === "parent";
+  return ["guardian", "parent", "mother", "father"].includes(value.trim());
 }
 
 function normalizeMinorGuardianRelation(
@@ -299,6 +301,8 @@ function PatientProfileEditorFormSections({
   const trustedRelationOptions = [
     ["spouse", dictionary.patient_relation_type_spouse],
     ["parent", parentLabel],
+    ["mother", dictionary.patient_relation_type_mother],
+    ["father", dictionary.patient_relation_type_father],
     ["child", dictionary.patient_relation_type_child],
     ["sibling", dictionary.patient_relation_type_sibling],
     ["relative", dictionary.patient_relation_type_relative],
@@ -803,7 +807,7 @@ function PatientProfileEditorFormSections({
                               {...profileFieldProps(patientProfileFieldKey.trustedPhone(contact.id), fieldErrors)}
                               value={contact.phone}
                               onChange={(event) => patchTrustedContact(contact.id, { phone: event.target.value })}
-                              required={isMinor}
+                              required={isMinor && !contact.email.trim()}
                               className={formInputClassName}
                             />
                             <ProfileFieldError
@@ -825,6 +829,19 @@ function PatientProfileEditorFormSections({
                                 <option key={value} value={value}>{optionLabel}</option>
                               ))}
                             </NativeComboboxSelect>
+                          </FormField>
+                          <FormField label={dictionary.field_email} htmlFor={profileFieldDomId(patientProfileFieldKey.trustedEmail(contact.id))}>
+                            <Input
+                              {...profileFieldProps(patientProfileFieldKey.trustedEmail(contact.id), fieldErrors)}
+                              type="email"
+                              value={contact.email}
+                              onChange={(event) => patchTrustedContact(contact.id, { email: event.target.value })}
+                              className={formInputClassName}
+                            />
+                            <ProfileFieldError
+                              fieldKey={patientProfileFieldKey.trustedEmail(contact.id)}
+                              message={fieldErrors[patientProfileFieldKey.trustedEmail(contact.id)]}
+                            />
                           </FormField>
                         </div>
                         <FormField label={dictionary.patient_profile_editor_notes}>
@@ -1142,9 +1159,10 @@ function PatientProfileEditorSheetContent({
         const normalizedTrustedContacts = trustedContacts.flatMap((contact) => {
           const name = contact.name.trim();
           const phone = contact.phone.trim();
+          const email = contact.email.trim();
           const relation = contact.relation.trim() || "other";
           const notes = contact.notes.trim();
-          if (!name && !phone && !notes) return [];
+          if (!name && !phone && !email && !notes) return [];
           if (!name) {
             throw new Error(
               lang === "de"
@@ -1152,7 +1170,7 @@ function PatientProfileEditorSheetContent({
                 : "Укажите имя доверенного контакта",
             );
           }
-          return [{ ...contact, name, phone, relation, notes }];
+          return [{ ...contact, name, phone, email, relation, notes }];
         });
         const patientAge = computeAge(form.birthDate);
         const isMinor = patientAge !== null && patientAge < 18;
@@ -1205,11 +1223,12 @@ function PatientProfileEditorSheetContent({
           const persisted = await upsertPatientRelation(
             patientId,
             {
-              related_patient_id: null,
+              ...(contact.persistedId ? {} : { related_patient_id: contact.relatedPatientId }),
               related_name: contact.name,
               relation_type: contact.relation,
               is_emergency_contact: true,
               phone: contact.phone || null,
+              email: contact.email,
               notes: contact.notes || null,
             },
             contact.persistedId,

@@ -22,13 +22,14 @@ export const patientProfileFieldKey = {
   contact: (contactId: string) => `contact:${contactId}`,
   trustedName: (contactId: string) => `trusted-name:${contactId}`,
   trustedPhone: (contactId: string) => `trusted-phone:${contactId}`,
+  trustedEmail: (contactId: string) => `trusted-email:${contactId}`,
 } as const;
 
 /**
  * Checks the patient profile the way the lead wizard checks its master data,
  * with the app's own messages instead of the browser's: required personal
  * data, e-mail addresses and phone numbers (empty optional contacts are
- * allowed), and a named trusted contact, with a phone for a minor. Returns
+ * allowed), and a named trusted contact, with phone or e-mail for a minor. Returns
  * the message per field key; an empty object means the profile can be saved.
  */
 export function validatePatientProfileForm(
@@ -56,10 +57,13 @@ export function validatePatientProfileForm(
   for (const contact of trustedContacts) {
     const name = contact.name.trim();
     const phone = contact.phone.trim();
+    const email = contact.email.trim();
     // A blank row is dropped on save.
-    if (!name && !phone && !contact.notes.trim()) continue;
+    if (!name && !phone && !email && !contact.notes.trim()) continue;
     if (!name) errors[patientProfileFieldKey.trustedName(contact.id)] = messages.required;
-    if (isMinor && !phone) errors[patientProfileFieldKey.trustedPhone(contact.id)] = messages.required;
+    if (isMinor && !phone && !email) errors[patientProfileFieldKey.trustedPhone(contact.id)] = messages.required;
+    if (phone && !isValidPhoneNumber(phone)) errors[patientProfileFieldKey.trustedPhone(contact.id)] = messages.invalidPhone;
+    if (email && !isValidEmailAddress(email)) errors[patientProfileFieldKey.trustedEmail(contact.id)] = messages.invalidEmail;
   }
   return errors;
 }
@@ -99,7 +103,7 @@ export function postalCodeError(
 
 /**
  * The trusted contacts of a minor as the form shows them: the relation field
- * offers only parent and guardian and shows "guardian" for any other stored
+ * offers mother, father, parent and guardian and shows "guardian" for any other stored
  * relation, so that is what is checked and saved.
  */
 export function withMinorGuardianRelations(
@@ -108,7 +112,7 @@ export function withMinorGuardianRelations(
 ): PatientTrustedContactFormState[] {
   if (!isMinor) return contacts;
   return contacts.map((contact) =>
-    ["guardian", "parent"].includes(contact.relation.trim())
+    ["guardian", "parent", "mother", "father"].includes(contact.relation.trim())
       ? contact
       : { ...contact, relation: "guardian" },
   );
@@ -129,7 +133,7 @@ export type NewPatientValidationMessages = PatientProfileValidationMessages &
 /**
  * The new-patient form's checks with the app's own messages (the form has
  * `noValidate`, so the browser shows none): the profile checks, an explicit
- * sex, the postal code, and for a minor a parent or guardian with a phone.
+ * sex, the postal code, and for a minor a parent or guardian with a contact.
  */
 export function validateNewPatientForm(
   form: PatientFormState,
@@ -149,9 +153,9 @@ export function validateNewPatientForm(
     isMinor &&
     !form.trustedContacts.some(
       (contact) =>
-        ["guardian", "parent"].includes(contact.relation) &&
+        ["guardian", "parent", "mother", "father"].includes(contact.relation) &&
         Boolean(contact.name.trim()) &&
-        Boolean(contact.phone.trim()),
+        Boolean(contact.phone.trim() || contact.email.trim()),
     )
   ) {
     errors[newPatientFieldKey.guardian] = messages.minorNeedsGuardian;

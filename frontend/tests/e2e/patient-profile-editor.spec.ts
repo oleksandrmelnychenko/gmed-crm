@@ -86,3 +86,47 @@ for (const lang of ["ru", "de"]) {
     });
   }
 }
+
+test("saving a minor's profile preserves the linked mother and her e-mail-only contact", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("gmed_lang", "ru");
+    localStorage.setItem("gmed_access_token", "profile-editor-test");
+  });
+  const relation = {
+    id: "relation-mother", patient_id: "patient-profile-qa", related_patient_id: "patient-mother",
+    related_name: "Anna Muster", related_display_name: "Anna Muster", relation_type: "mother",
+    is_emergency_contact: true, email: "anna@example.test", phone: null, notes: null,
+  };
+  let savedRelation: Record<string, unknown> | undefined;
+  await page.route("**/api/v1/**", async route => {
+    const url = route.request().url();
+    if (url.endsWith("/relations")) return route.fulfill({ json: [relation] });
+    if (url.endsWith("/relations/relation-mother/update")) {
+      savedRelation = route.request().postDataJSON();
+      return route.fulfill({ json: { ...relation, ...savedRelation } });
+    }
+    if (url.endsWith("/patients/patient-profile-qa/update")) return route.fulfill({ json: { id: "patient-profile-qa" } });
+    return route.fulfill({ json: [] });
+  });
+  await page.route("**/__patient-profile-editor-qa**", route => route.fulfill({
+    contentType: "text/html",
+    body: `<html><div id="root"></div><script type="module">
+      import RefreshRuntime from '/@react-refresh';
+      RefreshRuntime.injectIntoGlobalHook(window);
+      window.$RefreshReg$ = () => {};
+      window.$RefreshSig$ = () => (type) => type;
+      window.__vite_plugin_react_preamble_installed__ = true;
+      await import('/tests/e2e/fixtures/patient-profile-editor.tsx');
+    </script></html>`,
+  }));
+  await page.goto("/__patient-profile-editor-qa?minor=1");
+  const sheet = page.getByRole("dialog", { name: "Редактировать профиль пациента", exact: true });
+  await expect(sheet.locator('input[value="anna@example.test"]')).toHaveCount(1);
+  await sheet.locator('input[value="Alex"]').fill("Alexandra");
+  await sheet.getByRole("button", { name: "Сохранить пациента", exact: true }).click();
+  await expect(sheet).toBeHidden();
+  expect(savedRelation).toMatchObject({
+    relation_type: "mother", email: "anna@example.test", phone: null,
+  });
+  expect(savedRelation).not.toHaveProperty("related_patient_id");
+});

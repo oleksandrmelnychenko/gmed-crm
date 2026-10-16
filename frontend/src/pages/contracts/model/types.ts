@@ -135,6 +135,7 @@ export type QuoteFilters = {
 export type ContractFormState = {
   patientId: string;
   status: ContractStatus;
+  validFrom: string;
   signedAt: string;
   conditionsText: string;
 };
