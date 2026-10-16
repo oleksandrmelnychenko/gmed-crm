@@ -473,6 +473,32 @@ const PATIENT_PAYS = "Zahler ist die Patientin / der Patient";
 const OTHER_PAYS = "Zahler ist eine andere Person oder Organisation";
 const METHOD = "Welche Zahlungsart für Rechnungen bevorzugen Sie?";
 
+test("Next saves the last billing answer before checking missing fields", async ({ page }) => {
+  let release = () => {};
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const { calls } = await setup(page, {
+    prepare: (request) => {
+      request.billing.invoice_recipient = "self";
+      request.billing.invoice_recipient_is_payer = true;
+      request.payer = selfPayer();
+    },
+    afterBillingWrite: async (_, patch) => {
+      if (patch.payment_method === "bank_transfer") await pending;
+    },
+  });
+  await page.goto("/");
+  await step(page, "billing");
+  await choose(page, page.getByRole("combobox", { name: METHOD }), "Überweisung");
+  await page.getByRole("button", { name: "Weiter", exact: true }).click();
+  await expect.poll(() => calls.billing.length).toBe(1);
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "billing");
+  release();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "disclosure");
+  await step(page, "billing");
+  await expect(page.getByRole("combobox", { name: METHOD })).toContainText("Überweisung");
+  expect(calls.billing).toEqual([{ payment_method: "bank_transfer" }]);
+});
+
 test("two parents: choose the named invoice parent, preserve it on reload and switch the payer deliberately", async ({ page }) => {
   const mother = "11111111-1111-4111-8111-111111111111";
   const father = "22222222-2222-4222-8222-222222222222";

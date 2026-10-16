@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
@@ -19,7 +18,8 @@ import {
   type LeadRequest,
 } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
-import { CabinetSection as Section, errorBody, errorMessage, type RequestQueue } from "./lead-request-parts";
+import { CabinetSection as Section, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
+import type { SaveState } from "./lead-request-model";
 
 import { storedTrustedPersons, trustedPersonsPath } from "./lead-trusted-persons-model";
 import { TrustedPersonsList } from "./lead-trusted-persons-editor";
@@ -57,7 +57,7 @@ export function choiceOnlyByGuardian(request: Pick<LeadRequest, "access_kind" | 
 /**
  * The person's own choice of the options of the consent form «Einverständniserklärung zur
  * Datenübermittlung» (Anlage 1), 2026-10-12. Nothing is ticked in advance; the choice counts only
- * once the person saves it (an active choice), and every save is kept. The generated form ticks
+ * after the person's checkbox changes are saved automatically, and every save is kept. The generated form ticks
  * only what was chosen here; without a saved choice GMED sends the form for a paper signature.
  *
  * The three consents the service runs on are part of every saved choice (QA 2026-10-12, A2-02):
@@ -69,18 +69,23 @@ export function ConsentFormChoicesSection({
   lang,
   enqueue,
   onChange,
+  onSaveState,
 }: {
   request: LeadRequest;
   lang: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
+  onSaveState?: (state: SaveState) => void;
 }) {
   const form = request.consent_form;
-  const text = consentFormText(lang, choosesForChild(request));
+  const forChild = choosesForChild(request);
+  const text = useMemo(() => consentFormText(lang, forChild), [lang, forChild]);
   const [draft, setDraft] = useState<ConsentFormChoices>(form?.choices ?? NO_CONSENT_FORM_CHOICES);
   const recipients = storedTrustedPersons(request);
   const personsText = trustedPersonsText(lang);
   const [baseline, setBaseline] = useState(form);
+  const savedRef = useRef(form);
+  useLayoutEffect(() => { savedRef.current = form; }, [form]);
   // A server refresh may carry the other parent's choice. Adopt it only when
   // this tab has no local edits, comparing against the previous server value.
   if (form?.chosen_at !== baseline?.chosen_at) {
@@ -92,6 +97,48 @@ export function ConsentFormChoicesSection({
   }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const ownMinor = choiceOnlyByGuardian(request);
+  const namedRecipients = savedDisclosureAllowed(request);
+  const version = form?.version;
+  const save = useCallback(async (snapshot: ConsentFormChoices): Promise<boolean> => {
+    if (!version || ownMinor) return true;
+    return enqueue(async () => {
+      // Recheck inside the shared queue: a timer and Next can flush the same choice.
+      if (!consentFormChanged(snapshot, savedRef.current?.choices)) return true;
+      if (!hasCoreConsents(snapshot)) {
+        onSaveState?.("idle");
+        return false;
+      }
+      setBusy(true);
+      setError("");
+      onSaveState?.("saving");
+      try {
+        const saved = await saveLeadConsentFormChoicesAndRefresh(
+          request.lead_id, { ...snapshot, named_recipients: namedRecipients }, version, lang, [],
+        );
+        savedRef.current = saved.consent_form;
+        setBaseline(saved.consent_form);
+        // Keep any choices made while this request was being saved.
+        setDraft((current) => consentFormChanged(current, snapshot) ? current : saved.consent_form?.choices ?? snapshot);
+        onChange(saved);
+        onSaveState?.("saved");
+        return true;
+      } catch (cause) {
+        const code = errorBody(cause)?.code;
+        setError(code === "disclosure_choice_changed" ? personsText.outdated
+          : code === "consent_core_required" ? text.coreRequired
+          : code === CONSENT_CHOICE_BY_GUARDIAN ? text.byGuardianOnly
+          : code === CONSENT_RECIPIENTS_REQUIRED ? text.recipientsRequired
+          : code === CONSENT_RECIPIENTS_INVALID ? text.recipientsInvalid
+          : errorMessage(cause));
+        onSaveState?.("error");
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    });
+  }, [version, ownMinor, enqueue, request.lead_id, namedRecipients, lang, onChange, onSaveState, personsText.outdated, text]);
+  useAutosave(draft, save);
   if (!form) return null;
   if (choiceOnlyByGuardian(request)) {
     return (
@@ -106,37 +153,6 @@ export function ConsentFormChoicesSection({
   }
   const changed = consentFormChanged(draft, form.choices);
   const coreTicked = hasCoreConsents(draft);
-
-  async function save() {
-    if (!form) return;
-    setBusy(true);
-    setError("");
-    try {
-      const saved = await enqueue(() =>
-        saveLeadConsentFormChoicesAndRefresh(request.lead_id, { ...draft, named_recipients: savedDisclosureAllowed(request) }, form.version, lang, []),
-      );
-      onChange(saved);
-      setDraft(saved.consent_form?.choices ?? draft);
-      setBaseline(saved.consent_form);
-    } catch (cause) {
-      const code = errorBody(cause)?.code;
-      setError(
-        code === "disclosure_choice_changed"
-          ? personsText.outdated
-          : code === "consent_core_required"
-          ? text.coreRequired
-          : code === CONSENT_CHOICE_BY_GUARDIAN
-            ? text.byGuardianOnly
-            : code === CONSENT_RECIPIENTS_REQUIRED
-              ? text.recipientsRequired
-              : code === CONSENT_RECIPIENTS_INVALID
-                ? text.recipientsInvalid
-                : errorMessage(cause),
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const recipientsBlock = (
     <fieldset className="space-y-3 rounded-lg border border-border/60 p-3" data-testid="lead-request-consent-recipients">
@@ -156,11 +172,12 @@ export function ConsentFormChoicesSection({
         type="checkbox"
         className={cn(checkboxClass, "mt-0.5")}
         checked={draft[key]}
-        disabled={busy}
         data-consent-option={key}
         onChange={(event) => {
           const checked = event.currentTarget.checked;
           setDraft((current) => ({ ...current, [key]: checked }));
+          setError("");
+          onSaveState?.("idle");
         }}
       />
       <span className="leading-relaxed">
@@ -192,18 +209,9 @@ export function ConsentFormChoicesSection({
             </p>
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy || !coreTicked || (!changed && Boolean(form.choices) && form.chosen_by_me !== false)}
-              onClick={() => void save()}
-              data-testid="lead-request-consent-form-save"
-            >
-              {busy ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}
-              {busy ? text.saving : text.save}
-            </Button>
-            <p className="text-xs text-muted-foreground" aria-live="polite">
-              {changed && form.choices
+            {busy ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}
+            <p className="text-xs text-muted-foreground" aria-live="polite" data-testid="lead-request-consent-form-state">
+              {busy ? text.saving : changed
                 ? text.unsaved
                 : form.chosen_at
                   ? form.chosen_by_me === false

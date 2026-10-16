@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CircleAlert, LoaderCircle, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleAlert, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
@@ -75,6 +75,13 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     return () => { flushers?.delete(flush); };
   }, [flushers]);
   useEffect(() => {
+    // Only an explicit, complete decision is saved; viewing another parent's
+    // choice does not turn it into this parent's consent.
+    if (!changed || problem || ownMinor) return;
+    const timer = window.setTimeout(() => { void latest.current.save(); }, 700);
+    return () => window.clearTimeout(timer);
+  }, [draft, changed, problem, ownMinor]);
+  useEffect(() => {
     if (!changed && !busy) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
@@ -90,7 +97,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
 
   const state = <StatusChip tone={changed ? "warning" : request.disclosure ? "success" : "neutral"} role="status" data-testid="trusted-persons-save-state">
     {!changed && request.disclosure ? <Check aria-hidden="true" /> : null}
-    {changed ? text.unsaved : request.disclosure ? text.saved : text.unanswered}
+    {busy ? common.saving : changed ? text.unsaved : request.disclosure ? text.saved : text.unanswered}
   </StatusChip>;
 
   return <section className="space-y-4" data-testid="lead-request-disclosure-step">
@@ -136,11 +143,6 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     </StatusChip> : null}
     <p className="px-1 text-xs leading-5 text-muted-foreground">{text.footer}</p>
     {request.disclosure ? <p className="px-1 font-mono text-[11px] leading-5 text-muted-foreground" data-testid="disclosure-receipt">{text.saved} · {formatAppDateTime(request.disclosure.chosen_at)}{request.disclosure.chosen_by_name ? ` · ${request.disclosure.chosen_by_name}` : ""}</p> : null}
-    <div className="flex items-center gap-3 pb-2">
-      <Button type="button" size="sm" className="h-9 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 disabled:shadow-none" disabled={busy || problem !== null || !changed} onClick={() => void save()} data-testid="trusted-persons-save">
-        {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Check aria-hidden="true" className="size-3.5" />}{busy ? common.saving : text.save}
-      </Button>
-    </div>
     <StepFooter index={nav.index} total={nav.total} text={common}>
       <Button type="button" variant="outline" className="h-9" disabled={busy || !nav.onBack} onClick={() => nav.onBack?.()}><ArrowLeft aria-hidden="true" className="size-3.5" />{common.back}</Button>
       <Button type="button" className="h-9" disabled={busy || !nav.onNext} onClick={() => nav.onNext?.()}>{common.next}<ArrowRight aria-hidden="true" className="size-3.5" /></Button>

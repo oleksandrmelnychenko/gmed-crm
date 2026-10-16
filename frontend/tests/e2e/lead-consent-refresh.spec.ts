@@ -11,18 +11,23 @@ test("clean consent draft adopts other parent's new choices and recipients", asy
   await expect(recipient).toContainText("Invoices only");
   await expect(page.locator('[data-consent-option="named_recipients"]')).toHaveCount(0);
   await expect(page.getByTestId("disclosure-saved-status")).toHaveText("Disclosure permitted");
-  await expect(page.getByTestId("lead-request-consent-form-save")).toBeDisabled();
+  await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
   await page.getByRole("button", { name: "Refresh other parent" }).click();
   await expect(recipient).toContainText("Second Recipient");
   await expect(page.locator('[data-consent-option="channel_email"]')).toBeChecked();
-  await expect(page.getByTestId("lead-request-consent-form-save")).toBeEnabled();
+  await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
 });
 
 test("saving channels keeps disclosure read-only and asks the server for canonical scoped people", async ({ page }) => {
   await open(page);
   let body: Record<string, unknown> | undefined;
+  const bodies: Record<string, unknown>[] = [];
+  let release = () => {};
+  const pending = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/**/consent-choices", async route => {
     body = route.request().postDataJSON();
+    bodies.push(body!);
+    if (bodies.length === 1) await pending;
     return route.fulfill({ json: {} });
   });
   await page.route("**/api/**/lead-requests/synthetic-lead", route => route.fulfill({ json: {
@@ -32,9 +37,14 @@ test("saving channels keeps disclosure read-only and asks the server for canonic
     consent_form: { version: "v1", chosen_at: "2026-10-14T09:00:00Z", choices: body?.choices },
   } }));
   await page.locator('[data-consent-option="channel_threema"]').check();
-  await page.getByTestId("lead-request-consent-form-save").click();
-  await expect(page.getByTestId("lead-request-consent-form-save")).toBeDisabled();
-  expect(body).toMatchObject({ choices: { named_recipients: true, channel_threema: true }, recipients: [] });
+  await expect.poll(() => bodies.length).toBe(1);
+  await page.locator('[data-consent-option="channel_email"]').check();
+  release();
+  await expect.poll(() => bodies.length).toBe(2);
+  await expect(page.getByTestId("lead-request-consent-form-state")).toContainText("Your choice of");
+  await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
+  expect(body).toMatchObject({ choices: { named_recipients: true, channel_threema: true, channel_email: true }, recipients: [] });
+  await expect(page.locator('[data-consent-option="channel_email"]')).toBeChecked();
   await expect(page.getByTestId("trusted-persons-list")).toContainText("Invoices only");
 });
 test("locally edited consent draft survives a newer server choice", async ({ page }) => {
@@ -45,5 +55,5 @@ test("locally edited consent draft survives a newer server choice", async ({ pag
   await expect(recipient).toContainText("Second Recipient");
   await expect(page.locator('[data-consent-option="channel_threema"]')).toBeChecked();
   await expect(page.locator('[data-consent-option="channel_email"]')).not.toBeChecked();
-  await expect(page.getByTestId("lead-request-consent-form-save")).toBeEnabled();
+  await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
 });

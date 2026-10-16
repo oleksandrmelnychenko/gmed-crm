@@ -103,19 +103,18 @@ test("an incomplete choice is not discarded when another step is selected", asyn
   expect(calls).toHaveLength(0);
 });
 
-test("explicit save keeps failed drafts and retries; reload restores decision, scope and receipt", async ({ page }) => {
+test("automatic save keeps failed drafts; Next retries and reload restores decision, scope and receipt", async ({ page }) => {
   const { calls } = await setup(page, { failSave: true });
   await expect(page.getByTestId("disclosure-no")).not.toBeChecked();
   await expect(page.getByTestId("disclosure-yes")).not.toBeChecked();
-  await expect(page.getByTestId("trusted-persons-save")).toBeDisabled();
+  await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await addFriend(page);
   await expect(page.getByText("I expressly consent to Example Care GmbH", { exact: false })).toBeVisible();
-  expect(calls).toHaveLength(0);
-  await expect(page.getByTestId("trusted-persons-save-state")).toHaveText("Changes not saved yet");
-  await page.getByTestId("trusted-persons-save").click();
   await expect(page.getByRole("alert").last()).toContainText("Enter a name, relationship and scope");
   await expect(page.getByTestId("trusted-person-editor").getByLabel("Last name, first name")).toHaveValue("Eva Friend");
-  await page.getByTestId("trusted-persons-save").click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "documents");
+  await page.getByTestId("lead-request-steps").locator('[data-step="disclosure"]').click();
   await expect(page.getByTestId("trusted-persons-save-state")).toHaveText("Saved");
   expect(calls).toHaveLength(2);
   expect(calls[1]).toEqual({ id: "child-a", persons: [{ name: "Eva Friend", relation: "friend", contact: null, scope: "Medical information" }], allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "en" });
@@ -129,17 +128,17 @@ test("explicit save keeps failed drafts and retries; reload restores decision, s
 test("Yes requires person, scope and checkbox; editing details requires fresh consent", async ({ page }) => {
   await setup(page);
   await page.getByTestId("disclosure-yes").check();
-  await expect(page.getByTestId("trusted-persons-save")).toBeDisabled();
+  await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await addFriend(page);
-  await expect(page.getByTestId("trusted-persons-save")).toBeEnabled();
+  await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await page.getByLabel("Scope of information", { exact: false }).fill("");
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
   await page.getByTestId("disclosure-consent").check();
-  await expect(page.getByTestId("trusted-persons-save")).toBeDisabled();
+  await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await page.getByLabel("Scope of information", { exact: false }).fill("Invoices only");
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
   await page.getByTestId("disclosure-consent").check();
-  await expect(page.getByTestId("trusted-persons-save")).toBeEnabled();
+  await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await page.getByTestId("disclosure-no").check();
   await page.getByTestId("disclosure-yes").check();
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
@@ -169,9 +168,8 @@ test("No clears existing people and records an explicit refusal without changing
   item.consent_form.choices.named_recipients = true;
   const { calls } = await setup(page, { requests: [item] });
   await page.getByRole("button", { name: "Remove", exact: true }).click();
-  await expect(page.getByTestId("trusted-persons-save")).toBeDisabled();
+  await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await page.getByTestId("disclosure-no").check();
-  await page.getByTestId("trusted-persons-save").click();
   await expect(page.getByTestId("trusted-persons-save-state")).toHaveText("Saved");
   expect(calls).toEqual([{ id: "child-a", persons: [], allow_disclosure: false, consent_given: false, version: "2026-10-14", language: "en" }]);
   expect(item.consent_form.choices.agency_processing).toBe(true);
@@ -190,7 +188,7 @@ test("a legacy list is retained without preselecting the new decision or consent
   await expect(page.getByLabel("Last name, first name")).toHaveValue("Legacy Friend");
   await expect(page.getByLabel("Scope of information", { exact: false })).toHaveValue("");
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
-  await expect(page.getByTestId("trusted-persons-save")).toBeDisabled();
+  await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
 });
 
 test("another guardian can confirm the saved people while the original actor stays identified", async ({ page }) => {
@@ -200,9 +198,8 @@ test("another guardian can confirm the saved people while the original actor sta
   await expect(page.getByTestId("disclosure-yes")).toBeChecked();
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
   await expect(page.getByTestId("disclosure-receipt")).toContainText("Other Guardian");
-  await expect(page.getByTestId("trusted-persons-save")).toBeDisabled();
+  await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await page.getByTestId("disclosure-consent").check();
-  await page.getByTestId("trusted-persons-save").click();
   await expect(page.getByTestId("disclosure-receipt")).toContainText("Guardian Muster");
   expect(calls[0].persons[0].scope).toBe("Invoices only");
 });
@@ -246,7 +243,7 @@ for (const width of [1440, 390]) {
     await expect(page.getByTestId("trusted-person-editor")).toHaveCount(2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: `../.tmp/third-party-disclosure-20261014/disclosure-${width}.png`, fullPage: true });
-    await page.getByTestId("trusted-persons-save").scrollIntoViewIfNeeded();
+    await page.getByRole("button", { name: "Далее", exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: `../.tmp/third-party-disclosure-20261014/disclosure-${width}-consent.png`, fullPage: true });
   });
 }

@@ -28,7 +28,7 @@ const CORE = {
 };
 
 describe("consent form choices in the lead cabinet", () => {
-  it("ticks nothing in advance and asks the person to save an own choice", () => {
+  it("ticks nothing in advance and explains automatic saving of an explicit choice", () => {
     const markup = renderToStaticMarkup(
       <ConsentFormChoicesSection
         request={request({ version: "2026-10-12", choices: null, chosen_at: null })}
@@ -42,11 +42,11 @@ describe("consent form choices in the lead cabinet", () => {
     expect(markup).not.toContain('checked=""');
     expect(markup).toContain("Noch keine Auswahl gespeichert.");
     expect(markup).toContain("GMED kreuzt nichts für Sie an");
-    // QA 2026-10-12, A2-02: an empty choice is no consent; "save" waits for the three.
+    // An empty choice is no consent; automatic saving waits for the three.
     expect(markup.match(/\(erforderlich\)/g)).toHaveLength(3);
     expect(markup).toContain('data-testid="lead-request-consent-form-core-hint"');
-    const saveButton = (markup.match(/<button[^>]*>/g) ?? []).find((tag) => tag.includes("lead-request-consent-form-save"));
-    expect(saveButton).toContain('disabled=""');
+    expect(markup).not.toContain("lead-request-consent-form-save");
+    expect(markup).toContain("automatisch gespeichert");
   });
 
   it("knows the three consents the service runs on", () => {
@@ -142,10 +142,7 @@ describe("consent form choices in the lead cabinet", () => {
     );
     expect(markup).toContain("сохранил другой родитель или представитель");
     expect(markup).not.toContain("Ваш выбор от");
-    // The second parent can deliberately record the same selection as their
-    // own; changing a consent merely to become its signer is not required.
-    const saveButton = (markup.match(/<button[^>]*>/g) ?? []).find((tag) => tag.includes("lead-request-consent-form-save"));
-    expect(saveButton).not.toContain('disabled=""');
+    expect(markup).not.toContain("lead-request-consent-form-save");
   });
 
   it("is hidden for an older server without the consent form", () => {

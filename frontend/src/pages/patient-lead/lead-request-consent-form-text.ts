@@ -68,7 +68,7 @@ const de: ConsentFormText = {
   channelsRisk: "Die Übermittlung sensibler Daten per E-Mail oder Messenger ist mit Risiken verbunden.",
   required: "erforderlich",
   coreHint:
-    "Ohne die drei erforderlichen Einwilligungen kann GMED Ihre Anfrage nicht bearbeiten; deshalb lässt sich die Auswahl erst mit ihnen speichern. Möchten Sie sie nicht geben, speichern Sie nichts und sprechen Sie mit uns.",
+    "Ihre Auswahl wird automatisch gespeichert, sobald Sie die drei erforderlichen Einwilligungen angekreuzt haben. Möchten Sie sie nicht geben, sprechen Sie bitte mit GMED.",
   coreRequired: "Bitte kreuzen Sie die drei erforderlichen Einwilligungen an.",
   save: "Auswahl speichern",
   saving: "Wird gespeichert …",
@@ -110,7 +110,7 @@ const deChild: ChildTexts = {
   },
   channelsTitle: "Die Daten und Unterlagen meines Kindes dürfen über diese Kommunikationswege eingeholt oder übermittelt werden:",
   coreHint:
-    "Ohne die drei erforderlichen Einwilligungen kann GMED die Anfrage für Ihr Kind nicht bearbeiten; deshalb lässt sich die Auswahl erst mit ihnen speichern. Möchten Sie sie nicht geben, speichern Sie nichts und sprechen Sie mit uns.",
+    "Ihre Auswahl für Ihr Kind wird automatisch gespeichert, sobald Sie die drei erforderlichen Einwilligungen angekreuzt haben. Möchten Sie sie nicht geben, sprechen Sie bitte mit GMED.",
   recipientsHint: "Nennen Sie, an wen GMED die Daten Ihres Kindes übermitteln darf (höchstens 5). Sich selbst als Eltern bzw. Vormund müssen Sie hier nicht nennen.",
 };
 
@@ -134,7 +134,7 @@ const en: ConsentFormText = {
   channelsRisk: "Sending sensitive data by e-mail or messenger carries risks.",
   required: "required",
   coreHint:
-    "Without the three required consents GMED cannot handle your request, so your choice can be saved only with them. If you do not want to give them, save nothing and talk to us.",
+    "Your choice is saved automatically once you tick the three required consents. If you do not wish to give them, please contact GMED.",
   coreRequired: "Please tick the three required consents.",
   save: "Save my choice",
   saving: "Saving …",
@@ -174,7 +174,7 @@ const enChild: ChildTexts = {
   },
   channelsTitle: "My child's data and documents may be obtained or passed on through these channels:",
   coreHint:
-    "Without the three required consents GMED cannot handle the request for your child, so your choice can be saved only with them. If you do not want to give them, save nothing and talk to us.",
+    "Your choice for your child is saved automatically once you tick the three required consents. If you do not wish to give them, please contact GMED.",
   recipientsHint: "Name who GMED may pass your child's data on to (at most 5). You need not name yourself as parent or guardian.",
 };
 
@@ -198,7 +198,7 @@ const uk: ConsentFormText = {
   channelsRisk: "Передача чутливих даних електронною поштою чи месенджером пов'язана з ризиками.",
   required: "обов'язково",
   coreHint:
-    "Без трьох обов'язкових згод GMED не може опрацювати ваш запит, тому вибір можна зберегти лише з ними. Якщо ви не хочете їх давати, нічого не зберігайте й зв'яжіться з нами.",
+    "Вибір зберігається автоматично, коли ви позначите три обов'язкові згоди. Якщо ви не хочете їх давати, зв'яжіться з GMED.",
   coreRequired: "Позначте, будь ласка, три обов'язкові згоди.",
   save: "Зберегти вибір",
   saving: "Зберігаємо …",
@@ -238,7 +238,7 @@ const ukChild: ChildTexts = {
   },
   channelsTitle: "Дані та документи моєї дитини можна отримувати або передавати цими каналами:",
   coreHint:
-    "Без трьох обов'язкових згод GMED не може опрацювати запит для вашої дитини, тому вибір можна зберегти лише з ними. Якщо ви не хочете їх давати, нічого не зберігайте й зв'яжіться з нами.",
+    "Вибір для вашої дитини зберігається автоматично, коли ви позначите три обов'язкові згоди. Якщо ви не хочете їх давати, зв'яжіться з GMED.",
   recipientsHint: "Вкажіть, кому GMED може передавати дані вашої дитини (не більше 5). Себе як батька, матір чи опікуна вказувати не потрібно.",
 };
 
@@ -262,7 +262,7 @@ const ru: ConsentFormText = {
   channelsRisk: "Передача чувствительных данных по электронной почте или в мессенджере связана с рисками.",
   required: "обязательно",
   coreHint:
-    "Без трёх обязательных согласий GMED не может обработать ваше обращение, поэтому выбор можно сохранить только с ними. Если вы не хотите их давать, ничего не сохраняйте и свяжитесь с нами.",
+    "Выбор сохраняется автоматически, когда вы отметите три обязательных согласия. Если вы не хотите их давать, свяжитесь с GMED.",
   coreRequired: "Отметьте, пожалуйста, три обязательных согласия.",
   save: "Сохранить выбор",
   saving: "Сохраняем …",
@@ -302,7 +302,7 @@ const ruChild: ChildTexts = {
   },
   channelsTitle: "Данные и документы моего ребёнка можно получать или передавать по этим каналам:",
   coreHint:
-    "Без трёх обязательных согласий GMED не может обработать обращение для вашего ребёнка, поэтому выбор можно сохранить только с ними. Если вы не хотите их давать, ничего не сохраняйте и свяжитесь с нами.",
+    "Выбор для вашего ребёнка сохраняется автоматически, когда вы отметите три обязательных согласия. Если вы не хотите их давать, свяжитесь с GMED.",
   recipientsHint: "Укажите, кому GMED может передавать данные вашего ребёнка (не более 5). Себя как родителя или опекуна указывать не нужно.",
 };
 

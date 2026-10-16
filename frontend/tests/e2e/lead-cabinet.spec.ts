@@ -1032,15 +1032,14 @@ test.describe("lead cabinet", () => {
     const save = page.getByTestId("lead-request-consent-form-save");
     // An empty or partial choice is no consent (QA 2026-10-12, A2-02): saving waits for the three
     // consents the service runs on.
-    await expect(save).toBeDisabled();
+    await expect(save).toHaveCount(0);
     await expect(page.getByTestId("lead-request-consent-form-core-hint")).toBeVisible();
     await block.getByRole("checkbox", { name: /behandelnden Ärzte/ }).check();
     await block.getByRole("checkbox", { name: "WhatsApp", exact: true }).check();
-    await expect(save).toBeDisabled();
+    await expect(save).toHaveCount(0);
     await block.getByRole("checkbox", { name: /beauftragte Mitarbeitende/ }).check();
     await block.getByRole("checkbox", { name: /EDV-System/ }).check();
     await expect(page.getByTestId("lead-request-consent-form-core-hint")).toHaveCount(0);
-    await save.click();
     await expect(block).toContainText("Ihre Auswahl vom 12.10.2026");
     await expect(block).toContainText("ein schon erstelltes Formular erstellt GMED dann neu");
     expect(calls.consentChoices).toEqual([
@@ -1106,7 +1105,6 @@ test.describe("lead cabinet", () => {
       await block.getByRole("checkbox", { name }).check();
     }
     await block.getByRole("checkbox", { name: "E-Mail", exact: true }).check();
-    await page.getByTestId("lead-request-consent-form-save").click();
     await expect(block).toContainText("Ihre Auswahl vom 12.10.2026");
     expect(calls.consentChoices).toHaveLength(1);
     expect(calls.consentChoices[0]?.choices).toMatchObject({

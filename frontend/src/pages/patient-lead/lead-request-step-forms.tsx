@@ -153,10 +153,7 @@ function StepFrame({
   // which steps showed it, for the badges of the step bar.
   const showMissing = nav.missingShown;
   const next = () => {
-    if (labels.length > 0 && !showMissing) {
-      nav.onShowMissing();
-      return;
-    }
+    // The page validates the fresh server response after flushing this step.
     nav.onNext?.();
   };
   return (
@@ -1000,7 +997,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
       </Section>
 
       {/* The person's own choice of the consent form options (2026-10-12). */}
-      <ConsentFormChoicesSection request={request} lang={lang} enqueue={enqueue} onChange={onChange} />
+      <ConsentFormChoicesSection request={request} lang={lang} enqueue={enqueue} onChange={onChange} onSaveState={parts.on("consentForm")} />
     </StepFrame>
   );
 }

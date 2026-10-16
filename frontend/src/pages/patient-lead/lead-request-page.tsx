@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Clock, LoaderCircle } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
@@ -325,6 +325,12 @@ function LeadRequestView({
   switchAfterSave: (leadId: string, action: () => void) => Promise<void>;
 }) {
   const guardian = request.access_kind === "guardian";
+  const latestRequest = useRef(request);
+  useLayoutEffect(() => { latestRequest.current = request; }, [request]);
+  const updateRequest = useCallback((next: LeadRequest) => {
+    latestRequest.current = next;
+    onChange(next);
+  }, [onChange]);
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedStep = searchParams.get("step");
   const [chosenStep, setChosenStep] = useState<StepId>(() => visibleSteps(request).find((step) => step === requestedStep) ?? initialStep(request));
@@ -360,8 +366,14 @@ function LeadRequestView({
     [missingShownSteps, request.submitted_at, request.follow_up?.before_submit, sendOpened],
   );
 
-  const go = useCallback((next: StepId) => {
+  const go = useCallback((next: StepId, validateCurrent = false) => {
     void switchAfterSave(request.lead_id, () => {
+      // All sections have now saved. The pre-save render can still list fields
+      // the user just completed, especially in Insurance & Invoice.
+      if (validateCurrent && !missingShownSteps.has(step) && stepMissingCount(latestRequest.current, step) > 0) {
+        showMissingOf(step);
+        return;
+      }
       setChosenStep(next);
       setSearchParams((current) => {
         const params = new URLSearchParams(current);
@@ -377,17 +389,17 @@ function LeadRequestView({
         top.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
       }
     });
-  }, [switchAfterSave, request.lead_id, setSearchParams]);
+  }, [switchAfterSave, request.lead_id, setSearchParams, missingShownSteps, step, showMissingOf]);
 
   const nav: StepNav = {
     index: position + 1,
     total: steps.length,
     onBack: position > 0 ? () => go(steps[position - 1]) : null,
-    onNext: position < steps.length - 1 ? () => go(steps[position + 1]) : null,
+    onNext: position < steps.length - 1 ? () => go(steps[position + 1], true) : null,
     missingShown: missingShownSteps.has(step),
     onShowMissing: () => showMissingOf(step),
   };
-  const props: StepProps = { request, text, lang, enqueue, onChange, missing: missing[step], nav };
+  const props: StepProps = { request, text, lang, enqueue, onChange: updateRequest, missing: missing[step], nav };
 
   return (
     // `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer.
