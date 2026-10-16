@@ -9,10 +9,6 @@ import {
   localizeReleaseText,
 } from "@/lib/release-notes";
 
-function buildTimeLabel(value: string) {
-  return formatAppDateTime(value) || value;
-}
-
 export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
   const { lang } = useLang();
   const [open, setOpen] = useState(false);
@@ -24,16 +20,19 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
   const text = lang === "de"
     ? {
         button: "Neu",
-        dialog: "Build-Inhalt",
+        dialog: "Wichtige Neuerungen",
         close: "Build-Informationen schließen",
         date: "Erstellt",
+        unknownDate: "Zeitpunkt nicht verfügbar",
       }
     : {
         button: "Новое",
-        dialog: "Состав сборки",
+        dialog: "Главные обновления",
         close: "Закрыть информацию о билде",
         date: "Собрано",
+        unknownDate: "Время сборки не указано",
       };
+  const buildTime = formatAppDateTime(release.builtAt) || text.unknownDate;
 
   useEffect(() => {
     if (!open) return;
@@ -90,6 +89,8 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
         type="button"
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-label={`${text.dialog}: ${channelLabel}, ${release.build}, ${buildTime}`}
+        title={`${channelLabel} · ${release.build} · ${buildTime}`}
         onClick={toggle}
         className="flex h-7 items-center gap-1.5 rounded-md bg-[#111111] px-2.5 font-mono text-[10.5px] font-semibold tracking-[0.02em] text-[#789487] transition-colors hover:bg-black hover:text-[#8fa99c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none"
       >
@@ -97,7 +98,7 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
         {/* Phones show only the channel; the panel names the build time. */}
         <span aria-hidden="true" className="hidden text-[#566b62] sm:inline">·</span>
         <span className="hidden uppercase md:inline">{text.button}</span>
-        <span className="hidden tracking-normal sm:inline">{buildTimeLabel(release.builtAt)}</span>
+        <span className="hidden tracking-normal sm:inline">{buildTime}</span>
       </button>
 
       {open ? createPortal(
@@ -132,7 +133,7 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
             <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
               <span className="font-mono text-foreground">Build {release.build}</span>
               <span aria-hidden="true" className="size-1 rounded-full bg-border" />
-              <span>{text.date}: {buildTimeLabel(release.builtAt)}</span>
+              <span>{text.date}: {buildTime}</span>
             </div>
           </div>
 

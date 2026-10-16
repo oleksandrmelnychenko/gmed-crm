@@ -27,6 +27,8 @@ services:
       args:
         VITE_DEFAULT_LANG: "ru"
         VITE_RELEASE_CHANNEL: "dev"
+        VITE_BUILD_NUMBER: "${VITE_BUILD_NUMBER:-}"
+        VITE_BUILD_TIMESTAMP: "${VITE_BUILD_TIMESTAMP:-}"
 
   backend:
     build:

@@ -9,7 +9,6 @@ import {
 describe("customer release notes", () => {
   it("defines a complete customer-facing release in both languages", () => {
     expect(CURRENT_CUSTOMER_RELEASE.build).not.toBe("");
-    expect(Number.isNaN(new Date(CURRENT_CUSTOMER_RELEASE.builtAt).getTime())).toBe(false);
     expect(CURRENT_CUSTOMER_RELEASE.notes.length).toBeGreaterThan(0);
 
     for (const lang of ["ru", "de"] as const) {
@@ -20,6 +19,14 @@ describe("customer release notes", () => {
         expect(localizeReleaseText(note.description, lang)).not.toBe("");
       }
     }
+  });
+
+  it("never invents a release number or date when deployment metadata is missing", () => {
+    expect(resolveCustomerRelease({ mode: "development" })).toMatchObject({
+      build: "local", builtAt: "", title: { ru: "Обновления", de: "Aktualisierungen" },
+    });
+    expect(resolveCustomerRelease({ mode: "production", buildNumber: " ", buildTimestamp: "invalid" }))
+      .toMatchObject({ build: "unversioned", builtAt: "", title: { ru: "Релиз", de: "Release" } });
   });
 
   it("keeps development and production releases distinct", () => {
@@ -42,8 +49,8 @@ describe("customer release notes", () => {
     // Newer notes are added on top: a known note is looked up, not pinned to the first place.
     expect(development.notes).toContainEqual(
       expect.objectContaining({
-        commit: "26ad6fa",
-        title: expect.objectContaining({ ru: "E-Rechnung: счета в формате ZUGFeRD" }),
+        commit: "9629c4b",
+        title: expect.objectContaining({ ru: "Автосохранение заявки и одна кнопка «Далее»" }),
       }),
     );
     expect(production.channel).toBe("production");
@@ -53,8 +60,8 @@ describe("customer release notes", () => {
     expect(production.title.de).toBe("Release vom 11.08.2026");
     expect(production.notes).toContainEqual(
       expect.objectContaining({
-        commit: "26ad6fa",
-        title: expect.objectContaining({ ru: "E-Rechnung: счета в формате ZUGFeRD" }),
+        commit: "9629c4b",
+        title: expect.objectContaining({ ru: "Автосохранение заявки и одна кнопка «Далее»" }),
       }),
     );
   });

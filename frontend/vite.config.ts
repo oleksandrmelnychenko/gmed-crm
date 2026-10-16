@@ -1,14 +1,29 @@
 import path from "path"
 import { readFileSync, readdirSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { defineConfig, loadEnv } from 'vite'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 import tailwindcss from '@tailwindcss/vite'
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const proxyTarget = process.env.VITE_PROXY_TARGET ?? env.VITE_PROXY_TARGET ?? 'http://localhost:3000'
   const buildTimestamp = process.env.VITE_BUILD_TIMESTAMP || env.VITE_BUILD_TIMESTAMP || new Date().toISOString()
+  let buildNumber = process.env.VITE_BUILD_NUMBER || env.VITE_BUILD_NUMBER
+  if (!buildNumber) {
+    try {
+      const revision = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], {
+        cwd: __dirname,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim()
+      buildNumber = `${command === 'serve' ? 'local' : mode}-sha-${revision}`
+    } catch {
+      // Source archives have no Git metadata; deployers supply the build ID.
+      buildNumber = command === 'serve' ? 'local' : 'unversioned'
+    }
+  }
 
   if (mode.startsWith('mobile') && !env.VITE_API_BASE_URL && !process.env.VITE_API_BASE_URL) {
     throw new Error(
@@ -41,6 +56,7 @@ export default defineConfig(({ mode }) => {
       },
     ],
     define: {
+      'import.meta.env.VITE_BUILD_NUMBER': JSON.stringify(buildNumber),
       'import.meta.env.VITE_BUILD_TIMESTAMP': JSON.stringify(buildTimestamp),
     },
     server: {

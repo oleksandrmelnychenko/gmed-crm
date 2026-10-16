@@ -71,6 +71,8 @@ function Publish-LocalImages {
     [Parameter(Mandatory = $true)][string]$Archive,
     [Parameter(Mandatory = $true)][string]$WorkRoot,
     [Parameter(Mandatory = $true)][string]$Tag,
+    [Parameter(Mandatory = $true)][string]$BuildNumber,
+    [Parameter(Mandatory = $true)][string]$BuildTimestamp,
     [Parameter(Mandatory = $true)][string[]]$SshOptions,
     [Parameter(Mandatory = $true)][string]$Remote
   )
@@ -91,7 +93,9 @@ function Publish-LocalImages {
     "GMED_MESSAGE_ENCRYPTION_KEYS=v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     "GMED_INVOICE_PARSER_API_KEY=build-only-placeholder",
     "CADDY_HOSTNAME=console-dev.gmed-health.com",
-    "ACME_EMAIL=build@example.invalid"
+    "ACME_EMAIL=build@example.invalid",
+    "VITE_BUILD_NUMBER=$BuildNumber",
+    "VITE_BUILD_TIMESTAMP=$BuildTimestamp"
   ) | Set-Content -LiteralPath $buildEnv -Encoding ascii
   $buildOverride = Join-Path $WorkRoot "build-local.yml"
   @(
@@ -258,9 +262,11 @@ try {
   }
 
   $prebuiltTag = ""
+  $buildNumber = "dev-sha-$snapshotLabel"
+  $buildTimestamp = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
   if (-not $ServerBuild) {
     $prebuiltTag = ($publishId -replace '[^A-Za-z0-9_.-]', '-')
-    Publish-LocalImages -Archive $archive -WorkRoot $temporaryPublishRoot -Tag $prebuiltTag -SshOptions $sshOptions -Remote $remote
+    Publish-LocalImages -Archive $archive -WorkRoot $temporaryPublishRoot -Tag $prebuiltTag -BuildNumber $buildNumber -BuildTimestamp $buildTimestamp -SshOptions $sshOptions -Remote $remote
   }
 
   Invoke-Checked "ssh" ($sshOptions + @($remote, "mkdir -p /home/gmed/deploy"))
@@ -270,7 +276,7 @@ try {
   # merely locking the final container replacement still permits mixed releases.
   Write-Host "Waiting for the DEV deployment lock, then publishing $snapshotLabel..."
   $migrationMode = if ($DirectMigrations) { "direct" } else { "rehearse" }
-  Invoke-Checked "ssh" ($sshOptions + @($remote, "chmod 700 $RemoteDeployScript && flock -x /home/gmed/deploy/deploy.lock env GMED_DEV_MIGRATION_MODE=$migrationMode GMED_DEV_PREBUILT_TAG=$prebuiltTag bash $RemoteDeployScript $RemoteArchive"))
+  Invoke-Checked "ssh" ($sshOptions + @($remote, "chmod 700 $RemoteDeployScript && flock -x /home/gmed/deploy/deploy.lock env GMED_DEV_MIGRATION_MODE=$migrationMode GMED_DEV_PREBUILT_TAG=$prebuiltTag VITE_BUILD_NUMBER=$buildNumber VITE_BUILD_TIMESTAMP=$buildTimestamp bash $RemoteDeployScript $RemoteArchive"))
 
   if (-not $SkipSmoke) {
     $response = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 30
