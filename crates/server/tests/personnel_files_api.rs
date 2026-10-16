@@ -974,7 +974,10 @@ async fn completeness_retention_and_export() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes)).unwrap();
-    let names: Vec<String> = archive.file_names().map(str::to_string).collect();
+    let names: Vec<String> = archive
+        .file_names()
+        .map(|name| name.unwrap().into_owned())
+        .collect();
     let number = employee["personnel_number"].as_str().unwrap();
     assert!(
         names.contains(&format!(

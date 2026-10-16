@@ -551,8 +551,8 @@ mod tests {
         ])
         .unwrap();
         let archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
-        let names: Vec<&str> = archive.file_names().collect();
-        assert!(names.contains(&"A/one.pdf"));
-        assert!(names.contains(&"Index.csv"));
+        let names: Vec<_> = archive.file_names().collect::<Result<_, _>>().unwrap();
+        assert!(names.iter().any(|name| name == "A/one.pdf"));
+        assert!(names.iter().any(|name| name == "Index.csv"));
     }
 }

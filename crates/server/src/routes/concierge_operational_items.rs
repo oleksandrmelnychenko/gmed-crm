@@ -5642,7 +5642,7 @@ fn is_docx_container(data: &[u8]) -> bool {
     (0..archive.len()).any(|index| {
         archive
             .by_index(index)
-            .is_ok_and(|entry| entry.name().starts_with("word/"))
+            .is_ok_and(|entry| entry.name().is_ok_and(|name| name.starts_with("word/")))
     })
 }
 
@@ -5683,6 +5683,36 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 #[cfg(test)]
 mod work_center_tests {
     use super::*;
+
+    #[test]
+    fn docx_container_accepts_utf8_and_cp437_entry_names() {
+        use std::io::Write;
+
+        let filename = "word/ä.xml";
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("[Content_Types].xml", options).unwrap();
+        writer.write_all(b"<Types/>").unwrap();
+        writer.start_file(filename, options).unwrap();
+        writer.write_all(b"<document/>").unwrap();
+        let mut bytes = writer.finish().unwrap().into_inner();
+        assert!(is_docx_container(&bytes));
+
+        let offsets: Vec<_> = bytes
+            .windows(filename.len())
+            .enumerate()
+            .filter_map(|(offset, value)| (value == filename.as_bytes()).then_some(offset))
+            .collect();
+        assert_eq!(offsets.len(), 2);
+        // CP437 filenames retain the word/ prefix used to recognize DOCX.
+        for offset in offsets {
+            bytes[offset + "word/".len()] = 0xff;
+        }
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        assert!(archive.by_index(1).unwrap().name().is_ok());
+        assert!(is_docx_container(&bytes));
+        assert!(!is_docx_container(b"not a ZIP archive"));
+    }
 
     fn actor(user_id: Uuid, role: Role) -> AuthUser {
         AuthUser {

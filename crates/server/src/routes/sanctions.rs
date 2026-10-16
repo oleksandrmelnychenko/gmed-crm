@@ -762,7 +762,10 @@ fn uploaded_xml(bytes: &[u8]) -> Result<Vec<u8>, &'static str> {
     let index = (0..archive.len())
         .find(|index| {
             archive.by_index(*index).is_ok_and(|entry| {
-                entry.is_file() && entry.name().to_ascii_lowercase().ends_with(".xml")
+                entry.is_file()
+                    && entry
+                        .name()
+                        .is_ok_and(|name| name.to_ascii_lowercase().ends_with(".xml"))
             })
         })
         .ok_or("The ZIP file contains no XML file")?;
@@ -914,5 +917,29 @@ mod tests {
             writer.finish().unwrap();
         }
         assert!(uploaded_xml(empty.get_ref()).is_err());
+    }
+
+    #[test]
+    fn uploads_accept_cp437_xml_entry_names() {
+        let filename = "ä.xml";
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(filename, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"<export/>").unwrap();
+        let mut bytes = writer.finish().unwrap().into_inner();
+        let offsets: Vec<_> = bytes
+            .windows(filename.len())
+            .enumerate()
+            .filter_map(|(offset, value)| (value == filename.as_bytes()).then_some(offset))
+            .collect();
+        assert_eq!(offsets.len(), 2); // Local and central directory filenames.
+        // The crate decodes non-UTF-8 names as CP437; the XML remains readable.
+        for offset in offsets {
+            bytes[offset] = 0xff;
+        }
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        assert!(archive.by_index(0).unwrap().name().is_ok());
+        assert_eq!(uploaded_xml(&bytes).unwrap(), b"<export/>");
     }
 }
