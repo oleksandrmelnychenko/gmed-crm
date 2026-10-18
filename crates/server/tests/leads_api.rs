@@ -7608,15 +7608,16 @@ async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_a
     let (anna_relation, name, relation_type, email, street, zip, city, country, default_payer) =
         relations[0].clone();
     assert_eq!(name, "Anna Muster");
-    assert_eq!(relation_type, "parent");
+    assert_eq!(relation_type, "mother");
     assert_eq!(email.as_deref(), Some("anna.muster@example.com"));
     assert_eq!(street.as_deref(), Some("Musterweg 1"));
     assert_eq!(zip.as_deref(), Some("10115"));
     assert_eq!(city.as_deref(), Some("Berlin"));
     assert_eq!(country.as_deref(), Some("DE"));
     assert!(default_payer, "the paying parent is the default payer");
-    let (_, name, _, email, street, _, _, _, default_payer) = relations[1].clone();
+    let (_, name, relation_type, email, street, _, _, _, default_payer) = relations[1].clone();
     assert_eq!(name, "Ben Muster");
+    assert_eq!(relation_type, "father");
     assert_eq!(email.as_deref(), Some("ben.muster@example.com"));
     assert_eq!(
         street.as_deref(),

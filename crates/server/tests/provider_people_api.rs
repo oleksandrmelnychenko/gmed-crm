@@ -1254,7 +1254,7 @@ async fn provider_specializations_filter_matches_any_selected_specialization() {
 
 #[tokio::test]
 async fn provider_people_rejects_patient_role() {
-    let Some((app, pool, _admin_id)) = test_context().await else {
+    let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
 
@@ -1262,6 +1262,12 @@ async fn provider_people_rejects_patient_role() {
     let patient_user_id = seed_user(&pool, &tag, "patient").await;
     let bearer = auth_header_for(patient_user_id, "patient");
 
+    let (status, body) = json_request(&app, "GET", "/api/v1/provider-people", &bearer, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"], "subscription_required");
+
+    // An active package unlocks patient services, never the staff directory.
+    support::seed_subscribed_patient_for_user(&pool, patient_user_id, admin_id).await;
     let (status, body) = json_request(&app, "GET", "/api/v1/provider-people", &bearer, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["message"], "Insufficient permissions");

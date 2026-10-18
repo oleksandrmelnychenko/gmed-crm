@@ -81,7 +81,7 @@ export function LeadRequestPage() {
   const [sessions] = useState(() => new Map<string, { enqueue: RequestQueue; flushers: Set<AutosaveFlush> }>());
   const [saveBlocked, setSaveBlocked] = useState(false);
   const leaving = useRef(false);
-  const switchAfterSave = useCallback(async (leadId: string, action: () => void) => {
+  const switchAfterSave = useCallback(async (leadId: string, action: () => void, onBlocked?: () => void) => {
     if (leaving.current) return;
     leaving.current = true;
     try {
@@ -91,6 +91,7 @@ export function LeadRequestPage() {
         const results = await Promise.all(Array.from(versions.keys(), (flush) => flush.save()));
         if (!results.every(Boolean)) {
           setSaveBlocked(true);
+          onBlocked?.();
           break;
         }
         // A different section may have changed while a slower save was running.
@@ -322,7 +323,7 @@ function LeadRequestView({
   onChange: (request: LeadRequest) => void;
   onAccessLost: () => Promise<void>;
   enqueue: RequestQueue;
-  switchAfterSave: (leadId: string, action: () => void) => Promise<void>;
+  switchAfterSave: (leadId: string, action: () => void, onBlocked?: () => void) => Promise<void>;
 }) {
   const guardian = request.access_kind === "guardian";
   const latestRequest = useRef(request);
@@ -388,6 +389,10 @@ function LeadRequestView({
         const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
         top.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
       }
+    }, () => {
+      // An incomplete local draft may never reach server validation. Next must
+      // still reveal its required fields while preserving the unsaved values.
+      if (validateCurrent) showMissingOf(step);
     });
   }, [switchAfterSave, request.lead_id, setSearchParams, missingShownSteps, step, showMissingOf]);
 

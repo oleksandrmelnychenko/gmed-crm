@@ -2370,13 +2370,15 @@ test.describe("lead cabinet", () => {
 });
 
 test.describe("patient portal after conversion", () => {
-  test("a patient login keeps the full portal and gets the request page when it fills one in", async ({ page }) => {
+  test("a patient without a subscription keeps basic records and can fill in a new request", async ({ page }) => {
     await setup(page, "patient", { leadRequests: 1 });
     await page.goto("/");
-    // The dashboard repeats document links; check the side menu after it loads.
-    await expect(page.getByRole("main").getByRole("navigation").getByRole("link", { name: "Meine Dokumente" })).toBeVisible();
     const nav = page.getByRole("navigation").filter({ has: page.getByRole("link", { name: "Ihre Anfrage", exact: true }) });
-    await expect(nav.getByRole("link", { name: "Meine Dokumente" })).toBeVisible();
+    for (const name of ["Meine Dokumente", "Meine Rechnungen", "Datenschutz", "Konto"]) {
+      await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
+    }
+    await expect(nav.getByRole("button", { name: "Dashboard — Gesperrt", exact: true })).toBeVisible();
+    await expect(nav.getByRole("button", { name: "Chat — Gesperrt", exact: true })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
     await nav.getByRole("link", { name: "Ihre Anfrage" }).click();
     await expect(page).toHaveURL(/\/request$/);

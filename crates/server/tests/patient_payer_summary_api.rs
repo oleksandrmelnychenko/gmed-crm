@@ -337,6 +337,17 @@ async fn the_roles_of_the_card_and_a_patient_without_a_lead() {
     let patient_id = seed_patient(&app, "Ada", "1980-05-05").await;
     let path = format!("/api/v1/patients/{patient_id}/payer-summary");
 
+    let (status, body) = get(&app, &path, &app.bearer("patient")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"], "subscription_required");
+    // Even with a subscription, a patient cannot read the staff payer card.
+    support::seed_subscribed_patient_for_user(
+        app.pool(),
+        app.user_id("patient"),
+        app.suite.admin_id,
+    )
+    .await;
+
     // Roles without invoices.view, and a patient account, get nothing.
     for role in [
         "sales",
