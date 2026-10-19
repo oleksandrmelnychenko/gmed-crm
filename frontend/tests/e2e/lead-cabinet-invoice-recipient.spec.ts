@@ -427,7 +427,16 @@ async function setup(page: Page, options: {
               contact_consent_at: consent === true ? before?.contact_consent_at ?? "2026-10-11T09:16:00Z" : consent === false ? null : before?.contact_consent_at ?? null,
               cost_estimate_consent_at: before?.cost_estimate_consent_at ?? null,
             }
-          : { ...selfPayer() };
+          : input.payer_kind === "representative"
+            // A paying parent (2026-10-19): the server shows that representative's data.
+            ? (() => {
+                const person = (request.representation?.representatives ?? [])
+                  .find((rep: { id: string }) => rep.id === input.payer_representative_id) as Record<string, unknown> | undefined;
+                return { ...selfPayer(), payer_kind: "representative", payer_representative_id: input.payer_representative_id,
+                  first_name: person?.first_name ?? null, last_name: person?.last_name ?? null, email: person?.email ?? null,
+                  street: person?.street ?? null, relationship_kind: "parent" };
+              })()
+            : { ...selfPayer() };
       return route.fulfill({ json: answer() });
     }
     if (path === `${base}/payer/cost-estimate-consent` && method === "POST") {
@@ -525,7 +534,7 @@ test("two parents: choose the named invoice parent, preserve it on reload and sw
   await expect.poll(() => request.billing.recipient.representative_id).toBe(father);
   await expect.poll(() => request.payer?.email).toBe("ben.muster@example.com");
   expect(calls.billing.some((patch) => patch.recipient_representative_id === father)).toBe(true);
-  expect(calls.payer.at(-1)).toMatchObject({ first_name: "Ben", last_name: "Muster", street: "Vaterweg 2", relationship_kind: "parent" });
+  expect(calls.payer.at(-1)).toMatchObject({ payer_kind: "representative", payer_representative_id: father });
   expect(request.billing.invoice_to).toBe("other");
   expect(request.billing.invoice_name).toBe("Ben Muster");
   await step(page, "send");
@@ -544,7 +553,7 @@ test("two parents: choose the named invoice parent, preserve it on reload and sw
   await choose(page, parent, "Maria Muster");
   await expect.poll(() => request.billing.recipient.representative_id).toBe(mother);
   await expect.poll(() => request.payer?.email).toBe("maria.muster@example.com");
-  expect(calls.payer.at(-1)).toMatchObject({ first_name: "Maria", street: "Mutterweg 1" });
+  expect(calls.payer.at(-1)).toMatchObject({ payer_kind: "representative", payer_representative_id: mother });
   await expect(page.getByRole("combobox", { name: METHOD })).toBeVisible();
   await page.locator("#lead-request-recipient_email").fill("invoices@example.com");
   await expect.poll(() => request.billing.recipient.email).toBe("invoices@example.com");
@@ -767,7 +776,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await step(page, "billing");
     const email = page.getByTestId("lead-request-step-billing").getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" });
     await email.fill("rechnung-at-example.com");
-    await expect(page.locator("#lead-request-recipient_email-error")).toHaveText("Bitte prüfen Sie diese Angabe.");
+    await expect(page.locator("#lead-request-recipient_email-error")).toHaveText("Bitte geben Sie eine gültige E-Mail-Adresse ein, z. B. name@example.de.");
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Nicht gespeichert");
     await email.fill("rechnung@example.com");
     await expect.poll(() => calls.billing.at(-1)).toEqual({ recipient_email: "rechnung@example.com" });

@@ -750,17 +750,18 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     const saveState = page.getByTestId("lead-request-save-state");
 
     await email.fill("rechnung-at-example.com");
-    await expect(error).toHaveText("Bitte prüfen Sie diese Angabe.");
+    await expect(error).toHaveText("Bitte geben Sie eine gültige E-Mail-Adresse ein, z. B. name@example.de.");
     await expect(email).toHaveAttribute("aria-invalid", "true");
     await expect(saveState).toHaveText("Nicht gespeichert");
-    expect(calls.billing).toEqual([{ invoice_email: "rechnung-at-example.com" }]);
+    // The address is refused in the browser already (2026-10-19), nothing is sent.
+    expect(calls.billing).toEqual([]);
 
     // Another field is saved on its own; the refused address stays out and stays marked.
     await choose(page, page.getByTestId("lead-request-payment-route").getByRole("combobox", { name: METHOD_QUESTION }), "Bar");
     await expect.poll(() => calls.billing.at(-1)).toEqual({ payment_method: "cash" });
     await expect(error).toBeVisible();
     await expect(saveState).toHaveText("Nicht gespeichert");
-    expect(calls.billing.filter((patch) => "invoice_email" in patch)).toHaveLength(1);
+    expect(calls.billing.filter((patch) => "invoice_email" in patch)).toHaveLength(0);
 
     // A corrected address goes through, and the message goes with the refused value.
     await email.fill("rechnung@example.com");

@@ -370,8 +370,9 @@ test.describe("Parent country follow-up", () => {
     await expect(mother.getByRole("combobox", { name: leadRequestText("de").fields.country, exact: true })).toBeVisible();
     await expect(mother.locator("#lead-request-rep1_date_of_birth")).toHaveCount(0);
     await expect(mother.locator("#lead-request-rep1_street")).toHaveValue("Synthetic street 1");
-    await expect(page.getByTestId("lead-request-rep1-identity-upload")).toHaveCount(0);
-    await expect(page.getByTestId("lead-request-rep2-identity-upload")).toHaveCount(0);
+    // The parent's ID copy is asked from the start (2026-10-19), not only at the document stage.
+    await expect(page.getByTestId("lead-request-rep1-identity-upload")).toBeVisible();
+    await expect(page.getByTestId("lead-request-rep2-identity-upload")).toBeVisible();
     await page.setViewportSize({ width: 1440, height: 1000 });
     await mother.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("parent-short-1440.png"), fullPage: true, animations: "disabled" });
