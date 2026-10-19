@@ -6202,14 +6202,17 @@ async fn consent_child_keeps_linked_parent_people_without_relationship_labels() 
         !pdf_text.to_ascii_lowercase().contains("c/o"),
         "{pdf_text:?}"
     );
+    // The parents are the contracting representatives (2026-10-19): linked to
+    // their own patient records, they are printed with those records' names.
     assert!(
-        pdf_text.contains(&format!("{father_name}, geb. am 01.01.1990")),
+        pdf_text.contains("-father, geb. am 01.01.1990"),
         "{pdf_text:?}"
     );
     assert!(
-        pdf_text.contains(&format!("{mother_name}, geb. am 01.01.1990")),
+        pdf_text.contains("-mother, geb. am 01.01.1990"),
         "{pdf_text:?}"
     );
+    let _ = (father_name, mother_name);
     assert!(!pdf_text.contains("Vater"), "{pdf_text:?}");
     assert!(!pdf_text.contains("Hut"), "{pdf_text:?}");
 }

@@ -520,6 +520,7 @@ async fn a_self_payer_adult_and_a_third_party_person() {
         body["declaration"],
         json!({
             "payer_kind": "third_party",
+            "payer_representative_id": null,
             "payer_type": "person",
             "name": "Viktor Zahler",
             "organisation_name": null,

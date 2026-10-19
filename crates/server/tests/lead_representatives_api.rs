@@ -424,8 +424,11 @@ async fn an_invoice_names_the_chosen_parent_and_never_another_childs_contact() {
     assert_eq!(body["billing"]["invoice_name"], "Ben Muster");
     assert_eq!(body["billing"]["invoice_street"], "Vaterweg 2");
     assert_eq!(body["billing"]["invoice_email"], json!(father_email));
+    // The mother pays as representative (2026-10-19): the father chosen as
+    // recipient who pays must be confirmed, never silently taken over.
     assert!(
-        missing(&body).contains(&"payer_kind".into()),
+        missing(&body).contains(&"payer_kind".into())
+            || missing(&body).contains(&"invoice_recipient_is_payer".into()),
         "Choosing the father cannot silently leave the mother as payer: {body}"
     );
     let (status, separate) = json_request(

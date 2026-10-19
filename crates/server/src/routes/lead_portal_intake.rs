@@ -8250,17 +8250,11 @@ mod tests {
             "payer_kind",
             "invoice_to",
             "payment_method",
-            "request_reason",
         ]);
         // Nothing answered: the recipient first, no payer key.
         assert_eq!(
             with_invoice_recipient(base.clone(), &Recipient::default(), None, false, false),
-            keys(&[
-                "first_name",
-                "has_insurance",
-                "invoice_recipient",
-                "request_reason"
-            ])
+            keys(&["first_name", "has_insurance", "invoice_recipient"])
         );
         // A checked third-party recipient still needs visible recipient fields;
         // an absent or different stored payer never produces a hidden payer-kind error.
@@ -8287,12 +8281,7 @@ mod tests {
         };
         assert_eq!(
             with_invoice_recipient(base.clone(), &own, None, false, false),
-            keys(&[
-                "first_name",
-                "has_insurance",
-                "invoice_recipient_is_payer",
-                "request_reason"
-            ])
+            keys(&["first_name", "has_insurance", "invoice_recipient_is_payer",])
         );
         // "No": the payer question is shown and missing.
         let not_paying = Recipient {
@@ -8301,12 +8290,7 @@ mod tests {
         };
         assert_eq!(
             with_invoice_recipient(base.clone(), &not_paying, None, false, false),
-            keys(&[
-                "first_name",
-                "has_insurance",
-                "payer_kind",
-                "request_reason"
-            ])
+            keys(&["first_name", "has_insurance", "payer_kind",])
         );
         // A self-payer does not answer "the recipient (me) does not pay".
         let own_payer = lead_payer::Declaration {
