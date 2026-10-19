@@ -1401,8 +1401,14 @@ struct LeadConversionReadinessInput {
     // own `request_reason`) is optional since 2026-10-19 (owner) and is not
     // part of the readiness.
     requested_specialties: Value,
+    /// Staff record (a paper consent, the wizard toggle) or the cabinet's
+    /// consent; see `cabinet_consent_*` for the latter alone.
     consent_privacy_practices: bool,
     consent_healthcare: bool,
+    /// An active cabinet consent record (`lead_inquiry_processing` /
+    /// `health_data_processing`) of the adult lead or a parent / guardian.
+    cabinet_consent_privacy: bool,
+    cabinet_consent_healthcare: bool,
     identity_document_verified: bool,
     dsgvo_document_signed: bool,
     confidentiality_release_signed: bool,
@@ -1810,6 +1816,12 @@ fn evaluate_lead_conversion_readiness(
             "qualification_reasons": qualification_reasons,
             "blocking_reasons": conversion_reasons,
             "checks": checks,
+            // The wizard shows these as given in the cabinet next to its own
+            // toggles (which record a paper consent).
+            "cabinet_consents": {
+                "privacy_practices": input.cabinet_consent_privacy,
+                "healthcare": input.cabinet_consent_healthcare,
+            },
             "steps": [
                 { "key": "master_data", "label": "Stammdaten", "ready": master_data_ready },
                 { "key": "medical", "label": "Medizinische Merkmale", "ready": medical_ready },
@@ -1835,6 +1847,9 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
     let quote_matches_order = !readiness_line_signatures(&quote_line_items).is_empty()
         && readiness_line_signatures(&quote_line_items)
             == readiness_line_signatures(&order_service_line_items);
+    let cabinet_consent_privacy: bool = row.try_get("cabinet_consent_privacy").unwrap_or(false);
+    let cabinet_consent_healthcare: bool =
+        row.try_get("cabinet_consent_healthcare").unwrap_or(false);
     LeadConversionReadinessInput {
         qualification_status: row.try_get("qualification_status").unwrap_or_default(),
         compliance_status: row.try_get("compliance_status").unwrap_or_default(),
@@ -1849,8 +1864,13 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         requested_specialties: row
             .try_get("requested_specialties")
             .unwrap_or_else(|_| json!([])),
-        consent_privacy_practices: row.try_get("consent_privacy_practices").unwrap_or(false),
-        consent_healthcare: row.try_get("consent_healthcare").unwrap_or(false),
+        // A consent given in the cabinet counts like the staff's record of it.
+        consent_privacy_practices: row.try_get("consent_privacy_practices").unwrap_or(false)
+            || cabinet_consent_privacy,
+        consent_healthcare: row.try_get("consent_healthcare").unwrap_or(false)
+            || cabinet_consent_healthcare,
+        cabinet_consent_privacy,
+        cabinet_consent_healthcare,
         identity_document_verified: row.try_get("identity_document_verified").unwrap_or(false),
         dsgvo_document_signed: row.try_get("dsgvo_document_signed").unwrap_or(false),
         confidentiality_release_signed: row
@@ -1915,6 +1935,33 @@ async fn load_lead_conversion_readiness(
                   wizard_state,
                   consent_privacy_practices,
                   consent_healthcare,
+                  -- The consents given in the cabinet count like the staff's
+                  -- record of a paper consent (owner 2026-10-20): an active
+                  -- record of the adult lead, or of a parent / guardian.
+                  -- A minor's own login never counts: only a parent's or the
+                  -- guardian's record (`access_kind = guardian`).
+                  EXISTS (
+                      SELECT 1 FROM consent_records cr
+                      WHERE cr.lead_id = leads.id
+                        AND cr.consent_type = 'lead_inquiry_processing'
+                        AND cr.granted AND cr.revoked_at IS NULL
+                        AND (cr.expires_at IS NULL OR cr.expires_at > now())
+                        AND (cr.context->>'access_kind' = 'guardian'
+                             OR leads.date_of_birth IS NULL
+                             OR leads.date_of_birth
+                                <= ((now() AT TIME ZONE 'Europe/Berlin')::date - INTERVAL '18 years'))
+                  ) AS cabinet_consent_privacy,
+                  EXISTS (
+                      SELECT 1 FROM consent_records cr
+                      WHERE cr.lead_id = leads.id
+                        AND cr.consent_type = 'health_data_processing'
+                        AND cr.granted AND cr.revoked_at IS NULL
+                        AND (cr.expires_at IS NULL OR cr.expires_at > now())
+                        AND (cr.context->>'access_kind' = 'guardian'
+                             OR leads.date_of_birth IS NULL
+                             OR leads.date_of_birth
+                                <= ((now() AT TIME ZONE 'Europe/Berlin')::date - INTERVAL '18 years'))
+                  ) AS cabinet_consent_healthcare,
                   -- Repeat intakes (patient_first) reuse the compliance evidence
                   -- already stored on the patient instead of demanding new copies.
                   EXISTS (
@@ -10310,6 +10357,8 @@ mod lead_conversion_readiness_tests {
             requested_specialties: json!(["orthopedics"]),
             consent_privacy_practices: true,
             consent_healthcare: true,
+            cabinet_consent_privacy: false,
+            cabinet_consent_healthcare: false,
             identity_document_verified: true,
             dsgvo_document_signed: true,
             confidentiality_release_signed: true,

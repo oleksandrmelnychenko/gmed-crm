@@ -156,6 +156,8 @@ interface LeadReadiness {
   blocking_reasons: string[];
   checks: LeadReadinessCheck[];
   steps: LeadReadinessStep[];
+  /** Active cabinet consents (adult lead or parent / guardian); they count like the staff toggles. */
+  cabinet_consents?: { privacy_practices: boolean; healthcare: boolean };
 }
 
 interface LeadPhoneEntry {

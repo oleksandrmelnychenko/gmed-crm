@@ -48,7 +48,7 @@ export type ConsentFormText = {
 type ChildTexts = Pick<ConsentFormText, "intro" | "options" | "channelsTitle" | "coreHint" | "recipientsHint">;
 
 const de: ConsentFormText = {
-  title: "Einwilligung zur Datenübermittlung (Anlage 1)",
+  title: "Einverständniserklärung zur Datenübermittlung (Anlage 1)",
   intro:
     "Wählen Sie selbst, wozu Sie einwilligen. Im Formular, das Sie später elektronisch unterschreiben, ist nur angekreuzt, was Sie hier wählen – GMED kreuzt nichts für Sie an. Ohne Ihre Auswahl unterschreiben Sie das Formular auf Papier und kreuzen dort selbst an.",
   options: {

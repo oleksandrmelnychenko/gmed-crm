@@ -2609,6 +2609,17 @@ function orderValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue[] {
   return issues;
 }
 
+type CabinetConsents = { privacy: boolean; healthcare: boolean };
+const NO_CABINET_CONSENTS: CabinetConsents = { privacy: false, healthcare: false };
+
+/** The server's view of the active cabinet consents (adult lead or parent / guardian). */
+function cabinetConsentsOf(readiness: { cabinet_consents?: { privacy_practices: boolean; healthcare: boolean } } | null | undefined): CabinetConsents {
+  return {
+    privacy: readiness?.cabinet_consents?.privacy_practices === true,
+    healthcare: readiness?.cabinet_consents?.healthcare === true,
+  };
+}
+
 function documentsValidationIssues(
   draft: Draft | null,
   documents: Record<WizardDocumentKind, DocumentItem[]>,
@@ -2617,10 +2628,12 @@ function documentsValidationIssues(
   /** Owner rule 2026-10-07: the server's enhanced check (or an unsaved black-list country). */
   amlRequired = false,
   demoChecks: readonly string[] = [],
+  /** Consents given in the cabinet count like the staff's toggles (server readiness). */
+  cabinet: CabinetConsents = NO_CABINET_CONSENTS,
 ): ValidationIssue[] {
   if (!draft) return [];
   const issues: ValidationIssue[] = [];
-  if (!draft.privacyConsent) {
+  if (!draft.privacyConsent && !cabinet.privacy) {
     issues.push({
       key: "privacy-consent",
       step: "documents",
@@ -2628,7 +2641,7 @@ function documentsValidationIssues(
       fieldId: PRIVACY_CONSENT_ID,
     });
   }
-  if (!draft.healthcareConsent) {
+  if (!draft.healthcareConsent && !cabinet.healthcare) {
     issues.push({
       key: "healthcare-consent",
       step: "documents",
@@ -2703,6 +2716,8 @@ function validateMasterDraft(
   repeatIntake: boolean,
   // The server found in DNS that the e-mail domain receives no mail.
   emailNoMail = false,
+  // The health-data consent given in the cabinet needs the address like the toggle.
+  cabinetHealthcare = false,
 ): MasterValidationErrors {
   if (!draft) return {};
 
@@ -2776,7 +2791,7 @@ function validateMasterDraft(
     }
   }
 
-  if (draft.healthcareConsent) {
+  if (draft.healthcareConsent || cabinetHealthcare) {
     if (!draft.street.trim()) errors.street = required;
     if (!draft.city.trim()) errors.city = required;
     if (!draft.zip.trim()) errors.zip = required;
@@ -4595,9 +4610,10 @@ export function LeadWizard({
     );
   };
   const masterEmailNoMail = useEmailDomainStatus(draft?.email ?? "") === "no_mail";
+  const cabinetConsents = useMemo(() => cabinetConsentsOf(lead?.readiness), [lead?.readiness]);
   const strictMasterErrors = useMemo(
-    () => validateMasterDraft(draft, tx, isRepeatIntake, masterEmailNoMail),
-    [draft, isRepeatIntake, masterEmailNoMail, tx],
+    () => validateMasterDraft(draft, tx, isRepeatIntake, masterEmailNoMail, cabinetConsents.healthcare),
+    [draft, isRepeatIntake, masterEmailNoMail, tx, cabinetConsents.healthcare],
   );
   // "The patient fills it in": only names and e-mail are needed for the lead.
   const masterErrors = useMemo(
@@ -4615,7 +4631,7 @@ export function LeadWizard({
       return masterValidationIssues(masterErrors, tx);
     }
     if (validationContext.kind === "documents") {
-      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks);
+      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents);
     }
     if (validationContext.kind === "order") {
       return orderIssues;
@@ -4626,7 +4642,7 @@ export function LeadWizard({
       message: readinessReasonLabel(reason, tx),
       fieldId: readinessReasonFieldId(reason, draft),
     }));
-  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, amlRequired, lead?.readiness.demo_onboarding?.credited_checks]);
+  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents]);
   const visibleOrderErrors = orderValidationAttempted ? orderIssues : [];
   const orderFieldError = (...keys: string[]) =>
     visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
@@ -5702,7 +5718,7 @@ export function LeadWizard({
       intakeDraft = { ...draft, concern: patientRequestReason };
       setDraft((current) => current && !current.concern.trim() ? { ...current, concern: patientRequestReason } : current);
     }
-    const documentIssues = documentsValidationIssues(intakeDraft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks);
+    const documentIssues = documentsValidationIssues(intakeDraft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents);
     if (documentIssues.length > 0) {
       setValidationContext({ kind: "documents" });
       setStep("documents");
@@ -6969,7 +6985,10 @@ ${serviceCommentLines.join("\n")}`
   // request's own consents and documents, which are never inherited. These rows
   // show the same things the server checks, so a green table means a done step.
   const consentReasons = ["Privacy practices consent is missing", "Healthcare consent is missing"];
-  const missingConsentField = draft && !draft.privacyConsent ? PRIVACY_CONSENT_ID : draft && !draft.healthcareConsent ? HEALTHCARE_CONSENT_ID : null;
+  // A consent given in the cabinet counts like the toggle (server readiness).
+  const privacyConsentGiven = Boolean(draft?.privacyConsent) || cabinetConsents.privacy;
+  const healthcareConsentGiven = Boolean(draft?.healthcareConsent) || cabinetConsents.healthcare;
+  const missingConsentField = draft && !privacyConsentGiven ? PRIVACY_CONSENT_ID : draft && !healthcareConsentGiven ? HEALTHCARE_CONSENT_ID : null;
   const requestReviewRows: RequestReviewRow[] = draft && lead ? [
     {
       key: "request:consents",
@@ -6977,10 +6996,10 @@ ${serviceCommentLines.join("\n")}`
       ready: !missingConsentField,
       // The status names exactly what is still unticked: "not ticked" only
       // when neither consent is (QA 2026-10-12 B3-01).
-      status: requestConsentStatus(draft?.privacyConsent ?? false, draft?.healthcareConsent ?? false, tx),
+      status: requestConsentStatus(privacyConsentGiven, healthcareConsentGiven, tx),
       detail: [
-        `${tx("Политика конфиденциальности", "Datenschutzhinweise")}: ${draft.privacyConsent ? tx("да", "ja") : tx("нет", "nein")}`,
-        `${tx("Медицинские данные", "Gesundheitsdaten")}: ${draft.healthcareConsent ? tx("да", "ja") : tx("нет", "nein")}`,
+        `${tx("Политика конфиденциальности", "Datenschutzhinweise")}: ${cabinetConsents.privacy ? tx("да (кабинет)", "ja (Kundenkabinett)") : draft.privacyConsent ? tx("да", "ja") : tx("нет", "nein")}`,
+        `${tx("Медицинские данные", "Gesundheitsdaten")}: ${cabinetConsents.healthcare ? tx("да (кабинет)", "ja (Kundenkabinett)") : draft.healthcareConsent ? tx("да", "ja") : tx("нет", "nein")}`,
       ].join(" · "),
       action: missingConsentField ? {
         label: tx("Отметить согласия", "Einwilligungen bestätigen"),
@@ -7730,7 +7749,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Улица и дом", "Straße und Hausnummer")}
-                  required={draft.healthcareConsent}
+                  required={draft.healthcareConsent || cabinetConsents.healthcare}
                   error={visibleMasterError("street")}
                   errorId={`${MASTER_FIELD_IDS.street}-error`}
                   htmlFor={MASTER_FIELD_IDS.street}
@@ -7739,7 +7758,7 @@ ${serviceCommentLines.join("\n")}`
                     id={MASTER_FIELD_IDS.street}
                     name="street_address"
                     autoComplete="street-address"
-                    required={draft.healthcareConsent}
+                    required={draft.healthcareConsent || cabinetConsents.healthcare}
                     aria-invalid={Boolean(visibleMasterError("street"))}
                     aria-describedby={visibleMasterError("street") ? `${MASTER_FIELD_IDS.street}-error` : undefined}
                     className={inputClass}
@@ -7750,7 +7769,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Город", "Ort")}
-                  required={draft.healthcareConsent}
+                  required={draft.healthcareConsent || cabinetConsents.healthcare}
                   error={visibleMasterError("city")}
                   errorId={`${MASTER_FIELD_IDS.city}-error`}
                   htmlFor={MASTER_FIELD_IDS.city}
@@ -7759,7 +7778,7 @@ ${serviceCommentLines.join("\n")}`
                     id={MASTER_FIELD_IDS.city}
                     name="city"
                     autoComplete="address-level2"
-                    required={draft.healthcareConsent}
+                    required={draft.healthcareConsent || cabinetConsents.healthcare}
                     aria-invalid={Boolean(visibleMasterError("city"))}
                     aria-describedby={visibleMasterError("city") ? `${MASTER_FIELD_IDS.city}-error` : undefined}
                     className={inputClass}
@@ -7780,7 +7799,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Почтовый индекс", "Postleitzahl")}
-                  required={draft.healthcareConsent}
+                  required={draft.healthcareConsent || cabinetConsents.healthcare}
                   error={visibleMasterError("zip")}
                   errorId={`${MASTER_FIELD_IDS.zip}-error`}
                   htmlFor={MASTER_FIELD_IDS.zip}
@@ -7789,7 +7808,7 @@ ${serviceCommentLines.join("\n")}`
                     id={MASTER_FIELD_IDS.zip}
                     name="postal_code"
                     autoComplete="postal-code"
-                    required={draft.healthcareConsent}
+                    required={draft.healthcareConsent || cabinetConsents.healthcare}
                     aria-invalid={Boolean(visibleMasterError("zip"))}
                     aria-describedby={visibleMasterError("zip") ? `${MASTER_FIELD_IDS.zip}-error` : undefined}
                     className={inputClass}
@@ -8641,13 +8660,25 @@ ${serviceCommentLines.join("\n")}`
                 >
                 <PortalConsentChoiceView intake={step1Portal.intake} tx={tx} />
                 <div className="space-y-1 rounded-lg border border-border/70 bg-muted/10 px-3 py-2">
-                  {isRepeatIntake && (!draft.privacyConsent || !draft.healthcareConsent) ? (
+                  {isRepeatIntake && (!privacyConsentGiven || !healthcareConsentGiven) ? (
                     <p data-testid="repeat-consent-note" className="pb-1 text-xs leading-5 text-amber-800">
-                      {repeatConsentNote(draft.privacyConsent, draft.healthcareConsent, tx)}
+                      {repeatConsentNote(privacyConsentGiven, healthcareConsentGiven, tx)}
                     </p>
                   ) : null}
-                  <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
-                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
+                  {/* A consent given in the cabinet (adult lead, or a parent / guardian
+                      for a minor) shows here as given and locks the toggle; the toggle
+                      itself records only a consent obtained outside the cabinet (paper). */}
+                  <ToggleRow id={PRIVACY_CONSENT_ID} checked={privacyConsentGiven} disabled={isBusy || cabinetConsents.privacy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
+                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={healthcareConsentGiven} disabled={isBusy || cabinetConsents.healthcare} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
+                  {cabinetConsents.privacy || cabinetConsents.healthcare ? (
+                    <p data-testid="cabinet-consents-note" className="pt-1 text-xs leading-5 text-muted-foreground">
+                      {cabinetConsents.privacy && cabinetConsents.healthcare
+                        ? tx("Оба согласия даны в кабинете — отдельная отметка не нужна.", "Beide Einwilligungen wurden im Kundenkabinett erteilt – keine gesonderte Bestätigung nötig.")
+                        : cabinetConsents.privacy
+                          ? tx("Согласие на обработку данных обращения дано в кабинете. Согласие на медицинские данные отметьте, только если получили его иначе (например, на бумаге).", "Die Einwilligung zur Bearbeitung der Anfrage liegt aus dem Kundenkabinett vor. Die Einwilligung zu Gesundheitsdaten nur bestätigen, wenn sie anders (z. B. auf Papier) vorliegt.")
+                          : tx("Согласие на медицинские данные дано в кабинете. Ознакомление с политикой отметьте, только если получили его иначе (например, на бумаге).", "Die Einwilligung zu Gesundheitsdaten liegt aus dem Kundenkabinett vor. Die Datenschutzhinweise nur bestätigen, wenn dies anders (z. B. auf Papier) vorliegt.")}
+                    </p>
+                  ) : null}
                 </div>
                 {/* The form's boxes (transfer, communication channels) are ticked only by the
                     person's own choice in the cabinet (2026-10-12), never preset here. */}
@@ -8655,11 +8686,11 @@ ${serviceCommentLines.join("\n")}`
                   {isMinor(draft.birthDate, new Date())
                     ? tx(
                       "Для несовершеннолетнего форма «Согласие (ребёнок)»: заявляют и подписывают родители или опекун, данные — ребёнка. Варианты согласия отмечает родитель или опекун в кабинете (блок «Согласие на передачу данных»); его выбор сохраняется в системе, и подписать форму электронно должен он. Без выбора форма печатается с пустыми полями для бумажной подписи.",
-                      "Für Minderjährige die „Einverständniserklärung (Kind)“: Die Sorgeberechtigten bzw. der Vormund erklären und unterschreiben, betroffen sind die Daten des Kindes. Die Optionen kreuzt ein Elternteil bzw. der Vormund im Kundenkabinett an (Block „Einwilligung zur Datenübermittlung“); die Auswahl wird im System dokumentiert, und diese Person muss elektronisch unterschreiben. Ohne Auswahl wird es mit leeren Kästchen für die Unterschrift auf Papier gedruckt.",
+                      "Für Minderjährige die „Einverständniserklärung (Kind)“: Die Sorgeberechtigten bzw. der Vormund erklären und unterschreiben, betroffen sind die Daten des Kindes. Die Optionen kreuzt ein Elternteil bzw. der Vormund im Kundenkabinett an (Block „Einverständniserklärung zur Datenübermittlung“); die Auswahl wird im System dokumentiert, und diese Person muss elektronisch unterschreiben. Ohne Auswahl wird es mit leeren Kästchen für die Unterschrift auf Papier gedruckt.",
                     )
                     : tx(
                       "Варианты согласия в форме (передача данных, каналы связи) отмечает только сам клиент — в кабинете, блок «Согласие на передачу данных». Без его выбора форма печатается с пустыми полями: клиент отмечает их на бумаге.",
-                      "Die Optionen im Formular (Datenübermittlung, Kommunikationswege) kreuzt nur der Kunde selbst an – im Kundenkabinett, Block „Einwilligung zur Datenübermittlung“. Ohne seine Auswahl wird das Formular mit leeren Kästchen gedruckt, die er auf Papier ankreuzt.",
+                      "Die Optionen im Formular (Datenübermittlung, Kommunikationswege) kreuzt nur der Kunde selbst an – im Kundenkabinett, Block „Einverständniserklärung zur Datenübermittlung“. Ohne seine Auswahl wird das Formular mit leeren Kästchen gedruckt, die er auf Papier ankreuzt.",
                     )}
                 </p>
                 <div className="space-y-3">

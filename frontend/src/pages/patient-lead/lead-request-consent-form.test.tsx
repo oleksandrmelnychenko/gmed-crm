@@ -37,7 +37,7 @@ describe("consent form choices in the lead cabinet", () => {
         onChange={() => undefined}
       />,
     );
-    expect(markup).toContain("Einwilligung zur Datenübermittlung (Anlage 1)");
+    expect(markup).toContain("Einverständniserklärung zur Datenübermittlung (Anlage 1)");
     expect(markup.match(/type="checkbox"/g)).toHaveLength(7);
     expect(markup).not.toContain('checked=""');
     expect(markup).toContain("Noch keine Auswahl gespeichert.");

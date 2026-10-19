@@ -14,7 +14,7 @@ import type { StepProps } from "./lead-request-step-forms";
 import { asLeadCabinetLang } from "./lead-request-text";
 import { TrustedPersonsEditor } from "./lead-trusted-persons-editor";
 import { disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, type DisclosureDraft } from "./lead-trusted-persons-model";
-import { trustedPersonsText } from "./lead-trusted-persons-text";
+import { disclosureConsentText, disclosureSubject, trustedPersonsText } from "./lead-trusted-persons-text";
 
 export function DisclosureStep({ request, text: common, lang, enqueue, onChange, nav }: StepProps) {
   const { user } = useAuth();
@@ -132,7 +132,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
         <p className="text-xs leading-5 text-muted-foreground">{text.consentNote}</p>
         <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/25 p-3.5 text-sm leading-6">
           <input type="checkbox" className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} disabled={busy} data-testid="disclosure-consent" onChange={(event) => update({ consentGiven: event.currentTarget.checked })} />
-          <span>{text.consent(companyName)}</span>
+          <span>{disclosureConsentText(lang, companyName, disclosureSubject(request))}</span>
         </label>
         <a className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--brand)] underline underline-offset-4" href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer"><ShieldCheck aria-hidden="true" className="size-3.5" />{text.privacy}</a>
       </CabinetSection>

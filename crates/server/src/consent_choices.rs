@@ -170,7 +170,93 @@ pub struct DisclosureDecision {
     pub consent_text: String,
 }
 
+/// Whose data the disclosure consent is about: the person's own, a minor's
+/// (a parent or the guardian declares, like the child's Anlage 1), or an
+/// adult's represented by a legal representative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisclosureSubject {
+    Own,
+    Child,
+    Represented,
+}
+
+impl DisclosureSubject {
+    /// From the chooser's access kind and whether the subject is a minor.
+    pub fn of(access_kind: &str, minor: bool) -> Self {
+        match (access_kind, minor) {
+            ("guardian", true) => Self::Child,
+            ("guardian", false) => Self::Represented,
+            _ => Self::Own,
+        }
+    }
+}
+
+/// The person's own disclosure consent ("meine personenbezogenen Daten").
 pub fn disclosure_consent_text(language: &str, company: &str) -> String {
+    disclosure_consent_text_for(language, company, DisclosureSubject::Own)
+}
+
+/// The disclosure consent in the wording for whose data it is: a parent
+/// consents for "die Daten meines Kindes", never for "meine Daten".
+pub fn disclosure_consent_text_for(
+    language: &str,
+    company: &str,
+    subject: DisclosureSubject,
+) -> String {
+    let own = own_disclosure_consent_text(language, company);
+    let (mine, theirs) = match language {
+        "ru" => (
+            "о моих персональных данных, включая данные о состоянии здоровья,",
+            match subject {
+                DisclosureSubject::Child => {
+                    "о персональных данных моего ребёнка, включая данные о состоянии его здоровья,"
+                }
+                _ => {
+                    "о персональных данных представляемого мною лица, включая данные о состоянии его здоровья,"
+                }
+            },
+        ),
+        "uk" => (
+            "про мої персональні дані, зокрема дані про стан здоров’я,",
+            match subject {
+                DisclosureSubject::Child => {
+                    "про персональні дані моєї дитини, зокрема дані про стан її здоров’я,"
+                }
+                _ => {
+                    "про персональні дані особи, яку я представляю, зокрема дані про стан її здоров’я,"
+                }
+            },
+        ),
+        "en" => (
+            "about my personal data, including my health data,",
+            match subject {
+                DisclosureSubject::Child => {
+                    "about my child's personal data, including my child's health data,"
+                }
+                _ => {
+                    "about the personal data of the person I represent, including their health data,"
+                }
+            },
+        ),
+        _ => (
+            "über meine personenbezogenen Daten, einschließlich meiner Gesundheitsdaten,",
+            match subject {
+                DisclosureSubject::Child => {
+                    "über die personenbezogenen Daten meines Kindes, einschließlich seiner Gesundheitsdaten,"
+                }
+                _ => {
+                    "über die personenbezogenen Daten der von mir vertretenen Person, einschließlich ihrer Gesundheitsdaten,"
+                }
+            },
+        ),
+    };
+    match subject {
+        DisclosureSubject::Own => own,
+        _ => own.replacen(mine, theirs, 1),
+    }
+}
+
+fn own_disclosure_consent_text(language: &str, company: &str) -> String {
     let text = match language {
         "ru" => {
             "Я даю явное согласие на то, что [company] предоставляет указанным выше лицам в указанном объёме информацию о моих персональных данных, включая данные о состоянии здоровья, и передаёт им эти данные. Если существует обязанность соблюдать врачебную тайну, я в этом объёме освобождаю лиц, участвующих в организации и лечении, от этой обязанности. Я могу в любое время отозвать это согласие на будущее. Обработка данных, осуществлённая до отзыва, остаётся законной. Дополнительная информация содержится в Уведомлении о защите данных."
@@ -773,6 +859,40 @@ mod tests {
             chosen_by_emails: Vec::new(),
             lead_id: None,
         }
+    }
+
+    #[test]
+    fn a_parent_consents_to_the_disclosure_of_the_childs_data_not_their_own() {
+        assert_eq!(
+            DisclosureSubject::of("guardian", true),
+            DisclosureSubject::Child
+        );
+        assert_eq!(
+            DisclosureSubject::of("guardian", false),
+            DisclosureSubject::Represented
+        );
+        assert_eq!(DisclosureSubject::of("self", false), DisclosureSubject::Own);
+        for language in ["de", "en", "uk", "ru"] {
+            let own = disclosure_consent_text(language, "GMED");
+            assert_eq!(
+                own,
+                disclosure_consent_text_for(language, "GMED", DisclosureSubject::Own)
+            );
+            let child = disclosure_consent_text_for(language, "GMED", DisclosureSubject::Child);
+            let represented =
+                disclosure_consent_text_for(language, "GMED", DisclosureSubject::Represented);
+            assert_ne!(child, own, "{language}: child wording");
+            assert_ne!(represented, own, "{language}: representative wording");
+            assert_ne!(child, represented, "{language}");
+        }
+        assert!(
+            disclosure_consent_text_for("de", "GMED", DisclosureSubject::Child)
+                .contains("über die personenbezogenen Daten meines Kindes")
+        );
+        assert!(
+            disclosure_consent_text_for("ru", "GMED", DisclosureSubject::Child)
+                .contains("о персональных данных моего ребёнка")
+        );
     }
 
     #[test]

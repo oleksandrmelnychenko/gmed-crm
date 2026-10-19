@@ -9,7 +9,7 @@ const texts = {
     representativeContext: (person: string) => `Sie entscheiden als Vertretung für ${person}. Die folgenden Angaben und die Einwilligung beziehen sich auf die Daten dieser Person.`,
     question: "Soll eine weitere Person Auskunft erhalten dürfen?", no: "Nein, nur ich selbst.", yes: "Ja, folgende Person(en) dürfen Auskunft erhalten:",
     name: "Name, Vorname", relation: "Beziehung zu Ihnen (z. B. Ehefrau, Tochter, Freund)", contact: "Telefon / E-Mail", scope: "Umfang der Auskunft", scopePlaceholder: "Bitte auswählen",
-    scopeHint: "Diese Auswahl wird in Ihre Einverständniserklärung übernommen.",
+    scopeHint: "Diese Auswahl wird in Ihre Einverständniserklärung zur Datenübermittlung (Anlage 1) übernommen.",
     scopeLegacy: (typed: string) => `Bisher angegeben: „${typed}“. Bitte wählen Sie den Umfang der Auskunft aus der Liste.`,
     consentHeading: "Einwilligung", consentNote: "(nur auszufüllen, wenn Sie oben „Ja“ gewählt haben)",
     consent: (company: string) => `Ich willige ausdrücklich ein, dass ${company} den oben genannten Personen im angegebenen Umfang Auskunft über meine personenbezogenen Daten, einschließlich meiner Gesundheitsdaten, erteilt und diese Daten an sie übermittelt. Soweit eine Schweigepflicht besteht, entbinde ich die an Organisation und Behandlung Beteiligten insoweit von dieser. Ich kann diese Einwilligung jederzeit mit Wirkung für die Zukunft widerrufen. Die bis dahin erfolgte Verarbeitung bleibt davon unberührt. Weitere Informationen finden Sie im Datenschutzhinweis.`,
@@ -28,7 +28,7 @@ const texts = {
     representativeContext: (person: string) => `You are deciding as a representative for ${person}. The following details and consent relate to this person's data.`,
     question: "May another person receive information?", no: "No, only me.", yes: "Yes, the following person(s) may receive information:",
     name: "Last name, first name", relation: "Relationship to you (e.g. wife, daughter, friend)", contact: "Phone / email", scope: "Scope of information", scopePlaceholder: "Please choose",
-    scopeHint: "This choice is included in your declaration of consent.",
+    scopeHint: "This choice is included in your consent to data transfer (Annex 1).",
     scopeLegacy: (typed: string) => `Previously entered: “${typed}”. Please choose the scope of information from the list.`,
     consentHeading: "Consent", consentNote: "(only complete this if you selected “Yes” above)",
     consent: (company: string) => `I expressly consent to ${company} providing the persons named above with information about my personal data, including my health data, within the specified scope, and transmitting this data to them. Where a duty of confidentiality applies, I release those involved in organisation and treatment from that duty to this extent. I may withdraw this consent at any time with effect for the future. Processing carried out before withdrawal remains unaffected. Further information can be found in the Privacy Notice.`,
@@ -46,7 +46,7 @@ const texts = {
     representativeContext: (person: string) => `Ви приймаєте рішення як представник особи ${person}. Наведені нижче відомості та згода стосуються даних цієї особи.`,
     question: "Чи можуть інші особи отримувати інформацію?", no: "Ні, лише я особисто.", yes: "Так, інформацію можуть отримувати такі особи:",
     name: "Прізвище, ім’я", relation: "Ким доводиться Вам (напр. дружина, донька, друг)", contact: "Телефон / ел. пошта", scope: "Обсяг інформації", scopePlaceholder: "Будь ласка, виберіть",
-    scopeHint: "Цей вибір буде внесено до Вашої згоди на передачу даних.",
+    scopeHint: "Цей вибір буде внесено до Вашої згоди на передачу даних (додаток 1).",
     scopeLegacy: (typed: string) => `Раніше вказано: «${typed}». Виберіть, будь ласка, обсяг інформації зі списку.`,
     consentHeading: "Згода", consentNote: "(заповнюється лише якщо Ви вибрали «Так» вище)",
     consent: (company: string) => `Я надаю явну згоду на те, що ${company} надає зазначеним вище особам у вказаному обсязі інформацію про мої персональні дані, зокрема дані про стан здоров’я, та передає їм ці дані. Якщо існує обов’язок дотримуватися лікарської таємниці, я в цьому обсязі звільняю осіб, які беруть участь в організації та лікуванні, від цього обов’язку. Я можу будь-коли відкликати цю згоду на майбутнє. Обробка даних, здійснена до відкликання, залишається законною. Додаткова інформація міститься в Повідомленні про захист даних.`,
@@ -64,7 +64,7 @@ const texts = {
     representativeContext: (person: string) => `Вы принимаете решение как представитель лица ${person}. Приведённые ниже сведения и согласие относятся к данным этого лица.`,
     question: "Могут ли другие лица получать информацию?", no: "Нет, только я сам(а).", yes: "Да, информацию могут получать следующие лица:",
     name: "Фамилия, имя", relation: "Кем приходится Вам (напр. жена, дочь, друг)", contact: "Телефон / эл. почта", scope: "Объём информации", scopePlaceholder: "Пожалуйста, выберите",
-    scopeHint: "Этот выбор будет внесён в Ваше согласие на передачу данных.",
+    scopeHint: "Этот выбор будет внесён в Ваше согласие на передачу данных (приложение 1).",
     scopeLegacy: (typed: string) => `Ранее указано: «${typed}». Выберите, пожалуйста, объём информации из списка.`,
     consentHeading: "Согласие", consentNote: "(заполняется только в том случае, если Вы выбрали «Да»)",
     consent: (company: string) => `Я даю явное согласие на то, что ${company} предоставляет указанным выше лицам в указанном объёме информацию о моих персональных данных, включая данные о состоянии здоровья, и передаёт им эти данные. Если существует обязанность соблюдать врачебную тайну, я в этом объёме освобождаю лиц, участвующих в организации и лечении, от этой обязанности. Я могу в любое время отозвать это согласие на будущее. Обработка данных, осуществлённая до отзыва, остаётся законной. Дополнительная информация содержится в Уведомлении о защите данных.`,
@@ -78,4 +78,45 @@ const texts = {
 
 export function trustedPersonsText(lang: string) {
   return texts[asLeadCabinetLang(lang) ?? "ru"];
+}
+
+/** Whose data the disclosure consent is about (mirrors `DisclosureSubject` on the server). */
+export type DisclosureSubject = "own" | "child" | "represented";
+
+export function disclosureSubject(request: { access_kind?: string | null; minor?: boolean | null }): DisclosureSubject {
+  if (request.access_kind !== "guardian") return "own";
+  return request.minor === true ? "child" : "represented";
+}
+
+// The phrase of the own text and its replacements; the server stores the same wording.
+const subjectPhrases = {
+  de: {
+    own: "über meine personenbezogenen Daten, einschließlich meiner Gesundheitsdaten,",
+    child: "über die personenbezogenen Daten meines Kindes, einschließlich seiner Gesundheitsdaten,",
+    represented: "über die personenbezogenen Daten der von mir vertretenen Person, einschließlich ihrer Gesundheitsdaten,",
+  },
+  en: {
+    own: "about my personal data, including my health data,",
+    child: "about my child's personal data, including my child's health data,",
+    represented: "about the personal data of the person I represent, including their health data,",
+  },
+  uk: {
+    own: "про мої персональні дані, зокрема дані про стан здоров’я,",
+    child: "про персональні дані моєї дитини, зокрема дані про стан її здоров’я,",
+    represented: "про персональні дані особи, яку я представляю, зокрема дані про стан її здоров’я,",
+  },
+  ru: {
+    own: "о моих персональных данных, включая данные о состоянии здоровья,",
+    child: "о персональных данных моего ребёнка, включая данные о состоянии его здоровья,",
+    represented: "о персональных данных представляемого мною лица, включая данные о состоянии его здоровья,",
+  },
+} as const;
+
+/** The disclosure consent for whose data it is: a parent consents for the child's data, never "my data". */
+export function disclosureConsentText(lang: string, company: string, subject: DisclosureSubject): string {
+  const key = asLeadCabinetLang(lang) ?? "ru";
+  const own = texts[key].consent(company);
+  if (subject === "own") return own;
+  const phrases = subjectPhrases[key];
+  return own.replace(phrases.own, phrases[subject]);
 }

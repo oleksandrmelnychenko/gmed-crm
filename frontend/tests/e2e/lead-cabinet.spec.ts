@@ -1021,7 +1021,7 @@ test.describe("lead cabinet", () => {
     await page.goto("/");
     await step(page, "documents");
     const block = page.getByTestId("lead-request-consent-form");
-    await expect(block).toContainText("Einwilligung zur Datenübermittlung (Anlage 1)");
+    await expect(block).toContainText("Einverständniserklärung zur Datenübermittlung (Anlage 1)");
     // Three core consents and four channels; third-party disclosure is chosen on its own page.
     await expect(block.getByRole("checkbox")).toHaveCount(7);
     await expect(block.getByTestId("lead-request-consent-recipients").getByRole("link")).toHaveAttribute("href", /step=disclosure/);

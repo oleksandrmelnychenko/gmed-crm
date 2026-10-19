@@ -4459,11 +4459,23 @@ async fn save_trusted_persons(
     };
     // The own login of a minor never gets here: the middleware refuses it
     // (`lead_request_guardian_only`) and the lock does not resolve it.
-    let (kind, _) = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+    let (kind, lead_row) = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
         Ok(Some(found)) => found,
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    // A parent consents for the child's data, a representative for the
+    // represented person's: the stored text says so (like the child's Anlage 1).
+    let subject = consent_choices::DisclosureSubject::of(
+        kind.as_str(),
+        crate::routes::leads::is_minor_on(
+            lead_row
+                .try_get::<Option<NaiveDate>, _>("date_of_birth")
+                .ok()
+                .flatten(),
+            crate::app_time::today(),
+        ),
+    );
     let current = match consent_choices::current_for(&mut *tx, Some(lead_id), None).await {
         Ok(current) => current,
         Err(error) => return internal(error, "load consent choice"),
@@ -4502,7 +4514,11 @@ async fn save_trusted_persons(
             Err(error) => return internal(error, "load disclosure chooser"),
         },
         access_kind: kind.as_str().into(),
-        consent_text: consent_choices::disclosure_consent_text(&language, &company_name),
+        consent_text: consent_choices::disclosure_consent_text_for(
+            &language,
+            &company_name,
+            subject,
+        ),
         company_name,
     };
     let marker = json!({

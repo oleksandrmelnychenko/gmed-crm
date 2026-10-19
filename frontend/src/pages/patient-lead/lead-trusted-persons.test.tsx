@@ -5,7 +5,7 @@ import { CONSENT_RECIPIENT_RELATIONS, NO_CONSENT_FORM_CHOICES, type ConsentRecip
 import { consentFormText } from "./lead-request-consent-form-text";
 import { TrustedPersonsEditor, TrustedPersonsList } from "./lead-trusted-persons-editor";
 import { disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, personScope, recipientDrafts, recipientsToSend, requestForLead, samePersons, storedTrustedPersons, trustedPersonsProblem, type RecipientDraft } from "./lead-trusted-persons-model";
-import { trustedPersonsText } from "./lead-trusted-persons-text";
+import { disclosureConsentText, disclosureSubject, trustedPersonsText } from "./lead-trusted-persons-text";
 
 const stored = { name: "Eva Muster", relation: "friend", contact: "", scope_codes: ["medical"] } satisfies ConsentRecipient;
 const friend = { name: "Eva Muster", relation: "friend", contact: "", scope: "", scopeCodes: ["medical"] } satisfies RecipientDraft;
@@ -154,5 +154,21 @@ describe("trusted persons independent of consent", () => {
     expect(html).not.toContain("trusted-person-add");
     expect(html.match(/data-testid="trusted-person-editor"/g)).toHaveLength(5);
     expect(html).toContain('disabled=""');
+  });
+});
+
+describe("disclosure consent wording", () => {
+  it("lets a parent consent for the child's data and a representative for the represented person's", () => {
+    expect(disclosureSubject({ access_kind: "self", minor: false })).toBe("own");
+    expect(disclosureSubject({ access_kind: "guardian", minor: true })).toBe("child");
+    expect(disclosureSubject({ access_kind: "guardian", minor: false })).toBe("represented");
+    for (const lang of ["de", "en", "uk", "ru"]) {
+      const own = disclosureConsentText(lang, "GMED", "own");
+      expect(own).toBe(trustedPersonsText(lang).consent("GMED"));
+      expect(disclosureConsentText(lang, "GMED", "child")).not.toBe(own);
+      expect(disclosureConsentText(lang, "GMED", "represented")).not.toBe(own);
+    }
+    expect(disclosureConsentText("de", "GMED", "child")).toContain("über die personenbezogenen Daten meines Kindes");
+    expect(disclosureConsentText("ru", "GMED", "child")).toContain("о персональных данных моего ребёнка");
   });
 });

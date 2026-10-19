@@ -26215,7 +26215,7 @@ fn build_lead_self_disclosure_pdf(
             }
         }
     }
-    append_third_party_disclosure_pdf(&mut layout, data.consent_choice.as_ref());
+    append_third_party_disclosure_pdf(&mut layout, data.consent_choice.as_ref(), minor);
 
     // The declaration of § 11 Abs. 6 GwG and the signature of the
     // patient side: the patient, for a minor every legal representative
@@ -26389,6 +26389,7 @@ pub(crate) async fn generate_lead_document(
 fn append_third_party_disclosure_pdf(
     layout: &mut TreatmentPlanPdfLayout,
     choice: Option<&crate::consent_choices::OwnConsentChoice>,
+    minor: bool,
 ) {
     let Some(choice) = choice else {
         return;
@@ -26453,7 +26454,11 @@ fn append_third_party_disclosure_pdf(
         adult_legal_checkbox(
             layout,
             disclosure.consent_given,
-            &crate::consent_choices::disclosure_consent_text("de", &disclosure.company_name),
+            &crate::consent_choices::disclosure_consent_text_for(
+                "de",
+                &disclosure.company_name,
+                crate::consent_choices::DisclosureSubject::of(&disclosure.access_kind, minor),
+            ),
         );
     }
     fc_body(
@@ -26470,6 +26475,7 @@ fn append_third_party_disclosure_pdf(
 fn append_named_recipients_consent_pdf(
     layout: &mut TreatmentPlanPdfLayout,
     choice: Option<&crate::consent_choices::OwnConsentChoice>,
+    child_form: bool,
 ) {
     let Some(choice) = choice else {
         return;
@@ -26495,8 +26501,12 @@ fn append_named_recipients_consent_pdf(
             0.8,
         );
     }
-    let consent = crate::consent_choices::disclosure_consent_text("de", &disclosure.company_name)
-        .replace("den oben genannten Personen", "den genannten Personen");
+    let consent = crate::consent_choices::disclosure_consent_text_for(
+        "de",
+        &disclosure.company_name,
+        crate::consent_choices::DisclosureSubject::of(&disclosure.access_kind, child_form),
+    )
+    .replace("den oben genannten Personen", "den genannten Personen");
     layout.text_block(
         &consent,
         10.5,
@@ -26595,7 +26605,7 @@ fn build_adult_privacy_consents_pdf(
             0.8,
         );
     }
-    append_named_recipients_consent_pdf(&mut layout, own_choice);
+    append_named_recipients_consent_pdf(&mut layout, own_choice, false);
     adult_legal_checkbox(
         &mut layout,
         chosen.any_channel(),
@@ -26865,7 +26875,7 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
                     0.8,
                 );
             }
-            append_named_recipients_consent_pdf(&mut layout, own_choice);
+            append_named_recipients_consent_pdf(&mut layout, own_choice, true);
         }
         true => {
             layout.text_block(
