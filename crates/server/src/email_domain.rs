@@ -73,7 +73,13 @@ fn resolver() -> Option<&'static TokioResolver> {
                 let options = builder.options_mut();
                 options.timeout = LOOKUP_TIMEOUT;
                 options.attempts = 1;
-                Some(builder.build())
+                match builder.build() {
+                    Ok(resolver) => Some(resolver),
+                    Err(error) => {
+                        tracing::warn!(%error, "e-mail domain check: resolver could not be built");
+                        None
+                    }
+                }
             }
             Err(error) => {
                 tracing::warn!(%error, "e-mail domain check: no system resolver configuration");
@@ -162,10 +168,10 @@ async fn lookup(domain: &str) -> DomainStatus {
         Err(_) => DomainStatus::Unknown,
         Ok(Ok(mx)) => {
             let exchanges: Vec<String> = mx
-                .as_lookup()
-                .record_iter()
-                .filter_map(|record| match record.data() {
-                    RData::MX(mx) => Some(mx.exchange().to_ascii()),
+                .answers()
+                .iter()
+                .filter_map(|record| match &record.data {
+                    RData::MX(mx) => Some(mx.exchange.to_ascii()),
                     _ => None,
                 })
                 .collect();

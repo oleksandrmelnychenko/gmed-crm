@@ -14,6 +14,14 @@ no-default-features = false
 version = 2
 yanked = "deny"
 ignore = [
+    # hickory-proto 0.26.x — NSEC3 closest-encloser proof validation can loop
+    # on cross-zone responses. Only reachable through DNSSEC validation
+    # (DnssecDnsHandle); gmed-server uses hickory-resolver without the
+    # `dnssec-*` features for the e-mail domain check (email_domain.rs), so
+    # the path is never executed. No fixed release exists yet.
+    # Re-evaluate: on the next hickory release.
+    "RUSTSEC-2026-0118",
+
     # rsa 0.9.x — Marvin Attack timing sidechannel on RSA decryption.
     # Pulled in transitively by sqlx-macros-core -> sqlx-mysql, which is a
     # compile-time dependency of the sqlx macros (they must be able to parse

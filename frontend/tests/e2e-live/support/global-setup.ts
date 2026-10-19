@@ -115,6 +115,8 @@ export default async function globalSetup() {
       MESSAGE_ENCRYPTION_KEYS:
         "v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
       ENABLE_E2E_SUPPORT: "1",
+      // Synthetic test addresses have no mail DNS (email_domain.rs).
+      GMED_EMAIL_DOMAIN_CHECK: process.env.GMED_EMAIL_DOMAIN_CHECK ?? "off",
       E2E_SUPPORT_SECRET,
       RUST_LOG: process.env.RUST_LOG ?? "warn",
     },
@@ -175,6 +177,8 @@ export default async function globalSetup() {
           MESSAGE_ENCRYPTION_KEYS:
             "v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
           ENABLE_E2E_SUPPORT: "1",
+          // Synthetic test addresses have no mail DNS (email_domain.rs).
+          GMED_EMAIL_DOMAIN_CHECK: process.env.GMED_EMAIL_DOMAIN_CHECK ?? "off",
           E2E_SUPPORT_SECRET,
           RUST_LOG: process.env.RUST_LOG ?? "warn",
         },
