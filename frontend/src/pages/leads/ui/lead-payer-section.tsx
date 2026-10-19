@@ -323,6 +323,13 @@ export function LeadPayerDeclarationSection({
         updatedAt: enhancedDetails?.updated_at ?? null,
       }
     : null;
+  // Nothing stated and no proof asked: no block at all (owner 2026-10-19,
+  // no "not stated yet" label).
+  const selfFundsShown = Boolean(leadSelfFunds && (
+    leadSelfFunds.sources.length > 0
+    || leadSelfFunds.description
+    || (leadSelfFunds.proofDocuments && (leadSelfFunds.proofDocuments.length > 0 || leadSelfFunds.proofRequired))
+  ));
   // A source the lead stated is the declaration's: staff need not choose one.
   const sourceRequired = !(form.kind === "self" && form.leadSelfFundsStated);
   // The proof is required while the enhanced check (block A) asks the lead for
@@ -596,7 +603,7 @@ export function LeadPayerDeclarationSection({
           ) : null}
         </div>
 
-        {leadSelfFunds ? (
+        {leadSelfFunds && selfFundsShown ? (
           <div className="space-y-1.5 border-t border-border/60 pt-3 text-xs" data-testid="lead-payer-self-funds">
             <div className="flex flex-wrap items-center gap-2">
               <AdminSectionTitle>
@@ -606,12 +613,12 @@ export function LeadPayerDeclarationSection({
                 <PatientFieldBadge marker={{ at: leadSelfFunds.updatedAt, access_kind: null }} tx={tx} />
               ) : null}
             </div>
-            <p data-testid="lead-payer-self-funds-sources">
-              <span className="text-muted-foreground">{tx("Источники", "Quellen")}: </span>
-              {leadSelfFunds.sources.length > 0
-                ? statedFundsSourcesLabel(leadSelfFunds.sources, tx)
-                : tx("ещё не указаны", "noch nicht angegeben")}
-            </p>
+            {leadSelfFunds.sources.length > 0 ? (
+              <p data-testid="lead-payer-self-funds-sources">
+                <span className="text-muted-foreground">{tx("Источники", "Quellen")}: </span>
+                {statedFundsSourcesLabel(leadSelfFunds.sources, tx)}
+              </p>
+            ) : null}
             {leadSelfFunds.description ? (
               <p className="whitespace-pre-line" data-testid="lead-payer-self-funds-description">
                 <span className="text-muted-foreground">{tx("Описание", "Beschreibung")}: </span>

@@ -450,6 +450,10 @@ describe("LeadPayerDeclarationSection: the self-payer's source of funds from the
     expect(withoutIntake).not.toContain("lead-payer-self-funds-proof");
     const thirdParty = renderWithDetails({ ...stated, payer_kind: "third_party", self_funds_source: null }, details());
     expect(thirdParty).not.toContain('data-testid="lead-payer-self-funds"');
+    // Nothing stated and no proof asked: no block, no "not stated yet" label (owner 2026-10-19).
+    const empty = renderWithDetails({ ...stated, self_funds_source: null, self_funds_description: null }, details({ funds_proof_documents: [] }, { funds_source: null, funds_description: null }));
+    expect(empty).not.toContain('data-testid="lead-payer-self-funds"');
+    expect(empty).not.toContain("ещё не указаны");
     // An older server knows nothing of it.
     expect(renderSection(selfPayer)).not.toContain('data-testid="lead-payer-self-funds"');
   });
