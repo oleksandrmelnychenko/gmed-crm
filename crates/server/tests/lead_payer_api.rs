@@ -1412,11 +1412,13 @@ async fn the_self_payers_source_of_funds_from_the_cabinet_counts_and_survives_st
             .collect()
     };
 
-    // Staff said the patient pays and left the source of funds open.
+    // Staff said the patient pays and left the source of funds open: without
+    // a trigger of the enhanced check it is not asked (owner 2026-10-19).
     let own = json!({ "payer_kind": "self", "acts_on_own_account": true });
     let (status, body) = json_request(&app, "POST", &path, &ceo, Some(own.clone())).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(missing(&body), ["payer_source_of_funds_missing"], "{body}");
+    assert!(missing(&body).is_empty(), "{body}");
+    assert_eq!(body["status"]["source_of_funds_required"], false, "{body}");
     assert!(body["declaration"]["self_funds_source"].is_null());
     assert!(body["declaration"]["self_funds_description"].is_null());
 
@@ -1469,7 +1471,10 @@ async fn the_self_payers_source_of_funds_from_the_cabinet_counts_and_survives_st
     .await
     .unwrap();
     let (_, body) = json_request(&app, "GET", &path, &ceo, None).await;
-    assert_eq!(missing(&body), ["payer_source_of_funds_missing"], "{body}");
+    assert!(
+        missing(&body).is_empty(),
+        "not asked without a trigger: {body}"
+    );
 
     // A third party pays: the patient's own source goes with the save (the
     // table refuses it for a third party), the payer's source is the payer's
