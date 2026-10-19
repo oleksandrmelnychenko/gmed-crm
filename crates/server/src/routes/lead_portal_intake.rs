@@ -2191,7 +2191,6 @@ pub(crate) fn with_invoice_recipient(
     let at = reshaped
         .iter()
         .position(|key| key.starts_with("payer_") || key == "payment_method")
-        .or_else(|| reshaped.iter().position(|key| key == "request_reason"))
         .unwrap_or(reshaped.len());
     for (offset, key) in step_three.into_iter().enumerate() {
         reshaped.insert(at + offset, key);

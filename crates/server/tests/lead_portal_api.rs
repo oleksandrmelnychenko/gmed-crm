@@ -1105,12 +1105,12 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     // longer asked in the base form (owner 2026-10-09). Since 2026-10-11
     // (owner) the guardianship question follows a "yes" to "does somebody act
     // on your behalf?", and step 3 asks who receives the invoice first: "who
-    // pays" and the payment method wait for that answer.
+    // pays" and the payment method wait for that answer. The reason of the
+    // request is optional since 2026-10-19 (owner).
     let still_missing = json!([
         "id_document_upload",
         "has_representative",
-        "invoice_recipient",
-        "request_reason"
+        "invoice_recipient"
     ]);
     assert_eq!(
         body["progress"]["missing_for_submit"], still_missing,
@@ -1145,15 +1145,23 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // The reason of the request is optional (owner 2026-10-19): this lead
+    // leaves it empty and still sends the request below.
+    let mut identification = complete_identification();
+    identification
+        .as_object_mut()
+        .unwrap()
+        .remove("request_reason");
     let (status, body) = json_request(
         router,
         "POST",
         &format!("{request}/identification"),
         &patient,
-        Some(complete_identification()),
+        Some(identification),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["identification"]["request_reason"].is_null(), "{body}");
     // Without a trigger of the enhanced check a self-payer is asked nothing
     // about the source of funds (owner request 2026-10-07).
     assert_eq!(

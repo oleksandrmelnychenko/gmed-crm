@@ -217,10 +217,7 @@ export function leadErrorBlockingReasons(error: unknown) {
     readiness?.blocking_reasons,
     readiness?.qualification_reasons,
     Array.isArray(body.blocking_fields)
-      ? body.blocking_fields.map((field) => {
-          if (field === "hauptanfragegrund") return "Primary concern is missing";
-          return field;
-        })
+      ? body.blocking_fields
       : null,
   ];
 
@@ -605,7 +602,6 @@ const LEAD_READINESS_CHECK_LABEL_KEYS: Partial<Record<string, TranslationKey>> =
   privacy_consent: "lead_readiness_check_privacy_consent",
   healthcare_consent: "lead_readiness_check_healthcare_consent",
   address_present: "lead_readiness_check_address_present",
-  primary_concern_present: "lead_readiness_check_primary_concern_present",
   specialties_present: "lead_readiness_check_specialties_present",
   identity_document_verified: "lead_readiness_check_identity_document_verified",
   dsgvo_document_signed: "lead_readiness_check_dsgvo_document_signed",
@@ -615,8 +611,6 @@ const LEAD_READINESS_CHECK_LABEL_KEYS: Partial<Record<string, TranslationKey>> =
     "lead_readiness_check_enhanced_due_diligence_document_generated",
   enhanced_due_diligence_document_signed:
     "lead_readiness_check_enhanced_due_diligence_document_signed",
-  medical_characteristics_present:
-    "lead_readiness_check_medical_characteristics_present",
   contract_signed: "lead_readiness_check_contract_signed",
   framework_document_generated: "lead_readiness_check_framework_document_generated",
   order_exists: "lead_readiness_check_order_exists",
@@ -649,7 +643,6 @@ const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> 
   "Lead is already converted": "lead_readiness_reason_already_converted",
   "Complete street, city and postal code": "lead_readiness_reason_address_incomplete",
   "Complete city and postal code": "lead_readiness_reason_city_zip_incomplete",
-  "Primary concern is missing": "lead_readiness_reason_primary_concern_missing",
   "Requested specialty is missing": "lead_readiness_reason_specialty_missing",
   "Anamnesis intake is incomplete": "lead_readiness_reason_anamnesis_incomplete",
   "Identity document is not verified": "lead_readiness_reason_identity_not_verified",

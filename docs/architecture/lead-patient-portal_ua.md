@@ -274,7 +274,16 @@
   `request_reason` (13.1; `…/identification`, ≤ 4000 символів, зберігається в
   `lead_gwg_declarations.request_reason`, видаляється разом із твердженнями
   ліда; персонал бачить її в `portal-intake.patient_request_reason` лише з
-  `patients.medical.view`, Sales — ні).
+  `patients.medical.view`, Sales — ні). Рішення власника 2026-10-19: причина
+  звернення необов'язкова скрізь — у кабінеті (не входить до
+  `missing_for_submit`, без позначки обов'язкового поля), у wizard персоналу
+  («Причина обращения» / «Anliegen» без помилки й без повернення на
+  медичний крок), у готовності ліда (перевірок `primary_concern_present` і
+  `medical_characteristics_present` та причини «Primary concern is missing»
+  більше немає; крок `medical` готовий завжди, `service` — за обраною
+  спеціальністю) і в завершенні інтейку кейсу (`POST /cases/{id}/intake-completion`
+  без `hauptanfragegrund` більше не дає 422). Поле, його дані й перенесення
+  причини ліда в порожнє поле персоналу лишаються.
 
 ## Крок 3 «Страхування й рахунок»: спершу отримувач рахунку (2026-10-11)
 

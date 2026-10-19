@@ -1391,11 +1391,9 @@ struct LeadConversionReadinessInput {
     street_address: Option<String>,
     city: Option<String>,
     zip_code: Option<String>,
-    primary_concern_text: Option<String>,
-    /// The reason the lead gave in the cabinet (`lead_gwg_declarations`): it
-    /// counts as the captured concern while staff have not written their own
-    /// (QA 2026-10-10: "Не указана причина обращения" despite the answer).
-    portal_request_reason: Option<String>,
+    // The reason of the request (staff `primary_concern_text` or the lead's
+    // own `request_reason`) is optional since 2026-10-19 (owner) and is not
+    // part of the readiness.
     requested_specialties: Value,
     consent_privacy_practices: bool,
     consent_healthcare: bool,
@@ -1464,13 +1462,6 @@ fn evaluate_lead_conversion_readiness(
                 .is_some_and(|value| !value.trim().is_empty())
         });
     let address_ready = !input.consent_healthcare || address_present;
-    let primary_concern_present = [&input.primary_concern_text, &input.portal_request_reason]
-        .into_iter()
-        .any(|value| {
-            value
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty())
-        });
     let specialties_present = match &input.requested_specialties {
         Value::Array(items) => items.iter().any(|value| match value {
             Value::String(value) => !value.trim().is_empty(),
@@ -1482,8 +1473,10 @@ fn evaluate_lead_conversion_readiness(
     };
     let master_data_ready =
         birth_date_present && legal_sex_present && primary_contact_present && address_ready;
-    let medical_ready = primary_concern_present;
-    let service_ready = primary_concern_present && specialties_present;
+    // Nothing in the medical step is required: the reason of the request is
+    // optional since 2026-10-19 (owner).
+    let medical_ready = true;
+    let service_ready = specialties_present;
     let documents_ready = compliance_completed
         && input.consent_privacy_practices
         && input.consent_healthcare
@@ -1574,13 +1567,6 @@ fn evaluate_lead_conversion_readiness(
             "stage": "master_data",
         }),
         json!({
-            "key": "primary_concern_present",
-            "label": "Primary concern captured",
-            "passed": primary_concern_present,
-            "blocking_for": "conversion",
-            "stage": "service",
-        }),
-        json!({
             "key": "specialties_present",
             "label": "Requested specialty selected",
             "passed": specialties_present,
@@ -1623,13 +1609,6 @@ fn evaluate_lead_conversion_readiness(
                 || input.enhanced_due_diligence_document_signed,
             "blocking_for": "conversion",
             "stage": "documents",
-        }),
-        json!({
-            "key": "medical_characteristics_present",
-            "label": "Medical characteristics captured",
-            "passed": medical_ready,
-            "blocking_for": "conversion",
-            "stage": "medical",
         }),
         json!({
             "key": "contract_signed",
@@ -1748,9 +1727,6 @@ fn evaluate_lead_conversion_readiness(
     if input.consent_healthcare && !address_present {
         conversion_reasons.push("Complete street, city and postal code".to_string());
     }
-    if !primary_concern_present {
-        conversion_reasons.push("Primary concern is missing".to_string());
-    }
     if !specialties_present {
         conversion_reasons.push("Requested specialty is missing".to_string());
     }
@@ -1860,8 +1836,6 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         street_address: row.try_get("street_address").unwrap_or_default(),
         city: row.try_get("city").unwrap_or_default(),
         zip_code: row.try_get("zip_code").unwrap_or_default(),
-        primary_concern_text: row.try_get("primary_concern_text").unwrap_or_default(),
-        portal_request_reason: row.try_get("portal_request_reason").unwrap_or_default(),
         requested_specialties: row
             .try_get("requested_specialties")
             .unwrap_or_else(|_| json!([])),
@@ -1926,9 +1900,6 @@ async fn load_lead_conversion_readiness(
                   street_address,
                   city,
                   zip_code,
-                  primary_concern_text,
-                  (SELECT g.request_reason FROM lead_gwg_declarations g
-                    WHERE g.lead_id = leads.id) AS portal_request_reason,
                   requested_specialties,
                   country,
                   wizard_state,
@@ -10111,8 +10082,6 @@ mod lead_conversion_readiness_tests {
             street_address: Some("Hauptstr. 1".to_string()),
             city: Some("Berlin".to_string()),
             zip_code: Some("10115".to_string()),
-            primary_concern_text: Some("Knee pain".to_string()),
-            portal_request_reason: None,
             requested_specialties: json!(["orthopedics"]),
             consent_privacy_practices: true,
             consent_healthcare: true,
@@ -10145,38 +10114,44 @@ mod lead_conversion_readiness_tests {
     }
 
     #[test]
-    fn the_reason_the_lead_gave_in_the_cabinet_counts_as_the_concern() {
-        let mut input = ready_input();
-        input.primary_concern_text = None;
-        let missing = evaluate_lead_conversion_readiness(&input);
-        assert!(!missing.conversion_ready);
-        assert!(
-            missing
-                .conversion_reasons
-                .contains(&"Primary concern is missing".to_string()),
-            "{:?}",
-            missing.conversion_reasons
-        );
-
-        // QA 2026-10-10: the lead's own answer in the cabinet is the concern.
-        input.portal_request_reason = Some("Kontrolluntersuchung (synthetisch)".to_string());
-        let readiness = evaluate_lead_conversion_readiness(&input);
-        assert!(
-            !readiness
-                .conversion_reasons
-                .contains(&"Primary concern is missing".to_string()),
-            "{:?}",
-            readiness.conversion_reasons
-        );
+    fn the_reason_of_the_request_is_optional_for_readiness() {
+        // Owner 2026-10-19: neither the staff "Причина обращения" nor the
+        // lead's own reason is required; the readiness never asks for it.
+        let readiness = evaluate_lead_conversion_readiness(&ready_input());
         assert!(
             readiness.conversion_ready,
             "{:?}",
             readiness.conversion_reasons
         );
+        let checks = readiness.payload["checks"]
+            .as_array()
+            .expect("readiness checks");
+        assert!(
+            checks.iter().all(|check| !matches!(
+                check["key"].as_str(),
+                Some("primary_concern_present" | "medical_characteristics_present")
+            )),
+            "{checks:?}"
+        );
+        let steps = readiness.payload["steps"].as_array().expect("steps");
+        let step = |key: &str| {
+            steps
+                .iter()
+                .find(|step| step["key"] == key)
+                .map(|step| step["ready"].clone())
+        };
+        assert_eq!(step("medical"), Some(json!(true)));
+        assert_eq!(step("service"), Some(json!(true)));
 
-        // Blank text counts as nothing.
-        input.portal_request_reason = Some("   ".to_string());
-        assert!(!evaluate_lead_conversion_readiness(&input).conversion_ready);
+        // The service step waits only for a requested specialty.
+        let mut input = ready_input();
+        input.requested_specialties = json!([]);
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(
+            readiness
+                .conversion_reasons
+                .contains(&"Requested specialty is missing".to_string())
+        );
     }
 
     #[test]

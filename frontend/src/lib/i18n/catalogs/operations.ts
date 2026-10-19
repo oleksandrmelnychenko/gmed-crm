@@ -387,14 +387,12 @@ export interface OperationsTranslations {
   lead_readiness_reason_lead_must_be_qualified: string;
   lead_readiness_reason_already_converted: string;
   lead_readiness_check_address_present: string;
-  lead_readiness_check_primary_concern_present: string;
   lead_readiness_check_specialties_present: string;
   lead_readiness_check_identity_document_verified: string;
   lead_readiness_check_dsgvo_document_signed: string;
   lead_readiness_check_confidentiality_release_signed: string;
   lead_readiness_check_enhanced_due_diligence_document_generated: string;
   lead_readiness_check_enhanced_due_diligence_document_signed: string;
-  lead_readiness_check_medical_characteristics_present: string;
   lead_readiness_check_contract_signed: string;
   lead_readiness_check_framework_document_generated: string;
   lead_readiness_check_order_exists: string;
@@ -409,7 +407,6 @@ export interface OperationsTranslations {
   lead_readiness_check_prepayment_ready: string;
   lead_readiness_reason_address_incomplete: string;
   lead_readiness_reason_city_zip_incomplete: string;
-  lead_readiness_reason_primary_concern_missing: string;
   lead_readiness_reason_specialty_missing: string;
   lead_readiness_reason_anamnesis_incomplete: string;
   lead_readiness_reason_identity_not_verified: string;
@@ -1017,7 +1014,6 @@ export const operationsRu: OperationsTranslations = {
     "Перед созданием пациента лид должен быть квалифицирован",
   lead_readiness_reason_already_converted: "Лид уже конвертирован",
   lead_readiness_check_address_present: "Адрес заполнен (при медицинском согласии)",
-  lead_readiness_check_primary_concern_present: "Причина обращения указана",
   lead_readiness_check_specialties_present: "Специализация выбрана",
   lead_readiness_check_identity_document_verified: "Документ, удостоверяющий личность, проверен",
   lead_readiness_check_dsgvo_document_signed: "Документ DSGVO подписан",
@@ -1027,7 +1023,6 @@ export const operationsRu: OperationsTranslations = {
     "Усиленная AML-проверка оформлена (если требуется)",
   lead_readiness_check_enhanced_due_diligence_document_signed:
     "Документ усиленной AML-проверки подписан (если требуется)",
-  lead_readiness_check_medical_characteristics_present: "Медицинские данные заполнены",
   lead_readiness_check_contract_signed: "Рамочный договор подписан",
   lead_readiness_check_framework_document_generated: "Документ рамочного договора создан",
   lead_readiness_check_order_exists: "Заказ создан",
@@ -1043,7 +1038,6 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_check_prepayment_ready: "Требуемая предоплата получена",
   lead_readiness_reason_address_incomplete: "Заполните улицу, город и почтовый индекс",
   lead_readiness_reason_city_zip_incomplete: "Заполните город и почтовый индекс",
-  lead_readiness_reason_primary_concern_missing: "Не указана причина обращения",
   lead_readiness_reason_specialty_missing: "Не выбрана специализация",
   lead_readiness_reason_anamnesis_incomplete: "Анамнез заполнен не полностью",
   lead_readiness_reason_identity_not_verified:
@@ -1675,7 +1669,6 @@ export const operationsDe: OperationsTranslations = {
     "Vor dem Anlegen eines Patienten muss der Lead qualifiziert sein",
   lead_readiness_reason_already_converted: "Lead ist bereits konvertiert",
   lead_readiness_check_address_present: "Adresse erfasst (bei medizinischer Einwilligung)",
-  lead_readiness_check_primary_concern_present: "Anliegen erfasst",
   lead_readiness_check_specialties_present: "Gewünschte Fachrichtung ausgewählt",
   lead_readiness_check_identity_document_verified: "Ausweisdokument geprüft",
   lead_readiness_check_dsgvo_document_signed: "DSGVO-Dokument unterschrieben",
@@ -1685,7 +1678,6 @@ export const operationsDe: OperationsTranslations = {
     "Verstärkte AML-Sorgfaltsprüfung dokumentiert (falls erforderlich)",
   lead_readiness_check_enhanced_due_diligence_document_signed:
     "Dokument zur verstärkten AML-Sorgfaltsprüfung unterschrieben (falls erforderlich)",
-  lead_readiness_check_medical_characteristics_present: "Medizinische Merkmale erfasst",
   lead_readiness_check_contract_signed: "Rahmenvertrag unterschrieben",
   lead_readiness_check_framework_document_generated: "Rahmenvertragsdokument erstellt",
   lead_readiness_check_order_exists: "Auftrag angelegt",
@@ -1702,7 +1694,6 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_check_prepayment_ready: "Erforderliche Vorauszahlung erhalten",
   lead_readiness_reason_address_incomplete: "Straße, Ort und Postleitzahl vervollständigen",
   lead_readiness_reason_city_zip_incomplete: "Ort und Postleitzahl vervollständigen",
-  lead_readiness_reason_primary_concern_missing: "Anliegen fehlt",
   lead_readiness_reason_specialty_missing: "Gewünschte Fachrichtung fehlt",
   lead_readiness_reason_anamnesis_incomplete: "Anamnese ist unvollständig",
   lead_readiness_reason_identity_not_verified: "Ausweisdokument ist nicht geprüft",

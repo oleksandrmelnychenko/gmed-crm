@@ -139,12 +139,11 @@ pub struct BaseExtra {
     pub organisation: bool,
     /// The organisation mask's keys still open.
     pub organisation_missing: Vec<&'static str>,
-    /// The lead's reason of the request is still empty.
-    pub request_reason_missing: bool,
 }
 
 /// The base form's `missing_for_submit` after the trigger flow: the dropped
-/// keys go, the organisation mask and the reason of the request join.
+/// keys go, the organisation mask joins. The reason of the request is
+/// optional since 2026-10-19 (owner) and never blocks the submit.
 pub fn reshape_missing(missing: Vec<String>, extra: &BaseExtra) -> Vec<String> {
     let mut reshaped: Vec<String> = missing
         .into_iter()
@@ -163,9 +162,6 @@ pub fn reshape_missing(missing: Vec<String>, extra: &BaseExtra) -> Vec<String> {
         for (offset, key) in extra.organisation_missing.iter().enumerate() {
             reshaped.insert(at + offset, key.to_string());
         }
-    }
-    if extra.request_reason_missing {
-        reshaped.push("request_reason".to_string());
     }
     reshaped
 }
@@ -215,17 +211,16 @@ pub fn missing_by_step(missing: &[String]) -> Value {
     Value::Object(steps)
 }
 
-/// The base form's extra state of a lead (organisation mask, reason).
+/// The base form's extra state of a lead (organisation mask).
 pub async fn base_extra(
     conn: &mut PgConnection,
     lead_id: Uuid,
     payer: Option<&Declaration>,
 ) -> Result<BaseExtra, sqlx::Error> {
     let row = sqlx::query(
-        r#"SELECT d.organisation_legal_form, d.organisation_contact_name, g.request_reason
+        r#"SELECT d.organisation_legal_form, d.organisation_contact_name
            FROM leads l
            LEFT JOIN lead_payer_declarations d ON d.lead_id = l.id
-           LEFT JOIN lead_gwg_declarations g ON g.lead_id = l.id
            WHERE l.id = $1"#,
     )
     .bind(lead_id)
@@ -251,7 +246,6 @@ pub async fn base_extra(
     Ok(BaseExtra {
         organisation,
         organisation_missing,
-        request_reason_missing: text("request_reason").is_none(),
     })
 }
 
@@ -1345,13 +1339,7 @@ mod tests {
             "enhanced_funds_source",
         ]);
         assert_eq!(
-            reshape_missing(
-                missing,
-                &BaseExtra {
-                    request_reason_missing: true,
-                    ..BaseExtra::default()
-                }
-            ),
+            reshape_missing(missing, &BaseExtra::default()),
             keys(&[
                 "first_name",
                 "payer_kind",
@@ -1365,7 +1353,8 @@ mod tests {
                 "under_guardianship",
                 "invoice_to",
                 "payment_method",
-                "request_reason",
+                // The reason of the request is optional since 2026-10-19
+                // (owner) and never joins the list.
             ])
         );
     }
@@ -1386,7 +1375,6 @@ mod tests {
                 &BaseExtra {
                     organisation: true,
                     organisation_missing: vec!["payer_legal_form", "payer_contact_name"],
-                    request_reason_missing: false,
                 }
             ),
             // The e-mail stays required (its own link goes there, QA

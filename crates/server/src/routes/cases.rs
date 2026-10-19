@@ -1353,50 +1353,24 @@ async fn update_intake_completion(
         }
     };
 
-    let row = match sqlx::query(
+    // The reason of the request is saved when given but is optional since
+    // 2026-10-19 (owner): an empty one never blocks the intake completion.
+    match sqlx::query(
         r#"UPDATE cases
            SET hauptanfragegrund = COALESCE($2, hauptanfragegrund)
            WHERE id = $1
-           RETURNING hauptanfragegrund"#,
+           RETURNING id"#,
     )
     .bind(case_uuid)
     .bind(body.hauptanfragegrund.clone())
     .fetch_optional(&mut *transaction)
     .await
     {
-        Ok(Some(row)) => row,
+        Ok(Some(_)) => {}
         Ok(None) => return err(StatusCode::NOT_FOUND, "Case not found"),
         Err(error) => {
             tracing::error!(error = %error, case_id = %case_uuid, "load case intake completion");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-
-    if body.completed {
-        let fields = [(
-            "hauptanfragegrund",
-            row.try_get::<Option<String>, _>("hauptanfragegrund")
-                .unwrap_or_default(),
-        )];
-        let blocking_fields = fields
-            .into_iter()
-            .filter_map(|(key, value)| {
-                value
-                    .as_deref()
-                    .is_none_or(|text| text.trim().is_empty())
-                    .then_some(key)
-            })
-            .collect::<Vec<_>>();
-        if !blocking_fields.is_empty() {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(serde_json::json!({
-                    "error": "Unprocessable Entity",
-                    "message": "Case intake is incomplete",
-                    "blocking_fields": blocking_fields,
-                })),
-            )
-                .into_response();
         }
     }
 

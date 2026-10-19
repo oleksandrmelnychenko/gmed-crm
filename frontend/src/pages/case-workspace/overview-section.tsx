@@ -200,10 +200,7 @@ function OverviewSectionForm({
         {sectionError ? <Banner tone="error">{sectionError}</Banner> : null}
 
         <div className="grid gap-4 md:grid-cols-2">
-          <Field
-            label={t.cases_workspace_overview_main_reason}
-            required
-          >
+          <Field label={t.cases_workspace_overview_main_reason}>
             <Input
               value={form.hauptanfragegrund}
               onChange={(event) => updateField("hauptanfragegrund", event.target.value)}

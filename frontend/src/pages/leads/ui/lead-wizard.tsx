@@ -768,7 +768,6 @@ type ValidationIssue = {
 
 type ValidationContext =
   | { kind: "master" }
-  | { kind: "medical" }
   | { kind: "documents" }
   | { kind: "order" }
   | { kind: "server"; reasons: string[] };
@@ -2376,7 +2375,6 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Healthcare consent is missing": tx("Получите согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten einholen"),
     "Complete street, city and postal code": tx("Заполните улицу, город и почтовый индекс", "Straße, Ort und Postleitzahl vollständig angeben"),
     "Complete city and postal code": tx("Заполните город и почтовый индекс", "Ort und Postleitzahl vollständig angeben"),
-    "Primary concern is missing": tx("Укажите причину обращения", "Anliegen angeben"),
     "Requested specialty is missing": tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
     "Identity document is not verified": tx("Подтвердите документ, удостоверяющий личность", "Ausweisdokument bestätigen"),
     "Signed DSGVO document is missing": tx("Нужен подписанный документ согласий", "Unterzeichnetes Einwilligungsdokument erforderlich"),
@@ -2416,7 +2414,6 @@ function readinessReasonStep(reason: string): StepId {
     "Healthcare consent is missing": "documents",
     "Complete street, city and postal code": "master_data",
     "Complete city and postal code": "master_data",
-    "Primary concern is missing": "medical",
     "Requested specialty is missing": "order",
     "Identity document is not verified": "documents",
     "Signed DSGVO document is missing": "documents",
@@ -2496,7 +2493,6 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Email or phone is required": MASTER_FIELD_IDS.email,
     "Privacy practices consent is missing": PRIVACY_CONSENT_ID,
     "Healthcare consent is missing": HEALTHCARE_CONSENT_ID,
-    "Primary concern is missing": SERVICE_CONCERN_ID,
     "Requested specialty is missing": SERVICE_SPECIALTIES_ID,
     "Identity document is not verified": IDENTITY_DOCUMENT_ID,
     "Signed DSGVO document is missing": PRIVACY_DOCUMENT_ID,
@@ -3300,7 +3296,6 @@ export function LeadWizard({
   );
   const [masterValidationAttempted, setMasterValidationAttempted] = useState(false);
   const [orderValidationAttempted, setOrderValidationAttempted] = useState(false);
-  const [medicalValidationAttempted, setMedicalValidationAttempted] = useState(false);
   const [validationContext, setValidationContext] = useState<ValidationContext | null>(null);
   const hydrated = useRef<string | null>(null);
   const stepNavRef = useRef<HTMLElement | null>(null);
@@ -3854,8 +3849,7 @@ export function LeadWizard({
         setTouchedMasterFields(new Set());
         setMasterValidationAttempted(false);
         setOrderValidationAttempted(false);
-        setMedicalValidationAttempted(false);
-        setValidationContext(null);
+            setValidationContext(null);
       }
       if (hydrateDraft || hydrateCommercial) {
         setLines(nextLines);
@@ -4122,7 +4116,6 @@ export function LeadWizard({
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
     setOrderValidationAttempted(false);
-    setMedicalValidationAttempted(false);
     setValidationContext(null);
     wizardStateBaseRef.current = {};
     currentAutosaveSignatureRef.current = signature;
@@ -4206,7 +4199,6 @@ export function LeadWizard({
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
     setOrderValidationAttempted(false);
-    setMedicalValidationAttempted(false);
     setValidationContext(null);
     currentAutosaveSignatureRef.current = "";
     lastSavedAutosaveSignatureRef.current = "";
@@ -4617,19 +4609,6 @@ export function LeadWizard({
     if (!validationContext) return [];
     if (validationContext.kind === "master") {
       return masterValidationIssues(masterErrors, tx);
-    }
-    if (validationContext.kind === "medical") {
-      if (!draft) return [];
-      const issues: ValidationIssue[] = [];
-      if (!draft.concern.trim()) {
-        issues.push({
-          key: "concern",
-          step: "medical",
-          message: tx("Причина обращения: обязательное поле", "Anliegen: Pflichtfeld"),
-          fieldId: SERVICE_CONCERN_ID,
-        });
-      }
-      return issues;
     }
     if (validationContext.kind === "documents") {
       return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks);
@@ -5711,21 +5690,13 @@ export function LeadWizard({
       return null;
     }
     if (!ensureMasterDataReady()) return null;
-    // The lead's own reason from the cabinet counts as the reason of the
-    // request, as in the server's readiness: it is taken into the empty
-    // staff field instead of sending staff back to the medical step (QA
-    // 2026-10-10).
+    // The lead's own reason from the cabinet is taken into the empty staff
+    // field (QA 2026-10-10). The reason is optional since 2026-10-19 (owner):
+    // an empty one never sends staff back to the medical step.
     let intakeDraft = draft;
     if (!draft.concern.trim() && patientRequestReason) {
       intakeDraft = { ...draft, concern: patientRequestReason };
       setDraft((current) => current && !current.concern.trim() ? { ...current, concern: patientRequestReason } : current);
-    }
-    if (!intakeDraft.concern.trim()) {
-      setValidationContext({ kind: "medical" });
-      setMedicalValidationAttempted(true);
-      setStep("medical");
-      window.requestAnimationFrame(() => document.getElementById(SERVICE_CONCERN_ID)?.focus());
-      return null;
     }
     const documentIssues = documentsValidationIssues(intakeDraft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks);
     if (documentIssues.length > 0) {
@@ -6763,8 +6734,7 @@ ${serviceCommentLines.join("\n")}`
       setError("");
       setValidationContext(null);
       setOrderValidationAttempted(false);
-      setMedicalValidationAttempted(false);
-      if (!leadId && createMode) await createLeadAndNavigate(target);
+        if (!leadId && createMode) await createLeadAndNavigate(target);
       else if (target === "release") await prepareReleaseAndNavigate();
       else setStep(target);
     } catch (nextError) {
@@ -8133,21 +8103,10 @@ ${serviceCommentLines.join("\n")}`
                 tx={tx}
                 disabled={isBusy}
               />
-              <Field
-                required
-                label={tx("Причина обращения", "Anliegen")}
-                error={medicalValidationAttempted && !draft.concern.trim() ? tx("Обязательное поле", "Pflichtfeld") : undefined}
-                errorId={`${SERVICE_CONCERN_ID}-error`}
-              >
+              <Field label={tx("Причина обращения", "Anliegen")}>
                 <textarea
                   id={SERVICE_CONCERN_ID}
-                  className={cn(
-                    textareaClass,
-                    "min-h-28 bg-card",
-                    medicalValidationAttempted && !draft.concern.trim() && "border-destructive",
-                  )}
-                  aria-invalid={medicalValidationAttempted && !draft.concern.trim()}
-                  aria-describedby={medicalValidationAttempted && !draft.concern.trim() ? `${SERVICE_CONCERN_ID}-error` : undefined}
+                  className={cn(textareaClass, "min-h-28 bg-card")}
                   value={draft.concern}
                   onChange={(event) => patch("concern", event.target.value)}
                 />

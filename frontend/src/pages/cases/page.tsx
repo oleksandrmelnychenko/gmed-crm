@@ -1096,7 +1096,7 @@ function useCasesPageContent() {
               </Panel>
 
               <Panel title={t.cases_core_anamnesis}>
-                <Field label={t.cases_reason} required>
+                <Field label={t.cases_reason}>
                   <Input
                     value={createForm.hauptanfragegrund}
                     onChange={(event) =>

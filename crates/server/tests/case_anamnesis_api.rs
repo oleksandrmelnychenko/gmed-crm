@@ -264,7 +264,9 @@ async fn lead_case_completes_intake_without_creating_patient() {
     assert_eq!(repeated["id"], created["id"]);
     assert_eq!(repeated["already_exists"], true);
 
-    let (blocked_status, blocked) = json_request(
+    // The reason of the request is optional since 2026-10-19 (owner): the
+    // intake completes without it.
+    let (empty_status, empty) = json_request(
         &app,
         "POST",
         &format!("/api/v1/cases/{case_uuid}/intake-completion"),
@@ -272,8 +274,8 @@ async fn lead_case_completes_intake_without_creating_patient() {
         Some(json!({ "completed": true })),
     )
     .await;
-    assert_eq!(blocked_status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(blocked["blocking_fields"], json!(["hauptanfragegrund"]));
+    assert_eq!(empty_status, StatusCode::OK, "empty body: {empty}");
+    assert_eq!(empty["completed"], true);
 
     let (complete_status, completed) = json_request(
         &app,

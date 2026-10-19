@@ -301,8 +301,7 @@ function recompute(request: ReturnType<typeof leadRequest>) {
   // (block L) are asked only with the enhanced check: the base form does not need them.
   if (identification) {
     if (request.identity_documents.length === 0) missing.push("id_document_upload");
-    // The reason of the request (13.1), from a server that knows it.
-    if ("request_reason" in identification && !identification.request_reason) missing.push("request_reason");
+    // The reason of the request (13.1) is optional since 2026-10-19 (owner).
   }
   // A server that knows the representation (contract phase 1b-2) needs the adult's answer; whether the
   // person who acts is court-appointed is asked only after "yes" (owner 2026-10-11).
@@ -880,13 +879,12 @@ test.describe("lead cabinet", () => {
     });
     await expect(page.getByTestId("lead-request-document-list")).toContainText("befund.pdf");
 
-    // The reason is still missing: the first "Weiter" shows it, the second goes on.
-    await page.getByRole("button", { name: "Weiter" }).click();
-    await expect(page.getByTestId("lead-request-documents").getByTestId("lead-request-step-missing")).toContainText("Grund der Anfrage");
+    // The reason of the request is optional (owner 2026-10-19): nothing is missing here, "Weiter" goes on.
+    await expect(page.getByTestId("lead-request-documents").getByTestId("lead-request-step-missing")).toHaveCount(0);
     await page.getByRole("button", { name: "Weiter" }).click();
     const send = page.getByTestId("lead-request-submit");
     const missing = page.getByTestId("lead-request-missing");
-    // What is still missing, by step: the person, the identity copy, who pays, the invoice, the reason.
+    // What is still missing, by step: the person, the identity copy, who pays, the invoice.
     await expect(send).toBeDisabled();
     await expect(missing.getByTestId("lead-request-missing-person")).toContainText("Geburtsdatum");
     await expect(missing.getByTestId("lead-request-missing-person")).toContainText(ACTS);
@@ -902,7 +900,7 @@ test.describe("lead cabinet", () => {
     await expect(missing.getByTestId("lead-request-missing-payer")).toHaveCount(0);
     await expect(missing.getByTestId("lead-request-missing-billing")).toContainText(WHO_PAYS);
     await expect(missing.getByTestId("lead-request-missing-billing")).toContainText("Wer ist Rechnungsempfänger?");
-    await expect(missing.getByTestId("lead-request-missing-documents")).toContainText("Grund der Anfrage");
+    await expect(missing.getByTestId("lead-request-missing-documents")).toHaveCount(0);
     // The identity document's data are staff's; the payment route is asked later if at all.
     await expect(missing).not.toContainText("Art des Dokuments");
     await expect(missing).not.toContainText("Welche Zahlungsart für Rechnungen bevorzugen Sie?");

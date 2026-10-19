@@ -867,8 +867,16 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     assert_eq!(request_object["review_notice"], false);
     assert!(request_object.get("enhanced_check").is_none());
     assert!(request_object.get("extra_questions").is_none());
+    // The reason of the request is optional since 2026-10-19 (owner).
     assert!(
-        request_object["progress"]["missing_by_step"]["documents"]
+        !request_object["progress"]["missing_by_step"]["documents"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("request_reason")),
+        "{request_object}"
+    );
+    assert!(
+        !request_object["progress"]["missing_for_submit"]
             .as_array()
             .unwrap()
             .contains(&json!("request_reason")),

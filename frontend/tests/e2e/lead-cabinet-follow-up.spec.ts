@@ -178,9 +178,9 @@ function recompute(request: LeadRequestMock, countryPreview = false) {
     // The e-mail is required (its own link goes there, QA 2026-10-11 A-35); the phone is not.
     if (!payer.email) byStep.payer.push("payer_email");
   }
-  const reason = id.request_reason ? [] : ["request_reason"];
+  // The reason of the request is optional since 2026-10-19 (owner).
   request.progress.missing_by_step = byStep;
-  request.progress.missing_for_submit = [...Object.values(byStep).flat(), ...reason];
+  request.progress.missing_for_submit = Object.values(byStep).flat();
 
   // The open blocks and what each misses (contract 3.1).
   const answers = request.follow_up.answers;
@@ -641,7 +641,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect.poll(() => calls.personalData.at(-1)).toEqual({ city: "Berlin" });
     await expect(tab(page, "person").getByTestId("lead-request-step-badge")).toHaveText("3");
 
-    // "Anliegen & Unterlagen": the reason of the request, required, in the lead's own words.
+    // "Anliegen & Unterlagen": the reason of the request, optional (owner 2026-10-19), in the lead's own words.
     await tab(page, "documents").click();
     const reason = page.getByRole("textbox", { name: "Grund der Anfrage" });
     await expect(reason).toBeVisible();

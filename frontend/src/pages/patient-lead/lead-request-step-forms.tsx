@@ -943,7 +943,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
       {asksReason ? (
         <Section title={childSectionTitle(text, "request", request.minor)}>
           <div data-testid="lead-request-reason">
-            <IdentificationFormField form={identification} field="request_reason" text={text} required>
+            <IdentificationFormField form={identification} field="request_reason" text={text}>
               <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={5} disabled={!consentReady} />
             </IdentificationFormField>
             {!consentReady ? <p className="text-xs text-muted-foreground">{text.healthConsentRequired}</p> : null}
