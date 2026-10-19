@@ -107,6 +107,8 @@ async fn main() {
     gmed_server::sanctions::download::spawn_list_scheduler(app_state.clone());
     gmed_server::sanctions::screening::spawn_screening_worker(app_state.clone());
     spawn_audit_retention_purger(app_state.db.clone());
+    // Contracting party of minors converted before 2026-10-19 (idempotent).
+    gmed_server::services::contracting_party_backfill::spawn_once(app_state.db.clone());
 
     let cors_origins = cfg
         .cors_origin

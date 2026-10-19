@@ -8280,3 +8280,103 @@ async fn guardian_candidates_include_adult_leads_without_creating_patients_or_ac
         .unwrap();
     assert_eq!(links, 0, "Looking up a parent must never grant access");
 }
+
+/// Owner decision 2026-10-19: minors converted before the conversion stored
+/// the contracting party get it from the backfill — custody and rep1/rep2
+/// relations from the converted lead, audited; a second run changes nothing
+/// and nothing stored is ever overwritten.
+#[tokio::test]
+async fn backfill_stores_the_contracting_party_of_an_old_converted_minor_once() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_email = format!("mia-{}@example.com", Uuid::new_v4().simple());
+    let lead_id = seed_minor_lead_with_parents(&app, &lead_email, anna, ben, None).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    declare_mother_as_payer_and_sign(&app, lead_id, artifacts.order_id).await;
+    let child = convert_ready_lead(&app, lead_id).await;
+    let expected: Vec<Uuid> =
+        sqlx::query_scalar("SELECT contracting_relation_ids FROM patients WHERE id=$1")
+            .bind(child)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(expected.len(), 2, "joint custody: both parents");
+    // As converted before 2026-10-19: nothing stored on the patient.
+    sqlx::query("UPDATE patients SET contracting_relation_ids='{}', custody=NULL WHERE id=$1")
+        .bind(child)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let report = gmed_server::services::contracting_party_backfill::run(pool)
+        .await
+        .unwrap();
+    assert_eq!(report.stored, 1, "{report:?}");
+    assert_eq!(report.unresolved, 0, "{report:?}");
+    let (custody, stored): (Option<String>, Vec<Uuid>) =
+        sqlx::query_as("SELECT custody, contracting_relation_ids FROM patients WHERE id=$1")
+            .bind(child)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(custody.as_deref(), Some("joint"));
+    assert_eq!(stored, expected, "rep1 first, then rep2");
+    let audit: Vec<Value> = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action='backfill_contracting_party' AND entity_id=$1",
+    )
+    .bind(child)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0]["lead_id"], lead_id.to_string());
+    assert_eq!(audit[0]["custody"], "joint");
+
+    // A second run changes nothing.
+    let again = gmed_server::services::contracting_party_backfill::run(pool)
+        .await
+        .unwrap();
+    assert_eq!(again.stored, 0, "{again:?}");
+    let unchanged: Vec<Uuid> =
+        sqlx::query_scalar("SELECT contracting_relation_ids FROM patients WHERE id=$1")
+            .bind(child)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(unchanged, expected);
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action='backfill_contracting_party' AND entity_id=$1",
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1);
+
+    // An ambiguous mapping (two relations named like the father) is skipped
+    // and keeps the fallback.
+    sqlx::query("UPDATE patients SET contracting_relation_ids='{}', custody=NULL WHERE id=$1")
+        .bind(child)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO patient_relations(patient_id,related_name,relation_type) VALUES($1,'Ben Muster','parent')",
+    )
+    .bind(child)
+    .execute(pool)
+    .await
+    .unwrap();
+    let skipped = gmed_server::services::contracting_party_backfill::run(pool)
+        .await
+        .unwrap();
+    assert_eq!((skipped.stored, skipped.unresolved), (0, 1), "{skipped:?}");
+    let (custody, stored): (Option<String>, Vec<Uuid>) =
+        sqlx::query_as("SELECT custody, contracting_relation_ids FROM patients WHERE id=$1")
+            .bind(child)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!((custody, stored), (None, Vec::new()));
+}
