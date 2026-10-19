@@ -10,14 +10,16 @@ import { uploadRepresentativeDocument, type RepresentativeUploadKind } from "../
 import type { Tx } from "../model/lead-payer";
 
 /**
- * Whether the contract gate asks for the person's proof of authority: an
- * adult's agent or guardian, the guardian (Vormund) of a minor. A file on
- * record stays in sight either way.
+ * Whether the person's proof of authority is asked for: the contract gate
+ * needs it of an adult's agent or guardian and of the guardian (Vormund) of
+ * a minor; the cabinet also asks a parent with sole custody for the
+ * (optional) proof of it, so staff can upload it too. A file on record stays
+ * in sight either way.
  */
 export function representativeNeedsAuthority(person: LeadRepresentative, custody: LeadCustody | null | undefined) {
   if (person.authority_documents.length > 0) return true;
   if (person.slot === "agent" || person.slot === "guardian") return true;
-  return custody === "guardian" && person.slot === "rep1";
+  return (custody === "guardian" || custody === "sole_parent") && person.slot === "rep1";
 }
 
 /** Who uploaded a representative's file: the cabinet (the lead or a parent) or staff in the wizard. */

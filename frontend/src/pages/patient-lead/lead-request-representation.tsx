@@ -32,7 +32,7 @@ import {
   type RepresentativeUploadKind,
 } from "./lead-request-api";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
-import { MAX_UPLOAD_BYTES, combinedSaveState, consentGiven, type SaveState } from "./lead-request-model";
+import { MAX_UPLOAD_BYTES, combinedSaveState, consentGiven, uploadLimitReached, type SaveState } from "./lead-request-model";
 import {
   CabinetSection as Section,
   ConsentNeededNote,
@@ -369,7 +369,9 @@ function RepresentativeUpload({
   onChange: (request: LeadRequest) => void;
 }) {
   const consentReady = consentGiven(request, INQUIRY_CONSENT);
-  const ready = consentReady && person !== null;
+  // A representative's files count to the request's file limit like the medical documents.
+  const full = uploadLimitReached(request);
+  const ready = consentReady && person !== null && !full;
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -448,6 +450,7 @@ function RepresentativeUpload({
       ) : (
         <p className="text-xs text-muted-foreground">{person ? text.identityUploadHint : text.representativeUploadNeedsPerson}</p>
       )}
+      {full ? <p className="text-xs text-muted-foreground">{text.errors.too_many_documents}</p> : null}
       {errors.map((message) => (
         <p key={message} role="alert" className="text-xs text-destructive">
           {message}
@@ -971,7 +974,8 @@ export function RepresentationSection({
       ) : undefined}>
         <div className="space-y-4" data-testid="lead-request-representation">
           {representation.document_stage === false && !showDocumentDetails ? <p className="text-sm leading-relaxed text-muted-foreground">{text.parentShortFormIntro}</p> : null}
-          <LabeledField id="lead-request-custody" label={text.custodyQuestion}>
+          {/* The server lists `custody` as missing until it is stated. */}
+          <LabeledField id="lead-request-custody" label={text.custodyQuestion} required>
             <NativeComboboxSelect
               id="lead-request-custody"
               className={selectClass}

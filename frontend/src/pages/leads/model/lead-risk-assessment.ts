@@ -884,8 +884,8 @@ export function riskGateErrorText(error: unknown, tx: Tx): string | null {
       "Перед подтверждением подписи дополните данные этого лица в разделе «Данные клиента».",
       "Bitte vervollständigen Sie vor der Bestätigung der Unterschrift die Daten dieser Person unter „Kundendaten“.",
     ) : tx(
-      "Перед договором и подписью дополните данные родителей в разделе «Данные клиента». В кабинете можно запросить блок «Представители».",
-      "Bitte vervollständigen Sie vor Vertrag und Unterschrift die Elterndaten unter „Kundendaten“. Im Portal können Sie den Block „Vertretung“ anfordern.",
+      "Перед договором и подписью дополните данные родителей (законных представителей) в разделе «Данные клиента». В кабинете можно запросить блок «Представители».",
+      "Bitte vervollständigen Sie vor Vertrag und Unterschrift die Daten der Eltern bzw. gesetzlichen Vertreter unter „Kundendaten“. Im Portal können Sie den Block „Vertretung“ anfordern.",
     );
     const missing = representativeMissingText(error.body?.missing, tx);
     return missing ? `${base} ${missing}` : base;

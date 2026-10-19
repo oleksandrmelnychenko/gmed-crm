@@ -43,6 +43,16 @@ describe("the relation of a trusted contact", () => {
     for (const relation of ["mother", "father", "parent", "guardian", " Mutter ", "Vater"]) expect(isParentOrGuardianRelation(relation)).toBe(true);
     for (const relation of ["spouse", "representative", "relative", "other", ""]) expect(isParentOrGuardianRelation(relation)).toBe(false);
   });
+
+  it("reads free-text relations as the server does", () => {
+    for (const relation of ["Elternteil", "Vormund", "мама", "папа", "родитель", "опекун", "Stiefvater"]) {
+      expect(isParentOrGuardianRelation(relation)).toBe(true);
+    }
+    // The server's order: a spouse, a child or a sibling first.
+    for (const relation of ["Ehepartner", "Tochter", "Bruder", "Tante", "Betreuer"]) {
+      expect(isParentOrGuardianRelation(relation)).toBe(false);
+    }
+  });
 });
 import { patientEventChangesLeadData } from "./use-lead-step1-portal";
 

@@ -728,7 +728,7 @@ describe("lead request summary", () => {
       authority_documents: [upload("rep-auth-2", "urkunde.pdf")],
       ...overrides,
     });
-    const minor = (custody: "joint" | "guardian") =>
+    const minor = (custody: "joint" | "guardian", stated = true) =>
       requestSummary(
         request({
           access_kind: "guardian",
@@ -737,7 +737,7 @@ describe("lead request summary", () => {
             has_representative: null,
             under_guardianship: null,
             custody,
-            custody_stated: custody !== "joint",
+            custody_stated: stated,
             representatives: [
               parent({}),
               parent({ id: "22222222-2222-4222-8222-222222222222", slot: custody === "joint" ? "rep2" : null, mine: false, first_name: "Ben", email: null, authority_documents: [] }),
@@ -751,6 +751,8 @@ describe("lead request summary", () => {
     const joint = minor("joint");
     expect(joint?.title).toBe("Gesetzliche Vertreter");
     expect(joint?.rows).toEqual([{ label: "Wer vertritt das Kind?", value: "Beide Eltern gemeinsam" }]);
+    // Nobody answered yet: the server still lists the custody as missing, the summary states no answer.
+    expect(minor("joint", false)?.rows).toEqual([]);
     expect(joint?.parts?.map((part) => part.title)).toEqual(["1. Vertreter/in – Sie", "2. Vertreter/in – anderer Elternteil"]);
     // Parents with joint custody show no proof: a file from an earlier answer is not listed.
     expect(joint?.parts?.[0].rows).toEqual([

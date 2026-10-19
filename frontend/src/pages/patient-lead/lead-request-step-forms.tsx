@@ -41,6 +41,7 @@ import {
   languageName,
   personalDataPatch,
   rejectedValue,
+  uploadLimitReached,
   withInsuranceAnswer,
   type PersonalDraft,
   type PersonalField,
@@ -888,8 +889,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
-  const full = (request.documents_used ?? request.documents.length + (request.identity_documents?.length ?? 0)
-    + (request.representation?.representatives ?? []).reduce((count, person) => count + person.identity_documents.length + person.authority_documents.length, 0)) >= request.max_documents;
+  const full = uploadLimitReached(request);
 
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;

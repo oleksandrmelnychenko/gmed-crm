@@ -279,7 +279,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       title: request.minor ? text.sectionLegalRepresentatives : text.sectionRepresentation,
       rows: entered(
         custody
-          ? [[text.custodyQuestion, text.custodyOptions[custody]]]
+          // Only an answer given: until then the server lists the custody as missing.
+          ? [[text.custodyQuestion, representation.custody_stated ? text.custodyOptions[custody] : null]]
           : [
               [text.hasRepresentativeQuestion, yesNo(representation.has_representative)],
               // Asked only after its "yes" (owner 2026-10-11).

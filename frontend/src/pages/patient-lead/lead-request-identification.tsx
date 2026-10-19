@@ -28,6 +28,7 @@ import {
   LEGAL_QUESTIONS,
   MAX_UPLOAD_BYTES,
   consentGiven,
+  uploadLimitReached,
   draftFromIdentification,
   identificationPatch,
   identificationValue,
@@ -366,6 +367,8 @@ export function IdentityDocumentSection({
   documents?: LeadRequest["identity_documents"];
 }) {
   const consentReady = consentGiven(request, INQUIRY_CONSENT);
+  // The copies count to the request's file limit like the medical documents.
+  const full = uploadLimitReached(request);
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -420,7 +423,7 @@ export function IdentityDocumentSection({
           multiple
           accept=".pdf,.jpg,.jpeg,.png"
           className="sr-only"
-          disabled={!consentReady || uploading}
+          disabled={!consentReady || uploading || full}
           onChange={(event) => {
             const files = Array.from(event.currentTarget.files ?? []);
             event.currentTarget.value = "";
@@ -432,7 +435,7 @@ export function IdentityDocumentSection({
           variant="outline"
           // The label is a sentence: on a phone it may wrap instead of widening the page.
           className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
-          disabled={!consentReady || uploading}
+          disabled={!consentReady || uploading || full}
           onClick={() => fileInput.current?.click()}
         >
           {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
@@ -443,6 +446,7 @@ export function IdentityDocumentSection({
         ) : (
           <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
         )}
+        {full ? <p className="text-xs text-muted-foreground">{text.errors.too_many_documents}</p> : null}
         {errors.map((message) => (
           <p key={message} role="alert" className="text-xs text-destructive">
             {message}

@@ -6274,6 +6274,88 @@ async fn create_prospect_patient(
     )
 }
 
+/// A relation the patient already has, as a repeat conversion compares it
+/// with the lead's trusted contacts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ExistingRelation {
+    id: Uuid,
+    related_patient_id: Option<Uuid>,
+    related_name: String,
+    relation_type: String,
+    /// The trusted contact entry the relation was created from.
+    source_contact_id: Option<Uuid>,
+}
+
+/// Mother, father and a parent of unstated role are one kind: an older
+/// `parent` relation is the same person as a new `mother`.
+fn same_relation_group(left: &str, right: &str) -> bool {
+    let parent = |value: &str| matches!(value, "parent" | "mother" | "father");
+    left == right || (parent(left) && parent(right))
+}
+
+/// The relation a trusted contact of the lead is already on file as
+/// (audit 2026-10-20): the one created from the same entry, else the one
+/// linked to the same patient record, else one of the same relation group
+/// with a compatible name (a patronymic on one side only) — an exact name
+/// first, a single compatible one otherwise. A relation another entry
+/// created, or one linked to another patient record, is never taken, and
+/// none is taken twice (`taken`).
+fn matching_relation(
+    existing: &[ExistingRelation],
+    taken: &[Uuid],
+    contact_id: Option<Uuid>,
+    related_patient_id: Option<Uuid>,
+    name: &str,
+    relation_type: &str,
+) -> Option<Uuid> {
+    let free = || {
+        existing
+            .iter()
+            .filter(|relation| !taken.contains(&relation.id))
+    };
+    if let Some(contact_id) = contact_id
+        && let Some(relation) =
+            free().find(|relation| relation.source_contact_id == Some(contact_id))
+    {
+        return Some(relation.id);
+    }
+    let candidates = free()
+        .filter(|relation| same_relation_group(&relation.relation_type, relation_type))
+        .filter(|relation| {
+            relation.source_contact_id.is_none() || relation.source_contact_id == contact_id
+        })
+        .collect::<Vec<_>>();
+    if let Some(person) = related_patient_id
+        && let Some(relation) = candidates
+            .iter()
+            .find(|relation| relation.related_patient_id == Some(person))
+    {
+        return Some(relation.id);
+    }
+    let named = candidates
+        .iter()
+        .filter(|relation| {
+            relation.related_patient_id.is_none()
+                || relation.related_patient_id == related_patient_id
+        })
+        .filter(|relation| {
+            crate::routes::lead_portal_guardians::compatible_person_name(
+                &relation.related_name,
+                name,
+            )
+        })
+        .collect::<Vec<_>>();
+    if let Some(exact) = named.iter().find(|relation| {
+        crate::routes::lead_portal_guardians::same_person_name(&relation.related_name, name)
+    }) {
+        return Some(exact.id);
+    }
+    match named.as_slice() {
+        [single] => Some(single.id),
+        _ => None,
+    }
+}
+
 async fn convert_lead(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -7094,6 +7176,34 @@ async fn convert_lead(
         Vec::new()
     };
     let mut contracting_relations: Vec<(Uuid, Uuid)> = Vec::new();
+    // The relations a repeat conversion compares the contacts with, newest
+    // first; each is taken by one contact at most.
+    let existing_relations = match sqlx::query(
+        r#"SELECT id, related_patient_id, COALESCE(related_name, '') AS related_name,
+                  relation_type, source_contact_id
+           FROM patient_relations WHERE patient_id = $1
+           ORDER BY created_at DESC, id DESC"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(rows) => rows
+            .iter()
+            .map(|row| ExistingRelation {
+                id: row.get("id"),
+                related_patient_id: row.get("related_patient_id"),
+                related_name: row.get("related_name"),
+                relation_type: row.get("relation_type"),
+                source_contact_id: row.get("source_contact_id"),
+            })
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "load patient relations for conversion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let mut taken_relations: Vec<Uuid> = Vec::new();
 
     for trusted_contact in trusted_contacts.as_array().into_iter().flatten() {
         let Some(contact) = trusted_contact.as_object() else {
@@ -7164,61 +7274,102 @@ async fn convert_lead(
             .get("is_emergency_contact")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        // The relation of the entry: the one a repeat conversion finds, or
-        // the new one. A contact linked to a patient record matches by that
-        // record, any other by its name.
-        let relation_id = match sqlx::query_scalar::<_, Uuid>(
-            r#"WITH existing AS (
-                   SELECT existing.id FROM patient_relations existing
-                   WHERE existing.patient_id = $1
-                      AND (
-                        ($2::uuid IS NOT NULL AND existing.related_patient_id = $2)
-                        OR ($2::uuid IS NULL AND existing.related_name = $3)
-                      )
-                      AND existing.relation_type = $4
-                   ORDER BY existing.created_at DESC, existing.id DESC
-                   LIMIT 1
-               ), inserted AS (
-                   INSERT INTO patient_relations (
-                        patient_id, related_patient_id, related_name, relation_type,
-                        is_emergency_contact, phone, notes, email,
-                        address_street, address_zip, address_city, address_country,
-                        birth_date
-                   )
-                   SELECT $1, $2, $3, $4, $12, $5, $6, $7, $8, $9, $10, $11, $13
-                   WHERE NOT EXISTS (SELECT 1 FROM existing)
-                   RETURNING id
-               ), dated AS (
-                   -- A repeat conversion completes a date the relation lacks.
-                   UPDATE patient_relations relation
-                   SET birth_date = $13
-                   FROM existing
-                   WHERE relation.id = existing.id
-                     AND relation.birth_date IS NULL
-                     AND $13::date IS NOT NULL
-                   RETURNING relation.id
-               )
-               SELECT id FROM inserted
-               UNION ALL
-               SELECT id FROM existing"#,
-        )
-        .bind(patient_id)
-        .bind(related_patient_id)
-        .bind(name)
-        .bind(relation_type)
-        .bind(contact.get("phone").and_then(Value::as_str))
-        .bind((!notes.is_empty()).then_some(notes.as_str()))
-        .bind(email)
-        .bind(&address.0)
-        .bind(&address.1)
-        .bind(&address.2)
-        .bind(&address.3)
-        .bind(emergency_contact)
-        .bind(birth_date)
-        .fetch_optional(&mut *tx)
-        .await
-        {
-            Ok(relation_id) => relation_id,
+        // The relation of the entry: the one a repeat conversion finds
+        // ([`matching_relation`]), refreshed with the lead's current name,
+        // contact data and address (a value the lead no longer has stays),
+        // or a new one that remembers its entry.
+        let matched = matching_relation(
+            &existing_relations,
+            &taken_relations,
+            contact_id,
+            related_patient_id,
+            name,
+            relation_type,
+        );
+        let phone = contact
+            .get("phone")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let notes = (!notes.is_empty()).then_some(notes.as_str());
+        let stored = match matched {
+            Some(existing_id) => {
+                sqlx::query_scalar::<_, Uuid>(
+                    r#"UPDATE patient_relations SET
+                           related_name = $3,
+                           -- An older "parent" becomes "mother"/"father"; a known role is not
+                           -- turned back into "parent".
+                           relation_type = CASE
+                               WHEN $4 = 'parent' AND relation_type IN ('mother', 'father')
+                               THEN relation_type ELSE $4 END,
+                           related_patient_id = COALESCE($2, related_patient_id),
+                           phone = COALESCE($5, phone),
+                           notes = COALESCE($6, notes),
+                           email = COALESCE($7, email),
+                           -- The address is one value: the lead's whole, or the stored one.
+                           address_street = CASE WHEN COALESCE($8, $9, $10, $11) IS NOT NULL THEN $8 ELSE address_street END,
+                           address_zip = CASE WHEN COALESCE($8, $9, $10, $11) IS NOT NULL THEN $9 ELSE address_zip END,
+                           address_city = CASE WHEN COALESCE($8, $9, $10, $11) IS NOT NULL THEN $10 ELSE address_city END,
+                           address_country = CASE WHEN COALESCE($8, $9, $10, $11) IS NOT NULL THEN $11 ELSE address_country END,
+                           is_emergency_contact = is_emergency_contact OR $12,
+                           source_contact_id = COALESCE(source_contact_id, $13),
+                           -- A repeat conversion completes a date the relation lacks.
+                           birth_date = COALESCE(birth_date, $15)
+                       WHERE id = $14 AND patient_id = $1
+                       RETURNING id"#,
+                )
+                .bind(patient_id)
+                .bind(related_patient_id)
+                .bind(name)
+                .bind(relation_type)
+                .bind(phone)
+                .bind(notes)
+                .bind(email)
+                .bind(&address.0)
+                .bind(&address.1)
+                .bind(&address.2)
+                .bind(&address.3)
+                .bind(emergency_contact)
+                .bind(contact_id)
+                .bind(existing_id)
+                .bind(birth_date)
+                .fetch_optional(&mut *tx)
+                .await
+            }
+            None => {
+                sqlx::query_scalar::<_, Uuid>(
+                    r#"INSERT INTO patient_relations (
+                            patient_id, related_patient_id, related_name, relation_type,
+                            is_emergency_contact, phone, notes, email,
+                            address_street, address_zip, address_city, address_country,
+                            source_contact_id, birth_date
+                       )
+                       VALUES ($1, $2, $3, $4, $12, $5, $6, $7, $8, $9, $10, $11, $13, $14)
+                       RETURNING id"#,
+                )
+                .bind(patient_id)
+                .bind(related_patient_id)
+                .bind(name)
+                .bind(relation_type)
+                .bind(phone)
+                .bind(notes)
+                .bind(email)
+                .bind(&address.0)
+                .bind(&address.1)
+                .bind(&address.2)
+                .bind(&address.3)
+                .bind(emergency_contact)
+                .bind(contact_id)
+                .bind(birth_date)
+                .fetch_optional(&mut *tx)
+                .await
+            }
+        };
+        let relation_id = match stored {
+            Ok(relation_id) => {
+                taken_relations.extend(relation_id);
+                relation_id
+            }
             Err(error) => {
                 tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer trusted contact to patient relation");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -7298,28 +7449,38 @@ async fn convert_lead(
         }
     }
 
-    // The parent who pays is the default payer unless the patient already
-    // has one (a repeat conversion keeps the mark staff set, and the unique
-    // index allows one only). Never backfilled for earlier conversions. The
-    // relation is the entry's own, also when the parent is linked to a
-    // patient record of their own.
+    // The parent who pays according to the lead being converted is the
+    // default payer (audit 2026-10-20: a repeat conversion kept the payer of
+    // an earlier inquiry). The mark moves from another relation first: the
+    // unique index allows one only. Without a paying parent the mark stays.
+    // Never backfilled for earlier conversions. The relation is the entry's
+    // own, also when the parent is linked to a patient record of their own.
     if let Some(paying_relation_id) = paying_parent_relation {
-        let marked = sqlx::query_scalar::<_, Uuid>(
-            r#"UPDATE patient_relations
-               SET is_default_payer = true
-               WHERE id = $2 AND patient_id = $1
-               AND NOT EXISTS (
-                   SELECT 1 FROM patient_relations existing
-                   WHERE existing.patient_id = $1 AND existing.is_default_payer
-               )
-               RETURNING id"#,
-        )
-        .bind(patient_id)
-        .bind(paying_relation_id)
-        .fetch_optional(&mut *tx)
+        let marked = async {
+            let previous = sqlx::query_scalar::<_, Uuid>(
+                r#"UPDATE patient_relations SET is_default_payer = false
+                   WHERE patient_id = $1 AND is_default_payer AND id <> $2
+                   RETURNING id"#,
+            )
+            .bind(patient_id)
+            .bind(paying_relation_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let marked = sqlx::query_scalar::<_, Uuid>(
+                r#"UPDATE patient_relations
+                   SET is_default_payer = true
+                   WHERE id = $2 AND patient_id = $1 AND NOT is_default_payer
+                   RETURNING id"#,
+            )
+            .bind(patient_id)
+            .bind(paying_relation_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            Ok::<_, sqlx::Error>(marked.map(|relation_id| (relation_id, previous)))
+        }
         .await;
         match marked {
-            Ok(Some(relation_id)) => {
+            Ok(Some((relation_id, previous))) => {
                 if let Err(error) = audit::write_in_transaction(
                     &mut tx,
                     &audit::domain_event(
@@ -7327,7 +7488,11 @@ async fn convert_lead(
                         Some(auth.user_id),
                         "patient",
                         Some(patient_id),
-                        json!({ "lead_id": lead_id, "relation_id": relation_id }),
+                        json!({
+                            "lead_id": lead_id,
+                            "relation_id": relation_id,
+                            "previous_relation_id": previous,
+                        }),
                     ),
                 )
                 .await
@@ -10999,5 +11164,122 @@ mod auto_purge_tests {
             now(),
             180
         ));
+    }
+}
+
+#[cfg(test)]
+mod repeat_conversion_relation_tests {
+    use super::*;
+
+    fn relation(n: u8, name: &str, relation_type: &str) -> ExistingRelation {
+        ExistingRelation {
+            id: Uuid::from_bytes([n; 16]),
+            related_patient_id: None,
+            related_name: name.into(),
+            relation_type: relation_type.into(),
+            source_contact_id: None,
+        }
+    }
+
+    #[test]
+    fn a_repeat_conversion_finds_the_relation_of_the_same_person() {
+        let contact = Uuid::from_bytes([9; 16]);
+        let older = relation(1, "Anna Muster", "parent");
+        // An older "parent" is the same person as a new "mother"; a
+        // patronymic on one side only does not make a second person.
+        assert_eq!(
+            matching_relation(&[older.clone()], &[], None, None, "Anna Muster", "mother"),
+            Some(older.id)
+        );
+        assert_eq!(
+            matching_relation(
+                &[older.clone()],
+                &[],
+                None,
+                None,
+                "Anna Petrovna Muster",
+                "mother"
+            ),
+            Some(older.id)
+        );
+        // Not another kind of relation, not one taken already.
+        assert_eq!(
+            matching_relation(&[older.clone()], &[], None, None, "Anna Muster", "spouse"),
+            None
+        );
+        assert_eq!(
+            matching_relation(
+                &[older.clone()],
+                &[older.id],
+                None,
+                None,
+                "Anna Muster",
+                "mother"
+            ),
+            None
+        );
+        // The entry it was created from wins over any name.
+        let created = ExistingRelation {
+            source_contact_id: Some(contact),
+            ..relation(2, "Anna Alt", "mother")
+        };
+        assert_eq!(
+            matching_relation(
+                &[older.clone(), created.clone()],
+                &[],
+                Some(contact),
+                None,
+                "Anna Neu",
+                "mother"
+            ),
+            Some(created.id)
+        );
+        // A relation another entry created is never taken by a name.
+        assert_eq!(
+            matching_relation(
+                &[created.clone()],
+                &[],
+                Some(Uuid::from_bytes([8; 16])),
+                None,
+                "Anna Alt",
+                "mother"
+            ),
+            None
+        );
+        // The linked patient record decides; another record is another person.
+        let person = Uuid::from_bytes([7; 16]);
+        let linked = ExistingRelation {
+            related_patient_id: Some(person),
+            ..relation(3, "Ben Muster", "parent")
+        };
+        assert_eq!(
+            matching_relation(
+                &[linked.clone()],
+                &[],
+                None,
+                Some(person),
+                "Benjamin Muster",
+                "father"
+            ),
+            Some(linked.id)
+        );
+        assert_eq!(
+            matching_relation(
+                &[linked.clone()],
+                &[],
+                None,
+                Some(Uuid::from_bytes([6; 16])),
+                "Ben Muster",
+                "father"
+            ),
+            None
+        );
+        // Two compatible names without an exact one: nobody is guessed.
+        let first = relation(4, "Anna Maria Muster", "mother");
+        let second = relation(5, "Anna Luise Muster", "mother");
+        assert_eq!(
+            matching_relation(&[first, second], &[], None, None, "Anna Muster", "mother"),
+            None
+        );
     }
 }

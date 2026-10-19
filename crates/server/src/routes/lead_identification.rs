@@ -666,7 +666,17 @@ pub(crate) async fn load_identification_status(
 
     // A minor: every signature belongs to a representative or to nobody the
     // request page names; what is left of the payer's is the payer's own.
-    let people = &representation.representatives;
+    // The persons to identify are the representatives who act for the child
+    // (the first parent, the second one only under joint custody, owner
+    // decision 2026-10-19), and the parent the declaration names as payer: a
+    // parent on file without custody is no person of the child's side.
+    let people: Vec<Representative> = representation
+        .representatives
+        .iter()
+        .filter(|person| person.slot.is_some() || Some(person.id) == payer_is)
+        .cloned()
+        .collect();
+    let people = &people;
     let owners = signatures
         .iter()
         .map(|signature| {

@@ -7215,7 +7215,8 @@ ${serviceCommentLines.join("\n")}`
       ?? (draft ? isMinor(draft.birthDate, new Date()) : false),
     representatives: identification.status
       ? identification.status.representatives
-      : (portalRepresentation?.representatives ?? []).map((person) => ({
+      // Before the status answers: the persons who act for the child, as the server lists them.
+      : (portalRepresentation?.representatives ?? []).filter((person) => person.slot !== null).map((person) => ({
           id: person.id,
           name: representativeName(person),
         })),
@@ -8020,6 +8021,14 @@ ${serviceCommentLines.join("\n")}`
                                 <p className="truncate text-sm font-medium">{contact.name}</p>
                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                                   <TrustedContactRole relation={contact.relation} tx={tx} />
+                                  {/* On file, but not one of the persons who act for the child
+                                      (a second parent under sole custody, a third one): no
+                                      contract, signature or GwG sheet is made for that person. */}
+                                  {portalRepresentation?.representatives.some((person) => person.id === contact.id && person.slot === null) ? (
+                                    <span className="text-amber-700 dark:text-amber-300" data-testid="trusted-contact-not-representing">
+                                      {tx("Не представляет ребёнка", "Vertritt das Kind nicht")}
+                                    </span>
+                                  ) : null}
                                   <span className="break-all">{[contact.email, contact.phone].filter(Boolean).join(" · ")}</span>
                                 </div>
                               </div>

@@ -3609,14 +3609,20 @@ async fn load_gwg_identification_sheet(
     // Whose sheet it is, before anything is read for it.
     let representative = match subject {
         GwgSheetSubject::Representative(id) => {
-            // Any legal representative of a minor on file; of an adult only the
-            // representative and the legal guardian the cabinet asks for.
+            // A minor's representative who acts for the child (the first
+            // parent, the second one only under joint custody) or the parent
+            // who pays, as the identification status lists them; of an adult
+            // only the representative and the legal guardian the cabinet asks
+            // for. A parent on file without custody gets no sheet.
             let acts_for_lead = |person: &&super::lead_representatives::Representative| {
-                representation.minor
-                    || person.slot.is_some_and(|slot| {
-                        slot == super::lead_representatives::SLOT_AGENT
-                            || slot == super::lead_representatives::SLOT_GUARDIAN
-                    })
+                if representation.minor {
+                    return person.slot.is_some()
+                        || identification.payer_same_person_as == Some(person.id);
+                }
+                person.slot.is_some_and(|slot| {
+                    slot == super::lead_representatives::SLOT_AGENT
+                        || slot == super::lead_representatives::SLOT_GUARDIAN
+                })
             };
             match representation.find(id).filter(acts_for_lead) {
                 Some(person) => Some(person),

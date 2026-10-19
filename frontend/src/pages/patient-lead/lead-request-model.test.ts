@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LeadRequest, LeadRequestIdentification, LeadRequestPayer } from "./lead-request-api";
 import {
+  uploadLimitReached,
   canSubmit,
   changedSinceSubmit,
   combinedSaveState,
@@ -967,5 +968,19 @@ describe("lead request send step", () => {
     expect(formatFileSize(1000, "ru")).toBe("1 КБ");
     expect(formatFileSize(3 * 1024 * 1024, "uk")).toBe("3 МБ");
     expect(formatFileSize(2048, "en")).toBe("2 KB");
+  });
+});
+
+describe("the cabinet's file limit", () => {
+  const request = (overrides: Partial<LeadRequest>) =>
+    ({ documents: [], identity_documents: [], representation: null, max_documents: 30, ...overrides }) as unknown as LeadRequest;
+
+  it("counts what the server counts, so an identity or representative upload stops at the same point", () => {
+    expect(uploadLimitReached(request({ documents_used: 29 }))).toBe(false);
+    expect(uploadLimitReached(request({ documents_used: 30 }))).toBe(true);
+    // An older server without the count: every list of the cabinet counts.
+    const file = { id: "f" } as LeadRequest["documents"][number];
+    expect(uploadLimitReached(request({ max_documents: 2, documents: [file], identity_documents: [file] }))).toBe(true);
+    expect(uploadLimitReached(request({ max_documents: 3, documents: [file], identity_documents: [file] }))).toBe(false);
   });
 });

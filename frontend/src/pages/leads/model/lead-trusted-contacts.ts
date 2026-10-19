@@ -13,9 +13,33 @@
 /** The relations the wizard offers for a trusted contact, in the order of its list. */
 export const TRUSTED_CONTACT_RELATIONS = ["mother", "father", "guardian", "representative", "spouse", "relative", "other"] as const;
 
-/** Explicit parent roles and legacy values still identify the child's representatives. */
+/**
+ * The kind of a stored relation, read as the server reads it
+ * (`normalized_patient_relation_type` in `crates/server/src/routes/leads.rs`):
+ * free text of older data ("Elternteil", "Vormund", "мама", "опекун") counts
+ * by the word it contains, in the server's order.
+ */
+function relationKind(relation: string): "spouse" | "mother" | "father" | "parent" | "child" | "sibling" | "guardian" | "other" {
+  const value = relation.trim().toLowerCase();
+  const has = (...parts: string[]) => parts.some((part) => value.includes(part));
+  if (has("spouse", "partner", "ehe", "супруг", "чолов", "друж")) return "spouse";
+  if (has("mother", "mutter", "мать", "мам", "мати")) return "mother";
+  if (has("father", "vater", "отец", "пап", "батьк")) return "father";
+  if (has("parent", "eltern", "родител", "бать")) return "parent";
+  if (has("child", "son", "daughter", "kind", "сын", "доч", "син")) return "child";
+  if (has("sibling", "brother", "sister", "bruder", "schwester", "брат", "сестр")) return "sibling";
+  if (has("guardian", "vormund", "опек", "піклув")) return "guardian";
+  return "other";
+}
+
+/**
+ * Whether a contact is a parent or guardian, the same rule the server uses
+ * for a minor's representatives (audit 2026-10-20: with an exact list a
+ * contact "Vormund" or "Elternteil" was a representative on the server while
+ * the wizard showed "Представитель не указан" and refused to save the minor).
+ */
 export function isParentOrGuardianRelation(relation: string): boolean {
-  return ["parent", "mother", "father", "guardian", "mutter", "vater", "мать", "мати", "отец", "батько"].includes(relation.trim().toLowerCase());
+  return ["mother", "father", "parent", "guardian"].includes(relationKind(relation));
 }
 
 /**

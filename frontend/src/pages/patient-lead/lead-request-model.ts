@@ -1097,6 +1097,24 @@ export function consentGiven(request: Pick<LeadRequest, "consents">, purpose: st
 }
 
 /**
+ * The request holds as many files as the cabinet may upload
+ * (`max_documents`): medical documents, identity copies and the
+ * representatives' files count together, the payer's and staff's do not
+ * (`documents_used`). An older server does not send the count.
+ */
+export function uploadLimitReached(
+  request: Pick<LeadRequest, "documents_used" | "documents" | "identity_documents" | "representation" | "max_documents">,
+): boolean {
+  if (typeof request.max_documents !== "number") return false;
+  const used = request.documents_used ?? (request.documents?.length ?? 0) + (request.identity_documents?.length ?? 0)
+    + (request.representation?.representatives ?? []).reduce(
+      (count, person) => count + (person.identity_documents?.length ?? 0) + (person.authority_documents?.length ?? 0),
+      0,
+    );
+  return used >= request.max_documents;
+}
+
+/**
  * Something changed after the request was sent: only then "send again" is
  * offered. An older server does not say so; documents uploaded later still count.
  */

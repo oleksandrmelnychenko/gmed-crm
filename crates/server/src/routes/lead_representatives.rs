@@ -757,7 +757,10 @@ pub(crate) async fn load_on(
 /// or — a third-party row stored before — the third-party payer is that
 /// representative: a natural person whose e-mail address equals the
 /// representative's or — when either has none — whose first name, last name
-/// and date of birth do. Always `None` for an adult.
+/// and date of birth do. Always `None` for an adult. A third party matches
+/// only a representative with a place in the form (the first parent, the
+/// second one under joint custody): a parent on file without custody who
+/// pays stays a third party, as the declaration's own check keeps it.
 pub(crate) fn payer_same_person(
     representation: &Representation,
     payer: Option<&lead_payer::Declaration>,
@@ -781,6 +784,7 @@ pub(crate) fn payer_same_person(
     representation
         .representatives
         .iter()
+        .filter(|person| person.slot.is_some())
         .find(
             |person| match (&payer_email, address(person.email.as_deref())) {
                 (Some(payer_email), Some(email)) => *payer_email == email,
@@ -4294,6 +4298,22 @@ mod tests {
         );
         assert_eq!(
             payer_same_person(&minor, Some(&payer(None, "Zahler"))),
+            None
+        );
+        // A parent on file without custody (no place in the form) who pays
+        // stays a third party.
+        let without_custody = Representation {
+            representatives: vec![Representative {
+                slot: None,
+                ..parent.clone()
+            }],
+            ..minor.clone()
+        };
+        assert_eq!(
+            payer_same_person(
+                &without_custody,
+                Some(&payer(Some("anna.muster@example.com"), "Muster"))
+            ),
             None
         );
         // Not for an organisation, a self-payer or an adult lead.
