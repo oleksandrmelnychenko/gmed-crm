@@ -535,6 +535,7 @@ function PayerQuestionnaireForm({
             </LabeledField>
           </div>
 
+          {questionnaire.funds_required ? (
           <div className="space-y-3" data-testid="lead-request-payer-funds">
             <div
               role="group"
@@ -632,6 +633,7 @@ function PayerQuestionnaireForm({
               />
             </div>
           </div>
+          ) : null}
 
           <div className="space-y-5" data-testid="lead-request-payer-legal">
             {PAYER_LEGAL_QUESTIONS.map((question) => {

@@ -1145,6 +1145,9 @@ struct Requirements<'a> {
     privacy_acknowledged: bool,
     payer_type: &'a str,
     id_uploaded: bool,
+    /// The enhanced check is required: the payer states the source of the
+    /// funds (client and owner 2026-10-19: asked only by a trigger).
+    funds_required: bool,
     funds_proof_required: bool,
     funds_proof_uploaded: bool,
     /// Section 8 as stored, when this questionnaire asks it (the link; a
@@ -1242,12 +1245,14 @@ fn missing_for_submit(answers: &Answers, required: &Requirements<'_>) -> Vec<&'s
         checks.push(("relationship", relationship_described));
         checks.push(("occupation", filled(&answers.occupation)));
     }
-    checks.push(("funds_sources", !answers.funds_sources.is_empty()));
-    checks.push((
-        "funds_description",
-        !answers.funds_sources.iter().any(|source| source == "other")
-            || filled(&answers.funds_description),
-    ));
+    if required.funds_required {
+        checks.push(("funds_sources", !answers.funds_sources.is_empty()));
+        checks.push((
+            "funds_description",
+            !answers.funds_sources.iter().any(|source| source == "other")
+                || filled(&answers.funds_description),
+        ));
+    }
     checks.push((
         "funds_proof_upload",
         !required.funds_proof_required || required.funds_proof_uploaded,
@@ -2024,6 +2029,7 @@ fn questionnaire(
             privacy_acknowledged: statement.privacy_ack_at.is_some(),
             payer_type: &payer_type,
             id_uploaded: !identity_documents.is_empty(),
+            funds_required: level == 2,
             funds_proof_required: level == 2,
             funds_proof_uploaded: !funds_proof_documents.is_empty(),
             payment_route: asked.then_some(&declaration),
@@ -2117,6 +2123,7 @@ impl Questionnaire {
                 .iter()
                 .map(DocumentItem::to_json)
                 .collect::<Vec<_>>(),
+            "funds_required": self.level == 2,
             "funds_proof_required": self.level == 2,
             "missing_for_submit": self.missing,
             "declared_correct_at": self.statement.declared_correct_at,
@@ -5946,6 +5953,7 @@ mod tests {
             privacy_acknowledged: true,
             payer_type: "person",
             id_uploaded: true,
+            funds_required: level == 2,
             funds_proof_required: level == 2,
             funds_proof_uploaded: false,
             payment_route: None,
@@ -5956,6 +5964,9 @@ mod tests {
         assert_eq!((level, reasons), (1, vec![]));
         assert!(!missing_for_submit(&answers, &required(level)).contains(&"funds_proof_upload"));
         assert!(missing_for_submit(&answers, &required(2)).contains(&"funds_proof_upload"));
+        // The source of funds is asked only by a trigger (2026-10-19).
+        assert!(!missing_for_submit(&answers, &required(1)).contains(&"funds_sources"));
+        assert!(missing_for_submit(&answers, &required(2)).contains(&"funds_sources"));
     }
 
     #[test]
@@ -5977,6 +5988,7 @@ mod tests {
             privacy_acknowledged: false,
             payer_type: "person",
             id_uploaded: false,
+            funds_required: true,
             funds_proof_required: true,
             funds_proof_uploaded: false,
             payment_route: Some(&declaration),
@@ -6032,6 +6044,7 @@ mod tests {
             privacy_acknowledged: true,
             payer_type: "company",
             id_uploaded: true,
+            funds_required: false,
             funds_proof_required: false,
             funds_proof_uploaded: false,
             payment_route: None,

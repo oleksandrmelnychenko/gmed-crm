@@ -604,7 +604,7 @@ test("the enhanced check follows the server's rule: a black-list citizenship req
   const section = wizard.getByTestId("lead-wizard-enhanced-check-section");
   await expect(section).toHaveAttribute("data-required", "true");
   await expect(section.getByTestId("lead-wizard-enhanced-check-status").getByText("Erforderlich", { exact: true })).toBeVisible();
-  await expect(section.getByTestId("lead-wizard-enhanced-check-status")).toContainText("Staatsangehörigkeit des Zahlers auf der Blacklist (Iran)");
+  await expect(section).toContainText("Staatsangehörigkeit des Zahlers auf der Blacklist (Iran)");
   const hints = section.getByTestId("lead-wizard-enhanced-check-hint");
   await expect(hints).toHaveText([
     "möglicher Sanktionstreffer wartet auf die Entscheidung",

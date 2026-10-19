@@ -528,7 +528,7 @@ function DraftForm({
       content = <OwnersStep context={context} />;
       break;
     case "funds":
-      content = <FundsStep context={context} proofRequired={questionnaire.funds_proof_required} uploads={fundsUploads} />;
+      content = <FundsStep context={context} fundsAsked={questionnaire.funds_required !== false} proofRequired={questionnaire.funds_proof_required} uploads={fundsUploads} />;
       break;
     case "payment":
       content = <PaymentStep context={context} suggestion={questionnaire.payment_route?.account_holder_suggestion ?? null} />;

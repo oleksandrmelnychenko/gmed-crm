@@ -640,13 +640,21 @@ impl Declaration {
         (self.source_of_funds.is_some() && staff_described) || self.self_funds_stated()
     }
 
-    /// What is still missing before GMED may countersign, in check order.
+    /// What is still missing before GMED may countersign, in check order,
+    /// with the source of funds required.
     fn missing(&self) -> Vec<PayerReason> {
+        self.missing_with(true)
+    }
+
+    /// [`Self::missing`]; the source of funds only while `funds_required`:
+    /// it is asked when the enhanced check is required (client and owner
+    /// 2026-10-19: the question is raised by a trigger, § 15 GwG).
+    pub(crate) fn missing_with(&self, funds_required: bool) -> Vec<PayerReason> {
         let mut reasons = Vec::new();
         if !self.acts_on_own_account && blank(&self.beneficial_owner_name) {
             reasons.push(PayerReason::BeneficialOwnerMissing);
         }
-        if !self.source_of_funds_stated() {
+        if funds_required && !self.source_of_funds_stated() {
             reasons.push(PayerReason::SourceOfFundsMissing);
         }
         // An organisation is identified by its name and seat, a person by
@@ -979,6 +987,9 @@ pub(crate) struct PayerState {
     /// order as the contracting party, so no separate cost assumption
     /// declaration is asked of them (staff report 2026-10-19).
     pub paying_parent: bool,
+    /// No trigger of the enhanced check: the source of funds is not asked
+    /// and not required (2026-10-19). Loaded only while it is not stated.
+    pub funds_optional: bool,
 }
 
 /// Payer part of the lead conversion readiness (see `leads.rs`). The default
@@ -1072,7 +1083,7 @@ impl PayerState {
         let Some(declaration) = &self.declaration else {
             return vec![PayerReason::DeclarationMissing];
         };
-        let mut reasons = declaration.missing();
+        let mut reasons = declaration.missing_with(!self.funds_optional);
         if declaration.is_third_party() && !self.paying_parent {
             match (
                 self.cost_assumption.document_id,
@@ -1144,6 +1155,7 @@ impl PayerState {
             "status": {
                 "complete": declaration_reasons.is_empty(),
                 "paying_parent": self.paying_parent,
+                "source_of_funds_required": !self.funds_optional,
                 "missing": codes(&declaration_reasons),
                 "cost_assumption": {
                     "required": self.cost_assumption_required(),
@@ -1241,6 +1253,17 @@ pub(crate) async fn load_payer_state(
                 state.declaration.as_ref(),
             )
             .is_some();
+        }
+        // Without a trigger the source of funds is not asked (2026-10-19).
+        if state
+            .declaration
+            .as_ref()
+            .is_some_and(|declaration| !declaration.source_of_funds_stated())
+        {
+            state.funds_optional =
+                !super::lead_enhanced_check::enhanced_check_triggers(&mut *conn, lead_id)
+                    .await?
+                    .required;
         }
     }
     if let Some(order_id) = row.try_get::<Option<Uuid>, _>("order_id").ok().flatten() {

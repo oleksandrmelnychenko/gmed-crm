@@ -634,6 +634,8 @@ export type LeadPayerQuestionnaire = {
   answers: LeadPayerAnswers;
   funds_proof_documents: LeadPayerDocument[];
   funds_proof_required: boolean;
+  /** The source of funds is asked only by a trigger of the enhanced check (2026-10-19); an older server asks it. */
+  funds_required: boolean;
   /** What is still missing for "send", in the order of the form (contract 3.5). */
   missing_for_submit: string[];
   declared_correct_at: string | null;

@@ -215,10 +215,13 @@ export function OwnersStep({ context }: { context: StepContext }) {
 
 export function FundsStep({
   context,
+  fundsAsked = true,
   proofRequired,
   uploads,
 }: {
   context: StepContext;
+  /** The source of funds is asked only by a trigger of the enhanced check (2026-10-19). */
+  fundsAsked?: boolean;
   proofRequired: boolean;
   uploads: UploadControl;
 }) {
@@ -261,6 +264,7 @@ export function FundsStep({
         )}
       </div>
 
+      {fundsAsked ? (<>
       <div role="group" aria-labelledby="payer-link-funds_sources-label" data-testid="payer-link-funds-sources">
         <p id="payer-link-funds_sources-label" className={tokens.text.label}>
           {text.fields.funds_sources}
@@ -313,6 +317,7 @@ export function FundsStep({
         onFiles={uploads.upload}
         onRemove={uploads.remove}
       />
+      </>) : null}
     </div>
   );
 }

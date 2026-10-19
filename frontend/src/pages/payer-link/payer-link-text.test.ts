@@ -102,7 +102,8 @@ describe("payer page texts", () => {
     expect(de.fields.habitual_residence_country).toBe("Gewöhnlicher Aufenthalt (falls abweichend)");
     expect(de.fields.beneficial_owners_none).toBe("Es gibt keine natürliche Person mit mehr als 25 %");
     expect(de.fields.relationship_kind).toBe("Beziehung zur Patientin / zum Patienten");
-    expect(de.confirmLabel).toBe("Ich bestätige, dass meine Angaben vollständig und richtig sind.");
+    expect(de.confirmLabel).toMatch(/^Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe/);
+    expect(de.confirmLabel).toContain("nicht aus strafbaren Handlungen stammen");
     expect(de.submit).toBe("Absenden");
     expect(`${de.thanksTitle} ${de.thanksBody}`).toBe("Vielen Dank. Ihre Angaben sind bei GMED eingegangen.");
     expect(de.steps.funds).toBe("Beziehung und Herkunft der Mittel");

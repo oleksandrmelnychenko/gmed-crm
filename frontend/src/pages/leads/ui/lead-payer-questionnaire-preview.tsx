@@ -40,16 +40,13 @@ export function LeadPayerQuestionnairePreview({ state, tx }: { state: LeadPayerL
 
   return (
     <div className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card shadow-xs" data-testid="lead-payer-questionnaire-preview">
-      <div className="flex items-start gap-3 border-b border-border/50 bg-emerald-50/40 px-4 py-3 dark:bg-emerald-950/15">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100/70 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-          <CircleCheck aria-hidden="true" className="size-4.5" />
-        </span>
-        <div className="min-w-0 self-center">
-          <p className="text-[13px] font-semibold leading-5">{tx("Заполненная анкета плательщика", "Ausgefüllte Angaben des Zahlers")}</p>
-          <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{received}</p>
-        </div>
+      {/* A plain card header (owner 2026-10-19: no green band): title, then when it came. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/50 px-4 py-2.5">
+        <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <p className="text-[13px] font-semibold leading-5">{tx("Заполненная анкета плательщика", "Ausgefüllte Angaben des Zahlers")}</p>
+        <p className="text-xs leading-5 text-muted-foreground sm:ml-auto">{received}</p>
       </div>
-      <div className="space-y-3 px-4 py-4">
+      <div className="space-y-3 px-4 py-3">
         <dl className="grid min-w-0 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
           {summary.map((row) => <PreviewFact key={row.key} label={row.label} value={row.key === "email" ? questionnaire.email ?? "" : row.value} />)}
           {method ? <PreviewFact label={tx("Способ оплаты", "Zahlungsart")} value={method.value} /> : null}

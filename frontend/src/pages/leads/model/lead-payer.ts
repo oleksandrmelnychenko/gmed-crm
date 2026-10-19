@@ -148,6 +148,8 @@ export type PayerDeclarationStatus = {
   missing: string[];
   /** The third-party payer is one of the minor's legal representatives: no separate cost assumption. */
   paying_parent?: boolean;
+  /** The source of funds is required: a trigger of the enhanced check (2026-10-19); absent on an older server. */
+  source_of_funds_required?: boolean;
   cost_assumption: {
     required: boolean;
     document_id: string | null;
@@ -216,6 +218,7 @@ export function normalizePayerDeclarationResponse(value: unknown): PayerDeclarat
       complete: status.complete === true,
       missing: stringList(status.missing),
       paying_parent: status.paying_parent === true,
+      source_of_funds_required: status.source_of_funds_required !== false,
       cost_assumption: {
         required: costAssumption.required === true,
         document_id: typeof costAssumption.document_id === "string" ? costAssumption.document_id : null,

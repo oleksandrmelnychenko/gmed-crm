@@ -231,22 +231,24 @@ export function LeadPayerPackagePanel({
       {actions.sendShown || actions.prepare || (actions.details && firstDocument && renderDetails) ? (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {actions.sendShown ? (
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-              <span className="whitespace-nowrap text-muted-foreground" id={`lead-payer-package-language-${leadId}`}>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="whitespace-nowrap text-[13px] text-muted-foreground" id={`lead-payer-package-language-${leadId}`}>
                 {tx("Язык приглашения", "Sprache der Einladung")}
               </span>
-              <div className="flex gap-1" role="group" aria-labelledby={`lead-payer-package-language-${leadId}`}>
+              {/* The same segmented control as "Кто платит" (owner 2026-10-19). */}
+              <div className="flex w-fit gap-1 rounded-lg bg-muted/40 p-1" role="group" aria-labelledby={`lead-payer-package-language-${leadId}`}>
                 {payerPackageLanguages(state).map((option) => (
                   <button
                     key={option}
                     type="button"
                     aria-pressed={chosenLanguage === option}
                     disabled={locked}
-                    className={
+                    className={cn(
+                      "min-h-7 min-w-9 rounded-md px-2.5 py-1 text-[13px] font-medium transition-colors disabled:cursor-default disabled:opacity-60",
                       chosenLanguage === option
-                        ? "rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                        : "rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground"
-                    }
+                        ? "bg-card text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
                     onClick={() => setLanguage(option)}
                   >
                     {option.toUpperCase()}

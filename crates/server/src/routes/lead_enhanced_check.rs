@@ -48,6 +48,8 @@ use serde_json::{Value, json};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
+use gmed_domain::access::capabilities::{Capability, STAFF_ROLES};
+
 use crate::auth::middleware::AuthUser;
 use crate::routes::lead_payer;
 use crate::sanctions::normalize::country_code;
@@ -75,7 +77,60 @@ pub const REASON_SANCTIONS_REVIEW_PENDING: &str = "sanctions_review_pending";
 pub const REASON_RISK_ASSESSMENT: &str = "risk_assessment";
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/leads/{lead_id}/enhanced-check", get(get_enhanced_check))
+    Router::new()
+        .route("/leads/{lead_id}/enhanced-check", get(get_enhanced_check))
+        .route("/leads/{lead_id}/aml-reviewers", get(list_aml_reviewers))
+}
+
+/// The roles that carry out the enhanced check: those that edit leads.
+fn reviewer_roles() -> Vec<String> {
+    STAFF_ROLES
+        .iter()
+        .filter(|role| role.can(Capability::LeadsEdit))
+        .filter_map(|role| serde_json::to_value(role).ok()?.as_str().map(str::to_owned))
+        .collect()
+}
+
+/// `GET /leads/{lead_id}/aml-reviewers`: `{ reviewers: [{ id, name, role }] }`,
+/// the active staff who may carry out the enhanced check, the caller first
+/// (owner 2026-10-19: "Bearbeiter/in" is chosen from them, the one who opened
+/// the check by default).
+async fn list_aml_reviewers(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(_lead_id): Path<Uuid>,
+) -> Response {
+    if !lead_payer::may_view(&auth) {
+        return error(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Insufficient permissions",
+        );
+    }
+    let rows = match sqlx::query(
+        r#"SELECT id, name, role FROM users
+           WHERE is_active AND role = ANY($1)
+           ORDER BY (id = $2) DESC, lower(name), id"#,
+    )
+    .bind(reviewer_roles())
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => return database_error(error),
+    };
+    let reviewers: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<Uuid, _>("id").ok(),
+                "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                "role": row.try_get::<String, _>("role").unwrap_or_default(),
+            })
+        })
+        .collect();
+    Json(json!({ "reviewers": reviewers, "me": auth.user_id })).into_response()
 }
 
 /// Whether the enhanced check is required, and why.
@@ -456,6 +511,11 @@ async fn get_enhanced_check(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_staff_who_edit_leads_carry_out_the_check() {
+        assert_eq!(reviewer_roles(), ["ceo", "patient_manager", "sales"]);
+    }
 
     fn codes(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()

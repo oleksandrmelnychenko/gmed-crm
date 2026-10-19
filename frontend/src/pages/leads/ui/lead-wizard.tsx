@@ -630,7 +630,8 @@ function amlEnhancedCheckRequiredText(
   tx: Tx,
   lang: Lang,
 ): string {
-  const triggers = enhancedCheckTriggers(check);
+  // "Risk assessment level 2 or higher" is not shown as a reason (owner 2026-10-19).
+  const triggers = enhancedCheckTriggers(check).filter((reason) => reason !== "risk_assessment");
   const reasons = triggers.length > 0
     ? enhancedCheckReasonsText(triggers, tx)
     : blacklistCountries.length > 0
@@ -3244,6 +3245,10 @@ export function LeadWizard({
   const savedMinorRef = useRef(false);
   const [amlSheetOpen, setAmlSheetOpen] = useState(false);
   const [amlSheetError, setAmlSheetError] = useState("");
+  // The enhanced AML block shows the payer form's own interest and source of funds (owner 2026-10-19).
+  const [payerAmlSlot, setPayerAmlSlot] = useState<HTMLDivElement | null>(null);
+  // "Bearbeiter/in": the staff who may carry out the check (owner 2026-10-19).
+  const [amlReviewers, setAmlReviewers] = useState<{ id: string; name: string }[]>([]);
   // Staff set the boxes of section 1 ("Interne Risikoanalyse", "Individuelle
   // Prüfung") themselves while the wizard is open: opening the check again
   // keeps that choice.
@@ -5242,6 +5247,27 @@ export function LeadWizard({
     setAmlSheetError("");
     setAmlSheetOpen(true);
     void prefillAmlFromLeadAnswers();
+    void loadAmlReviewers();
+  }
+
+  /** The reviewers to choose from; the one who opened the check fills an empty field. */
+  async function loadAmlReviewers() {
+    if (!leadId) return;
+    try {
+      const response = await apiFetch<{ reviewers?: { id: string; name: string }[]; me?: string }>(
+        `/leads/${leadId}/aml-reviewers`,
+      );
+      const reviewers = (response.reviewers ?? []).filter((reviewer) => reviewer.name);
+      setAmlReviewers(reviewers);
+      const me = reviewers.find((reviewer) => reviewer.id === response.me);
+      if (me) {
+        setDraft((current) => current && !current.amlEnhancedDueDiligence.reviewerName.trim()
+          ? { ...current, amlEnhancedDueDiligence: { ...current.amlEnhancedDueDiligence, reviewerName: me.name } }
+          : current);
+      }
+    } catch {
+      // The field stays free text.
+    }
   }
 
   /**
@@ -7713,37 +7739,6 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </Field>
               </div>
-              <div className="mt-4">
-                <div className={cn(tokens.text.label, "mb-1.5 font-semibold")}>
-                  {tx("Статус PEP", "PeP-Status")}
-                </div>
-                <div className="grid border-y border-border/70 md:grid-cols-2 md:divide-x md:divide-border/70">
-                  <div className="md:pr-4">
-                    <ToggleRow
-                      checked={draft.amlEnhancedDueDiligence.pepContractPartner}
-                      disabled={isBusy}
-                      onChange={(checked) => handleAmlPepChange("pepContractPartner", checked)}
-                      label={tx("Клиент является политически значимым лицом", "Vertragspartner ist eine politisch exponierte Person")}
-                    />
-                  </div>
-                  <div className="md:pl-4">
-                    <ToggleRow
-                      checked={draft.amlEnhancedDueDiligence.pepBeneficialOwner}
-                      disabled={isBusy}
-                      onChange={(checked) => handleAmlPepChange("pepBeneficialOwner", checked)}
-                      label={tx("Бенефициар является политически значимым лицом", "Wirtschaftlich Berechtigter ist eine politisch exponierte Person")}
-                    />
-                  </div>
-                </div>
-                <div className="border-b border-border/70" data-testid="lead-aml-pep-status-checked">
-                  <ToggleRow
-                    checked={draft.amlEnhancedDueDiligence.pepStatusChecked}
-                    disabled={isBusy}
-                    onChange={(checked) => handleAmlPepChange("pepStatusChecked", checked)}
-                    label={tx("PEP-статус проверен (по базам или со слов клиента)", "PeP-Status geprüft (Datenbank oder Angabe des Kunden)")}
-                  />
-                </div>
-              </div>
               {amlRequired || amlHints.length > 0 || wizardDocuments.enhanced_due_diligence.length > 0 ? (
                 <div className="mt-4" data-testid="lead-aml-enhanced-check" data-required={amlRequired ? "true" : "false"}>
                   <div className="rounded-xl border border-border/50 bg-card p-3.5">
@@ -8310,6 +8305,7 @@ ${serviceCommentLines.join("\n")}`
                   patientMarker={step1Portal.intake?.patient_payer ?? null}
                   portalIntake={step1Portal.intake}
                   enhancedDetails={step1Portal.intake?.enhanced_details ?? null}
+                  amlSlot={payerAmlSlot}
                   prefill={payerPrefill}
                   payerLink={payerLink}
                   payerLinkCanEdit={canEditPayerLink}
@@ -8407,7 +8403,15 @@ ${serviceCommentLines.join("\n")}`
               <div data-testid="lead-wizard-enhanced-check-section" data-required={amlRequired ? "true" : "false"}>
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
-                  title={<StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>{tx("Усиленная AML-проверка", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}</StatusChip>}
+                  title={(
+                    // One row: the check and whether it is required (owner 2026-10-19: more compact).
+                    <span className="flex flex-wrap items-center gap-2" data-testid="lead-wizard-enhanced-check-status">
+                      <StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>{tx("Усиленная AML-проверка", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}</StatusChip>
+                      <span className={cn("text-xs font-medium", amlRequired ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground")}>
+                        {amlRequired ? tx("Обязательна", "Erforderlich") : tx("Добровольная проверка", "Freiwillige Prüfung")}
+                      </span>
+                    </span>
+                  )}
                   accessory={(
                     <Button
                       type="button"
@@ -8424,13 +8428,8 @@ ${serviceCommentLines.join("\n")}`
                     </Button>
                   )}
                 >
-                  <div className="space-y-2.5">
-                    <div className="flex flex-wrap items-center gap-2" data-testid="lead-wizard-enhanced-check-status">
-                      <StatusChip tone={amlRequired ? "error" : "neutral"}>
-                        {amlRequired ? tx("Обязательна", "Erforderlich") : tx("Добровольная проверка", "Freiwillige Prüfung")}
-                      </StatusChip>
-                      {amlRequired ? <p className="text-xs leading-5 text-rose-700 dark:text-rose-300">{amlRequiredText}</p> : null}
-                    </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {amlRequired && amlRequiredText ? <p className="text-xs leading-5 text-rose-700 dark:text-rose-300">{amlRequiredText}</p> : null}
                     {amlHints.map((hint) => (
                       <StatusChip key={hint} tone="warning" data-testid="lead-wizard-enhanced-check-hint">
                         <CircleAlert aria-hidden="true" />
@@ -8448,6 +8447,8 @@ ${serviceCommentLines.join("\n")}`
                       </StatusChip>
                     ) : null}
                   </div>
+                  {/* The payer form's own interest and source of funds (owner 2026-10-19). */}
+                  <div ref={setPayerAmlSlot} className="mt-2 border-t border-border/60" data-testid="lead-wizard-payer-aml-slot" />
                   <WizardDocumentRows
                     documents={wizardDocuments.enhanced_due_diligence}
                     complianceKind="enhanced_due_diligence"
@@ -9660,7 +9661,8 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </div>
 
-                <div className="flex flex-wrap items-end gap-3">
+                {/* Top-aligned: the received column has a hint and a button below (owner 2026-10-19: the row jumped). */}
+                <div className="flex flex-wrap items-start gap-3">
                   {prepayment ? (
                     <Field className="w-full sm:w-64" label={tx("Необходимая предоплата", "Erforderliche Vorauszahlung")}>
                       <Input
@@ -10214,6 +10216,15 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(checked) => handleAmlPepChange("pepBeneficialOwner", checked)}
                       label={tx("Бенефициарный владелец является PEP", "Wirtschaftlich Berechtigter ist eine PeP")}
                     />
+                    {/* Moved here from the personal data (owner 2026-10-19: no duplicate PEP block). */}
+                    <div data-testid="lead-aml-pep-status-checked">
+                      <ToggleRow
+                        checked={draft.amlEnhancedDueDiligence.pepStatusChecked}
+                        disabled={isBusy}
+                        onChange={(checked) => handleAmlPepChange("pepStatusChecked", checked)}
+                        label={tx("PEP-статус проверен (по базам или со слов клиента)", "PeP-Status geprüft (Datenbank oder Angabe des Kunden)")}
+                      />
+                    </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field required={amlPepTriggered} label={tx("Должность / функция", "Amt / Funktion")}>
@@ -10336,7 +10347,10 @@ ${serviceCommentLines.join("\n")}`
                   </Field>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field required label={tx("Проверил", "Bearbeiter/in")}>
-                      <Input className={inputClass} required value={draft.amlEnhancedDueDiligence.reviewerName} onChange={(event) => patchAml("reviewerName", event.target.value)} />
+                      <Input className={inputClass} required list="lead-aml-reviewers" autoComplete="off" data-testid="lead-aml-reviewer" value={draft.amlEnhancedDueDiligence.reviewerName} onChange={(event) => patchAml("reviewerName", event.target.value)} />
+                      <datalist id="lead-aml-reviewers">
+                        {amlReviewers.map((reviewer) => <option key={reviewer.id} value={reviewer.name} />)}
+                      </datalist>
                     </Field>
                     <Field required label={tx("Дата проверки", "Prüfdatum")}>
                       <Input className={inputClass} type="date" required value={draft.amlEnhancedDueDiligence.reviewDate} onChange={(event) => patchAml("reviewDate", event.target.value)} />

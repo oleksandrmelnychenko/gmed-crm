@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowRight,
   Check,
@@ -169,6 +170,7 @@ export function LeadPayerDeclarationSection({
   enhancedDetails,
   portalIntake = null,
   prefill = null,
+  amlSlot = null,
 }: {
   leadId: string;
   data: PayerDeclarationResponse | null;
@@ -205,7 +207,13 @@ export function LeadPayerDeclarationSection({
    * check it before editing; untouched prefill is not written (QA B-18, 2026-10-11).
    */
   prefill?: PayerDeclaration | null;
+  /**
+   * The wizard's enhanced AML block (owner 2026-10-19): the own economic
+   * interest and the source of funds are shown there; inline without it.
+   */
+  amlSlot?: HTMLElement | null;
 }) {
+  const inAmlBlock = (node: ReactNode) => (amlSlot ? createPortal(node, amlSlot) : node);
   const prefillActive = !data?.declaration && Boolean(prefill);
   const initialForm = (): PayerDeclarationForm =>
     !data?.declaration && prefill ? payerDeclarationPrefillForm(prefill) : payerDeclarationToForm(data?.declaration);
@@ -331,7 +339,9 @@ export function LeadPayerDeclarationSection({
     || (leadSelfFunds.proofDocuments && (leadSelfFunds.proofDocuments.length > 0 || leadSelfFunds.proofRequired))
   ));
   // A source the lead stated is the declaration's: staff need not choose one.
-  const sourceRequired = !(form.kind === "self" && form.leadSelfFundsStated);
+  // Asked only by a trigger of the enhanced check (2026-10-19); an older server requires it.
+  const sourceRequired = data?.status.source_of_funds_required !== false
+    && !(form.kind === "self" && form.leadSelfFundsStated);
   // The proof is required while the enhanced check (block A) asks the lead for
   // it; the lead's own upload counts (QA 2026-10-10: "(необязательно)" here,
   // "обязательно" below).
@@ -486,6 +496,8 @@ export function LeadPayerDeclarationSection({
           </p>
         ) : null}
 
+        {/* Own interest and source of funds: shown in the wizard's enhanced AML block (owner 2026-10-19), one form and one autosave. */}
+        {inAmlBlock(<div className="space-y-4" data-testid="lead-payer-aml-part">
         {/* Own economic interest: Да / Нет, nothing chosen while nobody answered it. */}
         <div
           role="radiogroup"
@@ -649,6 +661,7 @@ export function LeadPayerDeclarationSection({
           </div>
         ) : null}
 
+        </div>)}
         {thirdParty ? (
           <div className="space-y-3 border-t border-border/60 pt-3">
             <AdminSectionTitle>

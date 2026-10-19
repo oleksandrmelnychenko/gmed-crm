@@ -170,6 +170,7 @@ export function normalizeLeadPayerQuestionnaire(value: unknown): LeadPayerQuesti
     },
     funds_proof_documents: normalizeDocuments(raw.funds_proof_documents),
     funds_proof_required: raw.funds_proof_required === true,
+    funds_required: raw.funds_required !== false,
     missing_for_submit: stringList(raw.missing_for_submit),
     declared_correct_at: textOrNull(raw.declared_correct_at),
     submitted_at: textOrNull(raw.submitted_at),
