@@ -781,3 +781,55 @@ async fn parent_role_migration_only_recovers_unambiguous_identity_matches() {
         "A matching name alone must not infer the role"
     );
 }
+
+/// Owner decision 2026-10-19: the child's request names the mother with her
+/// patronymic, her login and her own request without it. The own request
+/// still reuses the guardian login (no 409, no new password); a different
+/// first name or birth date is still another person.
+#[tokio::test]
+async fn own_lead_reuses_the_guardian_login_despite_a_patronymic_on_one_side() {
+    let Some(suite) = support::suite_context(SECRET).await else {
+        return;
+    };
+    for (first_name, birth_date, reused) in [
+        ("Anna", "1985-02-03", true),
+        ("Hanna", "1985-02-03", false),
+        ("Anna", "1986-02-03", false),
+    ] {
+        let family = family(&suite.pool, suite.admin_id).await;
+        sqlx::query(
+            "UPDATE leads SET trusted_contacts=(SELECT jsonb_agg(c || jsonb_build_object('name','Anna Petrivna Mother')) FROM jsonb_array_elements(trusted_contacts) c) WHERE id=$1",
+        )
+        .bind(family.child)
+        .execute(&suite.pool)
+        .await
+        .unwrap();
+        let (status, result) = request(
+            &suite.app,
+            "POST",
+            "/api/v1/leads",
+            &bearer(suite.admin_id, "ceo"),
+            json!({"first_name":first_name,"last_name":"Mother","email":family.email,
+                   "date_of_birth":birth_date,"country":"FR"}),
+        )
+        .await;
+        if reused {
+            assert_eq!(status, StatusCode::CREATED, "{result}");
+            assert_eq!(
+                result["portal_account"]["user_id"],
+                family.mother.to_string()
+            );
+            assert_eq!(result["portal_account"]["reused"], true);
+            assert!(result["portal_account"]["one_time_password"].is_null());
+        } else {
+            assert!(
+                matches!(
+                    status,
+                    StatusCode::CONFLICT | StatusCode::UNPROCESSABLE_ENTITY
+                ),
+                "{first_name} {birth_date}: {status} {result}"
+            );
+        }
+        assert_login_preserved(&suite.pool, &family).await;
+    }
+}

@@ -137,7 +137,10 @@ pub(crate) struct NewPortalAccount {
 
 /// Locks an existing account before deciding whether it is this adult's
 /// guardian login. A guardian assignment is not an own patient record.
-/// Matching an e-mail alone never establishes identity or account ownership.
+/// Matching an e-mail alone never establishes identity or account ownership:
+/// the names must name the same person, a middle name or patronymic on one
+/// side only ([`super::lead_portal_guardians::compatible_person_name`], owner
+/// decision 2026-10-19), and known birth dates must agree.
 pub(crate) async fn reusable_guardian_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     email: &str,
@@ -157,7 +160,7 @@ pub(crate) async fn reusable_guardian_in_tx(
     };
     if user.try_get::<String, _>("role")? != "patient"
         || !user.try_get::<bool, _>("is_active")?
-        || !super::lead_portal_guardians::same_person_name(
+        || !super::lead_portal_guardians::compatible_person_name(
             &user.try_get::<String, _>("name")?,
             name,
         )
@@ -188,7 +191,7 @@ pub(crate) async fn reusable_guardian_in_tx(
     let profiles = guardian_profiles_in_tx(tx, user_id).await?;
     let mut previous_birth_date = None;
     for profile in profiles {
-        if !super::lead_portal_guardians::same_person_name(&profile.name, name) {
+        if !super::lead_portal_guardians::compatible_person_name(&profile.name, name) {
             return Ok(None);
         }
         if let Some(known) = profile
@@ -624,6 +627,7 @@ pub(crate) async fn link_to_patient_in_tx(
     {
         link_guardian_relationships_in_tx(tx, user_id, patient_id, assigned_by).await?;
     }
+    link_parent_relations_by_email_in_tx(tx, patient_id, assigned_by).await?;
     sqlx::query(
         "UPDATE consent_records SET patient_id = $2 WHERE lead_id = $1 AND patient_id IS NULL",
     )
@@ -631,6 +635,131 @@ pub(crate) async fn link_to_patient_in_tx(
     .bind(patient_id)
     .execute(&mut **tx)
     .await?;
+    Ok(())
+}
+
+/// A parent who becomes a patient is linked to the children whose records
+/// name them as parent or guardian (owner decision 2026-10-19), also when the
+/// parent never had a guardian login on the child's request: the child's
+/// relation without a linked record carries the parent's e-mail and a name
+/// of the same person ([`super::lead_portal_guardians::compatible_person_name`]),
+/// and a birth date the child's converted request knows for that contact
+/// agrees with the parent's. The relation and that contact then point to the
+/// parent's record; nothing already linked changes, and no access is granted.
+pub(crate) async fn link_parent_relations_by_email_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    parent_patient: Uuid,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let Some(parent) = sqlx::query(
+        r#"SELECT lower(btrim(email)) AS email, birth_date,
+                  concat_ws(' ', NULLIF(btrim(first_name), ''), NULLIF(btrim(last_name), '')) AS name
+           FROM patients
+           WHERE id = $1 AND lifecycle_status <> 'deleted'
+             AND legal_status->>'anonymized_at' IS NULL
+             AND NULLIF(btrim(email), '') IS NOT NULL"#,
+    )
+    .bind(parent_patient)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(());
+    };
+    let email: String = parent.try_get("email")?;
+    let name: String = parent.try_get("name")?;
+    let birth_date: Option<chrono::NaiveDate> = parent.try_get("birth_date")?;
+    if super::leads::is_minor_on(birth_date, crate::app_time::today()) {
+        return Ok(());
+    }
+    let relations = sqlx::query(
+        r#"SELECT r.id, r.patient_id, r.related_name,
+                  (SELECT array_agg(DISTINCT btrim(c ->> 'birth_date'))
+                   FROM leads l
+                   CROSS JOIN LATERAL jsonb_array_elements(
+                       CASE WHEN jsonb_typeof(l.trusted_contacts) = 'array'
+                            THEN l.trusted_contacts ELSE '[]'::jsonb END) c
+                   WHERE l.converted_patient_id = r.patient_id
+                     AND lower(btrim(c ->> 'email')) = $2
+                     AND NULLIF(btrim(c ->> 'birth_date'), '') IS NOT NULL) AS known_birth_dates
+           FROM patient_relations r
+           JOIN patients child ON child.id = r.patient_id
+           WHERE r.related_patient_id IS NULL
+             AND r.patient_id <> $1
+             AND r.relation_type IN ('parent', 'mother', 'father', 'guardian')
+             AND lower(btrim(r.email)) = $2
+             AND child.lifecycle_status <> 'deleted'
+           ORDER BY r.created_at, r.id"#,
+    )
+    .bind(parent_patient)
+    .bind(&email)
+    .fetch_all(&mut **tx)
+    .await?;
+    for relation in relations {
+        let related_name: String = relation.try_get("related_name")?;
+        if !super::lead_portal_guardians::compatible_person_name(&related_name, &name) {
+            continue;
+        }
+        let known: Vec<String> = relation
+            .try_get::<Option<Vec<String>>, _>("known_birth_dates")?
+            .unwrap_or_default();
+        if birth_date.is_some_and(|date| {
+            known
+                .iter()
+                .any(|known| known != &date.format("%Y-%m-%d").to_string())
+        }) {
+            continue;
+        }
+        let relation_id: Uuid = relation.try_get("id")?;
+        let child: Uuid = relation.try_get("patient_id")?;
+        sqlx::query(
+            "UPDATE patient_relations SET related_patient_id = $2 WHERE id = $1 AND related_patient_id IS NULL",
+        )
+        .bind(relation_id)
+        .bind(parent_patient)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            r#"UPDATE leads l
+               SET trusted_contacts = (
+                   SELECT jsonb_agg(
+                       CASE WHEN lower(btrim(c ->> 'email')) = $2
+                                 AND NULLIF(btrim(COALESCE(c ->> 'related_patient_id', '')), '') IS NULL
+                                 AND btrim(c ->> 'name') = btrim($4)
+                            THEN c || jsonb_build_object('related_patient_id', $3::uuid)
+                            ELSE c END
+                       ORDER BY n)
+                   FROM jsonb_array_elements(l.trusted_contacts) WITH ORDINALITY AS entries(c, n)
+               )
+               WHERE l.converted_patient_id = $1
+                 AND jsonb_typeof(l.trusted_contacts) = 'array'
+                 AND EXISTS (
+                     SELECT 1 FROM jsonb_array_elements(l.trusted_contacts) c
+                     WHERE lower(btrim(c ->> 'email')) = $2
+                       AND NULLIF(btrim(COALESCE(c ->> 'related_patient_id', '')), '') IS NULL
+                       AND btrim(c ->> 'name') = btrim($4)
+                 )"#,
+        )
+        .bind(child)
+        .bind(&email)
+        .bind(parent_patient)
+        .bind(&related_name)
+        .execute(&mut **tx)
+        .await?;
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "link_parent_relation_by_email",
+                Some(actor),
+                "patient",
+                Some(child),
+                json!({
+                    "relation_id": relation_id,
+                    "related_patient_id": parent_patient,
+                }),
+            ),
+        )
+        .await?;
+    }
     Ok(())
 }
 
@@ -664,7 +793,7 @@ pub(crate) async fn link_guardian_relationships_in_tx(
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        if !super::lead_portal_guardians::same_person_name(
+        if !super::lead_portal_guardians::compatible_person_name(
             name,
             &row.try_get::<String, _>("account_name")?,
         ) {

@@ -5107,10 +5107,12 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
         contact.0 == "phone" && contact.1 == "work" && contact.2 == "+49 30 4444"
     }));
 
+    // Trusted contacts become relations, but not emergency contacts by
+    // themselves (owner decision 2026-10-19).
     let trusted_contacts: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
         r#"SELECT related_name, relation_type, phone, notes
                FROM patient_relations
-               WHERE patient_id = $1 AND is_emergency_contact = true
+               WHERE patient_id = $1 AND is_emergency_contact = false
                ORDER BY related_name"#,
     )
     .bind(patient_id)
@@ -7722,6 +7724,187 @@ async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_a
         "{summary}"
     );
     assert_eq!(summary["invoice_recipient"]["source"], "default_payer");
+}
+
+/// Owner decision 2026-10-19: the parent(s) with custody are the minor's
+/// contracting party. Conversion stores the custody and their relations on
+/// the patient, so a parent without custody is no Auftraggeber; trusted
+/// contacts are no emergency contacts by themselves; the paying parent is
+/// the default payer also when linked to a patient record of her own. The
+/// father, who never had a login on the child's request, is linked to the
+/// child when his own request is converted (same e-mail, his patronymic on
+/// one side only, the same birth date).
+#[tokio::test]
+async fn converting_a_minor_stores_the_custodial_parents_as_contracting_party() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_email = format!("mia-{}@example.com", Uuid::new_v4().simple());
+    let lead_id = seed_minor_lead_with_parents(&app, &lead_email, anna, ben, None).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    declare_mother_as_payer_and_sign(&app, lead_id, artifacts.order_id).await;
+    // The mother is a patient herself; the contact points to her record.
+    let anna_patient: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients(patient_id,first_name,last_name,birth_date,gender,email,created_by)
+           VALUES($1,'Anna','Muster',DATE '1985-03-02','female','anna.muster@example.com',$2)
+           RETURNING id"#,
+    )
+    .bind(format!("P-{}", Uuid::new_v4()))
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE leads SET trusted_contacts=(SELECT jsonb_agg(CASE WHEN c->>'id'=$2::text
+             THEN c || jsonb_build_object('related_patient_id',$3::uuid) ELSE c END ORDER BY n)
+         FROM jsonb_array_elements(trusted_contacts) WITH ORDINALITY entries(c,n)) WHERE id=$1",
+    )
+    .bind(lead_id)
+    .bind(anna)
+    .bind(anna_patient)
+    .execute(pool)
+    .await
+    .unwrap();
+    // The mother alone has custody: the father stays a relation only.
+    sqlx::query("UPDATE lead_gwg_declarations SET custody='sole_parent' WHERE lead_id=$1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let child = convert_ready_lead(&app, lead_id).await;
+
+    let relations: Vec<(Uuid, String, Option<Uuid>, bool, bool)> = sqlx::query_as(
+        r#"SELECT id, related_name, related_patient_id, is_default_payer, is_emergency_contact
+           FROM patient_relations WHERE patient_id = $1 ORDER BY related_name"#,
+    )
+    .bind(child)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(relations.len(), 2, "{relations:?}");
+    let (anna_relation, name, linked, default_payer, emergency) = relations[0].clone();
+    assert_eq!(name, "Anna Muster");
+    assert_eq!(linked, Some(anna_patient));
+    assert!(
+        default_payer,
+        "the paying parent with a patient record is the default payer"
+    );
+    assert!(!emergency);
+    let (ben_relation, name, _, default_payer, emergency) = relations[1].clone();
+    assert_eq!(name, "Ben Muster");
+    assert!(!default_payer);
+    assert!(!emergency);
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action='set_default_payer_on_conversion' AND entity_id=$1",
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1);
+
+    let (custody, contracting): (Option<String>, Vec<Uuid>) =
+        sqlx::query_as("SELECT custody, contracting_relation_ids FROM patients WHERE id=$1")
+            .bind(child)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(custody.as_deref(), Some("sole_parent"));
+    assert_eq!(contracting, vec![anna_relation]);
+    let audit: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action='set_contracting_party_on_conversion' AND entity_id=$1",
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audit["lead_id"], lead_id.to_string());
+    assert_eq!(audit["custody"], "sole_parent");
+    let mut conn = pool.acquire().await.unwrap();
+    let representatives =
+        gmed_server::services::contracting_party::load_representatives(&mut conn, child, &[])
+            .await
+            .unwrap();
+    assert_eq!(
+        representatives
+            .iter()
+            .map(|person| person.relation_id)
+            .collect::<Vec<_>>(),
+        vec![anna_relation],
+        "the father without custody is no contracting party"
+    );
+    // An explicit choice on an order or contract still names whom it names.
+    let named = gmed_server::services::contracting_party::load_representatives(
+        &mut conn,
+        child,
+        &[ben_relation],
+    )
+    .await
+    .unwrap();
+    assert_eq!(named.len(), 1);
+    assert_eq!(named[0].relation_id, ben_relation);
+    drop(conn);
+
+    // The father's own request, converted later: his record is linked to
+    // the child's relation by itself.
+    let father_lead: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, street_address, city, zip_code,
+                primary_concern_text, requested_specialties,
+                qualification_status, compliance_status,
+                consent_healthcare, consent_privacy_practices,
+                intake_source, intake_model, created_by
+           ) VALUES (
+                'Ben Petrovych', 'Muster', 'ben.muster@example.com', '+4915112345670', 'DE', 'de',
+                DATE '1983-04-06', 'male', 'Vaterweg 2', 'Berlin', '10115',
+                'Chronic knee pain', '["orthopedics"]'::jsonb,
+                'qualified', 'signed', true, true,
+                'staff_wizard', 'patient_first', $1
+           ) RETURNING id"#,
+    )
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let (ben_patient, _) = wizard_prospect(&app, father_lead).await;
+    seed_complete_lead_onboarding(&app, father_lead).await;
+    wizard_convert(&app, father_lead).await;
+    let linked: Option<Uuid> =
+        sqlx::query_scalar("SELECT related_patient_id FROM patient_relations WHERE id=$1")
+            .bind(ben_relation)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(linked, Some(ben_patient));
+    let contacts: Value = sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id=$1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let ben_contact = contacts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|contact| contact["id"] == ben.to_string())
+        .unwrap();
+    assert_eq!(ben_contact["related_patient_id"], ben_patient.to_string());
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action='link_parent_relation_by_email' AND entity_id=$1",
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1);
+    // The mother's relation, linked before, is untouched.
+    let anna_linked: Option<Uuid> =
+        sqlx::query_scalar("SELECT related_patient_id FROM patient_relations WHERE id=$1")
+            .bind(anna_relation)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(anna_linked, Some(anna_patient));
 }
 
 #[tokio::test]

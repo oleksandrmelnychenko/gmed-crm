@@ -8852,3 +8852,88 @@ async fn a_parent_who_already_has_a_login_gets_the_childs_request_by_itself() {
         "no new password for a linked login"
     );
 }
+
+/// Owner decision 2026-10-19: a parent who is already a patient (own record,
+/// own login) is linked to the child's request by itself — the login gets
+/// the guardian access and the trusted contact points to the parent's
+/// record, so the representative's identity is filled from that record
+/// without overwriting what the request already states.
+#[tokio::test]
+async fn auto_linked_parent_patient_fills_the_representative_identity() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let email = format!("ioann.parent.{}@example.com", Uuid::new_v4().simple());
+    let parent_login: Uuid = sqlx::query_scalar(
+        "INSERT INTO users(email,password_hash,name,role) VALUES($1,'synthetic','Ioann Testov','patient') RETURNING id",
+    )
+    .bind(&email)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let parent_patient: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients(patient_id,first_name,last_name,birth_date,gender,email,
+                                address_street,address_zip,address_city,address_country,created_by)
+           VALUES($1,'Ioann','Testov',DATE '1980-01-02','male',$2,'Elternweg 5','10115','Berlin','DE',$3)
+           RETURNING id"#,
+    )
+    .bind(format!("P-{}", Uuid::new_v4()))
+    .bind(&email)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$3)")
+        .bind(parent_patient)
+        .bind(parent_login)
+        .bind(app.patient_manager_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let (child, contact) =
+        minor_with_father(&app, "Mykola", "Ioann Mikolajovich Testov", &email).await;
+    assert_eq!(
+        active_guardian_links(pool, child).await,
+        vec![(parent_login, Some(contact))]
+    );
+    let contacts: Value = sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id=$1")
+        .bind(child)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        contacts[0]["related_patient_id"],
+        json!(parent_patient),
+        "{contacts}"
+    );
+    assert_eq!(
+        contacts[0]["name"], "Ioann Mikolajovich Testov",
+        "the request's own name stays"
+    );
+    assert_eq!(
+        audit_count(pool, "link_guardian_own_patient", child).await,
+        1
+    );
+
+    let mut conn = pool.acquire().await.unwrap();
+    let identities = gmed_server::services::lead_guardian_identity::load(&mut conn, child)
+        .await
+        .unwrap();
+    let father = identities
+        .iter()
+        .find(|identity| identity.contact_id == Some(contact))
+        .expect("father identity");
+    assert_eq!(father.related_patient_id, Some(parent_patient));
+    assert_eq!(
+        father.contact["birth_date"], "1980-01-02",
+        "{:?}",
+        father.contact
+    );
+    assert_eq!(father.contact["name"], "Ioann Mikolajovich Testov");
+    assert_eq!(
+        father.extras["street"], "Elternweg 5",
+        "{:?}",
+        father.extras
+    );
+    assert_eq!(father.extras["city"], "Berlin");
+}

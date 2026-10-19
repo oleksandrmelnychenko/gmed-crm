@@ -279,8 +279,35 @@ pub(crate) async fn selected_kind(
     Ok(stored_choice(conn, order_id, contract_id).await?.kind)
 }
 
-/// The patient's recorded parents and guardians, or the named relations.
+/// The named relations; without names, the representatives the conversion of
+/// the minor's lead stored on the patient (`patients.contracting_relation_ids`,
+/// owner decision 2026-10-19: the parents with custody, not every parent on
+/// file), else every recorded parent and guardian. Stored relations that no
+/// longer exist fall back to the recorded parents and guardians.
 pub async fn load_representatives(
+    conn: &mut PgConnection,
+    patient_id: Uuid,
+    relation_ids: &[Uuid],
+) -> Result<Vec<Representative>, sqlx::Error> {
+    if relation_ids.is_empty() {
+        let stored: Vec<Uuid> =
+            sqlx::query_scalar("SELECT contracting_relation_ids FROM patients WHERE id = $1")
+                .bind(patient_id)
+                .fetch_optional(&mut *conn)
+                .await?
+                .unwrap_or_default();
+        if !stored.is_empty() {
+            let named = load_relations(&mut *conn, patient_id, &stored).await?;
+            if !named.is_empty() {
+                return Ok(named);
+            }
+        }
+    }
+    load_relations(conn, patient_id, relation_ids).await
+}
+
+/// The named relations, or with none named every parent and guardian.
+async fn load_relations(
     conn: &mut PgConnection,
     patient_id: Uuid,
     relation_ids: &[Uuid],

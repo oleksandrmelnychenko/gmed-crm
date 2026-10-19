@@ -230,12 +230,87 @@ pub(crate) async fn auto_link_parent_logins_in_tx(
             ),
         )
         .await?;
+        link_contact_to_own_patient_in_tx(tx, lead_id, contact_id, user_id, actor).await?;
         linked.push((access_id, user_id));
     }
     if let (false, Some(actor)) = (linked.is_empty(), actor) {
         crate::routes::lead_payer_link::revoke_for_cabinet_payer(tx, lead_id, actor).await?;
     }
     Ok(linked)
+}
+
+/// A parent whose login was just linked to the child's request and who is a
+/// patient: the trusted contact points to the parent's own patient record
+/// (owner decision 2026-10-19), so the representative's identity is filled
+/// from that record ([`crate::services::lead_guardian_identity`] only fills
+/// what the cabinet and staff left empty). Only a login with exactly one own
+/// record (not a guardian access to a child), and only while the contact
+/// names no record. Audited in the caller's transaction.
+async fn link_contact_to_own_patient_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    contact_id: Uuid,
+    user_id: Uuid,
+    actor: Option<Uuid>,
+) -> Result<(), sqlx::Error> {
+    let own: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT DISTINCT pa.patient_id
+           FROM patient_assignments pa
+           JOIN patients p ON p.id = pa.patient_id
+           WHERE pa.user_id = $1 AND pa.revoked_at IS NULL AND pa.source <> 'lead_guardian'
+             AND p.lifecycle_status <> 'deleted'
+             AND p.legal_status->>'anonymized_at' IS NULL"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let [own_patient] = own.as_slice() else {
+        return Ok(());
+    };
+    let linked: Option<Uuid> = sqlx::query_scalar(
+        r#"UPDATE leads l
+           SET trusted_contacts = (
+               SELECT jsonb_agg(
+                   CASE WHEN c ->> 'id' = $2::text
+                        THEN c || jsonb_build_object('related_patient_id', $3::uuid)
+                        ELSE c END
+                   ORDER BY n)
+               FROM jsonb_array_elements(l.trusted_contacts) WITH ORDINALITY AS entries(c, n)
+           )
+           WHERE l.id = $1
+             AND jsonb_typeof(l.trusted_contacts) = 'array'
+             AND l.prospect_patient_id IS DISTINCT FROM $3
+             AND EXISTS (
+                 SELECT 1 FROM jsonb_array_elements(l.trusted_contacts) c
+                 WHERE c ->> 'id' = $2::text
+                   AND NULLIF(btrim(COALESCE(c ->> 'related_patient_id', '')), '') IS NULL
+             )
+           RETURNING l.id"#,
+    )
+    .bind(lead_id)
+    .bind(contact_id)
+    .bind(own_patient)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if linked.is_some() {
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "link_guardian_own_patient",
+                actor,
+                "lead",
+                Some(lead_id),
+                json!({
+                    "user_id": user_id,
+                    "contact_id": contact_id,
+                    "related_patient_id": own_patient,
+                    "auto_linked": true,
+                }),
+            ),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// [`auto_link_parent_logins_in_tx`] for every open request of a minor that

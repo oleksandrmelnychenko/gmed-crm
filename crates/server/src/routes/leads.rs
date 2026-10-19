@@ -6825,8 +6825,30 @@ async fn convert_lead(
         &representatives_on_file.representation,
         payer_declaration.as_ref(),
     );
-    // Name and type of the paying parent's relation, once its entry is seen.
-    let mut paying_parent_relation: Option<(String, &str)> = None;
+    // The paying parent's relation, once its entry is seen.
+    let mut paying_parent_relation: Option<Uuid> = None;
+    // A minor's contracting party (owner decision 2026-10-19): the parents
+    // who represent the child — rep1, and rep2 under joint custody — not
+    // every parent on file. Their relations, in that order, once seen.
+    let minor_custody = representatives_on_file.representation.minor.then(|| {
+        representatives_on_file
+            .representation
+            .answers
+            .custody()
+            .to_string()
+    });
+    let contracting_contacts: Vec<Uuid> = if minor_custody.is_some() {
+        representatives_on_file
+            .representation
+            .representatives
+            .iter()
+            .filter(|person| person.slot.is_some())
+            .map(|person| person.id)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut contracting_relations: Vec<(Uuid, Uuid)> = Vec::new();
 
     for trusted_contact in trusted_contacts.as_array().into_iter().flatten() {
         let Some(contact) = trusted_contact.as_object() else {
@@ -6885,22 +6907,39 @@ async fn convert_lead(
         .join("\n");
 
         let relation_type = normalized_patient_relation_type(relation);
-        if let Err(error) = sqlx::query(
-            r#"INSERT INTO patient_relations (
-                    patient_id, related_patient_id, related_name, relation_type,
-                    is_emergency_contact, phone, notes, email,
-                    address_street, address_zip, address_city, address_country
-               )
-               SELECT $1, $2, $3, $4, true, $5, $6, $7, $8, $9, $10, $11
-               WHERE NOT EXISTS (
-                   SELECT 1 FROM patient_relations existing
+        // A trusted contact is no emergency contact by itself (owner
+        // decision 2026-10-19); only an explicit mark of the entry carries over.
+        let emergency_contact = contact
+            .get("is_emergency_contact")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        // The relation of the entry: the one a repeat conversion finds, or
+        // the new one. A contact linked to a patient record matches by that
+        // record, any other by its name.
+        let relation_id = match sqlx::query_scalar::<_, Uuid>(
+            r#"WITH existing AS (
+                   SELECT existing.id FROM patient_relations existing
                    WHERE existing.patient_id = $1
                       AND (
                         ($2::uuid IS NOT NULL AND existing.related_patient_id = $2)
                         OR ($2::uuid IS NULL AND existing.related_name = $3)
                       )
                       AND existing.relation_type = $4
-               )"#,
+                   ORDER BY existing.created_at DESC, existing.id DESC
+                   LIMIT 1
+               ), inserted AS (
+                   INSERT INTO patient_relations (
+                        patient_id, related_patient_id, related_name, relation_type,
+                        is_emergency_contact, phone, notes, email,
+                        address_street, address_zip, address_city, address_country
+                   )
+                   SELECT $1, $2, $3, $4, $12, $5, $6, $7, $8, $9, $10, $11
+                   WHERE NOT EXISTS (SELECT 1 FROM existing)
+                   RETURNING id
+               )
+               SELECT id FROM inserted
+               UNION ALL
+               SELECT id FROM existing"#,
         )
         .bind(patient_id)
         .bind(related_patient_id)
@@ -6913,37 +6952,100 @@ async fn convert_lead(
         .bind(&address.1)
         .bind(&address.2)
         .bind(&address.3)
-        .execute(&mut *tx)
+        .bind(emergency_contact)
+        .fetch_optional(&mut *tx)
         .await
         {
-            tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer trusted contact to patient relation");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            Ok(relation_id) => relation_id,
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer trusted contact to patient relation");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        let (Some(contact_id), Some(relation_id)) = (contact_id, relation_id) else {
+            continue;
+        };
+        if Some(contact_id) == paying_parent && is_parent_or_guardian_relation(relation) {
+            paying_parent_relation = Some(relation_id);
         }
-        if contact_id.is_some()
-            && contact_id == paying_parent
-            && related_patient_id.is_none()
-            && is_parent_or_guardian_relation(relation)
+        if contracting_contacts.contains(&contact_id)
+            && !contracting_relations
+                .iter()
+                .any(|(_, known)| *known == relation_id)
         {
-            paying_parent_relation = Some((name.to_string(), relation_type));
+            contracting_relations.push((contact_id, relation_id));
+        }
+    }
+
+    // The minor's contracting party on the patient: the custody and the
+    // relations of the representing parents, in the order of the lead's
+    // representation (rep1 first). A repeat conversion states it anew.
+    if let Some(custody) = minor_custody.as_deref() {
+        let relation_ids = contracting_contacts
+            .iter()
+            .filter_map(|contact| {
+                contracting_relations
+                    .iter()
+                    .find(|(known, _)| known == contact)
+                    .map(|(_, relation)| *relation)
+            })
+            .collect::<Vec<_>>();
+        let stored = sqlx::query_scalar::<_, Uuid>(
+            r#"UPDATE patients
+               SET custody = $2,
+                   contracting_relation_ids = CASE WHEN cardinality($3::uuid[]) > 0
+                       THEN $3::uuid[] ELSE contracting_relation_ids END
+               WHERE id = $1
+                 AND (custody IS DISTINCT FROM $2
+                      OR (cardinality($3::uuid[]) > 0
+                          AND contracting_relation_ids IS DISTINCT FROM $3::uuid[]))
+               RETURNING id"#,
+        )
+        .bind(patient_id)
+        .bind(custody)
+        .bind(&relation_ids)
+        .fetch_optional(&mut *tx)
+        .await;
+        match stored {
+            Ok(Some(_)) => {
+                if let Err(error) = audit::write_in_transaction(
+                    &mut tx,
+                    &audit::domain_event(
+                        "set_contracting_party_on_conversion",
+                        Some(auth.user_id),
+                        "patient",
+                        Some(patient_id),
+                        json!({
+                            "lead_id": lead_id,
+                            "custody": custody,
+                            "contracting_relation_ids": relation_ids,
+                        }),
+                    ),
+                )
+                .await
+                {
+                    tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "audit contracting party on conversion");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "store contracting party on conversion");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
         }
     }
 
     // The parent who pays is the default payer unless the patient already
     // has one (a repeat conversion keeps the mark staff set, and the unique
-    // index allows one only). Never backfilled for earlier conversions.
-    if let Some((related_name, relation_type)) = paying_parent_relation {
+    // index allows one only). Never backfilled for earlier conversions. The
+    // relation is the entry's own, also when the parent is linked to a
+    // patient record of their own.
+    if let Some(paying_relation_id) = paying_parent_relation {
         let marked = sqlx::query_scalar::<_, Uuid>(
             r#"UPDATE patient_relations
                SET is_default_payer = true
-               WHERE id = (
-                   SELECT candidate.id FROM patient_relations candidate
-                   WHERE candidate.patient_id = $1
-                     AND candidate.related_patient_id IS NULL
-                     AND candidate.related_name = $2
-                     AND candidate.relation_type = $3
-                   ORDER BY candidate.created_at DESC, candidate.id DESC
-                   LIMIT 1
-               )
+               WHERE id = $2 AND patient_id = $1
                AND NOT EXISTS (
                    SELECT 1 FROM patient_relations existing
                    WHERE existing.patient_id = $1 AND existing.is_default_payer
@@ -6951,8 +7053,7 @@ async fn convert_lead(
                RETURNING id"#,
         )
         .bind(patient_id)
-        .bind(&related_name)
-        .bind(relation_type)
+        .bind(paying_relation_id)
         .fetch_optional(&mut *tx)
         .await;
         match marked {
