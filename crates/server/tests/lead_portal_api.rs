@@ -7914,7 +7914,9 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
                 );
             }
         }
-        assert!(text.contains("[x] Ja, folgende Person(en)"), "{text}");
+        // Anlage 1 names the persons once, with the consent under item 4 (2026-10-19);
+        // the GwG form keeps its own block: both carry the explicit consent.
+        assert!(text.contains("Ich willige ausdrücklich ein"), "{text}");
         assert!(!text.contains("Kundenkabinett"), "{text}");
         assert!(!text.contains("Textversion"), "{text}");
     }
