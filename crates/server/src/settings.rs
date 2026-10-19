@@ -529,7 +529,7 @@ fn validate_email_setting(value: &str) -> Result<Value, UpdateError> {
         return Ok(Value::String(String::new()));
     }
 
-    if trimmed.len() > 320 || !trimmed.contains('@') {
+    if !crate::email_address::is_valid_email(trimmed) {
         return Err(UpdateError::InvalidValue("Agency email is invalid".into()));
     }
 

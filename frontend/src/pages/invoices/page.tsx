@@ -64,6 +64,7 @@ import {
 import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { appDateKey, appDateKeyOf } from "@/lib/app-time-zone";
 import { clearApiCache } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
@@ -2257,6 +2258,10 @@ function useStaffInvoicesPageContent() {
   async function handleSavePayer() {
     if (!payerDirty || payerBusy) return;
     if (!selectedInvoiceId) return;
+    if (payerForm.contactEmail.trim() && !isValidEmailAddress(payerForm.contactEmail)) {
+      setPayerError(t.login_error_email_invalid);
+      return;
+    }
     setPayerBusy(true);
     try {
       await updateInvoicePayer(selectedInvoiceId, payerFormToPayload(payerForm));

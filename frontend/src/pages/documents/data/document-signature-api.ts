@@ -1,4 +1,5 @@
 import { ApiRequestError, apiFetch, apiFetchFile } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 
 // `minor`: a minor patient who co-signs next to the legal representatives
 // (optional, from about 14 years and capable of understanding; never required).
@@ -158,11 +159,7 @@ export function validSigners(signers: Signer[]) {
       return name.length > 0 && encoder.encode(name).length <= 120
         && !Array.from(name).some(c => c.charCodeAt(0) < 32 || (c.charCodeAt(0) >= 127 && c.charCodeAt(0) <= 159));
     });
-    const email = s.email.trim();
-    const parts = email.split("@");
-    return namesValid && email.length <= 254 && parts.length === 2 && parts[0].length > 0
-      && parts[1].includes(".") && !parts[1].startsWith(".") && !parts[1].endsWith(".")
-      && Array.from(email).every(c => c.charCodeAt(0) > 32 && c.charCodeAt(0) < 127)
+    return namesValid && isValidEmailAddress(s.email)
       && ["client", "minor", "payer", "agency", "other"].includes(s.role);
   })
     && new Set(signers.map(s => s.email.trim().toLowerCase())).size === signers.length;

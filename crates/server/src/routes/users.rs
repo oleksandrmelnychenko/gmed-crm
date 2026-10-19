@@ -349,7 +349,7 @@ pub(crate) async fn ensure_can_act_on_account(
 }
 
 fn validate_create(req: &CreateUserRequest) -> Result<(), &'static str> {
-    if req.email.is_empty() || req.email.len() > 320 || !req.email.contains('@') {
+    if !crate::email_address::is_valid_email(&req.email) {
         return Err("Invalid email");
     }
     if req.name.is_empty() || req.name.len() > 200 {
@@ -673,7 +673,7 @@ async fn update_user(
     let mut body = body;
     body.email = body.email.map(|email| email.trim().to_string());
     if let Some(ref email) = body.email
-        && (email.is_empty() || email.len() > 320 || !email.contains('@'))
+        && !crate::email_address::is_valid_email(email)
     {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid email"));
     }

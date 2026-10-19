@@ -101,5 +101,7 @@ describe("order payer", () => {
     expect(isPlausiblePayerEmail("max@example.test")).toBe(true);
     expect(isPlausiblePayerEmail("max@example")).toBe(false);
     expect(isPlausiblePayerEmail("max muster@example.test")).toBe(false);
+    expect(isPlausiblePayerEmail("a@b.c")).toBe(false);
+    expect(isPlausiblePayerEmail("max@example.d")).toBe(false);
   });
 });

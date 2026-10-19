@@ -10,6 +10,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import {
   appWallClock,
   appWallClockToInstant,
@@ -417,6 +418,7 @@ export function ConciergeTaskEventDialog({
   const [externalName, setExternalName] = useState("");
   const [externalPhone, setExternalPhone] = useState("");
   const [externalEmail, setExternalEmail] = useState("");
+  const [externalEmailInvalid, setExternalEmailInvalid] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [pendingAttachmentError, setPendingAttachmentError] = useState("");
   const [scheduleError, setScheduleError] = useState("");
@@ -564,6 +566,12 @@ export function ConciergeTaskEventDialog({
     const endInstant = parseBerlinLocalInput(endValue);
     if (startInstant && endInstant && endInstant <= startInstant) {
       setScheduleError(lang === "ru" ? "Окончание должно быть позже начала." : "Das Ende muss nach dem Beginn liegen.");
+      return;
+    }
+    const emailInvalid = audience === "external" && Boolean(externalEmail.trim()) && !isValidEmailAddress(externalEmail);
+    setExternalEmailInvalid(emailInvalid);
+    if (emailInvalid) {
+      setScheduleError(lang === "ru" ? "Электронная почта указана неверно. Пример: name@example.de." : "Die E-Mail-Adresse ist ungültig. Beispiel: name@example.de.");
       return;
     }
     setScheduleError("");
@@ -748,7 +756,7 @@ export function ConciergeTaskEventDialog({
                           <Input value={externalName} required maxLength={255} placeholder={labels.externalNamePlaceholder} onChange={(event) => setExternalName(event.target.value)} />
                         </ConciergeField>
                         <ConciergeField label={labels.externalPhone}><Input value={externalPhone} maxLength={100} onChange={(event) => setExternalPhone(event.target.value)} /></ConciergeField>
-                        <ConciergeField label={labels.externalEmail}><Input type="email" value={externalEmail} maxLength={255} onChange={(event) => setExternalEmail(event.target.value)} /></ConciergeField>
+                        <ConciergeField label={labels.externalEmail}><Input type="email" value={externalEmail} maxLength={255} aria-invalid={externalEmailInvalid || undefined} onChange={(event) => { setExternalEmail(event.target.value); setExternalEmailInvalid(false); }} /></ConciergeField>
                       </>
                     ) : null}
                   </div>

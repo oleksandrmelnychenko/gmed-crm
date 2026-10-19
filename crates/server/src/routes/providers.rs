@@ -6268,6 +6268,12 @@ fn normalize_provider_payload(
 
     let phone = normalize_optional(body.phone);
     let email = normalize_optional(body.email);
+    if email
+        .as_deref()
+        .is_some_and(|value| !crate::email_address::is_valid_email(value))
+    {
+        return Err("Invalid email");
+    }
     let opening_hours = normalize_optional(body.opening_hours);
     if opening_hours
         .as_ref()
@@ -6386,6 +6392,12 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
     let fachbereich = fachbereich.or_else(|| specializations.first().cloned());
     let phone = normalize_optional(body.phone);
     let email = normalize_optional(body.email);
+    if email
+        .as_deref()
+        .is_some_and(|value| !crate::email_address::is_valid_email(value))
+    {
+        return Err("Invalid email");
+    }
     let contacts = match body.contacts {
         Some(raw) => Some(normalize_person_contacts(raw)?),
         None => legacy_contacts_from_fields(phone.clone(), email.clone()),
@@ -6892,6 +6904,9 @@ fn normalize_person_contacts(
         if value.is_empty() || value.len() > 255 {
             return Err("Contact value is required (max 255)");
         }
+        if contact_kind == "email" && !crate::email_address::is_valid_email(&value) {
+            return Err("Invalid email");
+        }
         contacts.push(PersonContactPayload {
             contact_kind,
             contact_type,
@@ -6922,6 +6937,9 @@ fn normalize_provider_contacts(
         let value = raw.value.trim().to_string();
         if value.is_empty() || value.len() > 255 {
             return Err("Contact value is required (max 255)");
+        }
+        if contact_kind == "email" && !crate::email_address::is_valid_email(&value) {
+            return Err("Invalid email");
         }
         let label = normalize_optional(raw.label);
         if label.as_ref().is_some_and(|value| value.len() > 120) {

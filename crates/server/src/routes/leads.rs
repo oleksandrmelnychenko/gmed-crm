@@ -315,11 +315,19 @@ fn normalize_trusted_contacts(contacts: &[TrustedContactRequest]) -> Result<Valu
             None => None,
         };
 
+        let email = normalized_contact_text(contact.email.as_deref());
+        if email
+            .as_deref()
+            .is_some_and(|value| !crate::email_address::is_valid_email(value))
+        {
+            return Err("Invalid trusted contact email");
+        }
+
         normalized.push(json!({
             "id": id,
             "related_patient_id": contact.related_patient_id,
             "name": name,
-            "email": normalized_contact_text(contact.email.as_deref()),
+            "email": email,
             "phone": normalized_contact_text(contact.phone.as_deref()),
             "relation": normalized_contact_text(contact.relation.as_deref()),
             "birth_date": birth_date,

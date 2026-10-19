@@ -17,6 +17,7 @@ pub mod consent_choices;
 pub mod crypto;
 pub mod datev;
 pub mod document_signatures;
+pub mod email_address;
 pub mod file_scan;
 pub mod file_sniff;
 pub mod mail;

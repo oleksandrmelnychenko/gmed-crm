@@ -439,7 +439,9 @@ impl SignerFacts {
     }
 
     fn complete(&self) -> bool {
-        !self.first_name.is_empty() && !self.last_name.is_empty() && self.email.contains('@')
+        !self.first_name.is_empty()
+            && !self.last_name.is_empty()
+            && crate::email_address::is_valid_email(&self.email)
     }
 }
 

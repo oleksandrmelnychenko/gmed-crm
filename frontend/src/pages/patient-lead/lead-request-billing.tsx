@@ -12,6 +12,7 @@ import {
 } from "@/components/record-workspace/primitives/design-tokens";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 
 import {
@@ -162,6 +163,16 @@ function useBillingForm({
         for (;;) {
           const patch = scopedDraftPatch(billingPatch(savedRef.current, snapshot, routeByRef.current, rejected), fields);
           if (Object.keys(patch).length === 0) break;
+          // An address the server would refuse is set aside here, like a refusal of the server.
+          const typedEmail = (patch as Record<string, unknown>).invoice_email;
+          const emailRefused = typeof typedEmail === "string" && typedEmail.trim() && !isValidEmailAddress(typedEmail)
+            ? withRejectedBilling(rejected, "invoice_email", snapshot)
+            : null;
+          if (emailRefused && rejected.invoice_email === undefined) {
+            rejected = emailRefused;
+            codes.invoice_email = "email_invalid";
+            continue;
+          }
           onSaveState("saving");
           try {
             const baseline = savedRef.current;
@@ -225,7 +236,7 @@ function useBillingForm({
       // The message belongs to the refused value: it goes as soon as the patient changes it.
       const value = refused.values[field];
       if (value === undefined || value !== billingValue(field, draft)) return undefined;
-      return text.invalidField;
+      return refused.codes[field] === "email_invalid" ? text.invalidEmail : text.invalidField;
     },
   };
 }

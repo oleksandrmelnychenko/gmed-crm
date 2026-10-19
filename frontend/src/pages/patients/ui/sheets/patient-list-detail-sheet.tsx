@@ -1,3 +1,4 @@
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { hasFormChanges } from "@/lib/form-changes";
 import {
   memo,
@@ -471,6 +472,13 @@ function PatientDetailSheet({
       const trustedContacts = patientTrustedContactsToPayload(form.trustedContacts);
       if (trustedContacts.some((contact) => !contact.name)) {
         throw new Error("Укажите имя доверенного контакта");
+      }
+      const typedEmails = [
+        ...form.contacts.filter((contact) => contact.contactKind === "email").map((contact) => contact.value),
+        ...trustedContacts.map((contact) => contact.email ?? ""),
+      ].filter((value) => value.trim());
+      if (typedEmails.some((value) => !isValidEmailAddress(value))) {
+        throw new Error(dictionary.patient_profile_editor_invalid_email || dictionary.login_error_email_invalid);
       }
       const primaryTrustedContact = trustedContacts[0];
       await updatePatient(detail.id, {

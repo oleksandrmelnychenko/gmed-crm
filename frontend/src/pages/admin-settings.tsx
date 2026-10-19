@@ -56,6 +56,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { issuerTaxRegistrationText } from "@/components/issuer-tax-registration-banner";
 import { clearApiCache } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { useRealtimeSubscription } from "@/lib/realtime";
@@ -582,6 +583,18 @@ function useAdminSettingsPageContent() {
         warning: t.settings_no_changes,
         error: "",
       }));
+      return;
+    }
+    const invalidEmailField = changedFields.find((field) => {
+      const value = editValues[field.key] ?? "";
+      return field.inputType === "email" && value.trim() !== "" && !isValidEmailAddress(value);
+    });
+    if (invalidEmailField) {
+      setSheetState({
+        saving: false,
+        error: `${tr[invalidEmailField.labelKey] ?? invalidEmailField.key}: ${t.login_error_email_invalid}`,
+        warning: "",
+      });
       return;
     }
 

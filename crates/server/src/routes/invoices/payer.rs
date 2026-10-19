@@ -220,21 +220,9 @@ pub(crate) fn contact_organisation_shown(
     Some(answer.unwrap_or_else(|| crate::sanctions::screening::contact_name_is_organisation(&name)))
 }
 
-/// A plausible e-mail address: one `@`, a local part and a dotted domain,
-/// no whitespace.
+/// A valid e-mail address (`crate::email_address`).
 pub(crate) fn is_plausible_email(value: &str) -> bool {
-    let value = value.trim();
-    if value.len() > 254 || value.chars().any(char::is_whitespace) {
-        return false;
-    }
-    let Some((local, domain)) = value.split_once('@') else {
-        return false;
-    };
-    !local.is_empty()
-        && !domain.contains('@')
-        && domain.contains('.')
-        && !domain.starts_with('.')
-        && !domain.ends_with('.')
+    crate::email_address::is_valid_email(value)
 }
 
 /// Payer fields as sent by the order and invoice payer dialogs.

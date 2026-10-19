@@ -3242,6 +3242,7 @@ export function LeadWizard({
   const [trustedContactEditor, setTrustedContactEditor] = useState<TrustedContactDraft | null>(null);
   const [trustedContactEditorError, setTrustedContactEditorError] = useState("");
   const [trustedContactRelationError, setTrustedContactRelationError] = useState("");
+  const [trustedContactEmailError, setTrustedContactEmailError] = useState("");
   // Whether the editor was opened from the minor's parent / legal representative block.
   const [trustedContactEditorGuardian, setTrustedContactEditorGuardian] = useState(false);
   // The trusted contacts as the server stores them, as far as this wizard
@@ -5365,6 +5366,7 @@ export function LeadWizard({
   const openNewTrustedContact = (guardian = false) => {
     setTrustedContactEditorError("");
     setTrustedContactRelationError("");
+    setTrustedContactEmailError("");
     setGuardianSearch("");
     setTrustedContactEditorGuardian(guardian);
     setTrustedContactEditor(emptyTrustedContact());
@@ -5373,6 +5375,7 @@ export function LeadWizard({
   const openTrustedContact = (contact: TrustedContactDraft, guardian = false) => {
     setTrustedContactEditorError("");
     setTrustedContactRelationError("");
+    setTrustedContactEmailError("");
     setGuardianSearch("");
     setTrustedContactEditorGuardian(guardian);
     setTrustedContactEditor({ ...contact });
@@ -5382,6 +5385,7 @@ export function LeadWizard({
     setTrustedContactEditor(null);
     setTrustedContactEditorError("");
     setTrustedContactRelationError("");
+    setTrustedContactEmailError("");
   };
 
   const patchTrustedContactEditor = <K extends keyof TrustedContactDraft>(
@@ -5390,6 +5394,7 @@ export function LeadWizard({
   ) => {
     if (key === "name" && trustedContactEditorError) setTrustedContactEditorError("");
     if (key === "relation") setTrustedContactRelationError("");
+    if (key === "email") setTrustedContactEmailError("");
     setTrustedContactEditor((current) => current ? { ...current, [key]: value } : current);
   };
 
@@ -5426,6 +5431,10 @@ export function LeadWizard({
     }
     if (trustedContactEditorGuardian && !["mother", "father", "guardian"].includes(trustedContactEditor.relation)) {
       setTrustedContactRelationError(tx("Укажите, кто представляет ребёнка: мать, отец или опекун", "Bitte Mutter, Vater oder Vormund auswählen"));
+      return;
+    }
+    if (trustedContactEditor.email.trim() && !isValidEmailAddress(trustedContactEditor.email)) {
+      setTrustedContactEmailError(tx("Введите корректный адрес электронной почты", "Gültige E-Mail-Adresse eingeben"));
       return;
     }
 
@@ -10462,11 +10471,13 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchTrustedContactEditor("name", event.target.value)}
                     />
                   </Field>
-                  <Field label="E-Mail">
+                  <Field label="E-Mail" error={trustedContactEmailError || undefined} errorId="trusted-contact-email-error">
                     <Input
                       className={inputClass}
                       type="email"
                       value={trustedContactEditor.email}
+                      aria-invalid={Boolean(trustedContactEmailError)}
+                      aria-describedby={trustedContactEmailError ? "trusted-contact-email-error" : undefined}
                       onChange={(event) => patchTrustedContactEditor("email", event.target.value)}
                     />
                   </Field>

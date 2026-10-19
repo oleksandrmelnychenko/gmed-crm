@@ -44,20 +44,10 @@ pub(crate) fn may_issue_portal_password(role: Role) -> bool {
     matches!(role, Role::Ceo | Role::PatientManager)
 }
 
-/// Lower-cased, trimmed e-mail when it looks like an address.
+/// Lower-cased, trimmed e-mail when it is a valid address
+/// (`crate::email_address`).
 pub(crate) fn normalize_portal_email(raw: Option<&str>) -> Option<String> {
-    let email = raw?.trim().to_lowercase();
-    let (local, domain) = email.split_once('@')?;
-    if local.is_empty()
-        || !domain.contains('.')
-        || domain.starts_with('.')
-        || domain.ends_with('.')
-        || email.len() > 320
-        || email.chars().any(char::is_whitespace)
-    {
-        return None;
-    }
-    Some(email)
+    crate::email_address::normalize_email(raw?)
 }
 
 /// The account that already uses `email`, described for the conflict message:

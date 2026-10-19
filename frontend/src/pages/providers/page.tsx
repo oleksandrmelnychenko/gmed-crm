@@ -140,6 +140,7 @@ import {
   splitDoctorTitleValue,
   taxonomyAttributeValue,
   taxonomyAttributeValueOptions,
+  contactEmailsValid,
   toDoctorPayload,
   toProviderPayload,
   toServicePayload,
@@ -2770,11 +2771,15 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   async function handleCreateProvider(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const payload = toProviderPayload(createForm, permissions.forceNonMedical);
+    if (!contactEmailsValid(payload.contacts)) {
+      setCreateError(t.login_error_email_invalid);
+      return;
+    }
     setCreateBusy(true);
     setCreateError("");
 
     try {
-      const payload = toProviderPayload(createForm, permissions.forceNonMedical);
       const created = await createProvider(payload);
       refreshInsuranceProviderOptions();
       setCreateOpen(false);
@@ -2789,12 +2794,16 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   async function handleUpdateProvider(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!detail || !permissions.canEditProvider) return;
+    const payload = toProviderPayload(providerForm, permissions.forceNonMedical);
+    if (!contactEmailsValid(payload.contacts)) {
+      setProviderError(t.login_error_email_invalid);
+      return;
+    }
 
     setProviderBusy(true);
     setProviderError("");
 
     try {
-      const payload = toProviderPayload(providerForm, permissions.forceNonMedical);
       await updateProvider(detail.id, payload);
       refreshInsuranceProviderOptions();
       if (providerEditOpen) {
@@ -2886,6 +2895,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     const payload = toDoctorPayload(providerDoctorFormForPayload(doctorForm, providerType));
     if (!payload.name.trim()) {
       setDoctorError(t.uiText.providers_doctor_name_required ?? t.common_failed_update);
+      return;
+    }
+    if (!contactEmailsValid(payload.contacts)) {
+      setDoctorError(t.login_error_email_invalid);
       return;
     }
     setDoctorBusy(true);
@@ -3191,12 +3204,17 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     event.preventDefault();
     const providerId = catalogPersonContext?.providerId ?? detail?.id;
     if (!providerId) return;
+    const staffPayload = toStaffPayload(staffForm);
+    if (!contactEmailsValid(staffPayload.contacts)) {
+      setStaffError(t.login_error_email_invalid);
+      return;
+    }
 
     setStaffBusy(true);
     setStaffError("");
 
     try {
-      await saveProviderStaff(providerId, staffForm.id, toStaffPayload(staffForm));
+      await saveProviderStaff(providerId, staffForm.id, staffPayload);
       setStaffDialogOpen(false);
       setStaffForm(blankStaffForm());
       setCatalogPersonContext(null);

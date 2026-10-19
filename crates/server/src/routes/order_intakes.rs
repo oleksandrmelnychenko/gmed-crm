@@ -482,7 +482,7 @@ fn validate_facts(f: &Facts) -> Result<(), Response> {
     if f.phone_primary.trim().is_empty() && f.email.trim().is_empty() {
         return Err(invalid("A contact is required"));
     }
-    if !f.email.is_empty() && (!f.email.contains('@') || f.email.contains(char::is_whitespace)) {
+    if !f.email.is_empty() && !crate::email_address::is_valid_email(&f.email) {
         return Err(invalid("Invalid email"));
     }
     if !f.representative_name.is_empty() && f.representative_authority.trim().is_empty() {

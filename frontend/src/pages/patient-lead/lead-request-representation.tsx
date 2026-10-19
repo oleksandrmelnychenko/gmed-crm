@@ -12,6 +12,7 @@ import { inputClass, selectClass, tokens } from "@/components/record-workspace/p
 import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 
 import {
   INQUIRY_CONSENT,
@@ -155,6 +156,8 @@ function refusalText(text: LeadRequestText, code: string | undefined): string {
       return text.representativeEmailLocked;
     case "representative_email_duplicate":
       return text.representativeEmailDuplicate;
+    case "email_invalid":
+      return text.invalidEmail;
     default:
       return text.invalidField;
   }
@@ -237,6 +240,12 @@ function useRepresentativeForm({
           if (!candidate) break;
           const patch = scopedDraftPatch(candidate, fields);
           if (Object.keys(patch).length === 0) break;
+          // An address the server would refuse is set aside here, like a refusal of the server.
+          if (typeof patch.email === "string" && patch.email.trim() && !isValidEmailAddress(patch.email)) {
+            rejected = withRejectedRepresentative(rejected, "email", snapshot);
+            codes.email = "email_invalid";
+            continue;
+          }
           onSaveState("saving");
           const id = (idRef.current ??= newRepresentativeId());
           try {

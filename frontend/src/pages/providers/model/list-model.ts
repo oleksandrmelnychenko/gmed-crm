@@ -1,3 +1,4 @@
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import type {
   DoctorFormState,
   DoctorSummary,
@@ -1687,6 +1688,11 @@ export function applyStaffFieldChange(
       composeStaffDisplayName(next.firstName, next.lastName, next.gender) || next.displayName;
   }
   return next;
+}
+
+/** Whether every e-mail contact is name@domain.tld; the server refuses the rest (422). Empty rows are dropped anyway. */
+export function contactEmailsValid(contacts: readonly { contact_kind: "phone" | "email"; value: string }[]) {
+  return contacts.every((contact) => contact.contact_kind !== "email" || !contact.value.trim() || isValidEmailAddress(contact.value));
 }
 
 export function toProviderPayload(form: ProviderFormState, forceNonMedical: boolean) {

@@ -46,6 +46,7 @@ import {
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { clearApiCache } from "@/lib/api";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, uiText, useLang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
@@ -728,6 +729,10 @@ function useAdminUsersPageContent() {
 
   const onSubmitCreate = async (ev: FormEvent) => {
     ev.preventDefault();
+    if (!isValidEmailAddress(newEmail)) {
+      setCreateError(t.login_error_email_invalid);
+      return;
+    }
     if (manualPassword) {
       const passwordError = getRequiredAdminPasswordError(newPassword, t);
       if (passwordError) {
@@ -822,6 +827,11 @@ function useAdminUsersPageContent() {
     if (!editUser) return;
     const passwordDirty =
       euPassword.length > 0 || euPasswordConfirm.length > 0;
+    // A stored legacy address stays editable; only a changed one is checked.
+    if (euEmail !== editUser.email && !isValidEmailAddress(euEmail)) {
+      setEditError(t.login_error_email_invalid);
+      return;
+    }
     if (passwordDirty) {
       const passwordError = getRequiredAdminPasswordError(euPassword, t);
       if (passwordError) {

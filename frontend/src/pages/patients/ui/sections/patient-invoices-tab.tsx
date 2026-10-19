@@ -46,6 +46,7 @@ import {
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { appDateKey, appDateKeyOf } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
@@ -1047,7 +1048,7 @@ function usePatientInvoicesTabContent({
   async function handleActivatePortalAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!patientId || portalAccountBusy) return;
-    if (!portalAccountForm.email.trim() || !portalAccountForm.email.includes("@")) {
+    if (!isValidEmailAddress(portalAccountForm.email)) {
       setPortalAccountError(
         lang === "de" ? "Bitte geben Sie eine gültige E-Mail-Adresse ein." : "Укажите корректный email.",
       );

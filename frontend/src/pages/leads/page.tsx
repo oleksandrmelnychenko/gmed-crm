@@ -1,5 +1,6 @@
 import { existingParentPatientFromError } from "./model/parent-profile-reuse";
 import { toast } from "@/components/ui/toast";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import {
   Suspense,
   lazy,
@@ -1293,6 +1294,11 @@ function useLeadsPageContent() {
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!permissions.canCreate) return;
+    if (!isValidEmailAddress(createForm.email)) {
+      setExistingParentPatientId(null);
+      setCreateError(t.login_error_email_invalid);
+      return;
+    }
     setCreateBusy(true);
     setCreateError("");
     setExistingParentPatientId(null);
@@ -1405,6 +1411,10 @@ function useLeadsPageContent() {
   async function handleSaveGateForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!permissions.canEdit || !selectedLeadId || !gateForm) return;
+    if (gateForm.email.trim() && !isValidEmailAddress(gateForm.email)) {
+      setDetailError(t.login_error_email_invalid);
+      return;
+    }
 
     setGateBusy(true);
     setDetailError("");

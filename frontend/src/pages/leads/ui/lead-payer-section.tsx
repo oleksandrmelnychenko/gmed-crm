@@ -27,6 +27,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { ApiRequestError } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useAuth } from "@/lib/auth";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
@@ -76,6 +77,10 @@ import {
 } from "../model/lead-payer";
 
 const MAX_EVIDENCE_FILE_SIZE = 25 * 1024 * 1024;
+
+/** A typed third-party e-mail the server would reject: kept in the form, never autosaved. */
+const payerEmailInvalid = (form: PayerDeclarationForm) =>
+  form.kind === "third_party" && Boolean(form.email.trim()) && !isValidEmailAddress(form.email);
 
 function PayerField({
   label,
@@ -247,7 +252,8 @@ export function LeadPayerDeclarationSection({
       setDirty(next.dirty);
     });
     autosaveRef.current = queue;
-    const unregister = registerAutosave?.(() => queue.flush());
+    // An invalid payer e-mail blocks the wizard's save instead of being dropped silently.
+    const unregister = registerAutosave?.(() => (payerEmailInvalid(formRef.current) ? Promise.resolve(false) : queue.flush()));
     return () => {
       // Closing the wizard or moving to another step must not drop the last edit.
       queue.setEnabled(mayFlushRef.current);
@@ -281,6 +287,7 @@ export function LeadPayerDeclarationSection({
     setDirty(true);
     setMessage(null);
     setForm(next);
+    if (payerEmailInvalid(next)) return;
     // Capture this lead's save callback: a later lead must never receive this draft.
     const queue = autosaveRef.current;
     queue?.schedule(next, async (snapshot) => {
@@ -298,6 +305,7 @@ export function LeadPayerDeclarationSection({
   const organisation = isOrganisationPayerForm(form);
   const relationshipTextShown = payerRelationshipTextShown(form, data?.declaration);
   const missing = payerFormMissing(form);
+  const emailInvalid = payerEmailInvalid(form);
   const statusBadge = payerStatusBadge(data?.status, tx);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
   const contactConsentAt = data?.declaration?.contact_consent_at ?? null;
@@ -749,7 +757,12 @@ export function LeadPayerDeclarationSection({
                 </PayerField>
               ) : null}
               <PayerField label={tx("Электронная почта", "E-Mail")}>
-                <Input className={inputClass} type="email" value={form.email} disabled={readOnly} onChange={(event) => patch("email", event.target.value)} />
+                <Input className={inputClass} type="email" value={form.email} disabled={readOnly} aria-invalid={emailInvalid || undefined} onChange={(event) => patch("email", event.target.value)} />
+                {emailInvalid ? (
+                  <span role="alert" className="block text-xs text-destructive">
+                    {tx("Электронная почта указана неверно, изменения не сохраняются. Пример: name@example.de.", "Die E-Mail-Adresse ist ungültig, Änderungen werden nicht gespeichert. Beispiel: name@example.de.")}
+                  </span>
+                ) : null}
               </PayerField>
               <PayerField label={tx("Телефон", "Telefon")}>
                 <Input className={inputClass} type="tel" value={form.phone} disabled={readOnly} onChange={(event) => patch("phone", event.target.value)} />

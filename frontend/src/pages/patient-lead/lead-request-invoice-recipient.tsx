@@ -15,6 +15,7 @@ import {
 } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
 import { ApiRequestError } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { cn } from "@/lib/utils";
 
 import { saveLeadInvoiceRecipient, type LeadRequest } from "./lead-request-api";
@@ -154,6 +155,12 @@ export function InvoiceRecipientSection({
         for (;;) {
           const patch = scopedDraftPatch(recipientPatch(savedRef.current, snapshot, rejected), fields);
           if (Object.keys(patch).length === 0) break;
+          // An address the server would refuse is set aside here, like a refusal of the server.
+          const typedEmail = (patch as Record<string, unknown>).recipient_email;
+          if (typeof typedEmail === "string" && typedEmail.trim() && !isValidEmailAddress(typedEmail) && rejected.email === undefined) {
+            rejected.email = recipientValue("email", snapshot);
+            continue;
+          }
           onRecipientState("saving");
           try {
             const baseline = savedRef.current;
@@ -208,7 +215,9 @@ export function InvoiceRecipientSection({
   const update = (change: (current: RecipientDraft) => RecipientDraft) => setDraft(change);
   const set = (field: RecipientField, value: string) => update((current) => ({ ...current, [field]: value }));
   const errorFor = (field: keyof RecipientDraft) =>
-    refused[field] !== undefined && refused[field] === recipientValue(field, draft) ? text.invalidField : undefined;
+    refused[field] !== undefined && refused[field] === recipientValue(field, draft)
+      ? (field === "email" ? text.invalidEmail : text.invalidField)
+      : undefined;
   const control = (field: keyof RecipientDraft) => ({
     id: `lead-request-recipient_${field}`,
     "aria-invalid": Boolean(errorFor(field)) || undefined,

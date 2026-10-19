@@ -76,6 +76,8 @@ export type LeadRequestText = {
   saved: string;
   notSaved: string;
   invalidField: string;
+  /** An e-mail address that is not name@domain.tld. */
+  invalidEmail: string;
   dobStaffOnly: string;
   healthConsentRequired: string;
   furtherDetails: string;
@@ -851,6 +853,7 @@ const de: LeadRequestText = {
   saved: "Gespeichert",
   notSaved: "Nicht gespeichert",
   invalidField: "Bitte prüfen Sie diese Angabe.",
+  invalidEmail: "Bitte geben Sie eine gültige E-Mail-Adresse ein, z. B. name@example.de.",
   dobStaffOnly: "Bitte wenden Sie sich an GMED, um das Geburtsdatum zu korrigieren.",
   healthConsentRequired: "Bitte stimmen Sie zuerst der Verarbeitung der Gesundheitsdaten zu.",
   furtherDetails: "Weitere Angaben",
@@ -1380,6 +1383,7 @@ const ru: LeadRequestText = {
   saved: "Сохранено",
   notSaved: "Не сохранено",
   invalidField: "Пожалуйста, проверьте это поле.",
+  invalidEmail: "Введите корректный адрес электронной почты, например name@example.de.",
   dobStaffOnly: "Чтобы исправить дату рождения, обратитесь в GMED.",
   healthConsentRequired: "Сначала дайте согласие на обработку данных о здоровье.",
   furtherDetails: "Дополнительные сведения",
@@ -1905,6 +1909,7 @@ const uk: LeadRequestText = {
   saved: "Збережено",
   notSaved: "Не збережено",
   invalidField: "Будь ласка, перевірте це поле.",
+  invalidEmail: "Введіть коректну адресу електронної пошти, наприклад name@example.de.",
   dobStaffOnly: "Щоб виправити дату народження, зверніться до GMED.",
   healthConsentRequired: "Спочатку дайте згоду на обробку даних про здоров’я.",
   furtherDetails: "Додаткові відомості",
@@ -2430,6 +2435,7 @@ const en: LeadRequestText = {
   saved: "Saved",
   notSaved: "Not saved",
   invalidField: "Please check this entry.",
+  invalidEmail: "Please enter a valid e-mail address, e.g. name@example.com.",
   dobStaffOnly: "Please contact GMED to correct the date of birth.",
   healthConsentRequired: "Please consent to health data processing first.",
   furtherDetails: "Further information",

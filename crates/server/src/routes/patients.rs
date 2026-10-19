@@ -1680,20 +1680,9 @@ fn validate_patient_contact_payload(contact: &PatientContactRequest) -> Result<(
     }
 }
 
-/// An e-mail address as the lead wizard accepts it (`^[^\s@]+@[^\s@]+\.[^\s@]+$`
-/// in `frontend/src/lib/contact-validation.ts`): one "@" with text before it,
-/// a domain with a dot that has text on both sides, no spaces.
+/// An e-mail address as every GMED form accepts it (`crate::email_address`).
 pub(crate) fn is_valid_contact_email(value: &str) -> bool {
-    let value = value.trim();
-    let Some((local, domain)) = value.split_once('@') else {
-        return false;
-    };
-    !local.is_empty()
-        && !domain.contains('@')
-        && !value.chars().any(char::is_whitespace)
-        && domain
-            .char_indices()
-            .any(|(index, character)| character == '.' && index > 0 && index + 1 < domain.len())
+    crate::email_address::is_valid_email(value)
 }
 
 /// A phone number as the lead wizard accepts it: at least six digits, the
@@ -1739,15 +1728,12 @@ mod patient_contact_validation_tests {
 
     #[test]
     fn email_follows_the_lead_wizard_rule() {
-        for valid in [
-            "anna@example.com",
-            " anna.muster@klinik.co.uk ",
-            "a@b.c",
-            "a@b.c.",
-        ] {
+        for valid in ["anna@example.com", " anna.muster@klinik.co.uk "] {
             assert!(is_valid_contact_email(valid), "{valid}");
         }
         for invalid in [
+            "a@b.c",
+            "a@b.c.",
             "bad@x",
             "bad@",
             "@example.com",
@@ -7600,7 +7586,7 @@ async fn activate_patient_portal_account(
     }
 
     let email = body.email.trim().to_lowercase();
-    if email.is_empty() || email.len() > 320 || !email.contains('@') {
+    if !crate::email_address::is_valid_email(&email) {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid email"));
     }
 

@@ -20,6 +20,7 @@ import {
   inputClass,
   selectClass,
 } from "@/components/ui-shell";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useLang } from "@/lib/i18n";
 
 import { usePatientLookupOptions } from "../../data/use-patient-lookup-options";
@@ -219,6 +220,10 @@ function PatientRelationEditorSheet({
         dispatchRelationState({
           error: `${t.patient_relation_name}: ${t.cf_required}`,
         });
+        return;
+      }
+      if (form.email.trim() && !isValidEmailAddress(form.email)) {
+        dispatchRelationState({ error: t.login_error_email_invalid });
         return;
       }
 

@@ -150,18 +150,8 @@ pub fn normalize_signers(mut signers: Vec<Signer>) -> Result<Vec<Signer>, &'stat
         {
             return Err("signer_name");
         }
-        let parts = signer.email.split('@').collect::<Vec<_>>();
-        if parts.len() != 2
-            || parts[0].is_empty()
-            || !parts[1].contains('.')
-            || parts[1].starts_with('.')
-            || parts[1].ends_with('.')
-            || signer.email.len() > 254
-            || !signer.email.is_ascii()
-            || signer
-                .email
-                .chars()
-                .any(|c| c.is_whitespace() || c.is_control())
+        if signer.email.trim() != signer.email
+            || !crate::email_address::is_valid_email(&signer.email)
         {
             return Err("signer_email");
         }

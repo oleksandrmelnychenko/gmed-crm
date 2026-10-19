@@ -44,6 +44,7 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { ApiRequestError, apiFetch, downloadApiFile } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useAppointmentLabels } from "@/pages/appointments/model/labels";
@@ -277,6 +278,7 @@ function staffPageCopy(lang: "de" | "ru") {
       internalOnlyError: "Nur interne Mitarbeitende können als Benutzerkonto erstellt werden.",
       nameRequired: "Name ist erforderlich.",
       nameEmailRequired: "Name und E-Mail sind für Benutzerkonten erforderlich.",
+      emailInvalid: "Die E-Mail-Adresse ist ungültig. Beispiel: name@example.de.",
       passwordLengthError: "Das Passwort muss mindestens 8 Zeichen enthalten.",
       accountCreated: "Mitarbeiterkonto erstellt",
       staffProfileCreated: "Mitarbeiterprofil erstellt",
@@ -457,6 +459,7 @@ function staffPageCopy(lang: "de" | "ru") {
     internalOnlyError: "Только внутренним сотрудникам можно создать аккаунт пользователя.",
     nameRequired: "Имя обязательно.",
     nameEmailRequired: "Имя и электронная почта обязательны для аккаунта пользователя.",
+    emailInvalid: "Электронная почта указана неверно. Пример: name@example.de.",
     passwordLengthError: "Пароль должен содержать минимум 8 символов.",
     accountCreated: "Аккаунт сотрудника создан",
     staffProfileCreated: "Профиль сотрудника создан",
@@ -1161,6 +1164,10 @@ export function InterpretersPage() {
     }
     if (shouldCreateUserAccount && !accountDraft.email.trim()) {
       setCreateAccountError(copy.nameEmailRequired);
+      return;
+    }
+    if (accountDraft.email.trim() && !isValidEmailAddress(accountDraft.email)) {
+      setCreateAccountError(copy.emailInvalid);
       return;
     }
     if (shouldCreateUserAccount && accountDraft.password.length < 8) {

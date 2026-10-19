@@ -14094,7 +14094,7 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
             "specializations": ["Cardiology", "Internal medicine"],
             "languages": ["de", "en", "uk"],
             "phone": "+49 30 4445566",
-            "email": format!("doctor-{tag}@clinic-api.example"),
+            "email": format!("dr-{}@clinic-api.example", &tag[tag.len() - 12..]),
             "contacts": [
                 {
                     "contact_kind": "phone",
@@ -14105,7 +14105,7 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
                 {
                     "contact_kind": "email",
                     "contact_type": "work",
-                    "value": format!("doctor-{tag}@clinic-api.example"),
+                    "value": format!("dr-{}@clinic-api.example", &tag[tag.len() - 12..]),
                     "is_primary": true
                 },
                 {
@@ -14355,7 +14355,7 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
                 {
                     "contact_kind": "email",
                     "contact_type": "work",
-                    "value": format!("secretary-{tag}@clinic-api.example"),
+                    "value": format!("sec-{}@clinic-api.example", &tag[tag.len() - 12..]),
                     "is_primary": true
                 }
             ],

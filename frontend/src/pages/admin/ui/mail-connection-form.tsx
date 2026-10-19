@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiRequestError } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -136,6 +137,16 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
 
   function save(event: FormEvent) {
     event.preventDefault();
+    if (!isValidEmailAddress(sender)) {
+      setNotice("");
+      setError(tx("Адрес отправителя указан неверно. Пример: name@example.de.", "Die Absenderadresse ist ungültig. Beispiel: name@example.de."));
+      return;
+    }
+    if (replyTo.trim() && !isValidEmailAddress(replyTo)) {
+      setNotice("");
+      setError(tx(ERRORS.mail_reply_to_invalid[0], ERRORS.mail_reply_to_invalid[1]));
+      return;
+    }
     void run(async () => {
       apply(await saveMailConnection({ api_key: apiKey, sender, reply_to: replyTo }));
       setEditing(false);
@@ -147,6 +158,11 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
   }
 
   function sendTest() {
+    if (testTo.trim() && !isValidEmailAddress(testTo)) {
+      setNotice("");
+      setError(tx("Адрес получателя указан неверно. Пример: name@example.de.", "Die Empfängeradresse ist ungültig. Beispiel: name@example.de."));
+      return;
+    }
     void run(async () => {
       const sent = await sendMailConnectionTest({ to: testTo, language: lang === "de" ? "de" : "ru" });
       setNotice(tx(`Тестовое письмо отправлено на ${sent.sent_to}.`, `Test-E-Mail an ${sent.sent_to} gesendet.`));

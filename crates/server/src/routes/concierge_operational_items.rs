@@ -4624,7 +4624,7 @@ fn validate_item_fields(
         }
         if external_assignee_email
             .as_deref()
-            .is_some_and(|value| !value.contains('@') || value.chars().any(char::is_whitespace))
+            .is_some_and(|value| !crate::email_address::is_valid_email(value))
         {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,

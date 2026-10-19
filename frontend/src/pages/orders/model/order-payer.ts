@@ -5,6 +5,7 @@
  * inherit it as one whole record.
  */
 
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { relationNameSuggestsOrganisation } from "@/pages/patients/model/sheet-forms";
 
 /**
@@ -141,13 +142,7 @@ export function orderPayerPayload(form: OrderPayerForm) {
   };
 }
 
-/** An e-mail the server will accept: one `@`, a dotted domain, no spaces. */
+/** An e-mail the server will accept; an empty field is allowed. */
 export function isPlausiblePayerEmail(value: string) {
-  const email = value.trim();
-  if (!email) return true;
-  if (/\s/.test(email)) return false;
-  const parts = email.split("@");
-  if (parts.length !== 2 || !parts[0]) return false;
-  const domain = parts[1];
-  return domain.includes(".") && !domain.startsWith(".") && !domain.endsWith(".");
+  return !value.trim() || isValidEmailAddress(value);
 }

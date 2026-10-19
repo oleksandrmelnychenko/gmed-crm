@@ -13,6 +13,7 @@ import {
 import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
+import { isValidEmailAddress } from "@/lib/contact-validation";
 
 import {
   NO_THIRD_PARTY_PAYER,
@@ -126,6 +127,13 @@ export function usePayerAutosave({
         // A third party is stored once it has a name, never empty in place of the
         // patient (QA 2026-10-11 A-08a: that cleared the patient's payment method).
         if (!payerAnswerSavable(savedRef.current, snapshot, typed)) return false;
+        // An address the server would refuse is not sent: the field says so at once.
+        if (input.email && !isValidEmailAddress(input.email)) {
+          rejectedRef.current = key;
+          setFieldError("payer_email");
+          onSaveState("error");
+          return false;
+        }
         onSaveState("saving");
         try {
           const next = await saveLeadPayer(request.lead_id, input);
@@ -284,7 +292,8 @@ export function PayerSection({
   // The organisation mask (trigger flow): a server that sends its keys knows it.
   const orgMask = typed && knowsOrganisationMask(request);
   const consentAt = request.payer?.contact_consent_at ?? null;
-  const errorFor = (field: PayerField) => (fieldError === field ? text.invalidField : undefined);
+  const errorFor = (field: PayerField) =>
+    fieldError === field ? (field === "payer_email" ? text.invalidEmail : text.invalidField) : undefined;
   const fieldProps = (field: PayerField) => ({
     id: `lead-request-${field}`,
     "aria-invalid": Boolean(errorFor(field)) || undefined,

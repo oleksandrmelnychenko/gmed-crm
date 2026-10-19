@@ -280,6 +280,12 @@ async fn create_standalone_interpreter_profile(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Name is required");
     }
     let email = normalize_optional_text(body.email);
+    if email
+        .as_deref()
+        .is_some_and(|value| !crate::email_address::is_valid_email(value))
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid email");
+    }
     let profile = match body.profile {
         Some(value) => match normalize_profile_payload(value) {
             Ok(value) => normalize_standalone_profile_defaults(value),
