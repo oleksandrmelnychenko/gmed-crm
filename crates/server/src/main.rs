@@ -165,6 +165,14 @@ async fn main() {
     // silent no-op.
     gmed_server::business_metrics::describe_all();
 
+    // DNS check of e-mail domains (`email_domain`); `GMED_EMAIL_DOMAIN_CHECK=off`
+    // turns it off where the server has no outside DNS.
+    if !std::env::var("GMED_EMAIL_DOMAIN_CHECK")
+        .is_ok_and(|value| value.eq_ignore_ascii_case("off"))
+    {
+        gmed_server::email_domain::enable();
+    }
+
     if let Some(metrics_addr) = cfg.metrics_listen {
         let handle_for_route = metric_handle.clone();
         tokio::spawn(async move {

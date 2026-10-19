@@ -1,6 +1,7 @@
 import { existingParentPatientFromError } from "./model/parent-profile-reuse";
 import { toast } from "@/components/ui/toast";
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { EmailDomainWarning, knownNoMailEmailError } from "@/components/email-domain-warning";
 import {
   Suspense,
   lazy,
@@ -1299,6 +1300,12 @@ function useLeadsPageContent() {
       setCreateError(t.login_error_email_invalid);
       return;
     }
+    const createEmailNoMail = knownNoMailEmailError(createForm.email, lang);
+    if (createEmailNoMail) {
+      setExistingParentPatientId(null);
+      setCreateError(createEmailNoMail);
+      return;
+    }
     setCreateBusy(true);
     setCreateError("");
     setExistingParentPatientId(null);
@@ -1413,6 +1420,11 @@ function useLeadsPageContent() {
     if (!permissions.canEdit || !selectedLeadId || !gateForm) return;
     if (gateForm.email.trim() && !isValidEmailAddress(gateForm.email)) {
       setDetailError(t.login_error_email_invalid);
+      return;
+    }
+    const gateEmailNoMail = knownNoMailEmailError(gateForm.email, lang);
+    if (gateEmailNoMail) {
+      setDetailError(gateEmailNoMail);
       return;
     }
 
@@ -2427,6 +2439,7 @@ function useLeadsPageContent() {
                               )
                             }
                           />
+                          <EmailDomainWarning email={gateForm.email} lang={lang} />
                         </LeadField>
                         <LeadField label={t.field_phone} htmlFor="lead-gate-phone">
                           <Input
@@ -3308,6 +3321,7 @@ function useLeadsPageContent() {
                           setCreateForm((current) => ({ ...current, email: event.target.value }))
                         }
                       />
+                      <EmailDomainWarning email={createForm.email} lang={lang} />
                     </LeadField>
                     <LeadField label={t.leads_source}>
                       <Input

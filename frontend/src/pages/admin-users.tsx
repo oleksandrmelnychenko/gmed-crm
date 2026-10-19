@@ -46,6 +46,7 @@ import {
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { clearApiCache } from "@/lib/api";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
+import { EmailDomainWarning, knownNoMailEmailError } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, uiText, useLang } from "@/lib/i18n";
@@ -733,6 +734,11 @@ function useAdminUsersPageContent() {
       setCreateError(t.login_error_email_invalid);
       return;
     }
+    const newEmailNoMail = knownNoMailEmailError(newEmail, lang);
+    if (newEmailNoMail) {
+      setCreateError(newEmailNoMail);
+      return;
+    }
     if (manualPassword) {
       const passwordError = getRequiredAdminPasswordError(newPassword, t);
       if (passwordError) {
@@ -830,6 +836,11 @@ function useAdminUsersPageContent() {
     // A stored legacy address stays editable; only a changed one is checked.
     if (euEmail !== editUser.email && !isValidEmailAddress(euEmail)) {
       setEditError(t.login_error_email_invalid);
+      return;
+    }
+    const euEmailNoMail = euEmail !== editUser.email ? knownNoMailEmailError(euEmail, lang) : null;
+    if (euEmailNoMail) {
+      setEditError(euEmailNoMail);
       return;
     }
     if (passwordDirty) {
@@ -1118,6 +1129,7 @@ function useAdminUsersPageContent() {
                     <div className="space-y-1.5">
                       <Label className={fieldLabelClass}>{t.users_email}</Label>
                       <Input type="email" required placeholder={t.users_email_placeholder} value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="h-9 rounded-lg bg-field" />
+                      <EmailDomainWarning email={newEmail} lang={lang} />
                     </div>
                   </div>
                   <div className="space-y-1.5">
@@ -1311,6 +1323,7 @@ function useAdminUsersPageContent() {
                   <div className="space-y-1.5">
                     <Label className={fieldLabelClass}>{t.users_email}</Label>
                     <Input type="email" value={euEmail} onChange={(e) => setEuEmail(e.target.value)} className="h-9 rounded-lg bg-field" />
+                    <EmailDomainWarning email={euEmail} lang={lang} />
                   </div>
                 </div>
                 <div className="space-y-1.5">

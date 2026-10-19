@@ -13,7 +13,9 @@ import {
 import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
+import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 
 import {
   NO_THIRD_PARTY_PAYER,
@@ -131,6 +133,12 @@ export function usePayerAutosave({
         if (input.email && !isValidEmailAddress(input.email)) {
           rejectedRef.current = key;
           setFieldError("payer_email");
+          onSaveState("error");
+          return false;
+        }
+        // A domain known to receive no mail is refused too; the field's domain warning says why.
+        if (input.email && isKnownNoMailEmail(input.email)) {
+          rejectedRef.current = key;
           onSaveState("error");
           return false;
         }
@@ -544,6 +552,7 @@ export function PayerSection({
                   value={draft.email}
                   onChange={(event) => set("email", event.target.value)}
                 />
+                {errorFor("payer_email") ? null : <EmailDomainWarning email={draft.email} lang={lang} />}
               </LabeledField>
               <LabeledField {...field("payer_phone", !organisation && contactRequired("payer_phone"))}>
                 <Input

@@ -43,6 +43,10 @@ const ERRORS: Record<string, [ru: string, de: string]> = {
     "Лимит писем Mittaro исчерпан. Повторите позже.",
     "Das E-Mail-Kontingent bei Mittaro ist ausgeschöpft. Bitte später erneut versuchen.",
   ],
+  mail_recipient_domain_no_mail: [
+    "Домен адреса получателя не принимает почту. Проверьте адрес.",
+    "Die Domain der Empfängeradresse empfängt keine E-Mails. Bitte Adresse prüfen.",
+  ],
   mail_unavailable: [
     "Mittaro временно недоступен. Повторите попытку.",
     "Mittaro ist vorübergehend nicht erreichbar. Bitte erneut versuchen.",

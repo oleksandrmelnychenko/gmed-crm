@@ -3,6 +3,7 @@ import { KeyRound, LoaderCircle, Mail } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
+import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { StatusChip } from "@/components/ui/status-chip";
 import {
   Dialog,
@@ -248,6 +249,7 @@ export function PatientPortalAccessDetail({
           <>
             <PortalFact label={de ? "Login" : "Логин"}>
               <span className="break-all">{loginEmail ?? "—"}</span>
+              <EmailDomainWarning email={loginEmail} lang={lang} className="mt-1" />
             </PortalFact>
             <PortalFact label={de ? "Letzte Anmeldung" : "Последний вход"}>
               {account?.last_login_at ? formatAppDateTime(account.last_login_at) : de ? "noch nie" : "ещё не было"}
@@ -266,6 +268,9 @@ export function PatientPortalAccessDetail({
               ? "Ohne E-Mail-Adresse kann kein Zugang angelegt werden."
               : "Без электронной почты доступ создать нельзя."}
         </p>
+      ) : null}
+      {status === "none" && !minor ? (
+        <EmailDomainWarning email={patient.email} lang={lang} />
       ) : null}
       {error ? <p className="text-rose-700">{error}</p> : null}
 

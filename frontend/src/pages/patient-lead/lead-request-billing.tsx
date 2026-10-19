@@ -12,7 +12,9 @@ import {
 } from "@/components/record-workspace/primitives/design-tokens";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
+import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 
 import {
@@ -90,10 +92,14 @@ const OWN_ROUTE_SET_ASIDE = new Map<string, { routeBy: PaymentRouteBy; route: Pa
  * the request is loaded afresh. Another save — "who pays" — may change the
  * sections on the server: the draft takes those fields over.
  */
+// The client-side refusal of an address whose domain receives no mail.
+const EMAIL_DOMAIN_NO_MAIL = "email_domain_no_mail";
+
 function useBillingForm({
   request,
   billing,
   text,
+  lang,
   enqueue,
   onChange,
   onSaveState,
@@ -101,6 +107,7 @@ function useBillingForm({
   request: LeadRequest;
   billing: LeadRequestBilling;
   text: LeadRequestText;
+  lang: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
@@ -173,6 +180,12 @@ function useBillingForm({
             codes.invoice_email = "email_invalid";
             continue;
           }
+          // So is one whose domain is known to receive no mail (the server refuses it too).
+          if (typeof typedEmail === "string" && isKnownNoMailEmail(typedEmail) && rejected.invoice_email === undefined) {
+            rejected = withRejectedBilling(rejected, "invoice_email", snapshot) ?? rejected;
+            codes.invoice_email = EMAIL_DOMAIN_NO_MAIL;
+            continue;
+          }
           onSaveState("saving");
           try {
             const baseline = savedRef.current;
@@ -236,6 +249,7 @@ function useBillingForm({
       // The message belongs to the refused value: it goes as soon as the patient changes it.
       const value = refused.values[field];
       if (value === undefined || value !== billingValue(field, draft)) return undefined;
+      if (refused.codes[field] === EMAIL_DOMAIN_NO_MAIL) return emailDomainWarningText(draft.invoice_email, lang);
       return refused.codes[field] === "email_invalid" ? text.invalidEmail : text.invalidField;
     },
   };
@@ -275,7 +289,7 @@ export function BillingSections({
   bare?: boolean;
 }) {
   const guardian = request.access_kind === "guardian";
-  const form = useBillingForm({ request, billing, text, enqueue, onChange, onSaveState });
+  const form = useBillingForm({ request, billing, text, lang, enqueue, onChange, onSaveState });
   const { draft, context } = form;
   // The name of the person who pays is offered as account holder once, while the field is empty.
   const offeredRef = useRef(false);
@@ -416,6 +430,7 @@ export function BillingSections({
           {asks("invoice_email") ? (
             <LabeledField {...labeled("invoice_email", "sm:max-w-[calc(50%-0.5rem)]")}>
               {textInput("invoice_email", 254, "email", "lead-request-invoice_email-hint")}
+              {form.errorFor("invoice_email") ? null : <EmailDomainWarning email={draft.invoice_email} lang={lang} />}
               <p id="lead-request-invoice_email-hint" className="text-xs leading-5 text-muted-foreground">
                 {text.invoiceEmailHint}
               </p>

@@ -146,6 +146,8 @@ import { formatMoneyLabel, formatMoneyRange, moneyLineAmounts, roundCents, sameC
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { appDateKey, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput, parseDateKey } from "@/lib/app-time-zone";
 import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
+import { EmailDomainWarning, emailDomainWarningText, knownNoMailEmailError } from "@/components/email-domain-warning";
+import { useEmailDomainStatus } from "@/lib/email-domain-check";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
@@ -2682,6 +2684,8 @@ function validateMasterDraft(
   draft: Draft | null,
   tx: Tx,
   repeatIntake: boolean,
+  // The server found in DNS that the e-mail domain receives no mail.
+  emailNoMail = false,
 ): MasterValidationErrors {
   if (!draft) return {};
 
@@ -2744,6 +2748,8 @@ function validateMasterDraft(
         "Введите корректный адрес электронной почты",
         "Gültige E-Mail-Adresse eingeben",
       );
+    } else if (email && emailNoMail) {
+      errors.email = emailDomainWarningText(email, tx("ru", "de"));
     }
     if (phone && !isValidPhoneNumber(phone)) {
       errors.phone = tx(
@@ -4577,9 +4583,10 @@ export function LeadWizard({
       </div>
     );
   };
+  const masterEmailNoMail = useEmailDomainStatus(draft?.email ?? "") === "no_mail";
   const strictMasterErrors = useMemo(
-    () => validateMasterDraft(draft, tx, isRepeatIntake),
-    [draft, isRepeatIntake, tx],
+    () => validateMasterDraft(draft, tx, isRepeatIntake, masterEmailNoMail),
+    [draft, isRepeatIntake, masterEmailNoMail, tx],
   );
   // "The patient fills it in": only names and e-mail are needed for the lead.
   const masterErrors = useMemo(
@@ -5441,6 +5448,11 @@ export function LeadWizard({
     }
     if (trustedContactEditor.email.trim() && !isValidEmailAddress(trustedContactEditor.email)) {
       setTrustedContactEmailError(tx("Введите корректный адрес электронной почты", "Gültige E-Mail-Adresse eingeben"));
+      return;
+    }
+    const trustedContactNoMail = knownNoMailEmailError(trustedContactEditor.email, lang);
+    if (trustedContactNoMail) {
+      setTrustedContactEmailError(trustedContactNoMail);
       return;
     }
 
@@ -7655,6 +7667,7 @@ ${serviceCommentLines.join("\n")}`
                     onBlur={() => touchMasterField("email")}
                     onChange={(event) => patch("email", event.target.value)}
                   />
+                  {visibleMasterError("email") ? null : <EmailDomainWarning email={draft.email} lang={lang} />}
                   {!isRepeatIntake && minorEmailOptional(draft) ? (
                     // Read as the field's description, not as part of its name.
                     <span
@@ -10504,6 +10517,7 @@ ${serviceCommentLines.join("\n")}`
                       aria-describedby={trustedContactEmailError ? "trusted-contact-email-error" : undefined}
                       onChange={(event) => patchTrustedContactEditor("email", event.target.value)}
                     />
+                    {trustedContactEmailError ? null : <EmailDomainWarning email={trustedContactEditor.email} lang={lang} />}
                   </Field>
                   <Field label={tx("Телефон", "Telefon")}>
                     <Input

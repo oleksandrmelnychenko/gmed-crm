@@ -1,4 +1,5 @@
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import type {
   DoctorFormState,
   DoctorSummary,
@@ -1693,6 +1694,11 @@ export function applyStaffFieldChange(
 /** Whether every e-mail contact is name@domain.tld; the server refuses the rest (422). Empty rows are dropped anyway. */
 export function contactEmailsValid(contacts: readonly { contact_kind: "phone" | "email"; value: string }[]) {
   return contacts.every((contact) => contact.contact_kind !== "email" || !contact.value.trim() || isValidEmailAddress(contact.value));
+}
+
+/** The first e-mail contact whose domain is already known to receive no mail (the server refuses it, 422). */
+export function firstNoMailContactEmail(contacts: readonly { contact_kind: "phone" | "email"; value: string }[]) {
+  return contacts.find((contact) => contact.contact_kind === "email" && isKnownNoMailEmail(contact.value))?.value ?? null;
 }
 
 export function toProviderPayload(form: ProviderFormState, forceNonMedical: boolean) {

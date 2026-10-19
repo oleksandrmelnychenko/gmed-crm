@@ -15,7 +15,9 @@ import {
 } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
 import { ApiRequestError } from "@/lib/api";
+import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { cn } from "@/lib/utils";
 
 import { saveLeadInvoiceRecipient, type LeadRequest } from "./lead-request-api";
@@ -157,7 +159,8 @@ export function InvoiceRecipientSection({
           if (Object.keys(patch).length === 0) break;
           // An address the server would refuse is set aside here, like a refusal of the server.
           const typedEmail = (patch as Record<string, unknown>).recipient_email;
-          if (typeof typedEmail === "string" && typedEmail.trim() && !isValidEmailAddress(typedEmail) && rejected.email === undefined) {
+          // So is one whose domain is known to receive no mail.
+          if (typeof typedEmail === "string" && typedEmail.trim() && (!isValidEmailAddress(typedEmail) || isKnownNoMailEmail(typedEmail)) && rejected.email === undefined) {
             rejected.email = recipientValue("email", snapshot);
             continue;
           }
@@ -216,7 +219,9 @@ export function InvoiceRecipientSection({
   const set = (field: RecipientField, value: string) => update((current) => ({ ...current, [field]: value }));
   const errorFor = (field: keyof RecipientDraft) =>
     refused[field] !== undefined && refused[field] === recipientValue(field, draft)
-      ? (field === "email" ? text.invalidEmail : text.invalidField)
+      ? (field === "email"
+        ? (isKnownNoMailEmail(draft.email) ? emailDomainWarningText(draft.email, lang) : text.invalidEmail)
+        : text.invalidField)
       : undefined;
   const control = (field: keyof RecipientDraft) => ({
     id: `lead-request-recipient_${field}`,
@@ -409,7 +414,10 @@ export function InvoiceRecipientSection({
                       onChange={(code) => set("country", code ?? "")}
                     />
                   </LabeledField>
-                  <LabeledField {...labeled("email", emailRequired)}>{textInput("email", 254, "email")}</LabeledField>
+                  <LabeledField {...labeled("email", emailRequired)}>
+                    {textInput("email", 254, "email")}
+                    {errorFor("email") ? null : <EmailDomainWarning email={draft.email} lang={lang} />}
+                  </LabeledField>
                   <LabeledField {...labeled("phone", phoneRequired)}>{textInput("phone", 40, "tel")}</LabeledField>
                   {organisation ? (
                     // An organisation that pays states the reason as the payer's (`payment_background`).
@@ -443,6 +451,7 @@ export function InvoiceRecipientSection({
               className="sm:max-w-[calc(50%-0.5rem)]"
             >
               {textInput("email", 254, "email")}
+              {errorFor("email") ? null : <EmailDomainWarning email={draft.email} lang={lang} />}
               <p className="text-xs leading-5 text-muted-foreground">{text.invoiceEmailHint}</p>
             </LabeledField>
           ) : null}

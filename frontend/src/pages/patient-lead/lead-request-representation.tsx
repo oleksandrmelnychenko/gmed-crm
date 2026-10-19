@@ -12,7 +12,9 @@ import { inputClass, selectClass, tokens } from "@/components/record-workspace/p
 import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
+import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 
 import {
   INQUIRY_CONSENT,
@@ -148,6 +150,9 @@ function adultBirthDateLimit(): string {
   return `${Number(today.slice(0, 4)) - 18}-${monthDay}`;
 }
 
+// The client-side refusal of an address whose domain receives no mail.
+const EMAIL_DOMAIN_NO_MAIL = "email_domain_no_mail";
+
 function refusalText(text: LeadRequestText, code: string | undefined): string {
   switch (code) {
     case "id_document_expired":
@@ -181,6 +186,7 @@ function useRepresentativeForm({
   slot,
   person,
   text,
+  lang,
   enqueue,
   onChange,
   onSaveState,
@@ -190,6 +196,7 @@ function useRepresentativeForm({
   slot: RepresentativeSlot;
   person: LeadRequestRepresentative | null;
   text: LeadRequestText;
+  lang: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
@@ -244,6 +251,12 @@ function useRepresentativeForm({
           if (typeof patch.email === "string" && patch.email.trim() && !isValidEmailAddress(patch.email)) {
             rejected = withRejectedRepresentative(rejected, "email", snapshot);
             codes.email = "email_invalid";
+            continue;
+          }
+          // So is one whose domain is known to receive no mail (the server refuses it too).
+          if (typeof patch.email === "string" && isKnownNoMailEmail(patch.email)) {
+            rejected = withRejectedRepresentative(rejected, "email", snapshot);
+            codes.email = EMAIL_DOMAIN_NO_MAIL;
             continue;
           }
           onSaveState("saving");
@@ -311,6 +324,7 @@ function useRepresentativeForm({
       if (value !== undefined && value === representativeValue(field, draft)) {
         // A representative born after the adult limit: say why, not only "check this field".
         if (field === "date_of_birth" && draft.date_of_birth && draft.date_of_birth > adultBirthDateLimit()) return text.representativeMinor;
+        if (refused.codes[field] === EMAIL_DOMAIN_NO_MAIL) return emailDomainWarningText(draft.email, lang);
         return refusalText(text, refused.codes[field]);
       }
       // Nothing about a person is saved before the last name is there: said once "next" (or
@@ -512,7 +526,7 @@ function RepresentativeBlock({
     [onPartState, slot],
   );
 
-  const form = useRepresentativeForm({ request, slot, person, text, enqueue, onChange, onSaveState, isShown });
+  const form = useRepresentativeForm({ request, slot, person, text, lang, enqueue, onChange, onSaveState, isShown });
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
   const entries = hasRepresentativeEntries(form.draft);
@@ -702,6 +716,7 @@ function RepresentativeBlock({
               value={form.draft.email}
               onChange={(event) => form.set("email", event.target.value)}
             />
+            {form.errorFor("email") ? null : <EmailDomainWarning email={form.draft.email} lang={lang} enabled={!locked} />}
           </LabeledField>
         ) : null}
         {asked("phone") ? <LabeledField {...labeled("phone")}>{textInput("phone", 50, "tel")}</LabeledField> : null}

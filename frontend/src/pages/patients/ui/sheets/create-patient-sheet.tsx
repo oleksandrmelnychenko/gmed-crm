@@ -9,6 +9,8 @@ import { LoaderCircle, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Banner } from "@/components/ui-shell";
+import { emailDomainWarningText } from "@/components/email-domain-warning";
+import { useLang } from "@/lib/i18n";
 
 import { createPatient } from "../../data/patient-mutations";
 import {
@@ -47,8 +49,10 @@ type CreatePatientSheetState = {
 
 function newPatientValidationMessages(
   dictionary: PatientsDictionary,
+  lang: string,
 ): NewPatientValidationMessages {
   return {
+    noMailEmail: (email) => emailDomainWarningText(email, lang),
     required: dictionary.patient_profile_editor_required_field,
     invalidEmail: dictionary.patient_profile_editor_invalid_email,
     invalidPhone: dictionary.patient_profile_editor_invalid_phone,
@@ -59,13 +63,13 @@ function newPatientValidationMessages(
 }
 
 /** The checks of the form as the patient would be saved. */
-function newPatientFieldErrors(form: PatientFormState, dictionary: PatientsDictionary) {
+function newPatientFieldErrors(form: PatientFormState, dictionary: PatientsDictionary, lang: string) {
   const age = computeAge(form.birthDate);
   const isMinor = age !== null && age < 18;
   return validateNewPatientForm(
     { ...form, trustedContacts: withMinorGuardianRelations(form.trustedContacts, isMinor) },
     isMinor,
-    newPatientValidationMessages(dictionary),
+    newPatientValidationMessages(dictionary, lang),
   );
 }
 
@@ -89,6 +93,7 @@ function CreatePatientSheet({
   onOpenChange,
   onCreated,
 }: CreatePatientSheetProps) {
+  const { lang } = useLang();
   const [sheetState, dispatchSheetState] = useReducer(
     createPatientSheetReducer,
     undefined,
@@ -100,7 +105,7 @@ function CreatePatientSheet({
     }),
   );
   const { form, busy, error, validationAttempted } = sheetState;
-  const fieldErrors = validationAttempted ? newPatientFieldErrors(form, dictionary) : undefined;
+  const fieldErrors = validationAttempted ? newPatientFieldErrors(form, dictionary, lang) : undefined;
   const setForm = (nextValue: SetStateAction<PatientFormState>) => {
     dispatchSheetState((current) => ({
       form:
@@ -127,7 +132,7 @@ function CreatePatientSheet({
     // The app's own checks and messages (the form has `noValidate`): the
     // browser's bubble spoke the browser's language, not the app's.
     const formElement = event.currentTarget;
-    if (Object.keys(newPatientFieldErrors(form, dictionary)).length > 0) {
+    if (Object.keys(newPatientFieldErrors(form, dictionary, lang)).length > 0) {
       dispatchSheetState({
         validationAttempted: true,
         error: dictionary.patient_profile_editor_check_fields,

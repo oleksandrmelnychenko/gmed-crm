@@ -19,6 +19,7 @@ import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { languageLabel } from "@/components/ui/language-multi-select";
 import { apiFetch } from "@/lib/api";
+import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { useLang, type Translations, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { cachedNumberFormat } from "@/lib/intl-cache";
@@ -803,6 +804,12 @@ function usePatientProfileTabContent({
                     contact.key === "phone_secondary" ? "contacts" : contact.key === "phone_primary" ? "phone" : contact.key,
                     fieldValue(contact.value, t.common_not_set),
                   )}</span>
+                  <EmailDomainWarning
+                    email={contact.value}
+                    lang={lang}
+                    enabled={contact.isEmail && !isHidden(contact.key)}
+                    className="text-right text-[11px] leading-4"
+                  />
                   {contact.note ? (
                     <span className="break-words text-[11px] font-normal leading-4 text-muted-foreground">
                       {contact.note}
@@ -1500,6 +1507,7 @@ function patientProfileContactRows(
         key: contact.id ?? `${contact.contact_kind}-${index}-${contact.value}`,
         label: `${kindLabel} · ${typeLabel}${primaryLabel}`,
         value: contact.value,
+        isEmail: !isWhatsApp && contact.contact_kind === "email",
         note: [consentLabel, ...retainedNotes].filter(Boolean).join(" · ") || null,
       };
     });
@@ -1510,18 +1518,21 @@ function patientProfileContactRows(
       key: "phone_primary",
       label: t.patients_phone_primary,
       value: detail.phone_primary,
+      isEmail: false,
       note: null,
     },
     {
       key: "phone_secondary",
       label: t.patients_phone_secondary,
       value: detail.phone_secondary,
+      isEmail: false,
       note: null,
     },
     {
       key: "email",
       label: t.patients_email,
       value: detail.email,
+      isEmail: true,
       note: null,
     },
   ];

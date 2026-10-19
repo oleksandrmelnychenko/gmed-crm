@@ -88,6 +88,8 @@ pub enum MailError {
     InvalidResponse,
     #[error("the provider does not know this message")]
     NotFound,
+    #[error("the domain of the recipient address accepts no mail")]
+    RecipientDomainNoMail,
 }
 
 impl MailError {
@@ -99,6 +101,7 @@ impl MailError {
             Self::QuotaReached => "mail_quota_reached",
             Self::Unavailable(_) | Self::Request | Self::InvalidResponse => "mail_unavailable",
             Self::NotFound => "mail_message_not_found",
+            Self::RecipientDomainNoMail => "mail_recipient_domain_no_mail",
         }
     }
 }
@@ -143,6 +146,7 @@ pub fn error_response(error: &MailError) -> axum::response::Response {
     let status = match error {
         MailError::NotConfigured => StatusCode::SERVICE_UNAVAILABLE,
         MailError::QuotaReached => StatusCode::TOO_MANY_REQUESTS,
+        MailError::RecipientDomainNoMail => StatusCode::UNPROCESSABLE_ENTITY,
         MailError::Unavailable(_) | MailError::Request | MailError::InvalidResponse => {
             StatusCode::SERVICE_UNAVAILABLE
         }
@@ -327,6 +331,11 @@ impl Mailer {
         else {
             return Err(MailError::NotConfigured);
         };
+        if crate::email_domain::check_email(&email.to).await
+            == crate::email_domain::DomainStatus::NoMail
+        {
+            return Err(MailError::RecipientDomainNoMail);
+        }
         let mut body = json!({
             "from": from,
             "to": email.to,

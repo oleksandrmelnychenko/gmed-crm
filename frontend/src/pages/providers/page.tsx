@@ -50,6 +50,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
+import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
 import { LanguageMultiSelect, languageLabel } from "@/components/ui/language-multi-select";
 import { StatusActionPill } from "@/components/status-action-pill";
 import {
@@ -141,6 +142,7 @@ import {
   taxonomyAttributeValue,
   taxonomyAttributeValueOptions,
   contactEmailsValid,
+  firstNoMailContactEmail,
   toDoctorPayload,
   toProviderPayload,
   toServicePayload,
@@ -2776,6 +2778,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       setCreateError(t.login_error_email_invalid);
       return;
     }
+    const createNoMail = firstNoMailContactEmail(payload.contacts);
+    if (createNoMail) {
+      setCreateError(emailDomainWarningText(createNoMail, lang));
+      return;
+    }
     setCreateBusy(true);
     setCreateError("");
 
@@ -2797,6 +2804,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     const payload = toProviderPayload(providerForm, permissions.forceNonMedical);
     if (!contactEmailsValid(payload.contacts)) {
       setProviderError(t.login_error_email_invalid);
+      return;
+    }
+    const providerNoMail = firstNoMailContactEmail(payload.contacts);
+    if (providerNoMail) {
+      setProviderError(emailDomainWarningText(providerNoMail, lang));
       return;
     }
 
@@ -2899,6 +2911,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     }
     if (!contactEmailsValid(payload.contacts)) {
       setDoctorError(t.login_error_email_invalid);
+      return;
+    }
+    const doctorNoMail = firstNoMailContactEmail(payload.contacts);
+    if (doctorNoMail) {
+      setDoctorError(emailDomainWarningText(doctorNoMail, lang));
       return;
     }
     setDoctorBusy(true);
@@ -3207,6 +3224,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     const staffPayload = toStaffPayload(staffForm);
     if (!contactEmailsValid(staffPayload.contacts)) {
       setStaffError(t.login_error_email_invalid);
+      return;
+    }
+    const staffNoMail = firstNoMailContactEmail(staffPayload.contacts);
+    if (staffNoMail) {
+      setStaffError(emailDomainWarningText(staffNoMail, lang));
       return;
     }
 
@@ -8924,6 +8946,7 @@ function ProviderContactFields({
                   className={shellInputClassName}
                   disabled={disabled}
                 />
+                <EmailDomainWarning email={contact.value} enabled={contact.contactKind === "email"} />
               </Field>
               <Field label={l("providers_contact_label")}>
                 <Input
@@ -9466,6 +9489,7 @@ function PersonContactFields({
                   onChange={(event) => onUpdate(contact.id, { value: event.target.value })}
                   className={shellInputClassName}
                 />
+                <EmailDomainWarning email={contact.value} enabled={contact.contactKind === "email"} />
               </Field>
             </div>
           </div>

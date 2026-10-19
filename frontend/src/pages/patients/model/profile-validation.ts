@@ -1,4 +1,5 @@
 import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
+import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 
 import type {
   PatientContactFormState,
@@ -11,7 +12,13 @@ export type PatientProfileValidationMessages = {
   required: string;
   invalidEmail: string;
   invalidPhone: string;
+  /** The message for an address whose domain is already known to receive no mail (no check without it). */
+  noMailEmail?: (email: string) => string;
 };
+
+function noMailError(email: string, messages: PatientProfileValidationMessages): string | undefined {
+  return messages.noMailEmail && isKnownNoMailEmail(email) ? messages.noMailEmail(email) : undefined;
+}
 
 /** Field keys of the profile editor that can carry an error. */
 export const patientProfileFieldKey = {
@@ -51,6 +58,9 @@ export function validatePatientProfileForm(
     if (contact.contactKind === "email" ? !isValidEmailAddress(value) : !isValidPhoneNumber(value)) {
       errors[patientProfileFieldKey.contact(contact.id)] =
         contact.contactKind === "email" ? messages.invalidEmail : messages.invalidPhone;
+    } else if (contact.contactKind === "email") {
+      const noMail = noMailError(value, messages);
+      if (noMail) errors[patientProfileFieldKey.contact(contact.id)] = noMail;
     }
   }
 
@@ -64,6 +74,10 @@ export function validatePatientProfileForm(
     if (isMinor && !phone && !email) errors[patientProfileFieldKey.trustedPhone(contact.id)] = messages.required;
     if (phone && !isValidPhoneNumber(phone)) errors[patientProfileFieldKey.trustedPhone(contact.id)] = messages.invalidPhone;
     if (email && !isValidEmailAddress(email)) errors[patientProfileFieldKey.trustedEmail(contact.id)] = messages.invalidEmail;
+    else {
+      const noMail = email ? noMailError(email, messages) : undefined;
+      if (noMail) errors[patientProfileFieldKey.trustedEmail(contact.id)] = noMail;
+    }
   }
   return errors;
 }

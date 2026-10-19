@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { checkboxClass } from "@/components/ui-shell";
+import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -436,6 +437,7 @@ export function PatientFormFields({
                         disabled={readOnly}
                       />
                       <FieldErrorText fieldKey={newPatientFieldKey.trustedEmail(contact.id)} fieldErrors={fieldErrors} />
+                      <EmailDomainWarning email={contact.email} enabled={!fieldErrors.messages[newPatientFieldKey.trustedEmail(contact.id)]} />
                     </Field>
                     <Field label={t.patients_emergency_relation} required>
                       <NativeComboboxSelect
@@ -767,6 +769,7 @@ function PatientContactSection({
                     disabled={readOnly}
                   />
                   <FieldErrorText fieldKey={newPatientFieldKey.contact(contact.id)} fieldErrors={fieldErrors} />
+                  <EmailDomainWarning email={contact.value} enabled={contact.contactKind === "email" && !fieldErrors.messages[newPatientFieldKey.contact(contact.id)]} />
                 </Field>
               </div>
             </div>
@@ -822,6 +825,7 @@ function PatientContactSection({
               className={formInputClassName}
               disabled={readOnly}
             />
+            <EmailDomainWarning email={form.email} />
           </Field>
         </div>
       )}

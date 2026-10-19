@@ -20,6 +20,7 @@ import {
   inputClass,
   selectClass,
 } from "@/components/ui-shell";
+import { EmailDomainWarning, knownNoMailEmailError } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useLang } from "@/lib/i18n";
 
@@ -224,6 +225,11 @@ function PatientRelationEditorSheet({
       }
       if (form.email.trim() && !isValidEmailAddress(form.email)) {
         dispatchRelationState({ error: t.login_error_email_invalid });
+        return;
+      }
+      const relationNoMail = knownNoMailEmailError(form.email, lang);
+      if (relationNoMail) {
+        dispatchRelationState({ error: relationNoMail });
         return;
       }
 
@@ -468,6 +474,7 @@ function PatientRelationEditorSheet({
               }
               className={inputClass}
             />
+            <EmailDomainWarning email={form.email} lang={lang} />
           </FormField>
           <FormField label={tx("Улица и дом", "Straße und Hausnummer")} htmlFor="relation-street">
             <Input

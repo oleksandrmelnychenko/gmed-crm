@@ -1,5 +1,6 @@
 import { ApiRequestError, apiFetch, apiFetchFile } from "@/lib/api";
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 
 // `minor`: a minor patient who co-signs next to the legal representatives
 // (optional, from about 14 years and capable of understanding; never required).
@@ -159,7 +160,8 @@ export function validSigners(signers: Signer[]) {
       return name.length > 0 && encoder.encode(name).length <= 120
         && !Array.from(name).some(c => c.charCodeAt(0) < 32 || (c.charCodeAt(0) >= 127 && c.charCodeAt(0) <= 159));
     });
-    return namesValid && isValidEmailAddress(s.email)
+    // A domain already known to receive no mail is refused by the server (signer_email_domain_no_mail).
+    return namesValid && isValidEmailAddress(s.email) && !isKnownNoMailEmail(s.email)
       && ["client", "minor", "payer", "agency", "other"].includes(s.role);
   })
     && new Set(signers.map(s => s.email.trim().toLowerCase())).size === signers.length;
@@ -336,6 +338,8 @@ export function signatureErrorText(
       return tx("Этот пакет подписывают клиент, плательщик и представитель GMED.", "Dieses Paket unterschreiben Kunde, Kostenübernehmer und GMED-Vertretung.");
     case "payer_package_signers_required":
       return tx("Документы плательщика подписывают только плательщик и представитель GMED — без пациента и законных представителей.", "Die Unterlagen des Zahlers unterschreiben nur der Zahler und die GMED-Vertretung – ohne Patientenseite.");
+    case "signer_email_domain_no_mail":
+      return tx("Домен e-mail одного из подписантов не принимает почту. Проверьте адреса подписантов.", "Die Domain der E-Mail-Adresse einer unterzeichnenden Person empfängt keine E-Mails. Bitte die Adressen prüfen.");
     case "minor_needs_representative":
       return tx("Несовершеннолетний подписывает только вместе с законным представителем.", "Minderjährige unterschreiben nur zusammen mit der gesetzlichen Vertretung.");
     case "signature_already_pending":

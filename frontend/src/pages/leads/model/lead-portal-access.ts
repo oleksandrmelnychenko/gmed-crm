@@ -117,6 +117,10 @@ export function portalEmailOwnerHref(owner: PortalEmailOwner): string | null {
 }
 
 const LOGIN_EMAIL_ERRORS: Record<string, { ru: string; de: string }> = {
+  mail_recipient_domain_no_mail: {
+    ru: "Домен адреса получателя не принимает почту. Проверьте адрес",
+    de: "Die Domain der Empfängeradresse empfängt keine E-Mails. Bitte Adresse prüfen",
+  },
   mail_not_configured: {
     ru: "Отправка e-mail не настроена (Mittaro). Передайте доступ сообщением",
     de: "Der E-Mail-Versand ist nicht eingerichtet (Mittaro). Zugang bitte per Nachricht weitergeben",

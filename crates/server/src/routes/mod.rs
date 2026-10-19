@@ -24,6 +24,7 @@ pub(crate) mod debt_management;
 pub mod documents;
 pub mod drug_products;
 pub mod e2e_support;
+pub mod email_check;
 pub mod feedback;
 pub mod health;
 pub mod hotel_statistics;
@@ -96,6 +97,7 @@ pub fn protected_router() -> Router<AppState> {
     Router::new()
         .merge(me::router())
         .merge(account::router())
+        .merge(email_check::router())
         .merge(invoice_imports::router())
         .merge(auth::protected_router())
         .merge(totp::protected_router())

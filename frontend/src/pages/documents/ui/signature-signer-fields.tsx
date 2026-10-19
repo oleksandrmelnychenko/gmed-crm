@@ -3,6 +3,7 @@ import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { useLang } from "@/lib/i18n";
 import type { Signer, SignerPolicy, SignerRole } from "../data/document-signature-api";
@@ -41,7 +42,7 @@ export function SignatureSignerFields({ signer, index, disabled, agencyOnly, emb
       <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">{tx("Имя", "Vorname")}<Input className="h-9 bg-field font-normal text-foreground" maxLength={120} autoComplete="off" value={signer.first_name} onChange={e => onChange({ first_name: e.target.value })} /></label>
       <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">{tx("Фамилия", "Nachname")}<Input className="h-9 bg-field font-normal text-foreground" maxLength={120} autoComplete="off" value={signer.last_name} onChange={e => onChange({ last_name: e.target.value })} /></label>
     </div>
-    <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">E-Mail<Input className="h-9 bg-field font-normal text-foreground" type="email" maxLength={254} autoComplete="off" value={signer.email} aria-invalid={emailInvalid || undefined} onBlur={() => setEmailTouched(true)} onChange={e => onChange({ email: e.target.value })} />{emailInvalid ? <span role="alert" className="font-normal text-destructive">{tx("Электронная почта указана неверно. Пример: name@example.de.", "Die E-Mail-Adresse ist ungültig. Beispiel: name@example.de.")}</span> : null}</label>
+    <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">E-Mail<Input className="h-9 bg-field font-normal text-foreground" type="email" maxLength={254} autoComplete="off" value={signer.email} aria-invalid={emailInvalid || undefined} onBlur={() => setEmailTouched(true)} onChange={e => onChange({ email: e.target.value })} />{emailInvalid ? <span role="alert" className="font-normal text-destructive">{tx("Электронная почта указана неверно. Пример: name@example.de.", "Die E-Mail-Adresse ist ungültig. Beispiel: name@example.de.")}</span> : null}<EmailDomainWarning email={signer.email} lang={lang} enabled={!emailInvalid} /></label>
     {!agencyOnly && roles.length > 1 ? <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">{tx("Роль", "Rolle")}<NativeComboboxSelect className="h-9 bg-field text-sm font-normal text-foreground" value={signer.role} onChange={e => onChange({ role: e.target.value as SignerRole })}>
       {roles.map(role => <option key={role} value={role}>{labels[role]}</option>)}
     </NativeComboboxSelect></label> : null}

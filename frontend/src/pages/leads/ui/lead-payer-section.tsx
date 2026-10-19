@@ -28,6 +28,8 @@ import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { ApiRequestError } from "@/lib/api";
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { isKnownNoMailEmail } from "@/lib/email-domain-check";
+import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { useAuth } from "@/lib/auth";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
@@ -78,9 +80,13 @@ import {
 
 const MAX_EVIDENCE_FILE_SIZE = 25 * 1024 * 1024;
 
-/** A typed third-party e-mail the server would reject: kept in the form, never autosaved. */
-const payerEmailInvalid = (form: PayerDeclarationForm) =>
+/** A typed third-party e-mail that is not name@domain.tld. */
+const payerEmailFormatInvalid = (form: PayerDeclarationForm) =>
   form.kind === "third_party" && Boolean(form.email.trim()) && !isValidEmailAddress(form.email);
+
+/** A typed third-party e-mail the server would reject (format, or a domain known to receive no mail): kept in the form, never autosaved. */
+const payerEmailInvalid = (form: PayerDeclarationForm) =>
+  payerEmailFormatInvalid(form) || (form.kind === "third_party" && isKnownNoMailEmail(form.email));
 
 function PayerField({
   label,
@@ -305,7 +311,7 @@ export function LeadPayerDeclarationSection({
   const organisation = isOrganisationPayerForm(form);
   const relationshipTextShown = payerRelationshipTextShown(form, data?.declaration);
   const missing = payerFormMissing(form);
-  const emailInvalid = payerEmailInvalid(form);
+  const emailInvalid = payerEmailFormatInvalid(form);
   const statusBadge = payerStatusBadge(data?.status, tx);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
   const contactConsentAt = data?.declaration?.contact_consent_at ?? null;
@@ -763,6 +769,7 @@ export function LeadPayerDeclarationSection({
                     {tx("Электронная почта указана неверно, изменения не сохраняются. Пример: name@example.de.", "Die E-Mail-Adresse ist ungültig, Änderungen werden nicht gespeichert. Beispiel: name@example.de.")}
                   </span>
                 ) : null}
+                <EmailDomainWarning email={form.email} lang={lang} enabled={form.kind === "third_party" && !emailInvalid} />
               </PayerField>
               <PayerField label={tx("Телефон", "Telefon")}>
                 <Input className={inputClass} type="tel" value={form.phone} disabled={readOnly} onChange={(event) => patch("phone", event.target.value)} />

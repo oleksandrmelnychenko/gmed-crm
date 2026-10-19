@@ -46,6 +46,7 @@ import {
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import { EmailDomainWarning, knownNoMailEmailError } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { appDateKey, appDateKeyOf } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
@@ -1052,6 +1053,11 @@ function usePatientInvoicesTabContent({
       setPortalAccountError(
         lang === "de" ? "Bitte geben Sie eine gültige E-Mail-Adresse ein." : "Укажите корректный email.",
       );
+      return;
+    }
+    const portalEmailNoMail = knownNoMailEmailError(portalAccountForm.email, lang);
+    if (portalEmailNoMail) {
+      setPortalAccountError(portalEmailNoMail);
       return;
     }
     if (portalAccountForm.password !== portalAccountForm.passwordConfirm) {
@@ -2978,6 +2984,7 @@ function usePatientInvoicesTabContent({
                     disabled={portalAccountBusy}
                     required
                   />
+                  <EmailDomainWarning email={portalAccountForm.email} lang={lang} />
                 </Field>
                 <Field
                   label={

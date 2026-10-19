@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { EmailDomainWarning } from "@/components/email-domain-warning";
+import { useEmailDomainStatus } from "@/lib/email-domain-check";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
@@ -116,6 +118,8 @@ export function OrderGroupPanel({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [searching, setSearching] = useState(false);
   const [payer, setPayer] = useState<OrderPayerForm>(EMPTY_ORDER_PAYER);
+  // The server refuses an address whose domain receives no mail (DNS, checked by the server).
+  const payerEmailNoMail = useEmailDomainStatus(payer.email) === "no_mail";
   const [relationChoices, setRelationChoices] = useState<PayerRelationChoice[]>([]);
   const updatePayer = (patch: Partial<OrderPayerForm>) =>
     setPayer((current) => ({ ...current, ...patch }));
@@ -531,11 +535,12 @@ export function OrderGroupPanel({
                 {tx("Проверьте e-mail плательщика", "E-Mail-Adresse des Zahlers prüfen")}
               </p>
             ) : null}
+            <EmailDomainWarning email={payer.email} lang={lang} className="mt-1" />
             <Button
               type="button"
               size="sm"
               className="mt-2 rounded-lg"
-              disabled={busy || !isPlausiblePayerEmail(payer.email)}
+              disabled={busy || !isPlausiblePayerEmail(payer.email) || payerEmailNoMail}
               onClick={() =>
                 void run(
                   () => setOrderPayer(group.head.id, orderPayerPayload(payer)),

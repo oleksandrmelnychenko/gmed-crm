@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Check, Copy, FileText, KeyRound, LoaderCircle, Mail, ShieldCheck, UserRound, UsersRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { StatusChip } from "@/components/ui/status-chip";
 import {
@@ -362,6 +363,7 @@ export function LeadPortalAccessDetail({
         <dl className="grid grid-cols-2 gap-2 @[40rem]:grid-cols-4 @[80rem]:grid-cols-[minmax(220px,2fr)_repeat(6,minmax(0,1fr))] [&>div]:rounded-lg [&>div]:border [&>div]:border-border [&>div]:bg-card [&>div]:p-3">
           <PortalFact label={de ? "Login" : "Логин"} className="col-span-2 @[80rem]:col-span-1">
             <span className="break-all">{lead.email ?? "—"}</span>
+            <EmailDomainWarning email={lead.email} lang={lang} className="mt-1" />
           </PortalFact>
           <PortalFact label={de ? "Letzte Anmeldung" : "Последний вход"}>
             {lastLogin ? formatAppDateTime(lastLogin) : de ? "noch nie" : "ещё не было"}
@@ -402,6 +404,8 @@ export function LeadPortalAccessDetail({
               ? "Ohne E-Mail-Adresse kann kein Zugang angelegt werden."
               : "Без электронной почты доступ создать нельзя."}
         </p>
+      ) : minor !== true && status === "none" ? (
+        <EmailDomainWarning email={lead.email} lang={lang} />
       ) : null}
       {ownLoginClosed && status !== "none" ? (
         <p className="leading-6 text-slate-700 dark:text-slate-300" data-testid="lead-portal-own-login-closed">

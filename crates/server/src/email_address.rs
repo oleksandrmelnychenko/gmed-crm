@@ -12,9 +12,17 @@ const MAX_LENGTH: usize = 254;
 const MAX_LOCAL_LENGTH: usize = 64;
 const MAX_LABEL_LENGTH: usize = 63;
 
-/// Whether `value` (surrounding whitespace ignored) is a deliverable-looking
-/// e-mail address.
+/// Whether `value` (surrounding whitespace ignored) is a well-formed e-mail
+/// address whose domain is not known to refuse mail (`crate::email_domain`;
+/// an unchecked domain is looked up in the background and passes).
 pub fn is_valid_email(value: &str) -> bool {
+    has_valid_format(value)
+        && crate::email_domain::domain_of(value)
+            .is_none_or(|domain| !crate::email_domain::known_no_mail(&domain))
+}
+
+/// Whether `value` is a well-formed e-mail address; no DNS involved.
+pub fn has_valid_format(value: &str) -> bool {
     let value = value.trim();
     if value.len() > MAX_LENGTH {
         return false;

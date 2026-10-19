@@ -382,6 +382,16 @@ pub(super) async fn create_request(
         .validate(&signers)
         .map_err(|code| error(StatusCode::UNPROCESSABLE_ENTITY, code))?;
     validate_minor_clients(state, &rows[0], &signers).await?;
+    for signer in &signers {
+        if crate::email_domain::check_email(&signer.email).await
+            == crate::email_domain::DomainStatus::NoMail
+        {
+            return Err(error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "signer_email_domain_no_mail",
+            ));
+        }
+    }
     // The consent form declares the choice of the person who made it in the
     // cabinet (for a minor the parent or guardian, QA 2026-10-12 A2-06): that
     // person signs it.

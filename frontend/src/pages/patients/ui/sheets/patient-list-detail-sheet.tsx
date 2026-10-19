@@ -1,4 +1,6 @@
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { emailDomainWarningText } from "@/components/email-domain-warning";
+import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { hasFormChanges } from "@/lib/form-changes";
 import {
   memo,
@@ -363,6 +365,7 @@ function PatientDetailSheet({
   onOpenContracts,
   onOpenDocuments,
 }: PatientDetailSheetProps) {
+  const { lang } = useLang();
   const {
     canCreateEdit,
     canViewAssignments,
@@ -480,6 +483,8 @@ function PatientDetailSheet({
       if (typedEmails.some((value) => !isValidEmailAddress(value))) {
         throw new Error(dictionary.patient_profile_editor_invalid_email || dictionary.login_error_email_invalid);
       }
+      const noMailEmail = typedEmails.find((value) => isKnownNoMailEmail(value));
+      if (noMailEmail) throw new Error(emailDomainWarningText(noMailEmail, lang));
       const primaryTrustedContact = trustedContacts[0];
       await updatePatient(detail.id, {
         title: toOptional(form.title),

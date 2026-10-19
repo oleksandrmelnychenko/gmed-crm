@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
 import { toast } from "@/components/ui/toast";
 import {
   Field as FormField,
@@ -232,6 +233,7 @@ function patientProfileFieldErrors(
   form: PatientEditFormState,
   trustedContacts: PatientTrustedContactFormState[],
   dictionary: Record<string, string>,
+  lang: string,
 ) {
   const age = computeAge(form.birthDate);
   return validatePatientProfileForm(
@@ -243,6 +245,7 @@ function patientProfileFieldErrors(
       required: dictionary.patient_profile_editor_required_field,
       invalidEmail: dictionary.patient_profile_editor_invalid_email,
       invalidPhone: dictionary.patient_profile_editor_invalid_phone,
+      noMailEmail: (email) => emailDomainWarningText(email, lang),
     },
   );
 }
@@ -605,6 +608,11 @@ function PatientProfileEditorFormSections({
                             fieldKey={patientProfileFieldKey.contact(contact.id)}
                             message={fieldErrors[patientProfileFieldKey.contact(contact.id)]}
                           />
+                          <EmailDomainWarning
+                            email={contact.value}
+                            lang={lang}
+                            enabled={contact.contactKind === "email" && !fieldErrors[patientProfileFieldKey.contact(contact.id)]}
+                          />
                         </FormField>
                       </div>
                     </div>
@@ -841,6 +849,11 @@ function PatientProfileEditorFormSections({
                             <ProfileFieldError
                               fieldKey={patientProfileFieldKey.trustedEmail(contact.id)}
                               message={fieldErrors[patientProfileFieldKey.trustedEmail(contact.id)]}
+                            />
+                            <EmailDomainWarning
+                              email={contact.email}
+                              lang={lang}
+                              enabled={!fieldErrors[patientProfileFieldKey.trustedEmail(contact.id)]}
                             />
                           </FormField>
                         </div>
@@ -1081,7 +1094,7 @@ function PatientProfileEditorSheetContent({
   // Field errors appear after the first save attempt and then follow the input.
   const [validationAttempted, setValidationAttempted] = useState(false);
   const fieldErrors = validationAttempted && form
-    ? patientProfileFieldErrors(form, trustedContacts, dictionary)
+    ? patientProfileFieldErrors(form, trustedContacts, dictionary, lang)
     : {};
 
   useEffect(() => {
@@ -1144,7 +1157,7 @@ function PatientProfileEditorSheetContent({
       event.preventDefault();
       if (!patientId || !form || !dirty || busy || trustedContactsLoading) return;
       const firstInvalidField = Object.keys(
-        patientProfileFieldErrors(form, trustedContacts, dictionary),
+        patientProfileFieldErrors(form, trustedContacts, dictionary, lang),
       )[0];
       if (firstInvalidField) {
         setValidationAttempted(true);
