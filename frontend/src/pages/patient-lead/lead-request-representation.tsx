@@ -465,6 +465,7 @@ function RepresentativeBlock({
   custody,
   fields,
   uploads,
+  identityUpload,
   text,
   lang,
   enqueue,
@@ -483,6 +484,8 @@ function RepresentativeBlock({
   custody: Custody | null;
   fields: ReadonlySet<RepresentativeField>;
   uploads: boolean;
+  /** The identity document copy is asked here (a minor's parent: as soon as the person exists). */
+  identityUpload: boolean;
   text: LeadRequestText;
   lang: string;
   enqueue: RequestQueue;
@@ -705,13 +708,13 @@ function RepresentativeBlock({
       </div>
 
       {/* The identity document: a copy only; GMED enters its data. */}
-      {uploads ? (
+      {identityUpload ? (
         <RepresentativeUpload
           request={request}
           slot={slot}
           kind="identity"
           label={representativeUploadLabel(text, slot, "identity")}
-          required
+          required={uploads}
           person={person}
           documents={person?.identity_documents ?? []}
           text={text}
@@ -914,6 +917,9 @@ export function RepresentationSection({
       custody={minor ? draft.custody || null : null}
       fields={fieldsOf(slot)}
       uploads={whole(slot)}
+      // A parent uploads the identity document copy as soon as the person
+      // exists, not only at the document stage (owner report 2026-10-19).
+      identityUpload={whole(slot) || (minor && representativeInSlot(representation, slot) !== null)}
       text={text}
       lang={lang}
       enqueue={enqueue}

@@ -99,6 +99,8 @@ export type LeadIdentityDocument = {
   file_name: string;
   uploaded_at: string | null;
   reviewed: boolean;
+  /** Staff uploaded it in the wizard (a representative's file); otherwise the cabinet did. */
+  uploaded_by_staff?: boolean;
 };
 
 /** Who represents a minor; a request without an answer counts as `joint`. */
@@ -550,6 +552,7 @@ function normalizeIdentityDocuments(value: unknown): LeadIdentityDocument[] {
         file_name: textOrNull(raw.file_name) ?? "",
         uploaded_at: textOrNull(raw.uploaded_at),
         reviewed: raw.reviewed === true,
+        uploaded_by_staff: raw.uploaded_by_staff === true,
       },
     ];
   });

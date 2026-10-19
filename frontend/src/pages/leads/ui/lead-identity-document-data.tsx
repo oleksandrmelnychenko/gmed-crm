@@ -14,8 +14,9 @@ import {
   saveLeadIdentityDocumentData,
   saveRepresentativeIdentityDocumentData,
   type IdentityDocumentDataInput,
+  type RepresentativeUploadKind,
 } from "../data/lead-risk-api";
-import type { LeadPortalIntake, LeadRepresentative } from "../data/lead-portal-intake-api";
+import type { LeadCustody, LeadPortalIntake, LeadRepresentative } from "../data/lead-portal-intake-api";
 import {
   ID_DOCUMENT_TYPES,
   identityDocumentDatesInvalid,
@@ -29,6 +30,7 @@ import {
 } from "../model/lead-identity-document-data";
 import { idDocumentTypeLabel, representativeName, representativeRoleLabel } from "../model/lead-gwg-statements";
 import type { Tx } from "../model/lead-payer";
+import { LeadRepresentativeUploads } from "./lead-representative-uploads";
 import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
@@ -235,22 +237,26 @@ export function LeadIdentityDocumentDataForm({
 function RepresentativeForm({
   leadId,
   person,
-  files,
+  custody,
+  renderFiles,
   tx,
   lang,
   disabled,
   today,
   onSaved,
+  onUploaded,
 }: {
   leadId: string;
   person: LeadRepresentative;
-  /** The person's own uploads (identity scan, power of attorney), under the person's card. */
-  files?: ReactNode;
+  custody: LeadCustody | null | undefined;
+  /** The person's own uploads of a kind (identity scan, power of attorney), under the person's card. */
+  renderFiles?: (person: LeadRepresentative, kind: RepresentativeUploadKind) => ReactNode;
   tx: Tx;
   lang: string;
   disabled: boolean;
   today: string;
   onSaved: () => void;
+  onUploaded: () => void;
 }) {
   const filled = Boolean(person.id_document_number || person.id_valid_until || person.id_document_unreadable);
   // A saved expired date stays in sight (QA 2026-10-10: no warning after the save).
@@ -285,7 +291,15 @@ function RepresentativeForm({
             onSaved();
           }}
         />
-        {files}
+        <LeadRepresentativeUploads
+          leadId={leadId}
+          person={person}
+          custody={custody}
+          tx={tx}
+          disabled={disabled}
+          renderFiles={renderFiles}
+          onUploaded={onUploaded}
+        />
       </div>
     </details>
   );
@@ -307,6 +321,7 @@ export function LeadIdentityDocumentData({
   representativeFiles,
   today = appDateKey(),
   onSaved,
+  onUploaded,
 }: {
   leadId: string;
   intake: LeadPortalIntake | null;
@@ -320,11 +335,13 @@ export function LeadIdentityDocumentData({
    * the representative's).
    */
   patientScans?: ReactNode;
-  /** A representative's own uploads, under that person's card. */
-  representativeFiles?: (person: LeadRepresentative) => ReactNode;
+  /** A representative's own uploads of a kind, under that person's card. */
+  representativeFiles?: (person: LeadRepresentative, kind: RepresentativeUploadKind) => ReactNode;
   today?: string;
   /** After a save: reload the portal state and the risk assessment. */
   onSaved: () => void;
+  /** After staff uploaded a representative's file; `onSaved` when not given. */
+  onUploaded?: () => void;
 }) {
   // The role may not read the GwG data: only the scans.
   if (intake?.identification_hidden) return patientScans ? <>{patientScans}</> : null;
@@ -358,12 +375,14 @@ export function LeadIdentityDocumentData({
               key={person.id}
               leadId={leadId}
               person={person}
-              files={representativeFiles?.(person)}
+              custody={intake?.representation?.custody}
+              renderFiles={representativeFiles}
               tx={tx}
               lang={lang}
               disabled={disabled}
               today={today}
               onSaved={onSaved}
+              onUploaded={onUploaded ?? onSaved}
             />
           ))}
         </div>

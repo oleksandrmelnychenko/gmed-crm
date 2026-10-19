@@ -116,6 +116,67 @@ describe("identity document data entered by staff", () => {
       renderToStaticMarkup(<LeadIdentityDocumentData leadId="lead-1" intake={hidden} tx={de} lang="de" onSaved={() => undefined} />),
     ).toBe("");
   });
+
+  it("lets staff upload a parent's identity copy and a guardian's proof, naming who uploaded each file", () => {
+    const intake = normalizeLeadPortalIntake({
+      lead_id: "lead-1",
+      minor: true,
+      representation: {
+        custody: "guardian",
+        representatives: [
+          {
+            id: "rep-1",
+            slot: "rep1",
+            role: "legal_guardian",
+            first_name: "Eva",
+            last_name: "Muster",
+            identity_documents: [
+              { id: "doc-1", file_name: "ausweis.pdf", uploaded_at: "2026-10-18T09:00:00Z", uploaded_by_staff: true },
+            ],
+            authority_documents: [],
+          },
+        ],
+      },
+    });
+    expect(intake?.representation?.representatives[0]?.identity_documents[0]?.uploaded_by_staff).toBe(true);
+    const html = withPickers(
+      <LeadIdentityDocumentData leadId="lead-1" intake={intake} tx={ru} lang="ru" onSaved={() => undefined} />,
+    );
+    expect(html).toContain("lead-representative-upload-identity-rep-1");
+    expect(html).toContain("lead-representative-upload-authority-rep-1");
+    expect(html).toContain("Скан документа");
+    expect(html).toContain("Подтверждение полномочий");
+    expect(html).toContain('accept=".pdf,.jpg,.jpeg,.png"');
+    // Without the wizard's document rows: name, date and origin of the file.
+    expect(html).toContain("ausweis.pdf");
+    expect(html).toContain("18.10.2026");
+    expect(html).toContain("Загружено сотрудником");
+    expect(html).toContain("Добавить файл");
+
+    // A parent with joint custody: only the identity copy.
+    const parent = normalizeLeadPortalIntake({
+      lead_id: "lead-1",
+      minor: true,
+      representation: {
+        custody: "joint",
+        representatives: [{ id: "rep-2", slot: "rep1", role: "legal_representative", first_name: "Anna", last_name: "Muster" }],
+      },
+    });
+    const parentHtml = withPickers(
+      <LeadIdentityDocumentData
+        leadId="lead-1"
+        intake={parent}
+        tx={de}
+        lang="de"
+        onSaved={() => undefined}
+        representativeFiles={() => <span>rows</span>}
+      />,
+    );
+    expect(parentHtml).toContain("lead-representative-upload-identity-rep-2");
+    expect(parentHtml).not.toContain("lead-representative-upload-authority-rep-2");
+    expect(parentHtml).toContain("Ausweiskopie");
+    expect(parentHtml).toContain("Datei hochladen");
+  });
 });
 
 describe("«Со слов пациента» in the medical step", () => {

@@ -80,7 +80,8 @@ import {
 import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
 import { useLeadPayerLink } from "../model/use-lead-payer-link";
 import { amlPrefillFromLeadAnswers, applyAmlLeadPrefill } from "../model/enhanced-check-prefill";
-import { fetchLeadPortalIntake } from "../data/lead-portal-intake-api";
+import { fetchLeadPortalIntake, type LeadRepresentative } from "../data/lead-portal-intake-api";
+import type { RepresentativeUploadKind } from "../data/lead-risk-api";
 import { useLeadEnhancedCheck } from "../model/use-lead-enhanced-check";
 import {
   ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES,
@@ -281,6 +282,7 @@ import { enhancedFundsProofOutstanding } from "../model/lead-gwg-statements";
 import { LeadRiskAssessmentPanel } from "./lead-risk-assessment-panel";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { LeadIdentityDocumentData } from "./lead-identity-document-data";
+import { LeadRepresentativeUploads, representativeFileOrigin } from "./lead-representative-uploads";
 import { LeadPatientConcern } from "./lead-patient-concern";
 import { useLeadRiskAssessment } from "../model/use-lead-risk-assessment";
 import { riskGateErrorText } from "../model/lead-risk-assessment";
@@ -2875,6 +2877,7 @@ function WizardDocumentRows({
   onSign,
   onDelete,
   onChanged,
+  documentNote,
 }: {
   documents: DocumentItem[];
   complianceKind?: DocumentComplianceKind;
@@ -2889,6 +2892,8 @@ function WizardDocumentRows({
   onSign?: (document: DocumentItem, kind: DocumentComplianceKind) => void;
   onDelete: (document: DocumentItem) => void;
   onChanged?: () => void;
+  /** A short note in the metadata line, e.g. who uploaded a representative's file. */
+  documentNote?: (document: DocumentItem) => ReactNode;
 }) {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [protectedDocumentIds, setProtectedDocumentIds] = useState<Set<string>>(() => new Set());
@@ -2918,6 +2923,7 @@ function WizardDocumentRows({
           </button>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <LeadWizardDocumentMetadata document={document} lang={lang} />
+            {documentNote?.(document)}
             {archived ? (
               <Badge variant="outline" className="font-mono text-[11px]">
                 {tx("Версия", "Version")} {document.version_number}
@@ -7075,6 +7081,37 @@ ${serviceCommentLines.join("\n")}`
   // guardian get one each beside the adult's, and a contact with GwG data
   // keeps them.
   const portalRepresentation = step1Portal.intake?.representation ?? null;
+  // A representative's own files of one kind (QA 2026-10-10: they sat under
+  // "Другие документы"), with who uploaded each — the cabinet or staff.
+  const representativeFileRows = (person: LeadRepresentative, kind: RepresentativeUploadKind) => {
+    const uploads = kind === "authority" ? person.authority_documents : person.identity_documents;
+    const byId = new Map(uploads.map((item) => [item.id, item]));
+    const files = documents.filter((item) => byId.has(item.id) && !item.file_deleted_at);
+    if (files.length === 0) return null;
+    return (
+      <WizardDocumentRows
+        documents={files}
+        emptyLabel=""
+        lang={lang}
+        busy={busy}
+        disabled={isBusy}
+        tx={tx}
+        onOpen={(document) => void openOrDownloadDocument(document)}
+        onDownload={(document) => void downloadDocument(document)}
+        onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+        onChanged={() => { void refreshDocumentsState(); }}
+        documentNote={(document) => {
+          const upload = byId.get(document.id);
+          return upload ? <span>{representativeFileOrigin(upload, tx)}</span> : null;
+        }}
+      />
+    );
+  };
+  const afterRepresentativeUpload = () => {
+    void reloadStep1PortalState();
+    void risk.controller.reload();
+    void refreshDocumentsState();
+  };
   const gwgDataContactIds = new Set(
     (portalRepresentation?.representatives ?? []).flatMap((person) => (person.has_data ? [person.id] : [])),
   );
@@ -8812,30 +8849,12 @@ ${serviceCommentLines.join("\n")}`
                       lang={lang}
                       disabled={isBusy}
                       patientScans={patientScans}
-                      representativeFiles={(person) => {
-                        // QA 2026-10-10: a representative's own scan sat under "Другие документы".
-                        const ids = new Set([...person.identity_documents, ...person.authority_documents].map((item) => item.id));
-                        const files = documents.filter((item) => ids.has(item.id) && !item.file_deleted_at);
-                        if (files.length === 0) return null;
-                        return (
-                          <WizardDocumentRows
-                            documents={files}
-                            emptyLabel=""
-                            lang={lang}
-                            busy={busy}
-                            disabled={isBusy}
-                            tx={tx}
-                            onOpen={(document) => void openOrDownloadDocument(document)}
-                            onDownload={(document) => void downloadDocument(document)}
-                            onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
-                            onChanged={() => { void refreshDocumentsState(); }}
-                          />
-                        );
-                      }}
+                      representativeFiles={representativeFileRows}
                       onSaved={() => {
                         void reloadStep1PortalState();
                         void risk.controller.reload();
                       }}
+                      onUploaded={afterRepresentativeUpload}
                     />
                   );
                 })()}
@@ -10537,6 +10556,30 @@ ${serviceCommentLines.join("\n")}`
                     />
                   </Field>
                 </div>
+                {(() => {
+                  // A representative on file: staff upload the identity document
+                  // copy (and proof of authority) the contract gate asks for.
+                  const person = leadId && editingTrustedContact
+                    ? portalRepresentation?.representatives.find((item) => item.id === trustedContactEditor.id)
+                    : undefined;
+                  if (!leadId || !person) return null;
+                  return (
+                    <div className="mt-4 space-y-2 border-t border-border/70 pt-3" data-testid="trusted-contact-representative-uploads">
+                      <h4 className="text-xs font-semibold text-foreground">
+                        {tx("Документы представителя", "Unterlagen des Vertreters")}
+                      </h4>
+                      <LeadRepresentativeUploads
+                        leadId={leadId}
+                        person={person}
+                        custody={portalRepresentation?.custody}
+                        tx={tx}
+                        disabled={isBusy}
+                        renderFiles={representativeFileRows}
+                        onUploaded={afterRepresentativeUpload}
+                      />
+                    </div>
+                  );
+                })()}
                 </AdminFormSection>
               </AdminDialogScaffold>
           ) : null}

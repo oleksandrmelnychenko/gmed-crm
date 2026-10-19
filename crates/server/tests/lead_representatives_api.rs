@@ -1007,7 +1007,9 @@ async fn an_adult_names_the_person_who_acts_for_him() {
         json!({
             "id": identity_document,
             "file_name": "ausweis.pdf",
+            "mime_type": "application/pdf",
             "uploaded_at": staff_person["identity_documents"][0]["uploaded_at"],
+            "uploaded_by_staff": false,
             "reviewed": false,
         }),
         "{intake}"
@@ -2105,4 +2107,156 @@ async fn a_paying_parent_snapshot_follows_representation_corrections_and_cannot_
     assert_eq!(body["payer"]["citizenships"], json!(["AT"]), "{body}");
     assert_eq!(body["payer"]["street"], "Testweg 2", "{body}");
     assert_eq!(body["payer"]["city"], "Wien", "{body}");
+}
+
+/// What the contract gate (creating a framework contract) still misses of
+/// the lead's representatives.
+async fn contract_gate_missing(app: &TestApp, lead_id: Uuid) -> Vec<String> {
+    let (status, body) = json_request(
+        &app.suite.app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &app.staff("patient_manager"),
+        Some(json!({ "lead_id": lead_id, "status": "draft" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "representative_details_incomplete", "{body}");
+    body["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn staff_upload_a_parents_identity_document_in_the_wizard() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    let mother = Uuid::new_v4();
+    let lead_id = minor_lead(
+        &app,
+        json!([{ "id": mother, "name": "Anna Muster", "relation": "mother",
+                 "email": address("anna.muster") }]),
+    )
+    .await;
+    let (_, parent) = guardian_login(&app, lead_id, mother).await;
+    let stranger = Uuid::new_v4();
+    let other_lead = minor_lead(
+        &app,
+        json!([{ "id": stranger, "name": "Eva Fremd", "relation": "mother",
+                 "email": address("eva.fremd") }]),
+    )
+    .await;
+    let path = format!("/api/v1/leads/{lead_id}/representatives/{mother}/identity-document");
+    assert!(
+        contract_gate_missing(&app, lead_id)
+            .await
+            .contains(&"rep1_id_upload".to_string())
+    );
+
+    // Only staff who work the lead: not the parent's cabinet login.
+    let (status, body) = upload_file(
+        router,
+        &path,
+        &parent,
+        "ausweis.pdf",
+        "application/pdf",
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    // Only a representative of this lead.
+    for foreign in [stranger, Uuid::new_v4()] {
+        let (status, body) = upload_file(
+            router,
+            &format!("/api/v1/leads/{lead_id}/representatives/{foreign}/identity-document"),
+            &pm,
+            "ausweis.pdf",
+            "application/pdf",
+            PDF,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+    let (status, body) = upload_file(
+        router,
+        &format!("/api/v1/leads/{other_lead}/representatives/{mother}/identity-document"),
+        &pm,
+        "ausweis.pdf",
+        "application/pdf",
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let stored: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM documents WHERE lead_id = ANY($1) AND art = 'representative_identity'",
+    )
+    .bind(vec![lead_id, other_lead])
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, 0);
+
+    // Staff upload the mother's scan: the gate no longer asks for it.
+    let (status, body) =
+        upload_file(router, &path, &pm, "ausweis.pdf", "application/pdf", PDF).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let document_id: Uuid = body["document_id"].as_str().unwrap().parse().unwrap();
+    let files = representative(&body, mother)["identity_documents"].clone();
+    assert_eq!(files.as_array().map(Vec::len), Some(1), "{body}");
+    assert_eq!(files[0]["id"], json!(document_id), "{body}");
+    assert_eq!(files[0]["uploaded_by_staff"], true, "{body}");
+    assert!(
+        !contract_gate_missing(&app, lead_id)
+            .await
+            .contains(&"rep1_id_upload".to_string())
+    );
+    let (access_kind, reviewed, consent, name, art): (
+        String,
+        bool,
+        Option<Uuid>,
+        String,
+        String,
+    ) = sqlx::query_as(
+        r#"SELECT u.access_kind, u.reviewed_at IS NOT NULL, u.consent_record_id, d.auto_name, d.art
+           FROM lead_portal_uploads u JOIN documents d ON d.id = u.document_id
+           WHERE u.document_id = $1 AND u.representative_id = $2"#,
+    )
+    .bind(document_id)
+    .bind(mother)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(access_kind, "staff");
+    assert!(reviewed);
+    assert_eq!(consent, None);
+    assert_eq!(name, "Ausweisdokument – Anna Muster");
+    assert_eq!(art, "representative_identity");
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'staff_upload_representative_identity' AND entity_id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    // The parent sees the file in the cabinet but cannot remove it.
+    let (status, request) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead_id}"),
+        &parent,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{request}");
+    let cabinet = representative(&request, mother)["identity_documents"].clone();
+    assert_eq!(cabinet[0]["uploaded_by_staff"], true, "{request}");
+    assert_eq!(cabinet[0]["can_delete"], false, "{request}");
 }

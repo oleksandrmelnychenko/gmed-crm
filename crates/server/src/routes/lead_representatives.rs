@@ -86,6 +86,8 @@ const ORIGIN_STAFF: &str = "staff";
 /// `lead_portal_uploads.kind` of a representative's files.
 pub(crate) const UPLOAD_IDENTITY: &str = "representative_identity";
 pub(crate) const UPLOAD_AUTHORITY: &str = "representative_authority";
+/// `lead_portal_uploads.access_kind` of a file staff uploaded in the wizard.
+pub(crate) const ACCESS_STAFF: &str = "staff";
 
 /// Key of the representation in `leads.portal_field_updates`: like a personal
 /// data field it says when the lead (or a parent) last changed it.
@@ -524,6 +526,8 @@ pub(crate) struct Upload {
     pub mime_type: Option<String>,
     pub uploaded_at: Option<DateTime<Utc>>,
     pub uploaded_by: Option<Uuid>,
+    /// Staff uploaded it in the wizard (`access_kind = 'staff'`).
+    pub by_staff: bool,
     /// Staff marked it as reviewed or confirmed it.
     pub reviewed: bool,
     /// Staff use the document (reviewed, signed, shared, in a review, moved
@@ -633,7 +637,7 @@ pub(crate) async fn load_on(
     .await?;
     let uploads = sqlx::query(
         r#"SELECT u.document_id, u.kind, u.representative_id, u.created_at, u.reviewed_at,
-                  u.uploaded_by, d.original_filename, d.auto_name, d.file_size, d.mime_type,
+                  u.uploaded_by, u.access_kind, d.original_filename, d.auto_name, d.file_size, d.mime_type,
                   d.patient_id, d.signed_at,
                   COALESCE(u.kind = 'representative_identity' AND u.created_at <=
                     (SELECT r.id_data_entered_at FROM lead_representatives r
@@ -672,6 +676,9 @@ pub(crate) async fn load_on(
             mime_type: row.try_get::<Option<String>, _>("mime_type").ok().flatten(),
             uploaded_at: row.try_get::<DateTime<Utc>, _>("created_at").ok(),
             uploaded_by: row.try_get::<Uuid, _>("uploaded_by").ok(),
+            by_staff: row
+                .try_get::<String, _>("access_kind")
+                .is_ok_and(|kind| kind == ACCESS_STAFF),
             reviewed,
             locked: reviewed
                 || moved
@@ -1025,6 +1032,7 @@ pub(crate) fn portal_payload(loaded: &Loaded, user_id: Uuid) -> Value {
                     "mime_type": upload.mime_type,
                     "uploaded_at": upload.uploaded_at,
                     "uploaded_by_me": mine,
+                    "uploaded_by_staff": upload.by_staff,
                     "reviewed": upload.reviewed,
                     "can_delete": mine && !upload.locked,
                 })
@@ -1081,7 +1089,9 @@ pub(crate) fn staff_payload(loaded: &Loaded) -> Value {
                 json!({
                     "id": upload.document_id,
                     "file_name": upload.file_name,
+                    "mime_type": upload.mime_type,
                     "uploaded_at": upload.uploaded_at,
+                    "uploaded_by_staff": upload.by_staff,
                     "reviewed": upload.reviewed,
                 })
             })
@@ -1140,6 +1150,7 @@ pub(crate) fn updated_at(loaded: &Loaded, field_updates: &Value) -> Option<DateT
     loaded
         .uploads
         .iter()
+        .filter(|upload| !upload.by_staff)
         .filter_map(|upload| upload.uploaded_at)
         .chain(marked)
         .max()
@@ -2607,6 +2618,175 @@ pub(crate) async fn upload_my_representative_authority_document(
 // Staff endpoints
 // ----------------------------------------------------------------------------
 
+/// `POST /leads/{lead_id}/representatives/{representative_id}/identity-document`
+/// (multipart `file`, `leads.edit`): staff upload the copy of a
+/// representative's identity document in the wizard (owner report
+/// 2026-10-19), stored and registered like the cabinet's upload.
+pub(crate) async fn upload_lead_representative_identity_document(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, representative_id)): Path<(Uuid, Uuid)>,
+    multipart: Multipart,
+) -> axum::response::Response {
+    store_staff_upload(
+        state,
+        auth,
+        lead_id,
+        representative_id,
+        multipart,
+        UploadKind::RepresentativeIdentity,
+    )
+    .await
+}
+
+/// `POST /leads/{lead_id}/representatives/{representative_id}/authority-document`
+/// (multipart `file`, `leads.edit`): staff upload the proof that the person
+/// may act (power of attorney, appointment deed, proof of sole custody).
+pub(crate) async fn upload_lead_representative_authority_document(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, representative_id)): Path<(Uuid, Uuid)>,
+    multipart: Multipart,
+) -> axum::response::Response {
+    store_staff_upload(
+        state,
+        auth,
+        lead_id,
+        representative_id,
+        multipart,
+        UploadKind::RepresentativeAuthority,
+    )
+    .await
+}
+
+/// A representative's file uploaded by staff: the document is stored like the
+/// cabinet's ([`intake::store_upload_document`]) and registered in
+/// `lead_portal_uploads` as `access_kind = 'staff'`, taken over at once (the
+/// cabinet cannot remove it) and outside the cabinet's upload limit. The
+/// lead must be open and the person a representative of it. Staff remove
+/// the file like any document (`POST /documents/{id}/delete`).
+async fn store_staff_upload(
+    state: AppState,
+    auth: AuthUser,
+    lead_id: Uuid,
+    representative_id: Uuid,
+    mut multipart: Multipart,
+    upload_kind: UploadKind,
+) -> axum::response::Response {
+    if let Err(response) = require_staff_editor(&auth) {
+        return response;
+    }
+    // Before the file is stored: the lead is open and the person belongs to it.
+    {
+        let mut tx = match state.db.begin().await {
+            Ok(tx) => tx,
+            Err(error) => return intake::internal(error, "begin"),
+        };
+        if let Err(response) = lock_open_lead(&mut tx, lead_id).await {
+            return response;
+        }
+    }
+    let person = match upload_target(&state, lead_id, representative_id).await {
+        Ok(Some(name)) => name,
+        Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Representative not found"),
+        Err(error) => return intake::internal(error, "resolve representative"),
+    };
+    let (file_name, content_type, data) = match intake::read_upload_file(&mut multipart).await {
+        Ok(file) => file,
+        Err(response) => return response,
+    };
+    let stored = match intake::store_upload_document(
+        &state,
+        lead_id,
+        upload_kind,
+        &person,
+        &file_name,
+        content_type.as_deref(),
+        &data,
+        auth.user_id,
+        true,
+    )
+    .await
+    {
+        Ok(stored) => stored,
+        Err(response) => return response,
+    };
+    let action = match upload_kind {
+        UploadKind::RepresentativeAuthority => "staff_upload_representative_authority",
+        _ => "staff_upload_representative_identity",
+    };
+    let registered: Result<Result<Loaded, axum::response::Response>, sqlx::Error> = async {
+        let mut tx = state.db.begin().await?;
+        // The lead may have been converted or the person removed meanwhile.
+        if let Err(response) = lock_open_lead(&mut tx, lead_id).await {
+            return Ok(Err(response));
+        }
+        if !ensure_row_for_upload(&mut tx, lead_id, representative_id, auth.user_id).await? {
+            return Ok(Err(intake::err(
+                StatusCode::NOT_FOUND,
+                "Representative not found",
+            )));
+        }
+        sqlx::query(
+            r#"INSERT INTO lead_portal_uploads
+                   (document_id, lead_id, uploaded_by, access_kind, consent_record_id, kind,
+                    representative_id, reviewed_at, reviewed_by)
+               VALUES ($1, $2, $3, $4, NULL, $5, $6, now(), $3)"#,
+        )
+        .bind(stored.document_id)
+        .bind(lead_id)
+        .bind(auth.user_id)
+        .bind(ACCESS_STAFF)
+        .bind(upload_kind.as_str())
+        .bind(representative_id)
+        .execute(&mut *tx)
+        .await?;
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                action,
+                Some(auth.user_id),
+                "document",
+                Some(stored.document_id),
+                json!({
+                    "lead_id": lead_id,
+                    "representative_id": representative_id,
+                    "kind": upload_kind.as_str(),
+                    "mime_type": stored.mime_type,
+                    "file_size": stored.file_size,
+                }),
+            ),
+        )
+        .await?;
+        let Some(loaded) = load(&mut tx, lead_id).await? else {
+            return Ok(Err(intake::err(StatusCode::NOT_FOUND, "Lead not found")));
+        };
+        tx.commit().await?;
+        Ok(Ok(loaded))
+    }
+    .await;
+    let loaded = match registered {
+        Ok(Ok(loaded)) => loaded,
+        Ok(Err(response)) => {
+            intake::discard_stored_document(&state, stored.document_id, &stored.storage_key).await;
+            return response;
+        }
+        Err(error) => {
+            intake::discard_stored_document(&state, stored.document_id, &stored.storage_key).await;
+            return intake::internal(error, "register staff upload");
+        }
+    };
+    publish_staff_change(&state, lead_id, auth.user_id).await;
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "document_id": stored.document_id,
+            "representation": staff_payload(&loaded),
+        })),
+    )
+        .into_response()
+}
+
 const COUNTRY_QUESTION_FIELDS: [&str; 16] = [
     "birth_place",
     "birth_country",
@@ -3524,6 +3704,7 @@ mod tests {
             mime_type: Some("application/pdf".into()),
             uploaded_at: None,
             uploaded_by: None,
+            by_staff: false,
             reviewed: false,
             locked: false,
         }

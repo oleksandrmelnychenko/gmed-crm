@@ -84,3 +84,26 @@ export async function saveRepresentativeIdentityDocumentData(
     send("PUT", input),
   );
 }
+
+/** Which file of a representative staff upload: the identity document or the proof of authority. */
+export type RepresentativeUploadKind = "identity" | "authority";
+
+/**
+ * `POST /leads/{id}/representatives/{rid}/identity-document` or
+ * `…/authority-document` (multipart `file`, PDF/JPG/PNG up to 25 MB): staff
+ * upload a representative's file in the wizard, stored like the cabinet's.
+ */
+export async function uploadRepresentativeDocument(
+  leadId: string,
+  representativeId: string,
+  kind: RepresentativeUploadKind,
+  file: File,
+) {
+  const form = new FormData();
+  form.append("file", file);
+  const part = kind === "authority" ? "authority-document" : "identity-document";
+  return apiFetch<unknown>(
+    `${base(leadId)}/representatives/${encodeURIComponent(representativeId)}/${part}`,
+    { method: "POST", body: form },
+  );
+}

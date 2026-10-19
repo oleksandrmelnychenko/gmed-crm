@@ -283,6 +283,7 @@ pub async fn follow_up_json(
             SELECT 1 FROM lead_portal_uploads u WHERE u.lead_id = $1
               AND u.kind IN ('self_funds_proof','relationship_proof','identity',
                              'representative_identity','representative_authority')
+              AND u.access_kind <> 'staff'
               AND (u.created_at > $2 OR u.withdrawn_at > $2)
         )"#).bind(lead_id).bind(answered_at).fetch_one(&mut *conn).await?
     } else {

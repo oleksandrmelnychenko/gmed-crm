@@ -2514,7 +2514,7 @@ pub(crate) async fn request_payload(
         AccessKind::Own => None,
     };
     let uploads = sqlx::query(
-        r#"SELECT u.document_id, u.kind, u.created_at, u.reviewed_at, u.uploaded_by,
+        r#"SELECT u.document_id, u.kind, u.created_at, u.reviewed_at, u.uploaded_by, u.access_kind,
                   d.original_filename, d.auto_name, d.file_size, d.mime_type, d.patient_id,
                   d.signed_at, d.lead_id,
                   EXISTS(SELECT 1 FROM document_shares s WHERE s.document_id = d.id) AS shared,
@@ -2724,8 +2724,10 @@ pub(crate) async fn request_payload(
         "documents": documents,
         "identity_documents": identity_documents,
         "max_documents": MAX_PORTAL_UPLOADS,
+        // Files staff uploaded in the wizard do not use up the lead's limit.
         "documents_used": uploads.iter().filter(|upload| {
             !PAYER_UPLOAD_KINDS.contains(&upload.try_get::<String, _>("kind").unwrap_or_default().as_str())
+                && upload.try_get::<String, _>("access_kind").is_ok_and(|kind| kind != "staff")
         }).count(),
         "consents": consents,
         // The person's own choice of the consent form options (2026-10-12).
@@ -5012,7 +5014,7 @@ pub(crate) async fn store_my_upload(
         r#"SELECT count(*) FROM lead_portal_uploads u
            JOIN documents d ON d.id = u.document_id
            WHERE u.lead_id = $1 AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL
-             AND u.kind NOT IN ('payer_identity', 'payer_funds_proof')"#,
+             AND u.kind NOT IN ('payer_identity', 'payer_funds_proof') AND u.access_kind <> 'staff'"#,
     )
     .bind(lead_id)
     .fetch_one(&state.db)
@@ -5030,131 +5032,32 @@ pub(crate) async fn store_my_upload(
         );
     }
 
-    // Same checks as the files of the website questionnaire: the content must
-    // match the file type, and the malware scan must not object.
-    let mime_type = match crate::routes::leads::validate_lead_attachment(
-        &file_name,
-        content_type.as_deref(),
-        &data,
-    )
-    .await
-    {
-        Ok(mime_type) => mime_type,
-        Err(response) => return response,
-    };
-    let medical = upload_kind == UploadKind::Medical;
-    if !medical && !IDENTITY_DOCUMENT_MIME_TYPES.contains(&mime_type.as_str()) {
-        return coded(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "unsupported_file_type",
-            if matches!(
-                upload_kind,
-                UploadKind::SelfFundsProof | UploadKind::RelationshipProof
-            ) {
-                "Upload the document as PDF, JPG or PNG"
-            } else {
-                "Upload the identity document as PDF, JPG or PNG"
-            },
-            json!({}),
-        );
-    }
     let person = representative
         .as_ref()
         .map(|(_, name)| name.as_str())
         .unwrap_or_default();
-    // A copy of the lead's identity document is stored like the one staff
-    // upload in the wizard (`identity`), so the identity check finds it. The
-    // files of a representative have a document type of their own: they are
-    // never the lead's identity document.
-    let (auto_name, art, category, access_category) = match upload_kind {
-        UploadKind::Medical => (
-            file_name.clone(),
-            "patient_medical_upload",
-            "medical",
-            "medical",
-        ),
-        // German names, like every document of the lead: the staff UI shows
-        // them in pickers and lists (QA 2026-10-10).
-        UploadKind::Identity => (
-            "Ausweisdokument".to_string(),
-            "identity",
-            "identity",
-            "internal",
-        ),
-        UploadKind::RepresentativeIdentity => (
-            format!("Ausweisdokument – {person}"),
-            lead_representatives::UPLOAD_IDENTITY,
-            "identity",
-            "internal",
-        ),
-        UploadKind::RepresentativeAuthority => (
-            format!("Vertretungsnachweis – {person}"),
-            lead_representatives::UPLOAD_AUTHORITY,
-            "administrative",
-            "internal",
-        ),
-        // A financial document of the patient's own: neither an identity
-        // document nor an administrative one, so it never fulfils the
-        // patient's required documents (passport, consent form).
-        UploadKind::SelfFundsProof => (
-            "Nachweis der Mittelherkunft".to_string(),
-            SELF_FUNDS_PROOF_KIND,
-            "finance",
-            "financial",
-        ),
-        UploadKind::RelationshipProof => (
-            "Nachweis der Beziehung zum Kostenübernehmer".to_string(),
-            RELATIONSHIP_PROOF_KIND,
-            "administrative",
-            "internal",
-        ),
-        UploadKind::PayerIdentity | UploadKind::PayerFundsProof => return not_found(),
+    let StoredUpload {
+        document_id,
+        file_size,
+        storage_key,
+        mime_type,
+    } = match store_upload_document(
+        &state,
+        lead_id,
+        upload_kind,
+        person,
+        &file_name,
+        content_type.as_deref(),
+        &data,
+        auth.user_id,
+        false,
+    )
+    .await
+    {
+        Ok(stored) => stored,
+        Err(response) => return response,
     };
-    let auto_name = auto_name.as_str();
-    let input = NewStoredDocument {
-        document_id: None,
-        document_number: None,
-        patient_id: None,
-        lead_id: Some(lead_id),
-        order_id: None,
-        appointment_id: None,
-        auto_name,
-        original_filename: &file_name,
-        art,
-        category: Some(category),
-        status: "active",
-        visibility: "internal",
-        is_medical: medical,
-        mime_type: &mime_type,
-        klinik: None,
-        ursprung: Some("lead_portal"),
-        notes: None,
-        document_direction: Some("incoming"),
-        document_variant: Some("original"),
-        document_language: None,
-        access_category: Some(access_category),
-        document_date: Some(crate::app_time::today()),
-        source_person: Some("patient_portal"),
-        source_institution: None,
-        addressee_person: None,
-        addressee_institution: Some("GMED"),
-        financial_status: None,
-        payment_due_date: None,
-        payment_date: None,
-        payment_method: None,
-        generated_template_id: None,
-        generated_bindings: None,
-        generated_manual_text: None,
-        version_root_document_id: None,
-        replaces_document_id: None,
-        version_number: 1,
-        uploaded_by: auth.user_id,
-    };
-    let (document_id, file_size, _, storage_key) =
-        match persist_document_file(&state, &data, &input).await {
-            Ok(stored) => stored,
-            Err(response) => return response,
-        };
+    let medical = upload_kind == UploadKind::Medical;
 
     // The upload is registered with its consent in one transaction; if the
     // link or the consent went away meanwhile, the stored file goes again.
@@ -5168,7 +5071,7 @@ pub(crate) async fn store_my_upload(
             "SELECT count(*) FROM lead_portal_uploads u
              JOIN documents d ON d.id = u.document_id
              WHERE u.lead_id = $1 AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL
-               AND u.kind NOT IN ('payer_identity', 'payer_funds_proof')",
+               AND u.kind NOT IN ('payer_identity', 'payer_funds_proof') AND u.access_kind <> 'staff'",
         )
         .bind(lead_id)
         .fetch_one(&mut *tx)
@@ -5281,6 +5184,149 @@ pub(crate) async fn store_my_upload(
         Ok(payload) => (StatusCode::CREATED, Json(payload)).into_response(),
         Err(error) => internal(error, "load request"),
     }
+}
+
+/// A lead upload stored as a document, not registered yet.
+pub(crate) struct StoredUpload {
+    pub document_id: Uuid,
+    pub file_size: i64,
+    pub storage_key: String,
+    pub mime_type: String,
+}
+
+/// Checks the file of a lead upload and stores it as a document of the lead,
+/// named and typed by its kind (`person`: the representative a file of a
+/// representative is named after). Shared by the cabinet and by staff
+/// uploading a representative's file in the wizard (`by_staff`: the document
+/// does not claim the cabinet as its origin). The caller registers it in
+/// `lead_portal_uploads` or discards it again.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn store_upload_document(
+    state: &AppState,
+    lead_id: Uuid,
+    upload_kind: UploadKind,
+    person: &str,
+    file_name: &str,
+    content_type: Option<&str>,
+    data: &[u8],
+    uploaded_by: Uuid,
+    by_staff: bool,
+) -> Result<StoredUpload, axum::response::Response> {
+    // Same checks as the files of the website questionnaire: the content must
+    // match the file type, and the malware scan must not object.
+    let mime_type =
+        crate::routes::leads::validate_lead_attachment(file_name, content_type, data).await?;
+    let medical = upload_kind == UploadKind::Medical;
+    if !medical && !IDENTITY_DOCUMENT_MIME_TYPES.contains(&mime_type.as_str()) {
+        return Err(coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unsupported_file_type",
+            if matches!(
+                upload_kind,
+                UploadKind::SelfFundsProof | UploadKind::RelationshipProof
+            ) {
+                "Upload the document as PDF, JPG or PNG"
+            } else {
+                "Upload the identity document as PDF, JPG or PNG"
+            },
+            json!({}),
+        ));
+    }
+    // A copy of the lead's identity document is stored like the one staff
+    // upload in the wizard (`identity`), so the identity check finds it. The
+    // files of a representative have a document type of their own: they are
+    // never the lead's identity document.
+    let (auto_name, art, category, access_category) = match upload_kind {
+        UploadKind::Medical => (
+            file_name.to_string(),
+            "patient_medical_upload",
+            "medical",
+            "medical",
+        ),
+        // German names, like every document of the lead: the staff UI shows
+        // them in pickers and lists (QA 2026-10-10).
+        UploadKind::Identity => (
+            "Ausweisdokument".to_string(),
+            "identity",
+            "identity",
+            "internal",
+        ),
+        UploadKind::RepresentativeIdentity => (
+            format!("Ausweisdokument – {person}"),
+            lead_representatives::UPLOAD_IDENTITY,
+            "identity",
+            "internal",
+        ),
+        UploadKind::RepresentativeAuthority => (
+            format!("Vertretungsnachweis – {person}"),
+            lead_representatives::UPLOAD_AUTHORITY,
+            "administrative",
+            "internal",
+        ),
+        // A financial document of the patient's own: neither an identity
+        // document nor an administrative one, so it never fulfils the
+        // patient's required documents (passport, consent form).
+        UploadKind::SelfFundsProof => (
+            "Nachweis der Mittelherkunft".to_string(),
+            SELF_FUNDS_PROOF_KIND,
+            "finance",
+            "financial",
+        ),
+        UploadKind::RelationshipProof => (
+            "Nachweis der Beziehung zum Kostenübernehmer".to_string(),
+            RELATIONSHIP_PROOF_KIND,
+            "administrative",
+            "internal",
+        ),
+        UploadKind::PayerIdentity | UploadKind::PayerFundsProof => return Err(not_found()),
+    };
+    let input = NewStoredDocument {
+        document_id: None,
+        document_number: None,
+        patient_id: None,
+        lead_id: Some(lead_id),
+        order_id: None,
+        appointment_id: None,
+        auto_name: &auto_name,
+        original_filename: file_name,
+        art,
+        category: Some(category),
+        status: "active",
+        visibility: "internal",
+        is_medical: medical,
+        mime_type: &mime_type,
+        klinik: None,
+        ursprung: (!by_staff).then_some("lead_portal"),
+        notes: None,
+        document_direction: Some("incoming"),
+        document_variant: Some("original"),
+        document_language: None,
+        access_category: Some(access_category),
+        document_date: Some(crate::app_time::today()),
+        source_person: (!by_staff).then_some("patient_portal"),
+        source_institution: None,
+        addressee_person: None,
+        addressee_institution: Some("GMED"),
+        financial_status: None,
+        payment_due_date: None,
+        payment_date: None,
+        payment_method: None,
+        generated_template_id: None,
+        generated_bindings: None,
+        generated_manual_text: None,
+        version_root_document_id: None,
+        replaces_document_id: None,
+        version_number: 1,
+        uploaded_by,
+    };
+    let (document_id, file_size, _, storage_key) =
+        persist_document_file(state, data, &input).await?;
+    Ok(StoredUpload {
+        document_id,
+        file_size,
+        storage_key,
+        mime_type,
+    })
 }
 
 /// Removes a stored document that could not be registered as a portal upload.

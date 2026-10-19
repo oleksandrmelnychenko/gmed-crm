@@ -16,7 +16,7 @@
 
 use axum::{
     Json, Router,
-    extract::{Extension, Path, State},
+    extract::{DefaultBodyLimit, Extension, Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -31,6 +31,7 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::risk::store::{self, Assessment, Cause, DecisionError};
 use crate::risk::{self, RiskConfig, Sticky, cabinet};
+use crate::routes::documents::MAX_FILE_SIZE;
 use crate::routes::lead_payer;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
@@ -61,6 +62,18 @@ pub fn router() -> Router<AppState> {
         .route(
             "/leads/{lead_id}/representatives/{representative_id}/identity-document-data",
             axum::routing::put(put_representative_identity_data),
+        )
+        // The files of a representative staff upload in the wizard; the
+        // handlers share the cabinet's storage (`lead_representatives`).
+        .route(
+            "/leads/{lead_id}/representatives/{representative_id}/identity-document",
+            post(super::lead_representatives::upload_lead_representative_identity_document)
+                .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
+        )
+        .route(
+            "/leads/{lead_id}/representatives/{representative_id}/authority-document",
+            post(super::lead_representatives::upload_lead_representative_authority_document)
+                .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
         )
         .route("/compliance/risk-config", get(get_config).put(put_config))
         .route("/compliance/risk-reviews", get(review_queue))
