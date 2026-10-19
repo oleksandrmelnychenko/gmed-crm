@@ -2797,7 +2797,7 @@ async fn purging_a_lead_clears_the_portal_intake() {
         &patient,
         Some(confirmed_disclosure(
             json!([{ "name": "Oma Lena", "relation": "relative",
-            "scope": "Medizinische Informationen" }]),
+            "scope_codes": ["medical"] }]),
             true,
         )),
     )
@@ -6770,7 +6770,7 @@ async fn a_minors_own_login_is_closed_while_the_parents_have_access() {
         "name": "Praxis Dr. Beispiel",
         "relation": "family_doctor",
         "contact": "praxis.consent@example.com",
-        "scope": "Medizinische Informationen"
+        "scope_codes": ["medical"]
     }]);
     let (status, body) = save_disclosure(
         router,
@@ -7820,8 +7820,9 @@ fn confirmed_disclosure(persons: Value, allow: bool) -> Value {
         "version":"2026-10-14", "language":"de" })
 }
 
-fn disclosure_person(name: &str, scope: &str) -> Value {
-    json!({ "name":name, "relation":"friend", "scope":scope })
+/// A trusted person with one scope code (owner 2026-10-19).
+fn disclosure_person(name: &str, scope_code: &str) -> Value {
+    json!({ "name":name, "relation":"friend", "scope_codes":[scope_code] })
 }
 
 async fn save_disclosure(
@@ -7867,8 +7868,8 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
     let pm = app.staff("patient_manager");
     let (lead, user, patient) = lead_with_login(&app, "Form", "form.disclosure@example.com").await;
     let persons = json!([
-        { "name": "Max Named", "relation": "friend", "contact": "max@example.test", "scope": "Nur Rechnungen" },
-        { "name": "Olga Named", "relation": "relative", "contact": "+49 151 000000", "scope": "Nur Termine" }
+        { "name": "Max Named", "relation": "friend", "contact": "max@example.test", "scope_codes": ["financial"] },
+        { "name": "Olga Named", "relation": "relative", "contact": "+49 151 000000", "scope_codes": ["medical", "organisational"] }
     ]);
     let (status, decision) = save_disclosure(
         router,
@@ -7907,16 +7908,28 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
         assert_eq!(recorded["disclosure"], decision["disclosure"], "{recorded}");
         let text = document_pdf_text(router, id, &pm).await;
         for person in persons.as_array().unwrap() {
-            for field in ["name", "contact", "scope"] {
+            for field in ["name", "contact"] {
                 assert!(
                     text.contains(person[field].as_str().unwrap()),
                     "{field}: {text}"
                 );
             }
         }
-        // Anlage 1 names the persons once, with the consent under item 4 (2026-10-19);
-        // the GwG form keeps its own block: both carry the explicit consent.
-        assert!(text.contains("Ich willige ausdrücklich ein"), "{text}");
+        // The chosen scope is printed in words right with each person.
+        for scope in [
+            "max@example.test; Umfang der Auskunft: finanzielle Informationen",
+            "+49 151 000000; Umfang der Auskunft: medizinische und organisatorische Informationen",
+        ] {
+            assert!(text.contains(scope), "{scope}: {text}");
+        }
+        // Anlage 1 names the persons once, under item 4 (c184f570); the
+        // patient form keeps its Ja/Nein question.
+        let ticked = if template == "privacy_consents" {
+            "[x] dass meine personenbezogenen und medizinischen Daten an folgende Personen"
+        } else {
+            "[x] Ja, folgende Person(en)"
+        };
+        assert!(text.contains(ticked), "{text}");
         assert!(!text.contains("Kundenkabinett"), "{text}");
         assert!(!text.contains("Textversion"), "{text}");
     }
@@ -7952,7 +7965,7 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
         pending, "pending",
         "channel edits must preserve this invitation"
     );
-    let changed_persons = json!([{ "name": "Different Named", "relation": "spouse", "contact": "other@example.test", "scope": "Medizinische Informationen" }]);
+    let changed_persons = json!([{ "name": "Different Named", "relation": "spouse", "contact": "other@example.test", "scope_codes": ["medical"] }]);
     let (status, changed) = save_disclosure(
         router,
         lead,
@@ -8036,19 +8049,35 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
         "{initial}"
     );
     for invalid in [
-        json!([{ "name":" ","relation":"friend","scope":"Dates" }]),
-        json!([{ "name":"Max","relation":"neighbour","scope":"Dates" }]),
-        json!([{ "name":"x".repeat(121),"relation":"friend","scope":"Dates" }]),
-        json!([{ "name":"Max","relation":"friend","contact":"x".repeat(121),"scope":"Dates" }]),
+        json!([{ "name":" ","relation":"friend","scope_codes":["organisational"] }]),
+        json!([{ "name":"Max","relation":"neighbour","scope_codes":["organisational"] }]),
+        json!([{ "name":"x".repeat(121),"relation":"friend","scope_codes":["organisational"] }]),
+        json!([{ "name":"Max","relation":"friend","contact":"x".repeat(121),"scope_codes":["organisational"] }]),
         json!([{ "name":"Max","relation":"friend" }]),
-        json!([{ "name":"Max","relation":"friend","scope":" " }]),
-        json!([{ "name":"Max","relation":"friend","scope":"x".repeat(241) }]),
-        json!(vec![disclosure_person("Max", "Dates"); 6]),
+        json!([{ "name":"Max","relation":"friend","scope_codes":[] }]),
+        // A legacy free text alone is asked again (owner 2026-10-19).
+        json!([{ "name":"Max","relation":"friend","scope":"medizin" }]),
+        json!(vec![disclosure_person("Max", "organisational"); 6]),
     ] {
         let (status, body) =
             save_disclosure(router, lead, &patient, confirmed_disclosure(invalid, true)).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
         assert_eq!(body["code"], "consent_recipients_invalid", "{body}");
+    }
+    for unknown in [json!(["medizin"]), json!(["medical", "everything"])] {
+        let (status, body) = save_disclosure(
+            router,
+            lead,
+            &patient,
+            confirmed_disclosure(
+                json!([{ "name":"Max","relation":"friend","scope_codes":unknown }]),
+                true,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "invalid_field", "{body}");
+        assert_eq!(body["field"], "scope_codes", "{body}");
     }
     for (invalid, code) in [
         (
@@ -8056,12 +8085,12 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
             "consent_recipients_required",
         ),
         (
-            json!({"persons":[disclosure_person("Max","Dates")],"allow_disclosure":true,"consent_given":false,
+            json!({"persons":[disclosure_person("Max","organisational")],"allow_disclosure":true,"consent_given":false,
             "version":"2026-10-14","language":"de"}),
             "disclosure_consent_required",
         ),
         (
-            confirmed_disclosure(json!([disclosure_person("Max", "Dates")]), false),
+            confirmed_disclosure(json!([disclosure_person("Max", "organisational")]), false),
             "disclosure_decision_invalid",
         ),
         (
@@ -8075,7 +8104,7 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
         assert_eq!(body["code"], code, "{body}");
     }
     for invalid in [
-        json!({"persons":[disclosure_person("Max","Dates")]}),
+        json!({"persons":[disclosure_person("Max","organisational")]}),
         json!({"persons":[],"allow_disclosure":false,"consent_given":false,"version":"2026-10-14",
             "language":"de","acts_for_patient":true}),
     ] {
@@ -8095,7 +8124,7 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
         Some(
             json!({ "choices": { "agency_processing": true, "doctors_to_agency": true,
             "data_system": true, "named_recipients": true },
-            "recipients": [disclosure_person("Max", "Dates")],
+            "recipients": [disclosure_person("Max", "organisational")],
             "version": "2026-10-12", "language": "de" }),
         ),
     )
@@ -8113,9 +8142,9 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
             .unwrap();
     assert_eq!(rows, 0, "refusals create no decision receipt");
     let cleaned =
-        json!([{ "name":"Max Muster","relation":"friend","scope":"Medizinische Informationen" }]);
+        json!([{ "name":"Max Muster","relation":"friend","scope_codes":["medical","financial"] }]);
     let (status,body)=save_disclosure(router,lead,&patient,confirmed_disclosure(
-        json!([{ "name":"  Max   Muster ","relation":" friend ","contact":"","scope":"  Medizinische Informationen  " }]),true)).await;
+        json!([{ "name":"  Max   Muster ","relation":" friend ","contact":"","scope":"medizin","scope_codes":["financial"," medical","medical"] }]),true)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["trusted_persons"], cleaned, "{body}");
     assert_disclosure_receipt(&body["disclosure"], true, user, "self");
@@ -8215,7 +8244,7 @@ async fn core_consent_preserves_the_explicit_disclosure_receipt_but_cannot_chang
     let (lead, user, patient) =
         lead_with_login(&app, "Ella", "ella.disclosure.core@example.com").await;
     let request = format!("/api/v1/me/lead-requests/{lead}");
-    let persons = json!([disclosure_person("Max Muster", "Terminorganisation")]);
+    let persons = json!([disclosure_person("Max Muster", "organisational")]);
     let (status, decision) = save_disclosure(
         router,
         lead,
@@ -8242,14 +8271,8 @@ async fn core_consent_preserves_the_explicit_disclosure_receipt_but_cannot_chang
     .await
     .unwrap();
     for changed in [
-        json!([disclosure_person(
-            "Different Person",
-            "Finanzielle Informationen"
-        )]),
-        json!([disclosure_person(
-            "Max Muster",
-            "Medizinische Informationen"
-        )]),
+        json!([disclosure_person("Different Person", "financial")]),
+        json!([disclosure_person("Max Muster", "medical")]),
     ] {
         let (status,refused)=json_request(router,"POST",&format!("{request}/consent-choices"),&patient,
             Some(json!({"choices":named,"recipients":changed,"version":"2026-10-12","language":"de"}))).await;
@@ -8308,13 +8331,7 @@ async fn a_no_disclosure_decision_preserves_core_flags_and_invalidates_old_invit
         router,
         lead,
         &patient,
-        confirmed_disclosure(
-            json!([disclosure_person(
-                "Max Muster",
-                "Medizinische Informationen"
-            )]),
-            true,
-        ),
+        confirmed_disclosure(json!([disclosure_person("Max Muster", "medical")]), true),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{decision}");
@@ -8416,15 +8433,12 @@ async fn a_guardian_changes_disclosure_only_for_an_active_link_and_owns_the_rece
     let guardian: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
     let access: Uuid = issued["access_id"].as_str().unwrap().parse().unwrap();
     let parent = bearer(guardian, "patient");
-    let persons = json!([disclosure_person("Oma Muster", "Terminorganisation")]);
+    let persons = json!([disclosure_person("Oma Muster", "organisational")]);
     let (status, body) =
         save_disclosure(router, lead, &parent, confirmed_disclosure(persons, true)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_disclosure_receipt(&body["disclosure"], true, guardian, "guardian");
-    let changed = json!([disclosure_person(
-        "Oma Muster",
-        "Medizinische Informationen"
-    )]);
+    let changed = json!([disclosure_person("Oma Muster", "medical")]);
     let (status, body) = save_disclosure(
         router,
         lead,
@@ -8488,7 +8502,7 @@ async fn every_explicit_disclosure_save_records_the_current_guardian_and_languag
         sqlx::query("INSERT INTO lead_portal_access (lead_id,user_id,kind,created_by) VALUES($1,$2,'guardian',$3)")
             .bind(lead).bind(parent).bind(app.patient_manager_id).execute(pool).await.unwrap();
     }
-    let persons = json!([disclosure_person("Oma Muster", &"x".repeat(240))]);
+    let persons = json!([disclosure_person("Oma Muster", "all")]);
     let body = confirmed_disclosure(persons.clone(), true);
     let (status, saved) =
         save_disclosure(router, lead, &bearer(first, "patient"), body.clone()).await;

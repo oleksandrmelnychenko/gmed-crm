@@ -1,4 +1,5 @@
 import { ApiRequestError, apiFetch as request } from "@/lib/api";
+import type { ConsentRecipientScope } from "@/lib/consent-recipient-scope";
 
 export const LEAD_REQUEST_ACCESS_CHANGED = "gmed:lead-request-access-changed";
 
@@ -292,7 +293,13 @@ export type ConsentRecipientRelation = (typeof CONSENT_RECIPIENT_RELATIONS)[numb
  * while that option is chosen; not sanctions-screened (owner 2026-10-12). Since 2026-10-14 the
  * list is the lead's trusted persons (own menu item of the cabinet, `TrustedPerson`).
  */
-export type ConsentRecipient = { name: string; relation: ConsentRecipientRelation; contact?: string | null; scope?: string | null };
+export type ConsentRecipient = {
+  name: string; relation: ConsentRecipientRelation; contact?: string | null;
+  /** Free-text scope of persons named before 2026-10-19; shown as typed until codes are chosen. */
+  scope?: string | null;
+  /** The chosen scope (owner 2026-10-19); `["all"]` covers everything. */
+  scope_codes?: ConsentRecipientScope[] | null;
+};
 
 /**
  * A trusted person of the cabinet (owner 2026-10-14): somebody GMED may tell about the person —
@@ -314,7 +321,7 @@ export type LeadDisclosure = {
   chosen_by_name?: string | null;
 };
 export type LeadDisclosureInput = {
-  persons: (ConsentRecipient & { scope: string })[];
+  persons: (Omit<ConsentRecipient, "scope" | "scope_codes"> & { scope_codes: ConsentRecipientScope[] })[];
   allow_disclosure: boolean;
   consent_given: boolean;
   version: typeof DISCLOSURE_VERSION;

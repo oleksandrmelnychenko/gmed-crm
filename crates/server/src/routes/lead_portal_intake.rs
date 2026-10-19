@@ -4089,7 +4089,7 @@ async fn save_consent_choices(
             StatusCode::UNPROCESSABLE_ENTITY,
             code,
             "Name at least one trusted person (at most five) under «Trusted persons»: name, who they are, optionally how to reach them",
-            json!({ "field": "recipients", "max": consent_choices::MAX_RECIPIENTS }),
+            json!({ "field": consent_choices::persons_error_field(code, "recipients"), "max": consent_choices::MAX_RECIPIENTS }),
         )
     };
     let sent_recipients = if body.choices.named_recipients {
@@ -4399,7 +4399,7 @@ async fn save_trusted_persons(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 code,
                 "At most five trusted persons: name, who they are, optionally how to reach them",
-                json!({ "field": "persons", "max": consent_choices::MAX_RECIPIENTS }),
+                json!({ "field": consent_choices::persons_error_field(code, "persons"), "max": consent_choices::MAX_RECIPIENTS }),
             );
         }
     };
@@ -4411,12 +4411,14 @@ async fn save_trusted_persons(
             json!({}),
         );
     }
-    if persons.iter().any(|p| p.scope.is_none()) {
+    // The scope is chosen from fixed options (owner 2026-10-19); a person
+    // with only a legacy free text is asked again.
+    if persons.iter().any(|p| p.scope_codes.is_empty()) {
         return coded(
             StatusCode::UNPROCESSABLE_ENTITY,
             consent_choices::RECIPIENTS_INVALID,
-            "State the scope of information for each person (up to 240 characters)",
-            json!({ "field": "scope" }),
+            "Choose the scope of information for each person",
+            json!({ "field": "scope_codes" }),
         );
     }
     let persons_json = match serde_json::to_value(&persons) {

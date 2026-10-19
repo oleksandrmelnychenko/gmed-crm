@@ -134,6 +134,22 @@ pub const RECIPIENTS_REQUIRED: &str = "consent_recipients_required";
 /// Refusal of a save in the cabinet: a recipient is incomplete, too long, of
 /// an unknown kind, or there are more than [`MAX_RECIPIENTS`].
 pub const RECIPIENTS_INVALID: &str = "consent_recipients_invalid";
+/// What a trusted person may be told (owner 2026-10-19), in the order the
+/// cabinet offers it; `all` covers the other three.
+pub const RECIPIENT_SCOPES: [&str; 4] = ["all", "medical", "organisational", "financial"];
+/// Refusal of a save: a scope code outside [`RECIPIENT_SCOPES`]; the route
+/// names the field `scope_codes` ([`persons_error_field`]).
+pub const RECIPIENT_SCOPE_INVALID: &str = "invalid_field";
+
+/// The request field a refusal of [`clean_persons`] concerns: `scope_codes`
+/// for an unknown scope code, otherwise `fallback` (the list itself).
+pub fn persons_error_field(code: &str, fallback: &'static str) -> &'static str {
+    if code == RECIPIENT_SCOPE_INVALID {
+        "scope_codes"
+    } else {
+        fallback
+    }
+}
 pub const DISCLOSURE_VERSION: &str = "2026-10-14";
 pub const DISCLOSURE_REQUIRED: &str = "disclosure_consent_required";
 
@@ -187,9 +203,15 @@ pub struct ConsentRecipient {
     /// A phone number or an e-mail address; optional.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contact: Option<String>,
-    /// Exactly what may be disclosed; absent only in legacy choices.
+    /// The free-text scope of persons named before 2026-10-19; printed as
+    /// typed while no [`Self::scope_codes`] are chosen, dropped once they are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
+    /// What may be disclosed, as codes of [`RECIPIENT_SCOPES`] (owner
+    /// 2026-10-19); `["all"]` when everything is permitted. Empty only in
+    /// legacy persons.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scope_codes: Vec<String>,
 }
 
 impl ConsentRecipient {
@@ -218,20 +240,81 @@ impl ConsentRecipient {
             line.push_str(", ");
             line.push_str(contact);
         }
-        if let Some(scope) = self.scope.as_deref().filter(|s| !s.trim().is_empty()) {
+        if let Some(scope) = self.printed_scope() {
             line.push_str("; Umfang der Auskunft: ");
-            line.push_str(scope);
+            line.push_str(&scope);
         }
         line
     }
+
+    /// The scope as the German form words it: "alle Informationen",
+    /// "medizinische und organisatorische Informationen"; a legacy free text
+    /// as typed. `None` when nothing is stated.
+    pub fn printed_scope(&self) -> Option<String> {
+        if !self.scope_codes.is_empty() {
+            return Some(scope_codes_label(&self.scope_codes));
+        }
+        self.scope
+            .as_deref()
+            .map(str::trim)
+            .filter(|scope| !scope.is_empty())
+            .map(str::to_string)
+    }
+}
+
+/// German wording of scope codes, joined naturally ("a, b und c").
+fn scope_codes_label(codes: &[String]) -> String {
+    if codes.iter().any(|code| code == "all") {
+        return "alle Informationen".into();
+    }
+    let adjectives: Vec<&str> = RECIPIENT_SCOPES
+        .iter()
+        .filter(|scope| codes.iter().any(|code| code == *scope))
+        .filter_map(|scope| match *scope {
+            "medical" => Some("medizinische"),
+            "organisational" => Some("organisatorische"),
+            "financial" => Some("finanzielle"),
+            _ => None,
+        })
+        .collect();
+    let joined = match adjectives.split_last() {
+        None => return String::new(),
+        Some((last, [])) => (*last).to_string(),
+        Some((last, rest)) => format!("{} und {last}", rest.join(", ")),
+    };
+    format!("{joined} Informationen")
+}
+
+/// Scope codes as they are stored: known codes only, in the order of
+/// [`RECIPIENT_SCOPES`], without repeats; `["all"]` when `all` is among them.
+fn clean_scope_codes(codes: &[String]) -> Result<Vec<String>, &'static str> {
+    let mut chosen = Vec::new();
+    for code in codes {
+        let code = code.trim();
+        if !RECIPIENT_SCOPES.contains(&code) {
+            return Err(RECIPIENT_SCOPE_INVALID);
+        }
+        chosen.push(code);
+    }
+    if chosen.contains(&"all") {
+        return Ok(vec!["all".to_string()]);
+    }
+    Ok(RECIPIENT_SCOPES
+        .iter()
+        .filter(|scope| chosen.contains(scope))
+        .map(|scope| scope.to_string())
+        .collect())
 }
 
 /// Persons as they are stored — the trusted persons of the cabinet
 /// (`leads.portal_trusted_persons`, 2026-10-14) and the recipients of a
 /// choice: the name trimmed with inner spaces collapsed, the relation
-/// trimmed, blank contacts dropped. `Err` with [`RECIPIENTS_INVALID`] for an
-/// empty name, an unknown relation, a text over 120 characters or more than
-/// [`MAX_RECIPIENTS`]. An empty list is valid (nobody named).
+/// trimmed, blank contacts dropped, scope codes canonical
+/// ([`clean_scope_codes`]; a legacy free-text scope is kept only without
+/// codes). `Err` with [`RECIPIENTS_INVALID`] for an empty name, an unknown
+/// relation, a text over 120 characters or more than [`MAX_RECIPIENTS`];
+/// [`RECIPIENT_SCOPE_INVALID`] for an unknown scope code. An empty list is
+/// valid (nobody named).
 pub fn clean_persons(
     persons: Vec<ConsentRecipient>,
 ) -> Result<Vec<ConsentRecipient>, &'static str> {
@@ -246,10 +329,11 @@ pub fn clean_persons(
             .contact
             .map(|contact| contact.trim().to_string())
             .filter(|contact| !contact.is_empty());
+        let scope_codes = clean_scope_codes(&person.scope_codes)?;
         let scope = person
             .scope
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+            .filter(|s| !s.is_empty() && scope_codes.is_empty());
         if name.is_empty()
             || name.chars().count() > RECIPIENT_TEXT_MAX
             || !RECIPIENT_RELATIONS.contains(&relation.as_str())
@@ -265,6 +349,7 @@ pub fn clean_persons(
             relation,
             contact,
             scope,
+            scope_codes,
         });
     }
     Ok(cleaned)
@@ -699,6 +784,7 @@ mod tests {
             relation: "friend".into(),
             contact: Some("max@example.test".into()),
             scope: Some("Nur Rechnungen".into()),
+            scope_codes: Vec::new(),
         }];
         recorded.disclosure = Some(DisclosureDecision {
             allow_disclosure: true,
@@ -716,7 +802,7 @@ mod tests {
         current.id = Uuid::new_v4();
         current.choices.channel_whatsapp = !current.choices.channel_whatsapp;
         assert!(!disclosure_changed(Some(&recorded), Some(&current)));
-        for key in ["name", "relation", "contact", "scope"] {
+        for key in ["name", "relation", "contact", "scope", "scope_codes"] {
             let mut changed = current.clone();
             let person = &mut changed.recipients[0];
             match key {
@@ -724,6 +810,7 @@ mod tests {
                 "relation" => person.relation = "spouse".into(),
                 "contact" => person.contact = Some("other@example.test".into()),
                 "scope" => person.scope = Some("Medizinische Informationen".into()),
+                "scope_codes" => person.scope_codes = vec!["medical".into()],
                 _ => unreachable!(),
             }
             assert!(disclosure_changed(Some(&recorded), Some(&changed)), "{key}");
@@ -820,6 +907,7 @@ mod tests {
             relation: relation.into(),
             contact: contact.map(Into::into),
             scope: None,
+            scope_codes: Vec::new(),
         };
         assert_eq!(
             clean_recipients(&named, Vec::new()),
@@ -889,6 +977,7 @@ mod tests {
             relation: relation.into(),
             contact: contact.map(Into::into),
             scope: None,
+            scope_codes: Vec::new(),
         };
         assert_eq!(clean_persons(Vec::new()), Ok(Vec::new()));
         assert_eq!(
@@ -937,6 +1026,82 @@ mod tests {
             clean_recipients(&named, Vec::new()),
             Err(RECIPIENTS_REQUIRED)
         );
+    }
+
+    /// The scope is chosen from fixed options since 2026-10-19 (owner):
+    /// codes are validated and stored canonically, printed in German words.
+    #[test]
+    fn scope_codes_are_validated_stored_canonically_and_printed_in_words() {
+        let person = |codes: &[&str], scope: Option<&str>| ConsentRecipient {
+            name: "Max Muster".into(),
+            relation: "friend".into(),
+            contact: Some("max@example.test".into()),
+            scope: scope.map(Into::into),
+            scope_codes: codes.iter().map(|code| code.to_string()).collect(),
+        };
+        let cleaned = |codes: &[&str], scope: Option<&str>| {
+            clean_persons(vec![person(codes, scope)]).map(|mut list| list.remove(0))
+        };
+        // Order, repeats and spaces do not matter; `all` covers the rest.
+        assert_eq!(
+            cleaned(&[" financial", "medical", "medical "], None),
+            Ok(person(&["medical", "financial"], None))
+        );
+        assert_eq!(
+            cleaned(&["medical", "all", "financial"], None),
+            Ok(person(&["all"], None))
+        );
+        // Codes replace a legacy free text.
+        assert_eq!(
+            cleaned(&["organisational"], Some("medizin")),
+            Ok(person(&["organisational"], None))
+        );
+        for unknown in [&["medizin"][..], &["medical", ""], &["ALL"]] {
+            let refused = cleaned(unknown, None);
+            assert_eq!(refused, Err(RECIPIENT_SCOPE_INVALID), "{unknown:?}");
+            assert_eq!(
+                persons_error_field(refused.unwrap_err(), "persons"),
+                "scope_codes"
+            );
+        }
+        assert_eq!(
+            persons_error_field(RECIPIENTS_INVALID, "persons"),
+            "persons"
+        );
+
+        let line = |codes: &[&str], scope: Option<&str>| person(codes, scope).printed_line();
+        let prefix = "Max Muster (Freund/in / Bekannte/r), max@example.test; Umfang der Auskunft: ";
+        for (codes, scope) in [
+            (&["all"][..], "alle Informationen"),
+            (&["medical"], "medizinische Informationen"),
+            (
+                &["organisational", "medical"],
+                "medizinische und organisatorische Informationen",
+            ),
+            (
+                &["financial", "organisational", "medical"],
+                "medizinische, organisatorische und finanzielle Informationen",
+            ),
+        ] {
+            assert_eq!(line(codes, None), format!("{prefix}{scope}"), "{codes:?}");
+        }
+        // A legacy free text prints as typed while no codes are chosen.
+        assert_eq!(line(&[], Some(" medizin ")), format!("{prefix}medizin"));
+        assert_eq!(
+            line(&["financial"], Some("medizin")),
+            format!("{prefix}finanzielle Informationen")
+        );
+        assert_eq!(
+            line(&[], None),
+            "Max Muster (Freund/in / Bekannte/r), max@example.test"
+        );
+        // Legacy JSON without codes still reads.
+        let legacy: ConsentRecipient = serde_json::from_value(
+            json!({ "name": "Max Muster", "relation": "friend", "scope": "medizin" }),
+        )
+        .unwrap();
+        assert!(legacy.scope_codes.is_empty());
+        assert_eq!(legacy.printed_scope().as_deref(), Some("medizin"));
     }
 
     #[test]

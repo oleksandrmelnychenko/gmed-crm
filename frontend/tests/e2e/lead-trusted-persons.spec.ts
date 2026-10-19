@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import type { LeadDisclosure, LeadDisclosureInput } from "../../src/pages/patient-lead/lead-request-api";
 
 const core = { agency_processing: true, doctors_to_agency: true, data_system: true, named_recipients: false, channel_email: false, channel_threema: false, channel_whatsapp: false, channel_telegram: false };
-type Person = { name: string; relation: string; contact: string | null; scope?: string };
+type Person = { name: string; relation: string; contact: string | null; scope?: string; scope_codes?: string[] };
 function request(id = "child-a", firstName = "Anna") {
   return {
     lead_id: id, access_kind: "guardian", minor: true,
@@ -56,14 +56,24 @@ async function setup(page: Page, options: { requests?: ReturnType<typeof request
   return { calls, requests };
 }
 
+const MEDICAL = "Medical information (findings, treatment)";
+const FINANCIAL = "Financial information (cost estimates, invoices, payments)";
+
+/** Ticks or unticks scope options in the multi-select of one person, then closes it. */
+async function toggleScope(page: Page, options: string[], row = page.getByTestId("trusted-person-editor").last()) {
+  await row.getByLabel("Scope of information", { exact: true }).click();
+  for (const option of options) await page.getByRole("option", { name: option, exact: true }).click();
+  await page.keyboard.press("Escape");
+}
+
 async function addFriend(page: Page, name = "Eva Friend") {
   await page.getByTestId("disclosure-yes").check();
   await page.getByTestId("trusted-person-add").click();
   const row = page.getByTestId("trusted-person-editor").last();
   await row.getByLabel("Last name, first name").fill(name);
-  await row.getByRole("combobox").click();
+  await row.getByRole("combobox").first().click();
   await page.getByRole("option", { name: "Friend / acquaintance", exact: true }).click();
-  await row.getByLabel("Scope of information", { exact: false }).fill("Medical information");
+  await toggleScope(page, [MEDICAL], row);
   await page.getByTestId("disclosure-consent").check();
 }
 
@@ -110,19 +120,19 @@ test("automatic save keeps failed drafts; Next retries and reload restores decis
   await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await addFriend(page);
   await expect(page.getByText("I expressly consent to Example Care GmbH", { exact: false })).toBeVisible();
-  await expect(page.getByRole("alert").last()).toContainText("Enter a name, relationship and scope");
+  await expect(page.getByRole("alert").last()).toContainText("Enter a name and relationship and choose the scope");
   await expect(page.getByTestId("trusted-person-editor").getByLabel("Last name, first name")).toHaveValue("Eva Friend");
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "documents");
   await page.getByTestId("lead-request-steps").locator('[data-step="disclosure"]').click();
   await expect(page.getByTestId("trusted-persons-save-state")).toHaveText("Saved");
   expect(calls).toHaveLength(2);
-  expect(calls[1]).toEqual({ id: "child-a", persons: [{ name: "Eva Friend", relation: "friend", contact: null, scope: "Medical information" }], allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "en" });
+  expect(calls[1]).toEqual({ id: "child-a", persons: [{ name: "Eva Friend", relation: "friend", contact: null, scope_codes: ["medical"] }], allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "en" });
   await page.reload();
   await expect(page.getByTestId("disclosure-yes")).toBeChecked();
   await expect(page.getByTestId("disclosure-consent")).toBeChecked();
   await expect(page.getByTestId("disclosure-receipt")).toContainText("Guardian Muster");
-  await expect(page.getByTestId("trusted-person-editor").getByLabel("Scope of information", { exact: false })).toHaveValue("Medical information");
+  await expect(page.getByTestId("trusted-person-editor").getByLabel("Scope of information", { exact: true })).toContainText("Medical information");
 });
 
 test("Yes requires person, scope and checkbox; editing details requires fresh consent", async ({ page }) => {
@@ -131,18 +141,53 @@ test("Yes requires person, scope and checkbox; editing details requires fresh co
   await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await addFriend(page);
   await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
-  await page.getByLabel("Scope of information", { exact: false }).fill("");
+  await toggleScope(page, [MEDICAL]);
+  await expect(page.getByLabel("Scope of information", { exact: true })).toContainText("Please choose");
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
   await page.getByTestId("disclosure-consent").check();
   await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
-  await page.getByLabel("Scope of information", { exact: false }).fill("Invoices only");
+  await toggleScope(page, [FINANCIAL]);
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
   await page.getByTestId("disclosure-consent").check();
   await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await page.getByTestId("disclosure-no").check();
   await page.getByTestId("disclosure-yes").check();
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
-  await expect(page.getByLabel("Scope of information", { exact: false })).toHaveValue("Invoices only");
+  await expect(page.getByLabel("Scope of information", { exact: true })).toContainText("Financial information");
+});
+
+test("All information ticks every option; unticking one keeps the rest", async ({ page }) => {
+  const { calls } = await setup(page);
+  await addFriend(page);
+  await toggleScope(page, ["All information"]);
+  await expect(page.getByLabel("Scope of information", { exact: true })).toContainText("All information");
+  await page.getByLabel("Scope of information", { exact: true }).click();
+  for (const option of ["All information", MEDICAL, FINANCIAL]) {
+    await expect(page.getByRole("option", { name: option, exact: true }).locator("svg")).toHaveCount(1);
+  }
+  await page.getByRole("option", { name: MEDICAL, exact: true }).click();
+  await expect(page.getByRole("option", { name: "All information", exact: true }).locator("svg")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByLabel("Scope of information", { exact: true })).toContainText("Organisational information, Financial information");
+  await page.getByTestId("disclosure-consent").check();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "documents");
+  expect(calls.at(-1)?.persons[0].scope_codes).toEqual(["organisational", "financial"]);
+});
+
+test("a free-text scope from before is shown and must be chosen again", async ({ page }) => {
+  const item = request(); item.disclosure = receipt();
+  item.trusted_persons = [{ name: "Eva Friend", relation: "friend", contact: null, scope: "medizin" }];
+  const { calls } = await setup(page, { requests: [item] });
+  await expect(page.getByTestId("trusted-person-scope-legacy")).toContainText("“medizin”");
+  await expect(page.getByLabel("Scope of information", { exact: true })).toContainText("Please choose");
+  expect(calls).toHaveLength(0);
+  await toggleScope(page, [MEDICAL]);
+  await expect(page.getByTestId("trusted-person-scope-legacy")).toHaveCount(0);
+  await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
+  await page.getByTestId("disclosure-consent").check();
+  await expect(page.getByTestId("trusted-persons-save-state")).toHaveText("Saved");
+  expect(calls.at(-1)?.persons).toEqual([{ name: "Eva Friend", relation: "friend", contact: null, scope_codes: ["medical"] }]);
 });
 
 test("switching children saves the current decision and keeps each child's people separate", async ({ page }) => {
@@ -164,7 +209,7 @@ test("switching children saves the current decision and keeps each child's peopl
 
 test("No clears existing people and records an explicit refusal without changing core consents", async ({ page }) => {
   const item = request(); item.disclosure = receipt();
-  item.trusted_persons = [{ name: "Eva Friend", relation: "friend", contact: null, scope: "Medical" }];
+  item.trusted_persons = [{ name: "Eva Friend", relation: "friend", contact: null, scope_codes: ["medical"] }];
   item.consent_form.choices.named_recipients = true;
   const { calls } = await setup(page, { requests: [item] });
   await page.getByRole("button", { name: "Remove", exact: true }).click();
@@ -186,14 +231,14 @@ test("a legacy list is retained without preselecting the new decision or consent
   await expect(page.getByTestId("disclosure-no")).not.toBeChecked();
   await page.getByTestId("disclosure-yes").check();
   await expect(page.getByLabel("Last name, first name")).toHaveValue("Legacy Friend");
-  await expect(page.getByLabel("Scope of information", { exact: false })).toHaveValue("");
+  await expect(page.getByLabel("Scope of information", { exact: true })).toContainText("Please choose");
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
   await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
 });
 
 test("another guardian can confirm the saved people while the original actor stays identified", async ({ page }) => {
   const item = request(); item.disclosure = { ...receipt(), chosen_by: "other-guardian", chosen_by_name: "Other Guardian" };
-  item.trusted_persons = [{ name: "Eva Friend", relation: "friend", contact: null, scope: "Invoices only" }];
+  item.trusted_persons = [{ name: "Eva Friend", relation: "friend", contact: null, scope_codes: ["financial"] }];
   const { calls } = await setup(page, { requests: [item] });
   await expect(page.getByTestId("disclosure-yes")).toBeChecked();
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
@@ -201,7 +246,7 @@ test("another guardian can confirm the saved people while the original actor sta
   await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await page.getByTestId("disclosure-consent").check();
   await expect(page.getByTestId("disclosure-receipt")).toContainText("Guardian Muster");
-  expect(calls[0].persons[0].scope).toBe("Invoices only");
+  expect(calls[0].persons[0].scope_codes).toEqual(["financial"]);
 });
 
 test("an adult representative sees whose data is covered", async ({ page }) => {
@@ -235,8 +280,8 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     const item = request(); item.disclosure = receipt();
     item.trusted_persons = [
-      { name: "Eva Muster", relation: "friend", contact: "eva@example.com", scope: "Медицинская информация" },
-      { name: "Nina Muster", relation: "relative", contact: "+49 151 000000", scope: "Счета" },
+      { name: "Eva Muster", relation: "friend", contact: "eva@example.com", scope_codes: ["medical", "organisational"] },
+      { name: "Nina Muster", relation: "relative", contact: "+49 151 000000", scope_codes: ["all"] },
     ];
     await setup(page, { requests: [item], lang: "ru" });
     await expect(page.getByTestId("trusted-persons-editor")).toBeVisible();

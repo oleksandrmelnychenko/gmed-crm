@@ -3,9 +3,10 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
+import { CONSENT_RECIPIENT_SCOPES, cabinetScopeSummary, checkedScopeCodes, scopeOptionLabel, toggleScopeCode, type ConsentRecipientScope } from "@/lib/consent-recipient-scope";
 import { CONSENT_RECIPIENT_RELATIONS, MAX_CONSENT_RECIPIENTS, type ConsentRecipient, type ConsentRecipientRelation } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
-import type { RecipientDraft } from "./lead-trusted-persons-model";
+import { personScope, type RecipientDraft } from "./lead-trusted-persons-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 
 export function TrustedPersonsList({ persons, lang }: { persons: readonly ConsentRecipient[]; lang: string }) {
@@ -14,9 +15,23 @@ export function TrustedPersonsList({ persons, lang }: { persons: readonly Consen
     {persons.map((person, index) => <li key={index} className="break-words rounded-lg border border-border/60 bg-card px-3 py-2">
       <span className="font-medium">{person.name}</span>{" · "}{text.recipientRelations[person.relation] ?? text.recipientRelations.other}
       {person.contact ? <span className="text-muted-foreground"> · {person.contact}</span> : null}
-      {person.scope ? <p className="mt-1 text-muted-foreground">{person.scope}</p> : null}
+      {personScope(person, lang) ? <p className="mt-1 text-muted-foreground">{personScope(person, lang)}</p> : null}
     </li>)}
   </ul>;
+}
+
+/** Multi-select with check marks: `all` ticks every option, unticking another one drops `all`. */
+export function ScopeSelect({ value, onChange, lang, disabled = false, invalid = false, id }: {
+  value: readonly ConsentRecipientScope[]; onChange: (next: ConsentRecipientScope[]) => void; lang: string; disabled?: boolean; invalid?: boolean; id?: string;
+}) {
+  const fields = trustedPersonsText(lang);
+  const summary = cabinetScopeSummary(value, lang);
+  return <NativeComboboxSelect id={id} className={selectClass} value="" disabled={disabled} aria-invalid={invalid || undefined}
+    selectedValues={checkedScopeCodes(value)} showValueIndicator={false} hidePlaceholderOption keepOpenOnSelect title={summary || fields.scopePlaceholder} aria-label={fields.scope}
+    onChange={(event) => { if (event.target.value) onChange(toggleScopeCode(value, event.target.value as ConsentRecipientScope)); }}>
+    <option value="">{summary || fields.scopePlaceholder}</option>
+    {CONSENT_RECIPIENT_SCOPES.map((code) => <option key={code} value={code}>{scopeOptionLabel(code, lang)}</option>)}
+  </NativeComboboxSelect>;
 }
 
 export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false }: {
@@ -44,12 +59,16 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
       <label className="min-w-0 space-y-1.5 text-xs"><span className="text-muted-foreground">{fields.contact}</span>
         <Input className={inputClass} value={person.contact} maxLength={120} disabled={disabled} autoComplete="off" onChange={(event) => update(index, { contact: event.target.value })} />
       </label>
-      <label className="min-w-0 space-y-1.5 text-xs"><span className="text-muted-foreground">{fields.scope}</span>
-        <Input className={inputClass} value={person.scope} maxLength={240} disabled={disabled} autoComplete="off" onChange={(event) => update(index, { scope: event.target.value })} />
-      </label>
+      <div className="min-w-0 space-y-1.5 text-xs sm:col-span-2"><label htmlFor={`trusted-person-scope-${index}`} className="text-muted-foreground">{fields.scope}</label>
+        <ScopeSelect id={`trusted-person-scope-${index}`} value={person.scopeCodes} lang={lang} disabled={disabled} invalid={person.scopeCodes.length === 0 && Boolean(person.scope.trim())}
+          onChange={(scopeCodes) => update(index, { scopeCodes })} />
+        {person.scopeCodes.length === 0 && person.scope.trim()
+          ? <p className="text-amber-700 dark:text-amber-400" data-testid="trusted-person-scope-legacy">{fields.scopeLegacy(person.scope.trim())}</p>
+          : <p className="text-muted-foreground">{fields.scopeHint}</p>}
+      </div>
       </div>
     </div>)}
-    {persons.length < MAX_CONSENT_RECIPIENTS ? <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" disabled={disabled} data-testid="trusted-person-add" onClick={() => onChange([...persons, { name: "", relation: "", contact: "", scope: "" }])}>
+    {persons.length < MAX_CONSENT_RECIPIENTS ? <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" disabled={disabled} data-testid="trusted-person-add" onClick={() => onChange([...persons, { name: "", relation: "", contact: "", scope: "", scopeCodes: [] }])}>
       <Plus aria-hidden="true" className="size-3.5" />{text.addRecipient}
     </Button> : null}
   </div>;

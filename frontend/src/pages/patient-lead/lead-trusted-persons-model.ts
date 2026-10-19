@@ -1,19 +1,27 @@
+import { cabinetScopeSummary, normalizeScopeCodes, type ConsentRecipientScope } from "@/lib/consent-recipient-scope";
 import { CONSENT_RECIPIENT_RELATIONS, DISCLOSURE_VERSION, MAX_CONSENT_RECIPIENTS, type ConsentRecipient, type ConsentRecipientRelation, type LeadDisclosureInput, type LeadRequest } from "./lead-request-api";
 
-export type RecipientDraft = { name: string; relation: ConsentRecipientRelation | ""; contact: string; scope: string };
+/** `scope` is the read-only free text of a person named before 2026-10-19; `scopeCodes` the choice. */
+export type RecipientDraft = { name: string; relation: ConsentRecipientRelation | ""; contact: string; scope: string; scopeCodes: ConsentRecipientScope[] };
 export type DisclosureDraft = { allowDisclosure: boolean | null; consentGiven: boolean; persons: RecipientDraft[] };
 
 export function recipientDrafts(saved: readonly ConsentRecipient[] | undefined): RecipientDraft[] {
-  return (saved ?? []).map((person) => ({ name: person.name, relation: person.relation, contact: person.contact ?? "", scope: person.scope ?? "" }));
+  return (saved ?? []).map((person) => ({ name: person.name, relation: person.relation, contact: person.contact ?? "", scope: person.scope ?? "", scopeCodes: normalizeScopeCodes(person.scope_codes) }));
+}
+
+/** The chosen scope in the cabinet language; a legacy free text as typed. */
+export function personScope(person: Pick<ConsentRecipient, "scope" | "scope_codes">, lang: string): string {
+  const codes = normalizeScopeCodes(person.scope_codes);
+  return codes.length > 0 ? cabinetScopeSummary(codes, lang) : person.scope?.trim() ?? "";
 }
 
 const normalizedName = (name: string) => name.trim().replace(/\s+/g, " ");
-const typedPersons = (drafts: readonly RecipientDraft[]) => drafts.filter((person) => person.name.trim() || person.relation || person.contact.trim() || person.scope.trim());
+const typedPersons = (drafts: readonly RecipientDraft[]) => drafts.filter((person) => person.name.trim() || person.relation || person.contact.trim() || person.scopeCodes.length > 0);
 
 /** Empty rows are not people; incomplete rows must pass validation before saving. */
 export function recipientsToSend(drafts: readonly RecipientDraft[]): LeadDisclosureInput["persons"] {
   return typedPersons(drafts).map((person) => ({
-    name: normalizedName(person.name), relation: person.relation as ConsentRecipientRelation, contact: person.contact.trim() || null, scope: person.scope.trim(),
+    name: normalizedName(person.name), relation: person.relation as ConsentRecipientRelation, contact: person.contact.trim() || null, scope_codes: normalizeScopeCodes(person.scopeCodes),
   }));
 }
 
@@ -22,13 +30,15 @@ export function trustedPersonsProblem(drafts: readonly RecipientDraft[]): "inval
   return people.length > MAX_CONSENT_RECIPIENTS || people.some((person) =>
     !normalizedName(person.name) || [...normalizedName(person.name)].length > 120 ||
     !CONSENT_RECIPIENT_RELATIONS.includes(person.relation as ConsentRecipientRelation) || [...person.contact.trim()].length > 120 ||
-    !person.scope.trim() || [...person.scope.trim()].length > 240,
+    normalizeScopeCodes(person.scopeCodes).length === 0,
   ) ? "invalid" : null;
 }
 
 export function samePersons(left: readonly ConsentRecipient[], right: readonly ConsentRecipient[]): boolean {
   return left.length === right.length && left.every((person, index) =>
-    person.name === right[index].name && person.relation === right[index].relation && (person.contact || null) === (right[index].contact || null) && (person.scope || null) === (right[index].scope || null),
+    person.name === right[index].name && person.relation === right[index].relation && (person.contact || null) === (right[index].contact || null) &&
+    (person.scope || null) === (right[index].scope || null) &&
+    normalizeScopeCodes(person.scope_codes).join() === normalizeScopeCodes(right[index].scope_codes).join(),
   );
 }
 

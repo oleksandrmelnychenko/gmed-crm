@@ -1,29 +1,53 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CONSENT_RECIPIENT_RELATIONS, NO_CONSENT_FORM_CHOICES, type LeadRequest } from "./lead-request-api";
+import { CONSENT_RECIPIENT_SCOPES, cabinetScopeSummary, checkedScopeCodes, normalizeScopeCodes, scopeOptionLabel, staffScopeSummary, toggleScopeCode } from "@/lib/consent-recipient-scope";
+import { CONSENT_RECIPIENT_RELATIONS, NO_CONSENT_FORM_CHOICES, type ConsentRecipient, type LeadRequest } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { TrustedPersonsEditor, TrustedPersonsList } from "./lead-trusted-persons-editor";
-import { disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, recipientDrafts, recipientsToSend, requestForLead, samePersons, storedTrustedPersons, trustedPersonsProblem, type RecipientDraft } from "./lead-trusted-persons-model";
+import { disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, personScope, recipientDrafts, recipientsToSend, requestForLead, samePersons, storedTrustedPersons, trustedPersonsProblem, type RecipientDraft } from "./lead-trusted-persons-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 
-const friend = { name: "Eva Muster", relation: "friend", contact: "", scope: "Medical" } satisfies RecipientDraft;
+const stored = { name: "Eva Muster", relation: "friend", contact: "", scope_codes: ["medical"] } satisfies ConsentRecipient;
+const friend = { name: "Eva Muster", relation: "friend", contact: "", scope: "", scopeCodes: ["medical"] } satisfies RecipientDraft;
+const legacyStored = { name: "Eva Muster", relation: "friend", contact: "", scope: "medizin" } satisfies ConsentRecipient;
+const legacyFriend = { ...friend, scope: "medizin", scopeCodes: [] } satisfies RecipientDraft;
 
 describe("explicit disclosure decision", () => {
-  const legacy = { trusted_persons: [friend], consent_form: { version: "v1", chosen_at: null, choices: { ...NO_CONSENT_FORM_CHOICES, named_recipients: true }, recipients: [friend] } };
+  const legacy = { trusted_persons: [stored], consent_form: { version: "v1", chosen_at: null, choices: { ...NO_CONSENT_FORM_CHOICES, named_recipients: true }, recipients: [stored] } };
   it("does not preselect a legacy decision or consent and preserves its draft people", () => {
     const draft = disclosureDraft(legacy);
     expect(draft).toEqual({ allowDisclosure: null, consentGiven: false, persons: [friend] });
     expect(disclosureProblem(draft)).toBe("decision");
     expect(disclosureChanged(draft, legacy)).toBe(false);
   });
-  it("requires people, per-person scope and explicit consent for Yes", () => {
+  it("requires people, a chosen scope per person and explicit consent for Yes", () => {
     const draft = { allowDisclosure: true, consentGiven: false, persons: [friend] };
     expect(disclosureProblem({ ...draft, persons: [] })).toBe("required");
-    expect(disclosureProblem({ ...draft, persons: [{ ...friend, scope: " " }] })).toBe("invalid");
-    expect(disclosureProblem({ ...draft, persons: [{ ...friend, scope: "x".repeat(241) }] })).toBe("invalid");
+    expect(disclosureProblem({ ...draft, persons: [{ ...friend, scopeCodes: [] }] })).toBe("invalid");
     expect(disclosureProblem(draft)).toBe("consent");
     expect(() => disclosureToSend(draft, "en")).toThrow();
-    expect(disclosureToSend({ ...draft, consentGiven: true }, "uk")).toEqual({ persons: [{ ...friend, contact: null }], allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "uk" });
+    expect(disclosureToSend({ ...draft, consentGiven: true }, "uk")).toEqual({
+      persons: [{ name: "Eva Muster", relation: "friend", contact: null, scope_codes: ["medical"] }],
+      allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "uk",
+    });
+  });
+  it("asks again for a person with only a legacy free-text scope and then sends codes only", () => {
+    const request = { trusted_persons: [legacyStored] };
+    const draft = { ...disclosureDraft(request), allowDisclosure: true, consentGiven: true };
+    expect(draft.persons).toEqual([legacyFriend]);
+    expect(disclosureProblem(draft)).toBe("invalid");
+    const chosen = { ...draft, persons: [{ ...legacyFriend, scopeCodes: toggleScopeCode([], "medical") }] };
+    expect(disclosureProblem(chosen)).toBeNull();
+    expect(disclosureToSend(chosen, "de").persons).toEqual([{ name: "Eva Muster", relation: "friend", contact: null, scope_codes: ["medical"] }]);
+    expect(disclosureChanged(chosen, request)).toBe(true);
+    const html = renderToStaticMarkup(<TrustedPersonsEditor persons={[legacyFriend]} lang="de" onChange={() => undefined} />);
+    expect(html).toContain("trusted-person-scope-legacy");
+    expect(html).toContain("Bisher angegeben: „medizin“");
+    expect(personScope(legacyStored, "de")).toBe("medizin");
+  });
+  it("sends `all` alone when everything is permitted", () => {
+    const all = { ...friend, scopeCodes: toggleScopeCode(["medical"], "all") };
+    expect(recipientsToSend([all])[0].scope_codes).toEqual(["all"]);
   });
   it("No sends an explicit negative decision without stale persons or consent", () => {
     expect(disclosureToSend({ allowDisclosure: false, consentGiven: true, persons: [friend] }, "de")).toEqual({ persons: [], allow_disclosure: false, consent_given: false, version: "2026-10-14", language: "de" });
@@ -37,14 +61,48 @@ describe("explicit disclosure decision", () => {
     expect(disclosureDraft(request, "parent-a").consentGiven).toBe(true);
     expect(disclosureDraft({ ...request, disclosure_company_name: "New Clinic" }, "parent-a").consentGiven).toBe(false);
     expect(disclosureDraft({ ...request, disclosure: { ...request.disclosure, version: "old" } }, "parent-a").consentGiven).toBe(false);
-    expect(disclosureChanged({ ...disclosureDraft(request), persons: [{ ...friend, scope: "Invoices" }] }, request)).toBe(true);
+    expect(disclosureChanged({ ...disclosureDraft(request), persons: [{ ...friend, scopeCodes: ["financial"] }] }, request)).toBe(true);
+  });
+});
+
+describe("scope selector", () => {
+  it("ticks every option with `all` and drops `all` when another option is unticked", () => {
+    expect(toggleScopeCode([], "all")).toEqual(["all"]);
+    expect(checkedScopeCodes(["all"])).toEqual([...CONSENT_RECIPIENT_SCOPES]);
+    expect(toggleScopeCode(["all"], "medical")).toEqual(["organisational", "financial"]);
+    expect(toggleScopeCode(["all"], "all")).toEqual([]);
+    expect(toggleScopeCode(["medical"], "financial")).toEqual(["medical", "financial"]);
+    expect(toggleScopeCode(["medical", "financial"], "medical")).toEqual(["financial"]);
+    expect(toggleScopeCode(["medical", "financial"], "all")).toEqual(["all"]);
+    expect(checkedScopeCodes(["financial", "medical"])).toEqual(["medical", "financial"]);
+  });
+  it("keeps known codes only, in offer order", () => {
+    expect(normalizeScopeCodes(["financial", "medizin", " medical", "financial"])).toEqual(["medical", "financial"]);
+    expect(normalizeScopeCodes(["medical", "all"])).toEqual(["all"]);
+    expect(normalizeScopeCodes(null)).toEqual([]);
+  });
+  it("requires at least one option", () => {
+    expect(trustedPersonsProblem([{ ...friend, scopeCodes: [] }])).toBe("invalid");
+    expect(trustedPersonsProblem([{ ...friend, scopeCodes: ["all"] }])).toBeNull();
+  });
+  it.each(["de", "en", "uk", "ru"])("labels every option and summary in %s", (lang) => {
+    for (const code of CONSENT_RECIPIENT_SCOPES) expect(scopeOptionLabel(code, lang)).toBeTruthy();
+    expect(cabinetScopeSummary(["organisational", "medical"], lang)).toContain(", ");
+    const html = renderToStaticMarkup(<TrustedPersonsEditor persons={[friend]} lang={lang} onChange={() => undefined} />);
+    expect(html).toContain(trustedPersonsText(lang).scopeHint);
+    expect(html).toContain(cabinetScopeSummary(["medical"], lang));
+  });
+  it("shows the localized labels in the staff app", () => {
+    expect(staffScopeSummary(["all"], "ru")).toBe("вся информация");
+    expect(staffScopeSummary(["medical", "organisational", "financial"], "ru")).toBe("медицинская, организационная, финансовая");
+    expect(staffScopeSummary(["financial"], "de")).toBe("finanzielle");
   });
 });
 
 describe("trusted persons independent of consent", () => {
   it("accepts an empty list, validates every typed row and matches server normalization", () => {
     expect(trustedPersonsProblem([])).toBeNull();
-    expect(trustedPersonsProblem([{ name: "", relation: "", contact: "", scope: "" }])).toBeNull();
+    expect(trustedPersonsProblem([{ name: "", relation: "", contact: "", scope: "", scopeCodes: [] }])).toBeNull();
     expect(trustedPersonsProblem([friend])).toBeNull();
     expect(trustedPersonsProblem([{ ...friend, relation: "" }])).toBe("invalid");
     expect(trustedPersonsProblem([{ ...friend, name: " " }])).toBe("invalid");
@@ -52,16 +110,17 @@ describe("trusted persons independent of consent", () => {
     expect(trustedPersonsProblem([{ ...friend, name: `Eva${" ".repeat(121)}Muster` }])).toBeNull();
     expect(trustedPersonsProblem([{ ...friend, contact: "x".repeat(121) }])).toBe("invalid");
     expect(trustedPersonsProblem(Array.from({ length: 6 }, () => friend))).toBe("invalid");
-    expect(recipientsToSend([{ ...friend, name: " Eva   Muster ", contact: " eva@example.com " }])).toEqual([{ name: "Eva Muster", relation: "friend", contact: "eva@example.com", scope: "Medical" }]);
-    expect(recipientDrafts([{ ...friend, contact: null }])).toEqual([friend]);
-    expect(samePersons([{ ...friend, contact: null }], [friend])).toBe(true);
+    expect(recipientsToSend([{ ...friend, name: " Eva   Muster ", contact: " eva@example.com " }])).toEqual([{ name: "Eva Muster", relation: "friend", contact: "eva@example.com", scope_codes: ["medical"] }]);
+    expect(recipientDrafts([{ ...stored, contact: null }])).toEqual([friend]);
+    expect(samePersons([{ ...stored, contact: null }], [stored])).toBe(true);
+    expect(samePersons([stored], [{ ...stored, scope_codes: ["financial"] }])).toBe(false);
   });
 
   it("does not restore old recipients when the lead explicitly cleared the list", () => {
-    const consent_form = { version: "v1", chosen_at: null, choices: NO_CONSENT_FORM_CHOICES, recipients: [friend] };
+    const consent_form = { version: "v1", chosen_at: null, choices: NO_CONSENT_FORM_CHOICES, recipients: [stored] };
     expect(storedTrustedPersons({ trusted_persons: [], consent_form })).toEqual([]);
-    expect(storedTrustedPersons({ consent_form })).toEqual([friend]);
-    expect(storedTrustedPersons({ trusted_persons: [friend] })).toEqual([friend]);
+    expect(storedTrustedPersons({ consent_form })).toEqual([stored]);
+    expect(storedTrustedPersons({ trusted_persons: [stored] })).toEqual([stored]);
   });
 
   it("selects the requested child and falls back only to an accessible request", () => {
@@ -83,8 +142,10 @@ describe("trusted persons independent of consent", () => {
     expect(html).toContain('value="Eva Muster"');
     expect(html).toContain(text.recipientRelations.friend);
     expect(html).toContain("trusted-person-add");
-    const list = renderToStaticMarkup(<TrustedPersonsList persons={[{ ...friend, name: "<script>" }]} lang={lang} />);
+    const list = renderToStaticMarkup(<TrustedPersonsList persons={[{ ...stored, name: "<script>" }, legacyStored]} lang={lang} />);
     expect(list).toContain("&lt;script&gt;");
+    expect(list).toContain(cabinetScopeSummary(["medical"], lang));
+    expect(list).toContain("medizin");
     expect(list).not.toContain("<input");
   });
 

@@ -35970,7 +35970,8 @@ mod tests {
             name: "Chosen Clinic".into(),
             relation: "clinic".into(),
             contact: Some("chosen@example.test".into()),
-            scope: Some("Nur organisatorische Informationen".into()),
+            scope: None,
+            scope_codes: vec!["organisational".into(), "medical".into()],
         }];
         selected.disclosure = Some(disclosure_test_receipt(selected));
         let selected_pdf = build_consent_pdf(&context).unwrap();
@@ -35990,7 +35991,8 @@ mod tests {
         );
         assert!(!selected_text.contains("Oma Beispiel"), "{selected_text}");
         assert!(
-            selected_text.contains("Umfang der Auskunft: Nur organisatorische Informationen"),
+            selected_text
+                .contains("Umfang der Auskunft: medizinische und organisatorische Informationen"),
             "{selected_text}"
         );
         assert_anlage1_has_no_separate_disclosure_block(&selected_text);
@@ -36474,7 +36476,9 @@ mod tests {
             name: "Chosen Adult Recipient".into(),
             relation: "spouse".into(),
             contact: Some("chosen@example.test".into()),
+            // A legacy free-text scope prints as typed.
             scope: Some("Nur Rechnungen".into()),
+            scope_codes: Vec::new(),
         }];
         named.disclosure = Some(disclosure_test_receipt(&named));
         let selected = build_adult_privacy_consents_pdf(

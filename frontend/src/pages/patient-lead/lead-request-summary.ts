@@ -3,7 +3,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
-import { storedTrustedPersons } from "./lead-trusted-persons-model";
+import { personScope, storedTrustedPersons } from "./lead-trusted-persons-model";
 import { REPRESENTATIVE_COUNTRY_FIELDS } from "./lead-request-representative-questions-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
@@ -532,7 +532,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       ...Object.entries(consent.choices).map(([key, value]): Entry =>
         [wording.options[key as keyof typeof consent.choices], yesNo(value)]),
       ...(!request.disclosure && consent.choices.named_recipients ? storedTrustedPersons(request).map((person): Entry =>
-        [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], person.contact, person.scope].filter(Boolean).join(" · ")]) : []),
+        [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], person.contact, personScope(person, lang)].filter(Boolean).join(" · ")]) : []),
       [text.saved, consent.chosen_at ? (consent.chosen_by_me === false ? wording.savedByOtherAt : wording.savedAt)(formatAppDateTime(consent.chosen_at)) : ""],
     ]);
   }
@@ -551,7 +551,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       ]),
       parts: disclosure.allow_disclosure ? storedTrustedPersons(request).map((person, index) => ({
         id: `disclosure-person-${index}`, title: person.name,
-        rows: entered([[wording.relation, relations[person.relation]], [wording.contact, person.contact], [wording.scope, person.scope]]),
+        rows: entered([[wording.relation, relations[person.relation]], [wording.contact, person.contact], [wording.scope, personScope(person, lang)]]),
       })) : [],
     });
   }

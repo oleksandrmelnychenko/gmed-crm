@@ -5,6 +5,7 @@ import type { LeadPortalIntake } from "../data/lead-portal-intake-api";
 import {
   PORTAL_CONSENT_CHANNELS,
   PORTAL_CONSENT_OPTIONS,
+  recipientScopeLabel,
   type ConsentRecipientRelation,
   type PortalConsentChoiceKey,
 } from "../model/lead-portal-consents";
@@ -81,7 +82,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
         <p className="text-xs text-muted-foreground">{tx("Только получение информации. Не могут действовать от имени пациента или подписывать документы. Передача данных возможна только с соответствующим согласием.", "Nur für Auskünfte. Keine Vertretung und keine Unterschrift im Namen des Patienten. Die Datenübermittlung setzt eine entsprechende Einwilligung voraus.")}</p>
         <ul className="space-y-2 text-sm">{persons.map((person, index) => <li key={index} className="break-words leading-5">
           <span className="font-medium">{person.name}</span>{" · "}{relationLabels[person.relation as ConsentRecipientRelation] ?? relationLabels.other}{person.contact ? ` · ${person.contact}` : ""}
-          <p className="text-xs text-muted-foreground">{tx("Объём информации:", "Auskunftsumfang:")} {person.scope || tx("Не указан", "Nicht angegeben")}</p>
+          <p className="text-xs text-muted-foreground">{tx("Объём информации:", "Auskunftsumfang:")} {recipientScopeLabel(person, tx("ru", "de")) || tx("Не указан", "Nicht angegeben")}</p>
         </li>)}</ul>
       </div> : null}
     </div>
@@ -104,7 +105,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
                     <span className="text-foreground">{recipient.name}</span>
                     {" · "}{relationLabels[recipient.relation as ConsentRecipientRelation] ?? relationLabels.other}
                     {recipient.contact ? ` · ${recipient.contact}` : ""}
-                    {recipient.scope ? <p className="break-words">{tx("Объём информации:", "Auskunftsumfang:")} {recipient.scope}</p> : null}
+                    {recipientScopeLabel(recipient, tx("ru", "de")) ? <p className="break-words">{tx("Объём информации:", "Auskunftsumfang:")} {recipientScopeLabel(recipient, tx("ru", "de"))}</p> : null}
                   </li>
                 ))}
               </ul>

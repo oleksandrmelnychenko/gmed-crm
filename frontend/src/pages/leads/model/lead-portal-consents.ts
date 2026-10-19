@@ -1,3 +1,4 @@
+import { normalizeScopeCodes, staffScopeSummary, type ConsentRecipientScope } from "@/lib/consent-recipient-scope";
 import type { LeadPortalConsent } from "../data/lead-portal-intake-api";
 
 export const PORTAL_CONSENT_OPTIONS = [
@@ -13,7 +14,20 @@ export const CONSENT_RECIPIENT_RELATIONS = ["spouse", "child", "relative", "frie
 export type ConsentRecipientRelation = (typeof CONSENT_RECIPIENT_RELATIONS)[number];
 
 /** A person or institution the person named for "named recipients". */
-export type LeadPortalConsentRecipient = { name: string; relation: string; contact: string | null; scope?: string | null };
+export type LeadPortalConsentRecipient = {
+  name: string; relation: string; contact: string | null;
+  /** Free text of persons named before 2026-10-19. */
+  scope?: string | null;
+  /** The chosen scope (owner 2026-10-19); absent for legacy persons. */
+  scope_codes?: ConsentRecipientScope[];
+};
+
+/** What the person may be told, in the staff language ("медицинская, финансовая"); a legacy free text as typed. */
+export function recipientScopeLabel(recipient: Pick<LeadPortalConsentRecipient, "scope" | "scope_codes">, lang: string): string | null {
+  const codes = normalizeScopeCodes(recipient.scope_codes);
+  if (codes.length > 0) return staffScopeSummary(codes, lang);
+  return recipient.scope?.trim() || null;
+}
 
 /** Independent disclosure receipt; legacy records without one remain unanswered. */
 export type LeadPortalDisclosure = {
@@ -61,7 +75,8 @@ export function normalizeConsentRecipients(value: unknown): LeadPortalConsentRec
     if (!name) return [];
     const contact = typeof raw.contact === "string" && raw.contact.trim() ? raw.contact.trim() : null;
     const scope = typeof raw.scope === "string" && raw.scope.trim() ? raw.scope.trim() : null;
-    return [{ name, relation: typeof raw.relation === "string" ? raw.relation : "other", contact, scope }];
+    const scopeCodes = normalizeScopeCodes(raw.scope_codes);
+    return [{ name, relation: typeof raw.relation === "string" ? raw.relation : "other", contact, scope, ...(scopeCodes.length > 0 ? { scope_codes: scopeCodes } : {}) }];
   });
 }
 

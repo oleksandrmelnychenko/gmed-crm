@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { normalizeLeadPortalIntake, type LeadPortalIntake } from "../data/lead-portal-intake-api";
-import { normalizeLeadPortalConsentForm, normalizeLeadPortalDisclosure } from "../model/lead-portal-consents";
+import { normalizeConsentRecipients, normalizeLeadPortalConsentForm, normalizeLeadPortalDisclosure } from "../model/lead-portal-consents";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { PortalHealthConsentLine, PortalInquiryConsentLine } from "./lead-wizard-portal-intake";
 
@@ -114,6 +114,20 @@ describe("portal consent facts in the staff wizard", () => {
     expect(html).not.toMatch(/<(?:button|input|script)\b/);
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain("Auskunftsumfang: Только даты приёмов");
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={{ ...intake, identification_hidden: true }} tx={tx} />)).toBe("");
+  });
+
+  it("shows a chosen scope in the staff language (owner 2026-10-19)", () => {
+    const intake = state({
+      disclosure: normalizeLeadPortalDisclosure({ allow_disclosure: true, consent_given: true, access_kind: "self", chosen_at: "2026-10-19T10:00:00Z" }),
+      trusted_persons: normalizeConsentRecipients([
+        { name: "Eva Muster", relation: "friend", scope_codes: ["financial", "medical"] },
+        { name: "Max Muster", relation: "friend", scope_codes: ["all"], scope: "ignored legacy" },
+      ]),
+    });
+    const html = renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={tx} />);
+    expect(html).toContain("Объём информации: медицинская, финансовая");
+    expect(html).toContain("Объём информации: вся информация");
+    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain("Auskunftsumfang: medizinische, finanzielle");
   });
 
   it("renders an explicit No without named persons or Anlage 1 and uses warning chips", () => {
