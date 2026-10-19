@@ -147,6 +147,36 @@ export function answeredPayerRows(request: LeadRequest, text: LeadRequestText): 
   ]);
 }
 
+function custodyOf(request: Pick<LeadRequest, "minor" | "representation">) {
+  return request.minor ? (request.representation?.custody ?? "joint") : null;
+}
+
+/**
+ * "Who pays" when a parent or legal representative pays (owner decision
+ * 2026-10-19): the contracting representative, never a third party. The
+ * summary names that person — "I (as a parent) – name" for the own login,
+ * else the representative's heading with the name — instead of reading the
+ * answer as "a private person". `null` for any other payer.
+ */
+function representativePayerLabel(
+  request: Pick<LeadRequest, "payer" | "payer_self_template" | "representation" | "minor">,
+  text: LeadRequestText,
+  custody: ReturnType<typeof custodyOf>,
+): string | null {
+  const payer = request.payer;
+  if (payer?.payer_kind !== "representative") return null;
+  const person = request.representation?.representatives.find((item) => item.id === payer.payer_representative_id);
+  const name = [payer.first_name, payer.last_name].map((part) => part?.trim()).filter(Boolean).join(" ")
+    || [person?.first_name, person?.last_name].map((part) => part?.trim()).filter(Boolean).join(" ");
+  const mine = person ? person.mine : payerAnswer(payer, request.payer_self_template ?? null) === "guardian";
+  const label = mine
+    ? text.recipient.payerOptions.guardian
+    : person?.slot
+      ? representativeHeading(text, person.slot, false, custody)
+      : text.payerRelationshipOptions.parent;
+  return name ? `${label} – ${name}` : label;
+}
+
 /**
  * What "send to the manager" sends, grouped like the form (step "send"). Only
  * what was entered is listed: what is still needed is the list of missing
@@ -204,16 +234,11 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     ],
   ]);
 
-  // The identity document: the copies only, GMED enters the data.
-  if (identification) {
-    group("identity", childSectionTitle(text, "identity", request.minor), [[request.minor ? text.childIdentityFiles : text.identityFiles, fileNames(request.identity_documents)]]);
-  }
-
   // Who acts for the lead: the answers of an adult or the custody of a minor,
-  // then each person the form asks for, with the files.
+  // then each person the form asks for, with the files (step 1, like the form).
   const representation = request.representation;
   if (representation) {
-    const custody = request.minor ? (representation.custody ?? "joint") : null;
+    const custody = custodyOf(request);
     const stated = (person: LeadRequestRepresentative, field: RepresentativeField) => {
       switch (field) {
         case "citizenships":
@@ -264,6 +289,11 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       empty: text.summaryEmpty,
       parts,
     });
+  }
+
+  // The identity document, the step after the person: the copies only, GMED enters the data.
+  if (identification) {
+    group("identity", childSectionTitle(text, "identity", request.minor), [[request.minor ? text.childIdentityFiles : text.identityFiles, fileNames(request.identity_documents)]]);
   }
 
   group("insurance", childSectionTitle(text, "insurance", request.minor), [
@@ -385,7 +415,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     group("payer", text.sectionPayer, [
       [
         text.payerQuestion,
-        flowKnown ? choiceLabel : option(guardian ? text.payerOptionsGuardian : text.payerOptions, answer),
+        representativePayerLabel(request, text, custodyOf(request))
+          ?? (flowKnown ? choiceLabel : option(guardian ? text.payerOptionsGuardian : text.payerOptions, answer)),
       ],
       ...(thirdParty ? thirdPartyRows(thirdParty) : []),
       [payerFieldLabel(text, "payer_own_account", guardian), yesNo(payer?.acts_on_own_account)],
@@ -525,18 +556,6 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     if (entered(rows).length > 0) group("follow_up", text.steps.follow_up, rows);
   }
 
-  const consent = request.consent_form;
-  if (consent?.choices) {
-    const wording = consentFormText(lang, guardian && request.minor);
-    group("consent_form", wording.title, [
-      ...Object.entries(consent.choices).map(([key, value]): Entry =>
-        [wording.options[key as keyof typeof consent.choices], yesNo(value)]),
-      ...(!request.disclosure && consent.choices.named_recipients ? storedTrustedPersons(request).map((person): Entry =>
-        [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], person.contact, personScope(person, lang)].filter(Boolean).join(" · ")]) : []),
-      [text.saved, consent.chosen_at ? (consent.chosen_by_me === false ? wording.savedByOtherAt : wording.savedAt)(formatAppDateTime(consent.chosen_at)) : ""],
-    ]);
-  }
-
   // This explicit decision is independent of whether Anlage 1's core choices were saved.
   if (request.disclosure) {
     const disclosure = request.disclosure;
@@ -546,10 +565,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       id: "disclosure", title: wording.title, empty: text.summaryEmpty,
       rows: entered([
         [wording.question, yesNo(disclosure.allow_disclosure)],
-        // The consent belongs to a "Yes" only; after a "No" there is nothing to consent to.
-        ...(disclosure.allow_disclosure
-          ? [[wording.consentHeading, [yesNo(disclosure.consent_given), disclosure.company_name].filter(Boolean).join(" · ")] as [string, string]]
-          : []),
+        // The consent is asked only after "yes": after "no" there is nothing to consent to.
+        [wording.consentHeading, disclosure.allow_disclosure ? [yesNo(disclosure.consent_given), disclosure.company_name].filter(Boolean).join(" · ") : ""],
         [text.saved, [formatAppDateTime(disclosure.chosen_at), disclosure.chosen_by_name].filter(Boolean).join(" · ")],
       ]),
       parts: disclosure.allow_disclosure ? storedTrustedPersons(request).map((person, index) => ({
@@ -569,6 +586,25 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     text.sectionUpload,
     request.documents.map((document) => ["", document.file_name ?? "—"]),
   );
+
+  // The choices of Anlage 1, the last part of step "documents", in the order of
+  // the form (the server's JSON keys come in any order); the channels as one row.
+  const consent = request.consent_form;
+  if (consent?.choices) {
+    const choices = consent.choices;
+    const wording = consentFormText(lang, guardian && request.minor);
+    const keys = (Object.keys(wording.options) as Array<keyof typeof choices>).filter((key) => key in choices);
+    const channels = keys.filter((key) => key.startsWith("channel_"));
+    group("consent_form", wording.title, [
+      ...keys.filter((key) => !key.startsWith("channel_")).map((key): Entry => [wording.options[key], yesNo(choices[key])]),
+      [wording.channelsTitle, channels.length > 0
+        ? channels.filter((key) => choices[key]).map((key) => wording.options[key]).join(", ") || "—"
+        : ""],
+      ...(!request.disclosure && choices.named_recipients ? storedTrustedPersons(request).map((person): Entry =>
+        [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], person.contact, personScope(person, lang)].filter(Boolean).join(" · ")]) : []),
+      [text.saved, consent.chosen_at ? (consent.chosen_by_me === false ? wording.savedByOtherAt : wording.savedAt)(formatAppDateTime(consent.chosen_at)) : ""],
+    ]);
+  }
 
   // Only what was entered (QA 2026-10-10): a group without a statement, a
   // person or a remark is left out instead of saying "nothing yet".

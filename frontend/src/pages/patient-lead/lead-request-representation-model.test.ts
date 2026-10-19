@@ -412,10 +412,10 @@ describe("what is missing about the representation", () => {
       "rep1_authority_upload",
       ...parent.map((part) => `rep2_${part}`),
     ]);
-    // In the first step, after the person, before address and residence (trigger flow).
+    // In the first step, as in the form: after the person, the address and the contact, before the identity document.
     const first = SUBMIT_FIELDS.indexOf("has_representative");
-    expect(SUBMIT_FIELDS[first - 1]).toBe("citizenships");
-    expect(SUBMIT_FIELDS[first + REPRESENTATION_SUBMIT_FIELDS.length]).toBe("street_address");
+    expect(SUBMIT_FIELDS[first - 1]).toBe("contact_channels");
+    expect(SUBMIT_FIELDS[first + REPRESENTATION_SUBMIT_FIELDS.length]).toBe("id_document_upload");
     expect(new Set(SUBMIT_FIELDS).size).toBe(SUBMIT_FIELDS.length);
   });
 

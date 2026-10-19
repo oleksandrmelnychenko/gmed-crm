@@ -17,8 +17,17 @@ it("shows saved consent choices and explicit recipients in the submission summar
     recipients: [{ name: "Example Relative", relation: "relative", contact: "relative@example.test", scope: "Rechnungen" }],
   } }), de, "de");
   const summary = rows(groups, "consent_form");
-  expect(summary[wording.options.channel_email]).toBe(de.yesNo.yes);
-  expect(summary[wording.options.channel_whatsapp]).toBe(de.yesNo.no);
+  // The ticked channels as one row, below the consents in the order of the form.
+  expect(summary[wording.channelsTitle]).toBe("E-Mail");
+  expect(groups.find((group) => group.id === "consent_form")?.rows.map((row) => row.label).slice(0, 5)).toEqual([
+    wording.options.agency_processing,
+    wording.options.doctors_to_agency,
+    wording.options.data_system,
+    wording.options.named_recipients,
+    wording.channelsTitle,
+  ]);
+  // Anlage 1 is chosen last in step "documents": the summary lists it after the uploads.
+  expect(groups.map((group) => group.id).slice(-2)).toEqual(["documents", "consent_form"]);
   expect(summary[wording.recipientsTitle]).toContain("Example Relative");
   expect(summary[wording.recipientsTitle]).toContain("relative@example.test");
   expect(summary[wording.recipientsTitle]).toContain("Rechnungen");
@@ -41,9 +50,32 @@ it("shows disclosure, actor and per-person scope before any core consent choice 
   expect(groups.find(group => group.id === "consent_form")).toBeUndefined();
   const no = requestSummary({ ...item, disclosure: { ...disclosure, allow_disclosure: false, consent_given: false } }, de, "de").find(group => group.id === "disclosure");
   expect(no?.rows).toContainEqual({ label: wording.question, value: "Nein" });
-  // After a "No" there is no consent to give: no "Einwilligung: Nein" row.
-  expect(no?.rows.some(row => row.label === wording.consentHeading)).toBe(false);
+  // After "no" there is no consent to show, not "consent: no".
+  expect(no?.rows.map((row) => row.label)).not.toContain(wording.consentHeading);
   expect(no?.parts).toEqual([]);
+});
+
+it("names the parent who pays as the representative, never as a private person", () => {
+  const parent = (id: string, slot: "rep1" | "rep2", mine: boolean, first_name: string): LeadRequestRepresentative => ({
+    id, slot, role: "legal_guardian", relation: "parent", mine, email_locked: mine, can_remove: !mine,
+    first_name, last_name: "Testov", date_of_birth: "1980-01-15", birth_place: null, birth_country: null,
+    citizenships: ["DE"], street: null, zip: null, city: null, country: "DE", email: null, phone: null,
+    identity_documents: [], authority_documents: [],
+  });
+  const representation = {
+    has_representative: null, under_guardianship: null, custody: "joint" as const, custody_stated: true,
+    representatives: [parent("p-1", "rep1", true, "Anna"), parent("p-2", "rep2", false, "Ivan")],
+  };
+  const paying = (id: string, first_name: string) => request({
+    access_kind: "guardian",
+    minor: true,
+    representation,
+    payer: { ...request().payer!, payer_kind: "representative", payer_representative_id: id, first_name, last_name: "Testov", relationship_kind: "parent", contact_consent_at: null, acts_on_own_account: null, beneficial_owner: null },
+  });
+  expect(rows(requestSummary(paying("p-1", "Anna"), de, "de"), "payer")).toEqual({ "Wer ist der Zahler?": "Ich (als Elternteil) – Anna Testov" });
+  expect(rows(requestSummary(paying("p-2", "Ivan"), de, "de"), "payer")).toEqual({
+    "Wer ist der Zahler?": "2. Vertreter/in – anderer Elternteil – Ivan Testov",
+  });
 });
 
 function upload(id: string, fileName: string): LeadRequestDocument {
@@ -595,7 +627,7 @@ describe("lead request summary", () => {
     expect(requestSummary(kAndL, de, "de").map((group) => group.id)).not.toContain("follow_up");
   });
 
-  it("shows who acts for an adult after the identity document: the answers, then each person with the files", () => {
+  it("shows who acts for an adult before the identity document, like step 1: the answers, then each person with the files", () => {
     const agent: LeadRequestRepresentative = {
       id: "11111111-1111-4111-8111-111111111111",
       slot: "agent",
@@ -633,7 +665,7 @@ describe("lead request summary", () => {
       de,
       "de",
     );
-    expect(groups.map((group) => group.id).slice(3, 6)).toEqual(["identity", "representation", "insurance"]);
+    expect(groups.map((group) => group.id).slice(3, 6)).toEqual(["representation", "identity", "insurance"]);
     const group = groups.find((item) => item.id === "representation");
     expect(group?.title).toBe("Vertretung");
     expect(rows(groups, "representation")).toEqual({

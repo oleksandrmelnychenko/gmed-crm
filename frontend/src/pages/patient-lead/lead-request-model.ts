@@ -1001,8 +1001,6 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "birth_country",
   "legal_sex",
   "citizenships",
-  // Who acts for the lead: the answers and the persons
-  ...REPRESENTATION_SUBMIT_FIELDS,
   // Address and residence
   "street_address",
   "zip_code",
@@ -1013,6 +1011,8 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "phone",
   "primary_language",
   "contact_channels",
+  // Who acts for the lead: the answers and the persons, below the contact in step 1
+  ...REPRESENTATION_SUBMIT_FIELDS,
   // Identity document: the copy only, the data are entered by GMED
   "id_document_upload",
   // Insurance

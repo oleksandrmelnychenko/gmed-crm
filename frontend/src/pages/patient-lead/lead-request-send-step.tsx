@@ -336,9 +336,10 @@ export function SummaryRows({ rows }: { rows: SummaryRow[] }) {
   }
   return (
     <dl className="mt-1.5 space-y-1.5 text-sm">
-      {rows.map((row) => (
-        // Stacked on a phone, label beside value from the tablet width on.
-        <div key={row.label} className="sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-4">
+      {rows.map((row, index) => (
+        // Stacked on a phone, label beside value from the tablet width on. A label
+        // can repeat (several trusted persons), so the position keys the row.
+        <div key={`${row.label}-${index}`} className="sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-4">
           <dt className="text-xs leading-5 text-muted-foreground">{row.label}</dt>
           <dd className="min-w-0 whitespace-pre-line break-words">{row.value}</dd>
         </div>

@@ -871,8 +871,9 @@ describe("lead request send step", () => {
     expect(missing).toEqual([
       "birth_place",
       "birth_country",
-      "has_representative",
+      // Step 1 asks who acts for the lead below the address and the contact.
       "city",
+      "has_representative",
       "id_document_upload",
       "payer_kind",
       "payer_own_account",
