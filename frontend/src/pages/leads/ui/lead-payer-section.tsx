@@ -367,7 +367,7 @@ export function LeadPayerDeclarationSection({
   const typed = form.payerTypeSupport !== "unsupported";
   const organisation = isOrganisationPayerForm(form);
   const relationshipTextShown = payerRelationshipTextShown(form, data?.declaration);
-  const missing = payerFormMissing(form);
+  const missing = payerFormMissing(form, data?.status.source_of_funds_required !== false);
   const emailInvalid = payerEmailFormatInvalid(form);
   const statusBadge = payerStatusBadge(data?.status, tx);
   const informedAt = data?.declaration?.payer_informed_at ?? null;

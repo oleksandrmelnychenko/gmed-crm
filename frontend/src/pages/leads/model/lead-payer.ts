@@ -994,7 +994,8 @@ export function payerSignatureSequence(status: PayerDeclarationStatus | null | u
 }
 
 /** What the form still lacks before it can be saved as complete (UI hint). */
-export function payerFormMissing(form: PayerDeclarationForm): string[] {
+/** `fundsRequired`: the source of funds is asked only by a trigger of the enhanced check (2026-10-19). */
+export function payerFormMissing(form: PayerDeclarationForm, fundsRequired = true): string[] {
   const missing: string[] = [];
   if (!form.kind) return ["payer_declaration_missing"];
   if (form.actsOnOwnAccount === false && !form.beneficialOwnerName.trim()) {
@@ -1003,7 +1004,7 @@ export function payerFormMissing(form: PayerDeclarationForm): string[] {
   const staffStated = Boolean(form.sourceOfFunds)
     && (form.sourceOfFunds !== "other" || Boolean(form.sourceOfFundsDescription.trim()));
   // A self-paying lead who stated the source in the cabinet has stated it.
-  if (!staffStated && !(form.kind === "self" && form.leadSelfFundsStated)) {
+  if (fundsRequired && !staffStated && !(form.kind === "self" && form.leadSelfFundsStated)) {
     missing.push("payer_source_of_funds_missing");
   }
   if (form.kind === "third_party") {

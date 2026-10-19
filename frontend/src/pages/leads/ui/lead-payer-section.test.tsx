@@ -594,6 +594,8 @@ describe("LeadPayerDeclarationSection: a minor's parent or legal representative 
     expect(body.first_name).toBeNull();
     expect(body.street).toBeNull();
     expect(payerFormMissing({ ...form, representativeId: "" })).toContain("payer_identity_incomplete");
+    // Without a trigger the source of funds is not asked (2026-10-19).
+    expect(payerFormMissing({ ...form, sourceOfFunds: "" }, false)).not.toContain("payer_source_of_funds_missing");
     expect(chosenPayerRepresentative({ kind: "representative", representativeId: "rep-ben" }, minorStatus)?.name).toBe("Ben Muster");
     expect(payerKindOptions(true, "self", tx).map(([kind]) => kind)).toEqual(["representative", "third_party", "self"]);
   });
