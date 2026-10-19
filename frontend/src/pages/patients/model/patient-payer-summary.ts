@@ -209,25 +209,29 @@ function normalizeDeclaration(value: unknown): PatientPayerDeclaration | null {
   const record = asRecord(value);
   if (!record) return null;
   const thirdParty = record.payer_kind === "third_party";
+  // A minor's parent who pays (owner decision 2026-10-19): the server sends the
+  // representative's name, address and contact; no third party, no consents.
+  const representative = record.payer_kind === "representative";
+  const named = thirdParty || representative;
   const organisationName = thirdParty ? text(record.organisation_name) : null;
-  const firstName = thirdParty ? text(record.first_name) : null;
-  const lastName = thirdParty ? text(record.last_name) : null;
+  const firstName = named ? text(record.first_name) : null;
+  const lastName = named ? text(record.last_name) : null;
   const personName = [firstName, lastName].filter(Boolean).join(" ");
   return {
-    payer_kind: thirdParty ? "third_party" : "self",
+    payer_kind: thirdParty ? "third_party" : representative ? "representative" : "self",
     payer_type: thirdParty ? (isPayerType(record.payer_type) ? record.payer_type : "person") : null,
-    name: thirdParty ? text(record.name) ?? organisationName ?? (personName || null) : null,
+    name: named ? text(record.name) ?? organisationName ?? (personName || null) : null,
     organisation_name: organisationName,
     first_name: firstName,
     last_name: lastName,
-    relationship_kind: thirdParty && isRelationshipKind(record.relationship_kind) ? record.relationship_kind : null,
+    relationship_kind: named && isRelationshipKind(record.relationship_kind) ? record.relationship_kind : null,
     relationship: thirdParty ? text(record.relationship) : null,
-    street: thirdParty ? text(record.street) : null,
-    zip: thirdParty ? text(record.zip) : null,
-    city: thirdParty ? text(record.city) : null,
-    country: thirdParty ? text(record.country) : null,
-    email: thirdParty ? text(record.email) : null,
-    phone: thirdParty ? text(record.phone) : null,
+    street: named ? text(record.street) : null,
+    zip: named ? text(record.zip) : null,
+    city: named ? text(record.city) : null,
+    country: named ? text(record.country) : null,
+    email: named ? text(record.email) : null,
+    phone: named ? text(record.phone) : null,
     contact_consent_at: thirdParty ? text(record.contact_consent_at) : null,
     payer_informed_at: thirdParty ? text(record.payer_informed_at) : null,
     // Section 7 applies to a self-payer as well; a server without it sends no key.
@@ -344,13 +348,21 @@ export function isThirdPartyPayer(
   return declaration?.payer_kind === "third_party";
 }
 
-/** Line 1 of the card: "Patient selbst", "Dritte/r — Privatperson", or that nothing was declared. */
+/** Whether a minor's parent or legal representative pays: the contracting party, never a third party. */
+export function isRepresentativePayer(declaration: PatientPayerDeclaration | null | undefined): boolean {
+  return declaration?.payer_kind === "representative";
+}
+
+/** Line 1 of the card: "Patient selbst", "Dritte/r — Privatperson", a paying parent, or that nothing was declared. */
 export function whoPaysLabel(declaration: PatientPayerDeclaration | null, tx: Tx): string {
   if (!declaration) {
     return tx(
       "Декларация плательщика отсутствует (пациент создан без обращения)",
       "Keine Zahlererklärung (Patient ohne Anfrage angelegt)",
     );
+  }
+  if (isRepresentativePayer(declaration)) {
+    return tx("Родитель / законный представитель", "Elternteil / gesetzlicher Vertreter");
   }
   if (!isThirdPartyPayer(declaration)) return tx("Пациент сам", "Patient selbst");
   // A third party without a stored type is a person (as in the lead wizard).

@@ -35,6 +35,8 @@ export type PayerPackageStatus = (typeof PAYER_PACKAGE_STATUSES)[number];
 export const PAYER_PACKAGE_BLOCKED_REASONS = [
   "lead_converted",
   "lead_deleted",
+  // A minor's parent pays as the contracting party: no package (2026-10-19).
+  "payer_is_representative",
   "no_third_party",
   "payer_not_submitted",
   "payer_declaration_incomplete",

@@ -435,6 +435,7 @@ export interface OperationsTranslations {
   lead_readiness_reason_payer_beneficial_owner_missing: string;
   lead_readiness_reason_payer_source_of_funds_missing: string;
   lead_readiness_reason_payer_identity_incomplete: string;
+  lead_readiness_reason_payer_representative_missing: string;
   lead_readiness_reason_payer_not_informed: string;
   lead_readiness_reason_cost_assumption_missing: string;
   lead_readiness_reason_cost_assumption_outdated: string;
@@ -1072,6 +1073,7 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_reason_payer_beneficial_owner_missing: "Не указан фактический выгодоприобретатель",
   lead_readiness_reason_payer_source_of_funds_missing: "Не указано происхождение средств",
   lead_readiness_reason_payer_identity_incomplete: "Данные плательщика неполные",
+  lead_readiness_reason_payer_representative_missing: "Не выбран родитель / законный представитель, который платит",
   lead_readiness_reason_payer_not_informed: "Плательщик не проинформирован об обработке его данных",
   lead_readiness_reason_cost_assumption_missing: "Нет заявления о принятии расходов",
   lead_readiness_reason_cost_assumption_outdated: "Заявление о принятии расходов на другого плательщика",
@@ -1731,6 +1733,7 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_reason_payer_beneficial_owner_missing: "Wirtschaftlich Berechtigter nicht angegeben",
   lead_readiness_reason_payer_source_of_funds_missing: "Herkunft der Mittel fehlt",
   lead_readiness_reason_payer_identity_incomplete: "Angaben zum Zahler unvollständig",
+  lead_readiness_reason_payer_representative_missing: "Zahlender Elternteil / gesetzlicher Vertreter nicht ausgewählt",
   lead_readiness_reason_payer_not_informed: "Zahler nicht über die Datenverarbeitung informiert",
   lead_readiness_reason_cost_assumption_missing: "Kostenübernahmeerklärung fehlt",
   lead_readiness_reason_cost_assumption_outdated: "Kostenübernahmeerklärung nennt einen anderen Zahler",

@@ -478,6 +478,21 @@ describe("label helpers", () => {
     expect(whoPaysLabel(self, de)).toBe("Patient selbst");
   });
 
+  it("a minor's paying parent is the parent with the representative's data, never 'Patient selbst' or a third party", () => {
+    const parent = normalizePatientPayerSummary({
+      patient_id: PATIENT_ID,
+      declaration: thirdPartyDeclaration({ payer_kind: "representative", payer_type: "person", contact_consent_at: null, payer_informed_at: null }),
+    })!.declaration as PatientPayerDeclaration;
+    expect(parent.payer_kind).toBe("representative");
+    expect(isThirdPartyPayer(parent)).toBe(false);
+    expect(whoPaysLabel(parent, ru)).toBe("Родитель / законный представитель");
+    expect(whoPaysLabel(parent, de)).toBe("Elternteil / gesetzlicher Vertreter");
+    expect(payerDisplayName(parent)).toBe("Anna Muster");
+    expect(postalAddressLine(parent, "de")).toBe("Musterweg 1, 10115 Berlin, Deutschland");
+    expect(contactLine(parent)).toBe("anna.muster@example.com · +49 30 000000");
+    expect(parent.payer_type).toBeNull();
+  });
+
   it("names the payer: the organisation, else the person, else a dash", () => {
     expect(payerDisplayName(declaration)).toBe("Anna Muster");
     expect(payerDisplayName({ ...declaration, name: null, organisation_name: "Muster GmbH" })).toBe("Muster GmbH");

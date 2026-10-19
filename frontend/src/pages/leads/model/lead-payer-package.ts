@@ -73,6 +73,11 @@ export function payerPackageBlockedReasonText(
       );
     case "lead_deleted":
       return tx("Лид удалён", "Der Lead wurde gelöscht");
+    case "payer_is_representative":
+      return tx(
+        "Платит родитель / законный представитель ребёнка — он сторона договора: пакет плательщика не нужен",
+        "Es zahlt ein Elternteil / gesetzlicher Vertreter des Kindes als Vertragspartei: Ein Zahlerpaket entfällt",
+      );
     case "no_third_party":
       return tx(
         "Пакет нужен только для плательщика — третьего лица",

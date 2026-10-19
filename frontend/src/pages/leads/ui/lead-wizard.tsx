@@ -7034,6 +7034,46 @@ ${serviceCommentLines.join("\n")}`
       onSelect={id => { if (reviewContracts.some(item => item.id === id)) setDraft(current => current ? { ...current, frameworkContractId: id } : current); }} />
     {inheritedContract ? <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "" } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
   </Section> : null;
+  // "Кто платит" in the documents step; its own interest and source of funds
+  // are edited in the AML form (owner 2026-10-19). With `amlPartOnly` only
+  // that part, for the AML form opened from another step (one instance on
+  // the page at any time, so no input is doubled).
+  const renderPayerDeclarationSection = (amlPartOnly: boolean) => leadId && draft ? (
+    <LeadPayerDeclarationSection
+      leadId={leadId}
+      data={payer.data}
+      loading={payer.loading}
+      loadError={payer.error}
+      disabled={isBusy}
+      canEdit
+      lang={lang}
+      tx={tx}
+      patientMarker={step1Portal.intake?.patient_payer ?? null}
+      portalIntake={step1Portal.intake}
+      enhancedDetails={step1Portal.intake?.enhanced_details ?? null}
+      amlSlot={payerAmlSlot}
+      amlPartHidden
+      amlPartOnly={amlPartOnly}
+      prefill={payerPrefill}
+      payerLink={payerLink}
+      payerLinkCanEdit={canEditPayerLink}
+      leadLanguage={draft.language}
+      onPayerLinkSent={() => void payer.reload()}
+      registerAutosave={registerPayerAutosave}
+      errorText={(nextError) => errorText(nextError, tx)}
+      onSave={async (form) => {
+        const targetLeadId = leadId;
+        const saved = await payer.save(form);
+        payerFundsTextRef.current = payerFundsTextOf(saved);
+        if (hydrated.current !== targetLeadId) return;
+        handleAmlCountryChange({ payerCountries: payerAmlCountries(saved) });
+        // Another payer or e-mail clears the payment route the payer stated:
+        // "Данные от пациента" is read afresh, not left stale.
+        void reloadStep1PortalState();
+        await refreshCommercialState().catch(() => undefined);
+      }}
+    />
+  ) : null;
   // Client → payer → GMED, with the payer's Kostenübernahmeerklärung; the
   // payer's signature package (phase 3b) has its panel in the commercial step.
   const renderPayerSignatureFlow = (packagePanel: boolean) => leadId ? (
@@ -8378,41 +8418,7 @@ ${serviceCommentLines.join("\n")}`
             <section className="space-y-5">
               {patientDocumentReview}
               {patientContractReview}
-              {leadId ? (
-                <LeadPayerDeclarationSection
-                  leadId={leadId}
-                  data={payer.data}
-                  loading={payer.loading}
-                  loadError={payer.error}
-                  disabled={isBusy}
-                  canEdit
-                  lang={lang}
-                  tx={tx}
-                  patientMarker={step1Portal.intake?.patient_payer ?? null}
-                  portalIntake={step1Portal.intake}
-                  enhancedDetails={step1Portal.intake?.enhanced_details ?? null}
-                  amlSlot={payerAmlSlot}
-                  amlPartHidden
-                  prefill={payerPrefill}
-                  payerLink={payerLink}
-                  payerLinkCanEdit={canEditPayerLink}
-                  leadLanguage={draft.language}
-                  onPayerLinkSent={() => void payer.reload()}
-                  registerAutosave={registerPayerAutosave}
-                  errorText={(nextError) => errorText(nextError, tx)}
-                  onSave={async (form) => {
-                    const targetLeadId = leadId;
-                    const saved = await payer.save(form);
-                    payerFundsTextRef.current = payerFundsTextOf(saved);
-                    if (hydrated.current !== targetLeadId) return;
-                    handleAmlCountryChange({ payerCountries: payerAmlCountries(saved) });
-                    // Another payer or e-mail clears the payment route the payer stated:
-                    // "Данные от пациента" is read afresh, not left stale.
-                    void reloadStep1PortalState();
-                    await refreshCommercialState().catch(() => undefined);
-                  }}
-                />
-              ) : null}
+              {renderPayerDeclarationSection(false)}
               {leadId && payer.data?.status.cost_assumption.required ? renderPayerSignatureFlow(false) : null}
               {step1Portal.intake ? (
                 <Section title={tx("Согласия из кабинета", "Einwilligungen aus dem Kundenkabinett")}>
@@ -10268,6 +10274,8 @@ ${serviceCommentLines.join("\n")}`
                     <span className="text-[13px] font-medium text-foreground">{tx("Экономические интересы и происхождение средств", "Wirtschaftliches Interesse und Herkunft der Mittel")}</span>
                     {/* The payer form's own interest and source of funds live here (owner 2026-10-19); printed as "Herkunft der eingesetzten Vermögenswerte". */}
                     <div ref={setPayerAmlSlot} data-testid="lead-wizard-payer-aml-slot" />
+                    {/* Opened from another step (e.g. a new black-list country in the personal data): "Кто платит" is not mounted there. */}
+                    {step !== "documents" ? renderPayerDeclarationSection(true) : null}
                     <div className="border-t border-border/60 pt-3">
                       <AssetOriginEvidenceField
                         value={draft.amlEnhancedDueDiligence.assetOriginEvidence}

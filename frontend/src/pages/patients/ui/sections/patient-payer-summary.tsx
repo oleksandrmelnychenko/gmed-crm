@@ -21,6 +21,7 @@ import {
   invoiceRecipientSourceNote,
   invoiceTaxStatement,
   invoiceToStatement,
+  isRepresentativePayer,
   isThirdPartyPayer,
   leadPath,
   minorWithoutPayerWarning,
@@ -161,6 +162,8 @@ function LoadedCard({
   const tx: Tx = (ru, de) => (lang === "de" ? de : ru);
   const { declaration, contracting_party: party, invoice_recipient: recipient, identification, source, open_request: openRequest } = summary;
   const thirdParty = isThirdPartyPayer(declaration) ? declaration : null;
+  // A paying parent: name, address and contact, none of a third party's consents.
+  const representative = declaration && isRepresentativePayer(declaration) ? declaration : null;
   const addressWarning = recipient ? missingAddressWarning(recipient, tx) : null;
   const identificationRows = identification ? identificationLines(identification, tx) : [];
   const invoiceTo = invoiceToStatement(declaration, tx, lang);
@@ -233,6 +236,25 @@ function LoadedCard({
             label={tx("Плательщик проинформирован (Art. 14 DSGVO)", "Zahler informiert (Art. 14 DSGVO)")}
             value={payerInformedLabel(thirdParty, tx)}
             testId={`${TEST_ID}-informed`}
+          />
+        </>
+      ) : null}
+      {representative ? (
+        <>
+          <SummaryLine
+            label={tx("Имя", "Name")}
+            value={payerDisplayName(representative)}
+            testId={`${TEST_ID}-name`}
+          />
+          <SummaryLine
+            label={tx("Адрес", "Adresse")}
+            value={postalAddressLine(representative, lang)}
+            testId={`${TEST_ID}-address`}
+          />
+          <SummaryLine
+            label={tx("Контакт", "Kontakt")}
+            value={contactLine(representative)}
+            testId={`${TEST_ID}-contact`}
           />
         </>
       ) : null}

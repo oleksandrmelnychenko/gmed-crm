@@ -223,6 +223,12 @@ export function gwgSheetErrorText(error: unknown, tx: Tx): string | null {
       "Für diese Person kann kein Bogen erstellt werden: Sie ist nicht als gesetzliche Vertretung eines Minderjährigen erfasst. Als Vertreter/in oder Betreuer/in eines volljährigen Patienten ist sie im Kabinett ebenfalls nicht angegeben. Bitte die Seite aktualisieren und die Angaben zur Vertretung prüfen",
     );
   }
+  if (codes.includes("payer_is_representative")) {
+    return tx(
+      "Платит родитель / законный представитель ребёнка: он идентифицируется на листе представителя, отдельного листа плательщика нет",
+      "Es zahlt ein Elternteil / gesetzlicher Vertreter des Kindes: Er wird auf seinem Vertreterbogen identifiziert, ein eigener Zahlerbogen entfällt",
+    );
+  }
   if (codes.includes("payer_is_not_a_natural_person")) {
     return tx(
       "Для организации лист для физических лиц не формируется",

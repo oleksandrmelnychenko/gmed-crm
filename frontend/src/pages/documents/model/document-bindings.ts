@@ -531,6 +531,12 @@ const DOCUMENT_GENERATION_ERRORS: Array<{
     de: "Dieses Dokument wird nur für eine Anfrage erstellt, nicht für einen Patienten.",
   },
   {
+    // A minor's paying parent is the contracting party (owner decision 2026-10-19).
+    match: ["payer_is_representative", "pays as the contracting party", "identified on their representative sheet"],
+    ru: "Платит родитель / законный представитель ребёнка — он сторона договора: документы третьего плательщика для него не создаются.",
+    de: "Ein Elternteil / gesetzlicher Vertreter des Kindes zahlt als Vertragspartei: Unterlagen für einen dritten Zahler werden nicht erstellt.",
+  },
+  {
     match: ["payer_declaration_not_third_party", "names no third-party payer", "has no third-party payer"],
     ru: "В декларации плательщика не указан третий плательщик.",
     de: "Die Zahlererklärung nennt keine dritte zahlende Person.",

@@ -4021,9 +4021,11 @@ async fn load_gwg_identification_sheet(
     // payer's sheet, and the sheet of the parent who is that payer.
     let pays = match subject {
         GwgSheetSubject::Payer => true,
-        GwgSheetSubject::ContractPartner => declaration
-            .as_ref()
-            .is_some_and(|declaration| !declaration.is_third_party()),
+        // A minor's parent named as payer pays, not the child (owner
+        // decision 2026-10-19): the route is on that parent's sheet.
+        GwgSheetSubject::ContractPartner => declaration.as_ref().is_some_and(|declaration| {
+            !declaration.is_third_party() && !declaration.is_representative()
+        }),
         GwgSheetSubject::Representative(id) => {
             super::lead_representatives::payer_same_person(representation, declaration.as_ref())
                 == Some(id)

@@ -22,6 +22,8 @@ export const PAYER_LINK_BLOCKED_REASONS = [
   "contact_consent_missing",
   "payer_email_missing",
   "payer_has_cabinet_login",
+  // A minor's parent pays as the contracting party: never a payer's link (2026-10-19).
+  "payer_is_representative",
   "lead_converted",
 ] as const;
 

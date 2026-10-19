@@ -364,10 +364,14 @@ export function payerSelfOffered(request: Pick<LeadRequest, "minor" | "payer">):
  */
 export function payerContactRequired(
   draft: Pick<PayerDraft, "guardian_pays">,
-  request: Pick<LeadRequest, "progress">,
+  request: Pick<LeadRequest, "progress"> & Partial<Pick<LeadRequest, "payer">>,
   field: "payer_email" | "payer_phone" | "payer_country" | "payer_city",
 ): boolean {
-  return !draft.guardian_pays || request.progress.missing_for_submit.includes(field);
+  if (request.progress.missing_for_submit.includes(field)) return true;
+  // A parent of the minor named as payer (also the other parent, seen from
+  // this login) is the contracting party: the server never asks the contact
+  // (owner decision 2026-10-19).
+  return !draft.guardian_pays && request.payer?.payer_kind !== "representative";
 }
 
 /**

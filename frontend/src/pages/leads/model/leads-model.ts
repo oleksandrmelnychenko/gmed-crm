@@ -686,6 +686,7 @@ const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> 
   "Beneficial owner is not named": "lead_readiness_reason_payer_beneficial_owner_missing",
   "Source of funds is missing": "lead_readiness_reason_payer_source_of_funds_missing",
   "Third-party payer details are incomplete": "lead_readiness_reason_payer_identity_incomplete",
+  "Paying parent or legal representative is not named": "lead_readiness_reason_payer_representative_missing",
   "Payer is not informed about the processing of their data": "lead_readiness_reason_payer_not_informed",
   "Cost assumption declaration is missing": "lead_readiness_reason_cost_assumption_missing",
   "Cost assumption declaration names another payer": "lead_readiness_reason_cost_assumption_outdated",

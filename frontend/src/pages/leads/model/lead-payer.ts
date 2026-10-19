@@ -843,6 +843,10 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
     payer_beneficial_owner_missing: tx("Укажите, в чьих интересах действует клиент", "Wirtschaftlich Berechtigten angeben"),
     payer_source_of_funds_missing: tx("Укажите источник средств", "Herkunft der Mittel angeben"),
     payer_identity_incomplete: payerIdentityIncompleteLabel(tx, payerType),
+    payer_representative_missing: tx(
+      "Выберите, кто из родителей / законных представителей платит",
+      "Zahlenden Elternteil / gesetzlichen Vertreter auswählen",
+    ),
     payer_not_informed: tx("Подтвердите, что плательщик проинформирован об обработке его данных", "Bestätigen, dass der Kostenübernehmer über die Verarbeitung seiner Daten informiert wurde"),
     cost_assumption_missing: tx("Создайте согласие плательщика (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung erstellen"),
     cost_assumption_outdated: tx("Плательщик изменён — создайте новое согласие плательщика", "Kostenübernehmer geändert – neue Kostenübernahmeerklärung erstellen"),
@@ -909,6 +913,7 @@ export const PAYER_READINESS_REASON_CODES: Record<string, string> = {
   "Beneficial owner is not named": "payer_beneficial_owner_missing",
   "Source of funds is missing": "payer_source_of_funds_missing",
   "Third-party payer details are incomplete": "payer_identity_incomplete",
+  "Paying parent or legal representative is not named": "payer_representative_missing",
   "Payer is not informed about the processing of their data": "payer_not_informed",
   "Cost assumption declaration is missing": "cost_assumption_missing",
   "Cost assumption declaration names another payer": "cost_assumption_outdated",
@@ -993,9 +998,14 @@ export function payerSignatureSequence(status: PayerDeclarationStatus | null | u
   };
 }
 
-/** What the form still lacks before it can be saved as complete (UI hint). */
-/** `fundsRequired`: the source of funds is asked only by a trigger of the enhanced check (2026-10-19). */
-export function payerFormMissing(form: PayerDeclarationForm, fundsRequired = true): string[] {
+/**
+ * What the form still lacks before it can be saved as complete (UI hint).
+ * `fundsRequired`: the source of funds is asked only by a trigger of the
+ * enhanced check (2026-10-19). `payingParent`: the stored third party is one
+ * of the minor's parents (the server's `status.paying_parent`), the
+ * contracting party, of whom no third party's information is asked.
+ */
+export function payerFormMissing(form: PayerDeclarationForm, fundsRequired = true, payingParent = false): string[] {
   const missing: string[] = [];
   if (!form.kind) return ["payer_declaration_missing"];
   if (form.actsOnOwnAccount === false && !form.beneficialOwnerName.trim()) {
@@ -1021,11 +1031,11 @@ export function payerFormMissing(form: PayerDeclarationForm, fundsRequired = tru
     ) {
       missing.push("payer_identity_incomplete");
     }
-    if (!form.payerInformed) missing.push("payer_not_informed");
+    if (!form.payerInformed && !payingParent) missing.push("payer_not_informed");
   }
   // A paying representative is named; the data are the representative block's.
   if (form.kind === "representative" && !form.representativeId) {
-    missing.push("payer_identity_incomplete");
+    missing.push("payer_representative_missing");
   }
   return missing;
 }

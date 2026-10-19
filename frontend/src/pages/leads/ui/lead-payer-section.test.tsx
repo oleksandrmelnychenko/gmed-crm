@@ -11,6 +11,7 @@ import {
   payerDeclarationToForm,
   payerFormMissing,
   payerKindOptions,
+  payerReasonLabel,
   type PayerDeclaration,
   type PayerDeclarationStatus,
   type PayerRepresentative,
@@ -593,11 +594,39 @@ describe("LeadPayerDeclarationSection: a minor's parent or legal representative 
     expect(body.payer_representative_id).toBe("rep-anna");
     expect(body.first_name).toBeNull();
     expect(body.street).toBeNull();
-    expect(payerFormMissing({ ...form, representativeId: "" })).toContain("payer_identity_incomplete");
+    // Not "the third party's details": the parent is to be chosen.
+    expect(payerFormMissing({ ...form, representativeId: "" })).toEqual(["payer_representative_missing"]);
+    expect(payerReasonLabel("payer_representative_missing", tx)).toBe("Выберите, кто из родителей / законных представителей платит");
+    expect(payerReasonLabel("payer_representative_missing", de)).not.toContain("Kostenübernehmer");
     // Without a trigger the source of funds is not asked (2026-10-19).
     expect(payerFormMissing({ ...form, sourceOfFunds: "" }, false)).not.toContain("payer_source_of_funds_missing");
     expect(chosenPayerRepresentative({ kind: "representative", representativeId: "rep-ben" }, minorStatus)?.name).toBe("Ben Muster");
     expect(payerKindOptions(true, "self", tx).map(([kind]) => kind)).toEqual(["representative", "third_party", "self"]);
+  });
+
+  it("a third-party row of before that names a parent: no third party's title, information or consents", () => {
+    const parentRow: PayerDeclaration = {
+      ...selfPayer,
+      payer_kind: "third_party",
+      payer_type: "person",
+      first_name: "Anna",
+      last_name: "Muster",
+      date_of_birth: "1985-03-02",
+      street: "Musterweg 1",
+      zip: "10115",
+      city: "Berlin",
+      country: "DE",
+      citizenships: ["DE"],
+      payer_informed_at: null,
+    };
+    const html = renderSection(parentRow, tx, { minor: true, paying_parent: true, cost_assumption: { required: false, document_id: null, current: false, signed: false, signed_at: null } });
+    expect(html).toContain('data-testid="lead-payer-paying-parent"');
+    expect(html).toContain("Плательщик — родитель / законный представитель");
+    expect(html).not.toContain("Плательщик (третье лицо)");
+    expect(html).not.toContain("Плательщик проинформирован об обработке его данных");
+    expect(html).not.toContain('data-testid="lead-payer-contact-consent"');
+    expect(payerFormMissing(payerDeclarationToForm(parentRow), true, true)).not.toContain("payer_not_informed");
+    expect(payerFormMissing(payerDeclarationToForm(parentRow), true, false)).toContain("payer_not_informed");
   });
 });
 

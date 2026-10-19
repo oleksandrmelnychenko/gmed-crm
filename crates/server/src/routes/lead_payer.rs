@@ -1152,6 +1152,9 @@ pub(crate) enum PayerReason {
     BeneficialOwnerMissing,
     SourceOfFundsMissing,
     PayerIdentityIncomplete,
+    /// The representative named as payer is not (or no longer) one of the
+    /// minor's parents or legal representatives on file.
+    PayerRepresentativeMissing,
     PayerNotInformed,
     CostAssumptionMissing,
     CostAssumptionOutdated,
@@ -1166,6 +1169,7 @@ impl PayerReason {
             Self::BeneficialOwnerMissing => "payer_beneficial_owner_missing",
             Self::SourceOfFundsMissing => "payer_source_of_funds_missing",
             Self::PayerIdentityIncomplete => "payer_identity_incomplete",
+            Self::PayerRepresentativeMissing => "payer_representative_missing",
             Self::PayerNotInformed => "payer_not_informed",
             Self::CostAssumptionMissing => "cost_assumption_missing",
             Self::CostAssumptionOutdated => "cost_assumption_outdated",
@@ -1181,6 +1185,9 @@ impl PayerReason {
             Self::BeneficialOwnerMissing => "Beneficial owner is not named",
             Self::SourceOfFundsMissing => "Source of funds is missing",
             Self::PayerIdentityIncomplete => "Third-party payer details are incomplete",
+            Self::PayerRepresentativeMissing => {
+                "Paying parent or legal representative is not named"
+            }
             Self::PayerNotInformed => "Payer is not informed about the processing of their data",
             Self::CostAssumptionMissing => "Cost assumption declaration is missing",
             Self::CostAssumptionOutdated => "Cost assumption declaration names another payer",
@@ -1268,6 +1275,7 @@ impl PayerReadiness {
                     | PayerReason::BeneficialOwnerMissing
                     | PayerReason::SourceOfFundsMissing
                     | PayerReason::PayerIdentityIncomplete
+                    | PayerReason::PayerRepresentativeMissing
                     | PayerReason::PayerNotInformed
             )
         });
@@ -1317,10 +1325,16 @@ impl PayerState {
             return vec![PayerReason::DeclarationMissing];
         };
         let mut reasons = declaration.missing_with(!self.funds_optional);
+        // A minor's parent who pays (also a third-party row of before that
+        // names one) is the contracting party, informed by the contract: no
+        // separate information of a third party is asked (2026-10-19).
+        if self.paying_parent {
+            reasons.retain(|reason| *reason != PayerReason::PayerNotInformed);
+        }
         // The representative named as payer is no longer one of the minor's
         // (removed, or the patient came of age): somebody else must be named.
         if declaration.is_representative() && !self.paying_parent {
-            reasons.push(PayerReason::PayerIdentityIncomplete);
+            reasons.push(PayerReason::PayerRepresentativeMissing);
         }
         if declaration.is_third_party() && !self.paying_parent {
             match (
@@ -4448,6 +4462,29 @@ mod tests {
         assert!(parent.agency_gate(true).is_empty());
         assert!(!parent.cost_assumption_required());
         assert!(third_party_state(CostAssumptionDocument::default()).cost_assumption_required());
+
+        // The paying parent is the contracting party: no third party's
+        // information is asked, even of a third-party row of before.
+        let mut uninformed = parent.clone();
+        if let Some(declaration) = uninformed.declaration.as_mut() {
+            declaration.payer_informed_at = None;
+        }
+        assert!(uninformed.readiness().reasons.is_empty());
+
+        // A representative named as payer who is no longer on file: the
+        // parent must be named again, not "third-party details incomplete".
+        let gone = PayerState {
+            declaration: Some(Declaration {
+                payer_kind: PAYER_KIND_REPRESENTATIVE.to_string(),
+                payer_representative_id: Some(Uuid::nil()),
+                ..from_input(&input("self")).unwrap()
+            }),
+            ..PayerState::default()
+        };
+        assert_eq!(
+            gone.readiness().reasons,
+            [PayerReason::PayerRepresentativeMissing]
+        );
     }
 
     #[test]

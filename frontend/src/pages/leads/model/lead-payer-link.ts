@@ -216,6 +216,8 @@ export function payerLinkBlockedReasonText(reason: string | null | undefined, tx
       );
     case "payer_has_cabinet_login":
       return payerLinkCabinetNote(tx);
+    case "payer_is_representative":
+      return payerRepresentativeNote(tx);
     case "lead_converted":
       return tx(
         "Лид уже переведён в пациенты: ссылку отправить нельзя",
@@ -231,6 +233,17 @@ export function payerLinkCabinetNote(tx: Tx): string {
   return tx(
     "Плательщик — родитель с доступом в кабинет: анкета в его кабинете",
     "Zahler ist Elternteil mit Portalzugang: Fragebogen im Portal",
+  );
+}
+
+/**
+ * A minor's parent or legal representative pays: the contracting party, who
+ * gets no payer's link, package or Kostenübernahmeerklärung (2026-10-19).
+ */
+export function payerRepresentativeNote(tx: Tx): string {
+  return tx(
+    "Платит родитель / законный представитель ребёнка — он сторона договора: ссылка плательщика и согласие плательщика не нужны",
+    "Es zahlt ein Elternteil / gesetzlicher Vertreter des Kindes als Vertragspartei: Zahler-Link und Kostenübernahmeerklärung entfallen",
   );
 }
 

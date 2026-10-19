@@ -676,6 +676,9 @@ describe("lead request send step", () => {
     expect(payerContactRequired({ guardian_pays: true }, progress([]), "payer_city")).toBe(false);
     // A server that lists it as missing gets the mark, or the request could not be sent.
     expect(payerContactRequired({ guardian_pays: true }, progress(["payer_phone"]), "payer_phone")).toBe(true);
+    // The other parent named as payer, seen from this parent's login: the contracting party, no contact asked.
+    const otherParent = { ...progress([]), payer: { ...storedPayer, payer_kind: "representative" as const } };
+    expect(payerContactRequired({ guardian_pays: false }, otherParent, "payer_email")).toBe(false);
   });
 
   it("asks for the consent to pass the cost estimate on about a stored third party, not about the paying parent", () => {

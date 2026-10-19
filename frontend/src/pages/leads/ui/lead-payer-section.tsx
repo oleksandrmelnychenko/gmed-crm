@@ -224,6 +224,7 @@ export function LeadPayerDeclarationSection({
   prefill = null,
   amlSlot = null,
   amlPartHidden = false,
+  amlPartOnly = false,
 }: {
   leadId: string;
   data: PayerDeclarationResponse | null;
@@ -267,6 +268,11 @@ export function LeadPayerDeclarationSection({
   amlSlot?: HTMLElement | null;
   /** The part lives in the AML form only: while that form is closed it is not shown here. */
   amlPartHidden?: boolean;
+  /**
+   * Only the AML part, in `amlSlot`: the AML form opened from another step
+   * than the documents step, where "Кто платит" itself is not on the page.
+   */
+  amlPartOnly?: boolean;
 }) {
   const inAmlBlock = (node: ReactNode) => (amlSlot ? createPortal(node, amlSlot) : amlPartHidden ? null : node);
   const prefillActive = !data?.declaration && Boolean(prefill);
@@ -367,7 +373,19 @@ export function LeadPayerDeclarationSection({
   const typed = form.payerTypeSupport !== "unsupported";
   const organisation = isOrganisationPayerForm(form);
   const relationshipTextShown = payerRelationshipTextShown(form, data?.declaration);
-  const missing = payerFormMissing(form, data?.status.source_of_funds_required !== false);
+  // A third-party row of before that names one of the minor's parents: the
+  // contracting party, not a third party (2026-10-19).
+  const payingParent = form.kind === "third_party" && data?.status.paying_parent === true;
+  const missing = payerFormMissing(form, data?.status.source_of_funds_required !== false, payingParent);
+  // Own interest and source of funds are edited in the AML form only: while it
+  // is closed, their hints say where to fill them in.
+  const amlPartElsewhere = amlPartHidden && !amlSlot;
+  const missingLabel = (code: string) => {
+    const label = payerReasonLabel(code, tx, thirdParty ? form.payerType : null);
+    return amlPartElsewhere && (code === "payer_source_of_funds_missing" || code === "payer_beneficial_owner_missing")
+      ? `${label} ${tx("(в форме усиленной проверки)", "(im Prüfbogen der verstärkten Prüfung)")}`
+      : label;
+  };
   const emailInvalid = payerEmailFormatInvalid(form);
   const statusBadge = payerStatusBadge(data?.status, tx);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
@@ -488,114 +506,7 @@ export function LeadPayerDeclarationSection({
     </>
   );
 
-  return (
-    <div id={PAYER_SECTION_ID} tabIndex={-1} className="focus:outline-none">
-      <Section
-        className="rounded-xl border border-border/50 bg-card p-3.5"
-        title={(
-          <span className="inline-flex flex-wrap items-center gap-2">
-            <span>{tx("Кто платит", "Wer zahlt")}</span>
-            <span className="inline-flex" data-testid="lead-payer-status-badge">
-              <StatusBadge tone={statusBadge.tone}>{statusBadge.label}</StatusBadge>
-            </span>
-            {patientMarker && !dirty ? <PatientFieldBadge marker={patientMarker} tx={tx} /> : null}
-          </span>
-        )}
-        accessory={canEdit && autosave.status !== "idle" ? (
-          <StatusChip
-            tone={autosave.status === "error" ? "warning" : autosave.status === "saved" ? "success" : "neutral"}
-            role="status"
-            data-testid="lead-payer-autosave-status"
-            data-status={autosave.status}
-          >
-            {autosave.status === "saving" ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : null}
-            {autosave.status === "saving" ? tx("Сохраняется…", "Wird gespeichert…")
-              : autosave.status === "saved" ? tx("Сохранено", "Gespeichert")
-                : autosave.status === "error" ? tx("Не сохранено", "Nicht gespeichert")
-                  : !form.kind ? tx("Выберите, кто платит", "Bitte wählen, wer zahlt")
-                    : tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")}
-          </StatusChip>
-        ) : undefined}
-      >
-        {loadError && !data && !(loadError instanceof ApiRequestError && loadError.status === 404)
-          ? <Banner tone="error">{errorText(loadError)}</Banner>
-          : null}
-        {loading && !data ? (
-          <p className="text-xs text-muted-foreground">{tx("Загружается…", "Wird geladen…")}</p>
-        ) : null}
-        {prefillActive && canEdit ? (
-          <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-800" data-testid="lead-payer-prefill-note">
-            {tx(
-              "Заполнено по декларации плательщика, зафиксированной при конвертации прошлого обращения. Проверьте данные: внесённые изменения сохраняются автоматически.",
-              "Aus der Zahlererklärung übernommen, die bei der Umwandlung der letzten Anfrage festgehalten wurde. Bitte prüfen: Änderungen werden automatisch gespeichert.",
-            )}
-          </p>
-        ) : null}
-
-        <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg bg-muted/40 p-1">
-          {payerKindOptions(minor, form.kind, tx).map(([kind, label]) => (
-            <label
-              key={kind}
-              className={cn(
-                "flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
-                form.kind === kind ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                readOnly && "cursor-default",
-              )}
-            >
-              <input
-                type="radio"
-                name={`lead-payer-kind-${leadId}`}
-                className="size-3.5 shrink-0 accent-[var(--brand)]"
-                value={kind}
-                checked={form.kind === kind}
-                disabled={readOnly}
-                onChange={() => chooseKind(kind)}
-              />
-              {label}
-            </label>
-          ))}
-        </div>
-        {form.kind === "representative" ? (
-          <div className="space-y-3" data-testid="lead-payer-representative">
-            {representatives.length > 0 ? (
-              <PayerField label={tx("Кто из родителей / представителей платит", "Welcher Elternteil / Vertreter zahlt")} className="max-w-md" required>
-                <NativeComboboxSelect
-                  value={form.representativeId}
-                  className={selectClass}
-                  disabled={readOnly}
-                  aria-label={tx("Кто из родителей / представителей платит", "Welcher Elternteil / Vertreter zahlt")}
-                  onChange={(event) => patch("representativeId", event.target.value)}
-                >
-                  <option value="">{tx("Выберите", "Auswählen")}</option>
-                  {representatives.map((person) => (
-                    <option key={person.id} value={person.id}>{person.name || "—"}</option>
-                  ))}
-                </NativeComboboxSelect>
-              </PayerField>
-            ) : (
-              <Banner tone="warning">
-                {tx(
-                  "Сначала укажите родителей / законных представителей ребёнка в блоке представителей.",
-                  "Bitte zuerst die Eltern / gesetzlichen Vertreter des Kindes im Vertreterblock erfassen.",
-                )}
-              </Banner>
-            )}
-            {chosenRepresentative ? (
-              <PayerRepresentativeCard person={chosenRepresentative} lang={lang} tx={tx} />
-            ) : null}
-          </div>
-        ) : null}
-        {form.kind === "third_party" && data?.status.paying_parent ? (
-          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800" data-testid="lead-payer-paying-parent">
-            {tx(
-              "Платит один из родителей — законный представитель ребёнка. Он подписывает заказ сам, отдельное согласие плательщика (Kostenübernahmeerklärung) не нужно.",
-              "Es zahlt ein Elternteil als gesetzlicher Vertreter des Kindes. Er unterschreibt den Auftrag selbst; eine gesonderte Kostenübernahmeerklärung ist nicht nötig.",
-            )}
-          </p>
-        ) : null}
-
-        {/* Own interest and source of funds: shown in the wizard's enhanced AML block (owner 2026-10-19), one form and one autosave. */}
-        {inAmlBlock(<div className="space-y-4" data-testid="lead-payer-aml-part">
+  const amlPart = inAmlBlock(<div className="space-y-4" data-testid="lead-payer-aml-part">
         {/* Own economic interest: Да / Нет, nothing chosen while nobody answered it. */}
         <div
           role="radiogroup"
@@ -656,9 +567,11 @@ export function LeadPayerDeclarationSection({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <PayerField
-            label={thirdParty
-              ? tx("Источник средств плательщика", "Herkunft der Mittel des Kostenübernehmers")
-              : tx("Источник средств", "Herkunft der Mittel")}
+            label={form.kind === "representative" || payingParent
+              ? tx("Источник средств родителя / представителя", "Herkunft der Mittel des zahlenden Elternteils / Vertreters")
+              : thirdParty
+                ? tx("Источник средств плательщика", "Herkunft der Mittel des Kostenübernehmers")
+                : tx("Источник средств", "Herkunft der Mittel")}
             required={sourceRequired}
           >
             <NativeComboboxSelect
@@ -762,11 +675,124 @@ export function LeadPayerDeclarationSection({
           </div>
         ) : null}
 
-        </div>)}
+  </div>);
+  // Only the part of the AML form: the wizard mounts it so while another step is shown.
+  if (amlPartOnly) return <>{amlPart}</>;
+
+  return (
+    <div id={PAYER_SECTION_ID} tabIndex={-1} className="focus:outline-none">
+      <Section
+        className="rounded-xl border border-border/50 bg-card p-3.5"
+        title={(
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <span>{tx("Кто платит", "Wer zahlt")}</span>
+            <span className="inline-flex" data-testid="lead-payer-status-badge">
+              <StatusBadge tone={statusBadge.tone}>{statusBadge.label}</StatusBadge>
+            </span>
+            {patientMarker && !dirty ? <PatientFieldBadge marker={patientMarker} tx={tx} /> : null}
+          </span>
+        )}
+        accessory={canEdit && autosave.status !== "idle" ? (
+          <StatusChip
+            tone={autosave.status === "error" ? "warning" : autosave.status === "saved" ? "success" : "neutral"}
+            role="status"
+            data-testid="lead-payer-autosave-status"
+            data-status={autosave.status}
+          >
+            {autosave.status === "saving" ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : null}
+            {autosave.status === "saving" ? tx("Сохраняется…", "Wird gespeichert…")
+              : autosave.status === "saved" ? tx("Сохранено", "Gespeichert")
+                : autosave.status === "error" ? tx("Не сохранено", "Nicht gespeichert")
+                  : !form.kind ? tx("Выберите, кто платит", "Bitte wählen, wer zahlt")
+                    : tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")}
+          </StatusChip>
+        ) : undefined}
+      >
+        {loadError && !data && !(loadError instanceof ApiRequestError && loadError.status === 404)
+          ? <Banner tone="error">{errorText(loadError)}</Banner>
+          : null}
+        {loading && !data ? (
+          <p className="text-xs text-muted-foreground">{tx("Загружается…", "Wird geladen…")}</p>
+        ) : null}
+        {prefillActive && canEdit ? (
+          <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-800" data-testid="lead-payer-prefill-note">
+            {tx(
+              "Заполнено по декларации плательщика, зафиксированной при конвертации прошлого обращения. Проверьте данные: внесённые изменения сохраняются автоматически.",
+              "Aus der Zahlererklärung übernommen, die bei der Umwandlung der letzten Anfrage festgehalten wurde. Bitte prüfen: Änderungen werden automatisch gespeichert.",
+            )}
+          </p>
+        ) : null}
+
+        <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg bg-muted/40 p-1">
+          {payerKindOptions(minor, form.kind, tx).map(([kind, label]) => (
+            <label
+              key={kind}
+              className={cn(
+                "flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
+                form.kind === kind ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                readOnly && "cursor-default",
+              )}
+            >
+              <input
+                type="radio"
+                name={`lead-payer-kind-${leadId}`}
+                className="size-3.5 shrink-0 accent-[var(--brand)]"
+                value={kind}
+                checked={form.kind === kind}
+                disabled={readOnly}
+                onChange={() => chooseKind(kind)}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+        {form.kind === "representative" ? (
+          <div className="space-y-3" data-testid="lead-payer-representative">
+            {representatives.length > 0 ? (
+              <PayerField label={tx("Кто из родителей / представителей платит", "Welcher Elternteil / Vertreter zahlt")} className="max-w-md" required>
+                <NativeComboboxSelect
+                  value={form.representativeId}
+                  className={selectClass}
+                  disabled={readOnly}
+                  aria-label={tx("Кто из родителей / представителей платит", "Welcher Elternteil / Vertreter zahlt")}
+                  onChange={(event) => patch("representativeId", event.target.value)}
+                >
+                  <option value="">{tx("Выберите", "Auswählen")}</option>
+                  {representatives.map((person) => (
+                    <option key={person.id} value={person.id}>{person.name || "—"}</option>
+                  ))}
+                </NativeComboboxSelect>
+              </PayerField>
+            ) : (
+              <Banner tone="warning">
+                {tx(
+                  "Сначала укажите родителей / законных представителей ребёнка в блоке представителей.",
+                  "Bitte zuerst die Eltern / gesetzlichen Vertreter des Kindes im Vertreterblock erfassen.",
+                )}
+              </Banner>
+            )}
+            {chosenRepresentative ? (
+              <PayerRepresentativeCard person={chosenRepresentative} lang={lang} tx={tx} />
+            ) : null}
+          </div>
+        ) : null}
+        {payingParent ? (
+          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800" data-testid="lead-payer-paying-parent">
+            {tx(
+              "Платит один из родителей — законный представитель ребёнка. Он подписывает заказ сам, отдельное согласие плательщика (Kostenübernahmeerklärung) не нужно.",
+              "Es zahlt ein Elternteil als gesetzlicher Vertreter des Kindes. Er unterschreibt den Auftrag selbst; eine gesonderte Kostenübernahmeerklärung ist nicht nötig.",
+            )}
+          </p>
+        ) : null}
+
+        {/* Own interest and source of funds: shown in the wizard's enhanced AML block (owner 2026-10-19), one form and one autosave. */}
+        {amlPart}
         {thirdParty ? (
           <div className="space-y-3 border-t border-border/60 pt-3">
             <AdminSectionTitle>
-              {tx("Плательщик (третье лицо)", "Kostenübernehmer (Dritter)")}
+              {payingParent
+                ? tx("Плательщик — родитель / законный представитель", "Zahler – Elternteil / gesetzlicher Vertreter")
+                : tx("Плательщик (третье лицо)", "Kostenübernehmer (Dritter)")}
             </AdminSectionTitle>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {typed ? (
@@ -902,7 +928,8 @@ export function LeadPayerDeclarationSection({
                 </dl>
               </div>
             ) : null}
-            <div className="border-t border-border/70">
+            {/* The paying parent is the contracting party: no third party's information (2026-10-19). */}
+            {payingParent ? null : <div className="border-t border-border/70">
               <PayerCheckbox
                 checked={form.payerInformed}
                 disabled={readOnly}
@@ -916,8 +943,8 @@ export function LeadPayerDeclarationSection({
                   </>
                 )}
               />
-            </div>
-            {typed && data?.status.contact_consent_required === false ? (
+            </div>}
+            {payingParent ? null : typed && data?.status.contact_consent_required === false ? (
               // A parent with an own cabinet login pays: nobody else is told the contact.
               <StatusChip tone="neutral" data-testid="lead-payer-contact-consent" data-required="false">
                 {tx(
@@ -944,7 +971,7 @@ export function LeadPayerDeclarationSection({
                 )}
               </p>
             ) : null}
-            {typed && costEstimateConsent ? (
+            {typed && costEstimateConsent && !payingParent ? (
               <p
                 className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11.5px] leading-5 text-muted-foreground"
                 data-testid="lead-payer-cost-estimate-consent"
@@ -1031,7 +1058,7 @@ export function LeadPayerDeclarationSection({
               <li key={code}>
                 <StatusChip tone="warning">
                   <CircleAlert aria-hidden="true" />
-                  {payerReasonLabel(code, tx, thirdParty ? form.payerType : null)}
+                  {missingLabel(code)}
                 </StatusChip>
               </li>
             ))}
@@ -1121,7 +1148,8 @@ export function LeadPayerSignatureFlow({
   const [error, setError] = useState("");
   const packageController = useLeadPayerPackage(leadId, Boolean(payerPackage), payerPackage?.onChanged);
   const packageState = packageController.data;
-  const packagePanelShown = Boolean(payerPackage?.panel && packageState?.mode);
+  // No package for a minor's paying parent (the contracting party, 2026-10-19).
+  const packagePanelShown = Boolean(payerPackage?.panel && packageState?.mode && packageState.blocked_reason !== "payer_is_representative");
   const sequence = payerSignatureSequence(status);
   const { user } = useAuth();
   const summary = useSignatureSummary(user && ["ceo", "patient_manager"].includes(user.role) ? user.id : undefined, signatureDocumentId);
