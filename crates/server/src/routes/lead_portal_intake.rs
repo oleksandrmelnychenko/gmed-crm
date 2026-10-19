@@ -2178,7 +2178,11 @@ pub(crate) fn with_invoice_recipient(
     if !fits && lead_invoice_recipient::payer_question_reached(recipient) {
         // A paying recipient has no separate "who pays" field. Its own
         // fields and confirmation control are the actionable missing items.
-        if recipient.is_third_party() && recipient.is_payer == Some(true) {
+        // So does the parent chosen as recipient "who pays" while the other
+        // parent is named as payer (owner decision 2026-10-19).
+        if (recipient.is_third_party() || recipient.representative_contact_id.is_some())
+            && recipient.is_payer == Some(true)
+        {
             step_three.push("invoice_recipient_is_payer".to_string());
         } else {
             step_three.push("payer_kind".to_string());

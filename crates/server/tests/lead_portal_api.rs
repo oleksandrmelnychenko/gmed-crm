@@ -4413,9 +4413,11 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["billing"]["payment_route_by"], "guardian", "{body}");
-    // Anna remains the named recipient. Naming Ben as payer must not silently
+    // Anna remains the parent who receives the invoice (section 7 names her
+    // address). Naming Ben as the paying representative must not silently
     // transfer her recipient identity; the recipient/payer choice needs review.
-    assert!(body["billing"]["invoice_to"].is_null(), "{body}");
+    assert_eq!(body["payer"]["payer_kind"], "representative", "{body}");
+    assert_eq!(body["billing"]["invoice_to"], "other", "{body}");
     assert_eq!(body["billing"]["recipient"]["first_name"], "Anna", "{body}");
     assert!(
         missing_for_the_billing(&body).contains(&"invoice_recipient_is_payer"),
@@ -4863,20 +4865,17 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
     assert_eq!(status, StatusCode::OK, "{stored}");
     let current = &stored["declaration"];
     let mut form = serde_json::Map::new();
+    // She is the paying representative (owner decision 2026-10-19): staff's
+    // form names her by id; her data stay her representative row's.
+    assert_eq!(current["payer_kind"], "representative", "{stored}");
     for key in [
         "payer_kind",
+        "payer_representative_id",
         "acts_on_own_account",
-        "payer_type",
-        "first_name",
-        "last_name",
-        "date_of_birth",
-        "citizenships",
-        "relationship_kind",
-        "email",
     ] {
         form.insert(key.to_string(), current[key].clone());
     }
-    form.insert("phone".into(), json!("+49 30 1234567"));
+    form.insert("source_of_funds".into(), json!("employment"));
     let (status, saved) = json_request(
         router,
         "POST",
@@ -4886,7 +4885,10 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{saved}");
-    assert_eq!(saved["declaration"]["phone"], "+49 30 1234567", "{saved}");
+    assert_eq!(
+        saved["declaration"]["source_of_funds"], "employment",
+        "{saved}"
+    );
     assert_eq!(informed().await, (informed_at, informed_by), "{saved}");
     for (key, value) in [
         ("first_name", json!("Annette")),

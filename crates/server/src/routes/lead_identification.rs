@@ -477,17 +477,20 @@ async fn own_addresses(
 /// When the lead's third-party payer was last named (`identity_changed_at` of
 /// the payer declaration); `None` without a third-party payer. What an earlier
 /// payer signed, or what staff confirmed for an earlier payer, does not count
-/// for the person named now — the rule of the Kostenübernahmeerklärung.
+/// for the person named now — the rule of the Kostenübernahmeerklärung. A
+/// minor's representative named as payer (owner decision 2026-10-19) counts
+/// too: the payer line is then that representative (`same_person_as`).
 async fn third_party_payer_since(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT identity_changed_at FROM lead_payer_declarations
-         WHERE lead_id = $1 AND payer_kind = $2",
+         WHERE lead_id = $1 AND payer_kind IN ($2, $3)",
     )
     .bind(lead_id)
     .bind(lead_payer::PAYER_KIND_THIRD_PARTY)
+    .bind(lead_payer::PAYER_KIND_REPRESENTATIVE)
     .fetch_optional(conn)
     .await
 }

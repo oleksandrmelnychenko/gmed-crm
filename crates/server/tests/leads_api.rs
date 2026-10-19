@@ -7496,7 +7496,8 @@ async fn seed_minor_contract_identity(app: &TestApp, lead_id: Uuid) {
 }
 
 /// The mother declares herself as the payer (as the cabinet does); the
-/// Kostenübernahmeerklärung of the lead's order is generated and signed.
+/// mother is recorded as the paying representative, so no
+/// Kostenübernahmeerklärung is made (owner decision 2026-10-19).
 async fn declare_mother_as_payer_and_sign(app: &TestApp, lead_id: Uuid, order_id: Uuid) {
     seed_minor_contract_identity(app, lead_id).await;
     let pm = app.auth_header("patient_manager");
@@ -7526,7 +7527,18 @@ async fn declare_mother_as_payer_and_sign(app: &TestApp, lead_id: Uuid, order_id
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{saved}");
-    let (status, generated) = json_request(
+    // The mother is the paying representative — the contracting party, not
+    // a third party (owner decision 2026-10-19): no Kostenübernahmeerklärung
+    // is asked or made for her.
+    assert_eq!(
+        saved["declaration"]["payer_kind"], "representative",
+        "{saved}"
+    );
+    assert_eq!(
+        saved["status"]["cost_assumption"]["required"], false,
+        "{saved}"
+    );
+    let (status, refused) = json_request(
         app,
         "POST",
         "/api/v1/documents/generate",
@@ -7540,12 +7552,8 @@ async fn declare_mother_as_payer_and_sign(app: &TestApp, lead_id: Uuid, order_id
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{generated}");
-    let document_id = generated["id"].as_str().unwrap().to_string();
-    // Signed only with proof (owner decision 2026-10-11): the scan of the
-    // signed copy.
-    let (status, marked) = support::paper_signature(app, &pm, &document_id).await;
-    assert_eq!(status, StatusCode::OK, "{marked}");
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "payer_is_representative", "{refused}");
 }
 
 async fn convert_ready_lead(app: &TestApp, lead_id: Uuid) -> Uuid {
@@ -7639,7 +7647,8 @@ async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_a
     assert_eq!(audits.len(), 1, "{audits:?}");
     assert_eq!(audits[0]["lead_id"], lead_id.to_string());
     assert_eq!(audits[0]["relation_id"], anna_relation.to_string());
-    // The lead-stage order keeps the free-text payer the declaration wrote.
+    // The lead-stage order keeps the free-text payer the declaration wrote:
+    // the mother as contracting party, never as Kostenübernehmer.
     let order_payer: (Option<String>, Option<String>) =
         sqlx::query_as("SELECT payer_contact_name, payer_role FROM orders WHERE id = $1")
             .bind(artifacts.order_id)
@@ -7648,7 +7657,7 @@ async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_a
             .unwrap();
     assert_eq!(
         order_payer,
-        (Some("Anna Muster".into()), Some("cost_bearer".into()))
+        (Some("Anna Muster".into()), Some("contracting_party".into()))
     );
 
     // The patient card: the invoice goes to the mother as contracting party
