@@ -933,6 +933,90 @@ async fn paper_signatures_and_countersigning_cannot_bypass_the_full_parent_stage
     assert_eq!(status, "draft");
 }
 
+/// DEV 2026-10-19: confirming the GwG sheet of one parent was refused for the
+/// other parent's data. A person's own sheet checks only that person.
+#[tokio::test]
+async fn a_parents_gwg_sheet_checks_only_that_parents_data() {
+    let Some(app) = fixture("DE", "DE").await else {
+        return;
+    };
+    let sheet = |subject: String| {
+        let document = Uuid::new_v4();
+        let pool = app.suite.pool.clone();
+        let (lead, pm) = (app.lead, app.pm);
+        async move {
+            sqlx::query("INSERT INTO documents(id,version_root_document_id,lead_id,auto_name,art,category,status,visibility,is_medical,uploaded_by,generated_template_id,generated_bindings) VALUES($1,$1,$2,'Synthetic GwG sheet','report','administrative','active','internal',false,$3,'gwg_identification',$4)")
+                .bind(document).bind(lead).bind(pm)
+                .bind(json!({"gwg_identification": {"subject": subject}}))
+                .execute(&pool).await.unwrap();
+            document
+        }
+    };
+    let ben = sheet(format!("representative:{}", app.second)).await;
+    let keys_of = |body: &Value| -> Vec<String> {
+        body["missing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    };
+    let mark = request(
+        &app,
+        "POST",
+        &format!("/documents/{ben}/mark-signed"),
+        app.pm,
+        "patient_manager",
+        Some(json!({"compliance_kind":"other"})),
+    )
+    .await;
+    let paper = paper_request(&app, ben, app.pm, "patient_manager").await;
+    for (status, body) in [mark, paper] {
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "representative_details_incomplete", "{body}");
+        assert_eq!(body["scope"], "person", "{body}");
+        let missing = keys_of(&body);
+        assert!(missing.contains(&"rep2_id_upload".to_string()), "{body}");
+        assert!(
+            missing.iter().all(|key| key.starts_with("rep2_")),
+            "only Ben's own data: {body}"
+        );
+    }
+
+    // The payer's or the patient's sheet needs no parent's data.
+    let payer = sheet("payer".into()).await;
+    let (_, body) = request(
+        &app,
+        "POST",
+        &format!("/documents/{payer}/mark-signed"),
+        app.pm,
+        "patient_manager",
+        Some(json!({"compliance_kind":"other"})),
+    )
+    .await;
+    assert_ne!(body["code"], "representative_details_incomplete", "{body}");
+
+    // A contract still needs both parents under joint custody.
+    let contract = Uuid::new_v4();
+    sqlx::query("INSERT INTO documents(id,version_root_document_id,lead_id,auto_name,art,category,status,visibility,is_medical,uploaded_by,generated_template_id) VALUES($1,$1,$2,'Synthetic contract','report','administrative','active','internal',false,$3,'framework_contract')")
+        .bind(contract).bind(app.lead).bind(app.pm).execute(&app.suite.pool).await.unwrap();
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/documents/{contract}/mark-signed"),
+        app.pm,
+        "patient_manager",
+        Some(json!({"compliance_kind":"framework_contract"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["scope"], "contract", "{body}");
+    let missing = keys_of(&body);
+    assert!(missing.iter().any(|key| key.starts_with("rep1_")), "{body}");
+    assert!(missing.iter().any(|key| key.starts_with("rep2_")), "{body}");
+}
+
 #[tokio::test]
 async fn canonical_parent_profile_changes_close_pending_invitations_only_when_inherited_identity_changes()
  {

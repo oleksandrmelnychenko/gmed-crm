@@ -879,7 +879,11 @@ export function riskGateErrorText(error: unknown, tx: Tx): string | null {
   if (!(error instanceof ApiRequestError)) return null;
   const code = error.body?.code ?? error.body?.error ?? error.code;
   if (code === "representative_details_incomplete") {
-    const base = tx(
+    // A per-person document (the GwG sheet of one parent) names only that person's data.
+    const base = error.body?.scope === "person" ? tx(
+      "Перед подтверждением подписи дополните данные этого лица в разделе «Данные клиента».",
+      "Bitte vervollständigen Sie vor der Bestätigung der Unterschrift die Daten dieser Person unter „Kundendaten“.",
+    ) : tx(
       "Перед договором и подписью дополните данные родителей в разделе «Данные клиента». В кабинете можно запросить блок «Представители».",
       "Bitte vervollständigen Sie vor Vertrag und Unterschrift die Elterndaten unter „Kundendaten“. Im Portal können Sie den Block „Vertretung“ anfordern.",
     );

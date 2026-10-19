@@ -200,7 +200,7 @@ async fn validate_minor_clients(
         (representation.minor, required, expected)
     } else if let Some(patient_id) = patient_id {
         let patient = sqlx::query(
-            r#"SELECT p.birth_date, p.intake_profile,
+            r#"SELECT p.birth_date, p.intake_profile, p.custody,
                 COALESCE(CASE WHEN jsonb_typeof(p.intake_profile->'trusted_contacts') = 'array'
                     THEN p.intake_profile->'trusted_contacts' ELSE '[]'::jsonb END, '[]'::jsonb)
                 || COALESCE((SELECT jsonb_agg(jsonb_build_object(
@@ -225,20 +225,46 @@ async fn validate_minor_clients(
                 .ok()
                 .flatten()
                 .unwrap_or(Value::Null);
-            let contacts: Value = patient.get("guardian_contacts");
-            let required = contacts
-                .as_array()
-                .into_iter()
+            // The representatives who contract (owner decision 2026-10-19):
+            // the order's choice, else the relations the conversion stored on
+            // the patient, else every recorded parent; the trusted contacts
+            // of the profile only for old patients without relations.
+            let contracting = crate::services::contracting_party::resolve(
+                &mut conn,
+                patient_id,
+                row.get("order_id"),
+                None,
+                crate::app_time::today(),
+            )
+            .await
+            .map_err(db_error)?
+            .representatives;
+            let required = if contracting.is_empty() {
+                let contacts: Value = patient.get("guardian_contacts");
+                contacts
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|person| {
+                        crate::routes::leads::is_parent_or_guardian_relation(
+                            person["relation"].as_str(),
+                        )
+                    })
+                    .filter_map(|person| person["email"].as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            } else {
+                contracting
+                    .iter()
+                    .filter_map(|representative| representative.email.clone())
+                    .collect::<Vec<_>>()
+            };
+            let custody = patient
+                .try_get::<Option<String>, _>("custody")
+                .ok()
                 .flatten()
-                .filter(|person| {
-                    crate::routes::leads::is_parent_or_guardian_relation(
-                        person["relation"].as_str(),
-                    )
-                })
-                .filter_map(|person| person["email"].as_str().map(str::to_string))
-                .collect::<Vec<_>>();
-            let expected = if profile["custody"]
-                .as_str()
+                .or_else(|| profile["custody"].as_str().map(str::to_string));
+            let expected = if custody
+                .as_deref()
                 .is_some_and(|value| matches!(value, "sole_parent" | "guardian"))
             {
                 1
@@ -358,19 +384,7 @@ pub(super) async fn create_request(
     if contract_stage {
         let mut conn = state.db.acquire().await.map_err(db_error)?;
         for row in &rows {
-            let missing = crate::routes::lead_representatives::contract_subject_details_missing(
-                &mut conn,
-                row.get("lead_id"),
-                row.get("patient_id"),
-                row.get("order_id"),
-            )
-            .await
-            .map_err(db_error)?;
-            if !missing.is_empty() {
-                return Err(
-                    crate::routes::lead_representatives::contract_details_incomplete(&missing),
-                );
-            }
+            signature_details_check(&mut conn, row).await?;
         }
     }
 
@@ -616,20 +630,7 @@ pub(super) async fn create_request(
     }
     if contract_stage {
         for member in &members {
-            let row = &member.row;
-            let missing = crate::routes::lead_representatives::contract_subject_details_missing(
-                &mut tx,
-                row.get("lead_id"),
-                row.get("patient_id"),
-                row.get("order_id"),
-            )
-            .await
-            .map_err(db_error)?;
-            if !missing.is_empty() {
-                return Err(
-                    crate::routes::lead_representatives::contract_details_incomplete(&missing),
-                );
-            }
+            signature_details_check(&mut tx, &member.row).await?;
         }
     }
 

@@ -366,4 +366,16 @@ describe("the contract gate names the missing parent details (staff report 2026-
     });
     expect(riskGateErrorText(error, ru)).toContain("Не хватает: первый родитель / представитель — гражданство.");
   });
+
+  it("names only the person of a per-person document (DEV 2026-10-19)", () => {
+    const error = new ApiRequestError("x", {
+      status: 422,
+      code: "representative_details_incomplete",
+      body: { code: "representative_details_incomplete", scope: "person", missing: ["rep2_phone"] },
+    });
+    const text = riskGateErrorText(error, ru) ?? "";
+    expect(text).toContain("данные этого лица");
+    expect(text).not.toContain("Перед договором");
+    expect(text).toContain("Не хватает: второй родитель — телефон.");
+  });
 });

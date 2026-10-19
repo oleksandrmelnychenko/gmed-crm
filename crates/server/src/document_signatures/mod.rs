@@ -386,6 +386,41 @@ pub(crate) fn signed_by_patient_side_only(
     signer_policy_for_parts(generated_template_id, compliance_kind, art) == SignerPolicy::ClientOnly
 }
 
+/// Refuses a signature while the representatives' data the document needs are
+/// incomplete: for a contract the contracting representatives, for a
+/// person's own document (a parent's GwG sheet) only that person
+/// (DEV 2026-10-19). `row` is the document with its `generated_bindings`.
+pub(crate) async fn signature_details_check(
+    conn: &mut sqlx::PgConnection,
+    row: &PgRow,
+) -> Result<(), Response> {
+    use crate::routes::lead_representatives as representatives;
+    let details = representatives::SignatureDetails::of_document(
+        template_of(row).as_deref(),
+        &row.get::<String, _>("art"),
+        row.try_get::<Option<Value>, _>("generated_bindings")
+            .ok()
+            .flatten()
+            .as_ref(),
+    );
+    let missing = representatives::signature_details_missing(
+        conn,
+        details,
+        row.get("lead_id"),
+        row.get("patient_id"),
+        row.get("order_id"),
+    )
+    .await
+    .map_err(db_error)?;
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(representatives::signature_details_incomplete(
+            details, &missing,
+        ))
+    }
+}
+
 fn signer_policy(row: &PgRow) -> SignerPolicy {
     signer_policy_for_parts(
         row.get::<Option<String>, _>("generated_template_id")

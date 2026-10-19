@@ -915,6 +915,31 @@ fn german_country_names(value: Option<&str>) -> Option<String> {
 
 #[allow(dead_code)]
 impl DocPartyBlock {
+    /// The address as separate lines: street, "PLZ Ort", country (owner
+    /// 2026-10-19: a parent who contracts is printed like a person block).
+    fn address_lines(&self) -> Vec<String> {
+        let text = |value: &Option<String>| {
+            value
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        };
+        let locality = [text(&self.zip), text(&self.city)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
+        [
+            text(&self.street),
+            (!locality.is_empty()).then_some(locality),
+            text(&self.country).map(|country| german_document_country(&country)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
     fn address_line(&self) -> Option<String> {
         let street = self
             .street
@@ -2429,6 +2454,7 @@ async fn mark_document_signed(
 
     let document = match sqlx::query(
         r#"SELECT patient_id, lead_id, order_id, generated_template_id, art, status,
+                  generated_bindings,
                   file_deleted_at IS NOT NULL AS file_deleted,
                   signed_at IS NOT NULL AS already_signed
            FROM documents
@@ -2561,8 +2587,20 @@ async fn mark_document_signed(
         Some(kind),
         &document_art,
     ) {
-        match super::lead_representatives::contract_subject_details_missing(
+        // A person's own document (a parent's GwG sheet) needs only that
+        // person's data (DEV 2026-10-19).
+        let details = super::lead_representatives::SignatureDetails::of_document(
+            generated_template_id.as_deref(),
+            &document_art,
+            document
+                .try_get::<Option<Value>, _>("generated_bindings")
+                .ok()
+                .flatten()
+                .as_ref(),
+        );
+        match super::lead_representatives::signature_details_missing(
             &mut tx,
+            details,
             lead_id,
             patient_id,
             document.try_get("order_id").unwrap_or_default(),
@@ -2570,7 +2608,9 @@ async fn mark_document_signed(
         .await
         {
             Ok(missing) if !missing.is_empty() => {
-                return super::lead_representatives::contract_details_incomplete(&missing);
+                return super::lead_representatives::signature_details_incomplete(
+                    details, &missing,
+                );
             }
             Ok(_) => {}
             Err(error) => {
@@ -10055,11 +10095,20 @@ fn build_framework_contract_pdf(
                     &format!("geb. am {}", birth.format("%d.%m.%Y")),
                 );
             }
-            if let Some(address) = representative.address_line() {
-                fc_body_tight(&mut layout, &address);
+            // Street, PLZ Ort and country on lines of their own (2026-10-19).
+            for line in representative.address_lines() {
+                fc_body_tight(&mut layout, &line);
             }
             if let Some(email) = representative.email.as_deref() {
                 fc_body_tight(&mut layout, &format!("Email: {email}"));
+            }
+            if let Some(phone) = representative
+                .phone
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+            {
+                fc_body_tight(&mut layout, &format!("Tel.: {phone}"));
             }
         }
         let patient = DocPartyBlock {
@@ -18315,54 +18364,38 @@ async fn generate_document(
                         }
                     }
                 }
-                // The parent's address as the relation stores it, else the
-                // linked patient record's (QA 2026-10-12 B3-06: "Adresse: ____").
-                _ => sqlx::query(
-                    r#"SELECT pr.related_name, rp.birth_date,
-                              COALESCE(NULLIF(btrim(pr.address_street), ''), rp.address_street) AS street,
-                              COALESCE(NULLIF(btrim(pr.address_zip), ''), rp.address_zip) AS zip,
-                              COALESCE(NULLIF(btrim(pr.address_city), ''), rp.address_city) AS city,
-                              COALESCE(NULLIF(btrim(pr.address_country), ''), rp.address_country) AS country
-                       FROM patient_relations pr
-                       LEFT JOIN patients rp ON rp.id = pr.related_patient_id
-                       WHERE pr.patient_id = $1
-                         AND pr.relation_type IN ('parent', 'mother', 'father', 'guardian')
-                       ORDER BY pr.created_at"#,
-                )
-                .bind(patient_uuid)
-                .fetch_all(&state.db)
-                .await
-                .unwrap_or_default()
-                .iter()
-                .map(|row| {
-                    let text = |column: &str| {
-                        row.try_get::<Option<String>, _>(column)
-                            .ok()
-                            .flatten()
-                            .map(|value| value.trim().to_string())
-                            .filter(|value| !value.is_empty())
+                // The representatives who act for the child (owner decision
+                // 2026-10-19): those the conversion stored on the patient,
+                // else every recorded parent. The address as the relation
+                // stores it, else the linked patient record's (QA 2026-10-12
+                // B3-06: "Adresse: ____").
+                _ => {
+                    let representatives = match state.db.acquire().await {
+                        Ok(mut conn) => crate::services::contracting_party::load_representatives(
+                            &mut conn,
+                            patient_uuid,
+                            &[],
+                        )
+                        .await
+                        .unwrap_or_default(),
+                        Err(_) => Vec::new(),
                     };
-                    ConsentGuardian {
-                        name: row
-                            .try_get::<String, _>("related_name")
-                            .ok()
-                            .map(|name| name.trim().to_string())
-                            .filter(|name| !name.is_empty()),
-                        birth_date: row
-                            .try_get::<Option<NaiveDate>, _>("birth_date")
-                            .ok()
-                            .flatten(),
-                        address: DocPartyBlock {
-                            street: text("street"),
-                            zip: text("zip"),
-                            city: text("city"),
-                            country: text("country"),
-                            ..DocPartyBlock::default()
-                        }
-                        .address_line(),
-                    }
-                })
-                .collect(),
+                    representatives
+                        .iter()
+                        .map(|representative| ConsentGuardian {
+                            name: Some(representative.name.clone()).filter(|name| !name.is_empty()),
+                            birth_date: representative.birth_date,
+                            address: DocPartyBlock {
+                                street: representative.street.clone(),
+                                zip: representative.zip.clone(),
+                                city: representative.city.clone(),
+                                country: representative.country.clone(),
+                                ..DocPartyBlock::default()
+                            }
+                            .address_line(),
+                        })
+                        .collect()
+                }
             };
             let guardian_at = |idx: usize| guardians.get(idx).cloned().unwrap_or_default();
             let ConsentGuardian {
@@ -19614,7 +19647,7 @@ impl ContractingDoc {
         if self.parents_contract() {
             self.representatives
                 .iter()
-                .map(single_order_party_lines)
+                .map(contracting_representative_lines)
                 .collect()
         } else {
             let mut lines = single_order_party_lines(patient);
@@ -19803,6 +19836,23 @@ fn legal_party_block(layout: &mut TreatmentPlanPdfLayout, lines: &[String], role
         0.8,
         0.0,
     );
+}
+
+/// A parent who contracts in their own name: full name, date of birth, the
+/// address on separate lines (street, PLZ Ort, country), e-mail and phone
+/// (owner decision 2026-10-19).
+fn contracting_representative_lines(person: &DocPartyBlock) -> Vec<String> {
+    let mut lines = vec![person.name_with_salutation()];
+    if let Some(birth) = person.birth_date {
+        lines.push(format!("geb. am {}", birth.format("%d.%m.%Y")));
+    }
+    lines.extend(person.address_lines());
+    for (label, value) in [("Email", &person.email), ("Tel.", &person.phone)] {
+        if let Some(value) = value.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            lines.push(format!("{label}: {value}"));
+        }
+    }
+    lines
 }
 
 fn single_order_party_lines(party: &DocPartyBlock) -> Vec<String> {
@@ -20280,6 +20330,49 @@ fn build_order_cost_estimate_pdf(
     build_order_cost_estimate_pdf_with_terms(context, fallback_document_reference, None)
 }
 
+/// The Auftraggeber fields of the cost estimate: the patient's name, or each
+/// parent who contracts with name, date of birth and the address in separate
+/// fields (owner decision 2026-10-19).
+fn cost_estimate_contracting_cells(
+    context: &GeneratedSingleOrderContext,
+) -> Vec<(&'static str, String)> {
+    if !context.contracting.parents_contract() {
+        return vec![(
+            "Auftraggeber:",
+            context.contracting.debtor_name(&context.party),
+        )];
+    }
+    let mut cells = Vec::new();
+    for person in &context.contracting.representatives {
+        cells.push(("Auftraggeber:", person.name_with_salutation()));
+        cells.push((
+            "Geburtsdatum des Auftraggebers:",
+            fmt_de_date(person.birth_date),
+        ));
+        let text = |value: &Option<String>| {
+            value
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        };
+        let locality = [text(&person.zip), text(&person.city)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
+        cells.push(("Straße:", text(&person.street).unwrap_or_default()));
+        cells.push(("PLZ, Ort:", locality));
+        cells.push((
+            "Land:",
+            text(&person.country)
+                .map(|country| german_document_country(&country))
+                .unwrap_or_default(),
+        ));
+    }
+    cells
+}
+
 /// `payment_terms`: the prepayment set on the order (owner decision
 /// 2026-10-11); `None` keeps the wording of an estimate without order data.
 fn build_order_cost_estimate_pdf_with_terms(
@@ -20338,11 +20431,8 @@ fn build_order_cost_estimate_pdf_with_terms(
     let mut meta_cells = vec![
         ("Kostenvoranschlag Nr. :", quote_number.to_string()),
         ("Datum:", fmt_de_date(context.order_date)),
-        (
-            "Auftraggeber:",
-            context.contracting.debtor_name(&context.party),
-        ),
     ];
+    meta_cells.extend(cost_estimate_contracting_cells(context));
     if context.contracting.parents_contract() {
         // The parents are the party; the child receives the services.
         meta_cells.push(("Patient:", context.party.name_with_salutation()));
@@ -38755,6 +38845,7 @@ mod tests {
             name: format!("{first} Muster"),
             first_name: Some(first.to_string()),
             last_name: Some("Muster".to_string()),
+            birth_date: NaiveDate::from_ymd_opt(1980, 2, 1),
             street: Some("Nebenweg 2".to_string()),
             zip: Some("80331".to_string()),
             city: Some("München".to_string()),
@@ -38869,6 +38960,88 @@ mod tests {
         assert!(text.contains("Max Muster"));
         assert!(text.contains("zugunsten des Patienten Mia Muster"));
         assert!(text.contains("gemeinsam „Auftraggeber“ genannt"));
+        // Each parent with date of birth and the address on separate lines.
+        assert!(text.contains("geb. am 01.02.1980"), "{text}");
+        assert!(text.contains("Nebenweg 2"), "{text}");
+        assert!(text.contains("80331 München"), "{text}");
+        assert!(!text.contains("Nebenweg 2 | 80331"), "{text}");
+    }
+
+    #[test]
+    fn a_contracting_parent_is_printed_with_birth_date_and_address_fields() {
+        let contracting = parents_as_party();
+        let child = DocPartyBlock {
+            name: "Mia Muster".to_string(),
+            birth_date: NaiveDate::from_ymd_opt(2015, 3, 4),
+            ..DocPartyBlock::default()
+        };
+        let groups = contracting.party_line_groups(&child);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(
+            groups[0],
+            vec![
+                "Erika Muster",
+                "geb. am 01.02.1980",
+                "Nebenweg 2",
+                "80331 München",
+                "Deutschland",
+                "Email: erika@example.test",
+            ]
+        );
+        // The wording of the party stays (§ 328 BGB).
+        assert!(contracting.beneficiary_lines(&child)[0].starts_with(
+            "im eigenen Namen zugunsten des Patienten Mia Muster, geb. am 04.03.2015"
+        ));
+
+        let mut context = GeneratedSingleOrderContext {
+            language: "de".to_string(),
+            auto_name: "Einzelauftrag".to_string(),
+            title_override: None,
+            patient_pid: "PT-PARENTS-1".to_string(),
+            party: child,
+            agency: legal_test_agency(),
+            order_number: "EA-2026-0007".to_string(),
+            contract_number: Some("RV-2026-0003".to_string()),
+            order_sequence: 1,
+            order_date: NaiveDate::from_ymd_opt(2026, 10, 19),
+            contract_date: NaiveDate::from_ymd_opt(2026, 10, 19),
+            specialties: None,
+            examination_purpose: None,
+            treatment_purpose: None,
+            order_components: None,
+            period_from: None,
+            period_to: None,
+            payer: None,
+            quote_number: Some("KV-2026-0011".to_string()),
+            line_items: Vec::new(),
+            total_net: None,
+            total_vat: None,
+            total_gross: None,
+            party_sign_place: None,
+            party_sign_date: None,
+            agency_sign_place: None,
+            agency_sign_date: None,
+            generated_at: Utc.with_ymd_and_hms(2026, 10, 19, 10, 0, 0).unwrap(),
+            contracting,
+        };
+        let cells = super::cost_estimate_contracting_cells(&context);
+        assert_eq!(
+            cells[..5],
+            [
+                ("Auftraggeber:", "Erika Muster".to_string()),
+                ("Geburtsdatum des Auftraggebers:", "01.02.1980".to_string()),
+                ("Straße:", "Nebenweg 2".to_string()),
+                ("PLZ, Ort:", "80331 München".to_string()),
+                ("Land:", "Deutschland".to_string()),
+            ]
+        );
+        assert_eq!(cells.len(), 10);
+        // An adult patient contracts alone: one field, as before.
+        context.contracting = super::ContractingDoc::default();
+        assert_eq!(
+            super::cost_estimate_contracting_cells(&context),
+            vec![("Auftraggeber:", "Mia Muster".to_string())]
+        );
     }
 
     #[test]

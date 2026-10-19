@@ -329,6 +329,11 @@ import {
 import { LeadSigningPackagePanel } from "./lead-signing-package-panel";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
 import {
+  WizardDocumentRowError,
+  WizardDocumentRowErrorProvider,
+  type WizardDocumentRowErrorState,
+} from "./wizard-document-row-error";
+import {
   discoveryReferrerMissing,
   intakeAsksDiscoverySource,
   isMinor,
@@ -2992,6 +2997,7 @@ function WizardDocumentRows({
               })}
             />
           ) : null}
+          {!archived ? <WizardDocumentRowError documentId={document.id} /> : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {!archived && canSignWizardDocument(document) ? (
@@ -3229,6 +3235,8 @@ export function LeadWizard({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // A refused "Подтвердить подпись" is shown under the row whose button was pressed.
+  const [documentRowError, setDocumentRowError] = useState<WizardDocumentRowErrorState>(null);
   const [commercialSaveFeedback, setCommercialSaveFeedback] =
     useState<CommercialSaveFeedback | null>(null);
   const [commercialDocumentErrors, setCommercialDocumentErrors] = useState<
@@ -5876,6 +5884,7 @@ export function LeadWizard({
   async function signDocument(id: string, kind: DocumentComplianceKind, fromPreview = false) {
     setBusy("sign-" + id);
     setError("");
+    setDocumentRowError(null);
     if (fromPreview) setDocumentPreviewError("");
     try {
       await markDocumentSigned(id, kind);
@@ -5884,9 +5893,10 @@ export function LeadWizard({
       // A lead gate names its reason (risk assessment, sanctions, blocked country).
       const gate = signatureGateErrorText(nextError, tx);
       if (fromPreview) setDocumentPreviewError(gate ?? errorText(nextError, tx));
-      else if (gate) {
+      else if (gate || leadErrorBlockingReasons(nextError).length === 0) {
+        // Next to the pressed button, not at the bottom of the step (DEV 2026-10-19).
         setValidationContext(null);
-        setError(gate);
+        setDocumentRowError({ documentId: id, text: gate ?? errorText(nextError, tx) });
       } else showWizardError(nextError);
     } finally {
       setBusy(null);
@@ -7166,6 +7176,7 @@ ${serviceCommentLines.join("\n")}`
     payerSamePersonUnknown: !identification.loaded,
   });
   return (
+    <WizardDocumentRowErrorProvider value={documentRowError}>
     <PortalUploadsProvider
       intake={step1Portal.intake}
       canReview={canReviewPortalUploads}
@@ -11377,5 +11388,6 @@ ${serviceCommentLines.join("\n")}`
         </DialogContent>
       </Dialog>
     </PortalUploadsProvider>
+    </WizardDocumentRowErrorProvider>
   );
 }

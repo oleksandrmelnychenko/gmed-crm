@@ -874,14 +874,7 @@ pub(crate) async fn contract_subject_details_missing(
     patient_id: Option<Uuid>,
     order_id: Option<Uuid>,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let leads: Vec<Uuid> = sqlx::query_scalar(
-        r#"SELECT l.id FROM leads l WHERE l.qualification_status <> 'deleted' AND (
-            l.id=$1 OR l.prospect_patient_id=$2 OR l.converted_patient_id=$2 OR l.repeat_patient_id=$2
-            OR EXISTS (SELECT 1 FROM orders o WHERE o.id=$3 AND (o.source_lead_id=l.id
-                OR o.patient_id=l.prospect_patient_id OR o.patient_id=l.converted_patient_id OR o.patient_id=l.repeat_patient_id))
-        ) ORDER BY l.id FOR UPDATE"#,
-    ).bind(lead_id).bind(patient_id).bind(order_id).fetch_all(&mut *conn).await?;
-    for lead_id in leads {
+    for lead_id in subject_leads(conn, lead_id, patient_id, order_id).await? {
         let missing = contract_details_missing(conn, lead_id).await?;
         if !missing.is_empty() {
             return Ok(missing);
@@ -890,35 +883,173 @@ pub(crate) async fn contract_subject_details_missing(
     Ok(Vec::new())
 }
 
+/// The leads of a document's lead, patient or order, locked for the caller's
+/// transaction.
+async fn subject_leads(
+    conn: &mut PgConnection,
+    lead_id: Option<Uuid>,
+    patient_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT l.id FROM leads l WHERE l.qualification_status <> 'deleted' AND (
+            l.id=$1 OR l.prospect_patient_id=$2 OR l.converted_patient_id=$2 OR l.repeat_patient_id=$2
+            OR EXISTS (SELECT 1 FROM orders o WHERE o.id=$3 AND (o.source_lead_id=l.id
+                OR o.patient_id=l.prospect_patient_id OR o.patient_id=l.converted_patient_id OR o.patient_id=l.repeat_patient_id))
+        ) ORDER BY l.id FOR UPDATE"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(order_id)
+    .fetch_all(&mut *conn)
+    .await
+}
+
+/// Whose data a document's signature needs (DEV 2026-10-19: confirming the
+/// GwG sheet of one parent was refused for the other parent's data).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SignatureDetails {
+    /// Contracts and every other document of the client side: the
+    /// representatives who contract (both parents only under joint custody).
+    Contract,
+    /// The own document of one representative (its GwG sheet): that person's
+    /// data only.
+    Representative(Uuid),
+    /// The own document of somebody who is no representative (the GwG sheet
+    /// of the patient or of the payer): no representative's data.
+    Nobody,
+}
+
+impl SignatureDetails {
+    /// Reads the document's template (or type) and, for a GwG sheet, its
+    /// subject (`generated_bindings.gwg_identification.subject`).
+    pub(crate) fn of_document(template: Option<&str>, art: &str, bindings: Option<&Value>) -> Self {
+        let gwg_sheet = match template {
+            Some(template) => template == "gwg_identification",
+            None => art == "gwg_identification",
+        };
+        if !gwg_sheet {
+            return Self::Contract;
+        }
+        bindings
+            .and_then(|bindings| bindings.get("gwg_identification"))
+            .and_then(|binding| binding.get("subject"))
+            .and_then(Value::as_str)
+            .and_then(subject_representative)
+            .map_or(Self::Nobody, Self::Representative)
+    }
+}
+
+/// [`contract_subject_details_missing`] scoped to the document: a person's
+/// own document needs only that person's data. Call inside the operation's
+/// transaction.
+pub(crate) async fn signature_details_missing(
+    conn: &mut PgConnection,
+    details: SignatureDetails,
+    lead_id: Option<Uuid>,
+    patient_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+) -> Result<Vec<String>, sqlx::Error> {
+    match details {
+        SignatureDetails::Contract => {
+            contract_subject_details_missing(conn, lead_id, patient_id, order_id).await
+        }
+        SignatureDetails::Nobody => Ok(Vec::new()),
+        SignatureDetails::Representative(id) => {
+            for lead_id in subject_leads(conn, lead_id, patient_id, order_id).await? {
+                let Some(loaded) = load(conn, lead_id).await? else {
+                    continue;
+                };
+                if loaded.representation.find(id).is_some() {
+                    return Ok(missing_for_representative(
+                        &loaded,
+                        crate::app_time::today(),
+                        id,
+                    ));
+                }
+            }
+            Ok(Vec::new())
+        }
+    }
+}
+
+/// What one representative still lacks for a document of their own, as keys
+/// `<slot>_<field>`: the full list of their place, never the other parent's.
+/// A person on file without a place in the form (a third parent) needs none.
+pub(crate) fn missing_for_representative(
+    loaded: &Loaded,
+    today: NaiveDate,
+    representative_id: Uuid,
+) -> Vec<String> {
+    let representation = &loaded.representation;
+    let Some(slot) = representation
+        .find(representative_id)
+        .and_then(|person| person.slot)
+    else {
+        return Vec::new();
+    };
+    if representation.minor {
+        let mut missing = place_missing(loaded, today, slot, &MINOR_REQUIRED);
+        if slot == SLOT_REP1 && representation.answers.custody() == CUSTODY_GUARDIAN {
+            missing.extend(place_missing(
+                loaded,
+                today,
+                SLOT_REP1,
+                &["authority_upload"],
+            ));
+        }
+        missing
+    } else {
+        place_missing(loaded, today, slot, &ADULT_REQUIRED)
+    }
+}
+
 pub(crate) fn contract_details_incomplete(missing: &[String]) -> axum::response::Response {
     intake::coded(
         StatusCode::UNPROCESSABLE_ENTITY,
         "representative_details_incomplete",
         "Complete the representative's details before creating a contract or inviting signatures",
-        json!({"missing":missing}),
+        json!({"missing":missing, "scope":"contract"}),
     )
+}
+
+/// The refusal of [`signature_details_missing`]: `scope` says whether a
+/// contract or one person's own document asked for the data.
+pub(crate) fn signature_details_incomplete(
+    details: SignatureDetails,
+    missing: &[String],
+) -> axum::response::Response {
+    if !matches!(details, SignatureDetails::Representative(_)) {
+        return contract_details_incomplete(missing);
+    }
+    intake::coded(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "representative_details_incomplete",
+        "Complete this person's details before confirming the signature",
+        json!({"missing":missing, "scope":"person"}),
+    )
+}
+
+/// What the person of a place still lacks; everything while nobody is there.
+fn place_missing(loaded: &Loaded, today: NaiveDate, slot: &str, required: &[&str]) -> Vec<String> {
+    let person = loaded.representation.in_slot(slot);
+    let mut missing: Vec<_> = required
+        .iter()
+        .filter(|field| !person.is_some_and(|person| field_filled(loaded, person, field, today)))
+        .map(|field| format!("{slot}_{field}"))
+        .collect();
+    if person.is_some_and(|person| {
+        intake::name_needs_latin_spelling(&person.first_name)
+            || intake::name_needs_latin_spelling(&person.last_name)
+    }) {
+        missing.push(format!("{slot}_name_latin"));
+    }
+    missing
 }
 
 fn representation_missing(loaded: &Loaded, today: NaiveDate, full_minor: bool) -> Vec<String> {
     let representation = &loaded.representation;
-    // What the person of a place still lacks; everything while nobody is there.
-    let place = |slot: &str, required: &[&str]| -> Vec<String> {
-        let person = representation.in_slot(slot);
-        let mut missing: Vec<_> = required
-            .iter()
-            .filter(|field| {
-                !person.is_some_and(|person| field_filled(loaded, person, field, today))
-            })
-            .map(|field| format!("{slot}_{field}"))
-            .collect();
-        if person.is_some_and(|person| {
-            intake::name_needs_latin_spelling(&person.first_name)
-                || intake::name_needs_latin_spelling(&person.last_name)
-        }) {
-            missing.push(format!("{slot}_name_latin"));
-        }
-        missing
-    };
+    let place = |slot: &str, required: &[&str]| place_missing(loaded, today, slot, required);
     let mut missing = Vec::new();
     if representation.minor {
         if representation.answers.custody.is_none() {
@@ -3860,6 +3991,80 @@ mod tests {
         );
         alone.uploads.push(upload(1, UPLOAD_AUTHORITY));
         assert!(missing_for_contract(&alone, today()).is_empty());
+    }
+
+    #[test]
+    fn a_parents_own_document_needs_only_that_parents_data() {
+        // DEV 2026-10-19: the GwG sheet of the first parent was refused for
+        // the second parent's data.
+        let mut second = complete_person(2, SLOT_REP2, ROLE_LEGAL_REPRESENTATIVE);
+        second.phone = None;
+        second.extras.citizenships.clear();
+        let mut both = loaded(
+            true,
+            Answers::default(),
+            vec![
+                complete_person(1, SLOT_REP1, ROLE_LEGAL_REPRESENTATIVE),
+                second,
+            ],
+        );
+        both.uploads = vec![upload(1, UPLOAD_IDENTITY), upload(2, UPLOAD_IDENTITY)];
+        assert!(missing_for_representative(&both, today(), id(1)).is_empty());
+        assert_eq!(
+            missing_for_representative(&both, today(), id(2)),
+            vec!["rep2_citizenships", "rep2_phone"]
+        );
+        // The contract still needs both parents under joint custody.
+        assert_eq!(
+            missing_for_contract(&both, today()),
+            vec!["custody", "rep2_citizenships", "rep2_phone"]
+        );
+        // Unknown person or a person without a place: nothing to check.
+        assert!(missing_for_representative(&both, today(), id(9)).is_empty());
+        // A guardian's own sheet asks for the appointment deed.
+        both.representation.answers.custody = Some(CUSTODY_GUARDIAN.into());
+        assert_eq!(
+            missing_for_representative(&both, today(), id(1)),
+            vec!["rep1_authority_upload"]
+        );
+    }
+
+    #[test]
+    fn the_gwg_sheet_scopes_its_signature_to_its_person() {
+        let representative = id(4);
+        let bindings = json!({"gwg_identification": {"subject": subject_of(representative)}});
+        assert_eq!(
+            SignatureDetails::of_document(
+                Some("gwg_identification"),
+                "gwg_identification",
+                Some(&bindings)
+            ),
+            SignatureDetails::Representative(representative)
+        );
+        for subject in [
+            json!({"gwg_identification": {"subject": "payer"}}),
+            json!({}),
+        ] {
+            assert_eq!(
+                SignatureDetails::of_document(
+                    Some("gwg_identification"),
+                    "gwg_identification",
+                    Some(&subject)
+                ),
+                SignatureDetails::Nobody
+            );
+        }
+        assert_eq!(
+            SignatureDetails::of_document(None, "gwg_identification", None),
+            SignatureDetails::Nobody
+        );
+        // A contract keeps the check of the contracting representatives.
+        for template in ["framework_contract", "single_order", "cost_estimate"] {
+            assert_eq!(
+                SignatureDetails::of_document(Some(template), "contract", Some(&bindings)),
+                SignatureDetails::Contract
+            );
+        }
     }
 
     #[test]

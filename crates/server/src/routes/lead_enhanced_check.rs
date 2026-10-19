@@ -323,12 +323,14 @@ pub(crate) async fn load_subjects(
                       ) AS patient_open,
                       COUNT(*) FILTER (
                           WHERE (h.subject_kind IN ('lead_payer', 'payer_contact')
-                                 OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))
+                                 OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank')
+                                 OR h.subject_kind = 'lead_guardian')
                             AND h.status = 'confirmed'
                       ) AS payer_confirmed,
                       COUNT(*) FILTER (
                           WHERE (h.subject_kind IN ('lead_payer', 'payer_contact')
-                                 OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))
+                                 OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank')
+                                 OR h.subject_kind = 'lead_guardian')
                             AND h.status = 'open'
                       ) AS payer_open,
                       COUNT(*) FILTER (
@@ -342,10 +344,15 @@ pub(crate) async fn load_subjects(
                -- on the third-party invoice recipient who does not pay counts
                -- for the payer's side (owner decisions 2026-10-11), a payer
                -- contact staff named on the lead's order is a payer
-               -- (2026-10-12).
+               -- (2026-10-12). A minor's parent who pays is screened once, as
+               -- the guardian with the payer role noted (2026-10-19): only
+               -- that guardian counts, for the payer's side.
                WHERE (h.lead_id = l.id
-                      AND h.subject_kind IN ('lead_patient', 'lead_payer', 'lead_bank',
-                                             'lead_recipient', 'payer_contact'))
+                      AND (h.subject_kind IN ('lead_patient', 'lead_payer', 'lead_bank',
+                                              'lead_recipient', 'payer_contact')
+                           OR (h.subject_kind = 'lead_guardian'
+                               AND (COALESCE(h.subject_snapshot->>'relation', '') = 'payer'
+                                    OR COALESCE(h.subject_snapshot->>'relation', '') LIKE '%; payer'))))
                   -- The patient record of a repeat intake or of the converted lead.
                   OR (h.subject_kind = 'patient'
                       AND h.patient_id IN (l.prospect_patient_id, l.converted_patient_id))

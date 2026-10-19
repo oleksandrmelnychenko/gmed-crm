@@ -24,8 +24,11 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
 /// invoice recipient who does not pay (owner decisions 2026-10-11: the
 /// recipient is a third party on the money side) and a free-text payer
 /// contact staff named on one of the lead's orders (`payer_contact`,
-/// 2026-10-12). Every other hit of the lead — the patient, a guardian, the
-/// bank the patient pays through — is the patient's side (T16).
+/// 2026-10-12), and a minor's parent who pays, screened once as the guardian
+/// with the payer role noted (2026-10-19,
+/// [`crate::sanctions::screening::PAYING_REPRESENTATIVE_NOTE`]). Every
+/// other hit of the lead — the patient, a guardian, the bank the patient pays
+/// through — is the patient's side (T16).
 ///
 /// Only a CONFIRMED hit counts (owner decision 2026-10-07, QA 2026-10-11
 /// A-15/A-21/A-33): "under sanctions" means a match the CEO confirmed. An
@@ -34,7 +37,10 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
 /// never opens a follow-up block, the enhanced check or the payer's proof of
 /// funds, and nothing the lead, the payer or the recipient sees changes.
 pub(crate) const PAYER_SIDE_HIT_SQL: &str = "(h.subject_kind IN ('lead_payer', 'lead_recipient', 'payer_contact') \
-     OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))";
+     OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank') \
+     OR (h.subject_kind = 'lead_guardian' \
+         AND (COALESCE(h.subject_snapshot->>'relation', '') = 'payer' \
+              OR COALESCE(h.subject_snapshot->>'relation', '') LIKE '%; payer')))";
 
 /// The inputs of a lead; `None` when the lead does not exist.
 pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Inputs>, sqlx::Error> {

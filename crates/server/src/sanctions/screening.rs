@@ -479,6 +479,82 @@ fn guardian_subject(
     }
 }
 
+/// Noted in `relation` of a minor's representative who also pays: the parent
+/// is screened once, as `lead_guardian`, never again as `lead_payer`.
+pub const PAYING_REPRESENTATIVE_NOTE: &str = "payer";
+
+/// Whether the payer declaration `row` names this parent of a minor: the
+/// declaration names the representative itself (`payer_kind =
+/// 'representative'`), or a third party who is a natural person with the
+/// parent's e-mail address or — when either has none — the parent's first
+/// name, last name and date of birth (as `lead_representatives::payer_same_person`).
+fn paying_parent(row: &Value, contact: &Value, parent: &Subject) -> bool {
+    let contact_id = json_text(contact, "id").to_lowercase();
+    match json_text(row, "payer_kind").as_str() {
+        "representative" => {
+            !contact_id.is_empty()
+                && json_text(row, "payer_representative_id").to_lowercase() == contact_id
+        }
+        "third_party" => {
+            let payer_type = json_text(row, "payer_type");
+            if !payer_type.is_empty() && payer_type != "person" {
+                return false;
+            }
+            let email = |value: &Value| json_text(value, "email").to_lowercase();
+            let (payer_email, parent_email) = (email(row), email(contact));
+            if !payer_email.is_empty() && !parent_email.is_empty() {
+                return payer_email == parent_email;
+            }
+            let same = |left: &str, right: &str| {
+                let left = left.trim().to_lowercase();
+                !left.is_empty() && left == right.trim().to_lowercase()
+            };
+            same(&json_text(row, "first_name"), &parent.first_name)
+                && same(&json_text(row, "last_name"), &parent.last_name)
+                && json_date(row, "date_of_birth").is_some()
+                && json_date(row, "date_of_birth") == parent.date_of_birth
+        }
+        _ => false,
+    }
+}
+
+/// The parents and guardians of a minor lead, and the payer rows still to
+/// screen as `lead_payer`: a parent who pays is screened once, as the
+/// guardian with [`PAYING_REPRESENTATIVE_NOTE`] in `relation` (2026-10-19).
+fn minor_guardian_subjects(
+    lead_id: Uuid,
+    representatives: &[crate::services::lead_guardian_identity::CanonicalGuardianIdentity],
+    payer_rows: &[Value],
+) -> (Vec<SubjectRecord>, Vec<Value>) {
+    let mut screened_payers: Vec<Value> = payer_rows.to_vec();
+    let mut subjects = Vec::new();
+    for identity in representatives {
+        let contact = &identity.contact;
+        let relation = json_text(contact, "relation");
+        if !is_guardian_relation(&relation) {
+            continue;
+        }
+        // What the parent entered in the cabinet; a row of an adult role
+        // (from before a corrected date of birth) says nothing here.
+        let extras = (identity.role == "legal_representative").then_some(&identity.extras);
+        let mut subject = guardian_subject(lead_id, identity.position, contact, extras, relation);
+        let pays = screened_payers
+            .iter()
+            .position(|row| paying_parent(row, contact, &subject.subject));
+        if let Some(index) = pays {
+            if json_text(&screened_payers[index], "payer_kind") == "third_party" {
+                screened_payers.remove(index);
+            }
+            subject.relation = Some(match subject.relation.take() {
+                Some(relation) => format!("{relation}; {PAYING_REPRESENTATIVE_NOTE}"),
+                None => PAYING_REPRESENTATIVE_NOTE.to_string(),
+            });
+        }
+        subjects.push(subject);
+    }
+    (subjects, screened_payers)
+}
+
 fn lead_subjects_from_row(
     row: &sqlx::postgres::PgRow,
     payer_rows: &[Value],
@@ -520,24 +596,13 @@ fn lead_subjects_from_row(
         relation: None,
     }];
 
+    // The payer rows still screened as `lead_payer`: a parent who pays is
+    // screened once, as the representative, with the payer role noted.
+    let mut screened_payers: Vec<Value> = payer_rows.to_vec();
     if crate::routes::leads::is_minor_on(date_of_birth, today) {
-        for identity in representatives {
-            let contact = &identity.contact;
-            let relation = json_text(contact, "relation");
-            if !is_guardian_relation(&relation) {
-                continue;
-            }
-            // What the parent entered in the cabinet; a row of an adult role
-            // (from before a corrected date of birth) says nothing here.
-            let extras = (identity.role == "legal_representative").then_some(&identity.extras);
-            subjects.push(guardian_subject(
-                lead_id,
-                identity.position,
-                contact,
-                extras,
-                relation,
-            ));
-        }
+        let (guardians, payers) = minor_guardian_subjects(lead_id, representatives, payer_rows);
+        subjects.extend(guardians);
+        screened_payers = payers;
     } else {
         // An adult's contacts are not screened — but for the representative
         // and the legal guardian (Betreuer) the lead named in the cabinet.
@@ -556,7 +621,9 @@ fn lead_subjects_from_row(
         }
     }
 
-    subjects.extend(payer_subjects(lead_id, payer_rows));
+    subjects.extend(payer_subjects(lead_id, &screened_payers));
+    // The bank follows the declaration as it is: a paying parent's bank is
+    // still the payer's bank.
     subjects.extend(bank_subjects(lead_id, payer_rows));
 
     Some(LeadSubjects {
@@ -2350,6 +2417,84 @@ mod tests {
             guardian_subject(lead_id, 3, &unnamed, None, "father".into()).subject_ref,
             "contact-3"
         );
+    }
+
+    #[test]
+    fn a_paying_parent_is_screened_once_as_the_guardian() {
+        let lead_id = Uuid::new_v4();
+        let mother_id = "5d0c1f0e-0000-4000-8000-000000000001";
+        let identity = |position: usize, contact: Value| {
+            crate::services::lead_guardian_identity::CanonicalGuardianIdentity {
+                contact_id: None,
+                related_patient_id: None,
+                position,
+                name: json_text(&contact, "name"),
+                citizenships: Vec::new(),
+                residences: Vec::new(),
+                role: "legal_representative".into(),
+                contact,
+                extras: json!({}),
+            }
+        };
+        let parents = vec![
+            identity(
+                0,
+                json!({"id": mother_id, "name": "Anna Muster", "relation": "mother",
+                       "email": "Anna@example.org", "birth_date": "1985-03-02"}),
+            ),
+            identity(
+                1,
+                json!({"name": "Ben Muster", "relation": "father", "birth_date": "1984-01-01"}),
+            ),
+        ];
+        let third_party = |extra: Value| {
+            let mut row = json!({"id": "payer-row", "payer_kind": "third_party",
+                                 "payer_type": "person", "first_name": "Anna",
+                                 "last_name": "Muster"});
+            row.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            row
+        };
+
+        // The mother pays as a "third party" with her own address: one subject.
+        let (guardians, payers) = minor_guardian_subjects(
+            lead_id,
+            &parents,
+            &[third_party(json!({"email": "anna@example.org"}))],
+        );
+        assert!(payers.is_empty());
+        assert!(payer_subjects(lead_id, &payers).is_empty());
+        assert_eq!(guardians.len(), 2);
+        assert_eq!(guardians[0].relation.as_deref(), Some("mother; payer"));
+        assert_eq!(guardians[1].relation.as_deref(), Some("father"));
+
+        // Without addresses: name and date of birth decide.
+        let (_, payers) = minor_guardian_subjects(
+            lead_id,
+            &parents,
+            &[third_party(json!({"date_of_birth": "1985-03-02"}))],
+        );
+        assert!(payers.is_empty());
+        let (guardians, payers) = minor_guardian_subjects(
+            lead_id,
+            &parents,
+            &[third_party(json!({"date_of_birth": "1990-01-01"}))],
+        );
+        assert_eq!(payers.len(), 1, "another person stays the payer");
+        assert_eq!(guardians[0].relation.as_deref(), Some("mother"));
+
+        // The declaration names the representative itself (no copy to screen).
+        let named = json!({"payer_kind": "representative", "payer_representative_id": mother_id});
+        let (guardians, payers) =
+            minor_guardian_subjects(lead_id, &parents, std::slice::from_ref(&named));
+        assert_eq!(payers, vec![named]);
+        assert_eq!(guardians[0].relation.as_deref(), Some("mother; payer"));
+        // An organisation is never a parent.
+        let company = json!({"payer_kind": "third_party", "payer_type": "company",
+                             "email": "anna@example.org"});
+        let (_, payers) = minor_guardian_subjects(lead_id, &parents, &[company]);
+        assert_eq!(payers.len(), 1);
     }
 
     #[test]

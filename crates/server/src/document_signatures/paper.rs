@@ -106,17 +106,7 @@ async fn record(
         &source.get::<String, _>("art"),
     ) {
         let mut conn = state.db.acquire().await.map_err(db_error)?;
-        let missing = crate::routes::lead_representatives::contract_subject_details_missing(
-            &mut conn,
-            source.get("lead_id"),
-            source.get("patient_id"),
-            source.get("order_id"),
-        )
-        .await
-        .map_err(db_error)?;
-        if !missing.is_empty() {
-            return Err(crate::routes::lead_representatives::contract_details_incomplete(&missing));
-        }
+        signature_details_check(&mut conn, &source).await?;
     }
     if document_in_active_signature_request(&state.db, id)
         .await
@@ -290,17 +280,7 @@ async fn store_signed_version(
             .as_deref(),
         &context.get::<String, _>("art"),
     ) {
-        let missing = crate::routes::lead_representatives::contract_subject_details_missing(
-            &mut tx,
-            context.get("lead_id"),
-            context.get("patient_id"),
-            context.get("order_id"),
-        )
-        .await
-        .map_err(db_error)?;
-        if !missing.is_empty() {
-            return Err(crate::routes::lead_representatives::contract_details_incomplete(&missing));
-        }
+        signature_details_check(&mut tx, &context).await?;
     }
     let source = sqlx::query(
         "SELECT d.*, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version

@@ -175,6 +175,103 @@ fn guardian_signers(contacts: &Value) -> Vec<Signer> {
     signers
 }
 
+/// A signer of a representative with a name and an e-mail address.
+fn named_signer(first_name: &str, last_name: &str, email: Option<&str>) -> Option<Signer> {
+    let email = email.map(str::trim).filter(|email| !email.is_empty())?;
+    let (first_name, last_name) = (first_name.trim(), last_name.trim());
+    if first_name.is_empty() && last_name.is_empty() {
+        return None;
+    }
+    Some(Signer {
+        first_name: first_name.into(),
+        last_name: last_name.into(),
+        email: email.to_lowercase(),
+        role: "client".into(),
+        positions: Vec::new(),
+    })
+}
+
+/// Each signer once, by e-mail address.
+fn unique_signers(signers: impl IntoIterator<Item = Signer>) -> Vec<Signer> {
+    let mut unique: Vec<Signer> = Vec::new();
+    for signer in signers {
+        if !unique.iter().any(|known| known.email == signer.email) {
+            unique.push(signer);
+        }
+    }
+    unique
+}
+
+/// The representatives of a minor lead who contract: the first parent, the
+/// second one only under joint custody (the places of the form).
+fn lead_contracting_signers(
+    representation: &crate::routes::lead_representatives::Representation,
+) -> Vec<Signer> {
+    unique_signers(
+        representation
+            .representatives
+            .iter()
+            .filter(|person| person.slot.is_some())
+            .filter_map(|person| {
+                named_signer(
+                    &person.first_name,
+                    &person.last_name,
+                    person.email.as_deref(),
+                )
+            }),
+    )
+}
+
+/// The representatives of a minor patient who contract
+/// (`contracting_party::resolve`: the order's choice, else the relations the
+/// conversion stored on the patient, else every recorded parent).
+fn patient_contracting_signers(
+    representatives: &[crate::services::contracting_party::Representative],
+) -> Vec<Signer> {
+    unique_signers(representatives.iter().filter_map(|representative| {
+        match (&representative.first_name, &representative.last_name) {
+            (Some(first), Some(last)) => named_signer(first, last, representative.email.as_deref()),
+            _ => {
+                let (first, last) = signer_name(&representative.name);
+                named_signer(&first, &last, representative.email.as_deref())
+            }
+        }
+    }))
+}
+
+/// Who signs for a minor; `None` when nothing is recorded beyond the legacy
+/// trusted contacts of a patient.
+async fn contracting_signers(
+    state: &AppState,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+) -> Result<Option<Vec<Signer>>, Response> {
+    let mut conn = state.db.acquire().await.map_err(db_error)?;
+    if let Some(lead_id) = lead_id {
+        let loaded = crate::routes::lead_representatives::load(&mut conn, lead_id)
+            .await
+            .map_err(db_error)?;
+        return Ok(loaded.map(|loaded| lead_contracting_signers(&loaded.representation)));
+    }
+    let Some(patient_id) = patient_id else {
+        return Ok(None);
+    };
+    let party = crate::services::contracting_party::resolve(
+        &mut conn,
+        patient_id,
+        order_id,
+        None,
+        crate::app_time::today(),
+    )
+    .await
+    .map_err(db_error)?;
+    if party.representatives.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(patient_contracting_signers(&party.representatives)))
+}
+
 #[cfg(test)]
 fn guardian_signer(contacts: &Value) -> Option<Signer> {
     guardian_signers(contacts).into_iter().next()
@@ -297,8 +394,22 @@ pub(super) async fn suggested(
     if let Some(row) = row {
         let birth_date = row.get::<Option<NaiveDate>, _>("birth_date");
         if is_minor(birth_date) {
-            let contacts = row.get::<Value, _>("guardian_contacts");
-            let guardians = guardian_signers(&contacts);
+            // The representatives who contract for the child sign (owner
+            // decision 2026-10-19): the recorded parents only for old
+            // patients nobody resolved.
+            let guardians = match contracting_signers(
+                state,
+                patient_id,
+                lead_id,
+                source
+                    .try_get::<Option<Uuid>, _>("order_id")
+                    .unwrap_or_default(),
+            )
+            .await?
+            {
+                Some(signers) => signers,
+                None => guardian_signers(&row.get::<Value, _>("guardian_contacts")),
+            };
             if !guardians.is_empty() {
                 clients = guardians;
             }
@@ -406,6 +517,98 @@ mod tests {
         assert_eq!(signer.last_name, "Beispiel");
         assert_eq!(signer.email, "anna@example.org");
         assert_eq!(signer.role, "client");
+    }
+
+    fn lead_parent(
+        slot: Option<&'static str>,
+        first: &str,
+        email: Option<&str>,
+    ) -> crate::routes::lead_representatives::Representative {
+        crate::routes::lead_representatives::Representative {
+            id: Uuid::new_v4(),
+            slot,
+            role: "legal_representative",
+            relation: Some("parent".into()),
+            first_name: first.into(),
+            last_name: "Muster".into(),
+            date_of_birth: None,
+            email: email.map(str::to_string),
+            phone: None,
+            login_user_ids: Vec::new(),
+            has_data: true,
+            extras: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_minor_leads_signers_follow_the_custody() {
+        use crate::routes::lead_representatives::Representation;
+        // Joint custody: both places sign.
+        let joint = Representation {
+            minor: true,
+            answers: Default::default(),
+            representatives: vec![
+                lead_parent(Some("rep1"), "Ioann", Some("IOANN@example.org")),
+                lead_parent(Some("rep2"), "Maria", Some("maria@example.org")),
+            ],
+        };
+        let emails = |signers: Vec<Signer>| {
+            signers
+                .into_iter()
+                .map(|signer| signer.email)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            emails(lead_contracting_signers(&joint)),
+            vec!["ioann@example.org", "maria@example.org"]
+        );
+        // Sole custody: the second parent on file has no place and does not sign.
+        let sole = Representation {
+            representatives: vec![
+                lead_parent(Some("rep1"), "Ioann", Some("ioann@example.org")),
+                lead_parent(None, "Maria", Some("maria@example.org")),
+            ],
+            ..joint.clone()
+        };
+        assert_eq!(
+            emails(lead_contracting_signers(&sole)),
+            vec!["ioann@example.org"]
+        );
+        // Without an e-mail address nobody can be invited.
+        let no_email = Representation {
+            representatives: vec![lead_parent(Some("rep1"), "Ioann", None)],
+            ..joint
+        };
+        assert!(lead_contracting_signers(&no_email).is_empty());
+    }
+
+    #[test]
+    fn a_minor_patients_signers_are_the_stored_contracting_parents() {
+        use crate::services::contracting_party::Representative;
+        let signers = patient_contracting_signers(&[
+            Representative {
+                name: "Ioann Muster".into(),
+                first_name: Some("Ioann".into()),
+                last_name: Some("Muster".into()),
+                email: Some("Ioann@example.org".into()),
+                ..Default::default()
+            },
+            Representative {
+                name: "Maria von Muster".into(),
+                email: Some("maria@example.org".into()),
+                ..Default::default()
+            },
+            Representative {
+                name: "Ohne Adresse".into(),
+                ..Default::default()
+            },
+        ]);
+        assert_eq!(signers.len(), 2);
+        assert_eq!(signers[0].first_name, "Ioann");
+        assert_eq!(signers[0].email, "ioann@example.org");
+        assert_eq!(signers[1].first_name, "Maria von");
+        assert_eq!(signers[1].last_name, "Muster");
+        assert!(signers.iter().all(|signer| signer.role == "client"));
     }
 
     #[test]
