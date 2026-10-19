@@ -182,6 +182,7 @@ export function LeadPayerDeclarationSection({
   portalIntake = null,
   prefill = null,
   amlSlot = null,
+  amlPartHidden = false,
 }: {
   leadId: string;
   data: PayerDeclarationResponse | null;
@@ -223,8 +224,10 @@ export function LeadPayerDeclarationSection({
    * interest and the source of funds are shown there; inline without it.
    */
   amlSlot?: HTMLElement | null;
+  /** The part lives in the AML form only: while that form is closed it is not shown here. */
+  amlPartHidden?: boolean;
 }) {
-  const inAmlBlock = (node: ReactNode) => (amlSlot ? createPortal(node, amlSlot) : node);
+  const inAmlBlock = (node: ReactNode) => (amlSlot ? createPortal(node, amlSlot) : amlPartHidden ? null : node);
   const prefillActive = !data?.declaration && Boolean(prefill);
   const initialForm = (): PayerDeclarationForm =>
     !data?.declaration && prefill ? payerDeclarationPrefillForm(prefill) : payerDeclarationToForm(data?.declaration);

@@ -57,7 +57,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { AdminSectionTitle, AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
 import { TrustedContactRole } from "./trusted-contact-role";
 import { StaffLink } from "@/components/staff-link";
@@ -76,6 +76,7 @@ import {
   payerReadinessReasonLabels,
   payerReadinessReasonSteps,
   statedFundsSourceLabel,
+  type PayerDeclarationResponse,
 } from "../model/lead-payer";
 import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
 import { useLeadPayerLink } from "../model/use-lead-payer-link";
@@ -629,6 +630,17 @@ function amlCountryBoxes(
  * reasons with the black-list countries, or a black-list country the wizard
  * shows before it is saved; "" while nothing requires it.
  */
+/** The source of funds as the AML document prints it: the staff choice with its words, else what the self-paying lead stated in the cabinet. */
+function payerFundsTextOf(data: PayerDeclarationResponse | null | undefined): string {
+  const declaration = data?.declaration;
+  if (!declaration) return "";
+  const source = declaration.source_of_funds ?? declaration.self_funds_source ?? null;
+  if (!source) return "";
+  const words = (declaration.source_of_funds ? declaration.source_of_funds_description : declaration.self_funds_description)?.trim();
+  const label = statedFundsSourceLabel(source, (_ru: string, de: string) => de);
+  return words ? `${label}: ${words}` : label;
+}
+
 function amlEnhancedCheckRequiredText(
   check: LeadEnhancedCheck | null,
   blacklistCountries: readonly string[],
@@ -3106,15 +3118,10 @@ export function LeadWizard({
   const payerCountries = useMemo(() => payerAmlCountries(payer.data), [payer.data]);
   // The source of funds as the AML document prints it: the staff choice with
   // its words, else what the self-paying lead stated in the cabinet.
-  const payerFundsText = useMemo(() => {
-    const declaration = payer.data?.declaration;
-    if (!declaration) return "";
-    const source = declaration.source_of_funds ?? declaration.self_funds_source ?? null;
-    if (!source) return "";
-    const words = (declaration.source_of_funds ? declaration.source_of_funds_description : declaration.self_funds_description)?.trim();
-    const label = statedFundsSourceLabel(source, (_ru: string, de: string) => de);
-    return words ? `${label}: ${words}` : label;
-  }, [payer.data]);
+  const payerFundsText = useMemo(() => payerFundsTextOf(payer.data), [payer.data]);
+  // The latest saved text: the AML form saves the payer fields right before its document.
+  const payerFundsTextRef = useRef(payerFundsText);
+  payerFundsTextRef.current = payerFundsText;
   const reloadPayer = payer.reload;
   useEffect(() => {
     if (lead) void reloadPayer();
@@ -5933,7 +5940,20 @@ export function LeadWizard({
     setBusy(`generate-${templateId}`);
     setError("");
     try {
-      if (!(await save(templateId === "enhanced_due_diligence" ? "master_data" : "documents", false))) {
+      // The AML form edits the payer's source of funds itself (owner 2026-10-19):
+      // save those fields first and print what they now say.
+      let draftOverride: Draft | undefined;
+      if (templateId === "enhanced_due_diligence") {
+        if (!(await flushPayerAutosave())) return false;
+        draftOverride = {
+          ...draft,
+          amlEnhancedDueDiligence: {
+            ...draft.amlEnhancedDueDiligence,
+            assetOrigin: payerFundsTextRef.current || draft.amlEnhancedDueDiligence.assetOrigin,
+          },
+        };
+      }
+      if (!(await save(templateId === "enhanced_due_diligence" ? "master_data" : "documents", false, draftOverride))) {
         return false;
       }
       const targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
@@ -8379,6 +8399,7 @@ ${serviceCommentLines.join("\n")}`
                   portalIntake={step1Portal.intake}
                   enhancedDetails={step1Portal.intake?.enhanced_details ?? null}
                   amlSlot={payerAmlSlot}
+                  amlPartHidden
                   prefill={payerPrefill}
                   payerLink={payerLink}
                   payerLinkCanEdit={canEditPayerLink}
@@ -8389,6 +8410,7 @@ ${serviceCommentLines.join("\n")}`
                   onSave={async (form) => {
                     const targetLeadId = leadId;
                     const saved = await payer.save(form);
+                    payerFundsTextRef.current = payerFundsTextOf(saved);
                     if (hydrated.current !== targetLeadId) return;
                     handleAmlCountryChange({ payerCountries: payerAmlCountries(saved) });
                     // Another payer or e-mail clears the payment route the payer stated:
@@ -8520,8 +8542,6 @@ ${serviceCommentLines.join("\n")}`
                       </StatusChip>
                     ) : null}
                   </div>
-                  {/* The payer form's own interest and source of funds (owner 2026-10-19). */}
-                  <div ref={setPayerAmlSlot} className="mt-2 border-t border-border/60" data-testid="lead-wizard-payer-aml-slot" />
                   <WizardDocumentRows
                     documents={wizardDocuments.enhanced_due_diligence}
                     complianceKind="enhanced_due_diligence"
@@ -10187,10 +10207,11 @@ ${serviceCommentLines.join("\n")}`
                     onCancel={() => setAmlSheetOpen(false)}
                   />
                 )}
-                bodyWrapperClassName="space-y-6"
+                bodyClassName="bg-muted/40"
+                bodyWrapperClassName="space-y-3"
               >
                 <div
-                  className="space-y-2"
+                  className="space-y-2 rounded-xl border border-border/50 bg-card p-3.5"
                   data-testid="lead-aml-sheet-requirement"
                 >
                   <StatusChip tone={amlRequired ? "error" : "neutral"}>
@@ -10210,10 +10231,10 @@ ${serviceCommentLines.join("\n")}`
                   ))}
                 </div>
 
-                <section className="space-y-4">
-                  <h3 className="text-sm font-semibold text-foreground">
+                <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                  <AdminSectionTitle>
                     {tx("1. Установление повышенного риска", "1. Feststellung eines erhöhten Geldwäscherisikos")}
-                  </h3>
+                  </AdminSectionTitle>
                   <div className="border-y border-border/70">
                     <ToggleRow
                       checked={draft.amlEnhancedDueDiligence.internalRiskAnalysis}
@@ -10238,18 +10259,10 @@ ${serviceCommentLines.join("\n")}`
                     />
                   </Field>
                   {/* One source of funds (owner 2026-10-19): entered in the AML block of the page, printed from there; one card with its proofs. */}
-                  <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3.5" data-testid="lead-aml-asset-origin-card">
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[13px] font-medium text-foreground">{tx("Происхождение задействованных активов", "Herkunft der eingesetzten Vermögenswerte")}</span>
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{tx("из блока AML на странице", "aus dem AML-Block der Seite")}</span>
-                      </div>
-                      <p className="text-sm" data-testid="lead-aml-asset-origin">
-                        {draft.amlEnhancedDueDiligence.assetOrigin || (
-                          <span className="text-muted-foreground">{tx("Источник средств ещё не указан — укажите его в блоке «Усиленная AML-проверка».", "Herkunft der Mittel noch nicht angegeben – bitte im Block „Verstärkte Sorgfaltspflichten“ angeben.")}</span>
-                        )}
-                      </p>
-                    </div>
+                  <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3" data-testid="lead-aml-asset-origin-card">
+                    <span className="text-[13px] font-medium text-foreground">{tx("Экономические интересы и происхождение средств", "Wirtschaftliches Interesse und Herkunft der Mittel")}</span>
+                    {/* The payer form's own interest and source of funds live here (owner 2026-10-19); printed as "Herkunft der eingesetzten Vermögenswerte". */}
+                    <div ref={setPayerAmlSlot} data-testid="lead-wizard-payer-aml-slot" />
                     <div className="border-t border-border/60 pt-3">
                       <AssetOriginEvidenceField
                         value={draft.amlEnhancedDueDiligence.assetOriginEvidence}
@@ -10262,10 +10275,10 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 </section>
 
-                <section className="space-y-4 border-t border-border pt-5">
-                  <h3 className="text-sm font-semibold text-foreground">
+                <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                  <AdminSectionTitle>
                     {tx("Политически значимое лицо (PEP)", "Politisch exponierte Person (PeP)")}
-                  </h3>
+                  </AdminSectionTitle>
                   <div className="border-y border-border/70">
                     <ToggleRow
                       checked={draft.amlEnhancedDueDiligence.pepContractPartner}
@@ -10309,10 +10322,10 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 </section>
 
-                <section className="space-y-4 border-t border-border pt-5">
-                  <h3 className="text-sm font-semibold text-foreground">
+                <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                  <AdminSectionTitle>
                     {tx("Связи с лицами под санкциями", "Verbindungen zu sanktionierten Personen")}
-                  </h3>
+                  </AdminSectionTitle>
                   <Field label={tx("Сведения о связях с лицами под санкциями", "Angaben zu Verbindungen zu sanktionierten Personen")}>
                     <textarea
                       className={textareaClass}
@@ -10324,10 +10337,10 @@ ${serviceCommentLines.join("\n")}`
                   </Field>
                 </section>
 
-                <section className="space-y-4 border-t border-border pt-5">
-                  <h3 className="text-sm font-semibold text-foreground">
+                <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                  <AdminSectionTitle>
                     {tx("Третья страна с высоким риском", "Drittstaat mit hohem Risiko")}
-                  </h3>
+                  </AdminSectionTitle>
                   <div className="border-y border-border/70">
                     <ToggleRow
                       checked={draft.amlEnhancedDueDiligence.highRiskCountryTransaction}
@@ -10378,10 +10391,10 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 </section>
 
-                <section className="space-y-4 border-t border-border pt-5">
-                  <h3 className="text-sm font-semibold text-foreground">
+                <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                  <AdminSectionTitle>
                     {tx("Необычная операция", "Ungewöhnliche Transaktion")}
-                  </h3>
+                  </AdminSectionTitle>
                   <div className="border-y border-border/70">
                     <ToggleRow checked={draft.amlEnhancedDueDiligence.unusualComplexOrLarge} disabled={isBusy} onChange={(checked) => patchAml("unusualComplexOrLarge", checked)} label={tx("Сложная или необычно крупная операция", "Komplexe oder ungewöhnlich große Transaktion")} />
                     <ToggleRow checked={draft.amlEnhancedDueDiligence.unusualPattern} disabled={isBusy} onChange={(checked) => patchAml("unusualPattern", checked)} label={tx("Необычная схема операции", "Ungewöhnliches Transaktionsmuster")} />
@@ -10392,19 +10405,19 @@ ${serviceCommentLines.join("\n")}`
                   </Field>
                 </section>
 
-                <section className="space-y-4 border-t border-border pt-5">
-                  <h3 className="text-sm font-semibold text-foreground">
+                <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                  <AdminSectionTitle>
                     {tx("2. Усиленный мониторинг", "2. Verstärkte kontinuierliche Überwachung")}
-                  </h3>
+                  </AdminSectionTitle>
                   <Field required label={tx("Меры постоянного мониторинга", "Maßnahmen der kontinuierlichen Überwachung")}>
                     <textarea className={textareaClass} required rows={3} value={draft.amlEnhancedDueDiligence.continuousMonitoring} onChange={(event) => patchAml("continuousMonitoring", event.target.value)} />
                   </Field>
                 </section>
 
-                <section className="space-y-4 border-t border-border pt-5">
-                  <h3 className="text-sm font-semibold text-foreground">
+                <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                  <AdminSectionTitle>
                     {tx("3. Дополнительные меры", "3. Weitere verstärkte Sorgfaltspflichten")}
-                  </h3>
+                  </AdminSectionTitle>
                   <Field label={tx("Принятые дополнительные меры", "Zusätzliche getroffene Maßnahmen")}>
                     <textarea className={textareaClass} rows={3} value={draft.amlEnhancedDueDiligence.additionalMeasures} onChange={(event) => patchAml("additionalMeasures", event.target.value)} />
                   </Field>

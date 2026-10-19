@@ -552,7 +552,7 @@ function normalizeIdentityDocuments(value: unknown): LeadIdentityDocument[] {
         file_name: textOrNull(raw.file_name) ?? "",
         uploaded_at: textOrNull(raw.uploaded_at),
         reviewed: raw.reviewed === true,
-        uploaded_by_staff: raw.uploaded_by_staff === true,
+        ...(raw.uploaded_by_staff === true ? { uploaded_by_staff: true } : {}),
       },
     ];
   });
