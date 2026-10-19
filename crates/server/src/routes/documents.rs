@@ -26330,6 +26330,52 @@ fn append_third_party_disclosure_pdf(
     );
 }
 
+/// Anlage 1 (owner 2026-10-19): the explicit disclosure consent from the
+/// cabinet receipt belongs to item 4 ("an folgende Personen oder
+/// Institutionen"), printed right under its persons instead of repeating
+/// them in a separate "Auskunft an Dritte" block. Only while that item is
+/// ticked, persons are named and the receipt records the consent.
+fn append_named_recipients_consent_pdf(
+    layout: &mut TreatmentPlanPdfLayout,
+    choice: Option<&crate::consent_choices::OwnConsentChoice>,
+) {
+    let Some(choice) = choice else {
+        return;
+    };
+    let Some(disclosure) = choice
+        .disclosure
+        .as_ref()
+        .filter(|disclosure| disclosure.allow_disclosure && disclosure.consent_given)
+    else {
+        return;
+    };
+    if choice.recipient_lines().is_empty() {
+        return;
+    }
+    if disclosure.access_kind == "guardian" {
+        layout.text_block(
+            "Die folgende Einwilligung erklärt die vertretende Person für die oben bezeichnete Person.",
+            10.5,
+            false,
+            12.0,
+            TreatmentPlanPdfColor::Body,
+            0.5,
+            0.8,
+        );
+    }
+    let consent = crate::consent_choices::disclosure_consent_text("de", &disclosure.company_name)
+        .replace("den oben genannten Personen", "den genannten Personen");
+    layout.text_block(
+        &consent,
+        10.5,
+        false,
+        12.0,
+        TreatmentPlanPdfColor::Body,
+        0.5,
+        1.5,
+    );
+}
+
 fn build_adult_privacy_consents_pdf(
     party: &DocPartyBlock,
     agency: &AgencyContractSettings,
@@ -26417,6 +26463,7 @@ fn build_adult_privacy_consents_pdf(
             0.8,
         );
     }
+    append_named_recipients_consent_pdf(&mut layout, own_choice);
     adult_legal_checkbox(
         &mut layout,
         chosen.any_channel(),
@@ -26430,7 +26477,6 @@ fn build_adult_privacy_consents_pdf(
     ] {
         adult_legal_channel(&mut layout, picked, channel);
     }
-    append_third_party_disclosure_pdf(&mut layout, own_choice);
     fc_body(
         &mut layout,
         "Ich bin mir der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
@@ -26687,6 +26733,7 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
                     0.8,
                 );
             }
+            append_named_recipients_consent_pdf(&mut layout, own_choice);
         }
         true => {
             layout.text_block(
@@ -26719,7 +26766,6 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     ] {
         adult_legal_channel(&mut layout, picked, channel);
     }
-    append_third_party_disclosure_pdf(&mut layout, own_choice);
     admin_block(
         &mut layout,
         &format!(
@@ -35947,14 +35993,12 @@ mod tests {
             selected_text.contains("Umfang der Auskunft: Nur organisatorische Informationen"),
             "{selected_text}"
         );
+        assert_anlage1_has_no_separate_disclosure_block(&selected_text);
         assert!(
-            selected_text.contains("Auskunft an Dritte"),
+            selected_text.contains("Ich willige ausdrücklich ein, dass GMED Test den genannten"),
             "{selected_text}"
         );
-        assert!(
-            selected_text.contains("Ich willige ausdrücklich ein"),
-            "{selected_text}"
-        );
+        assert_eq!(selected_text.matches("Chosen Clinic").count(), 1);
         let disclosure = context
             .own_choice
             .as_mut()
@@ -35980,9 +36024,26 @@ mod tests {
         );
         assert!(!unchecked.contains("Chosen Clinic"), "{unchecked}");
         assert!(
-            unchecked.contains("[x] Nein, nur ich selbst."),
+            !unchecked.contains("Ich willige ausdrücklich"),
             "{unchecked}"
         );
+        assert_anlage1_has_no_separate_disclosure_block(&unchecked);
+    }
+
+    /// Owner 2026-10-19: Anlage 1 names its persons once, under item 4.
+    fn assert_anlage1_has_no_separate_disclosure_block(text: &str) {
+        for removed in [
+            "Auskunft an Dritte",
+            "Wir geben Auskunft über Ihre persönlichen",
+            "Soll eine weitere Person",
+            "Nein, nur ich selbst.",
+            "Ja, folgende Person(en)",
+            "nur auszufüllen, wenn Sie oben",
+            "Nur die hier genannten Personen",
+            "den oben genannten Personen",
+        ] {
+            assert!(!text.contains(removed), "{removed}: {text}");
+        }
     }
 
     /// QA 2026-10-12 (round 3): the second parent's signature line stood
@@ -36441,14 +36502,25 @@ mod tests {
             selected_text.contains("Umfang der Auskunft: Nur Rechnungen"),
             "{selected_text}"
         );
+        assert_anlage1_has_no_separate_disclosure_block(&selected_text);
+        // The consent sits in item 4, right after its persons and before
+        // the channels item.
+        let item4 = selected_text
+            .find("[x] dass meine personenbezogenen und medizinischen Daten an folgende")
+            .unwrap();
+        let person = selected_text.find("Chosen Adult Recipient").unwrap();
+        let consent = selected_text
+            .find("Ich willige ausdrücklich ein, dass GMED Test den genannten Personen")
+            .expect(&selected_text);
+        let channels = selected_text
+            .find("dass meine personenbezogenen und medizinischen Daten sowie")
+            .unwrap();
+        assert!(item4 < person && person < consent && consent < channels);
         assert!(
-            selected_text.contains("Auskunft an Dritte"),
+            selected_text.contains("Weitere Informationen finden Sie im Datenschutzhinweis."),
             "{selected_text}"
         );
-        assert!(
-            selected_text.contains("Ich willige ausdrücklich ein, dass GMED Test"),
-            "{selected_text}"
-        );
+        assert_eq!(selected_text.matches("Chosen Adult Recipient").count(), 1);
         assert!(
             !selected_text.contains("Original Disclosure Chooser"),
             "{selected_text}"
@@ -36480,7 +36552,8 @@ mod tests {
                 .contains("[ ] dass meine personenbezogenen und medizinischen Daten an folgende")
         );
         assert!(!normalized_pdf_text(&unchecked).contains("Chosen Adult Recipient"));
-        assert!(normalized_pdf_text(&unchecked).contains("[x] Nein, nur ich selbst."));
+        assert!(!normalized_pdf_text(&unchecked).contains("Ich willige ausdrücklich ein"));
+        assert_anlage1_has_no_separate_disclosure_block(&normalized_pdf_text(&unchecked));
         // A representative's choice is never "meine eigene Auswahl".
         let represented = crate::consent_choices::OwnConsentChoice {
             access_kind: Some("guardian".into()),
@@ -37393,10 +37466,20 @@ mod tests {
             for line in choice.recipient_lines() {
                 assert!(text.contains(&line), "{line}: {text}");
             }
-            assert!(text.contains("[x] Ja, folgende Person(en)"), "{text}");
             assert!(!text.contains("Kundenkabinett"), "{text}");
             assert!(!text.contains("Textversion"), "{text}");
         }
+        assert!(
+            normalized_pdf_text(&form).contains("[x] Ja, folgende Person(en)"),
+            "the patient form keeps its own disclosure block"
+        );
+        let consent_text = normalized_pdf_text(&consent);
+        assert_anlage1_has_no_separate_disclosure_block(&consent_text);
+        assert_eq!(
+            consent_text.matches("Max Named").count(),
+            1,
+            "the persons are printed once, under item 4: {consent_text}"
+        );
         write_consent_review_sample("patient-form-third-parties-yes.pdf", &form);
         let mut legacy = data.clone();
         legacy.consent_choice.as_mut().unwrap().disclosure = None;
