@@ -1054,9 +1054,13 @@ pub(crate) fn normalized_patient_relation_type(value: Option<&str>) -> &'static 
         .any(|value| normalized.contains(value))
     {
         "mother"
-    } else if ["father", "vater", "отец", "пап", "батьк"]
+    } else if ["father", "vater", "отец", "пап"]
         .iter()
         .any(|value| normalized.contains(value))
+        // Ukrainian "батько" (father), not "батьки" / "батьків" (parents).
+        || (normalized.contains("батьк")
+            && !normalized.contains("батьки")
+            && !normalized.contains("батьків"))
     {
         "father"
     } else if normalized.contains("parent")
@@ -1264,7 +1268,9 @@ async fn validate_lead_contact_identity(
                         SELECT jsonb_agg(jsonb_build_object(
                           'related_patient_id', pr.related_patient_id,
                           'name', COALESCE(NULLIF(btrim(concat_ws(' ', rp.first_name, rp.last_name)), ''), pr.related_name),
-                          'email', rp.email,
+                          -- A relation without a patient record carries its own
+                          -- e-mail (the conversion and the patient card write it).
+                          'email', COALESCE(NULLIF(btrim(rp.email), ''), pr.email),
                           'phone', COALESCE(rp.phone_primary, pr.phone),
                           'relation', pr.relation_type
                         ))
@@ -2523,6 +2529,178 @@ async fn list_previous_requests(
     ))
 }
 
+/// A minor patient's repeat intake starts with the parents the patient record
+/// knows: its parent and guardian relations become the trusted contacts (the
+/// contracting parents of the conversion first, `patients.contracting_relation_ids`,
+/// then the others), the custody stated at the conversion is the custody of
+/// the request, and a parent without a patient record of their own gets the
+/// name parts and address of the relation as their row. Without this the
+/// request of a minor has no legal representatives, and its contracts, cost
+/// estimates and the patient's own signatures are refused until staff enter
+/// both parents again. Identity documents are not copied: they are checked
+/// for every request. A linked parent's data come from their patient record
+/// ([`crate::services::lead_guardian_identity`]). Nothing for an adult.
+async fn prefill_minor_repeat_representation(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    patient_id: Uuid,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let Some((birth_date, custody)) = sqlx::query_as::<_, (Option<NaiveDate>, Option<String>)>(
+        "SELECT birth_date, custody FROM patients WHERE id = $1",
+    )
+    .bind(patient_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(());
+    };
+    if !is_minor_on(birth_date, crate::app_time::today()) {
+        return Ok(());
+    }
+    let relations = sqlx::query(
+        r#"SELECT r.id, r.related_patient_id, r.relation_type,
+                  COALESCE(NULLIF(btrim(concat_ws(' ', person.first_name, person.last_name)), ''),
+                           NULLIF(btrim(r.related_name), '')) AS name,
+                  COALESCE(NULLIF(btrim(r.email), ''), NULLIF(btrim(person.email), '')) AS email,
+                  COALESCE(NULLIF(btrim(r.phone), ''), NULLIF(btrim(person.phone_primary), '')) AS phone,
+                  COALESCE(person.birth_date, r.birth_date) AS birth_date,
+                  NULLIF(btrim(r.address_street), '') AS street,
+                  NULLIF(btrim(r.address_zip), '') AS zip,
+                  NULLIF(btrim(r.address_city), '') AS city,
+                  NULLIF(btrim(r.address_country), '') AS country
+           FROM patient_relations r
+           JOIN patients child ON child.id = r.patient_id
+           LEFT JOIN patients person ON person.id = r.related_patient_id
+           WHERE r.patient_id = $1
+             AND r.relation_type IN ('parent', 'mother', 'father', 'guardian')
+           ORDER BY array_position(child.contracting_relation_ids, r.id) NULLS LAST,
+                    r.is_default_payer DESC, r.created_at, r.id"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut contacts = Vec::new();
+    for relation in &relations {
+        let Some(name) = relation.try_get::<Option<String>, _>("name")? else {
+            continue;
+        };
+        let contact_id: Uuid = relation.try_get("id")?;
+        let related_patient_id: Option<Uuid> = relation.try_get("related_patient_id")?;
+        let street: Option<String> = relation.try_get("street")?;
+        let zip: Option<String> = relation.try_get("zip")?;
+        let city: Option<String> = relation.try_get("city")?;
+        // The row holds an ISO code only; a country written out stays in the
+        // contact's address text.
+        let country = relation
+            .try_get::<Option<String>, _>("country")?
+            .filter(|code| code.len() == 2 && code.chars().all(|c| c.is_ascii_uppercase()));
+        let address_text = [
+            street.clone(),
+            [zip.clone(), city.clone()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .into(),
+            relation.try_get::<Option<String>, _>("country")?,
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(", ");
+        contacts.push(json!({
+            "id": contact_id,
+            "related_patient_id": related_patient_id,
+            "name": name,
+            "email": relation.try_get::<Option<String>, _>("email")?,
+            "phone": relation.try_get::<Option<String>, _>("phone")?,
+            "relation": relation.try_get::<String, _>("relation_type")?,
+            "birth_date": relation
+                .try_get::<Option<NaiveDate>, _>("birth_date")?
+                .map(|date| date.format("%Y-%m-%d").to_string()),
+            "address": (!address_text.is_empty()).then_some(address_text),
+        }));
+        if related_patient_id.is_none() {
+            let (first_name, last_name) =
+                super::lead_representatives::name_parts(&name, None, None);
+            sqlx::query(
+                r#"INSERT INTO lead_representatives (
+                       lead_id, contact_id, role, contact_origin, first_name, last_name,
+                       street, zip, city, country, updated_by)
+                   VALUES ($1, $2, 'legal_representative', 'staff', $3, $4, $5, $6, $7, $8, $9)
+                   ON CONFLICT (lead_id, contact_id) DO NOTHING"#,
+            )
+            .bind(lead_id)
+            .bind(contact_id)
+            .bind((!first_name.is_empty()).then_some(first_name))
+            .bind((!last_name.is_empty()).then_some(last_name))
+            .bind(street)
+            .bind(zip)
+            .bind(city)
+            .bind(country)
+            .bind(actor)
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+    if !contacts.is_empty() {
+        let first = &contacts[0];
+        let text = |key: &str| first.get(key).and_then(Value::as_str).map(str::to_string);
+        sqlx::query(
+            r#"UPDATE leads
+               SET trusted_contacts = $2::jsonb,
+                   trusted_contact_name = $3,
+                   trusted_contact_phone = $4,
+                   trusted_contact_relation = $5,
+                   trusted_contact_birth_date = $6,
+                   trusted_contact_address = $7,
+                   trusted_contact_email = $8
+               WHERE id = $1"#,
+        )
+        .bind(lead_id)
+        .bind(Value::Array(contacts.clone()))
+        .bind(text("name"))
+        .bind(text("phone"))
+        .bind(text("relation"))
+        .bind(
+            text("birth_date").and_then(|value| NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok()),
+        )
+        .bind(text("address"))
+        .bind(text("email"))
+        .execute(&mut **tx)
+        .await?;
+    }
+    if let Some(custody) = custody {
+        sqlx::query(
+            r#"INSERT INTO lead_gwg_declarations (lead_id, custody, updated_by)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (lead_id) DO NOTHING"#,
+        )
+        .bind(lead_id)
+        .bind(&custody)
+        .bind(actor)
+        .execute(&mut **tx)
+        .await?;
+    }
+    audit::write_in_transaction(
+        tx,
+        &audit::domain_event(
+            "prefill_repeat_intake_representatives",
+            Some(actor),
+            "lead",
+            Some(lead_id),
+            json!({
+                "patient_id": patient_id,
+                "contacts": contacts.len(),
+                "custody": custody,
+            }),
+        ),
+    )
+    .await
+}
+
 async fn create_repeat_intake(
     state: &AppState,
     auth: &AuthUser,
@@ -2596,6 +2774,15 @@ async fn create_repeat_intake(
             "Patient is not available for repeat intake",
         )
     })?;
+    prefill_minor_repeat_representation(&mut tx, id, patient, auth.user_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, lead_id = %id, patient_id = %patient, "prefill the parents of a minor's repeat intake");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create repeat intake",
+            )
+        })?;
     let retention = super::patients::load_patient_clinical_retention_years(state, 30).await;
     let (case_id, _) = ensure_prospect_case(&mut tx, id, patient, auth.user_id, "", "", retention)
         .await
@@ -6889,6 +7076,12 @@ async fn convert_lead(
         .collect::<Vec<_>>()
         .join("\n");
 
+        // The contact's date of birth: the contracting parents' documents name
+        // it after the conversion as before (owner decision 2026-10-19).
+        let birth_date = contact
+            .get("birth_date")
+            .and_then(Value::as_str)
+            .and_then(|value| NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").ok());
         let relation_type = normalized_patient_relation_type(relation);
         // A trusted contact is no emergency contact by itself (owner
         // decision 2026-10-19); only an explicit mark of the entry carries over.
@@ -6914,11 +7107,21 @@ async fn convert_lead(
                    INSERT INTO patient_relations (
                         patient_id, related_patient_id, related_name, relation_type,
                         is_emergency_contact, phone, notes, email,
-                        address_street, address_zip, address_city, address_country
+                        address_street, address_zip, address_city, address_country,
+                        birth_date
                    )
-                   SELECT $1, $2, $3, $4, $12, $5, $6, $7, $8, $9, $10, $11
+                   SELECT $1, $2, $3, $4, $12, $5, $6, $7, $8, $9, $10, $11, $13
                    WHERE NOT EXISTS (SELECT 1 FROM existing)
                    RETURNING id
+               ), dated AS (
+                   -- A repeat conversion completes a date the relation lacks.
+                   UPDATE patient_relations relation
+                   SET birth_date = $13
+                   FROM existing
+                   WHERE relation.id = existing.id
+                     AND relation.birth_date IS NULL
+                     AND $13::date IS NOT NULL
+                   RETURNING relation.id
                )
                SELECT id FROM inserted
                UNION ALL
@@ -6936,6 +7139,7 @@ async fn convert_lead(
         .bind(&address.2)
         .bind(&address.3)
         .bind(emergency_contact)
+        .bind(birth_date)
         .fetch_optional(&mut *tx)
         .await
         {
@@ -10028,6 +10232,23 @@ mod manual_compliance_tests {
                 Ok(Some(requested.to_string()))
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod relation_type_tests {
+    use super::normalized_patient_relation_type;
+
+    #[test]
+    fn ukrainian_parents_are_parents_and_batko_is_the_father() {
+        assert_eq!(normalized_patient_relation_type(Some("Батьки")), "parent");
+        assert_eq!(
+            normalized_patient_relation_type(Some("один із батьків")),
+            "parent"
+        );
+        assert_eq!(normalized_patient_relation_type(Some("батько")), "father");
+        assert_eq!(normalized_patient_relation_type(Some("мати")), "mother");
+        assert_eq!(normalized_patient_relation_type(Some("Vater")), "father");
     }
 }
 

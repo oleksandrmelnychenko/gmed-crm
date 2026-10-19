@@ -7625,6 +7625,32 @@ async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_a
     assert_eq!(city.as_deref(), Some("Berlin"));
     assert_eq!(country.as_deref(), Some("DE"));
     assert!(default_payer, "the paying parent is the default payer");
+    // Her date of birth stays with the relation: the contracting parents'
+    // documents name it after the conversion as before (owner 2026-10-19).
+    let anna_birth: Option<chrono::NaiveDate> =
+        sqlx::query_scalar("SELECT birth_date FROM patient_relations WHERE id = $1")
+            .bind(anna_relation)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        anna_birth,
+        chrono::NaiveDate::from_ymd_opt(1985, 3, 2),
+        "the contact's birth date is the relation's"
+    );
+    let mut conn = pool.acquire().await.unwrap();
+    let representatives = gmed_server::services::contracting_party::load_representatives(
+        &mut conn,
+        patient_id,
+        &[anna_relation],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        representatives[0].birth_date,
+        chrono::NaiveDate::from_ymd_opt(1985, 3, 2)
+    );
+    drop(conn);
     let (_, name, relation_type, email, street, _, _, _, default_payer) = relations[1].clone();
     assert_eq!(name, "Ben Muster");
     assert_eq!(relation_type, "father");
@@ -7733,6 +7759,93 @@ async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_a
         "{summary}"
     );
     assert_eq!(summary["invoice_recipient"]["source"], "default_payer");
+}
+
+/// A repeat intake of a converted minor starts with the parents the patient
+/// record knows (contracting parents first), their birth dates, the address
+/// of a parent without a record of their own and the custody stated at the
+/// conversion; without them the new request had no legal representatives
+/// and its documents were refused.
+#[tokio::test]
+async fn a_minor_patients_repeat_intake_starts_with_the_parents_on_record() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_email = format!("mia-{}@example.com", Uuid::new_v4().simple());
+    let lead_id = seed_minor_lead_with_parents(&app, &lead_email, anna, ben, None).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    declare_mother_as_payer_and_sign(&app, lead_id, artifacts.order_id).await;
+    let patient_id = convert_ready_lead(&app, lead_id).await;
+    let (custody, contracting): (Option<String>, Vec<Uuid>) =
+        sqlx::query_as("SELECT custody, contracting_relation_ids FROM patients WHERE id=$1")
+            .bind(patient_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let relations = parent_relations(pool, patient_id).await;
+    let anna_relation = relations[0].0;
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Mia",
+            "last_name": "Muster",
+            "repeat_patient_id": patient_id,
+            "creation_key": Uuid::new_v4(),
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "{created}");
+    let repeat = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+    let contacts: Value = sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id=$1")
+        .bind(repeat)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let contacts = contacts.as_array().unwrap();
+    assert_eq!(contacts.len(), 2, "{contacts:?}");
+    let first = Uuid::parse_str(contacts[0]["id"].as_str().unwrap()).unwrap();
+    if let Some(rep1) = contracting.first() {
+        assert_eq!(first, *rep1, "the contracting parents come first");
+    }
+    let anna_contact = contacts
+        .iter()
+        .find(|contact| contact["id"] == anna_relation.to_string())
+        .expect("the mother's relation is a contact of the new request");
+    assert_eq!(anna_contact["name"], "Anna Muster");
+    assert_eq!(anna_contact["relation"], "mother");
+    assert_eq!(anna_contact["email"], "anna.muster@example.com");
+    assert_eq!(anna_contact["birth_date"], "1985-03-02");
+    let row: (String, Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT role, first_name, last_name, street FROM lead_representatives WHERE lead_id=$1 AND contact_id=$2",
+    )
+    .bind(repeat)
+    .bind(anna_relation)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        row,
+        (
+            "legal_representative".to_string(),
+            Some("Anna".into()),
+            Some("Muster".into()),
+            Some("Musterweg 1".into())
+        )
+    );
+    let repeat_custody: Option<String> =
+        sqlx::query_scalar("SELECT custody FROM lead_gwg_declarations WHERE lead_id=$1")
+            .bind(repeat)
+            .fetch_optional(pool)
+            .await
+            .unwrap()
+            .flatten();
+    assert_eq!(repeat_custody, custody);
 }
 
 /// Owner decision 2026-10-19: the parent(s) with custody are the minor's

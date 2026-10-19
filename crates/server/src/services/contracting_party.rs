@@ -317,7 +317,10 @@ async fn load_relations(
                   relation.is_default_payer,
                   COALESCE(gmed_person_display_name(NULL, person.first_name, person.last_name),
                            NULLIF(btrim(relation.related_name), '')) AS name,
-                  person.first_name, person.last_name, person.birth_date,
+                  person.first_name, person.last_name,
+                  -- A relation without a patient record keeps the date the
+                  -- lead conversion wrote (owner decision 2026-10-19).
+                  COALESCE(person.birth_date, relation.birth_date) AS birth_date,
                   COALESCE(NULLIF(btrim(relation.email), ''), NULLIF(btrim(person.email), '')) AS email,
                   COALESCE(NULLIF(btrim(relation.phone), ''), NULLIF(btrim(person.phone_primary), '')) AS phone,
                   CASE WHEN has_own THEN relation.address_street ELSE person.address_street END AS street,
