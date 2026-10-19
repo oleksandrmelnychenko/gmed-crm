@@ -75,6 +75,7 @@ import {
   payerReadinessReasonFields,
   payerReadinessReasonLabels,
   payerReadinessReasonSteps,
+  statedFundsSourceLabel,
 } from "../model/lead-payer";
 import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
 import { useLeadPayerLink } from "../model/use-lead-payer-link";
@@ -3091,6 +3092,17 @@ export function LeadWizard({
   const payerLink = useLeadPayerLink(open ? leadId : null);
   const canEditPayerLink = useCan("leads.edit");
   const payerCountries = useMemo(() => payerAmlCountries(payer.data), [payer.data]);
+  // The source of funds as the AML document prints it: the staff choice with
+  // its words, else what the self-paying lead stated in the cabinet.
+  const payerFundsText = useMemo(() => {
+    const declaration = payer.data?.declaration;
+    if (!declaration) return "";
+    const source = declaration.source_of_funds ?? declaration.self_funds_source ?? null;
+    if (!source) return "";
+    const words = (declaration.source_of_funds ? declaration.source_of_funds_description : declaration.self_funds_description)?.trim();
+    const label = statedFundsSourceLabel(source, (_ru: string, de: string) => de);
+    return words ? `${label}: ${words}` : label;
+  }, [payer.data]);
   const reloadPayer = payer.reload;
   useEffect(() => {
     if (lead) void reloadPayer();
@@ -5237,6 +5249,8 @@ export function LeadWizard({
               }
             : {}),
           affectedThirdCountry: current.amlEnhancedDueDiligence.affectedThirdCountry || affectedThirdCountry,
+          // The document prints the payer form's source of funds (owner 2026-10-19: one field).
+          assetOrigin: payerFundsText || current.amlEnhancedDueDiligence.assetOrigin,
           ...(amlRisk ? {
             highRiskCountryResident: boxes.resident,
             highRiskCountryTransaction: boxes.transaction || current.amlEnhancedDueDiligence.highRiskCountryTransaction,
@@ -10182,13 +10196,16 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchAml("riskReason", event.target.value)}
                     />
                   </Field>
+                  {/* One source of funds (owner 2026-10-19): entered in the AML block of the page, printed from there. */}
                   <Field label={tx("Происхождение задействованных активов", "Herkunft der eingesetzten Vermögenswerte")}>
-                    <textarea
-                      className={textareaClass}
-                      rows={2}
-                      value={draft.amlEnhancedDueDiligence.assetOrigin}
-                      onChange={(event) => patchAml("assetOrigin", event.target.value)}
-                    />
+                    <p className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-sm" data-testid="lead-aml-asset-origin">
+                      {draft.amlEnhancedDueDiligence.assetOrigin || (
+                        <span className="text-muted-foreground">{tx("Источник средств ещё не указан", "Herkunft der Mittel noch nicht angegeben")}</span>
+                      )}
+                    </p>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {tx("Указывается в блоке «Усиленная AML-проверка» на странице: источник средств и описание.", "Wird im Block „Verstärkte Sorgfaltspflichten“ der Seite angegeben: Herkunft der Mittel und Beschreibung.")}
+                    </span>
                   </Field>
                   <AssetOriginEvidenceField
                     value={draft.amlEnhancedDueDiligence.assetOriginEvidence}

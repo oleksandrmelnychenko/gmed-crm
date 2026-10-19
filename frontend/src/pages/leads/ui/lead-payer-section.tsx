@@ -590,9 +590,12 @@ export function LeadPayerDeclarationSection({
             <FileText aria-hidden="true" />
             {form.sourceOfFundsDocumentId
               ? `${tx("Подтверждение приложено", "Nachweis beigefügt")}${evidenceName ? `: ${evidenceName}` : ""}`
-              : staffProofLabel}
+              : amlSlot
+                // One proof upload: the check's own (owner 2026-10-19), printed on its document.
+                ? tx("Подтверждение загружается в форме проверки («Заполнить проверку»)", "Der Nachweis wird im Prüfbogen hochgeladen („Prüfung ausfüllen“)")
+                : staffProofLabel}
           </StatusChip>
-          {canEdit ? (
+          {canEdit && !amlSlot ? (
             <label className={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted/40", readOnly && "pointer-events-none opacity-50")}>
               {busy === "upload" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
               {tx("Загрузить", "Hochladen")}
@@ -608,7 +611,7 @@ export function LeadPayerDeclarationSection({
               />
             </label>
           ) : null}
-          {form.sourceOfFundsDocumentId && canEdit ? (
+          {form.sourceOfFundsDocumentId && canEdit && !amlSlot ? (
             <Button type="button" variant="ghost" size="xs" disabled={readOnly} onClick={() => { setEvidenceName(""); patch("sourceOfFundsDocumentId", ""); }}>
               {tx("Убрать", "Entfernen")}
             </Button>
