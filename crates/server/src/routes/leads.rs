@@ -7042,6 +7042,34 @@ async fn convert_lead(
         &representatives_on_file.representation,
         payer_declaration.as_ref(),
     );
+    // Where the lead wants the invoice (cabinet step 3, `lead_invoice_recipients`):
+    // a parent chosen as recipient becomes the default payer — the parent the
+    // invoices are addressed to — also when the other parent pays; a third
+    // party who receives the invoice without paying is the declaration's
+    // "other address" (`invoice_address` in the invoice chain), so the paying
+    // parent is not marked then. Otherwise the paying parent, as before.
+    let invoice_recipient = match super::lead_invoice_recipient::load(&mut tx, lead_id).await {
+        Ok(recipient) => recipient,
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "load invoice recipient for conversion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let recipient_parent = invoice_recipient
+        .as_ref()
+        .filter(|recipient| {
+            recipient.recipient.as_deref() == Some(super::lead_invoice_recipient::RECIPIENT_SELF)
+        })
+        .and_then(|recipient| recipient.representative_contact_id)
+        .filter(|id| representatives_on_file.representation.find(*id).is_some());
+    let invoice_elsewhere = payer_declaration.as_ref().is_some_and(|declaration| {
+        declaration.invoice_to.as_deref() == Some(super::lead_payer::INVOICE_TO_OTHER)
+    });
+    let paying_parent = match recipient_parent {
+        Some(parent) => Some(parent),
+        None if invoice_elsewhere => None,
+        None => paying_parent,
+    };
     // The paying parent's relation, once its entry is seen.
     let mut paying_parent_relation: Option<Uuid> = None;
     // A minor's contracting party (owner decision 2026-10-19): the parents

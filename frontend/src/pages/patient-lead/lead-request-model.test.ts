@@ -608,6 +608,25 @@ describe("lead request send step", () => {
     expect(back).toMatchObject({ first_name: "Viktor", street: "Musterstraße 1", contact_consent: false });
   });
 
+  it("keeps the other parent named as payer by id; another person is a third party again", () => {
+    const template = { representative_id: "rep-anna", first_name: "Anna", last_name: "Muster" };
+    const ben: LeadRequestPayer = {
+      ...storedPayer,
+      payer_kind: "representative",
+      payer_representative_id: "rep-ben",
+      first_name: "Ben",
+      last_name: "Muster",
+    };
+    const draft = draftFromPayer(ben, template);
+    expect(draft).toMatchObject({ guardian_pays: false, representative_id: "rep-ben" });
+    // Re-saving the unchanged answer names Ben as representative, never as a third party.
+    expect(payerInput(draft, true, false)).toMatchObject({ payer_kind: "representative", payer_representative_id: "rep-ben" });
+    // Another person typed in: a third party.
+    const other = withPayerField(draft, "first_name", "Viktor");
+    expect(other.representative_id).toBe("");
+    expect(payerInput(other)?.payer_kind).toBe("third_party");
+  });
+
   it("takes a paying parent's citizenships and address from the representative data, and asks no consent", () => {
     const template = {
       first_name: "Anna",

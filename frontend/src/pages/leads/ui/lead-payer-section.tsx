@@ -222,6 +222,7 @@ export function LeadPayerDeclarationSection({
   enhancedDetails,
   portalIntake = null,
   prefill = null,
+  prefillRepresentative = null,
   amlSlot = null,
   amlPartHidden = false,
   amlPartOnly = false,
@@ -261,6 +262,8 @@ export function LeadPayerDeclarationSection({
    * check it before editing; untouched prefill is not written (QA B-18, 2026-10-11).
    */
   prefill?: PayerDeclaration | null;
+  /** The paying parent of `prefill` (its lead's status), matched to this lead's representatives. */
+  prefillRepresentative?: PayerRepresentative | null;
   /**
    * The wizard's enhanced AML block (owner 2026-10-19): the own economic
    * interest and the source of funds are shown there; inline without it.
@@ -276,8 +279,11 @@ export function LeadPayerDeclarationSection({
 }) {
   const inAmlBlock = (node: ReactNode) => (amlSlot ? createPortal(node, amlSlot) : amlPartHidden ? null : node);
   const prefillActive = !data?.declaration && Boolean(prefill);
+  // A paying parent of the earlier request is named by this lead's own representative id.
+  const prefillForm = (declaration: PayerDeclaration) =>
+    payerDeclarationPrefillForm(declaration, { previous: prefillRepresentative, current: data?.status.representatives ?? [] });
   const initialForm = (): PayerDeclarationForm =>
-    !data?.declaration && prefill ? payerDeclarationPrefillForm(prefill) : payerDeclarationToForm(data?.declaration);
+    !data?.declaration && prefill ? prefillForm(prefill) : payerDeclarationToForm(data?.declaration);
   // The stored declaration is the first form state as well, so a render
   // without effects (static markup) already shows it.
   const [form, setForm] = useState<PayerDeclarationForm>(initialForm);
@@ -295,7 +301,7 @@ export function LeadPayerDeclarationSection({
   mayFlushRef.current = canEdit && !disabled;
 
   useEffect(() => {
-    const initial = prefillActive && prefill ? payerDeclarationPrefillForm(prefill) : payerDeclarationToForm(data?.declaration);
+    const initial = prefillActive && prefill ? prefillForm(prefill) : payerDeclarationToForm(data?.declaration);
     formRef.current = initial;
     setForm(initial);
     setDirty(false);
@@ -326,12 +332,14 @@ export function LeadPayerDeclarationSection({
   // Take the stored declaration unless the user is editing it. Sending the
   // payer link marks the payer as informed without another change.
   useEffect(() => {
-    const prefillKey = prefillActive ? `prefill-${prefill?.updated_at ?? ""}` : "";
+    const prefillKey = prefillActive
+      ? `prefill-${prefill?.updated_at ?? ""}-${(data?.status.representatives ?? []).map((person) => person.id).join(",")}`
+      : "";
     const key = `${leadId}:${data?.declaration?.updated_at ?? "none"}:${data?.declaration?.payer_informed_at ?? ""}:${prefillKey}`;
     if (dirty && loadedFor.current?.startsWith(`${leadId}:`)) return;
     if (loadedFor.current === key) return;
     loadedFor.current = key;
-    const next = prefillActive && prefill ? payerDeclarationPrefillForm(prefill) : payerDeclarationToForm(data?.declaration);
+    const next = prefillActive && prefill ? prefillForm(prefill) : payerDeclarationToForm(data?.declaration);
     formRef.current = next;
     setForm(next);
     autosaveRef.current?.setBaseline(next);

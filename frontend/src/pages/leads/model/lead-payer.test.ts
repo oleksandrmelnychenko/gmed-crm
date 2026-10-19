@@ -757,4 +757,22 @@ describe("a repeat intake starts from the patient's declaration (QA B-18)", () =
       self_funds_source: "income",
     }).sourceOfFunds).toBe("");
   });
+
+  it("names the paying parent of the earlier request by this lead's representative id", () => {
+    const person = (id: string, first: string, birth: string | null) => ({
+      id, slot: "rep1", relation: "mother", guardian: false, name: `${first} Muster`, first_name: first, last_name: "Muster",
+      date_of_birth: birth, street: null, zip: null, city: null, country: null, citizenships: [], email: null, phone: null,
+    });
+    const earlier = { ...thirdParty, payer_kind: "representative" as const, payer_representative_id: "old-contact" };
+    const current = [person("relation-anna", "Anna", "1985-03-02"), person("relation-ben", "Ben", null)];
+    // The earlier contact id is not this lead's: matched by name and date of birth.
+    expect(payerDeclarationPrefillForm(earlier, { previous: person("old-contact", "Anna", "1985-03-02"), current }).representativeId)
+      .toBe("relation-anna");
+    // No match: staff choose (the server would refuse the old id).
+    expect(payerDeclarationPrefillForm(earlier, { previous: person("old-contact", "Clara", null), current }).representativeId).toBe("");
+    expect(payerDeclarationPrefillForm(earlier).representativeId).toBe("");
+    // The same id on the repeat lead stays.
+    expect(payerDeclarationPrefillForm({ ...earlier, payer_representative_id: "relation-ben" }, { current }).representativeId)
+      .toBe("relation-ben");
+  });
 });

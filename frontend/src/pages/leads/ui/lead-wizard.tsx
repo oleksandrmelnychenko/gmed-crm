@@ -5038,7 +5038,25 @@ export function LeadWizard({
         }
 
         wizardStateBaseRef.current = payload.wizard_state;
-        if (initializing) setLead(await fetchLeadDetail(targetLeadId));
+        if (initializing) {
+          const fresh = await fetchLeadDetail(targetLeadId);
+          // A minor's repeat intake starts with the patient's parents as
+          // trusted contacts (server prefill): the draft takes them, so the
+          // representatives, "Кто платит" and a later contact save see them
+          // instead of an empty list that would remove them.
+          const freshContacts = storedTrustedContactDrafts(fresh.trusted_contacts, draftFromLead(fresh).trustedContacts);
+          if (snapshot.draft.trustedContacts.length === 0 && freshContacts.length > 0) {
+            const base = trustedContactsPayload(freshContacts);
+            lastSentTrustedContactsRef.current = base;
+            setTrustedContactsBase(base);
+            savedDraft = { ...savedDraft, trustedContacts: freshContacts };
+            setDraft((current) => current && current.trustedContacts.length === 0 && hydrated.current === targetLeadId
+              ? { ...current, trustedContacts: freshContacts }
+              : current);
+            setRepresentationVersion((version) => version + 1);
+          }
+          setLead(fresh);
+        }
         lastSavedAutosaveSignatureRef.current = signature;
         if (currentAutosaveSignatureRef.current === signature) {
           if (savedDraft !== snapshot.draft) {
@@ -7055,6 +7073,7 @@ ${serviceCommentLines.join("\n")}`
       amlPartHidden
       amlPartOnly={amlPartOnly}
       prefill={payerPrefill}
+      prefillRepresentative={payerPrefill ? previousPayer.data?.status.payer_representative ?? null : null}
       payerLink={payerLink}
       payerLinkCanEdit={canEditPayerLink}
       leadLanguage={draft.language}

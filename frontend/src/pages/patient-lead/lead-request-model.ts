@@ -408,9 +408,11 @@ export function draftFromPayer(
     // representative again.
     payer_kind: payer?.payer_kind === "representative" ? "third_party" : payer?.payer_kind ?? "",
     guardian_pays: guardianPays,
+    // The other parent named as payer keeps the id too: re-saving the
+    // unchanged answer names that representative again, never a third party.
     representative_id: guardianPays
       ? payer?.payer_representative_id ?? template?.representative_id ?? ""
-      : "",
+      : payer?.payer_kind === "representative" ? payer.payer_representative_id ?? "" : "",
     payer_type: payer?.payer_type ?? "",
     organisation_name: payer?.organisation_name ?? "",
     organisation_legal_form: payer?.organisation_legal_form ?? "",
@@ -635,8 +637,10 @@ export function withPayerChoice(
     return withPayerAnswer(draft, choice === "guardian" ? "guardian" : choice, template);
   }
   const third = withPayerAnswer(draft, "third_party", template);
-  if (choice === "organisation") return organisationPayerType(third.payer_type) ? third : withPayerType(third, "organisation");
-  return withPayerType(third, "person");
+  // Another answer than the stored other parent: no representative id.
+  const other = { ...third, representative_id: "" };
+  if (choice === "organisation") return organisationPayerType(other.payer_type) ? other : withPayerType(other, "organisation");
+  return withPayerType(other, "person");
 }
 
 /**
@@ -658,7 +662,10 @@ export function payerInput(draft: PayerDraft, typed = true, withConsent = true):
   // "I pay (as a parent)" / the other parent pays: that representative, the
   // contracting party — named by id, never as a third party with data
   // (owner decision 2026-10-19).
-  const representativeId = draft.payer_kind === "third_party" && draft.guardian_pays && typed
+  // The other parent stays named by id while the person's data are unchanged
+  // (`withPayerField` and `withPayerChoice` drop the id with another identity).
+  const representativeId = draft.payer_kind === "third_party" && typed
+    && (draft.guardian_pays || payerTypeOf(draft) === "person")
     ? draft.representative_id ?? ""
     : "";
   const input: LeadRequestPayerInput = representativeId
@@ -744,7 +751,9 @@ export function payerIdentityKey(draft: PayerDraft): string {
 /** Consent belongs to the identity the patient named, not the form itself. */
 export function withPayerField<K extends keyof PayerDraft>(draft: PayerDraft, field: K, value: PayerDraft[K]): PayerDraft {
   const next = { ...draft, [field]: value };
-  return payerIdentityKey(next) === payerIdentityKey(draft) ? next : { ...next, contact_consent: false };
+  if (payerIdentityKey(next) === payerIdentityKey(draft)) return next;
+  // Another person than the other parent named as payer: a third party now.
+  return { ...next, contact_consent: false, ...(next.guardian_pays ? {} : { representative_id: "" }) };
 }
 
 export function payerAnswerSavable(saved: PayerDraft, draft: PayerDraft, typed = true): boolean {

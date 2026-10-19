@@ -544,8 +544,24 @@ const STATED_TO_DECLARED_SOURCE: Partial<Record<string, SourceOfFunds>> = {
  * DSGVO is confirmed per request) and the evidence file of the earlier lead.
  * Staff check the answers and save; nothing is stored before.
  */
-export function payerDeclarationPrefillForm(declaration: PayerDeclaration): PayerDeclarationForm {
+export function payerDeclarationPrefillForm(
+  declaration: PayerDeclaration,
+  /**
+   * A paying parent: the earlier lead's representative (its status) and this
+   * lead's representatives. The earlier lead's contact id is not this lead's,
+   * so the parent is found by the same id (a repeat intake whose contacts are
+   * the patient's relations), else by name and date of birth; otherwise staff
+   * choose (the server would refuse the earlier id).
+   */
+  representatives: {
+    previous?: PayerRepresentative | null;
+    current?: readonly PayerRepresentative[];
+  } = {},
+): PayerDeclarationForm {
   const form = payerDeclarationToForm(declaration);
+  if (form.kind === "representative") {
+    form.representativeId = matchingRepresentativeId(form.representativeId, representatives.previous, representatives.current ?? []);
+  }
   const stated = declaration.payer_kind === "self" ? declaration.self_funds_source?.trim() ?? "" : "";
   const statedSource = STATED_TO_DECLARED_SOURCE[stated];
   return {
@@ -559,6 +575,23 @@ export function payerDeclarationPrefillForm(declaration: PayerDeclaration): Paye
     sourceOfFundsDescription:
       form.sourceOfFundsDescription || (statedSource ? declaration.self_funds_description?.trim() ?? "" : ""),
   };
+}
+
+/** This lead's representative that is the earlier lead's paying parent; "" when none matches. */
+function matchingRepresentativeId(
+  previousId: string,
+  previous: PayerRepresentative | null | undefined,
+  current: readonly PayerRepresentative[],
+): string {
+  if (previousId && current.some((person) => person.id === previousId)) return previousId;
+  if (!previous) return "";
+  const key = (value: string | null | undefined) => (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  const name = (person: PayerRepresentative) =>
+    key(person.first_name || person.last_name ? `${person.first_name} ${person.last_name}` : person.name);
+  const matches = current.filter((person) =>
+    name(person) !== "" && name(person) === name(previous)
+    && (!person.date_of_birth || !previous.date_of_birth || person.date_of_birth === previous.date_of_birth));
+  return matches.length === 1 ? matches[0].id : "";
 }
 
 /**

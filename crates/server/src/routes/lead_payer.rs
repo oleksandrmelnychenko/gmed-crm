@@ -1963,6 +1963,20 @@ pub(crate) async fn carry_over_to_patient(
     if !converted {
         return Ok(());
     }
+    // A paying representative's name is the representative's row, never
+    // copied onto the declaration (owner decision 2026-10-19).
+    let representative_name = match load_declaration(&mut *tx, lead_id).await? {
+        Some(declaration) if declaration.is_representative() => {
+            let representation = lead_representatives::load(&mut *tx, lead_id)
+                .await?
+                .unwrap_or_default()
+                .representation;
+            declaration
+                .with_representative(&representation)
+                .payer_name()
+        }
+        _ => None,
+    };
     sqlx::query(
         r#"WITH linked AS (
                UPDATE lead_payer_declarations
@@ -1983,7 +1997,7 @@ pub(crate) async fn carry_over_to_patient(
                        'payer_kind', linked.payer_kind,
                        'acts_on_own_account', linked.acts_on_own_account,
                        'source_of_funds', linked.source_of_funds,
-                       'payer_name', linked.payer_name,
+                       'payer_name', COALESCE(linked.payer_name, $3),
                        'invoice_to', linked.invoice_to,
                        'cost_assumption_document_id', (
                            SELECT d.id FROM documents d
@@ -2001,6 +2015,7 @@ pub(crate) async fn carry_over_to_patient(
     )
     .bind(lead_id)
     .bind(patient_id)
+    .bind(representative_name)
     .execute(&mut *tx)
     .await?;
     Ok(())

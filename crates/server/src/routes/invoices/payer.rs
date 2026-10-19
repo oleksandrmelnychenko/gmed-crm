@@ -513,6 +513,10 @@ struct DeclaredRecipient {
     /// The Kostenübernehmer record the declaration syncs onto the lead's
     /// orders (`notes` are taken from the order record it is compared with).
     synced: Option<lead_payer::Declaration>,
+    /// A minor's paying parent as the declaration writes it on the orders
+    /// (role `contracting_party`, owner decision 2026-10-19): with section 7
+    /// "to another address" or "to me" it is skipped like the third party.
+    synced_parent: Option<PayerRecord>,
     record: Option<PayerRecord>,
     source: &'static str,
 }
@@ -523,10 +527,30 @@ async fn inherit(
     patient_id: Uuid,
     recipient: bool,
 ) -> Result<InheritedPayer, sqlx::Error> {
-    let declared = lead_payer::patient_declaration(conn, patient_id)
-        .await?
-        .map(|declared| declared.declaration);
-    let declared = match declared {
+    let declared_full = lead_payer::patient_declaration(conn, patient_id).await?;
+    // The paying parent's order record, for the recipient chain only.
+    let synced_parent = match declared_full.as_ref() {
+        Some(declared)
+            if recipient
+                && matches!(
+                    declared.declaration.invoice_to.as_deref(),
+                    Some(lead_payer::INVOICE_TO_OTHER | lead_payer::INVOICE_TO_SELF)
+                )
+                && (declared.declaration.is_representative()
+                    || declared.declaration.is_third_party()) =>
+        {
+            let on = crate::app_time::date_of(declared.converted_at);
+            crate::routes::lead_representatives::load_on(conn, declared.lead_id, on)
+                .await?
+                .and_then(|loaded| {
+                    declared
+                        .declaration
+                        .representative_payer_record(&loaded.representation, None)
+                })
+        }
+        _ => None,
+    };
+    let declared = match declared_full.map(|declared| declared.declaration) {
         Some(declaration) => {
             let invoice_to = declaration.invoice_to.as_deref();
             let other = recipient && invoice_to == Some(lead_payer::INVOICE_TO_OTHER);
@@ -545,12 +569,14 @@ async fn inherit(
             };
             DeclaredRecipient {
                 synced: (to_self || other).then_some(declaration),
+                synced_parent,
                 record,
                 source,
             }
         }
         None => DeclaredRecipient {
             synced: None,
+            synced_parent: None,
             record: None,
             source: "payer_declaration",
         },
@@ -579,6 +605,15 @@ async fn inherit(
                     declaration
                         .order_payer_record(record.notes.clone())
                         .is_some_and(|written| written.same_apart_from_organisation_box(&record))
+                }) {
+                    continue;
+                }
+                if declared.synced_parent.as_ref().is_some_and(|written| {
+                    PayerRecord {
+                        notes: record.notes.clone(),
+                        ..written.clone()
+                    }
+                    .same_apart_from_organisation_box(&record)
                 }) {
                     continue;
                 }
