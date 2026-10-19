@@ -520,8 +520,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return me;
   }, []);
 
+  // A patient login reads `/me` again on focus and every minute: the order
+  // subscription, and in the lead cabinet the conversion of the request into
+  // a patient record, which switches the account to the patient portal (H6).
   useEffect(() => {
-    if (user?.role !== "patient" || user.portal_mode === "lead"
+    if (user?.role !== "patient"
       || user.password_change_required || user.totp_enrolment_required) return;
     let pending = false;
     const refresh = () => {

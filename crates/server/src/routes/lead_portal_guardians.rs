@@ -945,6 +945,28 @@ async fn revoke_guardian_access(
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
     };
+    // A converted lead: the parent reaches the patient record through its own
+    // assignment (`lead_guardian`), which revoking the request access would
+    // leave in place. The access is managed on the patient record (H6).
+    let converted: Option<Option<Uuid>> =
+        match sqlx::query_scalar("SELECT converted_patient_id FROM leads WHERE id = $1 FOR UPDATE")
+            .bind(lead_id)
+            .fetch_optional(&mut *tx)
+            .await
+        {
+            Ok(value) => value,
+            Err(error) => return internal(error, "load lead"),
+        };
+    match converted {
+        None => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Some(Some(_)) => {
+            return err(
+                StatusCode::CONFLICT,
+                "The lead is converted; manage the access on the patient record",
+            );
+        }
+        Some(None) => {}
+    }
     let user_id: Uuid = match sqlx::query_scalar(
         r#"UPDATE lead_portal_access
            SET revoked_at = now(), revoked_by = $3, revoked_reason = 'revoked_by_staff'

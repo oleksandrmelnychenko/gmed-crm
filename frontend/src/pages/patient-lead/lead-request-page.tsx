@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Clock, LoaderCircle } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Banner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { setPortalAccountLabel } from "@/lib/portal-account-label";
+import { isLeadPortalUser } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
 
 import { LEAD_REQUEST_ACCESS_CHANGED, fetchMyLeadRequestList, type LeadRequest } from "./lead-request-api";
@@ -61,10 +62,12 @@ function storedCabinetLang(): LeadCabinetLang | null {
 
 export function LeadRequestPage() {
   const [, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { lang: portalLang, setLang: setPortalLang } = useLang();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const accountLang = user?.preferred_language ?? null;
   const userId = user?.id ?? null;
+  const leadMode = isLeadPortalUser(user);
   // The cabinet also speaks UA and EN (owner request 2026-10-04): an explicit
   // choice is remembered, otherwise the language the person entered for the
   // request is used, then the portal language.
@@ -130,14 +133,19 @@ export function LeadRequestPage() {
       setSelected((current) =>
         current && loaded.some((request) => request.lead_id === current) ? current : loaded[0]?.lead_id ?? null,
       );
+      // No request (left): staff may just have taken it over as a patient
+      // record. The account then reaches the patient portal, which `/me`
+      // says; the app switches to it on its own (H6, 2026-10-20).
+      if (loaded.length === 0) void refreshUser().catch(() => { /* The page stays as it is. */ });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, []);
+  }, [refreshUser]);
 
+  // Loaded again when the account changes between the cabinet and the patient portal.
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, leadMode]);
 
   // A parent's login that fills in requests for a child only (and is no
   // patient of its own): the side bar names it "parent / legal
@@ -191,6 +199,15 @@ export function LeadRequestPage() {
         <p className="text-sm text-muted-foreground" data-testid={ownAccessClosed ? "lead-request-guardian-only" : undefined}>
           {ownAccessClosed ? text.guardianOnly : text.noRequest}
         </p>
+        {/* The account has the patient portal (the request became a patient record): the way there. */}
+        {!ownAccessClosed && !leadMode && user?.role === "patient" ? (
+          <div className="space-y-3" data-testid="lead-request-patient-portal">
+            <p className="text-sm">{text.noRequestPortal}</p>
+            <Button type="button" onClick={() => navigate("/")}>
+              {text.openPatientPortal}
+            </Button>
+          </div>
+        ) : null}
       </LeadCabinetFrame>
     );
   }

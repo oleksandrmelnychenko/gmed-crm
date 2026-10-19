@@ -126,6 +126,12 @@ export type LeadRequestText = {
   retry: string;
   saveBeforeLeaving: string;
   noRequest: string;
+  /**
+   * A login with the patient portal and no open request, e.g. a parent whose
+   * request staff just took over as a patient record: where to go instead.
+   */
+  noRequestPortal: string;
+  openPatientPortal: string;
   /** The own login of a minor whose parents have access (QA 2026-10-12, A3-01): neutral, no reason. */
   guardianOnly: string;
   requestFor: string;
@@ -904,6 +910,8 @@ const de: LeadRequestText = {
   retry: "Erneut versuchen",
   saveBeforeLeaving: "Die letzten Änderungen konnten nicht gespeichert werden. Ihre Eingaben bleiben hier erhalten. Prüfen Sie die markierten Felder und versuchen Sie den Schrittwechsel erneut.",
   noRequest: "Für Ihr Konto ist derzeit keine offene Anfrage vorhanden.",
+  noRequestPortal: "Ihre Anfrage wird jetzt im Patientenportal weitergeführt. Dort finden Sie Ihre Unterlagen und die nächsten Schritte.",
+  openPatientPortal: "Zum Patientenportal",
   guardianOnly:
     "Diese Anfrage füllen Ihre Eltern bzw. Ihr gesetzlicher Vertreter mit ihrem eigenen Zugang aus. Bei Fragen wenden Sie sich bitte an GMED.",
   requestFor: "Anfrage für",
@@ -1432,6 +1440,8 @@ const ru: LeadRequestText = {
   retry: "Повторить",
   saveBeforeLeaving: "Не удалось сохранить последние изменения. Введённые данные остаются здесь. Проверьте отмеченные поля и попробуйте перейти ещё раз.",
   noRequest: "Для вашего аккаунта сейчас нет открытой заявки.",
+  noRequestPortal: "Ваша заявка теперь ведётся в портале пациента. Там вы найдёте свои документы и следующие шаги.",
+  openPatientPortal: "Перейти в портал пациента",
   guardianOnly:
     "Эту заявку заполняют ваши родители или законный представитель через свой собственный доступ. Если у вас есть вопросы, обратитесь в GMED.",
   requestFor: "Заявка для",
@@ -1958,6 +1968,8 @@ const uk: LeadRequestText = {
   retry: "Спробувати ще раз",
   saveBeforeLeaving: "Не вдалося зберегти останні зміни. Введені дані залишаються тут. Перевірте позначені поля й спробуйте перейти ще раз.",
   noRequest: "Для вашого акаунта зараз немає відкритої заявки.",
+  noRequestPortal: "Ваша заявка тепер ведеться в порталі пацієнта. Там ви знайдете свої документи та наступні кроки.",
+  openPatientPortal: "Перейти до порталу пацієнта",
   guardianOnly:
     "Цю заявку заповнюють ваші батьки або законний представник через свій власний доступ. Якщо у вас є запитання, зверніться до GMED.",
   requestFor: "Заявка для",
@@ -2484,6 +2496,8 @@ const en: LeadRequestText = {
   retry: "Try again",
   saveBeforeLeaving: "Your latest changes could not be saved. Your entries are kept here. Check the marked fields and try moving to the next step again.",
   noRequest: "There is no open request for your account at the moment.",
+  noRequestPortal: "Your request now continues in the patient portal. You will find your documents and the next steps there.",
+  openPatientPortal: "Go to the patient portal",
   guardianOnly:
     "Your parents or your legal representative fill in this request with their own access. If you have any questions, please contact GMED.",
   requestFor: "Request for",

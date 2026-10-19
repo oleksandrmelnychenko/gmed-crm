@@ -7250,6 +7250,43 @@ async fn guardian_identity_age_and_reactivation_boundaries_are_enforced() {
         .execute(pool)
         .await
         .unwrap();
+    // A converted lead: the parent's access lives on the patient record, so
+    // revoking the request access alone is refused (H6, 2026-10-20).
+    let converted_to: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Kira', 'Guardian-Revoke', DATE '2015-01-01', 'female', $2) RETURNING id"#,
+    )
+    .bind(format!("P-REVOKE-{}", Uuid::new_v4().simple()))
+    .bind(app.suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE leads SET converted_patient_id = $2 WHERE id = $1")
+        .bind(lead)
+        .bind(converted_to)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &format!("{issue_path}/{access}/revoke"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert!(
+        refused
+            .to_string()
+            .contains("manage the access on the patient record"),
+        "{refused}"
+    );
+    sqlx::query("UPDATE leads SET converted_patient_id = NULL WHERE id = $1")
+        .bind(lead)
+        .execute(pool)
+        .await
+        .unwrap();
     let (status, revoked) = json_request(
         router,
         "POST",

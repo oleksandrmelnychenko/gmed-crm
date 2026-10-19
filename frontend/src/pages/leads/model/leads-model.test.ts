@@ -310,6 +310,9 @@ describe("lead errors", () => {
     expect(leadErrorMessage(new Error("Case intake is incomplete"), de)).toBe(
       "Anliegen und Anamnese vollständig ausfüllen",
     );
+    // A parent's access on a converted lead is managed on the patient record (H6).
+    expect(leadErrorMessage(new Error("The lead is converted; manage the access on the patient record"), de))
+      .toContain("Patientenakte");
     expect(leadErrorMessage(new Error("Invalid legal_sex"), ru)).toBe(
       "Выберите пол по документам",
     );

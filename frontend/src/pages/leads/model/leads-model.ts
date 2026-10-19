@@ -26,6 +26,11 @@ type LeadErrorTranslator = (ru: string, de: string) => string;
 type LeadErrorTranslation = readonly [ru: string, de: string];
 
 const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
+  // Issuing or revoking a parent's access after the conversion (H6).
+  "the lead is converted; manage the access on the patient record": [
+    "Обращение уже переведено в пациента: доступ родителей настраивается в карточке пациента",
+    "Die Anfrage ist bereits in einen Patienten übernommen: Den Zugang der Eltern verwalten Sie in der Patientenakte",
+  ],
   "a valid email is required": [
     "Укажите корректную электронную почту — это логин пациента в портале",
     "Gültige E-Mail-Adresse angeben – sie ist der Login des Patienten im Portal",
