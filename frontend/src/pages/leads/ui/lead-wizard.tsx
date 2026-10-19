@@ -2367,7 +2367,10 @@ function readinessStepLabel(key: string, tx: Tx, repeatIntake = false) {
 function readinessReasonLabel(reason: string, tx: Tx) {
   const labels: Record<string, string> = {
     "Lead must be qualified before conversion": tx("Подтвердите данные обращения", "Angaben zum Anliegen bestätigen"),
-    "Compliance is not signed yet": tx("Подтвердите необходимые согласия", "Erforderliche Einwilligungen bestätigen"),
+    // Both mean the same fact: the generated consent form (Anlage 1) carries
+    // no signature yet. The consents given in the cabinet do not replace the
+    // signed form, and the optional disclosure to third parties is no part of it.
+    "Compliance is not signed yet": tx("Форма согласия (приложение 1) ещё не подписана", "Einverständniserklärung (Anlage 1) noch nicht unterschrieben"),
     "Birth date is missing": tx("Укажите дату рождения", "Geburtsdatum angeben"),
     "Legal sex is missing": tx("Укажите пол по документам", "Geschlecht laut Ausweisdokument angeben"),
     "Email or phone is required": tx("Укажите электронную почту или телефон", "E-Mail-Adresse oder Telefonnummer angeben"),
@@ -2377,7 +2380,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Complete city and postal code": tx("Заполните город и почтовый индекс", "Ort und Postleitzahl vollständig angeben"),
     "Requested specialty is missing": tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
     "Identity document is not verified": tx("Подтвердите документ, удостоверяющий личность", "Ausweisdokument bestätigen"),
-    "Signed DSGVO document is missing": tx("Нужен подписанный документ согласий", "Unterzeichnetes Einwilligungsdokument erforderlich"),
+    "Signed DSGVO document is missing": tx("Форма согласия (приложение 1) ещё не подписана", "Einverständniserklärung (Anlage 1) noch nicht unterschrieben"),
     "Signed confidentiality release is missing": tx("Нужно подписанное освобождение от медицинской тайны", "Unterzeichnete Schweigepflichtsentbindung erforderlich"),
     "Enhanced due diligence document is missing": tx("Заполните усиленную AML-проверку и создайте документ", "Verstärkte AML-Sorgfaltsprüfung ausfüllen und Dokument erstellen"),
     "Enhanced due diligence document is not signed": tx("Получите подпись на документе усиленной AML-проверки", "Unterschrift für die verstärkte AML-Sorgfaltsprüfung einholen"),
@@ -2496,6 +2499,7 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Requested specialty is missing": SERVICE_SPECIALTIES_ID,
     "Identity document is not verified": IDENTITY_DOCUMENT_ID,
     "Signed DSGVO document is missing": PRIVACY_DOCUMENT_ID,
+    "Compliance is not signed yet": PRIVACY_DOCUMENT_ID,
     "Signed confidentiality release is missing": CONFIDENTIALITY_RELEASE_ID,
     "Anamnesis intake is incomplete": SERVICE_CONCERN_ID,
     "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,

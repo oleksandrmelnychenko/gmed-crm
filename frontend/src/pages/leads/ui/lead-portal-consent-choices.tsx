@@ -41,6 +41,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
     : disclosure?.access_kind === "self" ? tx("Пациент", "Patient/in") : null;
   const disclosureWho = disclosure?.chosen_by_name ?? disclosureRole ?? tx("Не указан", "Nicht angegeben");
   const disclosureAllowed = disclosure?.allow_disclosure === true && disclosure.consent_given === true;
+  const disclosureDenied = disclosure?.allow_disclosure === false;
   const choice = (key: PortalConsentChoiceKey) => {
     const answer = form?.choices?.[key];
     return (
@@ -53,20 +54,29 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
     <>
     <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="portal-disclosure">
       <AdminSectionTitle>{tx("Информация третьим лицам", "Auskunft an Dritte")}</AdminSectionTitle>
+      {/* Optional (owner 2026-10-19): an explicit "No" is the person's own valid
+          answer, shown neutrally and never as a missing consent; the separate
+          disclosure consent exists only after a "Yes". */}
       <dl className="grid gap-x-5 gap-y-2 sm:grid-cols-2">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-          <dt>{tx("Разрешение на предоставление информации", "Auskunft erlaubt")}</dt>
-          <dd><StatusChip tone={disclosureAllowed ? "success" : "warning"} data-testid="portal-disclosure-decision">
-            {disclosure?.allow_disclosure === true ? tx("Да", "Ja") : disclosure?.allow_disclosure === false ? tx("Нет", "Nein") : tx("Не отвечено", "Nicht beantwortet")}
+          <dt>{tx("Предоставлять информацию доверенным лицам", "Auskunft an Vertrauenspersonen")}</dt>
+          <dd><StatusChip tone={disclosureAllowed ? "success" : disclosureDenied ? "neutral" : "warning"} data-testid="portal-disclosure-decision">
+            {disclosure?.allow_disclosure === true ? tx("Да", "Ja") : disclosureDenied ? tx("Нет — не разрешено", "Nein – nicht erlaubt") : tx("Не отвечено", "Nicht beantwortet")}
           </StatusChip></dd>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-          <dt>{tx("Согласие на передачу данных", "Einwilligung zur Datenweitergabe")}</dt>
+        {disclosureDenied ? null : <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <dt>{tx("Согласие на передачу данных доверенным лицам", "Einwilligung zur Weitergabe an Vertrauenspersonen")}</dt>
           <dd><StatusChip tone={disclosureAllowed ? "success" : "warning"} data-testid="portal-disclosure-consent">
             {disclosure?.consent_given === true ? tx("Дано", "Erteilt") : disclosure?.consent_given === false ? tx("Не дано", "Nicht erteilt") : tx("Не зафиксировано", "Nicht dokumentiert")}
           </StatusChip></dd>
-        </div>
+        </div>}
       </dl>
+      <p className="text-xs leading-5 text-muted-foreground" data-testid="portal-disclosure-optional">
+        {disclosureDenied
+          ? tx("Выбор клиента: информацию третьим лицам не предоставлять. Это допустимый ответ — отдельное согласие не нужно, оформление он не блокирует; в форме согласия пункт о передаче указанным лицам остаётся не отмеченным.",
+            "Wahl des Kunden: keine Auskunft an Dritte. Das ist eine gültige Antwort – eine gesonderte Einwilligung ist nicht nötig, sie blockiert nichts; in der Einverständniserklärung bleibt die Übermittlung an genannte Personen unangekreuzt.")
+          : tx("Предоставление информации третьим лицам необязательно и оформление не блокирует.", "Die Auskunft an Dritte ist freiwillig und blockiert nichts.")}
+      </p>
       {disclosure ? <div className="space-y-1 text-xs leading-5 text-muted-foreground" data-testid="portal-disclosure-receipt">
         <p>{tx("Выбор зафиксирован:", "Entscheidung dokumentiert:")} {disclosureWho}{disclosure.chosen_by_name && disclosureRole ? ` (${disclosureRole})` : ""} · {disclosure.chosen_at ? formatAppDateTime(disclosure.chosen_at) : tx("дата не указана", "Datum nicht angegeben")}</p>
         {disclosure.company_name || disclosure.version || disclosure.language ? <p className="break-words">

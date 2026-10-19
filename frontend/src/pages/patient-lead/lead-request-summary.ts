@@ -546,7 +546,10 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       id: "disclosure", title: wording.title, empty: text.summaryEmpty,
       rows: entered([
         [wording.question, yesNo(disclosure.allow_disclosure)],
-        [wording.consentHeading, [yesNo(disclosure.consent_given), disclosure.company_name].filter(Boolean).join(" · ")],
+        // The consent belongs to a "Yes" only; after a "No" there is nothing to consent to.
+        ...(disclosure.allow_disclosure
+          ? [[wording.consentHeading, [yesNo(disclosure.consent_given), disclosure.company_name].filter(Boolean).join(" · ")] as [string, string]]
+          : []),
         [text.saved, [formatAppDateTime(disclosure.chosen_at), disclosure.chosen_by_name].filter(Boolean).join(" · ")],
       ]),
       parts: disclosure.allow_disclosure ? storedTrustedPersons(request).map((person, index) => ({

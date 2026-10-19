@@ -1003,7 +1003,7 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_check_primary_contact_present: "Электронная почта или телефон есть",
   lead_readiness_check_privacy_consent: "Правила приватности приняты",
   lead_readiness_check_healthcare_consent: "Медицинское согласие есть",
-  lead_readiness_reason_compliance_not_signed: "Compliance ещё не подписан",
+  lead_readiness_reason_compliance_not_signed: "Форма согласия (приложение 1) ещё не подписана",
   lead_readiness_reason_birth_date_missing: "Не указана дата рождения",
   lead_readiness_reason_legal_sex_missing: "Не указан юридический пол",
   lead_readiness_reason_primary_contact_missing: "Нужна электронная почта или телефон",
@@ -1042,7 +1042,7 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_reason_anamnesis_incomplete: "Анамнез заполнен не полностью",
   lead_readiness_reason_identity_not_verified:
     "Документ, удостоверяющий личность, не проверен",
-  lead_readiness_reason_dsgvo_document_missing: "Нет подписанного документа DSGVO",
+  lead_readiness_reason_dsgvo_document_missing: "Форма согласия (приложение 1) ещё не подписана",
   lead_readiness_reason_confidentiality_release_missing:
     "Нет подписанного освобождения от врачебной тайны",
   lead_readiness_reason_edd_document_missing: "Нет документа усиленной AML-проверки",
@@ -1655,7 +1655,7 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_check_healthcare_consent:
     "Medizinische Einwilligung liegt vor",
   lead_readiness_reason_compliance_not_signed:
-    "Compliance ist noch nicht unterschrieben",
+    "Einverständniserklärung (Anlage 1) noch nicht unterschrieben",
   lead_readiness_reason_birth_date_missing: "Geburtsdatum fehlt",
   lead_readiness_reason_legal_sex_missing:
     "Rechtliches Geschlecht fehlt",
@@ -1697,7 +1697,7 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_reason_specialty_missing: "Gewünschte Fachrichtung fehlt",
   lead_readiness_reason_anamnesis_incomplete: "Anamnese ist unvollständig",
   lead_readiness_reason_identity_not_verified: "Ausweisdokument ist nicht geprüft",
-  lead_readiness_reason_dsgvo_document_missing: "Unterschriebenes DSGVO-Dokument fehlt",
+  lead_readiness_reason_dsgvo_document_missing: "Einverständniserklärung (Anlage 1) noch nicht unterschrieben",
   lead_readiness_reason_confidentiality_release_missing:
     "Unterschriebene Schweigepflichtsentbindung fehlt",
   lead_readiness_reason_edd_document_missing:

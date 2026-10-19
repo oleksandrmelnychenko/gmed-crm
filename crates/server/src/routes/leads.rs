@@ -1734,6 +1734,10 @@ fn evaluate_lead_conversion_readiness(
         conversion_reasons.push("Identity document is not verified".to_string());
     }
     if !input.dsgvo_document_signed {
+        // "Compliance is not signed yet" is this very fact (the signed consent
+        // form sets the compliance status): one blocker, not the same missing
+        // signature listed twice as if a further consent were needed.
+        conversion_reasons.retain(|reason| reason != "Compliance is not signed yet");
         conversion_reasons.push("Signed DSGVO document is missing".to_string());
     }
     if !input.confidentiality_release_signed {
@@ -10402,6 +10406,31 @@ mod lead_conversion_readiness_tests {
                 "missing {missing_field}"
             );
         }
+    }
+
+    #[test]
+    fn an_unsigned_consent_form_is_one_blocker_and_disclosure_is_never_required() {
+        // The cabinet consents are given (as for the DEV lead of 2026-10-19
+        // who answered "No" to the disclosure to third parties); only the
+        // generated consent form is still unsigned.
+        let mut input = ready_input();
+        input.qualification_status = "in_progress".to_string();
+        input.compliance_status = "documents_sent".to_string();
+        input.dsgvo_document_signed = false;
+
+        let readiness = evaluate_lead_conversion_readiness(&input);
+
+        assert_eq!(
+            readiness.qualification_reasons,
+            vec!["Compliance is not signed yet".to_string()]
+        );
+        assert_eq!(
+            readiness.conversion_reasons,
+            vec![
+                "Lead must be qualified before conversion".to_string(),
+                "Signed DSGVO document is missing".to_string(),
+            ]
+        );
     }
 
     #[test]

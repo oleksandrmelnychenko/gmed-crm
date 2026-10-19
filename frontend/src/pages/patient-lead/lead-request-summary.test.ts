@@ -41,6 +41,8 @@ it("shows disclosure, actor and per-person scope before any core consent choice 
   expect(groups.find(group => group.id === "consent_form")).toBeUndefined();
   const no = requestSummary({ ...item, disclosure: { ...disclosure, allow_disclosure: false, consent_given: false } }, de, "de").find(group => group.id === "disclosure");
   expect(no?.rows).toContainEqual({ label: wording.question, value: "Nein" });
+  // After a "No" there is no consent to give: no "Einwilligung: Nein" row.
+  expect(no?.rows.some(row => row.label === wording.consentHeading)).toBe(false);
   expect(no?.parts).toEqual([]);
 });
 

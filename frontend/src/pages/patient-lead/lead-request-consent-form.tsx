@@ -157,7 +157,9 @@ export function ConsentFormChoicesSection({
   const recipientsBlock = (
     <fieldset className="space-y-3 rounded-lg border border-border/60 p-3" data-testid="lead-request-consent-recipients">
       <legend className="px-1 text-sm font-medium">{personsText.title}</legend>
-      <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs", request.disclosure?.allow_disclosure && request.disclosure.consent_given ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800")} data-testid="disclosure-saved-status">
+      <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs", request.disclosure?.allow_disclosure && request.disclosure.consent_given ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+        // "No" is a valid, optional answer: neutral, never a warning.
+        : request.disclosure?.allow_disclosure === false ? "border-border bg-muted/40 text-muted-foreground" : "border-amber-200 bg-amber-50 text-amber-800")} data-testid="disclosure-saved-status">
         {!request.disclosure ? personsText.unanswered : savedDisclosureAllowed(request) ? personsText.allowed : personsText.denied}
       </span>
       {recipients.length > 0 ? <TrustedPersonsList persons={recipients} lang={lang} /> : null}

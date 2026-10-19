@@ -130,19 +130,21 @@ describe("portal consent facts in the staff wizard", () => {
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain("Auskunftsumfang: medizinische, finanzielle");
   });
 
-  it("renders an explicit No without named persons or Anlage 1 and uses warning chips", () => {
+  it("renders an explicit No as the person's neutral choice, never as a missing consent", () => {
     const intake = state({ disclosure: normalizeLeadPortalDisclosure({
       allow_disclosure: false, consent_given: false, access_kind: "self", chosen_at: "2026-10-14T10:00:00Z",
     }) });
     const html = renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={tx} />);
-    expect(html).toContain(">Нет</span>");
-    expect(html).toContain(">Не дано</span>");
+    expect(html).toContain(">Нет — не разрешено</span>");
+    expect(html).not.toContain("Не дано");
+    expect(html).not.toContain("portal-disclosure-consent");
+    expect(html).toContain("Это допустимый ответ");
     expect(html).toContain("Выбор зафиксирован: Пациент");
-    expect(html).toMatch(/data-testid="portal-disclosure-decision" class="[^"]*border-amber-200/);
-    expect(html).toMatch(/data-testid="portal-disclosure-consent" class="[^"]*border-amber-200/);
+    expect(html).not.toMatch(/data-testid="portal-disclosure-decision" class="[^"]*border-amber-200/);
+    expect(html).not.toContain("border-amber-200");
     expect(html).not.toContain("portal-trusted-persons");
     expect(html).not.toContain("portal-consent-choices");
-    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain(">Nein</span>");
+    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain(">Nein – nicht erlaubt</span>");
   });
 
   it("does not invent a disclosure receipt or scope for historic recipients", () => {
