@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::lead_portal_intake::PORTAL_LEAD_SQL;
+use super::lead_portal_intake::{OWN_LOGIN_CLOSED_SQL, PORTAL_LEAD_SQL};
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::auth::{password, password_policy};
@@ -91,6 +91,215 @@ pub(crate) fn same_person_name(left: &str, right: &str) -> bool {
     };
     let left = normalize(left);
     !left.is_empty() && left == normalize(right)
+}
+
+/// A parent's login and the request's contact name the same person, a
+/// middle name or patronymic on one side only (staff report 2026-10-19: the
+/// login "Ioann Testov", the contact "Ioann Mikolajovich Testov"): every word
+/// of the shorter name is in the longer one and the shorter has at least a
+/// first and a last name. Case and spacing do not matter.
+pub(crate) fn compatible_person_name(left: &str, right: &str) -> bool {
+    if same_person_name(left, right) {
+        return true;
+    }
+    let words = |value: &str| {
+        value
+            .split_whitespace()
+            .map(str::to_lowercase)
+            .collect::<Vec<_>>()
+    };
+    let (left, right) = (words(left), words(right));
+    let (short, long) = if left.len() <= right.len() {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    short.len() >= 2 && short.len() < long.len() && short.iter().all(|word| long.contains(word))
+}
+
+/// Links the active patient logins of a minor's parents and legal guardians
+/// to the request (owner decision 2026-10-19): a trusted contact with a
+/// parent or guardian relation whose e-mail is the login of a patient account
+/// of the same person ([`compatible_person_name`]) gets the guardian access
+/// without staff issuing it, with no new password and no e-mail. Nothing
+/// happens for an adult, a converted or deleted lead, the lead's own login,
+/// another person's account, or a contact or login that had an access to
+/// this request before (staff revoked it: it does not come back by itself).
+/// Returns the new accesses as `(access_id, user_id)`.
+pub(crate) async fn auto_link_parent_logins_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    actor: Option<Uuid>,
+) -> Result<Vec<(Uuid, Uuid)>, sqlx::Error> {
+    let Some(lead) = sqlx::query(&format!(
+        r#"SELECT l.date_of_birth, l.trusted_contacts, l.portal_user_id
+           FROM leads l WHERE l.id = $1 AND {PORTAL_LEAD_SQL}"#
+    ))
+    .bind(lead_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(Vec::new());
+    };
+    if !crate::routes::leads::is_minor_on(
+        lead.try_get::<Option<chrono::NaiveDate>, _>("date_of_birth")?,
+        crate::app_time::today(),
+    ) {
+        return Ok(Vec::new());
+    }
+    let lead_login: Option<Uuid> = lead.try_get("portal_user_id")?;
+    let contacts: Value = lead
+        .try_get::<Option<Value>, _>("trusted_contacts")?
+        .unwrap_or_else(|| json!([]));
+    let mut linked = Vec::new();
+    for contact in contacts.as_array().into_iter().flatten() {
+        if !crate::routes::leads::is_parent_or_guardian_relation(
+            contact.get("relation").and_then(Value::as_str),
+        ) {
+            continue;
+        }
+        let Some(contact_id) = contact
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok())
+        else {
+            continue;
+        };
+        let Some(email) = normalize_portal_email(contact.get("email").and_then(Value::as_str))
+        else {
+            continue;
+        };
+        let name = contact
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let Some(account) = sqlx::query(
+            r#"SELECT u.id, u.name FROM users u
+               WHERE lower(btrim(u.email)) = $1 AND u.role = 'patient' AND u.is_active
+                 AND NOT EXISTS (
+                     SELECT 1 FROM lead_portal_access a
+                     WHERE a.lead_id = $2 AND (a.trusted_contact_id = $3 OR a.user_id = u.id)
+                 )"#,
+        )
+        .bind(&email)
+        .bind(lead_id)
+        .bind(contact_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        else {
+            continue;
+        };
+        let user_id: Uuid = account.try_get("id")?;
+        if Some(user_id) == lead_login
+            || !compatible_person_name(&account.try_get::<String, _>("name")?, name)
+        {
+            continue;
+        }
+        let Some(access_id) = sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO lead_portal_access (lead_id, user_id, kind, trusted_contact_id, created_by)
+               VALUES ($1, $2, 'guardian', $3, $4)
+               ON CONFLICT DO NOTHING
+               RETURNING id"#,
+        )
+        .bind(lead_id)
+        .bind(user_id)
+        .bind(contact_id)
+        .bind(actor)
+        .fetch_optional(&mut **tx)
+        .await?
+        else {
+            continue;
+        };
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "issue_lead_guardian_access",
+                actor,
+                "lead",
+                Some(lead_id),
+                json!({
+                    "access_id": access_id,
+                    "portal_user_id": user_id,
+                    "trusted_contact_id": contact_id,
+                    "email": email,
+                    "created": false,
+                    "reused_existing_login": true,
+                    "reactivated": false,
+                    "auto_linked": true,
+                }),
+            ),
+        )
+        .await?;
+        linked.push((access_id, user_id));
+    }
+    if let (false, Some(actor)) = (linked.is_empty(), actor) {
+        crate::routes::lead_payer_link::revoke_for_cabinet_payer(tx, lead_id, actor).await?;
+    }
+    Ok(linked)
+}
+
+/// [`auto_link_parent_logins_in_tx`] for every open request of a minor that
+/// names `user_id`'s e-mail as a parent's or guardian's, each in its own
+/// transaction: the parent's cabinet shows the child's request at the next
+/// load, also for contacts entered before 2026-10-19. Best effort; returns
+/// the leads that got an access.
+pub(crate) async fn auto_link_for_login(state: &AppState, user_id: Uuid) -> Vec<Uuid> {
+    let leads: Vec<Uuid> = match sqlx::query_scalar(&format!(
+        r#"SELECT l.id FROM leads l, users u
+           WHERE u.id = $1 AND u.role = 'patient' AND u.is_active
+             AND {PORTAL_LEAD_SQL}
+             AND {OWN_LOGIN_CLOSED_SQL}
+             AND jsonb_typeof(l.trusted_contacts) = 'array'
+             AND EXISTS (
+                 SELECT 1 FROM jsonb_array_elements(l.trusted_contacts) c
+                 WHERE lower(btrim(c ->> 'email')) = lower(btrim(u.email))
+             )
+             AND NOT EXISTS (
+                 SELECT 1 FROM lead_portal_access a WHERE a.lead_id = l.id AND a.user_id = u.id
+             )"#
+    ))
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(leads) => leads,
+        Err(error) => {
+            tracing::warn!(%error, %user_id, "find children's requests for a parent's login");
+            return Vec::new();
+        }
+    };
+    let mut linked = Vec::new();
+    for lead_id in leads {
+        let result = async {
+            let mut tx = state.db.begin().await?;
+            sqlx::query("SELECT 1 FROM leads WHERE id = $1 FOR UPDATE")
+                .bind(lead_id)
+                .execute(&mut *tx)
+                .await?;
+            let new = auto_link_parent_logins_in_tx(&mut tx, lead_id, Some(user_id)).await?;
+            tx.commit().await?;
+            Ok::<_, sqlx::Error>(new)
+        }
+        .await;
+        match result {
+            Ok(new) if !new.is_empty() => {
+                crate::realtime::publish_lead_event(
+                    state,
+                    Some(user_id),
+                    "lead.portal_updated",
+                    lead_id,
+                    json!({ "change": "guardian_access", "auto_linked": true }),
+                )
+                .await;
+                linked.push(lead_id);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(%error, %lead_id, %user_id, "link a parent's login to the request");
+            }
+        }
+    }
+    linked
 }
 
 /// Whether `user_id` still reaches anything besides `lead_id`: a patient
@@ -416,7 +625,7 @@ async fn issue_guardian_access(
             let same_patient = account
                 .try_get::<String, _>("role")
                 .is_ok_and(|role| role == "patient")
-                && same_person_name(
+                && compatible_person_name(
                     &account.try_get::<String, _>("name").unwrap_or_default(),
                     &name,
                 )
@@ -748,5 +957,21 @@ mod tests {
         assert!(same_person_name("Olga  Petrenko", " olga petrenko "));
         assert!(!same_person_name("Olga Petrenko", "Oleg Petrenko"));
         assert!(!same_person_name("", ""));
+        assert!(compatible_person_name(
+            "Ioann Testov",
+            "Ioann Mikolajovich Testov"
+        ));
+        assert!(compatible_person_name(
+            "ioann mikolajovich testov",
+            " Ioann  Testov"
+        ));
+        assert!(compatible_person_name("Olga Petrenko", "olga petrenko"));
+        assert!(!compatible_person_name("Ioann", "Ioann Testov"));
+        assert!(!compatible_person_name(
+            "Petro Testov",
+            "Ioann Mikolajovich Testov"
+        ));
+        assert!(!compatible_person_name("Testov Ioann", "Ioann Testov"));
+        assert!(!compatible_person_name("", ""));
     }
 }

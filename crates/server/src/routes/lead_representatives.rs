@@ -1689,6 +1689,7 @@ async fn finish_cabinet_write(
     if let Some(contacts) = contacts {
         store_lead(&mut *tx, lead_id, Some(contacts), &json!({})).await?;
     }
+    super::lead_portal_guardians::auto_link_parent_logins_in_tx(tx, lead_id, Some(actor)).await?;
     super::lead_invoice_recipient::sync_section_seven(tx, lead_id, actor, kind.as_str()).await?;
     let state = load(&mut *tx, lead_id).await?.unwrap_or_default();
     let now = intake::portal_update_time(&mut *tx).await?;

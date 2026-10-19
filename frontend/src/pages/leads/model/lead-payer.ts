@@ -146,6 +146,8 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type PayerDeclarationStatus = {
   complete: boolean;
   missing: string[];
+  /** The third-party payer is one of the minor's legal representatives: no separate cost assumption. */
+  paying_parent?: boolean;
   cost_assumption: {
     required: boolean;
     document_id: string | null;
@@ -213,6 +215,7 @@ export function normalizePayerDeclarationResponse(value: unknown): PayerDeclarat
     status: {
       complete: status.complete === true,
       missing: stringList(status.missing),
+      paying_parent: status.paying_parent === true,
       cost_assumption: {
         required: costAssumption.required === true,
         document_id: typeof costAssumption.document_id === "string" ? costAssumption.document_id : null,

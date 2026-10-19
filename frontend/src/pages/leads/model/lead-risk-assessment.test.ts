@@ -16,6 +16,7 @@ import {
   riskDisplayedScore,
   riskEventLabel,
   riskGateErrorText,
+  representativeMissingText,
   riskLevelTone,
   riskMissingLabel,
   riskPointsLine,
@@ -341,5 +342,28 @@ describe("T16 of the invoice recipient (QA 2026-10-12, round 3)", () => {
     expect(riskSubjectLabel(recipient.subject, de, recipient.variant)).toBe("Rechnungsempfänger");
     expect(riskSubjectLabel("payer", ru)).toBe("плательщик");
     expect(riskVariantLabel("recipient", ru)).toBe("");
+  });
+});
+
+describe("the contract gate names the missing parent details (staff report 2026-10-19)", () => {
+  const ru = (text: string) => text;
+  const de = (_ru: string, text: string) => text;
+
+  it("groups the missing fields by parent", () => {
+    expect(representativeMissingText(["rep1_date_of_birth", "rep1_street", "rep2_id_upload", "rep2_id_valid_until"], ru)).toBe(
+      "Не хватает: первый родитель / представитель — дата рождения, улица и дом; второй родитель — скан документа, срок действия документа.",
+    );
+    expect(representativeMissingText(["rep2_phone"], de)).toBe("Es fehlt: zweiter Elternteil — Telefon.");
+    expect(representativeMissingText([], ru)).toBeNull();
+    expect(representativeMissingText(undefined, ru)).toBeNull();
+  });
+
+  it("adds the list to the contract refusal", () => {
+    const error = new ApiRequestError("x", {
+      status: 422,
+      code: "representative_details_incomplete",
+      body: { code: "representative_details_incomplete", missing: ["rep1_citizenships"] },
+    });
+    expect(riskGateErrorText(error, ru)).toContain("Не хватает: первый родитель / представитель — гражданство.");
   });
 });

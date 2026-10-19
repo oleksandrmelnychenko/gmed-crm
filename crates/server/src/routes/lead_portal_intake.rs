@@ -561,6 +561,9 @@ pub(crate) async fn me_portal(state: &AppState, auth: &AuthUser) -> (Value, Valu
     if auth.role != Role::Patient {
         return (Value::Null, Value::Null);
     }
+    // A parent who already has a login gets the child's request without staff
+    // issuing the access (owner decision 2026-10-19).
+    crate::routes::lead_portal_guardians::auto_link_for_login(state, auth.user_id).await;
     let lead_only = match is_lead_only_login(&state.db, auth.user_id).await {
         Ok(value) => value,
         Err(error) => {

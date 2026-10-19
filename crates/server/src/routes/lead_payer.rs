@@ -974,6 +974,11 @@ pub(crate) struct PayerState {
     pub order_number: Option<String>,
     pub order_signed_patient: bool,
     pub order_signed_agency: bool,
+    /// The third-party payer is one of the minor's legal representatives
+    /// ([`lead_representatives::payer_same_person`]): that parent signs the
+    /// order as the contracting party, so no separate cost assumption
+    /// declaration is asked of them (staff report 2026-10-19).
+    pub paying_parent: bool,
 }
 
 /// Payer part of the lead conversion readiness (see `leads.rs`). The default
@@ -1056,13 +1061,19 @@ impl PayerState {
             .is_some_and(Declaration::is_third_party)
     }
 
+    /// Whether a cost assumption declaration is asked: a third party who is
+    /// not the minor's own paying parent.
+    fn cost_assumption_required(&self) -> bool {
+        self.is_third_party() && !self.paying_parent
+    }
+
     /// Declaration reasons plus, for a third party, the cost assumption.
     fn declaration_reasons(&self) -> Vec<PayerReason> {
         let Some(declaration) = &self.declaration else {
             return vec![PayerReason::DeclarationMissing];
         };
         let mut reasons = declaration.missing();
-        if declaration.is_third_party() {
+        if declaration.is_third_party() && !self.paying_parent {
             match (
                 self.cost_assumption.document_id,
                 self.cost_assumption.current,
@@ -1132,9 +1143,10 @@ impl PayerState {
             }),
             "status": {
                 "complete": declaration_reasons.is_empty(),
+                "paying_parent": self.paying_parent,
                 "missing": codes(&declaration_reasons),
                 "cost_assumption": {
-                    "required": self.is_third_party(),
+                    "required": self.cost_assumption_required(),
                     "document_id": self.cost_assumption.document_id,
                     "current": self.cost_assumption.current,
                     "signed": self.cost_assumption.current
@@ -1219,6 +1231,17 @@ pub(crate) async fn load_payer_state(
         state.patient_id = row.try_get("patient_id").unwrap_or_default();
         state.created_at = row.try_get("created_at").ok().flatten();
         state.updated_at = row.try_get("updated_at").ok().flatten();
+        // A parent of the minor who pays is no separate cost bearer.
+        if state.declaration.as_ref().is_some_and(|declaration| {
+            declaration.is_third_party() && !declaration.is_organisation()
+        }) && let Some(loaded) = lead_representatives::load(&mut *conn, lead_id).await?
+        {
+            state.paying_parent = lead_representatives::payer_same_person(
+                &loaded.representation,
+                state.declaration.as_ref(),
+            )
+            .is_some();
+        }
     }
     if let Some(order_id) = row.try_get::<Option<Uuid>, _>("order_id").ok().flatten() {
         state.order_id = Some(order_id);
@@ -3982,6 +4005,21 @@ mod tests {
             lead_citizenships: vec!["UA".into()],
             ..PayerState::default()
         }
+    }
+
+    #[test]
+    fn a_paying_parent_of_the_minor_signs_no_separate_cost_assumption() {
+        let parent = PayerState {
+            paying_parent: true,
+            ..third_party_state(CostAssumptionDocument::default())
+        };
+        assert_eq!(
+            parent.agency_gate(false),
+            [PayerReason::ClientOrderSignatureMissing]
+        );
+        assert!(parent.agency_gate(true).is_empty());
+        assert!(!parent.cost_assumption_required());
+        assert!(third_party_state(CostAssumptionDocument::default()).cost_assumption_required());
     }
 
     #[test]

@@ -470,6 +470,14 @@ export function LeadPayerDeclarationSection({
             </label>
           ))}
         </div>
+        {form.kind === "third_party" && data?.status.paying_parent ? (
+          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800" data-testid="lead-payer-paying-parent">
+            {tx(
+              "Платит один из родителей — законный представитель ребёнка. Он подписывает заказ сам, отдельное согласие плательщика (Kostenübernahmeerklärung) не нужно.",
+              "Es zahlt ein Elternteil als gesetzlicher Vertreter des Kindes. Er unterschreibt den Auftrag selbst; eine gesonderte Kostenübernahmeerklärung ist nicht nötig.",
+            )}
+          </p>
+        ) : null}
 
         {/* Own economic interest: Да / Нет, nothing chosen while nobody answered it. */}
         <div

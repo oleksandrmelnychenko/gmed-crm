@@ -819,14 +819,73 @@ export function riskDecisionErrorText(error: unknown, tx: Tx): string | null {
   }
 }
 
+const REPRESENTATIVE_SLOT_LABELS: Record<string, [string, string]> = {
+  rep1: ["первый родитель / представитель", "erster Elternteil / Vertreter"],
+  rep2: ["второй родитель", "zweiter Elternteil"],
+  agent: ["представитель", "Bevollmächtigte Person"],
+  guardian: ["опекун (Betreuer)", "Betreuer/in"],
+};
+
+const REPRESENTATIVE_FIELD_LABELS: Record<string, [string, string]> = {
+  first_name: ["имя", "Vorname"],
+  last_name: ["фамилия", "Nachname"],
+  name_latin: ["имя латиницей", "Name in lateinischer Schrift"],
+  date_of_birth: ["дата рождения", "Geburtsdatum"],
+  birth_place: ["место рождения", "Geburtsort"],
+  birth_country: ["страна рождения", "Geburtsland"],
+  citizenships: ["гражданство", "Staatsangehörigkeit"],
+  street: ["улица и дом", "Straße und Hausnummer"],
+  zip: ["индекс", "PLZ"],
+  city: ["город", "Ort"],
+  country: ["страна", "Land"],
+  email: ["e-mail", "E-Mail"],
+  phone: ["телефон", "Telefon"],
+  id_upload: ["скан документа", "Ausweiskopie"],
+  id_document_type: ["вид документа", "Ausweisart"],
+  id_document_number: ["номер документа", "Ausweisnummer"],
+  id_issuing_authority: ["кем выдан документ", "ausstellende Behörde"],
+  id_issuing_country: ["страна выдачи документа", "Ausstellungsland"],
+  id_valid_until: ["срок действия документа", "gültig bis"],
+  authority_upload: ["подтверждение полномочий", "Vollmachtsnachweis"],
+};
+
+/**
+ * What the server listed as missing for a contract (`representative_details_incomplete`,
+ * keys `<slot>_<field>`), grouped by person: "Не хватает: первый родитель — дата рождения, …".
+ * Null when nothing usable was sent (staff report 2026-10-19: the message named no field).
+ */
+export function representativeMissingText(missing: unknown, tx: Tx): string | null {
+  if (!Array.isArray(missing)) return null;
+  const groups = new Map<string, string[]>();
+  for (const key of missing) {
+    if (typeof key !== "string") continue;
+    const slot = Object.keys(REPRESENTATIVE_SLOT_LABELS).find((candidate) => key.startsWith(`${candidate}_`));
+    const field = slot ? key.slice(slot.length + 1) : key;
+    const person = slot ? tx(...REPRESENTATIVE_SLOT_LABELS[slot]) : tx("представители", "Vertretung");
+    const label = REPRESENTATIVE_FIELD_LABELS[field]
+      ? tx(...REPRESENTATIVE_FIELD_LABELS[field])
+      : field === "custody" ? tx("кто представляет ребёнка", "Sorgerecht") : field.replaceAll("_", " ");
+    const list = groups.get(person) ?? [];
+    if (!list.includes(label)) list.push(label);
+    groups.set(person, list);
+  }
+  if (groups.size === 0) return null;
+  const parts = [...groups].map(([person, fields]) => `${person} — ${fields.join(", ")}`);
+  return `${tx("Не хватает:", "Es fehlt:")} ${parts.join("; ")}.`;
+}
+
 /** 409 `risk_review_required` of the gated staff actions (qualify, convert, signatures …). */
 export function riskGateErrorText(error: unknown, tx: Tx): string | null {
   if (!(error instanceof ApiRequestError)) return null;
   const code = error.body?.code ?? error.body?.error ?? error.code;
-  if (code === "representative_details_incomplete") return tx(
-    "Перед договором и подписью дополните данные родителей в разделе «Данные клиента». В кабинете можно запросить блок «Представители».",
-    "Bitte vervollständigen Sie vor Vertrag und Unterschrift die Elterndaten unter „Kundendaten“. Im Portal können Sie den Block „Vertretung“ anfordern.",
-  );
+  if (code === "representative_details_incomplete") {
+    const base = tx(
+      "Перед договором и подписью дополните данные родителей в разделе «Данные клиента». В кабинете можно запросить блок «Представители».",
+      "Bitte vervollständigen Sie vor Vertrag und Unterschrift die Elterndaten unter „Kundendaten“. Im Portal können Sie den Block „Vertretung“ anfordern.",
+    );
+    const missing = representativeMissingText(error.body?.missing, tx);
+    return missing ? `${base} ${missing}` : base;
+  }
   if (code !== "risk_review_required") return null;
   if (error.body?.rejected === true) {
     return tx(

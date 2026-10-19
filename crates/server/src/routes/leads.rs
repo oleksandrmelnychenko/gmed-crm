@@ -2885,6 +2885,13 @@ async fn create_lead(
         tracing::error!(%error, lead = %id, "store lead citizenships");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
     }
+    if let Err(error) =
+        super::lead_portal_guardians::auto_link_parent_logins_in_tx(&mut tx, id, Some(auth.user_id))
+            .await
+    {
+        tracing::error!(%error, lead = %id, "link parents' logins to the new lead");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+    }
     if let Err(error) = tx.commit().await {
         tracing::error!(%error, lead = %id, "commit lead creation");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
@@ -4530,6 +4537,18 @@ async fn update_lead(
     } else {
         Vec::new()
     };
+    // A parent who already has a patient login gets the request at once
+    // (owner decision 2026-10-19).
+    if let Err(error) = super::lead_portal_guardians::auto_link_parent_logins_in_tx(
+        &mut tx,
+        lead_id,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        tracing::error!(%error, %lead_id, "link parents' logins after lead update");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, lead_id = %lead_id, "commit lead update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");

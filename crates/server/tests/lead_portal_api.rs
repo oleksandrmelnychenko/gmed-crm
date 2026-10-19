@@ -8694,3 +8694,161 @@ async fn trusted_persons_backfill_uses_the_latest_eligible_choice_without_revivi
         );
     }
 }
+
+async fn active_guardian_links(pool: &PgPool, lead_id: Uuid) -> Vec<(Uuid, Option<Uuid>)> {
+    sqlx::query_as(
+        "SELECT user_id, trusted_contact_id FROM lead_portal_access
+         WHERE lead_id = $1 AND kind = 'guardian' AND revoked_at IS NULL",
+    )
+    .bind(lead_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+async fn minor_with_father(
+    app: &TestApp,
+    child: &str,
+    father_name: &str,
+    email: &str,
+) -> (Uuid, Uuid) {
+    let contact = Uuid::new_v4();
+    let (status, created) = json_request(
+        &app.suite.app,
+        "POST",
+        "/api/v1/leads",
+        &app.staff("patient_manager"),
+        Some(json!({
+            "first_name": child,
+            "last_name": "Portal",
+            "date_of_birth": "2016-04-05",
+            "trusted_contacts": [{
+                "id": contact,
+                "name": father_name,
+                "relation": "father",
+                "email": email
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    (created["id"].as_str().unwrap().parse().unwrap(), contact)
+}
+
+/// Staff report 2026-10-19: the father already had a login and the child's
+/// request named him with his patronymic; his cabinet showed no request.
+/// Owner decision: a parent's existing login gets the child's request by
+/// itself, with no new password; an access staff revoked stays revoked.
+#[tokio::test]
+async fn a_parent_who_already_has_a_login_gets_the_childs_request_by_itself() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    // The login is named "Ioann Portal".
+    let (_, father, father_bearer) =
+        lead_with_login(&app, "Ioann", "ioann.autolink@example.com").await;
+
+    // A request created for the child links the login at once.
+    let (child, contact) = minor_with_father(
+        &app,
+        "Adolf",
+        "Ioann Mikolajovich Portal",
+        " Ioann.Autolink@example.com",
+    )
+    .await;
+    assert_eq!(
+        active_guardian_links(pool, child).await,
+        vec![(father, Some(contact))]
+    );
+    assert_eq!(
+        audit_count(pool, "issue_lead_guardian_access", child).await,
+        1
+    );
+    let (_, requests) = json_request(
+        router,
+        "GET",
+        "/api/v1/me/lead-requests",
+        &father_bearer,
+        None,
+    )
+    .await;
+    assert!(
+        requests["requests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|request| request["lead_id"] == json!(child)
+                && request["access_kind"] == "guardian"),
+        "{requests}"
+    );
+    let password_hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
+        .bind(father)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    // Revoked by staff: neither a save nor the next sign-in brings it back.
+    let access: Uuid = sqlx::query_scalar(
+        "SELECT id FROM lead_portal_access WHERE lead_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{child}/portal-guardians/{access}/revoke"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{child}/update"),
+        &pm,
+        Some(json!({ "trusted_contacts": [{
+            "id": contact, "name": "Ioann Mikolajovich Portal", "relation": "father",
+            "email": "ioann.autolink@example.com"
+        }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    json_request(router, "GET", "/api/v1/me", &father_bearer, None).await;
+    assert!(active_guardian_links(pool, child).await.is_empty());
+
+    // A request entered before the parent had a login: linked at the
+    // parent's next load of the portal.
+    let (earlier, earlier_contact) =
+        minor_with_father(&app, "Stefan", "Petro Portal", "petro.autolink@example.com").await;
+    assert!(active_guardian_links(pool, earlier).await.is_empty());
+    let (_, petro, petro_bearer) =
+        lead_with_login(&app, "Petro", "petro.autolink@example.com").await;
+    assert!(active_guardian_links(pool, earlier).await.is_empty());
+    let (status, me) = json_request(router, "GET", "/api/v1/me", &petro_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(
+        active_guardian_links(pool, earlier).await,
+        vec![(petro, Some(earlier_contact))]
+    );
+    assert_eq!(me["lead_portal"]["requests"], 2, "{me}");
+
+    // Another person with the address is not linked.
+    let (stranger_child, _) =
+        minor_with_father(&app, "Mila", "Taras Inshyi", "petro.autolink@example.com").await;
+    json_request(router, "GET", "/api/v1/me", &petro_bearer, None).await;
+    assert!(active_guardian_links(pool, stranger_child).await.is_empty());
+
+    let unchanged: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
+        .bind(father)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        unchanged, password_hash,
+        "no new password for a linked login"
+    );
+}
