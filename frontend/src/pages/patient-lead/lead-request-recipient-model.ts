@@ -254,7 +254,7 @@ export const OTHER_PAYER_CHOICES = ["person", "organisation"] as const satisfies
  */
 export function payerPartyOf(payer: LeadRequestPayer | null | undefined, parentPays: boolean): PayerParty | "" {
   if (!payer) return "";
-  if (payer.payer_kind === "self" || parentPays) return "patient";
+  if (payer.payer_kind === "self" || payer.payer_kind === "representative" || parentPays) return "patient";
   return payer.payer_kind === "third_party" ? "other" : "";
 }
 
@@ -296,6 +296,15 @@ export function payerFitsFlow(
   representatives: readonly Pick<LeadRequestRepresentative, "id" | "slot" | "email" | "first_name" | "last_name" | "date_of_birth">[] = [],
 ): boolean {
   if (!payer) return false;
+  // A parent named as payer (owner decision 2026-10-19), as the server reads it.
+  if (payer.payer_kind === "representative") {
+    if (flow.recipient === "self" && recipient.representative_id) {
+      const same = payer.payer_representative_id === recipient.representative_id;
+      return flow.isPayer === "yes" ? same : flow.isPayer === "no" && !same;
+    }
+    return (flow.recipient === "self" && flow.isPayer === "yes")
+      || (flow.recipient === "third_party" && flow.isPayer === "no");
+  }
   const thirdParty = payer.payer_kind === "third_party";
   if (flow.recipient === "self" && recipient.representative_id) {
     const parent = representatives.find((person) => person.id === recipient.representative_id && (person.slot === "rep1" || person.slot === "rep2"));

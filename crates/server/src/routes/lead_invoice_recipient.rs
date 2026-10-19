@@ -860,6 +860,25 @@ pub(crate) fn payer_fits(
         return false;
     };
     let third_party = declaration.is_third_party();
+    // A minor's representative named as payer (owner decision 2026-10-19):
+    // the parent chosen as recipient pays, or the other one does.
+    if declaration.is_representative() {
+        return match (
+            recipient.recipient.as_deref(),
+            recipient.representative_contact_id,
+            recipient.is_payer,
+        ) {
+            (Some(RECIPIENT_SELF), Some(parent), Some(true)) => {
+                declaration.payer_representative_id == Some(parent)
+            }
+            (Some(RECIPIENT_SELF), Some(parent), Some(false)) => {
+                declaration.payer_representative_id != Some(parent)
+            }
+            (Some(RECIPIENT_SELF), None, Some(true)) => true,
+            (Some(RECIPIENT_THIRD_PARTY), _, Some(false)) => true,
+            _ => false,
+        };
+    }
     if recipient.recipient.as_deref() == Some(RECIPIENT_SELF)
         && recipient.representative_contact_id.is_some()
     {

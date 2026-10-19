@@ -50,7 +50,15 @@ export type PayerType = "person" | "company" | "organisation" | "insurance";
  * party is named with identity and citizenships; staff complete the rest.
  */
 export type LeadRequestPayer = {
-  payer_kind: "self" | "third_party";
+  /**
+   * `representative`: a parent or legal representative of the minor pays
+   * (owner decision 2026-10-19) — the contracting party, never a third
+   * party. The server shows that parent with the representative's own data
+   * (name, date of birth, address, citizenships, relationship `parent`).
+   */
+  payer_kind: "self" | "third_party" | "representative";
+  /** The paying representative (trusted contact id), only with the kind `representative`. */
+  payer_representative_id?: string | null;
   first_name: string | null;
   last_name: string | null;
   date_of_birth: string | null;
@@ -113,7 +121,9 @@ export type LeadRequestPayer = {
 
 /** What the cabinet sends: the whole answer, empty values left out. */
 export type LeadRequestPayerInput = {
-  payer_kind: "self" | "third_party";
+  payer_kind: "self" | "third_party" | "representative";
+  /** With `representative`: which parent of the minor pays; nothing of the person is sent. */
+  payer_representative_id?: string;
   first_name?: string;
   last_name?: string;
   date_of_birth?: string;
@@ -151,6 +161,8 @@ export type LeadRequestPayerInput = {
  * an older server does not send these keys.
  */
 export type PayerSelfTemplate = {
+  /** The parent the answer "I pay (as a parent)" names (trusted contact id); absent on an older server. */
+  representative_id?: string | null;
   first_name: string | null;
   last_name: string | null;
   date_of_birth: string | null;

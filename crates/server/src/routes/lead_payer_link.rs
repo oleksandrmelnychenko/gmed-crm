@@ -1832,9 +1832,11 @@ impl LeadContext {
             .filter(|declaration| declaration.is_third_party())
     }
 
-    /// The minor's representative who is the payer, if any.
+    /// The minor's representative who is the payer, if any: named as such
+    /// (kind `representative`, owner decision 2026-10-19) or a third party
+    /// of before who is one of the representatives.
     fn paying_parent(&self) -> Option<&Representative> {
-        let declaration = self.third_party()?;
+        let declaration = self.declaration.as_ref()?;
         let id = lead_representatives::payer_same_person(
             &self.loaded.representation,
             Some(declaration),
@@ -1842,8 +1844,17 @@ impl LeadContext {
         self.loaded.representation.find(id)
     }
 
-    /// How the payer answers; `None` without a third party.
+    /// How the payer answers; `None` without a third party or a paying
+    /// representative. A paying parent with a cabinet login answers there; a
+    /// representative named as payer never gets a payer's link.
     fn mode(&self) -> Option<Mode> {
+        let declaration = self.declaration.as_ref()?;
+        if declaration.is_representative() {
+            return self
+                .paying_parent()
+                .filter(|parent| parent.has_login())
+                .map(|_| Mode::Cabinet);
+        }
         self.third_party()?;
         Some(match self.paying_parent() {
             Some(parent) if parent.has_login() => Mode::Cabinet,
@@ -1862,11 +1873,24 @@ impl LeadContext {
         if self.request_submitted_at.is_none() {
             return Some("request_not_submitted");
         }
+        // A minor's paying parent is the contracting party: no payer's link
+        // (owner decision 2026-10-19).
+        if self
+            .declaration
+            .as_ref()
+            .is_some_and(Declaration::is_representative)
+        {
+            return Some("payer_is_representative");
+        }
         let Some(declaration) = self.third_party() else {
             return Some("no_third_party");
         };
         if self.mode() == Some(Mode::Cabinet) {
             return Some("payer_has_cabinet_login");
+        }
+        // A third party of before who is the minor's parent: no link either.
+        if self.paying_parent().is_some() {
+            return Some("payer_is_representative");
         }
         if declaration.contact_consent_at.is_none() {
             return Some("contact_consent_missing");
@@ -2060,7 +2084,9 @@ fn questionnaire(
     let email = statement
         .confirmed_email
         .clone()
-        .or_else(|| declaration.email.clone());
+        .or_else(|| declaration.email.clone())
+        // A representative named as payer: the representative's own address.
+        .or_else(|| parent.and_then(|parent| parent.email.clone()));
     Questionnaire {
         patient_name: context.patient_name.clone(),
         mode,
@@ -2383,7 +2409,9 @@ async fn resolve_link(conn: &mut PgConnection, headers: &HeaderMap) -> Result<Li
     if current.is_none() {
         return Err(Refusal::LinkRevoked);
     }
-    if payer_has_cabinet_login(conn, link.lead_id, current.as_ref()).await? {
+    // A minor's parent who pays is the contracting party, with or without a
+    // cabinet login: no payer's link (owner decision 2026-10-19).
+    if payer_is_representative(conn, link.lead_id, current.as_ref()).await? {
         return Err(Refusal::LinkRevoked);
     }
     if link.expires_at <= Utc::now() {
@@ -2925,12 +2953,23 @@ fn adopted_declaration(
     answers: &Answers,
     funds_document: Option<Uuid>,
 ) -> Declaration {
+    let mut next = current.clone();
+    // A paying representative's identity is the representative's row, never
+    // copied onto the declaration (owner decision 2026-10-19).
+    if !current.is_representative() {
+        adopt_identity(&mut next, answers);
+    }
+    adopt_funds(next, answers, funds_document)
+}
+
+/// The payer's identity, address, phone and relationship of
+/// [`adopted_declaration`].
+fn adopt_identity(next: &mut Declaration, answers: &Answers) {
     fn set(target: &mut Option<String>, value: &Option<String>) {
         if value.is_some() {
             target.clone_from(value);
         }
     }
-    let mut next = current.clone();
     if next.is_organisation() {
         set(&mut next.organisation_name, &answers.organisation_name);
     } else {
@@ -2957,6 +2996,14 @@ fn adopted_declaration(
             None
         };
     }
+}
+
+/// The source of funds of [`adopted_declaration`].
+fn adopt_funds(
+    mut next: Declaration,
+    answers: &Answers,
+    funds_document: Option<Uuid>,
+) -> Declaration {
     // The source of funds only while nobody stated it: one source the
     // declaration knows is it; several, or one of an organisation without a
     // match in the declaration's list, are "other" with the payer's words.
@@ -4950,6 +4997,18 @@ pub(crate) async fn link_can_be_sent(state: &AppState, lead_id: Uuid) -> Result<
         .is_some_and(|context| context.blocked_reason().is_none()))
 }
 
+/// The payer named in `payer` is one of the minor's representatives.
+async fn payer_is_representative(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    payer: Option<&Declaration>,
+) -> Result<bool, sqlx::Error> {
+    let loaded = lead_representatives::load(conn, lead_id)
+        .await?
+        .unwrap_or_default();
+    Ok(lead_representatives::payer_same_person(&loaded.representation, payer).is_some())
+}
+
 async fn payer_has_cabinet_login(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -5001,8 +5060,20 @@ pub(crate) async fn payer_changed_in_tx(
     let Some(previous) = previous else {
         return Ok(());
     };
-    let payer_changed = previous.payer_kind != next.payer_kind
+    let mut payer_changed = previous.payer_kind != next.payer_kind
+        || previous.payer_representative_id != next.payer_representative_id
         || (next.is_third_party() && previous.payer_key() != next.payer_key());
+    // A third-party row of before that named the minor's parent, now
+    // recorded as that representative (owner decision 2026-10-19): the same
+    // person, whose answers in the own cabinet stay.
+    if payer_changed && previous.is_third_party() && next.is_representative() {
+        let loaded = lead_representatives::load(conn, lead_id)
+            .await?
+            .unwrap_or_default();
+        payer_changed =
+            lead_representatives::payer_same_person(&loaded.representation, Some(previous))
+                != next.payer_representative_id;
+    }
     if payer_changed {
         sqlx::query("UPDATE lead_payer_declarations SET organisation_legal_form = NULL, organisation_register_number = NULL, organisation_contact_name = NULL WHERE lead_id = $1")
             .bind(lead_id).execute(&mut *conn).await?;

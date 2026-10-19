@@ -752,16 +752,24 @@ pub(crate) async fn load_on(
 }
 
 /// A parent who also pays is one person (coordinator's addendum 10.1): the
-/// representative of a minor the third-party payer is. The payer must be a
-/// natural person; the two are the same when their e-mail addresses are equal
-/// or — when either has none — first name, last name and date of birth are.
-/// Always `None` for an adult.
+/// representative of a minor who pays. The declaration names the
+/// representative itself (kind `representative`, owner decision 2026-10-19),
+/// or — a third-party row stored before — the third-party payer is that
+/// representative: a natural person whose e-mail address equals the
+/// representative's or — when either has none — whose first name, last name
+/// and date of birth do. Always `None` for an adult.
 pub(crate) fn payer_same_person(
     representation: &Representation,
     payer: Option<&lead_payer::Declaration>,
 ) -> Option<Uuid> {
     if !representation.minor {
         return None;
+    }
+    if let Some(declared) = payer.filter(|payer| payer.is_representative()) {
+        return declared
+            .payer_representative_id
+            .and_then(|id| representation.find(id))
+            .map(|person| person.id);
     }
     let payer = payer.filter(|payer| payer.is_third_party() && !payer.is_organisation())?;
     let address = |value: Option<&str>| {
@@ -2406,8 +2414,11 @@ pub(crate) async fn upsert_my_representative(
     // residence or citizenships are corrected. Match before writing the new
     // representative, so an identity correction cannot detach the payer.
     let parent_payer = match lead_payer::load_declaration(&mut tx, lead_id).await {
+        // A declaration that names the representative (kind
+        // `representative`) holds no copy of its data: nothing to follow.
         Ok(payer) => payer.filter(|payer| {
-            payer_same_person(representation, Some(payer)) == Some(representative_id)
+            payer.is_third_party()
+                && payer_same_person(representation, Some(payer)) == Some(representative_id)
         }),
         Err(error) => return intake::internal(error, "load parent payer"),
     };
@@ -4103,6 +4114,106 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn a_paying_parent_is_named_as_the_representative_never_as_a_third_party() {
+        let mother = complete_person(1, SLOT_REP1, ROLE_LEGAL_REPRESENTATIVE);
+        let father = Representative {
+            id: id(2),
+            slot: Some(SLOT_REP2),
+            first_name: "Ben".into(),
+            email: Some("ben.muster@example.com".into()),
+            ..complete_person(2, SLOT_REP2, ROLE_LEGAL_REPRESENTATIVE)
+        };
+        let minor = Representation {
+            minor: true,
+            answers: Answers::default(),
+            representatives: vec![mother, father],
+        };
+        let representative = |n: u8| lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_REPRESENTATIVE.into(),
+            payer_representative_id: Some(id(n)),
+            ..Default::default()
+        };
+        // The declaration names the parent itself.
+        assert_eq!(
+            payer_same_person(&minor, Some(&representative(2))),
+            Some(id(2))
+        );
+        assert_eq!(payer_same_person(&minor, Some(&representative(9))), None);
+
+        // A third party who is the mother becomes the mother as
+        // representative: nothing of a third party stays on the row.
+        let mut named = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.into(),
+            payer_type: Some(lead_payer::PAYER_TYPE_PERSON.into()),
+            first_name: Some("Anna".into()),
+            last_name: Some("Muster".into()),
+            email: Some("anna.muster@example.com".into()),
+            citizenships: vec!["DE".into()],
+            relationship_kind: Some("parent".into()),
+            invoice_to: Some(lead_payer::INVOICE_TO_PAYER.into()),
+            ..Default::default()
+        };
+        lead_payer::fit_to_representation(&mut named, &minor, None).unwrap();
+        assert!(named.is_representative());
+        assert!(!named.is_third_party());
+        assert_eq!(named.payer_representative_id, Some(id(1)));
+        assert_eq!(named.first_name, None);
+        assert!(named.citizenships.is_empty());
+        assert_eq!(named.relationship_kind, None);
+        assert_eq!(named.invoice_to, None);
+        // Shown with the representative's own data.
+        let shown = named.with_representative(&minor);
+        assert_eq!(shown.payer_name().as_deref(), Some("Anna Muster"));
+        assert_eq!(shown.date_of_birth, NaiveDate::from_ymd_opt(1985, 3, 2));
+        assert_eq!(shown.street.as_deref(), Some("Musterweg 1"));
+        assert_eq!(shown.zip.as_deref(), Some("10115"));
+        assert_eq!(shown.city.as_deref(), Some("Berlin"));
+        assert_eq!(shown.country.as_deref(), Some("DE"));
+        assert_eq!(shown.citizenships, ["DE"]);
+        // The order names her as contracting party, not as Kostenübernehmer.
+        let record = named.representative_payer_record(&minor, None).unwrap();
+        assert_eq!(record.contact_name.as_deref(), Some("Anna Muster"));
+        assert_eq!(record.payer_role.as_deref(), Some("contracting_party"));
+        assert_eq!(record.address_city.as_deref(), Some("Berlin"));
+        assert!(named.order_payer_record(None).is_none());
+
+        // A minor does not pay himself; only a current representative of a
+        // minor is named.
+        let mut own = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            lead_payer::fit_to_representation(&mut own, &minor, None),
+            Err("payer_self_minor")
+        );
+        assert_eq!(
+            lead_payer::fit_to_representation(&mut representative(9), &minor, None),
+            Err("payer_representative_invalid")
+        );
+        let adult = Representation {
+            minor: false,
+            ..minor.clone()
+        };
+        assert_eq!(
+            lead_payer::fit_to_representation(&mut representative(1), &adult, None),
+            Err("payer_representative_not_minor")
+        );
+        assert!(lead_payer::fit_to_representation(&mut own, &adult, None).is_ok());
+        // Somebody else stays a third party.
+        let mut aunt = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.into(),
+            payer_type: Some(lead_payer::PAYER_TYPE_PERSON.into()),
+            first_name: Some("Erika".into()),
+            last_name: Some("Zahler".into()),
+            email: Some("erika@example.com".into()),
+            ..Default::default()
+        };
+        lead_payer::fit_to_representation(&mut aunt, &minor, None).unwrap();
+        assert!(aunt.is_third_party());
     }
 
     #[test]

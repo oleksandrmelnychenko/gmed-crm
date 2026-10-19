@@ -83,7 +83,8 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::invoices::payer::{
-    PAYER_ROLE_COST_BEARER, PayerRecord, is_plausible_email, payer_columns,
+    PAYER_ROLE_CONTRACTING_PARTY, PAYER_ROLE_COST_BEARER, PayerRecord, is_plausible_email,
+    payer_columns,
 };
 use crate::routes::lead_representatives;
 use crate::services::citizenships::{normalize_citizenships, normalize_country_code};
@@ -93,6 +94,15 @@ use gmed_domain::role::Role;
 
 pub const PAYER_KIND_SELF: &str = "self";
 pub const PAYER_KIND_THIRD_PARTY: &str = "third_party";
+/// A minor's parent or legal representative pays (owner decision
+/// 2026-10-19): the representative who signs the contract is the
+/// contracting party (Auftraggeber, "im eigenen Namen zugunsten des
+/// Patienten", § 328 BGB), never a third-party payer — no Kostenübernehmer,
+/// no Schuldbeitritt, no Kostenübernahmeerklärung. The declaration names the
+/// representative by its trusted contact id (`payer_representative_id`); the
+/// identity (name, date of birth, address, citizenships) is the
+/// representative's row and is never copied onto the declaration.
+pub const PAYER_KIND_REPRESENTATIVE: &str = "representative";
 
 /// A third-party payer who is a natural person; the other types are
 /// organisations.
@@ -225,6 +235,9 @@ pub fn router() -> Router<AppState> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Declaration {
     pub payer_kind: String,
+    /// The paying representative of a minor (the trusted contact id), only
+    /// for [`PAYER_KIND_REPRESENTATIVE`].
+    pub payer_representative_id: Option<Uuid>,
     pub acts_on_own_account: bool,
     /// Whether the own-account question was answered at all: by the lead in
     /// the cabinet or by staff. Until then `acts_on_own_account` is only the
@@ -323,7 +336,8 @@ pub(crate) struct Declaration {
     pub payer_funds_description_stated: Option<String>,
 }
 
-const DECLARATION_COLUMNS: &str = "payer_kind, acts_on_own_account, own_account_answered, \
+const DECLARATION_COLUMNS: &str = "payer_kind, payer_representative_id, acts_on_own_account, \
+     own_account_answered, \
      beneficial_owner_name, beneficial_owner_note, source_of_funds, source_of_funds_description, \
      source_of_funds_document_id, payer_type, organisation_name, first_name, last_name, \
      date_of_birth, place_of_birth, street, zip, city, country, citizenships, \
@@ -363,6 +377,50 @@ impl Declaration {
         self.payer_kind == PAYER_KIND_THIRD_PARTY
     }
 
+    /// A minor's parent or legal representative pays
+    /// ([`PAYER_KIND_REPRESENTATIVE`]): no third party.
+    pub(crate) fn is_representative(&self) -> bool {
+        self.payer_kind == PAYER_KIND_REPRESENTATIVE
+    }
+
+    /// The declaration with the paying representative's identity filled in
+    /// from `representation` (read-only: never stored), so readers that show
+    /// the payer — the cabinet, staff, the documents — see the person. Any
+    /// other kind, or a representative no longer on file, is returned as it
+    /// is.
+    pub(crate) fn with_representative(
+        &self,
+        representation: &lead_representatives::Representation,
+    ) -> Self {
+        let Some(person) = self
+            .payer_representative_id
+            .filter(|_| self.is_representative())
+            .and_then(|id| representation.find(id))
+        else {
+            return self.clone();
+        };
+        let present = |value: &str| {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        };
+        Self {
+            payer_type: Some(PAYER_TYPE_PERSON.to_string()),
+            first_name: present(&person.first_name),
+            last_name: present(&person.last_name),
+            date_of_birth: person.date_of_birth,
+            place_of_birth: person.extras.birth_place.clone(),
+            street: person.extras.street.clone(),
+            zip: person.extras.zip.clone(),
+            city: person.extras.city.clone(),
+            country: person.extras.country.clone(),
+            citizenships: person.extras.citizenships.clone(),
+            relationship_kind: Some("parent".to_string()),
+            email: person.email.clone(),
+            phone: person.phone.clone(),
+            ..self.clone()
+        }
+    }
+
     /// A company, an organisation or an insurer pays: no natural person.
     pub(crate) fn is_organisation(&self) -> bool {
         self.is_third_party()
@@ -383,6 +441,7 @@ impl Declaration {
             });
         Self {
             payer_kind,
+            payer_representative_id: row.try_get("payer_representative_id").unwrap_or_default(),
             acts_on_own_account: row.try_get("acts_on_own_account").unwrap_or(true),
             own_account_answered: row.try_get("own_account_answered").unwrap_or(false),
             beneficial_owner_name: row.try_get("beneficial_owner_name").unwrap_or_default(),
@@ -511,6 +570,46 @@ impl Declaration {
         })
     }
 
+    /// The minor's paying representative as the payer record of an order: a
+    /// free-text contact with the representative's name, e-mail, phone and
+    /// address in the role `contracting_party` — the parent who signs is the
+    /// Auftraggeber, not a Kostenübernehmer (owner decision 2026-10-19). For
+    /// the kind [`PAYER_KIND_REPRESENTATIVE`] and for a stored third party
+    /// who is one of the minor's representatives
+    /// ([`lead_representatives::payer_same_person`]); `None` otherwise.
+    pub(crate) fn representative_payer_record(
+        &self,
+        representation: &lead_representatives::Representation,
+        notes: Option<String>,
+    ) -> Option<PayerRecord> {
+        let id = lead_representatives::payer_same_person(representation, Some(self))?;
+        let person = representation.find(id)?;
+        let name = person.name();
+        if name.trim().is_empty() {
+            return None;
+        }
+        let relationship = if person.is_guardian_of_minor(representation.answers.custody()) {
+            "Vormund"
+        } else {
+            "Elternteil"
+        };
+        Some(PayerRecord {
+            payer_patient_id: None,
+            payer_patient_relation_id: None,
+            contact_name: Some(name),
+            contact_email: person.email.clone(),
+            contact_phone: person.phone.clone(),
+            contact_relationship: Some(relationship.to_string()),
+            notes,
+            address_street: person.extras.street.clone(),
+            address_zip: person.extras.zip.clone(),
+            address_city: person.extras.city.clone(),
+            address_country: person.extras.country.clone(),
+            payer_role: Some(PAYER_ROLE_CONTRACTING_PARTY.to_string()),
+            contact_is_organisation: Some(false),
+        })
+    }
+
     /// What the patient card shows of the declaration: who pays, how the
     /// payer is reached and where the invoice goes (section 7 with the tax
     /// fields). None of the GwG answers (own account, beneficial owner,
@@ -520,6 +619,7 @@ impl Declaration {
     pub(crate) fn billing_json(&self) -> Value {
         json!({
             "payer_kind": self.payer_kind,
+            "payer_representative_id": self.payer_representative_id,
             "payer_type": self.payer_type,
             "name": self.payer_name(),
             "organisation_name": self.organisation_name,
@@ -561,12 +661,14 @@ impl Declaration {
             self.zip,
             self.city,
             self.country,
+            self.payer_representative_id,
         ])
     }
 
     fn to_json(&self) -> Value {
         json!({
             "payer_kind": self.payer_kind,
+            "payer_representative_id": self.payer_representative_id,
             "acts_on_own_account": self.acts_on_own_account,
             "own_account_answered": self.own_account_answered,
             "beneficial_owner_name": self.beneficial_owner_name,
@@ -688,6 +790,10 @@ fn blank(value: &Option<String>) -> bool {
 #[serde(deny_unknown_fields)]
 struct DeclarationInput {
     payer_kind: String,
+    /// The paying representative of a minor (trusted contact id), required
+    /// with the kind `representative` and ignored otherwise.
+    #[serde(default)]
+    payer_representative_id: Option<Uuid>,
     /// The own-economic-interest answer. A key that is left out answers
     /// nothing (QA 2026-10-10): the stored answer stays, and an unanswered
     /// question stays unanswered instead of becoming a "yes".
@@ -778,9 +884,24 @@ fn declaration_from_input(
     today: NaiveDate,
 ) -> Result<Declaration, &'static str> {
     let payer_kind = input.payer_kind.trim();
-    if payer_kind != PAYER_KIND_SELF && payer_kind != PAYER_KIND_THIRD_PARTY {
+    if ![
+        PAYER_KIND_SELF,
+        PAYER_KIND_THIRD_PARTY,
+        PAYER_KIND_REPRESENTATIVE,
+    ]
+    .contains(&payer_kind)
+    {
         return Err("payer_kind_invalid");
     }
+    let payer_representative_id = if payer_kind == PAYER_KIND_REPRESENTATIVE {
+        Some(
+            input
+                .payer_representative_id
+                .ok_or("payer_representative_missing")?,
+        )
+    } else {
+        None
+    };
     let source_of_funds = text(&input.source_of_funds, SHORT_TEXT_MAX)?;
     if source_of_funds
         .as_deref()
@@ -790,6 +911,7 @@ fn declaration_from_input(
     }
     let mut declaration = Declaration {
         payer_kind: payer_kind.to_string(),
+        payer_representative_id,
         acts_on_own_account: input
             .acts_on_own_account
             .unwrap_or_else(|| previous.is_none_or(|previous| previous.acts_on_own_account)),
@@ -910,6 +1032,115 @@ fn declaration_from_input(
     Ok(declaration)
 }
 
+/// Who may pay for whom (owner decision 2026-10-19), applied to a validated
+/// declaration before it is stored:
+/// - a minor does not pay himself (`payer_self_minor`): one of the minor's
+///   parents or legal representatives pays (kind `representative`, naming a
+///   current representative of the minor — `rep1` or `rep2` —, else
+///   `payer_representative_invalid`) or a third party;
+/// - a third party who is one of the minor's representatives
+///   ([`lead_representatives::payer_same_person`]) is recorded as that
+///   representative: a paying parent is never a third-party payer;
+/// - an adult has no paying representative (`payer_representative_not_minor`).
+///
+/// `previous` is the stored declaration: the payment route answered for the
+/// same representative stays.
+pub(crate) fn fit_to_representation(
+    declaration: &mut Declaration,
+    representation: &lead_representatives::Representation,
+    previous: Option<&Declaration>,
+) -> Result<(), &'static str> {
+    if !representation.minor {
+        return if declaration.is_representative() {
+            Err("payer_representative_not_minor")
+        } else {
+            Ok(())
+        };
+    }
+    if declaration.payer_kind == PAYER_KIND_SELF {
+        return Err("payer_self_minor");
+    }
+    let id = if declaration.is_representative() {
+        declaration.payer_representative_id
+    } else {
+        lead_representatives::payer_same_person(representation, Some(&*declaration))
+    };
+    let Some(id) = id else {
+        return Ok(());
+    };
+    let current = representation
+        .find(id)
+        .is_some_and(|person| person.slot.is_some());
+    if !current {
+        return if declaration.is_representative() {
+            Err("payer_representative_invalid")
+        } else {
+            Ok(())
+        };
+    }
+    // The stored declaration named the same person: as that representative,
+    // or as a third party of before who is that parent.
+    let same = previous.filter(|previous| {
+        lead_representatives::payer_same_person(representation, Some(previous)) == Some(id)
+    });
+    declaration.become_representative(id, same);
+    Ok(())
+}
+
+impl Declaration {
+    /// The declaration names the minor's representative `id` as payer: no
+    /// identity and nothing of a third party is kept on the row (the
+    /// representative's data are read from the representative), "to the
+    /// payer" is no answer for the invoice, and what was recorded for the
+    /// same person (`same`, the stored declaration) — the payment route, the
+    /// parent's acknowledgement of the notice — stays.
+    fn become_representative(&mut self, id: Uuid, same: Option<&Declaration>) {
+        self.payer_kind = PAYER_KIND_REPRESENTATIVE.to_string();
+        self.payer_representative_id = Some(id);
+        self.payer_type = None;
+        self.organisation_name = None;
+        self.first_name = None;
+        self.last_name = None;
+        self.date_of_birth = None;
+        self.place_of_birth = None;
+        self.street = None;
+        self.zip = None;
+        self.city = None;
+        self.country = None;
+        self.citizenships = Vec::new();
+        self.relationship_kind = None;
+        self.relationship = None;
+        self.email = None;
+        self.phone = None;
+        self.messenger = None;
+        // The parent's own acknowledgement of the notice in the cabinet
+        // stays for the same representative.
+        self.payer_informed_at = same.and_then(|previous| previous.payer_informed_at);
+        self.payer_informed_by = same.and_then(|previous| previous.payer_informed_by);
+        self.contact_consent_at = None;
+        self.cost_estimate_consent_at = None;
+        self.identity_adopted_at = None;
+        self.identity_adopted_key = None;
+        self.self_funds_source = None;
+        self.self_funds_description = None;
+        self.payer_funds_source_stated = None;
+        self.payer_funds_description_stated = None;
+        if self.invoice_to.as_deref() == Some(INVOICE_TO_PAYER) {
+            self.invoice_to = None;
+        }
+        if let Some(previous) = same {
+            self.payment_method = previous.payment_method.clone();
+            self.payment_method_details = previous.payment_method_details.clone();
+            self.account_country = previous.account_country.clone();
+            self.account_holder = previous.account_holder.clone();
+            self.bank_name = previous.bank_name.clone();
+            self.via_third_party = previous.via_third_party;
+            self.via_third_party_details = previous.via_third_party_details.clone();
+        }
+        self.clear_dependent_billing();
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Readiness and the agency signature gate
 // ----------------------------------------------------------------------------
@@ -982,10 +1213,12 @@ pub(crate) struct PayerState {
     pub order_number: Option<String>,
     pub order_signed_patient: bool,
     pub order_signed_agency: bool,
-    /// The third-party payer is one of the minor's legal representatives
-    /// ([`lead_representatives::payer_same_person`]): that parent signs the
-    /// order as the contracting party, so no separate cost assumption
-    /// declaration is asked of them (staff report 2026-10-19).
+    /// One of the minor's legal representatives pays
+    /// ([`lead_representatives::payer_same_person`]): named as such (kind
+    /// `representative`) or, a third-party row of before, matched by e-mail or
+    /// name and date of birth. That parent signs the order as the contracting
+    /// party, so no separate cost assumption declaration is asked of them
+    /// (staff report and owner decision 2026-10-19).
     pub paying_parent: bool,
     /// No trigger of the enhanced check: the source of funds is not asked
     /// and not required (2026-10-19). Loaded only while it is not stated.
@@ -1084,6 +1317,11 @@ impl PayerState {
             return vec![PayerReason::DeclarationMissing];
         };
         let mut reasons = declaration.missing_with(!self.funds_optional);
+        // The representative named as payer is no longer one of the minor's
+        // (removed, or the patient came of age): somebody else must be named.
+        if declaration.is_representative() && !self.paying_parent {
+            reasons.push(PayerReason::PayerIdentityIncomplete);
+        }
         if declaration.is_third_party() && !self.paying_parent {
             match (
                 self.cost_assumption.document_id,
@@ -1243,9 +1481,12 @@ pub(crate) async fn load_payer_state(
         state.patient_id = row.try_get("patient_id").unwrap_or_default();
         state.created_at = row.try_get("created_at").ok().flatten();
         state.updated_at = row.try_get("updated_at").ok().flatten();
-        // A parent of the minor who pays is no separate cost bearer.
+        // A parent of the minor who pays is no separate cost bearer: named as
+        // such (kind `representative`), or a third-party row of before that
+        // names one of the representatives.
         if state.declaration.as_ref().is_some_and(|declaration| {
-            declaration.is_third_party() && !declaration.is_organisation()
+            declaration.is_representative()
+                || (declaration.is_third_party() && !declaration.is_organisation())
         }) && let Some(loaded) = lead_representatives::load(&mut *conn, lead_id).await?
         {
             state.paying_parent = lead_representatives::payer_same_person(
@@ -1557,8 +1798,47 @@ pub(crate) struct CostAssumptionPayer {
     pub identity_version: String,
 }
 
+/// 422 `payer_is_representative`: the minor's parent or legal representative
+/// pays and signs as the contracting party; no document of a third-party
+/// payer (Kostenübernahmeerklärung, the payer's copy of the estimate, the
+/// payer's self-disclosure) is made for that parent.
+pub(crate) fn payer_is_representative() -> Response {
+    error(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "payer_is_representative",
+        "A parent or legal representative of the minor pays as the contracting party; \
+         no cost assumption declaration is made",
+    )
+}
+
+/// Whether the minor's parent or legal representative pays for the lead (or
+/// the open lead of `order_id`): named as such, or a third-party row of before
+/// that names one of the representatives. `false` when no open lead is
+/// involved.
+pub(crate) async fn representative_pays(
+    conn: &mut PgConnection,
+    lead_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+) -> Result<bool, sqlx::Error> {
+    let lead_id = match (lead_id, order_id) {
+        (Some(lead_id), _) => Some(lead_id),
+        (None, Some(order_id)) => open_lead_of_order(conn, order_id).await?,
+        (None, None) => None,
+    };
+    let Some(lead_id) = lead_id else {
+        return Ok(false);
+    };
+    let state = load_payer_state(conn, lead_id).await?;
+    Ok(state.paying_parent
+        || state
+            .declaration
+            .as_ref()
+            .is_some_and(Declaration::is_representative))
+}
+
 /// For a document of a lead (or of a lead's order): `Ok(None)` when no lead
-/// is involved, `Err` with a 422 when the lead has no third-party payer.
+/// is involved, `Err` with a 422 when the lead has no third-party payer or
+/// the minor's parent pays ([`payer_is_representative`]).
 pub(crate) async fn cost_assumption_payer(
     db: &gmed_db::DbPool,
     lead_id: Option<Uuid>,
@@ -1581,6 +1861,16 @@ pub(crate) async fn cost_assumption_payer(
     let state = load_payer_state(&mut conn, lead_id)
         .await
         .map_err(|error| database_error(error, "load cost assumption payer"))?;
+    // A minor's paying parent is the contracting party, never a
+    // Kostenübernehmer (owner decision 2026-10-19).
+    if state.paying_parent
+        || state
+            .declaration
+            .as_ref()
+            .is_some_and(Declaration::is_representative)
+    {
+        return Err(payer_is_representative());
+    }
     let third_party = state
         .declaration
         .as_ref()
@@ -1796,6 +2086,27 @@ async fn get_payer_declaration(
     payload["status"]["contact_consent_required"] = required.clone();
     payload["status"]["cost_estimate_consent_required"] = required.clone();
     payload["status"]["payer_package"] = package;
+    // Who may be named as paying representative, and who is (owner decision
+    // 2026-10-19): the minor's current parents or legal representatives with
+    // their data as the representative block holds them.
+    payload["status"]["minor"] = json!(representation.minor);
+    payload["status"]["representatives"] = json!(
+        representation
+            .representatives
+            .iter()
+            .filter(|person| representation.minor && person.slot.is_some())
+            .map(|person| representative_json(person, &representation))
+            .collect::<Vec<_>>()
+    );
+    payload["status"]["payer_representative"] = payer
+        .declaration
+        .as_ref()
+        .and_then(|declaration| {
+            lead_representatives::payer_same_person(&representation, Some(declaration))
+        })
+        .and_then(|id| representation.find(id))
+        .map(|person| representative_json(person, &representation))
+        .unwrap_or(Value::Null);
     if payload["declaration"].is_object() {
         payload["declaration"]["contact_consent_required"] = required.clone();
         payload["declaration"]["cost_estimate_consent_required"] = required;
@@ -1803,18 +2114,45 @@ async fn get_payer_declaration(
     Json(payload).into_response()
 }
 
+/// A representative of the minor as the payer section shows it: the full
+/// name, the date of birth, the structured address and the citizenships,
+/// read-only (they are edited in the representative block).
+fn representative_json(
+    person: &lead_representatives::Representative,
+    representation: &lead_representatives::Representation,
+) -> Value {
+    json!({
+        "id": person.id,
+        "slot": person.slot,
+        "relation": person.relation,
+        "guardian": person.is_guardian_of_minor(representation.answers.custody()),
+        "name": person.name(),
+        "first_name": person.first_name,
+        "last_name": person.last_name,
+        "date_of_birth": person.date_of_birth.map(|date| date.format("%Y-%m-%d").to_string()),
+        "street": person.extras.street,
+        "zip": person.extras.zip,
+        "city": person.extras.city,
+        "country": person.extras.country,
+        "citizenships": person.extras.citizenships,
+        "email": person.email,
+        "phone": person.phone,
+    })
+}
+
 /// Whether the lead's consent that GMED passes the contact on to the payer
 /// is needed (`contact_consent_required` of the staff JSON, QA 2026-10-06):
-/// not when the third-party payer is a representative of the minor who holds
-/// a cabinet login — that parent is the one who pays and answers in the own
-/// cabinet ([`lead_representatives::payer_same_person`]); otherwise it is.
+/// not when a representative of the minor pays
+/// ([`lead_representatives::payer_same_person`]) — that parent is the
+/// contracting party; otherwise it is.
 pub(crate) fn contact_consent_required(
     declaration: Option<&Declaration>,
     representation: &lead_representatives::Representation,
 ) -> bool {
-    !lead_representatives::payer_same_person(representation, declaration)
-        .and_then(|id| representation.find(id))
-        .is_some_and(lead_representatives::Representative::has_login)
+    // Any paying parent of the minor, with or without a login of the own, is
+    // the contracting party (owner decision 2026-10-19): nobody else to
+    // contact or to pass the cost estimate on to.
+    lead_representatives::payer_same_person(representation, declaration).is_none()
 }
 
 async fn save_payer_declaration(
@@ -1876,6 +2214,24 @@ async fn save_payer_declaration(
                 );
             }
         };
+    // A minor does not pay himself; a paying parent is the representative,
+    // never a third party (owner decision 2026-10-19).
+    let representation = match lead_representatives::load(&mut tx, lead_id).await {
+        Ok(loaded) => loaded.unwrap_or_default().representation,
+        Err(error) => return database_error(error, "load payer representatives"),
+    };
+    if let Err(code) = fit_to_representation(&mut declaration, &representation, previous.as_ref()) {
+        let message = match code {
+            "payer_self_minor" => {
+                "A minor does not pay: a parent or legal representative, or a third party pays"
+            }
+            "payer_representative_not_minor" => {
+                "Only a minor's parent or legal representative can be named as paying representative"
+            }
+            _ => "Choose a current parent or legal representative of the minor",
+        };
+        return error(StatusCode::UNPROCESSABLE_ENTITY, code, message);
+    }
     // The staff form states the own-account answer once someone chose it; a
     // left-out key keeps what is stored (an unanswered question included).
     declaration.own_account_answered = body.acts_on_own_account.is_some()
@@ -2063,13 +2419,15 @@ async fn store_declaration(
                bank_name, via_third_party, via_third_party_details, identity_adopted_at,
                identity_adopted_key, cost_estimate_consent_at, self_funds_source,
                self_funds_description, payer_funds_source_stated,
-               payer_funds_description_stated, messenger)
+               payer_funds_description_stated, messenger, payer_representative_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
                    $16, $17, $18, $19, $20, $23, $24, clock_timestamp(), $21, $21, $25,
                    $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
-                   $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53)
+                   $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53,
+                   $54)
            ON CONFLICT (lead_id) DO UPDATE SET
                payer_kind = EXCLUDED.payer_kind,
+               payer_representative_id = EXCLUDED.payer_representative_id,
                payer_type = EXCLUDED.payer_type,
                organisation_name = EXCLUDED.organisation_name,
                relationship_kind = EXCLUDED.relationship_kind,
@@ -2179,6 +2537,7 @@ async fn store_declaration(
     .bind(&declaration.payer_funds_source_stated)
     .bind(&declaration.payer_funds_description_stated)
     .bind(&declaration.messenger)
+    .bind(declaration.payer_representative_id)
     .execute(conn)
     .await
     .map(|_| ())
@@ -2205,6 +2564,9 @@ async fn store_declaration(
 #[serde(deny_unknown_fields)]
 pub(crate) struct PortalPayerInput {
     pub(crate) payer_kind: String,
+    /// With the kind `representative`: which parent or guardian of the minor
+    /// pays (the trusted contact id of the representative).
+    pub(crate) payer_representative_id: Option<Uuid>,
     /// Who the third party is; left out means a person (older clients).
     payer_type: Option<String>,
     /// Name of the company, organisation or insurer.
@@ -2259,7 +2621,10 @@ impl From<sqlx::Error> for PortalPayerError {
 /// The cabinet field a validation code of [`declaration_from_input`] names.
 fn portal_field_of(code: &str) -> &'static str {
     match code {
-        "payer_kind_invalid" => "payer_kind",
+        "payer_kind_invalid" | "payer_self_minor" => "payer_kind",
+        "payer_representative_missing"
+        | "payer_representative_invalid"
+        | "payer_representative_not_minor" => "payer_representative_id",
         "payer_type_invalid" => "payer_type",
         "payer_organisation_name_too_long" => "payer_organisation_name",
         "payer_relationship_kind_invalid" => "payer_relationship_kind",
@@ -2342,6 +2707,10 @@ impl Declaration {
         // without one stays what it was before the key existed.
         if let Some(messenger) = &self.messenger {
             value["messenger"] = json!(messenger);
+        }
+        // Only for a paying representative, for the same reason.
+        if let Some(id) = self.payer_representative_id {
+            value["payer_representative_id"] = json!(id);
         }
         value
     }
@@ -2588,6 +2957,7 @@ fn declaration_from_portal(
     let own_account_sent = input.acts_on_own_account.is_some() || input.beneficial_owner.is_some();
     let staff = DeclarationInput {
         payer_kind: input.payer_kind.clone(),
+        payer_representative_id: input.payer_representative_id,
         acts_on_own_account: Some(
             input
                 .acts_on_own_account
@@ -2685,6 +3055,18 @@ pub(crate) async fn save_from_portal(
                 field: portal_field_of(code),
             }
         })?;
+    // "Ich zahle (als Elternteil)" / "Der andere Elternteil zahlt": the
+    // representative, never a third party (owner decision 2026-10-19).
+    let representation = lead_representatives::load(conn, lead_id)
+        .await?
+        .unwrap_or_default()
+        .representation;
+    fit_to_representation(&mut declaration, &representation, previous.as_ref()).map_err(
+        |code| PortalPayerError::Invalid {
+            code,
+            field: portal_field_of(code),
+        },
+    )?;
     if previous.as_ref() == Some(&declaration) {
         return Ok(None);
     }
@@ -2817,9 +3199,12 @@ pub(crate) async fn store_payment_route(
 
 /// The declaration is the source of the payer of the lead's orders while the
 /// lead is open: a third party becomes the order payer (role `cost_bearer`);
-/// a self-payer clears a cost bearer and keeps any other payer (for example
-/// the parents as contracting party). Each change is audited like the order
-/// payer dialog (`set_order_payer`).
+/// a minor's paying parent or legal representative — named as such, or a
+/// third-party row of before that names one — becomes the order payer in the
+/// role `contracting_party` (owner decision 2026-10-19: the Auftraggeber, no
+/// Kostenübernehmer); a self-payer clears a cost bearer and keeps any other
+/// payer (for example the parents as contracting party). Each change is
+/// audited like the order payer dialog (`set_order_payer`).
 async fn sync_order_payers(
     tx: &mut PgConnection,
     lead_id: Uuid,
@@ -2833,10 +3218,28 @@ async fn sync_order_payers(
     .bind(lead_id)
     .fetch_all(&mut *tx)
     .await?;
+    if orders.is_empty() {
+        return Ok(());
+    }
+    let representation = if declaration.is_representative() || declaration.is_third_party() {
+        lead_representatives::load(&mut *tx, lead_id)
+            .await?
+            .unwrap_or_default()
+            .representation
+    } else {
+        lead_representatives::Representation::default()
+    };
+    let parent_pays =
+        lead_representatives::payer_same_person(&representation, Some(declaration)).is_some();
     for order in orders {
         let order_id: Uuid = order.try_get("id")?;
         let previous = PayerRecord::from_row(&order, "");
-        let next = if declaration.is_third_party() {
+        let next = if parent_pays {
+            match declaration.representative_payer_record(&representation, previous.notes.clone()) {
+                Some(next) => next,
+                None => continue,
+            }
+        } else if declaration.is_third_party() {
             match declaration.order_payer_record(previous.notes.clone()) {
                 Some(next) => next,
                 None => continue,
@@ -3241,6 +3644,7 @@ impl Declaration {
             self.invoice_to = None;
         }
         let same_payer = previous.payer_kind == self.payer_kind
+            && previous.payer_representative_id == self.payer_representative_id
             && (!self.is_third_party() || previous.payer_key() == self.payer_key());
         if !same_payer {
             self.clear_payment_route();
@@ -3859,6 +4263,7 @@ mod tests {
     fn input(kind: &str) -> DeclarationInput {
         DeclarationInput {
             payer_kind: kind.to_string(),
+            payer_representative_id: None,
             acts_on_own_account: Some(true),
             beneficial_owner_name: None,
             beneficial_owner_note: None,

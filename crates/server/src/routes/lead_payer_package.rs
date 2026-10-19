@@ -554,6 +554,19 @@ impl Facts {
         if self.deleted {
             return Some("lead_deleted");
         }
+        // A minor's paying parent — named as such, or a third party of before
+        // who is that parent — is the contracting party: no
+        // Kostenübernahmeerklärung, no payer's self-disclosure (owner decision
+        // 2026-10-19).
+        if self.payer.paying_parent
+            || self
+                .payer
+                .declaration
+                .as_ref()
+                .is_some_and(Declaration::is_representative)
+        {
+            return Some("payer_is_representative");
+        }
         let (Some(declaration), Some(subject)) = (self.third_party(), self.subject.as_ref()) else {
             return Some("no_third_party");
         };

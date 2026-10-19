@@ -5,7 +5,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { normalizeLeadPortalEnhancedDetails, normalizeLeadPortalIntake, type LeadPortalEnhancedDetails, type LeadPortalIntake } from "../data/lead-portal-intake-api";
 import { payerDeclarationChanged } from "../model/use-lead-payer-declaration";
-import type { PayerDeclaration, PayerDeclarationStatus } from "../model/lead-payer";
+import {
+  chosenPayerRepresentative,
+  payerDeclarationPayload,
+  payerDeclarationToForm,
+  payerFormMissing,
+  payerKindOptions,
+  type PayerDeclaration,
+  type PayerDeclarationStatus,
+  type PayerRepresentative,
+} from "../model/lead-payer";
 import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
 
 const tx = (ru: string) => ru;
@@ -516,6 +525,77 @@ describe("reload of the payer declaration on cabinet changes", () => {
     expect(payerDeclarationChanged("identification")).toBe(false);
     expect(payerDeclarationChanged("representation")).toBe(false);
     expect(payerDeclarationChanged(undefined)).toBe(false);
+  });
+});
+
+describe("LeadPayerDeclarationSection: a minor's parent or legal representative pays (2026-10-19)", () => {
+  const anna: PayerRepresentative = {
+    id: "rep-anna",
+    slot: "rep1",
+    relation: "mother",
+    guardian: false,
+    name: "Anna Muster",
+    first_name: "Anna",
+    last_name: "Muster",
+    date_of_birth: "1985-03-02",
+    street: "Musterweg 1",
+    zip: "10115",
+    city: "Berlin",
+    country: "DE",
+    citizenships: ["DE", "UA"],
+    email: "anna@example.com",
+    phone: null,
+  };
+  const ben: PayerRepresentative = { ...anna, id: "rep-ben", slot: "rep2", relation: "father", name: "Ben Muster", first_name: "Ben" };
+  const representativePays: PayerDeclaration = {
+    ...selfPayer,
+    payer_kind: "representative",
+    payer_representative_id: "rep-anna",
+  };
+  const minorStatus = { minor: true, representatives: [anna, ben], payer_representative: anna, cost_assumption: { required: false, document_id: null, current: false, signed: false, signed_at: null } };
+
+  it("offers the parent and a third party for a minor, never the patient", () => {
+    const html = renderSection(representativePays, tx, minorStatus);
+    expect(html).toContain("Платит родитель / законный представитель");
+    expect(html).toContain("Платит третье лицо");
+    expect(html).not.toContain("Пациент платит сам");
+    expect(html).toContain('checked="" value="representative"');
+    // The parent chosen among the minor's representatives, by name.
+    const select = html.slice(html.indexOf('data-testid="lead-payer-representative"'));
+    expect(select).toContain('aria-label="Кто из родителей / представителей платит"');
+    expect(select).toContain('value="rep-anna"');
+    const german = renderSection(representativePays, de, minorStatus);
+    expect(german).toContain("Ein Elternteil / gesetzlicher Vertreter zahlt");
+    // An adult keeps "the patient pays".
+    expect(renderSection(selfPayer)).toContain("Пациент платит сам");
+  });
+
+  it("shows the paying parent read-only with the data of the representative block", () => {
+    const html = renderSection(representativePays, tx, minorStatus);
+    const start = html.indexOf('data-testid="lead-payer-representative-card"');
+    expect(start).toBeGreaterThan(-1);
+    const card = html.slice(start);
+    expect(card).toContain("Anna Muster");
+    expect(card).toContain("02.03.1985");
+    expect(card).toContain("Musterweg 1");
+    expect(card).toContain("10115");
+    expect(card).toContain("Berlin");
+    expect(card).toContain("блоке законных представителей");
+    // No third-party form, no "paying parent" note of the old third-party rows.
+    expect(html).not.toContain("Плательщик (третье лицо)");
+    expect(html).not.toContain('data-testid="lead-payer-paying-parent"');
+  });
+
+  it("names the representative by id only in the save body", () => {
+    const form = { ...payerDeclarationToForm(representativePays), firstName: "Typed" };
+    const body = payerDeclarationPayload(form);
+    expect(body.payer_kind).toBe("representative");
+    expect(body.payer_representative_id).toBe("rep-anna");
+    expect(body.first_name).toBeNull();
+    expect(body.street).toBeNull();
+    expect(payerFormMissing({ ...form, representativeId: "" })).toContain("payer_identity_incomplete");
+    expect(chosenPayerRepresentative({ kind: "representative", representativeId: "rep-ben" }, minorStatus)?.name).toBe("Ben Muster");
+    expect(payerKindOptions(true, "self", tx).map(([kind]) => kind)).toEqual(["representative", "third_party", "self"]);
   });
 });
 

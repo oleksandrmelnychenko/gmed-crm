@@ -332,7 +332,7 @@ export function gwgLegalAnswers(identification: GwgLegalAnswerSource, tx: Tx, la
  * the cabinet in one.
  */
 export type GwgPayerStatement = {
-  payer_kind?: "self" | "third_party" | null;
+  payer_kind?: "self" | "third_party" | "representative" | null;
   acts_on_own_account?: boolean | null;
   /**
    * False while nobody answered the question: `acts_on_own_account` is then

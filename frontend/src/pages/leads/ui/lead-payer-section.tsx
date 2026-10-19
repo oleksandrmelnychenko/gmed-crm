@@ -24,7 +24,7 @@ import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { StatusChip } from "@/components/ui/status-chip";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { CountrySelect } from "@/components/ui/country-select";
+import { CountrySelect, countryLabel } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { ApiRequestError } from "@/lib/api";
 import { isValidEmailAddress } from "@/lib/contact-validation";
@@ -54,12 +54,14 @@ import {
   PAYER_SECTION_ID,
   PAYER_TYPES,
   SOURCE_OF_FUNDS,
+  chosenPayerRepresentative,
   costEstimateConsentLine,
   invoiceTaxFieldsShown,
   isOrganisationPayerForm,
   payerDeclarationPrefillForm,
   payerDeclarationToForm,
   payerFormMissing,
+  payerKindOptions,
   payerReasonLabel,
   payerRelationshipKindLabel,
   payerRelationshipTextShown,
@@ -73,6 +75,7 @@ import {
   type PayerDeclarationForm,
   type PayerDeclarationResponse,
   type PayerDeclarationStatus,
+  type PayerRepresentative,
   type SignatureStepState,
   type SourceOfFunds,
   type Tx,
@@ -143,6 +146,44 @@ function PayerReadOnlyStatement({ label, value, testId }: { label: string; value
     <div className="min-w-0" data-testid={testId}>
       <dt className="text-[11.5px] font-medium leading-snug text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 break-words text-[13px] font-medium leading-5 text-foreground">{value || "—"}</dd>
+    </div>
+  );
+}
+
+/**
+ * The minor's parent or legal representative who pays, read-only: the full
+ * name, the date of birth, the address in its fields and the citizenships as
+ * the representative block holds them (owner decision 2026-10-19). The
+ * parent signs as the contracting party; no Kostenübernahmeerklärung.
+ */
+export function PayerRepresentativeCard({ person, lang, tx }: { person: PayerRepresentative; lang: string; tx: Tx }) {
+  const rows: Array<[string, string, string]> = [
+    ["name", tx("Имя и фамилия", "Vor- und Nachname"), person.name],
+    ["date_of_birth", tx("Дата рождения", "Geburtsdatum"), person.date_of_birth ? formatAppDate(person.date_of_birth) : ""],
+    ["street", tx("Улица и дом", "Straße und Hausnummer"), person.street ?? ""],
+    ["zip", tx("Почтовый индекс", "Postleitzahl"), person.zip ?? ""],
+    ["city", tx("Город", "Ort"), person.city ?? ""],
+    ["country", tx("Страна проживания", "Wohnsitzland"), countryLabel(person.country, lang)],
+    ["citizenships", tx("Гражданство", "Staatsangehörigkeit"), person.citizenships.map((code) => countryLabel(code, lang)).join(", ")],
+  ];
+  return (
+    <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5" data-testid="lead-payer-representative-card">
+      <p className="text-[13px] font-medium text-foreground">
+        {person.guardian
+          ? tx("Платит законный представитель (опекун) — сторона договора", "Es zahlt der Vormund – Vertragspartei")
+          : tx("Платит родитель — законный представитель и сторона договора", "Es zahlt ein Elternteil – gesetzlicher Vertreter und Vertragspartei")}
+      </p>
+      <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+        {rows.map(([key, label, value]) => (
+          <PayerReadOnlyStatement key={key} label={label} value={value} testId={`lead-payer-representative-${key}`} />
+        ))}
+      </dl>
+      <p className="text-xs leading-5 text-muted-foreground">
+        {tx(
+          "Данные меняются в блоке законных представителей. Отдельное согласие плательщика (Kostenübernahmeerklärung) не нужно: родитель подписывает договор сам.",
+          "Die Angaben werden im Block der gesetzlichen Vertreter geändert. Eine Kostenübernahmeerklärung ist nicht nötig: der Elternteil unterschreibt den Vertrag selbst.",
+        )}
+      </p>
     </div>
   );
 }
@@ -304,6 +345,19 @@ export function LeadPayerDeclarationSection({
       // Another payer or e-mail revokes the link; a third party may make it sendable.
       if (activeLeadRef.current === leadId && autosaveRef.current === queue) void payerLink?.reload();
     });
+  };
+
+  // A minor's parent or legal representative pays, never the child (owner
+  // decision 2026-10-19); the parent is named, the data are the representative block's.
+  const minor = data?.status.minor === true;
+  const representatives = data?.status.representatives ?? [];
+  const chosenRepresentative = chosenPayerRepresentative(form, data?.status);
+  const chooseKind = (kind: PayerDeclarationForm["kind"]) => {
+    patch("kind", kind);
+    // One parent on file: that one; otherwise staff choose.
+    if (kind === "representative" && !formRef.current.representativeId && representatives.length === 1) {
+      patch("representativeId", representatives[0].id);
+    }
   };
 
   const readOnly = disabled || !canEdit || busy !== null || (loading && !data);
@@ -479,10 +533,7 @@ export function LeadPayerDeclarationSection({
         ) : null}
 
         <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg bg-muted/40 p-1">
-          {([
-            ["self", tx("Пациент платит сам", "Patient zahlt selbst")],
-            ["third_party", tx("Платит третье лицо", "Ein Dritter zahlt")],
-          ] as const).map(([kind, label]) => (
+          {payerKindOptions(minor, form.kind, tx).map(([kind, label]) => (
             <label
               key={kind}
               className={cn(
@@ -498,12 +549,42 @@ export function LeadPayerDeclarationSection({
                 value={kind}
                 checked={form.kind === kind}
                 disabled={readOnly}
-                onChange={() => patch("kind", kind)}
+                onChange={() => chooseKind(kind)}
               />
               {label}
             </label>
           ))}
         </div>
+        {form.kind === "representative" ? (
+          <div className="space-y-3" data-testid="lead-payer-representative">
+            {representatives.length > 0 ? (
+              <PayerField label={tx("Кто из родителей / представителей платит", "Welcher Elternteil / Vertreter zahlt")} className="max-w-md" required>
+                <NativeComboboxSelect
+                  value={form.representativeId}
+                  className={selectClass}
+                  disabled={readOnly}
+                  aria-label={tx("Кто из родителей / представителей платит", "Welcher Elternteil / Vertreter zahlt")}
+                  onChange={(event) => patch("representativeId", event.target.value)}
+                >
+                  <option value="">{tx("Выберите", "Auswählen")}</option>
+                  {representatives.map((person) => (
+                    <option key={person.id} value={person.id}>{person.name || "—"}</option>
+                  ))}
+                </NativeComboboxSelect>
+              </PayerField>
+            ) : (
+              <Banner tone="warning">
+                {tx(
+                  "Сначала укажите родителей / законных представителей ребёнка в блоке представителей.",
+                  "Bitte zuerst die Eltern / gesetzlichen Vertreter des Kindes im Vertreterblock erfassen.",
+                )}
+              </Banner>
+            )}
+            {chosenRepresentative ? (
+              <PayerRepresentativeCard person={chosenRepresentative} lang={lang} tx={tx} />
+            ) : null}
+          </div>
+        ) : null}
         {form.kind === "third_party" && data?.status.paying_parent ? (
           <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800" data-testid="lead-payer-paying-parent">
             {tx(

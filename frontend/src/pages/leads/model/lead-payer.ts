@@ -18,7 +18,35 @@ import { normalizePayerPackageSummary, type PayerPackageSummary } from "../data/
 
 export type Tx = (ru: string, de: string) => string;
 
-export type PayerKind = "self" | "third_party";
+/**
+ * `representative`: a minor's parent or legal representative pays (owner
+ * decision 2026-10-19). That parent signs as the contracting party —
+ * Auftraggeber in the own name for the patient (§ 328 BGB) — and is never a
+ * third-party payer: no Kostenübernehmer, no Kostenübernahmeerklärung. The
+ * declaration names the representative only by id; the person's data are
+ * the representative block's.
+ */
+export type PayerKind = "self" | "third_party" | "representative";
+
+/** A minor's parent or legal representative as the payer section shows it (read-only). */
+export type PayerRepresentative = {
+  id: string;
+  slot: string | null;
+  relation: string | null;
+  /** A guardian (Vormund) rather than a parent. */
+  guardian: boolean;
+  name: string;
+  first_name: string;
+  last_name: string;
+  date_of_birth: string | null;
+  street: string | null;
+  zip: string | null;
+  city: string | null;
+  country: string | null;
+  citizenships: string[];
+  email: string | null;
+  phone: string | null;
+};
 
 /** What a third-party payer is; every type but `person` is an organisation. */
 export const PAYER_TYPES = ["person", "company", "organisation", "insurance"] as const;
@@ -54,6 +82,8 @@ export type SourceOfFunds = (typeof SOURCE_OF_FUNDS)[number];
 
 export type PayerDeclaration = {
   payer_kind: PayerKind;
+  /** The paying representative of a minor (kind `representative`); absent on an older server. */
+  payer_representative_id?: string | null;
   acts_on_own_account: boolean;
   /** False until the lead cabinet or staff gave the answer; absent on an older server. */
   own_account_answered?: boolean;
@@ -146,8 +176,17 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type PayerDeclarationStatus = {
   complete: boolean;
   missing: string[];
-  /** The third-party payer is one of the minor's legal representatives: no separate cost assumption. */
+  /**
+   * One of the minor's legal representatives pays — named as such, or a
+   * third-party row of before that names one: no separate cost assumption.
+   */
   paying_parent?: boolean;
+  /** The lead is a minor: the patient does not pay himself (2026-10-19). */
+  minor?: boolean;
+  /** The minor's current parents or legal representatives who can be named as payer. */
+  representatives?: PayerRepresentative[];
+  /** The representative who pays, with the data of the representative block; null otherwise. */
+  payer_representative?: PayerRepresentative | null;
   /** The source of funds is required: a trigger of the enhanced check (2026-10-19); absent on an older server. */
   source_of_funds_required?: boolean;
   cost_assumption: {
@@ -197,6 +236,31 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 const stringList = (value: unknown) =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 
+const textOrNull = (value: unknown) => (typeof value === "string" ? value : null);
+
+/** A representative of the status, or `null` for anything else. */
+export function normalizePayerRepresentative(value: unknown): PayerRepresentative | null {
+  const record = asRecord(value);
+  if (!record || typeof record.id !== "string") return null;
+  return {
+    id: record.id,
+    slot: textOrNull(record.slot),
+    relation: textOrNull(record.relation),
+    guardian: record.guardian === true,
+    name: typeof record.name === "string" ? record.name : "",
+    first_name: typeof record.first_name === "string" ? record.first_name : "",
+    last_name: typeof record.last_name === "string" ? record.last_name : "",
+    date_of_birth: textOrNull(record.date_of_birth),
+    street: textOrNull(record.street),
+    zip: textOrNull(record.zip),
+    city: textOrNull(record.city),
+    country: textOrNull(record.country),
+    citizenships: stringList(record.citizenships),
+    email: textOrNull(record.email),
+    phone: textOrNull(record.phone),
+  };
+}
+
 /**
  * The server response with every status field present; `null` for anything
  * that is not a payer declaration response (e.g. an unexpected proxy reply).
@@ -218,6 +282,13 @@ export function normalizePayerDeclarationResponse(value: unknown): PayerDeclarat
       complete: status.complete === true,
       missing: stringList(status.missing),
       paying_parent: status.paying_parent === true,
+      minor: status.minor === true,
+      representatives: Array.isArray(status.representatives)
+        ? status.representatives
+            .map(normalizePayerRepresentative)
+            .filter((person): person is PayerRepresentative => person !== null)
+        : [],
+      payer_representative: normalizePayerRepresentative(status.payer_representative),
       source_of_funds_required: status.source_of_funds_required !== false,
       cost_assumption: {
         required: costAssumption.required === true,
@@ -255,6 +326,8 @@ export function normalizePayerDeclarationResponse(value: unknown): PayerDeclarat
 
 export type PayerDeclarationForm = {
   kind: PayerKind | "";
+  /** The paying representative of a minor (kind `representative`): the trusted contact id. */
+  representativeId: string;
   /**
    * The own-economic-interest answer; `null` while nobody (lead or staff)
    * answered it — the stored `acts_on_own_account` is then only the column
@@ -315,6 +388,7 @@ export type PayerTypeSupport = "supported" | "unsupported" | "unknown";
 
 export const EMPTY_PAYER_DECLARATION_FORM: PayerDeclarationForm = {
   kind: "",
+  representativeId: "",
   actsOnOwnAccount: null,
   beneficialOwnerName: "",
   beneficialOwnerNote: "",
@@ -400,6 +474,7 @@ export function payerDeclarationToForm(
   if (!declaration) return { ...EMPTY_PAYER_DECLARATION_FORM };
   return {
     kind: declaration.payer_kind,
+    representativeId: declaration.payer_kind === "representative" ? declaration.payer_representative_id ?? "" : "",
     // Unanswered (the stored value is only the default): nothing is ticked.
     // An older server without the flag keeps showing the stored value.
     actsOnOwnAccount: declaration.own_account_answered === false ? null : declaration.acts_on_own_account,
@@ -571,8 +646,14 @@ export function payerDeclarationPayload(form: PayerDeclarationForm) {
     ? {}
     : { acts_on_own_account: form.actsOnOwnAccount };
   const namesOwner = form.actsOnOwnAccount === false;
+  // A paying representative is named by id only: the person's data are the
+  // representative block's (owner decision 2026-10-19).
+  const representative: { payer_representative_id?: string | null } = form.kind === "representative"
+    ? { payer_representative_id: form.representativeId || null }
+    : {};
   return {
     payer_kind: form.kind || "self",
+    ...representative,
     ...ownAccount,
     beneficial_owner_name: namesOwner ? text(form.beneficialOwnerName) : null,
     beneficial_owner_note: namesOwner ? text(form.beneficialOwnerNote) : null,
@@ -609,7 +690,7 @@ export function withPayerDeclarationField<K extends keyof PayerDeclarationForm>(
     const body = payerDeclarationPayload(draft);
     return JSON.stringify([
       body.payer_kind, body.payer_type ?? "person", body.organisation_name ?? null,
-      body.first_name, body.last_name, body.date_of_birth,
+      body.first_name, body.last_name, body.date_of_birth, body.payer_representative_id ?? null,
     ]);
   };
   return identity(next) === identity(form) ? next : { ...next, payerInformed: false };
@@ -941,5 +1022,39 @@ export function payerFormMissing(form: PayerDeclarationForm): string[] {
     }
     if (!form.payerInformed) missing.push("payer_not_informed");
   }
+  // A paying representative is named; the data are the representative block's.
+  if (form.kind === "representative" && !form.representativeId) {
+    missing.push("payer_identity_incomplete");
+  }
   return missing;
+}
+
+/**
+ * The answers of "Кто платит" staff may choose (owner decision 2026-10-19):
+ * for a minor a parent or legal representative pays, or a third party — the
+ * patient himself only while it is the stored answer of before; for an adult
+ * the patient or a third party.
+ */
+export function payerKindOptions(minor: boolean, current: PayerKind | "", tx: Tx): Array<[PayerKind, string]> {
+  const self: [PayerKind, string] = ["self", tx("Пациент платит сам", "Patient zahlt selbst")];
+  const third: [PayerKind, string] = ["third_party", tx("Платит третье лицо", "Ein Dritter zahlt")];
+  if (!minor) return [self, third];
+  const representative: [PayerKind, string] = [
+    "representative",
+    tx("Платит родитель / законный представитель", "Ein Elternteil / gesetzlicher Vertreter zahlt"),
+  ];
+  return current === "self" ? [representative, third, self] : [representative, third];
+}
+
+/**
+ * The parent chosen in the form, with the data of the representative block:
+ * one of the minor's representatives, else the one the server names.
+ */
+export function chosenPayerRepresentative(
+  form: Pick<PayerDeclarationForm, "kind" | "representativeId">,
+  status: Pick<PayerDeclarationStatus, "representatives" | "payer_representative"> | null | undefined,
+): PayerRepresentative | null {
+  if (form.kind !== "representative" || !form.representativeId) return null;
+  return status?.representatives?.find((person) => person.id === form.representativeId)
+    ?? (status?.payer_representative?.id === form.representativeId ? status.payer_representative : null);
 }

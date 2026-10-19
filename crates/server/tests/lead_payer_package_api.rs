@@ -2052,6 +2052,8 @@ async fn a_paying_parent_signs_the_same_package_and_is_identified_on_the_own_lin
         !missing.contains(&json!("payer_cost_estimate_consent")),
         "{request}"
     );
+    // The order exists first: the declaration writes its payer onto it.
+    let (order_id, _) = lead_order(&app, child).await;
     // Her answers, as her cabinet section would have stored them.
     sqlx::query(
         r#"INSERT INTO lead_payer_statements (
@@ -2096,79 +2098,150 @@ async fn a_paying_parent_signs_the_same_package_and_is_identified_on_the_own_lin
         saved["declaration"]["cost_estimate_consent_required"], false,
         "{saved}"
     );
-    let (order_id, _) = lead_order(&app, child).await;
+    // Named as a third party, the mother is one of the minor's
+    // representatives: she is recorded as the paying representative — the
+    // contracting party, never a third-party payer (owner decision
+    // 2026-10-19) — and her data are read from her representative row.
+    assert_eq!(
+        saved["declaration"]["payer_kind"], "representative",
+        "{saved}"
+    );
+    assert_eq!(
+        saved["declaration"]["payer_representative_id"],
+        json!(mother),
+        "{saved}"
+    );
+    assert!(saved["declaration"]["first_name"].is_null(), "{saved}");
+    assert_eq!(saved["status"]["paying_parent"], true, "{saved}");
+    assert_eq!(
+        saved["status"]["cost_assumption"]["required"], false,
+        "{saved}"
+    );
+    let parent = &saved["status"]["payer_representative"];
+    assert_eq!(parent["name"], "Anna Muster", "{saved}");
+    assert_eq!(parent["date_of_birth"], "1985-03-02", "{saved}");
+    assert_eq!(parent["street"], "Musterweg 1", "{saved}");
+    assert_eq!(parent["zip"], "10115", "{saved}");
+    assert_eq!(parent["city"], "Berlin", "{saved}");
+    assert_eq!(parent["country"], "DE", "{saved}");
+    assert_eq!(
+        saved["status"]["representatives"].as_array().map(Vec::len),
+        Some(2),
+        "{saved}"
+    );
+
+    // The order names her as contracting party, not as Kostenübernehmer.
+    let (name, role): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT payer_contact_name, payer_role FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(name.as_deref(), Some("Anna Muster"));
+    assert_eq!(role.as_deref(), Some("contracting_party"));
+
+    // No package of a third-party payer and no Kostenübernahmeerklärung.
     client_estimate(&app, child, order_id, None).await;
     let body = package(&app, child).await;
-    assert_eq!(body["mode"], "cabinet", "{body}");
-    assert!(body["blocked_reason"].is_null(), "{body}");
-    assert_eq!(body["signer"]["first_name"], "Anna");
-    assert_eq!(body["signer"]["email"], "anna.package@example.com");
-    agency_signer(&app).await;
-    let prepared = prepare(&app, child).await;
-    let text = pdf_text(&app, &slot(&prepared, "self_disclosure")["document_id"]).await;
-    assert!(text.contains("über das Patientenportal"), "{text}");
-    let (status, sent) = send(
+    assert_eq!(body["blocked_reason"], "payer_is_representative", "{body}");
+    let (status, refused) = with_login(
         &app,
-        child,
-        json!({ "package_id": prepared["package"]["id"] }),
+        "POST",
+        "/api/v1/documents/generate",
+        &app.ceo(),
+        Some(json!({
+            "template_id": "cost_coverage_declaration", "lead_id": child,
+            "order_id": order_id, "language": "de"
+        })),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED, "{sent}");
-    let request_id = Uuid::parse_str(sent["package"]["request_id"].as_str().unwrap()).unwrap();
-    until_pending(&app, request_id).await;
-    let request_path = format!("/api/v1/me/lead-requests/{child}");
-    let (_, request) = with_login(&app, "GET", &request_path, anna, None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "payer_is_representative", "{refused}");
+
+    // The Einzelauftrag names no Kostenübernehmer and no Schuldbeitritt.
+    let (status, generated) = with_login(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &app.ceo(),
+        Some(json!({
+            "template_id": "single_order", "lead_id": child,
+            "order_id": order_id, "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let text = pdf_text(&app, &generated["id"]).await;
+    assert!(text.contains("Vergütungsvereinbarung"), "{text}");
+    assert!(!text.contains("Kostenübernehmer"), "{text}");
+    assert!(!text.contains("Schuldbeitritt"), "{text}");
+
+    // A minor does not pay himself: staff cannot say so either.
+    let (status, refused) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{child}/payer-declaration"),
+        &app.ceo(),
+        Some(json!({ "payer_kind": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "payer_self_minor", "{refused}");
+    // The father is named directly; somebody who is no representative is not.
+    let (status, saved) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{child}/payer-declaration"),
+        &app.ceo(),
+        Some(json!({ "payer_kind": "representative", "payer_representative_id": father })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
     assert_eq!(
-        request["payer_questionnaire"]["signature_package"]["status"], "sent",
-        "{request}"
+        saved["status"]["payer_representative"]["name"], "Ben Muster",
+        "{saved}"
     );
-    let (_, request) = with_login(&app, "GET", &request_path, ben, None).await;
-    assert!(request["payer_questionnaire"].is_null(), "{request}");
-    app.mock.sign(request_id);
-    until_completed(&app, request_id).await;
-    let (_, request) = with_login(&app, "GET", &request_path, anna, None).await;
-    assert_eq!(
-        request["payer_questionnaire"]["signature_package"]["status"], "signed",
-        "{request}"
-    );
-    let (_, section) = with_login(
+    let name: Option<String> =
+        sqlx::query_scalar("SELECT payer_contact_name FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(name.as_deref(), Some("Ben Muster"));
+    // The mother's cabinet is not asked for a third party's consents: the
+    // father who pays is the contracting party (DEV report 2026-10-19).
+    let (status, request) = with_login(
         &app,
         "GET",
-        &format!("{request_path}/payer-questionnaire"),
+        &format!("/api/v1/me/lead-requests/{child}"),
         anna,
         None,
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "{request}");
+    let missing = request["progress"]["missing_for_submit"]
+        .as_array()
+        .unwrap();
+    for consent in ["payer_contact_consent", "payer_cost_estimate_consent"] {
+        assert!(!missing.contains(&json!(consent)), "{request}");
+    }
     assert_eq!(
-        section["signature_package"]["status"], "signed",
-        "{section}"
+        request["payer"]["payer_kind"], "representative",
+        "{request}"
     );
-    // Her QES identifies her on her own line, the payer line shows it too.
-    let (_, identification) = with_login(
+    assert_eq!(request["payer"]["first_name"], "Ben", "{request}");
+    let (status, refused) = with_login(
         &app,
-        "GET",
-        &format!("/api/v1/leads/{child}/identification-status"),
+        "POST",
+        &format!("/api/v1/leads/{child}/payer-declaration"),
         &app.ceo(),
-        None,
+        Some(json!({ "payer_kind": "representative", "payer_representative_id": Uuid::new_v4() })),
     )
     .await;
-    let anna_line = identification["representatives"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|line| line["name"] == "Anna Muster")
-        .unwrap();
-    assert!(
-        anna_line["qes"]["signed_at"].is_string(),
-        "{identification}"
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(
+        refused["error"], "payer_representative_invalid",
+        "{refused}"
     );
-    assert!(
-        identification["payer"]["qes"]["signed_at"].is_string(),
-        "{identification}"
-    );
-    let body = package(&app, child).await;
-    assert!(
-        body["payer_identification"]["qes_signed_at"].is_string(),
-        "{body}"
-    );
+    let _ = ben;
 }

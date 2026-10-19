@@ -102,17 +102,20 @@ export function usePayerAutosave({
   // parent is the payer); a server that still lists the consent as missing
   // (an older one) gets the box, or the request could not be sent.
   const serverAsksConsent = request.progress.missing_for_submit.includes("payer_contact_consent");
+  // A parent of the minor who pays is the contracting party (owner decision
+  // 2026-10-19): no consent is asked about that parent in any login.
+  const parentPaying = request.payer?.payer_kind === "representative";
 
   const save = useCallback(
     (snapshot: PayerDraft) => {
-      const withConsent = !snapshot.guardian_pays || serverAsksConsent;
+      const withConsent = (!snapshot.guardian_pays && !parentPaying) || serverAsksConsent;
       const keyOf = (value: PayerDraft) => JSON.stringify(payerInput(value, typed, withConsent));
       const fields = new Set(keyOf(snapshot) === keyOf(savedRef.current) && keyOf(snapshot) === keyOf(queuedDraftRef.current) ? [] : ["payer"]);
       queuedDraftRef.current = snapshot;
       return runDraftSave(enqueue, fields, async () => {
         if (!enabled || answeredRef.current) return true;
         // Without the box the consent is left out: the server keeps what it has.
-        const withConsent = !snapshot.guardian_pays || serverAsksConsent;
+        const withConsent = (!snapshot.guardian_pays && !parentPaying) || serverAsksConsent;
         const input = payerInput(snapshot, typed, withConsent);
         const key = JSON.stringify(input);
         if (key === JSON.stringify(payerInput(savedRef.current, typed, withConsent))) {
@@ -179,7 +182,7 @@ export function usePayerAutosave({
         }
       });
     },
-    [enabled, enqueue, onChange, onSaveState, request.lead_id, serverAsksConsent, typed],
+    [enabled, enqueue, onChange, onSaveState, parentPaying, request.lead_id, serverAsksConsent, typed],
   );
 
   useAutosave(draft, save);
@@ -257,7 +260,9 @@ export function PayerSection({
     () => Boolean(draft.messenger) && draft.messenger === draft.phone,
   );
   const serverAsksConsent = request.progress.missing_for_submit.includes("payer_contact_consent");
-  const consentAsked = typed && (!draft.guardian_pays || serverAsksConsent);
+  // Never about a parent of the minor who pays (owner decision 2026-10-19).
+  const consentAsked = typed
+    && ((!draft.guardian_pays && request.payer?.payer_kind !== "representative") || serverAsksConsent);
   const costConsent = { request, text, enqueue, onChange, onSaveState };
 
   if (answered && ownAccountOnly) return null;

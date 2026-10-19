@@ -180,6 +180,12 @@ export type PayerDraft = {
   payer_kind: string;
   /** A parent's answer "I pay": the payer named below is the parent, not another person. */
   guardian_pays: boolean;
+  /**
+   * With `guardian_pays`: which parent of the minor pays (trusted contact id
+   * of the template). The answer is then saved as that representative, the
+   * contracting party — never as a third party (owner decision 2026-10-19).
+   */
+  representative_id?: string;
   /** "person", "company", "organisation" or "insurance"; "" counts as a person, as on the server. */
   payer_type: string;
   /** Name of the company, organisation or insurer. */
@@ -324,6 +330,15 @@ export function payerAnswer(
   template: PayerSelfTemplate | null | undefined = null,
 ): PayerAnswer {
   if (!payer) return "";
+  if (payer.payer_kind === "representative") {
+    // The parent named as payer: "I pay (as a parent)" when it is the parent
+    // of the template (by id, else by name); without a template a parent pays.
+    if (!template) return "guardian";
+    const sameId = Boolean(template.representative_id) && template.representative_id === payer.payer_representative_id;
+    const sameName = oneLine(payer.first_name) === oneLine(template.first_name)
+      && oneLine(payer.last_name) === oneLine(template.last_name);
+    return sameId || (!template.representative_id && sameName) ? "guardian" : "third_party";
+  }
   if (payer.payer_kind !== "third_party") return "self";
   const parent =
     Boolean(template) &&
@@ -382,9 +397,16 @@ export function draftFromPayer(
   payer: LeadRequestPayer | null | undefined,
   template: PayerSelfTemplate | null | undefined = null,
 ): PayerDraft {
+  const guardianPays = payerAnswer(payer, template) === "guardian";
   return {
-    payer_kind: payer?.payer_kind ?? "",
-    guardian_pays: payerAnswer(payer, template) === "guardian",
+    // A paying parent is answered in the form like before ("I pay (as a
+    // parent)", or the parent as the person who pays); the save names the
+    // representative again.
+    payer_kind: payer?.payer_kind === "representative" ? "third_party" : payer?.payer_kind ?? "",
+    guardian_pays: guardianPays,
+    representative_id: guardianPays
+      ? payer?.payer_representative_id ?? template?.representative_id ?? ""
+      : "",
     payer_type: payer?.payer_type ?? "",
     organisation_name: payer?.organisation_name ?? "",
     organisation_legal_form: payer?.organisation_legal_form ?? "",
@@ -414,6 +436,7 @@ function withoutPayerParty(draft: PayerDraft): PayerDraft {
   return {
     ...draft,
     guardian_pays: false,
+    representative_id: "",
     payer_type: "",
     organisation_name: "",
     organisation_legal_form: "",
@@ -457,6 +480,7 @@ export function withPayerAnswer(
       ...withoutPayerParty(next),
       payer_kind: "third_party",
       guardian_pays: true,
+      representative_id: template.representative_id ?? "",
       payer_type: "person",
       first_name: template.first_name ?? "",
       last_name: template.last_name ?? "",
@@ -556,6 +580,7 @@ export function payerDraftFromRecipient(
     ...base,
     payer_kind: "third_party",
     guardian_pays: false,
+    representative_id: "",
     payer_type: organisation ? (base.payer_type === "company" ? "company" : "organisation") : "person",
     organisation_name: organisation ? recipient.organisation_name : "",
     organisation_legal_form: organisation ? recipient.legal_form : "",
@@ -626,8 +651,16 @@ export function withPayerChoice(
  */
 export function payerInput(draft: PayerDraft, typed = true, withConsent = true): LeadRequestPayerInput | null {
   if (draft.payer_kind !== "self" && draft.payer_kind !== "third_party") return null;
-  const input: LeadRequestPayerInput = { payer_kind: draft.payer_kind };
-  if (draft.payer_kind === "third_party") {
+  // "I pay (as a parent)" / the other parent pays: that representative, the
+  // contracting party — named by id, never as a third party with data
+  // (owner decision 2026-10-19).
+  const representativeId = draft.payer_kind === "third_party" && draft.guardian_pays && typed
+    ? draft.representative_id ?? ""
+    : "";
+  const input: LeadRequestPayerInput = representativeId
+    ? { payer_kind: "representative", payer_representative_id: representativeId }
+    : { payer_kind: draft.payer_kind };
+  if (draft.payer_kind === "third_party" && !representativeId) {
     const type = typed ? payerTypeOf(draft) : "person";
     const put = (
       field:

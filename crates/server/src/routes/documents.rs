@@ -17381,6 +17381,30 @@ async fn generate_document(
                     Err(resp) => return resp,
                 };
             let mut payer = merge_payer(payer_block_from_bindings(&bindings), invoice_payer);
+            // A minor's paying parent signs as the contracting party (owner
+            // decision 2026-10-19): the Einzelauftrag names no Kostenübernehmer,
+            // no Schuldbeitritt and no Kostenübernahmeerklärung as condition —
+            // also for a third-party row of before that names that parent.
+            if !is_payer_copy {
+                let parent_pays = match state.db.acquire().await {
+                    Ok(mut conn) => {
+                        crate::routes::lead_payer::representative_pays(&mut conn, lead_id, order_id)
+                            .await
+                    }
+                    Err(error) => Err(error),
+                };
+                match parent_pays {
+                    Ok(true) => payer = DocPartyBlock::default(),
+                    Ok(false) => {}
+                    Err(error) => {
+                        tracing::error!(%error, ?lead_id, ?order_id, "load the paying parent");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to load payer context",
+                        );
+                    }
+                }
+            }
             // The payer's copy names the third-party payer of the lead's
             // declaration (422 without one, like the Kostenübernahmeerklärung)
             // and records which version of the payer and of the client's
@@ -24180,6 +24204,14 @@ async fn load_payer_self_disclosure(
         )
     };
     let mut conn = state.db.acquire().await.map_err(failed)?;
+    // A minor's paying parent is the contracting party, no third-party payer
+    // (owner decision 2026-10-19).
+    if super::lead_payer::representative_pays(&mut conn, Some(lead_id), None)
+        .await
+        .map_err(failed)?
+    {
+        return Err(super::lead_payer::payer_is_representative());
+    }
     super::lead_payer_link::self_disclosure(&mut conn, lead_id)
         .await
         .map_err(failed)
@@ -24211,6 +24243,14 @@ async fn load_patient_payer_statement(
         )
     };
     let mut conn = state.db.acquire().await.map_err(failed)?;
+    // A minor's paying parent is the contracting party, no third-party payer
+    // (owner decision 2026-10-19).
+    if super::lead_payer::representative_pays(&mut conn, Some(lead_id), None)
+        .await
+        .map_err(failed)?
+    {
+        return Err(super::lead_payer::payer_is_representative());
+    }
     let declaration = super::lead_payer::load_declaration(&mut conn, lead_id)
         .await
         .map_err(failed)?
@@ -25252,9 +25292,11 @@ async fn load_lead_self_disclosure(
                 }
             });
     let payer = declaration.as_ref().map(|declaration| {
+        // A representative named as payer, with the representative's data.
+        let declaration = &declaration.with_representative(representation);
         let organisation = declaration.is_organisation();
         LeadDisclosurePayer {
-            self_payer: !declaration.is_third_party(),
+            self_payer: !declaration.is_third_party() && !declaration.is_representative(),
             organisation,
             representative_role: paying_representative,
             payer_type: declaration
@@ -27678,6 +27720,15 @@ async fn load_invoice_payer(
             .await
             .map_err(failed)?;
     let record = &inherited.record;
+    // An order payer in the role of the contracting party (a minor's paying
+    // parent, owner decision 2026-10-19) is the Auftraggeber, never a
+    // Kostenübernehmer.
+    if matches!(inherited.source, "head_order" | "order")
+        && record.payer_role.as_deref()
+            == Some(crate::routes::invoices::payer::PAYER_ROLE_CONTRACTING_PARTY)
+    {
+        return Ok(None);
+    }
     let resolved_record = if matches!(inherited.source, "head_order" | "order")
         || (with_default_payer && inherited.source == "default_payer")
     {

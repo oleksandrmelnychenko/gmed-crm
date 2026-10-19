@@ -130,6 +130,7 @@ export function InvoiceRecipientSection({
   const selectedParentRequest: LeadRequest = invoiceParent ? {
     ...request,
     payer_self_template: {
+      representative_id: invoiceParent.id,
       first_name: invoiceParent.first_name, last_name: invoiceParent.last_name,
       date_of_birth: invoiceParent.date_of_birth, email: invoiceParent.email, phone: invoiceParent.phone,
       citizenships: invoiceParent.citizenships, street: invoiceParent.street, zip: invoiceParent.zip,

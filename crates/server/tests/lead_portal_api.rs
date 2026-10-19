@@ -3413,6 +3413,7 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
     assert_eq!(
         template,
         json!({
+            "representative_id": mother,
             "first_name": "Olga Maria",
             "last_name": "Kind",
             "date_of_birth": "1985-03-04",
@@ -3432,9 +3433,12 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
         "{list}"
     );
 
-    // "I pay (as a parent)" is an ordinary third-party answer made of the
-    // template; nothing else is stored for it. The parent is the payer: no
-    // consent to contact somebody else is asked (QA 2026-10-06).
+    // "I pay (as a parent)" sent the way an older cabinet does, as a
+    // third-party answer made of the template: the parent is recorded as the
+    // paying representative, never as a third party (owner decision
+    // 2026-10-19), and shown with the representative's own data. The parent
+    // is the payer: no consent to contact somebody else is asked (QA
+    // 2026-10-06).
     let (status, body) = json_request(
         router,
         "POST",
@@ -3454,6 +3458,12 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["payer_kind"], "representative", "{body}");
+    assert_eq!(
+        body["payer"]["payer_representative_id"],
+        json!(mother),
+        "{body}"
+    );
     assert_eq!(body["payer"]["relationship_kind"], "parent", "{body}");
     assert_eq!(body["payer"]["first_name"], "Olga Maria", "{body}");
     assert_eq!(body["payer"]["last_name"], "Kind", "{body}");
@@ -4262,7 +4272,10 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["billing"]["payment_route_by"], "guardian", "{body}");
-    assert_eq!(body["billing"]["payer_declared"], true, "{body}");
+    // The mother is the paying representative, no third party: the invoice
+    // does not go "to the payer" (owner decision 2026-10-19).
+    assert_eq!(body["billing"]["payer_declared"], false, "{body}");
+    assert_eq!(body["payer"]["payer_kind"], "representative", "{body}");
     assert_eq!(
         body["billing"]["account_holder_suggestion"], "Anna Muster",
         "{body}"
@@ -4312,28 +4325,28 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "payment_route_by_payer", "{body}");
-    // Where the invoice goes is the request's answer: either parent.
+    // Where the invoice goes is the request's answer: either parent. The
+    // paying mother is chosen as the parent who receives it (she is the
+    // contracting party, no third-party recipient; owner decision 2026-10-19).
     let (status, body) = json_request(
         router,
         "POST",
         &billing,
         ben,
         Some(json!({
-            "invoice_recipient": "third_party",
+            "invoice_recipient": "self",
             "invoice_recipient_is_payer": true,
-            "recipient_type": "person",
-            "recipient_first_name": "Anna",
-            "recipient_last_name": "Muster",
-            "recipient_relationship_kind": "parent",
-            "recipient_street": "Hauptstraße 1",
-            "recipient_zip": "10115",
-            "recipient_city": "Berlin",
-            "recipient_country": "DE"
+            "recipient_representative_id": mother
         })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["billing"]["invoice_to"], "payer", "{body}");
+    assert_eq!(body["billing"]["invoice_recipient"], "self", "{body}");
+    assert_eq!(
+        body["billing"]["recipient"]["representative_id"],
+        json!(mother),
+        "{body}"
+    );
     let (status, body) = json_request(
         router,
         "POST",
@@ -4740,11 +4753,13 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
     let (status, info) = json_request(router, "GET", &link, &pm, None).await;
     assert_eq!(status, StatusCode::OK, "{info}");
     assert_eq!(info["mode"], "cabinet", "{info}");
-    assert_eq!(info["blocked_reason"], "payer_has_cabinet_login", "{info}");
+    // She is recorded as the paying representative (owner decision
+    // 2026-10-19): never a payer's link.
+    assert_eq!(info["blocked_reason"], "payer_is_representative", "{info}");
     assert_eq!(info["can_send"], false);
     let (status, refused) = json_request(router, "POST", &link, &pm, Some(json!({}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
-    assert_eq!(refused["code"], "payer_has_cabinet_login");
+    assert_eq!(refused["code"], "payer_is_representative");
     let (_, body) = json_request(router, "GET", &request, anna, None).await;
     assert_eq!(body["payer_questionnaire"]["available"], true, "{body}");
     assert!(body["payer_questionnaire"]["submitted_at"].is_null());

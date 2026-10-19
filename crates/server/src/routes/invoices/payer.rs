@@ -583,6 +583,7 @@ async fn inherit(
                     continue;
                 }
                 let record = adapt_payer_to_patient(conn, record, patient_id).await?;
+                let record = party_relation_of_contact(conn, record, patient_id, order_id).await?;
                 if record.is_set() {
                     return Ok(InheritedPayer {
                         record,
@@ -650,6 +651,56 @@ async fn inherit(
         source: "none",
         minor_without_payer: party.patient_is_minor,
     })
+}
+
+/// A minor's paying parent as a lead's declaration writes it on the order —
+/// a free-text contact in the role `contracting_party` (owner decision
+/// 2026-10-19) — is, once the patient's legal representatives are recorded
+/// as relations, the party's own relation of that name: the invoice is then
+/// addressed to the contracting party itself, with no Kostenübernehmer and
+/// no confirmation of another recipient. Any other record, and a name that
+/// matches no representative, stays as it is.
+async fn party_relation_of_contact(
+    conn: &mut PgConnection,
+    record: PayerRecord,
+    patient_id: Uuid,
+    order_id: Uuid,
+) -> Result<PayerRecord, sqlx::Error> {
+    if record.payer_role.as_deref() != Some(PAYER_ROLE_CONTRACTING_PARTY)
+        || record.payer_patient_relation_id.is_some()
+        || record.payer_patient_id.is_some()
+    {
+        return Ok(record);
+    }
+    let Some(name) = record.contact_name.clone() else {
+        return Ok(record);
+    };
+    let party = contracting_party::resolve(
+        conn,
+        patient_id,
+        Some(order_id),
+        None,
+        crate::app_time::today(),
+    )
+    .await?;
+    if party.kind != PartyKind::LegalRepresentatives {
+        return Ok(record);
+    }
+    Ok(
+        match party
+            .representatives
+            .iter()
+            .find(|representative| same_name(&representative.name, &name))
+        {
+            Some(representative) => PayerRecord {
+                payer_patient_relation_id: Some(representative.relation_id),
+                payer_role: Some(PAYER_ROLE_CONTRACTING_PARTY.to_string()),
+                notes: record.notes,
+                ..PayerRecord::default()
+            },
+            None => record,
+        },
+    )
 }
 
 /// The party at the other address the declaration names (section 7 of the

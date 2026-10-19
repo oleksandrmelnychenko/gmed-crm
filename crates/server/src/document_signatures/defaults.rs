@@ -215,6 +215,18 @@ async fn order_payer_signer(state: &AppState, source: &PgRow) -> Result<Option<S
         return Ok(None);
     }
     let record = &inherited.record;
+    // A minor's paying parent is the contracting party, never a
+    // Kostenübernehmer who signs as `payer` (owner decision 2026-10-19): an
+    // order payer in that role, or the parent the open lead's declaration
+    // names (also a third-party row of before that names that parent).
+    if record.payer_role.as_deref()
+        == Some(crate::routes::invoices::payer::PAYER_ROLE_CONTRACTING_PARTY)
+        || crate::routes::lead_payer::representative_pays(&mut conn, None, Some(order_id))
+            .await
+            .map_err(db_error)?
+    {
+        return Ok(None);
+    }
     let recipient: Option<Value> =
         sqlx::query_scalar("SELECT invoice_recipient_resolve($1, $2, $3, $4, $5, $6, $7, $8, $9)")
             .bind(patient_id)

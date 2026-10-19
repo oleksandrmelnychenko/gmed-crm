@@ -1868,11 +1868,17 @@ pub(crate) fn payment_route_by(
     representation: &lead_representatives::Representation,
     caller: Option<Uuid>,
 ) -> PaymentRouteBy {
-    let Some(payer) = payer.filter(|payer| payer.is_third_party()) else {
+    let Some(payer) = payer.filter(|payer| payer.is_third_party() || payer.is_representative())
+    else {
         return PaymentRouteBy::Patient;
     };
     let parent = lead_representatives::payer_same_person(representation, Some(payer))
         .and_then(|id| representation.find(id));
+    // A representative named as payer answers in a cabinet, never through a
+    // link: the patient side answers while that parent has no login.
+    if payer.is_representative() && !parent.is_some_and(|parent| parent.has_login()) {
+        return PaymentRouteBy::Patient;
+    }
     match (parent, caller) {
         (Some(parent), Some(caller)) if parent.login_user_ids.contains(&caller) => {
             PaymentRouteBy::Guardian
@@ -1998,6 +2004,12 @@ pub(crate) struct ExtraState {
     pub questions: ExtraQuestions,
     pub funds_proof_uploaded: bool,
     pub payer_contact_known: bool,
+    /// One of the minor's parents or legal representatives pays — named as
+    /// such, or a third-party row of before that names one
+    /// ([`lead_representatives::payer_same_person`]): the contracting party,
+    /// so none of a third party's consents or contact data are asked (owner
+    /// decision 2026-10-19).
+    pub paying_parent: bool,
 }
 
 /// The keys of the extra step still open, in form order: why a third party
@@ -2079,10 +2091,11 @@ fn missing_for_submit(
             .into_iter()
             // A parent who pays and answers in the own login is the payer:
             // there is nobody else GMED needs the consent to contact or to
-            // pass the cost estimate on to (QA 2026-10-06, phase 3b). Staff
-            // completeness keeps asking for the contact consent.
+            // pass the cost estimate on to (QA 2026-10-06, phase 3b). The
+            // same for any paying parent, with or without a login of the own
+            // (owner decision 2026-10-19: the contracting party).
             .filter(|key| {
-                payment_route_by != PaymentRouteBy::Guardian
+                (payment_route_by != PaymentRouteBy::Guardian && !extra.paying_parent)
                     || !matches!(
                         *key,
                         "payer_contact_consent" | "payer_cost_estimate_consent"
@@ -2091,7 +2104,10 @@ fn missing_for_submit(
     );
     // The third party's e-mail, phone and residence (owner request
     // 2026-10-07), unless its data are known otherwise.
-    if !extra.payer_contact_known && payment_route_by != PaymentRouteBy::Guardian {
+    if !extra.payer_contact_known
+        && !extra.paying_parent
+        && payment_route_by != PaymentRouteBy::Guardian
+    {
         missing.extend(lead_payer::portal_missing_contact(payer));
     }
     missing.extend(identification.missing_identity(today));
@@ -2267,6 +2283,7 @@ pub(crate) async fn extra_state(
         funds_proof_uploaded,
         payer_contact_known: answered_by_payer
             || !lead_payer::contact_consent_required(payer, representation),
+        paying_parent: lead_representatives::payer_same_person(representation, payer).is_some(),
     })
 }
 
@@ -2361,6 +2378,9 @@ fn payer_template_from_contact(
         row.map(|row| row.last_name.as_deref().unwrap_or_default()),
     );
     json!({
+        // The representative the answer "I pay (as a parent)" names (kind
+        // `representative`, owner decision 2026-10-19).
+        "representative_id": lead_representatives::entry_id(contact),
         "first_name": first_name,
         "last_name": last_name,
         "date_of_birth": text("birth_date")
@@ -2654,7 +2674,12 @@ pub(crate) async fn request_payload(
             .cloned()
             .collect::<Vec<_>>()
     );
-    let mut payer_json = lead_payer::portal_payload(payer.as_ref(), answered_by_payer);
+    // A paying representative is shown with the representative's own data
+    // (owner decision 2026-10-19: never copied onto the declaration).
+    let shown_payer = payer
+        .as_ref()
+        .map(|payer| payer.with_representative(&representation.representation));
+    let mut payer_json = lead_payer::portal_payload(shown_payer.as_ref(), answered_by_payer);
     if !payer_json.is_null() {
         crate::risk::cabinet::merge_into(&mut payer_json, payer_extras);
     }
@@ -7595,6 +7620,26 @@ mod tests {
             ),
             vec!["payer_contact_consent", "payer_cost_estimate_consent"]
         );
+        // A parent of the minor who pays is the contracting party (owner
+        // decision 2026-10-19): in any login — the other parent's, or one of
+        // a parent without a login of the own — neither consent is asked.
+        assert!(
+            missing_for_submit(
+                &data,
+                Some(&without_consent),
+                &complete,
+                true,
+                Vec::new(),
+                PaymentRouteBy::Payer,
+                ExtraState {
+                    paying_parent: true,
+                    ..ExtraState::default()
+                },
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
+            )
+            .is_empty()
+        );
         // With the extra step, why another person pays is its first
         // question; the paying parent in the own login is never asked it.
         let triggered = |route_by| ExtraState {
@@ -7763,6 +7808,7 @@ mod tests {
         assert_eq!(
             template,
             json!({
+                "representative_id": "5d0c1f0e-0000-4000-8000-000000000001",
                 "first_name": "Olga Maria",
                 "last_name": "Kind",
                 "date_of_birth": "1985-03-04",
@@ -7817,6 +7863,7 @@ mod tests {
                 Some(&lead_representatives::Extras::default())
             ),
             json!({
+                "representative_id": null,
                 "first_name": "",
                 "last_name": "Kind",
                 "date_of_birth": null,
@@ -7965,6 +8012,7 @@ mod tests {
                     ),
                     funds_proof_uploaded: uploaded,
                     payer_contact_known: false,
+                    paying_parent: false,
                 },
                 today(),
                 &crate::risk::cabinet::BaseExtra::default(),
@@ -8005,6 +8053,7 @@ mod tests {
                     ),
                     funds_proof_uploaded: true,
                     payer_contact_known: false,
+                    paying_parent: false,
                 }
             ),
             ["enhanced_funds_description"]
