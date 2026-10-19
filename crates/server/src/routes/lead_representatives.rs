@@ -556,6 +556,32 @@ impl Loaded {
             .any(|upload| upload.representative_id == representative_id && upload.kind == kind)
     }
 
+    /// A minor's contracting representatives are identified (the readiness
+    /// check `identity_document_verified`): `rep1` and, under joint custody,
+    /// `rep2` each have an identity copy staff took over (reviewed, confirmed
+    /// or used for the identity data they entered). The GwG subjects of a
+    /// minor are the parents or the guardian, not the child, who often has no
+    /// document of its own. `false` for an adult or without any representative.
+    pub(crate) fn minor_representatives_identified(&self) -> bool {
+        let representation = &self.representation;
+        if !representation.minor {
+            return false;
+        }
+        let mut slots = vec![SLOT_REP1];
+        if representation.answers.custody() == CUSTODY_JOINT {
+            slots.push(SLOT_REP2);
+        }
+        slots.iter().all(|slot| {
+            representation.in_slot(slot).is_some_and(|person| {
+                self.uploads.iter().any(|upload| {
+                    upload.representative_id == person.id
+                        && upload.kind == UPLOAD_IDENTITY
+                        && upload.reviewed
+                })
+            })
+        })
+    }
+
     /// The row of a trusted contact, whatever its role.
     pub(crate) fn row_of(&self, contact_id: Uuid) -> Option<&Extras> {
         self.rows.get(&contact_id)
@@ -3861,6 +3887,46 @@ mod tests {
             .iter()
             .map(|field| format!("{prefix}_{field}"))
             .collect()
+    }
+
+    #[test]
+    fn a_minor_is_identified_through_the_contracting_representatives() {
+        let reviewed = |n: u8| Upload {
+            reviewed: true,
+            ..upload(n, UPLOAD_IDENTITY)
+        };
+        let parents = || {
+            vec![
+                complete_person(1, SLOT_REP1, ROLE_LEGAL_REPRESENTATIVE),
+                complete_person(2, SLOT_REP2, ROLE_LEGAL_REPRESENTATIVE),
+            ]
+        };
+        // Joint custody: both parents' copies, taken over by staff.
+        let mut joint = loaded(true, Answers::default(), parents());
+        assert!(!joint.minor_representatives_identified());
+        joint.uploads = vec![reviewed(1), upload(2, UPLOAD_IDENTITY)];
+        assert!(
+            !joint.minor_representatives_identified(),
+            "an unreviewed copy is no identification"
+        );
+        joint.uploads = vec![reviewed(1), reviewed(2)];
+        assert!(joint.minor_representatives_identified());
+        // Sole custody: the one custodian.
+        let mut sole = loaded(
+            true,
+            Answers {
+                custody: Some(CUSTODY_SOLE_PARENT.into()),
+                ..Default::default()
+            },
+            vec![complete_person(1, SLOT_REP1, ROLE_LEGAL_REPRESENTATIVE)],
+        );
+        sole.uploads = vec![reviewed(1)];
+        assert!(sole.minor_representatives_identified());
+        // Nobody on file, or an adult: never by this rule.
+        assert!(!loaded(true, Answers::default(), Vec::new()).minor_representatives_identified());
+        let mut adult = loaded(false, Answers::default(), parents());
+        adult.uploads = vec![reviewed(1), reviewed(2)];
+        assert!(!adult.minor_representatives_identified());
     }
 
     #[test]

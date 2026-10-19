@@ -5247,13 +5247,16 @@ async fn country_preview_blocks_first_submission_until_answers_are_complete_with
     .await;
     assert_eq!(status, StatusCode::OK, "{preview}");
     assert_neutral_country_preview(&preview);
+    // A list-1 country alone stays below level 2: no source of funds is
+    // asked of the self-payer (owner 2026-10-19), only profession and sector.
     assert!(
-        preview["follow_up"]["missing"]["A"]
+        !preview["follow_up"]["missing"]["A"]
             .as_array()
             .unwrap()
             .contains(&json!("funds_source")),
-        "the declared self-payer answers the source: {preview}"
+        "no source of funds without the enhanced check: {preview}"
     );
+    assert_eq!(preview["follow_up"]["funds_asked"], false, "{preview}");
     let (status, refused) = json_request(
         router,
         "POST",

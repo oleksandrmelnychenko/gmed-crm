@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES,
   ENHANCED_CHECK_TRIGGER_REASONS,
+  RISK_ASSESSMENT_REASON,
   SANCTIONS_REVIEW_PENDING,
   blacklistCountries,
   enhancedCheckReasonLabel,
@@ -82,6 +83,9 @@ describe("the enhanced check of the owner's rule (2026-10-07)", () => {
     // The non-paying invoice recipient is named as such, not as the payer (QA 2026-10-11 N-08).
     expect(enhancedCheckReasonLabel("recipient_sanctioned", ru)).toBe("получатель счёта в санкционном списке (подтверждено)");
     expect(enhancedCheckReasonLabel("unknown_key", de)).toBe("unknown_key");
+    // The risk level is not named as a level (owner 2026-10-19), only pointed to.
+    expect(enhancedCheckReasonLabel(RISK_ASSESSMENT_REASON, ru)).toBe("по результатам оценки риска (см. «Оценка риска»)");
+    expect(enhancedCheckReasonLabel(RISK_ASSESSMENT_REASON, de)).not.toContain("Stufe");
     expect(pepEnhancedCheckHint(de)).toBe(
       "PEP: nach § 15 GwG ist in der Regel eine verstärkte Prüfung erforderlich – Entscheidung des Mitarbeiters",
     );

@@ -318,8 +318,11 @@ pub async fn follow_up_json(
         }
         // Only the country-related questions and details of an explicit PEP /
         // sanctions-links answer are previewed. No duplicate identity step,
-        // staff-only request, payer trigger, score or automated declaration.
-        (preview, 1, Vec::new(), true)
+        // staff-only request, payer trigger, stored score or automated
+        // declaration. The preview's own level decides only whether block A
+        // asks the source of funds (a black-list country reaches level 2).
+        let level = super::score(&preview, &config).level;
+        (preview, level, Vec::new(), true)
     } else {
         let Some(assessment) = assessment.filter(store::Assessment::started) else {
             return Ok(empty);
@@ -332,6 +335,8 @@ pub async fn follow_up_json(
         )
     };
     let states = store::block_states(&triggers, level, &requested, &config, &answers);
+    // Neutral: whether block A asks the source of funds (never why).
+    let funds_asked = store::funds_asked(&triggers, level, &requested, &config);
     let mut blocks = Vec::new();
     let mut missing = Map::new();
     for block in CABINET_BLOCKS {
@@ -355,6 +360,7 @@ pub async fn follow_up_json(
         "before_submit": before_submit,
         "blocks": blocks,
         "missing": missing,
+        "funds_asked": blocks.contains(&"A") && funds_asked,
         "answered_at": answered_at,
         "changed_since_answer": changed_since_answer,
         "identity_since": identity_since,

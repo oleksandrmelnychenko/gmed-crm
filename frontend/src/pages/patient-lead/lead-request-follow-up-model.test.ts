@@ -85,6 +85,10 @@ describe("follow-up blocks", () => {
     expect(blockAAsks({ payer: payer("self") })).toMatchObject({ funds: true, occupation: true, sector: true, funds_proof: true, payer_funds: false });
     expect(blockAAsks({ payer: null })).toMatchObject({ funds: false, funds_proof: false, occupation: true, sector: true });
     expect([...askedExtraFields(blockAAsks({ payer: null }))]).toEqual(["occupation", "sector"]);
+    // Below the enhanced check the server asks no source of funds (owner 2026-10-19).
+    const noFunds = { required: true, blocks: ["A"], missing: { A: ["occupation"] }, answered_at: null, funds_asked: false };
+    expect(blockAAsks({ payer: payer("self"), follow_up: noFunds })).toMatchObject({ funds: false, funds_proof: false, occupation: true, sector: true });
+    expect(blockAAsks({ payer: payer("self"), follow_up: { ...noFunds, funds_asked: true } })).toMatchObject({ funds: true, funds_proof: true });
     // Even stale server missing keys never ask the lead for a third party's funds.
     const asked = { required: true, blocks: ["A"], missing: { A: ["payer_funds_source", "sector"] }, answered_at: null };
     expect(blockAAsks({ payer: payer("third_party"), follow_up: asked })).toMatchObject({ payer_funds: false, payer_states_funds: true, funds: false, funds_proof: false });

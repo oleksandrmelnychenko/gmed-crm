@@ -655,11 +655,48 @@ pub struct BlockState {
     pub missing: Vec<String>,
 }
 
+/// The keys of block A about the source of the funds and its proof.
+const FUNDS_KEYS: [&str; 3] = ["funds_source", "funds_description", "funds_proof_upload"];
+
+/// The level of the lead's own triggers: a representative's country opens
+/// that representative's R, never the child's questions (their combined
+/// points may rise).
+fn own_level(triggers: &[Sticky], level: i16, config: &RiskConfig) -> i16 {
+    if triggers
+        .iter()
+        .any(|trigger| trigger.subject == super::SUBJECT_REPRESENTATIVE)
+    {
+        let own: Vec<Sticky> = triggers
+            .iter()
+            .filter(|trigger| trigger.subject != super::SUBJECT_REPRESENTATIVE)
+            .cloned()
+            .collect();
+        score(&own, config).level
+    } else {
+        level
+    }
+}
+
+/// Whether block A asks the source of the funds and its proof: only with the
+/// enhanced check (level 2 or 3, the level `lead_enhanced_check` reads) or
+/// when staff requested A. A country of the lists below level 2 opens A for
+/// the profession and the sector only (owner 2026-10-19: the source of funds
+/// is asked only by a trigger of the enhanced check).
+pub fn funds_asked(
+    triggers: &[Sticky],
+    level: i16,
+    requested: &[String],
+    config: &RiskConfig,
+) -> bool {
+    requested.iter().any(|block| block == "A") || own_level(triggers, level, config) >= 2
+}
+
 /// Which blocks are open (contract 3.3) and what each still misses: G and I
 /// whenever T13 / T12 is sticky and their data are missing; the others at
 /// level 2 from the sticky triggers (when `level_2_blocks_automatic`) and,
 /// at any level, the ones staff requested. Patient country triggers also
-/// open A/F/K/L below level two; their configured points are unchanged.
+/// open A/F/K/L below level two; their configured points are unchanged, and
+/// A then asks no source of funds ([`funds_asked`]).
 pub fn block_states(
     triggers: &[Sticky],
     level: i16,
@@ -669,21 +706,10 @@ pub fn block_states(
 ) -> BTreeMap<&'static str, BlockState> {
     // Level 3 too (owner 2026-10-10): staff decide on level 3 with the details the
     // triggers ask for; the halt and the four-eyes decision stay.
-    let non_representative: Vec<Sticky> = triggers
-        .iter()
-        .filter(|trigger| trigger.subject != super::SUBJECT_REPRESENTATIVE)
-        .cloned()
-        .collect();
     // A parent's country opens that parent's R, without asking the child's
     // birth/PEP/residence questions merely because their combined points rose.
-    let child_level = if triggers
-        .iter()
-        .any(|trigger| trigger.subject == super::SUBJECT_REPRESENTATIVE)
-    {
-        score(&non_representative, config).level
-    } else {
-        level
-    };
+    let child_level = own_level(triggers, level, config);
+    let funds = funds_asked(triggers, level, requested, config);
     let automatic = if child_level >= 2 && config.level_2_blocks_automatic {
         blocks_of(triggers)
     } else {
@@ -695,7 +721,10 @@ pub fn block_states(
         .any(|trigger| super::patient_country_follow_up(&trigger.key, &trigger.subject));
     let mut states = BTreeMap::new();
     for block in BLOCKS {
-        let (party, missing) = block_missing(block, answers);
+        let (party, mut missing) = block_missing(block, answers);
+        if block == "A" && !funds {
+            missing.retain(|key| !FUNDS_KEYS.contains(&key.as_str()));
+        }
         let requested = requested.iter().any(|known| known == block);
         let open = match block {
             "G" => {
@@ -1889,6 +1918,48 @@ mod tests {
             );
             for field in ["pep_self", "pep_related", "sanctions_links"] {
                 assert!(states["L"].missing.contains(&field.to_string()));
+            }
+            // A self-payer below level 2 is not asked the source of funds
+            // (owner 2026-10-19); level 2 or a staff request asks it.
+            let self_payer = BlockAnswers {
+                payer: Some(Declaration {
+                    payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+                    ..Declaration::default()
+                }),
+                ..answers.clone()
+            };
+            let level_one =
+                block_states(std::slice::from_ref(&trigger), 1, &[], &config, &self_payer);
+            assert_eq!(
+                level_one["A"].missing,
+                vec!["occupation", "sector"],
+                "{key}"
+            );
+            assert!(!funds_asked(
+                std::slice::from_ref(&trigger),
+                1,
+                &[],
+                &config
+            ));
+            for (level, requested) in [(2, blocks(&[])), (1, blocks(&["A"]))] {
+                let asked = block_states(
+                    std::slice::from_ref(&trigger),
+                    level,
+                    &requested,
+                    &config,
+                    &self_payer,
+                );
+                assert_eq!(
+                    asked["A"].missing,
+                    vec![
+                        "funds_source",
+                        "funds_description",
+                        "occupation",
+                        "sector",
+                        "funds_proof_upload"
+                    ],
+                    "{key} level {level}"
+                );
             }
             let payer_trigger = Sticky {
                 subject: super::super::SUBJECT_PAYER.into(),

@@ -128,6 +128,8 @@ export function blockAAsks(request: Pick<LeadRequest, "follow_up" | "payer" | "p
   if (request.payer?.payer_kind === "third_party") {
     return { ...NO_ASKS, occupation: true, sector: true, payer_states_funds: true };
   }
+  // The own source of funds only with the enhanced check (owner 2026-10-19).
+  if (request.follow_up?.funds_asked === false) return { ...NO_ASKS, occupation: true, sector: true };
   return { ...NO_ASKS, funds: true, occupation: true, sector: true, funds_proof: true };
 }
 

@@ -26,9 +26,12 @@
 //! not the blocked countries of the sanctions policy. A possible match that
 //! nobody has reviewed yet is no trigger: it is reported as
 //! `sanctions_review_pending` and leaves the check optional. A PEP, a country
-//! of the longer high-risk list, cash or crypto and the expected total are
-//! information for staff, who may still carry out and sign the check
-//! voluntarily.
+//! of the longer high-risk list and the payment method are no input of this
+//! rule; they score in the risk assessment ([`crate::risk`]), and a stored
+//! level of 2 or 3 requires the check as well ([`with_risk_level`],
+//! `risk_assessment`). Otherwise staff may still carry out and sign the check
+//! voluntarily (GMED is no obliged entity under § 2 GwG; the check is its own
+//! measure).
 //!
 //! [`enhanced_check_triggers`] is the one place that decides it: the lead
 //! readiness, the staff wizard (`GET /leads/{id}/enhanced-check`), the

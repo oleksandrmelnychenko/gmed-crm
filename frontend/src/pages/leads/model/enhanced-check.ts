@@ -119,7 +119,9 @@ export function enhancedCheckReasonLabel(reason: string, tx: Tx): string {
         "Rechnungsempfänger auf einer Sanktionsliste (bestätigt)",
       );
     case RISK_ASSESSMENT_REASON:
-      return tx("уровень оценки риска 2 или выше", "Risikobewertung Stufe 2 oder höher");
+      // Not the level itself (owner 2026-10-19: "уровень оценки риска 2 или
+      // выше" is gone), a pointer to the panel that shows the triggers.
+      return tx("по результатам оценки риска (см. «Оценка риска»)", "aufgrund der Risikobewertung (siehe „Risikobewertung“)");
     case SANCTIONS_REVIEW_PENDING:
       return tx(
         "возможное совпадение с санкционным списком ждёт решения",

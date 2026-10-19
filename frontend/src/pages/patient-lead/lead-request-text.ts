@@ -275,6 +275,8 @@ export type LeadRequestText = {
   followUpBeforeSubmitIntro: string;
   representativeQuestionsIntro: string;
   followUpBlocks: Record<FollowUpBlock, string>;
+  /** Block A while it asks only the profession and the sector (no source of funds, owner 2026-10-19). */
+  followUpBlockAWork: string;
   followUpSubmit: string;
   followUpSending: string;
   followUpIncomplete: string;
@@ -1041,7 +1043,7 @@ const de: LeadRequestText = {
     payerExtrasBlock: "Weitere Angaben zum Zahler",
     missingPrefix: "Rechnungsempfänger",
   },
-  followUpBeforeSubmitIntro: "Unter bestimmten Umständen müssen wir einige ergänzende Fragen stellen, um gesetzliche Anforderungen zu erfüllen. Bitte beantworten Sie die Fragen zu politisch exponierten Personen, Sanktionsbezügen und zur Herkunft der Mittel. Das bedeutet nicht, dass Sie zu diesen Personengruppen gehören. Ihre Antworten werden automatisch gespeichert.",
+  followUpBeforeSubmitIntro: "Unter bestimmten Umständen müssen wir einige ergänzende Fragen stellen, um gesetzliche Anforderungen zu erfüllen. Bitte beantworten Sie die folgenden Fragen. Sie werden in solchen Fällen allen gestellt und sagen nichts über Ihre Person aus. Ihre Antworten werden automatisch gespeichert.",
   followUpIntro:
     "Bitte ergänzen Sie die folgenden Angaben und senden Sie sie anschließend ab. Alles wird automatisch gespeichert.",
   followUpBlocks: {
@@ -1058,6 +1060,7 @@ const de: LeadRequestText = {
     L: "Fragen nach dem Geldwäschegesetz",
   },
   followUpSubmit: "Angaben senden",
+  followUpBlockAWork: "Beruf und Branche",
   representativeQuestionsIntro: "Bitte beantworten Sie die folgenden Fragen für die jeweils genannte Person. Die Angaben betreffen den Elternteil oder gesetzlichen Vertreter, nicht das Kind. Bereits gespeicherte Antworten werden übernommen. Die Herkunft der Mittel gibt nur die tatsächlich zahlende Person in ihrer eigenen Erklärung an.",
   followUpSending: "Wird gesendet…",
   followUpIncomplete: "Bitte ergänzen Sie zuerst die noch offenen Angaben.",
@@ -1568,7 +1571,7 @@ const ru: LeadRequestText = {
     payerExtrasBlock: "Дополнительно о плательщике",
     missingPrefix: "Получатель счёта",
   },
-  followUpBeforeSubmitIntro: "При определённых обстоятельствах мы должны задать несколько уточняющих вопросов для выполнения законодательных требований. Ответьте на вопросы о политически значимых лицах, санкционных связях и происхождении средств. Это не означает, что вы относитесь к этим категориям. Ответы сохраняются автоматически.",
+  followUpBeforeSubmitIntro: "При определённых обстоятельствах мы должны задать несколько уточняющих вопросов для выполнения законодательных требований. Ответьте, пожалуйста, на вопросы ниже. В таких случаях их задают всем, и они ничего не говорят о вас лично. Ответы сохраняются автоматически.",
   followUpIntro: "Пожалуйста, дополните следующие сведения и затем отправьте их. Всё сохраняется автоматически.",
   followUpBlocks: {
     R: "Дополнительные сведения родителей или законных представителей",
@@ -1584,6 +1587,7 @@ const ru: LeadRequestText = {
     L: "Вопросы по закону (противодействие отмыванию денег)",
   },
   followUpSubmit: "Отправить сведения",
+  followUpBlockAWork: "Профессия и сфера деятельности",
   representativeQuestionsIntro: "Ответьте на вопросы для каждого указанного человека. Это сведения о родителе или законном представителе, а не о ребёнке. Уже сохранённые ответы подставляются автоматически. Происхождение средств указывает только человек, который действительно платит, в своей декларации.",
   followUpSending: "Отправляется…",
   followUpIncomplete: "Пожалуйста, сначала дополните недостающие сведения.",
@@ -2096,7 +2100,7 @@ const uk: LeadRequestText = {
     payerExtrasBlock: "Додатково про платника",
     missingPrefix: "Отримувач рахунку",
   },
-  followUpBeforeSubmitIntro: "За певних обставин ми маємо поставити кілька уточнювальних запитань для виконання законодавчих вимог. Дайте відповіді на запитання про політично значущих осіб, санкційні зв’язки та походження коштів. Це не означає, що ви належите до цих категорій. Відповіді зберігаються автоматично.",
+  followUpBeforeSubmitIntro: "За певних обставин ми маємо поставити кілька уточнювальних запитань для виконання законодавчих вимог. Дайте, будь ласка, відповіді на запитання нижче. У таких випадках їх ставлять усім, і вони нічого не кажуть про вас особисто. Відповіді зберігаються автоматично.",
   followUpIntro: "Будь ласка, доповніть наведені нижче відомості й потім надішліть їх. Усе зберігається автоматично.",
   followUpBlocks: {
     R: "Додаткові відомості батьків або законних представників",
@@ -2112,6 +2116,7 @@ const uk: LeadRequestText = {
     L: "Питання за законом (протидія відмиванню грошей)",
   },
   followUpSubmit: "Надіслати відомості",
+  followUpBlockAWork: "Професія та галузь",
   representativeQuestionsIntro: "Дайте відповіді для кожної вказаної людини. Ці відомості стосуються батька, матері або законного представника, а не дитини. Уже збережені відповіді підставляються автоматично. Походження коштів зазначає лише людина, яка справді платить, у своїй декларації.",
   followUpSending: "Надсилається…",
   followUpIncomplete: "Будь ласка, спершу доповніть відомості, яких бракує.",
@@ -2624,7 +2629,7 @@ const en: LeadRequestText = {
     payerExtrasBlock: "More about the payer",
     missingPrefix: "Invoice recipient",
   },
-  followUpBeforeSubmitIntro: "In some circumstances, we need to ask a few additional questions to meet legal requirements. Please answer the questions about politically exposed persons, sanctions connections and the source of funds. This does not mean that you belong to these categories. Your answers are saved automatically.",
+  followUpBeforeSubmitIntro: "In some circumstances, we need to ask a few additional questions to meet legal requirements. Please answer the questions below. In such cases they are asked of everyone and say nothing about you personally. Your answers are saved automatically.",
   followUpIntro: "Please complete the following details and then send them. Everything is saved automatically.",
   followUpBlocks: {
     R: "Additional details of parents or legal representatives",
@@ -2640,6 +2645,7 @@ const en: LeadRequestText = {
     L: "Questions under the anti-money-laundering law",
   },
   followUpSubmit: "Send details",
+  followUpBlockAWork: "Occupation and sector",
   representativeQuestionsIntro: "Please answer the questions for each named person. These details concern the parent or legal representative, rather than the child. Previously saved answers are filled in automatically. Only the person actually paying states the source of funds in their own declaration.",
   followUpSending: "Sending…",
   followUpIncomplete: "Please first complete the details that are still open.",

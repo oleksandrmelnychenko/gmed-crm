@@ -721,6 +721,12 @@ export type LeadRequestFollowUp = {
   answered_at: string | null;
   /** Block A's answers as saved through `…/enhanced-details`. */
   answers?: Partial<ExtraAnswers>;
+  /**
+   * Block A asks the own source of funds and its proof (owner 2026-10-19:
+   * only with the enhanced check or a staff request); `false` = profession
+   * and sector only. Absent on an older server (then asked as before).
+   */
+  funds_asked?: boolean;
   /** The source list the server offers, in form order. */
   funds_source_options?: string[];
   /** Block A: the uploaded proofs of the own funds (bank statement, salary slip …). */

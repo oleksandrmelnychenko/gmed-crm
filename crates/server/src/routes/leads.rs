@@ -1489,7 +1489,10 @@ fn evaluate_lead_conversion_readiness(
     // optional since 2026-10-19 (owner).
     let medical_ready = true;
     let service_ready = specialties_present;
+    // The risk assessment's check belongs to this step (`stage: documents`):
+    // the step is not ready while staff still have to decide.
     let documents_ready = compliance_completed
+        && !input.risk_assessment_held
         && input.consent_privacy_practices
         && input.consent_healthcare
         && input.identity_document_verified
@@ -1660,7 +1663,7 @@ fn evaluate_lead_conversion_readiness(
         json!({
             "key": "order_cost_estimate_document_generated",
             "label": "Order cost estimate document generated",
-            "passed": input.order_cost_estimate_document_generated,
+            "passed": input.package_covered || input.order_cost_estimate_document_generated,
             "blocking_for": "conversion",
             "stage": "commercial",
         }),
@@ -1681,7 +1684,7 @@ fn evaluate_lead_conversion_readiness(
         json!({
             "key": "quote_accepted",
             "label": "Quote accepted",
-            "passed": input.quote_accepted,
+            "passed": input.package_covered || input.quote_accepted,
             "blocking_for": "conversion",
             "stage": "commercial",
         }),
@@ -2254,6 +2257,17 @@ async fn load_lead_conversion_readiness(
     input.risk_assessment_held = crate::risk::store::readiness_held(&mut conn, lead_id)
         .await
         .map_err(enhanced_check_failed)?;
+    // A minor is identified through the parents or the guardian who contract
+    // (GwG subjects), not by an own identity document the child often lacks;
+    // an adult keeps the signed identity document of the lead.
+    if !input.identity_document_verified
+        && super::lead_representatives::load(&mut conn, lead_id)
+            .await
+            .map_err(enhanced_check_failed)?
+            .is_some_and(|loaded| loaded.minor_representatives_identified())
+    {
+        input.identity_document_verified = true;
+    }
     drop(conn);
     apply_repeat_patient_readiness(state, lead_id, &mut input).await?;
     let legal_readiness = evaluate_lead_conversion_readiness(&input);
@@ -10723,6 +10737,43 @@ mod lead_conversion_readiness_tests {
         );
         input.enhanced_due_diligence_document_signed = true;
         assert!(evaluate_lead_conversion_readiness(&input).conversion_ready);
+    }
+
+    #[test]
+    fn a_held_risk_assessment_keeps_the_documents_step_open() {
+        let step_ready = |readiness: &LeadConversionReadiness, key: &str| {
+            readiness.payload["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|step| step["key"] == key)
+                .unwrap()["ready"]
+                == true
+        };
+        let mut input = ready_input();
+        assert!(step_ready(
+            &evaluate_lead_conversion_readiness(&input),
+            "documents"
+        ));
+        input.risk_assessment_held = true;
+        let held = evaluate_lead_conversion_readiness(&input);
+        // The step, its check and the reason say the same.
+        assert!(!step_ready(&held, "documents"));
+        assert!(
+            held.payload["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|check| {
+                    check["key"] == "risk_assessment_released"
+                        && check["stage"] == "documents"
+                        && check["passed"] == false
+                })
+        );
+        assert!(
+            held.qualification_reasons
+                .contains(&"Risk assessment waits for a staff decision".to_string())
+        );
     }
 
     #[test]

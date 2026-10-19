@@ -257,7 +257,7 @@ export function FollowUpStep({
 
       {blocks.map((block) => (
         <div key={block} data-testid={`lead-request-follow-up-${block}`}>
-          <Section title={text.followUpBlocks[block]}>
+          <Section title={block === "A" && !blockAAsks(request).funds && !blockAAsks(request).payer_states_funds ? text.followUpBlockAWork : text.followUpBlocks[block]}>
             {showMissing ? (
               <MissingList
                 title={text.stepMissingTitle}

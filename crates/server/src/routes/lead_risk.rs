@@ -298,7 +298,20 @@ async fn assessment_json(
     } else {
         &question_preview
     };
-    let states = store::block_states(question_triggers, level, &requested, &config, &answers);
+    // The preview's own level, as the cabinet reads it: it only decides
+    // whether block A asks the source of funds.
+    let question_level = if started {
+        level
+    } else {
+        risk::score(&question_preview, &config).level
+    };
+    let states = store::block_states(
+        question_triggers,
+        question_level,
+        &requested,
+        &config,
+        &answers,
+    );
     let blocks: Map<String, Value> = states
         .iter()
         .map(|(block, state)| (block.to_string(), json!(state)))

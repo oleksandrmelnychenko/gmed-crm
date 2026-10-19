@@ -92,6 +92,7 @@ import {
   enhancedCheckTriggers,
   highRiskCountryHint,
   pepEnhancedCheckHint,
+  RISK_ASSESSMENT_REASON,
   SANCTIONS_REVIEW_PENDING,
   type LeadEnhancedCheck,
 } from "../model/enhanced-check";
@@ -630,11 +631,6 @@ function amlCountryBoxes(
   };
 }
 
-/**
- * Why the enhanced check is required (owner rule 2026-10-07): the server's
- * reasons with the black-list countries, or a black-list country the wizard
- * shows before it is saved; "" while nothing requires it.
- */
 /** The source of funds as the AML document prints it: the staff choice with its words, else what the self-paying lead stated in the cabinet. */
 function payerFundsTextOf(data: PayerDeclarationResponse | null | undefined): string {
   const declaration = data?.declaration;
@@ -646,19 +642,28 @@ function payerFundsTextOf(data: PayerDeclarationResponse | null | undefined): st
   return words ? `${label}: ${words}` : label;
 }
 
+/**
+ * Why the enhanced check is required (owner rule 2026-10-07): the server's
+ * reasons with the black-list countries, or a black-list country the wizard
+ * shows before it is saved; "" while nothing requires it. Required by the
+ * risk level alone, it points to the risk assessment: the level label itself
+ * is not shown (owner 2026-10-19), but a required check never stands there
+ * without a reason. An unsaved black-list country names itself before the
+ * level the server still reports.
+ */
 function amlEnhancedCheckRequiredText(
   check: LeadEnhancedCheck | null,
   blacklistCountries: readonly string[],
   tx: Tx,
   lang: Lang,
 ): string {
-  // "Risk assessment level 2 or higher" is not shown as a reason (owner 2026-10-19).
-  const triggers = enhancedCheckTriggers(check).filter((reason) => reason !== "risk_assessment");
-  const reasons = triggers.length > 0
-    ? enhancedCheckReasonsText(triggers, tx)
+  const triggers = enhancedCheckTriggers(check);
+  const ruleTriggers = triggers.filter((reason) => reason !== RISK_ASSESSMENT_REASON);
+  const reasons = ruleTriggers.length > 0
+    ? enhancedCheckReasonsText(ruleTriggers, tx)
     : blacklistCountries.length > 0
       ? tx("страна из чёрного списка", "Land auf der Blacklist")
-      : "";
+      : enhancedCheckReasonsText(triggers, tx);
   if (!reasons) return "";
   const countries = [...new Set([...(check?.countries ?? []), ...blacklistCountries])]
     .map((code) => countryLabel(code, lang))
@@ -666,7 +671,6 @@ function amlEnhancedCheckRequiredText(
   return countries ? `${reasons} (${countries})` : reasons;
 }
 
-/** Information next to the check, never a requirement: an open sanctions match, a high-risk country, a PEP. */
 /**
  * Whether the server judged the enhanced check for good: loaded (the lead
  * exists) and no possible sanctions match waits. Only then may the wizard say
@@ -677,14 +681,18 @@ function amlCheckSettled(check: LeadEnhancedCheck | null): boolean {
   return Boolean(check) && !check?.reasons.includes(SANCTIONS_REVIEW_PENDING);
 }
 
+/** Information next to the check, never a requirement: an open sanctions match, a high-risk country, a PEP. */
 function amlEnhancedCheckHints({
   check,
+  required,
   highRiskCountries,
   pep,
   tx,
   lang,
 }: {
   check: LeadEnhancedCheck | null;
+  /** The check is required (the server's answer or an unsaved black-list country). */
+  required: boolean;
   highRiskCountries: readonly string[];
   pep: boolean;
   tx: Tx;
@@ -694,8 +702,9 @@ function amlEnhancedCheckHints({
   if (check?.reasons.includes(SANCTIONS_REVIEW_PENDING)) {
     hints.push(enhancedCheckReasonsText([SANCTIONS_REVIEW_PENDING], tx));
   }
-  // "Not required" would contradict a required check (level 2 and more, QA 2026-10-10).
-  if (highRiskCountries.length > 0 && !check?.required) {
+  // "Decided separately" would contradict a required check (level 2 and more,
+  // QA 2026-10-10; also an unsaved black-list country next to a listed one).
+  if (highRiskCountries.length > 0 && !required) {
     hints.push(
       highRiskCountryHint(highRiskCountries.map((code) => countryLabel(code, lang)).join(", "), tx, amlCheckSettled(check)),
     );
@@ -790,6 +799,7 @@ const LeadMedicalIntakeForm = lazy(() =>
   })),
 );
 const SERVICE_CONCERN_ID = "lead-wizard-concern";
+const RISK_ASSESSMENT_SECTION_ID = "lead-wizard-risk-assessment";
 const SERVICE_SPECIALTIES_ID = "lead-wizard-specialties";
 const MEDICAL_ANAMNESE_ID = "lead-wizard-anamnese";
 const ORDER_DATE_FROM_ID = "lead-wizard-program-date-from";
@@ -2364,6 +2374,14 @@ function readinessStepLabel(key: string, tx: Tx, repeatIntake = false) {
   return labels[key] ?? tx("Проверка данных", "Datenprüfung");
 }
 
+/** "Identity document is not verified" for a minor: the contracting parents or the guardian are identified, not the child. */
+function minorIdentityReasonLabel(tx: Tx) {
+  return tx(
+    "Подтвердите документы, удостоверяющие личность родителей или опекуна",
+    "Ausweisdokumente der Eltern bzw. des Vormunds bestätigen",
+  );
+}
+
 function readinessReasonLabel(reason: string, tx: Tx) {
   const labels: Record<string, string> = {
     "Lead must be qualified before conversion": tx("Подтвердите данные обращения", "Angaben zum Anliegen bestätigen"),
@@ -2385,7 +2403,6 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Enhanced due diligence document is missing": tx("Заполните усиленную AML-проверку и создайте документ", "Verstärkte AML-Sorgfaltsprüfung ausfüllen und Dokument erstellen"),
     "Enhanced due diligence document is not signed": tx("Получите подпись на документе усиленной AML-проверки", "Unterschrift für die verstärkte AML-Sorgfaltsprüfung einholen"),
     "Risk assessment waits for a staff decision": tx("Нужно решение по оценке риска (документы → «Оценка риска»)", "Entscheidung zur Risikobewertung nötig (Unterlagen → „Risikobewertung“)"),
-    "Anamnesis intake is incomplete": tx("Укажите причину обращения", "Anliegen angeben"),
     "Framework contract is not signed": tx("Подпишите рамочный договор", "Rahmenvertrag unterzeichnen"),
     "Framework contract was terminated; create a new contract": tx("Рамочный договор расторгнут — оформите новый договор", "Rahmenvertrag wurde gekündigt – neuen Vertrag erstellen"),
     "Framework contract document is missing": tx("Создайте документ рамочного договора", "Rahmenvertragsdokument erstellen"),
@@ -2424,7 +2441,6 @@ function readinessReasonStep(reason: string): StepId {
     "Enhanced due diligence document is missing": "documents",
     "Enhanced due diligence document is not signed": "documents",
     "Risk assessment waits for a staff decision": "documents",
-    "Anamnesis intake is incomplete": "medical",
     "Framework contract is not signed": "commercial",
     "Framework contract was terminated; create a new contract": "commercial",
     "Framework contract document is missing": "commercial",
@@ -2501,7 +2517,6 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Signed DSGVO document is missing": PRIVACY_DOCUMENT_ID,
     "Compliance is not signed yet": PRIVACY_DOCUMENT_ID,
     "Signed confidentiality release is missing": CONFIDENTIALITY_RELEASE_ID,
-    "Anamnesis intake is incomplete": SERVICE_CONCERN_ID,
     "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,
     "Framework contract was terminated; create a new contract": FRAMEWORK_DOCUMENT_ID,
     "Framework contract document is missing": FRAMEWORK_DOCUMENT_ID,
@@ -2630,9 +2645,21 @@ function documentsValidationIssues(
   demoChecks: readonly string[] = [],
   /** Consents given in the cabinet count like the staff's toggles (server readiness). */
   cabinet: CabinetConsents = NO_CABINET_CONSENTS,
+  /** The server's check `risk_assessment_released` failed: qualification waits for the staff decision. */
+  riskHeld = false,
+  /** The server's check `identity_document_verified` passed (also a minor's parents' copies). */
+  identityVerifiedByServer = false,
 ): ValidationIssue[] {
   if (!draft) return [];
   const issues: ValidationIssue[] = [];
+  if (riskHeld) {
+    issues.push({
+      key: "risk-assessment",
+      step: "documents",
+      message: readinessReasonLabel("Risk assessment waits for a staff decision", tx),
+      fieldId: RISK_ASSESSMENT_SECTION_ID,
+    });
+  }
   if (!draft.privacyConsent && !cabinet.privacy) {
     issues.push({
       key: "privacy-consent",
@@ -2673,13 +2700,17 @@ function documentsValidationIssues(
       fieldId: PRIVACY_DOCUMENT_ID,
     });
   }
-  if (!existingChecks?.get("identity_document_verified") && !documents.identity.some((document) => (
+  // A minor is identified through the contracting parents or guardian (the
+  // server's check passes with their reviewed identity copies).
+  if (!existingChecks?.get("identity_document_verified") && !identityVerifiedByServer && !documents.identity.some((document) => (
     document.signed_at && document.compliance_kind === "identity"
   ))) {
     issues.push({
       key: "identity-document",
       step: "documents",
-      message: readinessReasonLabel("Identity document is not verified", tx),
+      message: isMinor(draft.birthDate, new Date())
+        ? minorIdentityReasonLabel(tx)
+        : readinessReasonLabel("Identity document is not verified", tx),
       fieldId: IDENTITY_DOCUMENT_ID,
     });
   }
@@ -4386,6 +4417,7 @@ export function LeadWizard({
   const amlRequiredText = amlEnhancedCheckRequiredText(enhancedCheck, amlBlacklistCountries, tx, lang);
   const amlHints = amlEnhancedCheckHints({
     check: enhancedCheck,
+    required: amlRequired,
     highRiskCountries: amlRisk?.countries.filter((code) => !AML_BLACKLIST_COUNTRY_CODES.has(code)) ?? [],
     pep: amlPepTriggered,
     tx,
@@ -4517,8 +4549,10 @@ export function LeadWizard({
   const prepaymentInvoiceHref = quote?.patient_id && order?.id
     ? `/invoices?patient=${encodeURIComponent(quote.patient_id)}&order=${encodeURIComponent(order.id)}&quote=${encodeURIComponent(quote.id)}&invoice_type=advance&create=1`
     : null;
-  const clientQuoteAndPrepaymentReady = Boolean(acceptedQuote);
   const serverQuoteAccepted = readinessChecks.get("quote_accepted");
+  // A repeat order covered by a package needs no quote: the server's check
+  // passes then, and the step counter follows it.
+  const clientQuoteAndPrepaymentReady = Boolean(acceptedQuote) || serverQuoteAccepted === true;
   const serverPrepaymentReady = readinessChecks.get("prepayment_ready");
   const quoteAndPrepaymentReady = mergeCommercialQuoteReadiness(
     clientQuoteAndPrepaymentReady,
@@ -4631,7 +4665,7 @@ export function LeadWizard({
       return masterValidationIssues(masterErrors, tx);
     }
     if (validationContext.kind === "documents") {
-      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents);
+      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents, readinessChecks.get("risk_assessment_released") === false, readinessChecks.get("identity_document_verified") === true);
     }
     if (validationContext.kind === "order") {
       return orderIssues;
@@ -5296,7 +5330,7 @@ export function LeadWizard({
             : {}),
           affectedThirdCountry: current.amlEnhancedDueDiligence.affectedThirdCountry || affectedThirdCountry,
           // The document prints the payer form's source of funds (owner 2026-10-19: one field).
-          assetOrigin: payerFundsText || current.amlEnhancedDueDiligence.assetOrigin,
+          assetOrigin: payer.data ? payerFundsText : current.amlEnhancedDueDiligence.assetOrigin,
           ...(amlRisk ? {
             highRiskCountryResident: boxes.resident,
             highRiskCountryTransaction: boxes.transaction || current.amlEnhancedDueDiligence.highRiskCountryTransaction,
@@ -5736,7 +5770,7 @@ export function LeadWizard({
       intakeDraft = { ...draft, concern: patientRequestReason };
       setDraft((current) => current && !current.concern.trim() ? { ...current, concern: patientRequestReason } : current);
     }
-    const documentIssues = documentsValidationIssues(intakeDraft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents);
+    const documentIssues = documentsValidationIssues(intakeDraft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents, readinessChecks.get("risk_assessment_released") === false, readinessChecks.get("identity_document_verified") === true);
     if (documentIssues.length > 0) {
       setValidationContext({ kind: "documents" });
       setStep("documents");
@@ -5960,7 +5994,8 @@ export function LeadWizard({
     setError("");
     try {
       // The AML form edits the payer's source of funds itself (owner 2026-10-19):
-      // save those fields first and print what they now say.
+      // save those fields first and print what they now say — also nothing,
+      // never the hidden prefill from the lead's answers the form does not show.
       let draftOverride: Draft | undefined;
       if (templateId === "enhanced_due_diligence") {
         if (!(await flushPayerAutosave())) return false;
@@ -5968,7 +6003,7 @@ export function LeadWizard({
           ...draft,
           amlEnhancedDueDiligence: {
             ...draft.amlEnhancedDueDiligence,
-            assetOrigin: payerFundsTextRef.current || draft.amlEnhancedDueDiligence.assetOrigin,
+            assetOrigin: payer.data ? payerFundsTextRef.current : draft.amlEnhancedDueDiligence.assetOrigin,
           },
         };
       }
@@ -7153,8 +7188,9 @@ ${serviceCommentLines.join("\n")}`
     + (!quoteAndPrepaymentReady && !(lead?.readiness.blocking_reasons ?? []).some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? 1 : 0);
   const isStepReady = (id: string) => {
     if (id === "master_data") return Boolean(draft && Object.keys(masterErrors).length === 0);
-    // The lead's own reason counts, as in the server's readiness; it is taken over on completion.
-    if (id === "medical") return Boolean(draft?.concern.trim() || patientRequestReason);
+    // Nothing in the medical step is required: the reason of the request is
+    // optional since 2026-10-19 (owner), as in the server's readiness.
+    if (id === "medical") return readiness.get("medical") ?? true;
     if (id === "order") return Boolean(draft && orderIssues.length === 0);
     if (id === "commercial") return commercialReady;
     if (id === "release") return conversionReady;
@@ -7903,16 +7939,16 @@ ${serviceCommentLines.join("\n")}`
                       <div className="min-w-0 space-y-2">
                         <StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>
                           <ShieldCheck aria-hidden="true" />
+                          {/* The same name as the documents step and the form (owner 2026-10-19). */}
                           {amlRequired
-                            ? tx("Требуется усиленная AML-проверка", "Verstärkte AML-Prüfung erforderlich")
+                            ? tx("Усиленная AML-проверка (§ 15 GwG): обязательна", "Verstärkte Sorgfaltspflichten (§ 15 GwG): erforderlich")
                             : amlCheckSettled(enhancedCheck)
-                              ? tx("Усиленная AML-проверка не обязательна", "Verstärkte AML-Prüfung nicht vorgeschrieben")
-                              : tx("Усиленная AML-проверка", "Verstärkte AML-Prüfung")}
+                              ? tx("Усиленная AML-проверка (§ 15 GwG): добровольная", "Verstärkte Sorgfaltspflichten (§ 15 GwG): freiwillig")
+                              : tx("Усиленная AML-проверка (§ 15 GwG)", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
                         </StatusChip>
-                        {amlRequiredText ? (
+                        {amlRequired && amlRequiredText ? (
                           <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-aml-enhanced-check-reasons">
                             {amlRequiredText}
-                            {" · Durchführung verstärkter Sorgfaltspflichten (§ 15 GwG)"}
                           </p>
                         ) : null}
                         {amlHints.map((hint) => (
@@ -7941,7 +7977,7 @@ ${serviceCommentLines.join("\n")}`
                         >
                           <ShieldCheck aria-hidden="true" className="size-3.5" />
                           {wizardDocuments.enhanced_due_diligence.length > 0
-                            ? tx("Обновить проверку", "Prüfung aktualisieren")
+                            ? tx("Создать новую версию", "Neue Version erstellen")
                             : tx("Заполнить проверку", "Prüfung ausfüllen")}
                         </Button>
                       ) : null}
@@ -8519,7 +8555,9 @@ ${serviceCommentLines.join("\n")}`
                 </Section>
               ) : null}
               {leadId ? (
-                <LeadRiskAssessmentPanel assessment={risk.assessment} controller={risk.controller} tx={tx} disabled={isBusy} />
+                <div id={RISK_ASSESSMENT_SECTION_ID} tabIndex={-1} className="focus:outline-none">
+                  <LeadRiskAssessmentPanel assessment={risk.assessment} controller={risk.controller} tx={tx} disabled={isBusy} />
+                </div>
               ) : null}
               {/* Always here: required by the owner's rule (2026-10-07) or carried out voluntarily. */}
               <div data-testid="lead-wizard-enhanced-check-section" data-required={amlRequired ? "true" : "false"}>
@@ -8528,7 +8566,7 @@ ${serviceCommentLines.join("\n")}`
                   title={(
                     // One row: the check and whether it is required (owner 2026-10-19: more compact).
                     <span className="flex flex-wrap items-center gap-2" data-testid="lead-wizard-enhanced-check-status">
-                      <StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>{tx("Усиленная AML-проверка", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}</StatusChip>
+                      <StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>{tx("Усиленная AML-проверка (§ 15 GwG)", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}</StatusChip>
                       <span className={cn("text-xs font-medium", amlRequired ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground")}>
                         {amlRequired ? tx("Обязательна", "Erforderlich") : tx("Добровольная проверка", "Freiwillige Prüfung")}
                       </span>
@@ -10225,6 +10263,7 @@ ${serviceCommentLines.join("\n")}`
         ) : error ? <div role="alert" className="shrink-0 border-t border-border p-4"><Banner tone="error">{error}</Banner></div> : null}
       </DialogContent>
       </Dialog>
+      {/* The AML form opened from another step: the payer's funds part still reaches its slot. */}
       <Sheet open={amlSheetOpen} onOpenChange={setAmlSheetOpen}>
         <SheetContent
           side="right"
