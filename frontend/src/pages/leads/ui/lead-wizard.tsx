@@ -10205,24 +10205,29 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchAml("riskReason", event.target.value)}
                     />
                   </Field>
-                  {/* One source of funds (owner 2026-10-19): entered in the AML block of the page, printed from there. */}
-                  <Field label={tx("Происхождение задействованных активов", "Herkunft der eingesetzten Vermögenswerte")}>
-                    <p className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-sm" data-testid="lead-aml-asset-origin">
-                      {draft.amlEnhancedDueDiligence.assetOrigin || (
-                        <span className="text-muted-foreground">{tx("Источник средств ещё не указан", "Herkunft der Mittel noch nicht angegeben")}</span>
-                      )}
-                    </p>
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      {tx("Указывается в блоке «Усиленная AML-проверка» на странице: источник средств и описание.", "Wird im Block „Verstärkte Sorgfaltspflichten“ der Seite angegeben: Herkunft der Mittel und Beschreibung.")}
-                    </span>
-                  </Field>
-                  <AssetOriginEvidenceField
-                    value={draft.amlEnhancedDueDiligence.assetOriginEvidence}
-                    subject={{ leadId }}
-                    lang={lang}
-                    disabled={isBusy}
-                    onChange={(next) => patchAml("assetOriginEvidence", next)}
-                  />
+                  {/* One source of funds (owner 2026-10-19): entered in the AML block of the page, printed from there; one card with its proofs. */}
+                  <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3.5" data-testid="lead-aml-asset-origin-card">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[13px] font-medium text-foreground">{tx("Происхождение задействованных активов", "Herkunft der eingesetzten Vermögenswerte")}</span>
+                        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{tx("из блока AML на странице", "aus dem AML-Block der Seite")}</span>
+                      </div>
+                      <p className="text-sm" data-testid="lead-aml-asset-origin">
+                        {draft.amlEnhancedDueDiligence.assetOrigin || (
+                          <span className="text-muted-foreground">{tx("Источник средств ещё не указан — укажите его в блоке «Усиленная AML-проверка».", "Herkunft der Mittel noch nicht angegeben – bitte im Block „Verstärkte Sorgfaltspflichten“ angeben.")}</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="border-t border-border/60 pt-3">
+                      <AssetOriginEvidenceField
+                        value={draft.amlEnhancedDueDiligence.assetOriginEvidence}
+                        subject={{ leadId }}
+                        lang={lang}
+                        disabled={isBusy}
+                        onChange={(next) => patchAml("assetOriginEvidence", next)}
+                      />
+                    </div>
+                  </div>
                 </section>
 
                 <section className="space-y-4 border-t border-border pt-5">

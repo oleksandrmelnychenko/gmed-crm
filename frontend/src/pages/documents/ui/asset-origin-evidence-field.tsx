@@ -72,7 +72,7 @@ export function AssetOriginEvidenceField({ value, subject, lang, disabled = fals
   return (
     <div data-asset-origin-evidence className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[11px] font-medium uppercase text-muted-foreground">
+        <span className="text-[13px] font-medium text-foreground">
           {tx("Подтверждающие документы о происхождении активов", "Nachweise zur Herkunft der Vermögenswerte")}
         </span>
         <span className="inline-flex">
@@ -113,11 +113,11 @@ export function AssetOriginEvidenceField({ value, subject, lang, disabled = fals
           : tx("Сначала выберите пациента.", "Wählen Sie zuerst den Patienten aus.")}
       </p>
       {value.length > 0 ? (
-        <ul className="border-y border-border/70">
+        <ul className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60">
           {value.map((item) => (
             <li
               key={item.documentId}
-              className="flex min-h-10 items-center justify-between gap-3 border-b border-border/70 py-2 last:border-b-0"
+              className="flex min-h-10 items-center justify-between gap-3 bg-muted/20 px-3 py-1.5"
             >
               <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
                 <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
