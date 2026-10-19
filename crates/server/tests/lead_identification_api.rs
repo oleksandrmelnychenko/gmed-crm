@@ -1458,14 +1458,16 @@ async fn a_parent_who_pays_is_one_person_with_the_payer() {
         "{named}"
     );
 
-    // She signs the cost assumption as `payer`: it is her signature on both
-    // lines, and the father's line stays empty.
+    // She is the paying representative — the contracting party, no separate
+    // payer (owner decision 2026-10-19) — and signs the order as `client`
+    // with her address: it is her signature on both lines, and the father's
+    // line stays empty.
     let signed_at = Utc::now() - Duration::hours(2);
-    let cost_assumption = seed_document(&app, Some(lead_id)).await;
+    let order_document = seed_document(&app, Some(lead_id)).await;
     seed_named_signature_request(
         &app,
-        cost_assumption,
-        vec![signature_by("payer", "anna.muster@example.com", signed_at)],
+        order_document,
+        vec![signature_by("client", "anna.muster@example.com", signed_at)],
         json!([]),
     )
     .await;
@@ -1523,8 +1525,8 @@ async fn a_parent_who_pays_is_one_person_with_the_payer() {
     );
 
     // The father pays instead. His contact has no address, so name and date
-    // of birth say that he is the payer; what he signs as payer with the
-    // payer's address is his signature.
+    // of birth say that he is the paying representative; what he signs under
+    // his name is his signature on both lines.
     let (status, saved) = json_request(
         &app,
         "POST",
@@ -1551,12 +1553,15 @@ async fn a_parent_who_pays_is_one_person_with_the_payer() {
     seed_named_signature_request(
         &app,
         second,
+        // His contact has no address: the signer's name says it is his
+        // `client` signature as the paying representative.
         vec![signature_by(
-            "payer",
+            "client",
             "ben.zahlt@example.com",
             ben_signed_at,
         )],
-        json!([]),
+        json!([{ "first_name": "Ben", "last_name": "Muster",
+                 "email": "ben.zahlt@example.com", "role": "client" }]),
     )
     .await;
     let (_, father) = json_request(&app, "GET", &status_path, &pm, None).await;

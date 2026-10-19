@@ -216,7 +216,22 @@ async fn load_summary(
 ) -> Result<PayerSummary, sqlx::Error> {
     let party =
         contracting_party::resolve(conn, patient_id, None, None, crate::app_time::today()).await?;
-    let declared = lead_payer::patient_declaration(conn, patient_id).await?;
+    let mut declared = lead_payer::patient_declaration(conn, patient_id).await?;
+    // A parent named as payer (owner decision 2026-10-19) is shown with the
+    // representative's data, as of the conversion day.
+    if let Some(declared) = declared
+        .as_mut()
+        .filter(|declared| declared.declaration.is_representative())
+    {
+        let on = crate::app_time::date_of(declared.converted_at);
+        if let Some(loaded) =
+            crate::routes::lead_representatives::load_on(conn, declared.lead_id, on).await?
+        {
+            declared.declaration = declared
+                .declaration
+                .with_representative(&loaded.representation);
+        }
+    }
     let recipient = load_recipient(conn, patient_id).await?;
     let identification = match (&declared, with_identification) {
         (Some(declared), true) => {

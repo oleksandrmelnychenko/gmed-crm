@@ -348,6 +348,14 @@ async fn payer_addresses(
 ) -> Result<Vec<String>, sqlx::Error> {
     let values: Vec<Option<String>> = sqlx::query_scalar(
         "SELECT email FROM lead_payer_declarations WHERE lead_id = $1 AND payer_kind = 'third_party'
+         UNION ALL SELECT c.entry->>'email'
+           FROM lead_payer_declarations d
+           JOIN leads l ON l.id = d.lead_id
+           CROSS JOIN LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(l.trusted_contacts) = 'array' THEN l.trusted_contacts ELSE '[]'::jsonb END
+           ) AS c(entry)
+           WHERE d.lead_id = $1 AND d.payer_kind = 'representative'
+             AND lower(c.entry->>'id') = d.payer_representative_id::text
          UNION ALL SELECT confirmed_email FROM lead_payer_statements WHERE lead_id = $1 AND email_confirmed_at IS NOT NULL"
     ).bind(lead_id).fetch_all(conn).await?;
     Ok(values
