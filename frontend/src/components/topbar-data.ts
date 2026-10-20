@@ -167,6 +167,18 @@ export function leadRetentionNotificationCopy(
           body: "В портале указана дата рождения младше 18 лет. У несовершеннолетних нет своего входа.",
         };
   }
+  // A minor patient turned 18 (crates/server/src/services/coming_of_age.rs, 2026-10-20).
+  if (item.kind === "patient_came_of_age") {
+    return lang === "de"
+      ? {
+          title: "Patient ist 18: eigenen Zugang anlegen",
+          body: "Der Zugang der Eltern zur Patientenakte endete mit dem 18. Geburtstag. Bitte den eigenen Zugang des Patienten in der Patiententabelle anlegen.",
+        }
+      : {
+          title: "Пациенту исполнилось 18: выдайте собственный вход",
+          body: "Доступ родителей к карте пациента закрыт в день 18-летия. Выдайте пациенту собственный вход в таблице пациентов.",
+        };
+  }
   if (item.kind === "lead_portal_consent_revoked") {
     const health = item.params?.consent
       ? item.params.consent === "health_data"

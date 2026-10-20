@@ -138,14 +138,44 @@ async fn issue_patient_portal_access(
         );
     }
 
+    let mut login_user = patient.try_get::<Option<Uuid>, _>("user_id").ok().flatten();
+    let mut login_active = patient
+        .try_get::<Option<bool>, _>("login_active")
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+    let mut login_email = patient
+        .try_get::<Option<String>, _>("login_email")
+        .ok()
+        .flatten();
+    // A former minor's own login of the converted request (owner decision
+    // 2026-10-20): the login the child had as a lead becomes the patient's
+    // login instead of a conflict over its e-mail.
+    let mut linked_request_login = false;
+    if login_user.is_none()
+        && let Some(email) = normalize_portal_email(
+            patient
+                .try_get::<Option<String>, _>("email")
+                .ok()
+                .flatten()
+                .as_deref(),
+        )
+    {
+        match link_converted_request_login(&state, auth.user_id, patient_id, &email).await {
+            Ok(Some(user_id)) => {
+                login_user = Some(user_id);
+                login_active = true;
+                login_email = Some(email);
+                linked_request_login = true;
+            }
+            Ok(None) => {}
+            Err(response) => return response,
+        }
+    }
+
     // A linked login gets a new password.
-    if let Some(user_id) = patient.try_get::<Option<Uuid>, _>("user_id").ok().flatten() {
-        if !patient
-            .try_get::<Option<bool>, _>("login_active")
-            .ok()
-            .flatten()
-            .unwrap_or(false)
-        {
+    if let Some(user_id) = login_user {
+        if !login_active {
             return coded(
                 StatusCode::CONFLICT,
                 "login_inactive",
@@ -191,8 +221,9 @@ async fn issue_patient_portal_access(
         ));
         return Json(json!({
             "user_id": user_id,
-            "email": patient.try_get::<Option<String>, _>("login_email").ok().flatten(),
+            "email": login_email,
             "created": false,
+            "linked_request_login": linked_request_login,
             "one_time_password": one_time_password,
         }))
         .into_response();
@@ -343,4 +374,98 @@ async fn issue_patient_portal_access(
         })),
     )
         .into_response()
+}
+
+/// Links the own login of the patient's converted request
+/// (`leads.portal_user_id`) to the patient record once the patient is of age
+/// (owner decision 2026-10-20), as
+/// [`crate::routes::lead_portal_account::link_to_patient_in_tx`] does for an
+/// adult at the conversion: a minor's request kept that login closed, so the
+/// conversion did not link it. Only an active login with the patient's
+/// e-mail qualifies that was never a parent's or guardian's login and
+/// reaches no other patient. The caller checked the age.
+async fn link_converted_request_login(
+    state: &AppState,
+    actor: Uuid,
+    patient_id: Uuid,
+    email: &str,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|error| internal(error, patient_id, "begin request login"))?;
+    let candidate = sqlx::query(
+        r#"SELECT l.id AS lead_id, u.id AS user_id
+           FROM leads l
+           JOIN users u ON u.id = l.portal_user_id AND u.role = 'patient' AND u.is_active
+           WHERE l.converted_patient_id = $1
+             AND lower(btrim(u.email)) = $2
+             AND NOT EXISTS (
+                 SELECT 1 FROM lead_portal_access a
+                 WHERE a.user_id = u.id AND a.kind = 'guardian'
+             )
+             AND NOT EXISTS (
+                 SELECT 1 FROM patient_assignments pa
+                 WHERE pa.user_id = u.id AND pa.patient_id <> $1 AND pa.revoked_at IS NULL
+             )
+           ORDER BY l.created_at DESC, l.id DESC
+           LIMIT 1
+           FOR UPDATE OF u"#,
+    )
+    .bind(patient_id)
+    .bind(email)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| internal(error, patient_id, "find request login"))?;
+    let Some(candidate) = candidate else {
+        return Ok(None);
+    };
+    let lead_id: Uuid = candidate
+        .try_get("lead_id")
+        .map_err(|error| internal(error, patient_id, "decode request login"))?;
+    let user_id: Uuid = candidate
+        .try_get("user_id")
+        .map_err(|error| internal(error, patient_id, "decode request login"))?;
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (patient_id, user_id)
+           DO UPDATE SET revoked_at = NULL, revoked_by = NULL, manually_revoked_at = NULL,
+                         revoked_reason = NULL, source = 'manual'"#,
+    )
+    .bind(patient_id)
+    .bind(user_id)
+    .bind(actor)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| internal(error, patient_id, "link request login"))?;
+    sqlx::query(
+        "UPDATE consent_records SET patient_id = $2 WHERE lead_id = $1 AND patient_id IS NULL",
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| internal(error, patient_id, "link request consents"))?;
+    audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "link_request_login_to_patient",
+            Some(actor),
+            "patient",
+            Some(patient_id),
+            json!({
+                "portal_user_id": user_id,
+                "lead_id": lead_id,
+                "reason": "patient_of_age",
+            }),
+        ),
+    )
+    .await
+    .map_err(|error| internal(error, patient_id, "audit request login"))?;
+    tx.commit()
+        .await
+        .map_err(|error| internal(error, patient_id, "commit request login"))?;
+    Ok(Some(user_id))
 }

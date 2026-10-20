@@ -214,6 +214,11 @@ impl ContractingParty {
 struct StoredChoice {
     kind: Option<PartyKind>,
     relation_ids: Vec<Uuid>,
+    /// The German day the order was created, when an order was given.
+    order_created_on: Option<NaiveDate>,
+    /// The day the framework contract was concluded (signed, else created),
+    /// when the order's choice is inherited from it.
+    inherited_contract_on: Option<NaiveDate>,
 }
 
 async fn stored_choice(
@@ -222,9 +227,12 @@ async fn stored_choice(
     contract_id: Option<Uuid>,
 ) -> Result<StoredChoice, sqlx::Error> {
     let mut contract_id = contract_id;
+    let mut order_created_on = None;
     if let Some(order_id) = order_id
         && let Some(row) = sqlx::query(
-            "SELECT contracting_party, contracting_relation_ids, contract_id FROM orders WHERE id = $1",
+            "SELECT contracting_party, contracting_relation_ids, contract_id,
+                    (created_at AT TIME ZONE 'Europe/Berlin')::date AS created_on
+             FROM orders WHERE id = $1",
         )
         .bind(order_id)
         .fetch_optional(&mut *conn)
@@ -234,12 +242,17 @@ async fn stored_choice(
             .try_get::<Option<String>, _>("contracting_party")
             .unwrap_or_default()
             .and_then(|value| PartyKind::parse(&value));
+        order_created_on = row
+            .try_get::<Option<NaiveDate>, _>("created_on")
+            .unwrap_or_default();
         if kind.is_some() {
             return Ok(StoredChoice {
                 kind,
                 relation_ids: row
                     .try_get::<Vec<Uuid>, _>("contracting_relation_ids")
                     .unwrap_or_default(),
+                order_created_on,
+                inherited_contract_on: None,
             });
         }
         contract_id = contract_id.or(row
@@ -248,13 +261,21 @@ async fn stored_choice(
     }
     if let Some(contract_id) = contract_id
         && let Some(row) = sqlx::query(
-            "SELECT contracting_party, contracting_relation_ids FROM framework_contracts WHERE id = $1",
+            "SELECT contracting_party, contracting_relation_ids,
+                    (COALESCE(signed_at, created_at) AT TIME ZONE 'Europe/Berlin')::date
+                        AS concluded_on
+             FROM framework_contracts WHERE id = $1",
         )
         .bind(contract_id)
         .fetch_optional(&mut *conn)
         .await?
     {
         return Ok(StoredChoice {
+            order_created_on,
+            inherited_contract_on: order_created_on.and(
+                row.try_get::<Option<NaiveDate>, _>("concluded_on")
+                    .unwrap_or_default(),
+            ),
             kind: row
                 .try_get::<Option<String>, _>("contracting_party")
                 .unwrap_or_default()
@@ -267,7 +288,30 @@ async fn stored_choice(
     Ok(StoredChoice {
         kind: None,
         relation_ids: Vec::new(),
+        order_created_on,
+        inherited_contract_on: None,
     })
+}
+
+/// Whether an order's party inherited from the framework contract no longer
+/// applies (owner decision 2026-10-20): the contract named the parents (or
+/// the child represented by them) while the patient was a minor, and the
+/// order was created after the 18th birthday. An adult's new order names the
+/// patient; a choice staff made on the order itself always stands.
+pub fn inherited_minor_choice_lapsed(
+    kind: Option<PartyKind>,
+    birth_date: Option<NaiveDate>,
+    contract_on: Option<NaiveDate>,
+    order_created_on: Option<NaiveDate>,
+) -> bool {
+    let (Some(contract_on), Some(order_created_on)) = (contract_on, order_created_on) else {
+        return false;
+    };
+    matches!(
+        kind,
+        Some(PartyKind::LegalRepresentatives | PartyKind::PatientRepresented)
+    ) && is_minor_on(birth_date, contract_on)
+        && !is_minor_on(birth_date, order_created_on)
 }
 
 /// Explicit contractual choice, shared by patient and unconverted-lead documents.
@@ -283,18 +327,32 @@ pub(crate) async fn selected_kind(
 /// the minor's lead stored on the patient (`patients.contracting_relation_ids`,
 /// owner decision 2026-10-19: the parents with custody, not every parent on
 /// file), else every recorded parent and guardian. Stored relations that no
-/// longer exist fall back to the recorded parents and guardians.
+/// longer exist fall back to the recorded parents and guardians. The stored
+/// custody parents apply only while the patient is a minor on `on` (owner
+/// decision 2026-10-20: parental custody ends at 18).
 pub async fn load_representatives(
     conn: &mut PgConnection,
     patient_id: Uuid,
     relation_ids: &[Uuid],
+    on: NaiveDate,
 ) -> Result<Vec<Representative>, sqlx::Error> {
     if relation_ids.is_empty() {
         let stored: Vec<Uuid> =
-            sqlx::query_scalar("SELECT contracting_relation_ids FROM patients WHERE id = $1")
+            sqlx::query("SELECT contracting_relation_ids, birth_date FROM patients WHERE id = $1")
                 .bind(patient_id)
                 .fetch_optional(&mut *conn)
                 .await?
+                .filter(|row| {
+                    // Without a birth date nothing shows that custody ended.
+                    let birth_date = row
+                        .try_get::<Option<NaiveDate>, _>("birth_date")
+                        .unwrap_or_default();
+                    birth_date.is_none() || is_minor_on(birth_date, on)
+                })
+                .map(|row| {
+                    row.try_get::<Vec<Uuid>, _>("contracting_relation_ids")
+                        .unwrap_or_default()
+                })
                 .unwrap_or_default();
         if !stored.is_empty() {
             let named = load_relations(&mut *conn, patient_id, &stored).await?;
@@ -388,15 +446,22 @@ pub async fn resolve(
         .as_ref()
         .and_then(|row| row.try_get::<Option<String>, _>("name").ok().flatten())
         .unwrap_or_default();
-    let patient_is_minor = is_minor_on(
-        patient.as_ref().and_then(|row| {
-            row.try_get::<Option<NaiveDate>, _>("birth_date")
-                .ok()
-                .flatten()
-        }),
-        on,
-    );
-    let choice = stored_choice(conn, order_id, contract_id).await?;
+    let birth_date = patient.as_ref().and_then(|row| {
+        row.try_get::<Option<NaiveDate>, _>("birth_date")
+            .ok()
+            .flatten()
+    });
+    let patient_is_minor = is_minor_on(birth_date, on);
+    let mut choice = stored_choice(conn, order_id, contract_id).await?;
+    if inherited_minor_choice_lapsed(
+        choice.kind,
+        birth_date,
+        choice.inherited_contract_on,
+        choice.order_created_on,
+    ) {
+        choice.kind = None;
+        choice.relation_ids.clear();
+    }
     let explicit = choice.kind.is_some();
     let kind = choice.kind.unwrap_or(if patient_is_minor {
         PartyKind::LegalRepresentatives
@@ -405,7 +470,7 @@ pub async fn resolve(
     });
     let representatives = match kind {
         PartyKind::Patient => Vec::new(),
-        _ => load_representatives(conn, patient_id, &choice.relation_ids).await?,
+        _ => load_representatives(conn, patient_id, &choice.relation_ids, on).await?,
     };
     Ok(ContractingParty {
         kind,
@@ -445,6 +510,60 @@ mod tests {
             patient_is_minor: true,
             representatives,
         }
+    }
+
+    #[test]
+    fn a_framework_contract_of_the_minor_does_not_name_the_parents_on_an_adults_new_order() {
+        let birth = Some(day("2008-10-20"));
+        let parents = Some(PartyKind::LegalRepresentatives);
+        // Contract concluded by the parents while the child was a minor.
+        let contract_on = Some(day("2026-05-01"));
+        // Order created on the 18th birthday: the patient contracts.
+        assert!(inherited_minor_choice_lapsed(
+            parents,
+            birth,
+            contract_on,
+            Some(day("2026-10-20"))
+        ));
+        assert!(inherited_minor_choice_lapsed(
+            Some(PartyKind::PatientRepresented),
+            birth,
+            contract_on,
+            Some(day("2027-01-10"))
+        ));
+        // An order created before the birthday keeps the parents.
+        assert!(!inherited_minor_choice_lapsed(
+            parents,
+            birth,
+            contract_on,
+            Some(day("2026-10-19"))
+        ));
+        // A representation chosen for the adult (e.g. a Betreuer) stands.
+        assert!(!inherited_minor_choice_lapsed(
+            Some(PartyKind::PatientRepresented),
+            birth,
+            Some(day("2026-11-01")),
+            Some(day("2026-12-01"))
+        ));
+        // The patient as party, or no inherited choice, never lapses.
+        assert!(!inherited_minor_choice_lapsed(
+            Some(PartyKind::Patient),
+            birth,
+            contract_on,
+            Some(day("2026-12-01"))
+        ));
+        assert!(!inherited_minor_choice_lapsed(
+            parents,
+            birth,
+            None,
+            Some(day("2026-12-01"))
+        ));
+        assert!(!inherited_minor_choice_lapsed(
+            parents,
+            birth,
+            contract_on,
+            None
+        ));
     }
 
     #[test]

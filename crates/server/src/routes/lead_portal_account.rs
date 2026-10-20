@@ -628,6 +628,64 @@ pub(crate) async fn link_to_patient_in_tx(
     Ok(())
 }
 
+/// The own login of a converted request whose patient is of age now and was
+/// not linked at the conversion, because a minor's own login is closed
+/// ([`OWN_LOGIN_CLOSED_SQL`], owner decision 2026-10-20): linked to the
+/// patient record as [`link_to_patient_in_tx`] links an adult's login. A
+/// login that is a parent's or guardian's login is never linked. Returns
+/// whether a link was made.
+pub(crate) async fn link_own_login_of_age_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    patient_id: Uuid,
+    assigned_by: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let linked: Option<Uuid> = sqlx::query_scalar(&format!(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           SELECT $2, l.portal_user_id, $3
+           FROM leads l
+           JOIN users u ON u.id = l.portal_user_id AND u.role = 'patient' AND u.is_active
+           WHERE l.id = $1 AND l.converted_patient_id = $2 AND NOT {OWN_LOGIN_CLOSED_SQL}
+             AND NOT EXISTS (
+                 SELECT 1 FROM lead_portal_access a
+                 WHERE a.user_id = u.id AND a.kind = 'guardian'
+             )
+           ON CONFLICT (patient_id, user_id)
+           DO UPDATE SET revoked_at = NULL, revoked_by = NULL, manually_revoked_at = NULL,
+                         revoked_reason = NULL, source = 'manual'
+           WHERE patient_assignments.revoked_at IS NOT NULL
+              OR patient_assignments.source = 'lead_guardian'
+           RETURNING user_id"#,
+    ))
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(assigned_by)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(user_id) = linked else {
+        return Ok(false);
+    };
+    sqlx::query(
+        "UPDATE consent_records SET patient_id = $2 WHERE lead_id = $1 AND patient_id IS NULL",
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .execute(&mut **tx)
+    .await?;
+    audit::write_in_transaction(
+        tx,
+        &audit::domain_event(
+            "link_request_login_to_patient",
+            Some(assigned_by),
+            "patient",
+            Some(patient_id),
+            json!({ "portal_user_id": user_id, "lead_id": lead_id, "reason": "patient_of_age" }),
+        ),
+    )
+    .await?;
+    Ok(true)
+}
+
 /// A parent who becomes a patient is linked to the children whose records
 /// name them as parent or guardian (owner decision 2026-10-19), also when the
 /// parent never had a guardian login on the child's request: the child's
@@ -971,6 +1029,17 @@ async fn issue_lead_portal_access(
             .unwrap_or(false)
         {
             return err(StatusCode::CONFLICT, "The patient account is deactivated");
+        }
+        // A converted minor who is of age now: the own login the conversion
+        // left closed becomes the patient's login (owner decision 2026-10-20).
+        if let Some(patient_id) = lead
+            .try_get::<Option<Uuid>, _>("converted_patient_id")
+            .ok()
+            .flatten()
+            && let Err(error) =
+                link_own_login_of_age_in_tx(&mut tx, lead_id, patient_id, auth.user_id).await
+        {
+            return internal(error, lead_id, "link own login to patient");
         }
         if let Err(error) = tx.commit().await {
             return internal(error, lead_id, "commit lookup");

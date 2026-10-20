@@ -7643,6 +7643,7 @@ async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_a
         &mut conn,
         patient_id,
         &[anna_relation],
+        gmed_server::app_time::today(),
     )
     .await
     .unwrap();
@@ -7943,10 +7944,14 @@ async fn converting_a_minor_stores_the_custodial_parents_as_contracting_party() 
     assert_eq!(audit["lead_id"], lead_id.to_string());
     assert_eq!(audit["custody"], "sole_parent");
     let mut conn = pool.acquire().await.unwrap();
-    let representatives =
-        gmed_server::services::contracting_party::load_representatives(&mut conn, child, &[])
-            .await
-            .unwrap();
+    let representatives = gmed_server::services::contracting_party::load_representatives(
+        &mut conn,
+        child,
+        &[],
+        gmed_server::app_time::today(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         representatives
             .iter()
@@ -7960,6 +7965,7 @@ async fn converting_a_minor_stores_the_custodial_parents_as_contracting_party() 
         &mut conn,
         child,
         &[ben_relation],
+        gmed_server::app_time::today(),
     )
     .await
     .unwrap();

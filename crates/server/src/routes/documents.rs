@@ -18383,6 +18383,7 @@ async fn generate_document(
                             &mut conn,
                             patient_uuid,
                             &[],
+                            crate::app_time::today(),
                         )
                         .await
                         .unwrap_or_default(),

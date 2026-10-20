@@ -493,4 +493,15 @@ describe("lead retention notifications", () => {
     const minor = retention("lead_portal_minor", "Patient is under 18: issue the parents' access", "");
     expect(localizedNotificationCopy(minor, "ru").title).toBe("Пациенту меньше 18: выдайте доступ родителю");
   });
+
+  it("asks staff to issue the patient's own login once the patient is 18", () => {
+    const cameOfAge = {
+      ...retention("patient_came_of_age", "Patient is 18: issue the patient's own login", "The parents' access ended."),
+      entity_type: "patient",
+      entity_id: "patient-1",
+    } as Notification;
+    expect(localizedNotificationCopy(cameOfAge, "ru").title).toBe("Пациенту исполнилось 18: выдайте собственный вход");
+    expect(localizedNotificationCopy(cameOfAge, "de").title).toBe("Patient ist 18: eigenen Zugang anlegen");
+    expect(notificationHrefForRole(cameOfAge, "patient_manager")).toBe("/patients?patient=patient-1");
+  });
 });
