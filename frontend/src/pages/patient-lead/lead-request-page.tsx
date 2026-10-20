@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Clock, LoaderCircle } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 import { Banner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -62,7 +62,6 @@ function storedCabinetLang(): LeadCabinetLang | null {
 
 export function LeadRequestPage() {
   const [, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
   const { lang: portalLang, setLang: setPortalLang } = useLang();
   const { user, refreshUser } = useAuth();
   const accountLang = user?.preferred_language ?? null;
@@ -203,7 +202,7 @@ export function LeadRequestPage() {
         {!ownAccessClosed && !leadMode && user?.role === "patient" ? (
           <div className="space-y-3" data-testid="lead-request-patient-portal">
             <p className="text-sm">{text.noRequestPortal}</p>
-            <Button type="button" onClick={() => navigate("/")}>
+            <Button type="button" onClick={() => window.location.assign("/")}>
               {text.openPatientPortal}
             </Button>
           </div>
