@@ -2733,14 +2733,14 @@ async fn prefill_minor_repeat_representation(
         .execute(&mut **tx)
         .await?;
     }
-    if let Some(custody) = custody {
+    if let Some(custody) = &custody {
         sqlx::query(
             r#"INSERT INTO lead_gwg_declarations (lead_id, custody, updated_by)
                VALUES ($1, $2, $3)
                ON CONFLICT (lead_id) DO NOTHING"#,
         )
         .bind(lead_id)
-        .bind(&custody)
+        .bind(custody)
         .bind(actor)
         .execute(&mut **tx)
         .await?;
@@ -11239,12 +11239,19 @@ mod repeat_conversion_relation_tests {
         // An older "parent" is the same person as a new "mother"; a
         // patronymic on one side only does not make a second person.
         assert_eq!(
-            matching_relation(&[older.clone()], &[], None, None, "Anna Muster", "mother"),
+            matching_relation(
+                std::slice::from_ref(&older),
+                &[],
+                None,
+                None,
+                "Anna Muster",
+                "mother"
+            ),
             Some(older.id)
         );
         assert_eq!(
             matching_relation(
-                &[older.clone()],
+                std::slice::from_ref(&older),
                 &[],
                 None,
                 None,
@@ -11255,12 +11262,19 @@ mod repeat_conversion_relation_tests {
         );
         // Not another kind of relation, not one taken already.
         assert_eq!(
-            matching_relation(&[older.clone()], &[], None, None, "Anna Muster", "spouse"),
+            matching_relation(
+                std::slice::from_ref(&older),
+                &[],
+                None,
+                None,
+                "Anna Muster",
+                "spouse"
+            ),
             None
         );
         assert_eq!(
             matching_relation(
-                &[older.clone()],
+                std::slice::from_ref(&older),
                 &[older.id],
                 None,
                 None,
@@ -11288,7 +11302,7 @@ mod repeat_conversion_relation_tests {
         // A relation another entry created is never taken by a name.
         assert_eq!(
             matching_relation(
-                &[created.clone()],
+                std::slice::from_ref(&created),
                 &[],
                 Some(Uuid::from_bytes([8; 16])),
                 None,
@@ -11305,7 +11319,7 @@ mod repeat_conversion_relation_tests {
         };
         assert_eq!(
             matching_relation(
-                &[linked.clone()],
+                std::slice::from_ref(&linked),
                 &[],
                 None,
                 Some(person),
@@ -11316,7 +11330,7 @@ mod repeat_conversion_relation_tests {
         );
         assert_eq!(
             matching_relation(
-                &[linked.clone()],
+                std::slice::from_ref(&linked),
                 &[],
                 None,
                 Some(Uuid::from_bytes([6; 16])),
