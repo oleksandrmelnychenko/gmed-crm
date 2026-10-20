@@ -336,12 +336,19 @@ pub async fn load_representatives(
     relation_ids: &[Uuid],
     on: NaiveDate,
 ) -> Result<Vec<Representative>, sqlx::Error> {
+    let mut adult = false;
     if relation_ids.is_empty() {
         let stored: Vec<Uuid> =
             sqlx::query("SELECT contracting_relation_ids, birth_date FROM patients WHERE id = $1")
                 .bind(patient_id)
                 .fetch_optional(&mut *conn)
                 .await?
+                .inspect(|row| {
+                    let birth_date = row
+                        .try_get::<Option<NaiveDate>, _>("birth_date")
+                        .unwrap_or_default();
+                    adult = birth_date.is_some() && !is_minor_on(birth_date, on);
+                })
                 .filter(|row| {
                     // Without a birth date nothing shows that custody ended.
                     let birth_date = row
@@ -355,20 +362,24 @@ pub async fn load_representatives(
                 })
                 .unwrap_or_default();
         if !stored.is_empty() {
-            let named = load_relations(&mut *conn, patient_id, &stored).await?;
+            let named = load_relations(&mut *conn, patient_id, &stored, false).await?;
             if !named.is_empty() {
                 return Ok(named);
             }
         }
     }
-    load_relations(conn, patient_id, relation_ids).await
+    // An adult is represented by a guardian (Betreuer) only, never by the
+    // parents as such (owner decision 2026-10-20).
+    load_relations(conn, patient_id, relation_ids, adult).await
 }
 
-/// The named relations, or with none named every parent and guardian.
+/// The named relations, or with none named every parent and guardian
+/// (`guardians_only`: only the guardians).
 async fn load_relations(
     conn: &mut PgConnection,
     patient_id: Uuid,
     relation_ids: &[Uuid],
+    guardians_only: bool,
 ) -> Result<Vec<Representative>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT relation.id, relation.related_patient_id, relation.relation_type,
@@ -395,7 +406,8 @@ async fn load_relations(
            ) own
            WHERE relation.patient_id = $1
              AND (
-                 (cardinality($2::uuid[]) = 0 AND relation.relation_type IN ('parent', 'mother', 'father', 'guardian'))
+                 (cardinality($2::uuid[]) = 0 AND relation.relation_type IN ('parent', 'mother', 'father', 'guardian')
+                  AND (NOT $3 OR relation.relation_type = 'guardian'))
                  OR relation.id = ANY($2::uuid[])
              )
            ORDER BY CASE WHEN cardinality($2::uuid[]) > 0
@@ -404,6 +416,7 @@ async fn load_relations(
     )
     .bind(patient_id)
     .bind(relation_ids)
+    .bind(guardians_only)
     .fetch_all(conn)
     .await?;
     Ok(rows
