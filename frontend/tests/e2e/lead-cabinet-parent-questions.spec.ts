@@ -250,7 +250,7 @@ test.describe("Parent country follow-up", () => {
       await expect(page.getByTestId("lead-request-rep2-identity-upload")).not.toContainText(text.childIdentityFiles);
       await step(page, "identity");
       const identity = page.getByTestId("lead-request-step-identity");
-      await expect(identity.getByRole("heading", { name: text.childSections.identity, exact: true })).toBeVisible();
+      await expect(identity.getByRole("heading", { name: text.childDocumentTitle, exact: true })).toBeVisible();
       await expect(identity).toContainText(text.childIdentityFiles);
       await expect(identity.getByRole("button", { name: text.childIdentityUploadButton, exact: true })).toBeVisible();
       await expect(identity).toContainText(text.childIdentityUploadHint);
