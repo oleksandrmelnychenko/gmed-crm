@@ -3524,6 +3524,11 @@ async fn update_my_billing(
             Ok(next) => next,
             Err(error) => return error.into_response(),
         };
+        lead_invoice_recipient::default_parent_to_viewer(
+            &mut next,
+            &representation.representation,
+            auth.user_id,
+        );
         if let Err(error) =
             lead_invoice_recipient::resolve_parent(&mut next, &representation.representation)
         {

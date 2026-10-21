@@ -52,6 +52,29 @@ fn codes(value: &Value, key: &str) -> Vec<String> {
     crate::sanctions::normalize::country_codes(values)
 }
 
+/// An ISO 3166-1 alpha-2 code for a stored country: a code as it is, or a
+/// country name a patient record holds as free text ("Ukraine",
+/// "Deutschland"); `None` for anything else.
+pub(crate) fn iso_country(value: &str) -> Option<String> {
+    crate::sanctions::normalize::country_code(value)
+        .filter(|code| crate::services::citizenships::is_country_code(code))
+}
+
+/// The countries of a representative are ISO codes wherever they are read
+/// (the cabinet's country select, the invoice recipient, the declaration). A
+/// linked patient's free-text address country (DEV 2026-10-21: "Ukraine"
+/// broke the invoice recipient's `country` check) becomes its code; a value
+/// that names no known country is left out.
+fn normalize_countries(extras: &mut Value) {
+    for key in ["country", "birth_country", "id_issuing_country"] {
+        let Some(value) = extras.get(key).and_then(Value::as_str) else {
+            continue;
+        };
+        let code = iso_country(value);
+        extras[key] = json!(code);
+    }
+}
+
 fn fill_text(target: &mut Value, key: &str, fallback: Option<String>) {
     if text(target, key).is_none()
         && let Some(value) = fallback
@@ -203,6 +226,7 @@ fn identity(
         }
     }
 
+    normalize_countries(&mut extras);
     if codes(&extras, "citizenships").is_empty() {
         let contact_citizenships = codes(&contact, "citizenships");
         if !contact_citizenships.is_empty() {
@@ -383,4 +407,42 @@ async fn load_many_on(
         ));
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_linked_patients_free_text_country_becomes_its_iso_code() {
+        let contact = json!({
+            "id": Uuid::nil().to_string(),
+            "relation": "mother",
+            "name": "Olena Test",
+        });
+        let patient = json!({
+            "first_name": "Olena",
+            "last_name": "Test",
+            "country": "Ukraine",
+            "residence_country": "Ukraine",
+            "birth_country": "Atlantis",
+        });
+        let identity = identity(
+            Uuid::nil(),
+            0,
+            &contact,
+            Some(&json!({ "role": "legal_representative" })),
+            Some(&patient),
+        );
+        assert_eq!(identity.extras["country"], json!("UA"));
+        assert_eq!(identity.extras["birth_country"], Value::Null);
+        assert_eq!(identity.residences, vec!["UA".to_string()]);
+    }
+
+    #[test]
+    fn stored_country_codes_stay_codes() {
+        let mut extras = json!({ "country": "de", "birth_country": "UA" });
+        normalize_countries(&mut extras);
+        assert_eq!(extras, json!({ "country": "DE", "birth_country": "UA" }));
+    }
 }

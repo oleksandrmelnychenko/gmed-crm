@@ -805,11 +805,40 @@ pub(crate) fn resolve_parent(
     recipient.street = person.extras.street.clone();
     recipient.zip = person.extras.zip.clone();
     recipient.city = person.extras.city.clone();
-    recipient.country = person.extras.country.clone();
+    // Stored as an ISO code (the column's check): a parent's country read
+    // from a linked patient record may be a name ("Ukraine", DEV 2026-10-21).
+    recipient.country = person
+        .extras
+        .country
+        .as_deref()
+        .and_then(crate::services::lead_guardian_identity::iso_country);
     recipient.phone = person.phone.clone();
     recipient.parent_email = person.email.clone();
     recipient.parent_date_of_birth = person.date_of_birth;
     Ok(())
+}
+
+/// "Ich (als Elternteil / gesetzliche Vertretung)" of a parent's login is that
+/// parent (owner 2026-10-21): the patient side of a minor as recipient
+/// without a named parent gets the parent whose login `user_id` is, when that
+/// parent has a place in the form. Another parent stays a deliberate choice,
+/// checked by [`resolve_parent`].
+pub(crate) fn default_parent_to_viewer(
+    recipient: &mut Recipient,
+    representation: &super::lead_representatives::Representation,
+    user_id: Uuid,
+) {
+    if !representation.minor
+        || recipient.recipient.as_deref() != Some(RECIPIENT_SELF)
+        || recipient.representative_contact_id.is_some()
+    {
+        return;
+    }
+    if let Some(person) = representation.representatives.iter().find(|person| {
+        matches!(person.slot, Some("rep1" | "rep2")) && person.login_user_ids.contains(&user_id)
+    }) {
+        recipient.representative_contact_id = Some(person.id);
+    }
 }
 
 pub(crate) fn parent_choice_missing(
@@ -1341,5 +1370,89 @@ mod tests {
                 "recipient_country"
             ]
         );
+    }
+
+    fn parent(
+        n: u128,
+        slot: &'static str,
+        login: Option<Uuid>,
+        country: &str,
+    ) -> super::super::lead_representatives::Representative {
+        super::super::lead_representatives::Representative {
+            id: Uuid::from_u128(n),
+            slot: Some(slot),
+            role: "legal_representative",
+            relation: Some("parent".into()),
+            first_name: format!("Parent{n}"),
+            last_name: "Test".into(),
+            date_of_birth: None,
+            email: Some(format!("parent{n}@example.com")),
+            phone: None,
+            login_user_ids: login.into_iter().collect(),
+            has_data: false,
+            extras: super::super::lead_representatives::Extras {
+                country: Some(country.into()),
+                ..Default::default()
+            },
+        }
+    }
+
+    /// DEV 2026-10-21: "Я" of a parent's login names that parent, also with
+    /// two parents, and a parent's country from a linked patient record
+    /// ("Ukraine") is stored as its code, never against the column's check.
+    #[test]
+    fn me_is_the_signed_in_parent_and_the_country_is_a_code() {
+        let viewer = Uuid::from_u128(99);
+        let representation = super::super::lead_representatives::Representation {
+            minor: true,
+            representatives: vec![
+                parent(1, "rep1", None, "DE"),
+                parent(2, "rep2", Some(viewer), "Ukraine"),
+            ],
+            ..Default::default()
+        };
+        let mut recipient = apply(
+            &Recipient::default(),
+            &body(json!({ "invoice_recipient": "self" })),
+        )
+        .unwrap();
+        assert!(parent_choice_missing(&recipient, &representation));
+        default_parent_to_viewer(&mut recipient, &representation, viewer);
+        assert_eq!(
+            recipient.representative_contact_id,
+            Some(Uuid::from_u128(2))
+        );
+        resolve_parent(&mut recipient, &representation).unwrap();
+        assert_eq!(recipient.country.as_deref(), Some("UA"));
+        assert!(!parent_choice_missing(&recipient, &representation));
+
+        // A chosen parent stays; somebody who is none of the parents gets none.
+        let mut chosen = apply(
+            &Recipient::default(),
+            &body(json!({
+                "invoice_recipient": "self",
+                "recipient_representative_id": Uuid::from_u128(1).to_string(),
+            })),
+        )
+        .unwrap();
+        default_parent_to_viewer(&mut chosen, &representation, viewer);
+        assert_eq!(chosen.representative_contact_id, Some(Uuid::from_u128(1)));
+        let mut stranger = apply(
+            &Recipient::default(),
+            &body(json!({ "invoice_recipient": "self" })),
+        )
+        .unwrap();
+        default_parent_to_viewer(&mut stranger, &representation, Uuid::from_u128(7));
+        assert_eq!(stranger.representative_contact_id, None);
+        // An id that is no current parent is still refused.
+        let mut foreign = apply(
+            &Recipient::default(),
+            &body(json!({
+                "invoice_recipient": "self",
+                "recipient_representative_id": Uuid::from_u128(5).to_string(),
+            })),
+        )
+        .unwrap();
+        assert!(resolve_parent(&mut foreign, &representation).is_err());
     }
 }

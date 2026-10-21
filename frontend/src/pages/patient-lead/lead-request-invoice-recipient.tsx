@@ -67,6 +67,7 @@ import {
   recipientPatch,
   recipientPayerReady,
   recipientValue,
+  withOwnParent,
   withRecipientAnswer,
   withRecipientRelationship,
   withRecipientType,
@@ -123,9 +124,15 @@ export function InvoiceRecipientSection({
   const template = guardian ? (request.payer_self_template ?? null) : null;
   const answered = payerAnsweredByPayer(request);
   const onRecipientState = partState("recipient");
-  const [draft, setDraft] = useState<RecipientDraft>(() => draftFromRecipient(request.billing));
   const parents = guardian ? request.representation?.representatives.filter((person) => person.slot === "rep1" || person.slot === "rep2") ?? [] : [];
+  // "Я (как родитель / законный представитель)" is the parent who is signed in (owner 2026-10-21):
+  // that parent receives the invoice, nobody is asked which parent.
+  const ownParent = parents.find((person) => person.mine) ?? null;
+  const [draft, setDraft] = useState<RecipientDraft>(() => withOwnParent(draftFromRecipient(request.billing), ownParent?.id));
   const invoiceParent = parents.find((person) => person.id === draft.representative_id);
+  // Which parent: only for a login that is none of the parents, or a choice of the other parent made before.
+  const parentChoiceShown = guardian && flowOf(draft).recipient === "self" && parents.length > 0
+    && (!ownParent || Boolean(draft.representative_id && draft.representative_id !== ownParent.id));
   const parentChoiceNeeded = !invoiceParent && (parents.length > 1 || Boolean(draft.representative_id));
   const selectedParentRequest: LeadRequest = invoiceParent ? {
     ...request,
@@ -309,10 +316,10 @@ export function InvoiceRecipientSection({
                       onChange={() => {
                         setPartyChoice(null);
                         if (identification && third && organisation && recipientPays) identification.set("payment_background", "");
-                        update((current) => withRecipientAnswer(current, answer));
+                        update((current) => withOwnParent(withRecipientAnswer(current, answer), ownParent?.id));
                       }}
                     />
-                    <span className="min-w-0">{guardian && parents.length > 1 && answer === "self" ? text.sectionLegalRepresentatives : options[answer]}</span>
+                    <span className="min-w-0">{options[answer]}</span>
                   </label>
                 );
               })}
@@ -324,7 +331,7 @@ export function InvoiceRecipientSection({
             ) : null}
           </div>
 
-          {guardian && flow.recipient === "self" && parents.length > 0 ? (
+          {parentChoiceShown ? (
             <LabeledField {...labeled("representative_id", parents.length > 1 || parentChoiceNeeded)}>
               <NativeComboboxSelect
                 {...control("representative_id")}

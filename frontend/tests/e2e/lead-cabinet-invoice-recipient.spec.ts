@@ -225,6 +225,11 @@ function payerFits(request: Request): boolean {
   const third = payer.payer_kind === "third_party";
   const answer = billing.invoice_recipient;
   const pays = billing.invoice_recipient_is_payer;
+  if ((payer.payer_kind as string) === "representative") {
+    const parent = billing.recipient.representative_id;
+    if (answer === "self" && parent) return pays === true ? payer.payer_representative_id === parent : pays === false && payer.payer_representative_id !== parent;
+    return (answer === "self" && pays === true) || (answer === "third_party" && pays === false);
+  }
   if (answer === "self" && billing.recipient.representative_id) {
     const parent = request.representation?.representatives.find((person) => person.id === billing.recipient.representative_id);
     const same = third && parent?.email === payer.email;
@@ -508,20 +513,64 @@ test("Next saves the last billing answer before checking missing fields", async 
   expect(calls.billing).toEqual([{ payment_method: "bank_transfer" }]);
 });
 
-test("two parents: choose the named invoice parent, preserve it on reload and switch the payer deliberately", async ({ page }) => {
-  const mother = "11111111-1111-4111-8111-111111111111";
-  const father = "22222222-2222-4222-8222-222222222222";
+const MOTHER = "11111111-1111-4111-8111-111111111111";
+const FATHER = "22222222-2222-4222-8222-222222222222";
+
+/** Both parents under joint custody; `mine` marks the parent who is signed in (none: a login that is no parent). */
+function twoParents(mine: string | null): LeadRequestRepresentation {
+  return { document_stage: false, has_representative: null, under_guardianship: null,
+    custody: "joint", custody_stated: true, representatives: [MOTHER, FATHER].map((id, index) => ({
+      id, slot: index === 0 ? "rep1" : "rep2", role: "legal_representative", relation: "parent",
+      mine: id === mine, email_locked: id === mine, can_remove: false,
+      first_name: index === 0 ? "Maria" : "Ben", last_name: "Muster", date_of_birth: "1985-04-12",
+      birth_place: null, birth_country: null, citizenships: ["DE"],
+      street: index === 0 ? "Mutterweg 1" : "Vaterweg 2", zip: "10115", city: "Berlin", country: "DE",
+      email: index === 0 ? "maria.muster@example.com" : "ben.muster@example.com", phone: "+4930000000",
+      identity_documents: [], authority_documents: [],
+    })) } as unknown as LeadRequestRepresentation;
+}
+
+test("'Ich' of a signed-in parent is that parent: no parent question, also with two parents (DEV 2026-10-21)", async ({ page }) => {
   const { request, calls } = await setup(page, { minor: true, prepare: (request) => {
-    request.representation = { document_stage: false, has_representative: null, under_guardianship: null,
-      custody: "joint", custody_stated: true, representatives: [mother, father].map((id, index) => ({
-        id, slot: index === 0 ? "rep1" : "rep2", role: "legal_representative", relation: "parent",
-        mine: index === 0, email_locked: index === 0, can_remove: false,
-        first_name: index === 0 ? "Maria" : "Ben", last_name: "Muster", date_of_birth: "1985-04-12",
-        birth_place: null, birth_country: null, citizenships: ["DE"],
-        street: index === 0 ? "Mutterweg 1" : "Vaterweg 2", zip: "10115", city: "Berlin", country: "DE",
-        email: index === 0 ? "maria.muster@example.com" : "ben.muster@example.com", phone: "+4930000000",
-        identity_documents: [], authority_documents: [],
-      })) };
+    request.representation = twoParents(FATHER);
+    request.payer_self_template = { representative_id: FATHER, first_name: "Ben", last_name: "Muster", date_of_birth: "1985-04-12",
+      email: "ben.muster@example.com", phone: null } as typeof request.payer_self_template;
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  const stepBox = page.getByTestId("lead-request-step-billing");
+  await stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }).check();
+  await expect.poll(() => request.billing.recipient.representative_id).toBe(FATHER);
+  expect(calls.billing[0]).toMatchObject({ invoice_recipient: "self", recipient_representative_id: FATHER });
+  await expect(page.getByRole("combobox", { name: "Welcher Elternteil erhält die Rechnung?" })).toHaveCount(0);
+  await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_kind: "representative", payer_representative_id: FATHER });
+  expect(request.progress.missing_for_submit).not.toContain("invoice_recipient");
+  expect(request.progress.missing_for_submit).not.toContain("recipient_representative_id");
+  // The payment method is asked on the same screen.
+  await choose(page, page.getByRole("combobox", { name: METHOD }), "Überweisung");
+  await expect.poll(() => request.billing.payment_method).toBe("bank_transfer");
+  await page.getByRole("button", { name: "Weiter", exact: true }).click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "disclosure");
+});
+
+test("a stored 'Ich' without a named parent gets the signed-in parent at once", async ({ page }) => {
+  const { request, calls } = await setup(page, { minor: true, prepare: (request) => {
+    request.representation = twoParents(MOTHER);
+    request.billing.invoice_recipient = "self";
+    request.billing.invoice_recipient_is_payer = true;
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  await expect.poll(() => request.billing.recipient.representative_id).toBe(MOTHER);
+  expect(calls.billing.at(-1)).toEqual({ recipient_representative_id: MOTHER });
+  await expect(page.getByRole("combobox", { name: "Welcher Elternteil erhält die Rechnung?" })).toHaveCount(0);
+});
+
+test("two parents and a login that is none of them: choose the named invoice parent, preserve it on reload and switch the payer deliberately", async ({ page }) => {
+  const mother = MOTHER;
+  const father = FATHER;
+  const { request, calls } = await setup(page, { minor: true, prepare: (request) => {
+    request.representation = twoParents(null);
     request.billing.invoice_recipient = "self";
     request.billing.invoice_recipient_is_payer = true;
   } });

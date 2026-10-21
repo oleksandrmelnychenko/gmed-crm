@@ -187,6 +187,17 @@ export function withRecipientAnswer(draft: RecipientDraft, answer: string): Reci
   return { ...withoutParty(draft), recipient: answer, email: "", is_payer: answer ? draft.is_payer || "yes" : "" };
 }
 
+/**
+ * "Я (как родитель / законный представитель)" of a parent's login names that
+ * parent (owner 2026-10-21): the patient side as recipient without a chosen
+ * parent gets the signed-in parent (`ownId`, the representative marked
+ * `mine`). A parent chosen before stays.
+ */
+export function withOwnParent(draft: RecipientDraft, ownId: string | null | undefined): RecipientDraft {
+  if (!ownId || draft.recipient !== "self" || draft.representative_id) return draft;
+  return { ...draft, representative_id: ownId };
+}
+
 /** The draft after "the recipient is": a person has no organisation's data and the other way round. */
 export function withRecipientType(draft: RecipientDraft, type: string): RecipientDraft {
   if (type === draft.type) return draft;

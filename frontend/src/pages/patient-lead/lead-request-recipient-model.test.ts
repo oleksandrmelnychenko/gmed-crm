@@ -20,6 +20,7 @@ import {
   recipientFieldOf,
   recipientKey,
   recipientPatch,
+  withOwnParent,
   withRecipientAnswer,
   withRecipientRelationship,
   withRecipientType,
@@ -83,6 +84,15 @@ describe("step 3: the invoice recipient first (owner spec 2026-10-11)", () => {
     expect(payerFitsFlow({ recipient: "self", isPayer: "no" }, viktor, father, false, parents)).toBe(false);
     expect(withRecipientAnswer(father, "third_party").representative_id).toBe("");
     expect(recipientFieldOf("recipient_representative_id")).toBe("representative_id");
+  });
+  it("'Ich' of a parent's login names the signed-in parent; a chosen parent stays", () => {
+    const saved = draftFromRecipient(billing());
+    const own = withOwnParent(withRecipientAnswer(saved, "self"), "parent-own");
+    expect(own.representative_id).toBe("parent-own");
+    expect(recipientPatch(saved, own)).toMatchObject({ invoice_recipient: "self", recipient_representative_id: "parent-own" });
+    expect(withOwnParent({ ...own, representative_id: "parent-other" }, "parent-own").representative_id).toBe("parent-other");
+    expect(withOwnParent(withRecipientAnswer(saved, "third_party"), "parent-own").representative_id).toBe("");
+    expect(withOwnParent(withRecipientAnswer(saved, "self"), null).representative_id).toBe("");
   });
   it("reads the answers and sends only what changed", () => {
     const saved = draftFromRecipient(billing());
