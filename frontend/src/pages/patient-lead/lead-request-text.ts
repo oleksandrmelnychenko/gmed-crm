@@ -450,6 +450,14 @@ export type LeadRequestText = {
   noPayerFundsProof: string;
   /** Where a missing key is answered instead: "Please add in the section „…“:". */
   payerElsewhere: (section: string) => string;
+  /** The button of such a box: to the section it names. */
+  goToSection: (section: string) => string;
+  /** Step "Document" of a parent's login for a minor: the child's copy and the parent's own (owner report 2026-10-21). */
+  childDocumentTitle: string;
+  ownRepresentativeDocumentTitle: string;
+  ownRepresentativeDocumentHint: string;
+  /** The parent is not yet a representative of the request: the own copy waits for that section. */
+  ownRepresentativeDocumentNeedsPerson: (section: string) => string;
   payerOwnMissingTitle: string;
   payerNoticeMissing: string;
   payerDeclarationLabel: string;
@@ -479,6 +487,9 @@ export function payerQuestionnaireFieldLabel(text: LeadRequestText, field: strin
       return text.payerNoticeMissing;
     case "funds_proof_upload":
       return text.payerFundsProofTitle;
+    // The paying parent's own copy, not the child's (owner report 2026-10-21).
+    case "id_document_upload":
+      return text.ownRepresentativeDocumentTitle;
     case "language":
     case "occupation":
     case "funds_sources":
@@ -755,13 +766,17 @@ export function followUpFieldLabel(text: LeadRequestText, key: string, guardian 
  * A field in the list of what is still missing before sending. Fields of a
  * section whose labels do not speak for themselves carry the section's name.
  * `payerType` is what the stated third-party payer is (see `payerFieldLabel`).
+ * `minor`: the request is a child's — its identity copy is named as in the
+ * step and the summary ("the child's document").
  */
 export function submitFieldLabel(
   text: LeadRequestText,
   field: SubmitField,
   guardian = false,
   payerType: string | null | undefined = null,
+  minor = false,
 ): string {
+  if (field === "id_document_upload" && minor) return text.childIdentityFiles;
   if (field === "has_insurance" && guardian) return text.hasInsuranceGuardian;
   if (field in text.fields) return text.fields[field as PersonalField];
   // Step 3: the two questions stand alone, a field of the third party carries the recipient.
@@ -1322,6 +1337,11 @@ const de: LeadRequestText = {
   payerFundsProofUpload: "Nachweis hochladen",
   noPayerFundsProof: "Noch kein Nachweis hochgeladen.",
   payerElsewhere: (section) => `Bitte im Abschnitt „${section}“ ergänzen:`,
+  goToSection: (section) => `Zum Abschnitt „${section}“`,
+  childDocumentTitle: "Ausweisdokument des Kindes",
+  ownRepresentativeDocumentTitle: "Ihr Ausweisdokument (Elternteil / gesetzlicher Vertreter)",
+  ownRepresentativeDocumentHint: "Bitte laden Sie einen gut lesbaren Scan oder ein Foto Ihres eigenen Ausweisdokuments hoch.",
+  ownRepresentativeDocumentNeedsPerson: (section) => `Um Ihr eigenes Ausweisdokument hochzuladen, tragen Sie bitte zuerst Ihre Angaben im Abschnitt „${section}“ ein.`,
   payerOwnMissingTitle: "Für das Senden fehlt noch:",
   payerNoticeMissing: "Datenschutzhinweis bestätigen",
   payerDeclarationLabel: "Ich bestätige, dass meine Angaben als zahlende Person vollständig und richtig sind.",
@@ -1852,6 +1872,11 @@ const ru: LeadRequestText = {
   payerFundsProofUpload: "Загрузить подтверждение",
   noPayerFundsProof: "Подтверждение ещё не загружено.",
   payerElsewhere: (section) => `Пожалуйста, дополните в разделе «${section}»:`,
+  goToSection: (section) => `Перейти к разделу «${section}»`,
+  childDocumentTitle: "Документ ребёнка",
+  ownRepresentativeDocumentTitle: "Ваш документ (родитель / законный представитель)",
+  ownRepresentativeDocumentHint: "Загрузите читаемый скан или фото вашего собственного документа, удостоверяющего личность.",
+  ownRepresentativeDocumentNeedsPerson: (section) => `Чтобы загрузить свой документ, сначала укажите свои данные в разделе «${section}».`,
   payerOwnMissingTitle: "Для отправки ещё не хватает:",
   payerNoticeMissing: "Подтвердить уведомление о защите данных",
   payerDeclarationLabel: "Я подтверждаю, что мои данные как плательщика полны и верны.",
@@ -2381,6 +2406,11 @@ const uk: LeadRequestText = {
   payerFundsProofUpload: "Завантажити підтвердження",
   noPayerFundsProof: "Підтвердження ще не завантажено.",
   payerElsewhere: (section) => `Будь ласка, доповніть у розділі «${section}»:`,
+  goToSection: (section) => `Перейти до розділу «${section}»`,
+  childDocumentTitle: "Документ дитини",
+  ownRepresentativeDocumentTitle: "Ваш документ (батько чи мати / законний представник)",
+  ownRepresentativeDocumentHint: "Завантажте читабельний скан або фото вашого власного документа, що посвідчує особу.",
+  ownRepresentativeDocumentNeedsPerson: (section) => `Щоб завантажити власний документ, спершу вкажіть свої дані в розділі «${section}».`,
   payerOwnMissingTitle: "Для надсилання ще бракує:",
   payerNoticeMissing: "Підтвердити повідомлення про захист даних",
   payerDeclarationLabel: "Я підтверджую, що мої дані як платника повні та правильні.",
@@ -2900,6 +2930,11 @@ const en: LeadRequestText = {
   payerFundsProofUpload: "Upload proof",
   noPayerFundsProof: "No proof uploaded yet.",
   payerElsewhere: (section) => `Please add in the section "${section}":`,
+  goToSection: (section) => `Go to "${section}"`,
+  childDocumentTitle: "Child’s identity document",
+  ownRepresentativeDocumentTitle: "Your identity document (parent / legal representative)",
+  ownRepresentativeDocumentHint: "Upload a readable scan or photo of your own identity document.",
+  ownRepresentativeDocumentNeedsPerson: (section) => `To upload your own document, first enter your details in the section "${section}".`,
   payerOwnMissingTitle: "Still missing before sending:",
   payerNoticeMissing: "Confirm the privacy notice",
   payerDeclarationLabel: "I confirm that my details as the paying person are complete and correct.",

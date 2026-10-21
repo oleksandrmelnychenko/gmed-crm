@@ -14,7 +14,15 @@ import { cn } from "@/lib/utils";
 import { LEAD_REQUEST_ACCESS_CHANGED, fetchMyLeadRequestList, type LeadRequest } from "./lead-request-api";
 import { FollowUpStep } from "./lead-request-follow-up";
 import { DisclosureStep } from "./lead-request-disclosure-step";
-import { AutosaveFlushContext, createRequestQueue, type AutosaveFlush, type RequestQueue } from "./lead-request-parts";
+import {
+  AutosaveFlushContext,
+  CabinetGoToContext,
+  createRequestQueue,
+  type AutosaveFlush,
+  type CabinetGoTo,
+  type RequestQueue,
+  type SectionAnchor,
+} from "./lead-request-parts";
 import { SendStep } from "./lead-request-send-step";
 import {
   BillingStep,
@@ -383,7 +391,18 @@ function LeadRequestView({
     [missingShownSteps, request.submitted_at, request.follow_up?.before_submit, sendOpened],
   );
 
-  const go = useCallback((next: StepId, validateCurrent = false) => {
+  // A section another step's box points to: scrolled to once its step is on screen.
+  // Set in the same render as the step it belongs to, so the section is there when the effect runs.
+  const [pendingAnchor, setPendingAnchor] = useState<{ id: SectionAnchor } | null>(null);
+  useEffect(() => {
+    if (!pendingAnchor) return;
+    const target = document.getElementById(pendingAnchor.id);
+    if (!target) return;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
+  }, [pendingAnchor]);
+
+  const go = useCallback((next: StepId, validateCurrent = false, anchor?: SectionAnchor) => {
     void switchAfterSave(request.lead_id, () => {
       // All sections have now saved. The pre-save render can still list fields
       // the user just completed, especially in Insurance & Invoice.
@@ -399,6 +418,11 @@ function LeadRequestView({
         return params;
       }, { replace: true });
       if (next === "send") setSendOpened(true);
+      if (anchor) {
+        // A fresh object: the same section asked for again scrolls again.
+        setPendingAnchor({ id: anchor });
+        return;
+      }
       // A long step was left at its bottom: the next one starts at its top.
       const top = topRef.current;
       if (top && top.getBoundingClientRect().top < 0) {
@@ -421,6 +445,7 @@ function LeadRequestView({
     onShowMissing: () => showMissingOf(step),
   };
   const props: StepProps = { request, text, lang, enqueue, onChange: updateRequest, missing: missing[step], nav };
+  const goTo: CabinetGoTo = (next, anchor) => go(next, false, anchor);
 
   return (
     // `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer.
@@ -457,6 +482,7 @@ function LeadRequestView({
           onSelect={go}
         />
         {/* A short step keeps its footer at the bottom of the column; a new step fades in instead of jumping. */}
+        <CabinetGoToContext.Provider value={goTo}>
         <div
           key={step}
           className="min-w-0 bg-muted/40 px-4 pt-5 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 lg:flex lg:flex-col lg:[&>section]:flex lg:[&>section]:flex-1 lg:[&>section]:flex-col"
@@ -498,6 +524,7 @@ function LeadRequestView({
             />
           ) : null}
         </div>
+        </CabinetGoToContext.Provider>
       </div>
     </article>
   );

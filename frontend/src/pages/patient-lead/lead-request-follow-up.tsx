@@ -59,6 +59,7 @@ import {
 import { SANCTIONS_LINK_KINDS, STAY_REASONS, combinedSaveState, consentGiven, type SaveState } from "./lead-request-model";
 import {
   CabinetSection as Section,
+  SECTION_ANCHORS,
   FileUploadField,
   LabeledField,
   MissingList,
@@ -172,17 +173,19 @@ export function FollowUpStep({
         return <RelationshipBlock request={request} form={identification} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />;
       case "C":
         return request.billing ? (
-          <BillingSections
-            request={request}
-            billing={request.billing}
-            text={text}
-            lang={lang}
-            enqueue={enqueue}
-            onChange={onChange}
-            onSaveState={onBillingState}
-            part="route"
-            bare
-          />
+          <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4">
+            <BillingSections
+              request={request}
+              billing={request.billing}
+              text={text}
+              lang={lang}
+              enqueue={enqueue}
+              onChange={onChange}
+              onSaveState={onBillingState}
+              part="route"
+              bare
+            />
+          </div>
         ) : null;
       case "F":
         return <ResidenceBlock form={identification} text={text} lang={lang} guardian={guardian} />;

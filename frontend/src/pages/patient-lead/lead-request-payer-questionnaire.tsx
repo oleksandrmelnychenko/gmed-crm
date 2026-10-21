@@ -39,6 +39,7 @@ import {
   fundsDescriptionRequired,
   normalizeLeadPayerQuestionnaire,
   payerAdditionalIdentityNeeded,
+  payerElsewhereTarget,
   payerMissingParts,
   payerNoticeAcknowledged,
   payerQuestionnairePatch,
@@ -57,6 +58,7 @@ import {
 } from "./lead-request-payer-questionnaire-model";
 import {
   CabinetSection as Section,
+  GoToSectionButton,
   LabeledField,
   MissingShownContext,
   RequiredMark,
@@ -683,7 +685,7 @@ function PayerQuestionnaireForm({
         </fieldset>
       )}
 
-      {showMissing ? <PayerMissingLists text={text} parts={missing} /> : null}
+      {showMissing ? <PayerMissingLists request={request} text={text} parts={missing} /> : null}
 
       {errors.map((message) => (
         <p key={message} role="alert" className="text-xs text-destructive">
@@ -757,12 +759,21 @@ function PayerSignatureStatus({ signature, text }: { signature: LeadPayerSignatu
 }
 
 /** What is still missing: here, and — with the section's name — what is answered elsewhere. */
-function PayerMissingLists({ text, parts }: { text: LeadRequestText; parts: ReturnType<typeof payerMissingParts> }) {
+export function PayerMissingLists({
+  request,
+  text,
+  parts,
+}: {
+  request: Pick<LeadRequest, "follow_up" | "submitted_at"> & Partial<Pick<LeadRequest, "identification">>;
+  text: LeadRequestText;
+  parts: ReturnType<typeof payerMissingParts>;
+}) {
+  // A box that names another section carries the way there (owner report 2026-10-21).
   const lists = [
-    { key: "own", title: text.payerOwnMissingTitle, fields: parts.own },
-    { key: "representatives", title: text.payerElsewhere(text.sectionLegalRepresentatives), fields: parts.representative },
-    { key: "payer", title: text.payerElsewhere(text.sectionPayer), fields: parts.payer },
-    { key: "payment-route", title: text.payerElsewhere(text.sectionPaymentRoute), fields: parts.paymentRoute },
+    { key: "own", title: text.payerOwnMissingTitle, fields: parts.own, section: null },
+    { key: "representatives", title: text.payerElsewhere(text.sectionLegalRepresentatives), fields: parts.representative, section: { name: text.sectionLegalRepresentatives, target: payerElsewhereTarget("representative", request) } },
+    { key: "payer", title: text.payerElsewhere(text.sectionPayer), fields: parts.payer, section: { name: text.sectionPayer, target: payerElsewhereTarget("payer", request) } },
+    { key: "payment-route", title: text.payerElsewhere(text.sectionPaymentRoute), fields: parts.paymentRoute, section: { name: text.sectionPaymentRoute, target: payerElsewhereTarget("paymentRoute", request) } },
   ].filter((list) => list.fields.length > 0);
   if (lists.length === 0) return null;
   return (
@@ -779,6 +790,14 @@ function PayerMissingLists({ text, parts }: { text: LeadRequestText; parts: Retu
               <li key={field}>{payerQuestionnaireFieldLabel(text, field)}</li>
             ))}
           </ul>
+          {list.section ? (
+            <GoToSectionButton
+              step={list.section.target.step}
+              anchor={list.section.target.anchor}
+              label={text.goToSection(list.section.name)}
+              testId={`lead-request-payer-missing-${list.key}-go`}
+            />
+          ) : null}
         </div>
       ))}
     </div>

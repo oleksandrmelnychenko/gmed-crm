@@ -54,9 +54,11 @@ import {
   ConsentNeededNote,
   ConsentCheckbox,
   FormField,
+  GoToSectionButton,
   LabeledField,
   MissingList,
   MissingShownContext,
+  SECTION_ANCHORS,
   SaveIndicator,
   StepFooter,
   UploadedFileList,
@@ -70,7 +72,7 @@ import { InvoiceRecipientSection } from "./lead-request-invoice-recipient";
 import { PayerSection } from "./lead-request-payer-section";
 import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
-import { RepresentationSection } from "./lead-request-representation";
+import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
 import { asLeadCabinetLang, childSectionTitle, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // The steps of the lead cabinet that hold the base form (trigger flow
@@ -147,7 +149,7 @@ function StepFrame({
   const guardian = request.access_kind === "guardian";
   const labels = [
     ...extraMissing,
-    ...missing.map((key) => submitFieldLabel(text, key as SubmitField, guardian, request.payer?.payer_type)),
+    ...missing.map((key) => submitFieldLabel(text, key as SubmitField, guardian, request.payer?.payer_type, request.minor)),
   ];
   // The yellow list of what is missing appears only after "Next" (owner 2026-10-09): the first
   // press with something missing shows it and stays, the next press goes on. The page keeps
@@ -550,18 +552,20 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
 
       {/* An older server does not know who acts for the lead. Adult or minor: the block starts anew with the other questions. */}
       {request.representation ? (
-        <RepresentationSection
-          childAddress={draft}
-          key={request.minor ? "minor" : "adult"}
-          request={request}
-          text={text}
-          lang={lang}
-          enqueue={enqueue}
-          onChange={onChange}
-          onSaveState={parts.on("representation")}
-          mode="base"
-          stepMissing={missing}
-        />
+        <div id={SECTION_ANCHORS.representatives} className="scroll-mt-4 space-y-6">
+          <RepresentationSection
+            childAddress={draft}
+            key={request.minor ? "minor" : "adult"}
+            request={request}
+            text={text}
+            lang={lang}
+            enqueue={enqueue}
+            onChange={onChange}
+            onSaveState={parts.on("representation")}
+            mode="base"
+            stepMissing={missing}
+          />
+        </div>
       ) : null}
     </StepFrame>
   );
@@ -658,6 +662,9 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
 
 /** Step 3 "Ausweis": a photo or scan of the identity document only; GMED enters its data. */
 export function IdentityStep({ request, text, lang, enqueue, onChange, missing, nav }: StepProps) {
+  // A parent's login for a minor uploads two documents here: the child's and the own one
+  // (owner report 2026-10-21: "I uploaded my passport and my child's" — only the child's arrived).
+  const parentOfMinor = request.access_kind === "guardian" && request.minor && Boolean(request.representation);
   return (
     <StepFrame testId="lead-request-step-identity" request={request} text={text} missing={missing} nav={nav}>
       {request.identification !== undefined ? (
@@ -668,10 +675,72 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
             lang={lang}
             enqueue={enqueue}
             onChange={onChange}
+            title={parentOfMinor ? text.childDocumentTitle : undefined}
           />
         </div>
       ) : null}
+      {parentOfMinor ? (
+        <OwnRepresentativeDocumentSection request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
+      ) : null}
     </StepFrame>
+  );
+}
+
+/**
+ * The parent's own identity copy on step "Document": the same upload as in
+ * the parent's block of "Legal representatives" (both show the same files).
+ * Until the login is one of the request's representatives there is nobody
+ * to upload for: a pointer to that section instead.
+ */
+export function OwnRepresentativeDocumentSection({
+  request,
+  text,
+  lang,
+  enqueue,
+  onChange,
+}: Pick<StepProps, "request" | "text" | "lang" | "enqueue" | "onChange">) {
+  const me = request.representation?.representatives.find((person) => person.mine && person.slot !== null) ?? null;
+  const slot = me?.slot ?? null;
+  const required = slot !== null && (
+    request.representation?.document_stage === true || request.progress.missing_for_submit.includes(`${slot}_id_upload`)
+  );
+  return (
+    <div id={SECTION_ANCHORS.ownDocument} className="scroll-mt-4" data-testid="lead-request-own-document">
+      <Section title={text.ownRepresentativeDocumentTitle}>
+        {me && slot ? (
+          <div className="space-y-2">
+            <p className="text-sm leading-6 text-muted-foreground">{text.ownRepresentativeDocumentHint}</p>
+            <RepresentativeUpload
+              request={request}
+              slot={slot}
+              kind="identity"
+              label={text.identityFiles}
+              required={required}
+              person={me}
+              documents={me.identity_documents}
+              text={text}
+              lang={lang}
+              enqueue={enqueue}
+              onChange={onChange}
+            />
+          </div>
+        ) : (
+          <div
+            role="note"
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+            data-testid="lead-request-own-document-needs-person"
+          >
+            <p>{text.ownRepresentativeDocumentNeedsPerson(text.sectionLegalRepresentatives)}</p>
+            <GoToSectionButton
+              step="person"
+              anchor={SECTION_ANCHORS.representatives}
+              label={text.goToSection(text.sectionLegalRepresentatives)}
+              testId="lead-request-own-document-go"
+            />
+          </div>
+        )}
+      </Section>
+    </div>
   );
 }
 
@@ -778,34 +847,38 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
       </Section>
       {/* The invoice recipient first, who pays with it (owner spec 2026-10-11). */}
       {request.billing && flowKnown && request.payer !== undefined ? (
-        <InvoiceRecipientSection
-          request={request}
-          text={text}
-          lang={lang}
-          identification={withIdentification ? identification : undefined}
-          enqueue={enqueue}
-          onChange={onChange}
-          partState={parts.on}
-        />
+        <div id={SECTION_ANCHORS.payer} className="scroll-mt-4 space-y-6">
+          <InvoiceRecipientSection
+            request={request}
+            text={text}
+            lang={lang}
+            identification={withIdentification ? identification : undefined}
+            enqueue={enqueue}
+            onChange={onChange}
+            partState={parts.on}
+          />
+        </div>
       ) : null}
       {/* An older server: who pays, then section 7 as it was asked. */}
       {!flowKnown && request.payer !== undefined ? (
-        <PayerSection
-          key={request.payer?.answered_by_payer ? "payer-answered" : "payer"}
-          request={request}
-          text={text}
-          lang={lang}
-          identification={withIdentification ? identification : undefined}
-          enqueue={enqueue}
-          onChange={onChange}
-          onSaveState={parts.on("payer")}
-          // Every answer of "who pays", as before the recipient came first.
-          choices={payerChoices(
-            { recipient: "third_party", isPayer: "no" },
-            request,
-            guardian ? (request.payer_self_template ?? null) : null,
-          )}
-        />
+        <div id={SECTION_ANCHORS.payer} className="scroll-mt-4 space-y-6">
+          <PayerSection
+            key={request.payer?.answered_by_payer ? "payer-answered" : "payer"}
+            request={request}
+            text={text}
+            lang={lang}
+            identification={withIdentification ? identification : undefined}
+            enqueue={enqueue}
+            onChange={onChange}
+            onSaveState={parts.on("payer")}
+            // Every answer of "who pays", as before the recipient came first.
+            choices={payerChoices(
+              { recipient: "third_party", isPayer: "no" },
+              request,
+              guardian ? (request.payer_self_template ?? null) : null,
+            )}
+          />
+        </div>
       ) : null}
       {request.billing && !flowKnown ? (
         <BillingSections
@@ -821,16 +894,18 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
       ) : null}
       {/* How the patient side will pay: once the payer is named. The details are follow-up block C. */}
       {request.billing && flowKnown && payerNamed && request.follow_up !== undefined ? (
-        <BillingSections
-          request={request}
-          billing={request.billing}
-          text={text}
-          lang={lang}
-          enqueue={enqueue}
-          onChange={onChange}
-          onSaveState={parts.on("billing")}
-          part="method"
-        />
+        <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-6">
+          <BillingSections
+            request={request}
+            billing={request.billing}
+            text={text}
+            lang={lang}
+            enqueue={enqueue}
+            onChange={onChange}
+            onSaveState={parts.on("billing")}
+            part="method"
+          />
+        </div>
       ) : null}
       {/* The parent who pays answers the payer-only questions (phase 3a); set for that login only. */}
       {request.payer_questionnaire ? (
@@ -845,16 +920,18 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
       ) : null}
       {/* An older server still asks the payment route with the base form. */}
       {request.billing && request.follow_up === undefined ? (
-        <BillingSections
-          request={request}
-          billing={request.billing}
-          text={text}
-          lang={lang}
-          enqueue={enqueue}
-          onChange={onChange}
-          onSaveState={parts.on("route")}
-          part="route"
-        />
+        <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-6">
+          <BillingSections
+            request={request}
+            billing={request.billing}
+            text={text}
+            lang={lang}
+            enqueue={enqueue}
+            onChange={onChange}
+            onSaveState={parts.on("route")}
+            part="route"
+          />
+        </div>
       ) : null}
     </StepFrame>
   );

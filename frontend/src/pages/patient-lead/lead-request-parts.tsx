@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, CircleAlert, FileText, LoaderCircle, Trash2, Upload } from "lucide-react";
+import { ArrowRight, Check, CircleAlert, FileText, LoaderCircle, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -15,13 +15,55 @@ import {
   type LeadRequestDocument,
 } from "./lead-request-api";
 import { consentGiven, formatFileSize, type PersonalField, type SaveState } from "./lead-request-model";
-import type { StepId } from "./lead-request-steps";
+import { SECTION_ANCHORS, type SectionAnchor, type StepId } from "./lead-request-steps";
 import type { LeadRequestText } from "./lead-request-text";
 
 // Building blocks the steps and sections of the lead cabinet share.
 
 /** The steps of the cabinet; "follow_up" ("Ergänzende Angaben") only while the server opened blocks. */
 export type Step = StepId;
+
+export { SECTION_ANCHORS, type SectionAnchor };
+
+/** Opens a step (after the open one has saved) and scrolls to a section of it. */
+export type CabinetGoTo = (step: StepId, anchor?: SectionAnchor) => void;
+
+/** The page's step navigation for sections deep in a step; `null` outside the cabinet page. */
+export const CabinetGoToContext = createContext<CabinetGoTo | null>(null);
+
+/**
+ * The way from a box that names another section to that section. Nothing
+ * where the cabinet page does not navigate (a section rendered on its own).
+ */
+export function GoToSectionButton({
+  step,
+  anchor,
+  label,
+  testId,
+}: {
+  step: StepId;
+  anchor: SectionAnchor;
+  label: string;
+  testId?: string;
+}) {
+  const goTo = useContext(CabinetGoToContext);
+  if (!goTo) return null;
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="mt-2 h-auto min-h-8 max-w-full gap-1.5 whitespace-normal border-amber-300 bg-white py-1.5 text-left text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-900/30"
+      data-testid={testId}
+      data-target-step={step}
+      data-target-anchor={anchor}
+      onClick={() => goTo(step, anchor)}
+    >
+      {label}
+      <ArrowRight aria-hidden="true" className="size-3.5 shrink-0" />
+    </Button>
+  );
+}
 
 /**
  * Whether "Next" (or "send") of the step on screen was pressed: only then do

@@ -4,9 +4,12 @@ import type {
   LeadPayerQuestionnaire,
   LeadPayerSignaturePackage,
   LeadRequestPayerQuestionnaireSummary,
+  LeadRequest,
   LeadRequestFollowUp,
   PayerQuestionnairePatch,
 } from "./lead-request-api";
+import { followUpShown, openFollowUpBlocks } from "./lead-request-follow-up-model";
+import { SECTION_ANCHORS, type SectionAnchor, type StepId } from "./lead-request-steps";
 
 // The paying parent's own questionnaire in the lead cabinet (contract phase
 // 3a, 5.2): the parent who pays for the child answers the payer-only
@@ -389,6 +392,26 @@ export function payerMissingParts(missing: readonly string[]): PayerMissingParts
     else parts.own.push(key);
   }
   return parts;
+}
+
+/** Where a part of the missing list that is answered elsewhere is answered: the step and its section. */
+export type PayerElsewhereTarget = { step: StepId; anchor: SectionAnchor };
+
+/**
+ * The way from the payer's "please add in the section …" box to that
+ * section (owner report 2026-10-21): the parent's own data in "Legal
+ * representatives" of the first step, "who pays" in the billing step, the
+ * payment route in follow-up block C while that block is open, else in the
+ * billing step.
+ */
+export function payerElsewhereTarget(
+  part: Exclude<keyof PayerMissingParts, "own">,
+  request: Pick<LeadRequest, "follow_up" | "submitted_at"> & Partial<Pick<LeadRequest, "identification">>,
+): PayerElsewhereTarget {
+  if (part === "representative") return { step: "person", anchor: SECTION_ANCHORS.representatives };
+  if (part === "payer") return { step: "billing", anchor: SECTION_ANCHORS.payer };
+  const inFollowUp = followUpShown(request) && openFollowUpBlocks(request).includes("C");
+  return { step: inFollowUp ? "follow_up" : "billing", anchor: SECTION_ANCHORS.paymentRoute };
 }
 
 /** The notice is acknowledged: only then is anything else writable. */

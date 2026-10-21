@@ -341,8 +341,11 @@ function useRepresentativeForm({
   };
 }
 
-/** An upload of a person: a copy of the identity document, or the proof of authority. */
-function RepresentativeUpload({
+/**
+ * An upload of a person: a copy of the identity document, or the proof of
+ * authority. Also on step "Document" for a parent's own copy (owner report 2026-10-21).
+ */
+export function RepresentativeUpload({
   request,
   slot,
   kind,

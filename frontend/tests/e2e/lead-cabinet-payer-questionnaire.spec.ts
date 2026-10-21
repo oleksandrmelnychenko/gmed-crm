@@ -658,11 +658,15 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
       await expect(elsewhere).toContainText("Bitte im Abschnitt „Gesetzliche Vertreter“ ergänzen:");
       await expect(elsewhere.getByRole("listitem")).toHaveText([
         "Geburtsort",
-        "Ausweisdokument: Foto oder Scan des Ausweises",
+        // The paying parent's own copy (owner report 2026-10-21), not the child's.
+        "Ihr Ausweisdokument (Elternteil / gesetzlicher Vertreter)",
       ]);
       expect(await overflow(page), `${width}px`).toBeLessThanOrEqual(1);
       await section.scrollIntoViewIfNeeded();
       await page.screenshot({ path: testInfo.outputPath(`lead-cabinet-payer-elsewhere-de-${width}.png`), animations: "disabled", fullPage: true });
+      // The box carries the way to that section: the first step, where the parents are named.
+      await elsewhere.getByRole("button", { name: "Zum Abschnitt „Gesetzliche Vertreter“" }).click();
+      await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "person");
     }
     // The answers here cannot send it while the person's data are missing.
     expect(calls.submits).toEqual([]);

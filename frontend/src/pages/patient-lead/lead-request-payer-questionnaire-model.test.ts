@@ -8,6 +8,7 @@ import {
   normalizeLeadPayerQuestionnaire,
   payerAdditionalIdentityNeeded,
   normalizePayerSignaturePackage,
+  payerElsewhereTarget,
   payerMissingParts,
   payerNoticeAcknowledged,
   payerQuestionnairePatch,
@@ -249,13 +250,28 @@ describe("paying parent's questionnaire: what is missing, and where", () => {
     });
   });
 
+  it("leads each box that names another section to that step and section", () => {
+    const plain = { follow_up: undefined, submitted_at: null } as unknown as Parameters<typeof payerElsewhereTarget>[1];
+    expect(payerElsewhereTarget("representative", plain)).toEqual({ step: "person", anchor: "lead-request-section-representatives" });
+    expect(payerElsewhereTarget("payer", plain)).toEqual({ step: "billing", anchor: "lead-request-section-payer" });
+    expect(payerElsewhereTarget("paymentRoute", plain)).toEqual({ step: "billing", anchor: "lead-request-section-payment-route" });
+    // Block C open: the payment route is asked in the follow-up step.
+    const withBlockC = {
+      submitted_at: "2026-10-20T10:00:00Z",
+      follow_up: { required: true, before_submit: false, blocks: ["C"], missing: { C: ["payment_method"] }, answered_at: null },
+    } as unknown as Parameters<typeof payerElsewhereTarget>[1];
+    expect(payerElsewhereTarget("paymentRoute", withBlockC)).toEqual({ step: "follow_up", anchor: "lead-request-section-payment-route" });
+  });
+
   it("names every key in every language", () => {
     const de = leadRequestText("de");
     expect(payerQuestionnaireFieldLabel(de, "privacy_ack")).toBe("Datenschutzhinweis bestätigen");
     expect(payerQuestionnaireFieldLabel(de, "funds_proof_upload")).toBe("Nachweis der Herkunft der Mittel");
     expect(payerQuestionnaireFieldLabel(de, "occupation")).toBe("Beruf / Tätigkeit");
     expect(payerQuestionnaireFieldLabel(de, "street")).toBe("Straße und Hausnummer");
-    expect(payerQuestionnaireFieldLabel(de, "id_document_upload")).toBe("Ausweisdokument: Foto oder Scan des Ausweises");
+    // The paying parent's own copy, not the child's (owner report 2026-10-21).
+    expect(payerQuestionnaireFieldLabel(de, "id_document_upload")).toBe("Ihr Ausweisdokument (Elternteil / gesetzlicher Vertreter)");
+    expect(payerQuestionnaireFieldLabel(leadRequestText("ru"), "id_document_upload")).toBe("Ваш документ (родитель / законный представитель)");
     // The paying parent's own legal questions keep their details (the lead's are yes/no since the trigger flow).
     expect(payerQuestionnaireFieldLabel(de, "pep_self")).toBe("Gesetzliche Fragen: Öffentliches Amt");
     expect(payerQuestionnaireFieldLabel(de, "pep_self_details")).toBe("Gesetzliche Fragen: Amt, Land und Zeitraum");

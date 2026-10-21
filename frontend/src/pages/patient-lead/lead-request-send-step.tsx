@@ -176,7 +176,7 @@ export function SendStep({
             {otherMissing.length > 0 ? <div data-testid="lead-request-missing-other">
               <p className="text-xs font-semibold">{text.furtherDetails}</p>
               <ul className="list-inside list-disc">{otherMissing.map((field) => <li key={field}>
-                {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type)}
+                {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor)}
               </li>)}</ul>
             </div> : null}
             {missingSteps.map((step) => (
@@ -191,7 +191,7 @@ export function SendStep({
                 <ul className="list-inside list-disc">
                   {byStep[step].map((field) => (
                     <li key={field} className="break-words">
-                      {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type)}
+                      {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor)}
                     </li>
                   ))}
                 </ul>

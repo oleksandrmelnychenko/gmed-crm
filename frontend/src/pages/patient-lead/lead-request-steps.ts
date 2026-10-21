@@ -31,6 +31,20 @@ export const STEP_IDS = [
 
 export type StepId = (typeof STEP_IDS)[number];
 
+/**
+ * Sections a box of another step can send the person to ("Please add in the
+ * section …", owner report 2026-10-21): the element with this id is scrolled
+ * into view once its step is open.
+ */
+export const SECTION_ANCHORS = {
+  representatives: "lead-request-section-representatives",
+  payer: "lead-request-section-payer",
+  paymentRoute: "lead-request-section-payment-route",
+  ownDocument: "lead-request-section-own-document",
+} as const;
+
+export type SectionAnchor = (typeof SECTION_ANCHORS)[keyof typeof SECTION_ANCHORS];
+
 /** The steps whose missing keys the server lists in `missing_by_step` (contract 3.1). */
 export const SERVER_STEPS = ["person", "contact", "identity", "billing", "declarations"] as const;
 
