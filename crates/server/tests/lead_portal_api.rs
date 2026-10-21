@@ -4770,6 +4770,16 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
     let (status, refused) = json_request(router, "POST", &link, &pm, Some(json!({}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["code"], "payer_is_representative");
+    // Without a trigger of the enhanced check the paying parent, the
+    // contracting party, gets no payer questions (owner 2026-10-21).
+    let (_, body) = json_request(router, "GET", &request, anna, None).await;
+    assert!(body["payer_questionnaire"].is_null(), "{body}");
+    // A black-list citizenship requires the enhanced check: then she answers them.
+    sqlx::query("UPDATE leads SET citizenships = ARRAY['DE', 'KP'] WHERE id = $1")
+        .bind(child)
+        .execute(pool)
+        .await
+        .unwrap();
     let (_, body) = json_request(router, "GET", &request, anna, None).await;
     assert_eq!(body["payer_questionnaire"]["available"], true, "{body}");
     assert!(body["payer_questionnaire"]["submitted_at"].is_null());

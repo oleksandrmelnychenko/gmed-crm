@@ -5572,6 +5572,12 @@ pub(crate) async fn cabinet_summary(
         return Ok(Value::Null);
     };
     let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
+    // A paying parent is the contracting party, not a third-party payer
+    // (owner 2026-10-19): occupation, PEP and sanctions questions of the payer
+    // are asked only when the enhanced check is required (owner 2026-10-21).
+    if !check.required {
+        return Ok(Value::Null);
+    }
     let built = questionnaire(
         &context,
         Viewer::Parent(user_id),
