@@ -73,6 +73,7 @@ import { PayerSection } from "./lead-request-payer-section";
 import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
+import type { StepId } from "./lead-request-steps";
 import { asLeadCabinetLang, childSectionTitle, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // The steps of the lead cabinet that hold the base form (trigger flow
@@ -129,6 +130,7 @@ function usePartStates() {
  */
 function StepFrame({
   testId,
+  step,
   request,
   text,
   missing,
@@ -138,19 +140,22 @@ function StepFrame({
   children,
 }: {
   testId: string;
+  step: StepId;
   request: LeadRequest;
   text: LeadRequestText;
   missing: readonly string[];
-  extraMissing?: readonly string[];
+  extraMissing?: readonly { label: string; field: string | null }[];
   nav: StepNav;
   saveState?: SaveState;
   children: ReactNode;
 }) {
   const guardian = request.access_kind === "guardian";
   const labels = [
-    ...extraMissing,
+    ...extraMissing.map((item) => item.label),
     ...missing.map((key) => submitFieldLabel(text, key as SubmitField, guardian, request.payer?.payer_type, request.minor)),
   ];
+  // Every item leads to its field (owner report 2026-10-21).
+  const fields = [...extraMissing.map((item) => item.field), ...missing];
   // The yellow list of what is missing appears only after "Next" (owner 2026-10-09): the first
   // press with something missing shows it and stays, the next press goes on. The page keeps
   // which steps showed it, for the badges of the step bar.
@@ -161,7 +166,7 @@ function StepFrame({
   };
   return (
     <section className="space-y-6" data-testid={testId}>
-      {showMissing ? <MissingList title={text.stepMissingTitle} labels={labels} testId="lead-request-step-missing" /> : null}
+      {showMissing ? <MissingList title={text.stepMissingTitle} labels={labels} fields={fields} step={step} testId="lead-request-step-missing" /> : null}
       <MissingShownContext.Provider value={showMissing}>{children}</MissingShownContext.Provider>
       <StepFooter
         index={nav.index}
@@ -298,7 +303,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
   const identification = useIdentificationForm({ request, text, enqueue, onChange, onSaveState: parts.on("identification") });
   const withIdentification = request.identification !== undefined;
   const { draft, set, errorFor, fieldProps } = personal;
-  const consentMissing = consentGiven(request, INQUIRY_CONSENT) ? [] : [text.sectionConsent];
+  const consentMissing = consentGiven(request, INQUIRY_CONSENT) ? [] : [{ label: text.sectionConsent, field: "inquiry_consent" }];
 
   const showLatinNameHint = /\p{Script=Cyrillic}/u.test([draft.first_name, draft.last_name, draft.middle_name].join(" "));
   const cabinetLang = asLeadCabinetLang(lang);
@@ -345,6 +350,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
   return (
     <StepFrame
       testId="lead-request-step-person"
+      step="person"
       request={request}
       text={text}
       missing={missing}
@@ -585,7 +591,7 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
   const withIdentification = request.identification !== undefined;
 
   return (
-    <StepFrame testId="lead-request-step-contact" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
+    <StepFrame testId="lead-request-step-contact" step="contact" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
       <Section title={childSectionTitle(text, "address", request.minor)}>
         <div className={GRID}>
           <FormField field="street_address" text={text} error={errorFor("street_address")} required className="sm:col-span-2">
@@ -666,7 +672,7 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
   // (owner report 2026-10-21: "I uploaded my passport and my child's" — only the child's arrived).
   const parentOfMinor = request.access_kind === "guardian" && request.minor && Boolean(request.representation);
   return (
-    <StepFrame testId="lead-request-step-identity" request={request} text={text} missing={missing} nav={nav}>
+    <StepFrame testId="lead-request-step-identity" step="identity" request={request} text={text} missing={missing} nav={nav}>
       {request.identification !== undefined ? (
         <div data-testid="lead-request-identity">
           <IdentityDocumentSection
@@ -769,7 +775,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
   const payerNamed = Boolean(request.payer) && (!flowKnown || payerFitsFlow(flowOf(recipient), request.payer, recipient,
     payerAnswer(request.payer, request.payer_self_template) === "guardian" || request.billing?.payment_route_by === "guardian", request.representation?.representatives));
   return (
-    <StepFrame testId="lead-request-step-billing" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
+    <StepFrame testId="lead-request-step-billing" step="billing" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
       <Section title={childSectionTitle(text, "insurance", request.minor)}>
         <div className={GRID} data-testid="lead-request-insurance">
           <LabeledField
@@ -942,7 +948,7 @@ export function DeclarationsStep({ request, text, enqueue, onChange, missing, na
   const parts = usePartStates();
   const identification = useIdentificationForm({ request, text, enqueue, onChange, onSaveState: parts.on("identification") });
   return (
-    <StepFrame testId="lead-request-step-declarations" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
+    <StepFrame testId="lead-request-step-declarations" step="declarations" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
       {request.identification !== undefined ? (
         <LegalQuestionsSection form={identification} text={text} guardian={request.access_kind === "guardian"} />
       ) : null}
@@ -1000,7 +1006,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
   }
 
   return (
-    <StepFrame testId="lead-request-documents" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
+    <StepFrame testId="lead-request-documents" step="documents" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
       <Section title={text.healthConsentTitle}>
         <p className="whitespace-pre-line rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
           {consentText(request, HEALTH_CONSENT, lang)}

@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils";
 import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, submitLeadRequest, type LeadRequest } from "./lead-request-api";
 import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown, missingOfRefusal } from "./lead-request-follow-up-model";
 import { canSubmit, changedSinceSubmit, consentGiven, type SubmitField } from "./lead-request-model";
-import { CabinetSection as Section, RequiredMark, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
+import { CabinetSection as Section, MissingItemLink, RequiredMark, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
+import type { CabinetTarget } from "./lead-request-field-target";
 import { hasBaseFormInput, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
 import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
 import { followUpFieldLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -34,7 +35,8 @@ export function SendStep({
   lang: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
-  onEdit: (step: Step) => void;
+  /** Opens a step and shows the field a missing item names (`CabinetGoTo`). */
+  onEdit: (step: Step, target?: CabinetTarget) => void;
   index?: number;
   total?: number;
 }) {
@@ -167,9 +169,14 @@ export function SendStep({
             data-testid="lead-request-missing"
           >
             <p className="font-medium">{text.missingTitle}</p>
+            {/* Every item leads straight to its step and field (owner report 2026-10-21). */}
             {!inquiryConsent ? (
               <ul className="list-inside list-disc">
-                <li>{text.inquiryConsentMissing}</li>
+                <li>
+                  <MissingItemLink field="inquiry_consent" onClick={() => onEdit("person", { field: "inquiry_consent" })}>
+                    {text.inquiryConsentMissing}
+                  </MissingItemLink>
+                </li>
               </ul>
             ) : null}
             {/* Grouped by step, each with a way there. */}
@@ -184,30 +191,41 @@ export function SendStep({
                 <button
                   type="button"
                   className="text-xs font-semibold underline-offset-2 hover:underline"
-                  onClick={() => onEdit(step)}
+                  onClick={() => onEdit(step, { field: byStep[step][0] })}
                 >
                   {text.steps[step]}
                 </button>
                 <ul className="list-inside list-disc">
                   {byStep[step].map((field) => (
                     <li key={field} className="break-words">
-                      {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor)}
+                      <MissingItemLink field={field} onClick={() => onEdit(step, { field })}>
+                        {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor)}
+                      </MissingItemLink>
                     </li>
                   ))}
                 </ul>
               </div>
             ))}
             {previewMissing.length > 0 ? <div data-testid="lead-request-missing-follow_up">
-              <button type="button" className="text-xs font-semibold underline underline-offset-2" onClick={() => onEdit("follow_up")}>{text.steps.follow_up}</button>
-              <ul className="list-inside list-disc">{previewMissing.map(({ block, key }) => <li key={`${block}:${key}`} className="break-words">{followUpFieldLabel(text, key, guardian, request.follow_up?.representatives)}</li>)}</ul>
+              <button type="button" className="text-xs font-semibold underline underline-offset-2" onClick={() => onEdit("follow_up", { field: `${previewMissing[0].block}:${previewMissing[0].key}` })}>{text.steps.follow_up}</button>
+              <ul className="list-inside list-disc">{previewMissing.map(({ block, key }) => <li key={`${block}:${key}`} className="break-words">
+                <MissingItemLink field={`${block}:${key}`} onClick={() => onEdit("follow_up", { field: `${block}:${key}` })}>
+                  {followUpFieldLabel(text, key, guardian, request.follow_up?.representatives)}
+                </MissingItemLink>
+              </li>)}</ul>
             </div> : null}
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="gap-1.5 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
-              // To the first step that still misses something.
-              onClick={() => onEdit(!inquiryConsent ? "person" : missingSteps[0] ?? (previewMissing.length > 0 ? "follow_up" : "person"))}
+              // To the first field that is still missing, in whichever step it is.
+              onClick={() => {
+                if (!inquiryConsent) onEdit("person", { field: "inquiry_consent" });
+                else if (missingSteps[0]) onEdit(missingSteps[0], { field: byStep[missingSteps[0]][0] });
+                else if (previewMissing[0]) onEdit("follow_up", { field: `${previewMissing[0].block}:${previewMissing[0].key}` });
+                else onEdit("person");
+              }}
             >
               <Pencil aria-hidden="true" className="size-3.5" />
               {text.editData}

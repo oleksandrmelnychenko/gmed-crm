@@ -57,9 +57,11 @@ import {
   type RejectedPayerFields,
 } from "./lead-request-payer-questionnaire-model";
 import {
+  CabinetGoToContext,
   CabinetSection as Section,
   GoToSectionButton,
   LabeledField,
+  MissingItemLink,
   MissingShownContext,
   RequiredMark,
   UploadedFileList,
@@ -768,6 +770,7 @@ export function PayerMissingLists({
   text: LeadRequestText;
   parts: ReturnType<typeof payerMissingParts>;
 }) {
+  const goTo = useContext(CabinetGoToContext);
   // A box that names another section carries the way there (owner report 2026-10-21).
   const lists = [
     { key: "own", title: text.payerOwnMissingTitle, fields: parts.own, section: null },
@@ -787,13 +790,26 @@ export function PayerMissingLists({
           <p className="font-medium">{list.title}</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {list.fields.map((field) => (
-              <li key={field}>{payerQuestionnaireFieldLabel(text, field)}</li>
+              <li key={field}>
+                {/* Each item answered elsewhere leads to its field in that section (owner report 2026-10-21). */}
+                {goTo && list.section ? (
+                  <MissingItemLink
+                    field={field}
+                    onClick={() => goTo(list.section.target.step, { anchor: list.section.target.anchor, field })}
+                  >
+                    {payerQuestionnaireFieldLabel(text, field)}
+                  </MissingItemLink>
+                ) : (
+                  payerQuestionnaireFieldLabel(text, field)
+                )}
+              </li>
             ))}
           </ul>
           {list.section ? (
             <GoToSectionButton
               step={list.section.target.step}
               anchor={list.section.target.anchor}
+              field={list.fields[0]}
               label={text.goToSection(list.section.name)}
               testId={`lead-request-payer-missing-${list.key}-go`}
             />

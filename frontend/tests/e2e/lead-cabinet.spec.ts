@@ -2209,6 +2209,45 @@ test.describe("lead cabinet", () => {
     await expect(page.getByTestId("lead-request-step-identity")).toBeVisible();
   });
 
+  test("every missing item leads straight to its step and field, whichever step is open (owner 2026-10-21)", async ({ page }) => {
+    await setup(page, "lead");
+    await page.goto("/");
+    const current = page.getByTestId("lead-request-step");
+    // From the first step straight to the summary, past every step between; nothing missing holds it.
+    await step(page, "send");
+    await expect(current).toHaveAttribute("data-current-step", "send");
+    const missing = page.getByTestId("lead-request-missing");
+
+    // An item of a step further on opens that step at its field.
+    await missing.getByTestId("lead-request-missing-identity").getByTestId("lead-request-missing-item").first().click();
+    await expect(current).toHaveAttribute("data-current-step", "identity");
+    await expect(page.getByTestId("lead-request-identity-upload")).toBeInViewport();
+
+    // An item of the first step puts the cursor into its field.
+    await step(page, "send");
+    await missing.getByTestId("lead-request-missing-person").getByRole("button", { name: "Ort", exact: true }).click();
+    await expect(current).toHaveAttribute("data-current-step", "person");
+    await expect(page.locator("#lead-request-city")).toBeFocused();
+    await expect(page.locator("#lead-request-city")).toBeInViewport();
+
+    // The step's own yellow list leads to its fields as well.
+    await page.getByTestId("lead-request-step-person").getByRole("button", { name: "Weiter" }).click();
+    const list = page.getByTestId("lead-request-step-person").getByTestId("lead-request-step-missing");
+    await list.getByRole("button", { name: "Postleitzahl", exact: true }).click();
+    await expect(current).toHaveAttribute("data-current-step", "person");
+    await expect(page.locator("#lead-request-zip_code")).toBeFocused();
+
+    // "Angaben ändern" in the summary: the first field still missing, in its step.
+    await step(page, "send");
+    await missing.getByRole("button", { name: "Angaben ändern" }).click();
+    await expect(current).toHaveAttribute("data-current-step", "person");
+
+    // The step name in the summary jumps over the steps between, too.
+    await step(page, "send");
+    await missing.getByTestId("lead-request-missing-billing").getByRole("button", { name: "Versicherung & Rechnung" }).click();
+    await expect(current).toHaveAttribute("data-current-step", "billing");
+  });
+
   test("the last entry is saved when the step is left at once", async ({ page }) => {
     const { calls } = await setup(page, "lead");
     // The page's timers are the test's from the start, so that they can be stopped below.

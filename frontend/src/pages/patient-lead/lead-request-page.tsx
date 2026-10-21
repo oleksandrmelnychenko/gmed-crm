@@ -21,8 +21,8 @@ import {
   type AutosaveFlush,
   type CabinetGoTo,
   type RequestQueue,
-  type SectionAnchor,
 } from "./lead-request-parts";
+import { findCabinetTarget, revealCabinetTarget, type CabinetTarget } from "./lead-request-field-target";
 import { SendStep } from "./lead-request-send-step";
 import {
   BillingStep,
@@ -391,18 +391,33 @@ function LeadRequestView({
     [missingShownSteps, request.submitted_at, request.follow_up?.before_submit, sendOpened],
   );
 
-  // A section another step's box points to: scrolled to once its step is on screen.
-  // Set in the same render as the step it belongs to, so the section is there when the effect runs.
-  const [pendingAnchor, setPendingAnchor] = useState<{ id: SectionAnchor } | null>(null);
+  // The section or field a link points to (a box of another step, a missing item, the summary):
+  // revealed once its step is on screen. Set in the same render as the step it belongs to; a part
+  // that renders a moment later (a loaded section) is waited for a few frames.
+  const stepRef = useRef<HTMLDivElement | null>(null);
+  const [pendingTarget, setPendingTarget] = useState<CabinetTarget | null>(null);
   useEffect(() => {
-    if (!pendingAnchor) return;
-    const target = document.getElementById(pendingAnchor.id);
-    if (!target) return;
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    target.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
-  }, [pendingAnchor]);
+    if (!pendingTarget) return;
+    let frame = 0;
+    let tries = 0;
+    const reveal = () => {
+      const found = findCabinetTarget(pendingTarget, stepRef.current ?? document);
+      if (found) {
+        revealCabinetTarget(found);
+        return;
+      }
+      if (++tries < 20) frame = window.requestAnimationFrame(reveal);
+    };
+    reveal();
+    return () => window.cancelAnimationFrame(frame);
+  }, [pendingTarget]);
 
-  const go = useCallback((next: StepId, validateCurrent = false, anchor?: SectionAnchor) => {
+  const go = useCallback((next: StepId, validateCurrent = false, target?: CabinetTarget) => {
+    // A link into the step on screen needs no saving and no step change: it only shows the field.
+    if (next === step && target) {
+      setPendingTarget({ ...target });
+      return;
+    }
     void switchAfterSave(request.lead_id, () => {
       // All sections have now saved. The pre-save render can still list fields
       // the user just completed, especially in Insurance & Invoice.
@@ -418,9 +433,9 @@ function LeadRequestView({
         return params;
       }, { replace: true });
       if (next === "send") setSendOpened(true);
-      if (anchor) {
+      if (target?.anchor || target?.field) {
         // A fresh object: the same section asked for again scrolls again.
-        setPendingAnchor({ id: anchor });
+        setPendingTarget({ ...target });
         return;
       }
       // A long step was left at its bottom: the next one starts at its top.
@@ -433,6 +448,11 @@ function LeadRequestView({
       // An incomplete local draft may never reach server validation. Next must
       // still reveal its required fields while preserving the unsaved values.
       if (validateCurrent) showMissingOf(step);
+      // The step stays because an entry could not be saved: show that entry (its
+      // message), not only the banner above the card, which may be out of sight.
+      const problem = stepRef.current?.querySelector<HTMLElement>('[aria-invalid="true"], [role="alert"]');
+      if (problem) revealCabinetTarget({ element: problem, field: true });
+      else window.requestAnimationFrame(() => document.querySelector('[data-testid="lead-request-save-blocked"]')?.scrollIntoView?.({ block: "nearest" }));
     });
   }, [switchAfterSave, request.lead_id, setSearchParams, missingShownSteps, step, showMissingOf]);
 
@@ -445,7 +465,7 @@ function LeadRequestView({
     onShowMissing: () => showMissingOf(step),
   };
   const props: StepProps = { request, text, lang, enqueue, onChange: updateRequest, missing: missing[step], nav };
-  const goTo: CabinetGoTo = (next, anchor) => go(next, false, anchor);
+  const goTo: CabinetGoTo = (next, target) => go(next, false, target);
 
   return (
     // `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer.
@@ -485,6 +505,7 @@ function LeadRequestView({
         <CabinetGoToContext.Provider value={goTo}>
         <div
           key={step}
+          ref={stepRef}
           className="min-w-0 bg-muted/40 px-4 pt-5 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 lg:flex lg:flex-col lg:[&>section]:flex lg:[&>section]:flex-1 lg:[&>section]:flex-col"
           data-testid="lead-request-step"
           data-current-step={step}
@@ -518,7 +539,7 @@ function LeadRequestView({
               lang={lang}
               enqueue={enqueue}
               onChange={onChange}
-              onEdit={go}
+              onEdit={goTo}
               index={nav.index}
               total={nav.total}
             />

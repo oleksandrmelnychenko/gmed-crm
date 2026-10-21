@@ -265,6 +265,8 @@ export function FollowUpStep({
               <MissingList
                 title={text.stepMissingTitle}
                 labels={followUpMissing(request, block).map((key) => followUpFieldLabel(text, key, guardian, request.follow_up?.representatives))}
+                fields={followUpMissing(request, block).map((key) => `${block}:${key}`)}
+                step="follow_up"
                 testId={`lead-request-follow-up-${block}-missing`}
               />
             ) : null}

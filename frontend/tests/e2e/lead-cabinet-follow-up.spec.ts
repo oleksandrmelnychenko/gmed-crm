@@ -512,7 +512,7 @@ test.describe("live country questions before first submission", () => {
       await tab(page, "send").click();
       await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
       await expect(page.getByTestId("lead-request-submit")).toBeDisabled();
-      await page.getByTestId("lead-request-missing-follow_up").getByRole("button").click();
+      await page.getByTestId("lead-request-missing-follow_up").getByRole("button").first().click();
       await expect(page.getByTestId("lead-request-follow-up-L")).toBeVisible();
       await tab(page, "person").click();
       if (scenario.field === "citizenships") {
@@ -580,7 +580,7 @@ test.describe("live country questions before first submission", () => {
     await expect(page.getByTestId("lead-request-send")).toBeVisible();
     await expect(page.getByText(leadRequestText("de").followUpIncomplete, { exact: true })).toBeVisible();
     await expect(page.getByTestId("lead-request-submit")).toBeDisabled();
-    await page.getByTestId("lead-request-missing-follow_up").getByRole("button").click();
+    await page.getByTestId("lead-request-missing-follow_up").getByRole("button").first().click();
     await expect(page.getByTestId("lead-request-follow-up-L")).toBeVisible();
     expect(calls.submits).toBe(1);
   });

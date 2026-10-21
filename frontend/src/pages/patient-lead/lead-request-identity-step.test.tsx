@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
-import { CabinetGoToContext } from "./lead-request-parts";
+import { CabinetGoToContext, MissingList } from "./lead-request-parts";
 import { PayerMissingLists } from "./lead-request-payer-questionnaire";
 import { payerMissingParts } from "./lead-request-payer-questionnaire-model";
 import { IdentityStep, type StepNav } from "./lead-request-step-forms";
@@ -154,6 +154,11 @@ describe("a box that names another section", () => {
     expect(html).toContain('data-testid="lead-request-payer-missing-payment-route-go"');
     // The own questions are answered right here: no button.
     expect(html).not.toContain("lead-request-payer-missing-own-go");
+    // Every item answered elsewhere is a link to its field there (owner 2026-10-21); the own ones are not.
+    expect(html).toContain('data-field="id_document_upload"');
+    expect(html).toContain('data-field="relationship_kind"');
+    expect(html).toContain('data-field="payment_method"');
+    expect(html).not.toContain('data-field="occupation"');
   });
 
   it("shows no button where the cabinet page does not navigate", () => {
@@ -166,6 +171,20 @@ describe("a box that names another section", () => {
     );
     expect(html).toContain("lead-request-payer-missing-representatives");
     expect(html).not.toContain("-go\"");
+    expect(html).not.toContain("lead-request-missing-item");
+  });
+});
+
+describe("a step's list of what is missing", () => {
+  it("makes each item a link to its field inside the cabinet, plain text elsewhere", () => {
+    const list = (
+      <MissingList title="Missing" labels={["City", "Consent", "City"]} fields={["city", null, "city"]} step="person" testId="missing" />
+    );
+    const linked = renderToStaticMarkup(<CabinetGoToContext.Provider value={() => undefined}>{list}</CabinetGoToContext.Provider>);
+    expect(linked.match(/data-testid="lead-request-missing-item"/g)).toHaveLength(1);
+    expect(linked).toContain('data-field="city"');
+    expect(linked).toContain("<li class=\"break-words\">Consent</li>");
+    expect(renderToStaticMarkup(list)).not.toContain("lead-request-missing-item");
   });
 });
 

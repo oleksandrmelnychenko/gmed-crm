@@ -15,6 +15,7 @@ import {
   type LeadRequestDocument,
 } from "./lead-request-api";
 import { consentGiven, formatFileSize, type PersonalField, type SaveState } from "./lead-request-model";
+import type { CabinetTarget } from "./lead-request-field-target";
 import { SECTION_ANCHORS, type SectionAnchor, type StepId } from "./lead-request-steps";
 import type { LeadRequestText } from "./lead-request-text";
 
@@ -25,8 +26,11 @@ export type Step = StepId;
 
 export { SECTION_ANCHORS, type SectionAnchor };
 
-/** Opens a step (after the open one has saved) and scrolls to a section of it. */
-export type CabinetGoTo = (step: StepId, anchor?: SectionAnchor) => void;
+/**
+ * Opens a step (after the open one has saved) and shows a section or a field
+ * of it; a link into the step on screen only shows the field.
+ */
+export type CabinetGoTo = (step: StepId, target?: CabinetTarget) => void;
 
 /** The page's step navigation for sections deep in a step; `null` outside the cabinet page. */
 export const CabinetGoToContext = createContext<CabinetGoTo | null>(null);
@@ -38,11 +42,14 @@ export const CabinetGoToContext = createContext<CabinetGoTo | null>(null);
 export function GoToSectionButton({
   step,
   anchor,
+  field,
   label,
   testId,
 }: {
   step: StepId;
   anchor: SectionAnchor;
+  /** The first missing field of the section: the cursor is put there. */
+  field?: string;
   label: string;
   testId?: string;
 }) {
@@ -57,7 +64,7 @@ export function GoToSectionButton({
       data-testid={testId}
       data-target-step={step}
       data-target-anchor={anchor}
-      onClick={() => goTo(step, anchor)}
+      onClick={() => goTo(step, { anchor, field })}
     >
       {label}
       <ArrowRight aria-hidden="true" className="size-3.5 shrink-0" />
@@ -492,12 +499,25 @@ export function MissingList({
   title,
   labels,
   testId,
+  step,
+  fields,
 }: {
   title: string;
   labels: readonly string[];
   testId: string;
+  /** The step the items are answered in; with `fields`, every item leads to its field. */
+  step?: StepId;
+  /** The key of each label (same order); `null` for a label without a field of its own. */
+  fields?: readonly (string | null)[];
 }) {
+  const goTo = useContext(CabinetGoToContext);
   if (labels.length === 0) return null;
+  const seen = new Set<string>();
+  const items = labels.flatMap((label, index) => {
+    if (seen.has(label)) return [];
+    seen.add(label);
+    return [{ label, field: fields?.[index] ?? null }];
+  });
   return (
     <div
       className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
@@ -505,13 +525,46 @@ export function MissingList({
     >
       <p className="font-medium">{title}</p>
       <ul className="mt-1 list-inside list-disc space-y-0.5 text-[13px] leading-5">
-        {Array.from(new Set(labels)).map((label) => (
+        {items.map(({ label, field }) => (
           <li key={label} className="break-words">
-            {label}
+            {goTo && step && field ? (
+              <MissingItemLink onClick={() => goTo(step, { field })} field={field}>
+                {label}
+              </MissingItemLink>
+            ) : (
+              label
+            )}
           </li>
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * One missing item as a link to its field (owner report 2026-10-21): a click
+ * opens the step that answers it, whichever step is on screen, and puts the
+ * cursor into the field.
+ */
+export function MissingItemLink({
+  field,
+  onClick,
+  children,
+}: {
+  field: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      data-testid="lead-request-missing-item"
+      data-field={field}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   );
 }
 
