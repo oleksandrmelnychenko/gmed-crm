@@ -12,7 +12,7 @@ dependencies = [
   "pypdf==6.19.0",
   "pypdfium2>=4.30,<5",
   "pytesseract>=0.3.13,<1",
-  "Pillow>=11,<13",
+  "Pillow>=13,<14",
   "defusedxml==0.7.1",
 ]
 
