@@ -661,6 +661,14 @@ pub(crate) async fn lock_my_lead(
     lead_id: Uuid,
     user_id: Uuid,
 ) -> Result<Option<(AccessKind, PgRow)>, sqlx::Error> {
+    // The lock is taken first in its own statement: a statement that waited
+    // for the lock re-reads the lead row but evaluates its subqueries (the
+    // changes since submit) on the snapshot from before the wait, so two
+    // simultaneous submits both counted as new (2026-10-21).
+    sqlx::query("SELECT 1 FROM leads WHERE id = $1 FOR UPDATE")
+        .bind(lead_id)
+        .fetch_optional(&mut **tx)
+        .await?;
     let row = sqlx::query(&format!(
         r#"SELECT CASE
                     WHEN l.portal_user_id = $2 AND NOT {OWN_LOGIN_CLOSED_SQL} THEN 'self'
