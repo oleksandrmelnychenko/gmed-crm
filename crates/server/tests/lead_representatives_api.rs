@@ -376,9 +376,17 @@ async fn an_invoice_names_the_chosen_parent_and_never_another_childs_contact() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(missing(&body).contains(&"recipient_representative_id".into()));
+    // "Ich" of the mother's login is the mother (owner 2026-10-21).
+    assert!(
+        !missing(&body).contains(&"recipient_representative_id".into()),
+        "{body}"
+    );
+    assert_eq!(
+        body["billing"]["recipient"]["name"], "Anna Muster",
+        "{body}"
+    );
 
-    // Choosing a parent does not expand the short initial form into passport/address questions.
+    // Choosing the other parent does not expand the short initial form into passport/address questions.
     let (status, short) = json_request(
         router,
         "POST",
