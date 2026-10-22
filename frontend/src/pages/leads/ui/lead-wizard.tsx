@@ -4371,9 +4371,17 @@ export function LeadWizard({
           - (stepNav.clientWidth - activeRect.width) / 2,
       });
     }
+    // The bar takes its narrow layout only after the resize event: measure
+    // two frames later, or the centring uses the wide layout (CI 2026-10-22).
+    let resizeFrame = 0;
     const handleResize = () => {
-      movePill(false);
-      centerActiveStep("auto");
+      window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = window.requestAnimationFrame(() => {
+          movePill(false);
+          centerActiveStep("auto");
+        });
+      });
     };
     window.addEventListener("resize", handleResize);
     // A tab changes width without a window resize (a step turns done and its
@@ -4399,6 +4407,7 @@ export function LeadWizard({
     }
     return () => {
       window.cancelAnimationFrame(animationFrame);
+      window.cancelAnimationFrame(resizeFrame);
       window.removeEventListener("resize", handleResize);
       tabsObserver?.disconnect();
     };
