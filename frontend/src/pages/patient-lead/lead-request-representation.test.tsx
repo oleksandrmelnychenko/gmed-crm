@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import { RepresentationSection } from "./lead-request-representation";
+import { OtherParentDocumentSection, OwnRepresentativeDocumentSection } from "./lead-request-step-forms";
 import { leadRequestText } from "./lead-request-text";
 
 const mother: LeadRequestRepresentative = {
@@ -62,22 +63,50 @@ function render(documentStage: boolean) {
   );
 }
 
+function renderDocumentStep(representatives: LeadRequestRepresentative[], documentStage = false) {
+  const props = {
+    request: { ...request(documentStage), representation: { ...request(documentStage).representation!, representatives } },
+    text: leadRequestText("ru"),
+    lang: "ru",
+    enqueue: ((task: () => Promise<unknown>) => task()) as never,
+    onChange: () => undefined,
+  };
+  return renderToStaticMarkup(
+    <>
+      <OwnRepresentativeDocumentSection {...props} />
+      <OtherParentDocumentSection {...props} />
+    </>,
+  );
+}
+
+const father: LeadRequestRepresentative = { ...mother, id: "rep-2", slot: "rep2", mine: false, email_locked: false, first_name: "Ben" };
+
 describe("a minor's parent in the cabinet", () => {
-  it("is asked for the identity document copy as soon as the person exists, before the document stage", () => {
+  // The parents' identity copies are uploaded on step "Document", where its missing list points (QA 2026-10-22).
+  it("uploads no identity copy in the person's form of step 1", () => {
     const html = render(false);
-    expect(html).toContain("lead-request-rep1-identity-upload");
+    expect(html).not.toContain("lead-request-rep1-identity-upload");
     // The rest of the document stage stays where it was: no date of birth yet.
     expect(html).not.toContain("lead-request-rep1_date_of_birth");
   });
 
-  it("keeps the upload at the document stage with the whole form", () => {
+  it("keeps the whole form at the document stage, the upload still on step Document", () => {
     const html = render(true);
-    expect(html).toContain("lead-request-rep1-identity-upload");
+    expect(html).not.toContain("lead-request-rep1-identity-upload");
     expect(html).toContain("lead-request-rep1_date_of_birth");
   });
 
-  it("is not asked for the second parent before the person exists", () => {
-    const html = render(false);
+  it("offers the own and the other parent's copy on step Document", () => {
+    const html = renderDocumentStep([mother, father]);
+    expect(html).toContain("lead-request-rep1-identity-upload");
+    expect(html).toContain("lead-request-rep2-identity-upload");
+    expect(html).toContain("Документ второго родителя (Ben Muster)");
+  });
+
+  it("points to step 1 while the other parent is not named yet", () => {
+    const html = renderDocumentStep([mother]);
+    expect(html).toContain("lead-request-rep1-identity-upload");
     expect(html).not.toContain("lead-request-rep2-identity-upload");
+    expect(html).toContain("lead-request-other-parent-document-needs-person");
   });
 });

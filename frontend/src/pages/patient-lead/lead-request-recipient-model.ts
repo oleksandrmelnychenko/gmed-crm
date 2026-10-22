@@ -230,7 +230,7 @@ export function flowOf(draft: Pick<RecipientDraft, "recipient" | "is_payer">): R
  * older request says so), the paying parent with a third-party recipient
  * when the parent's own data are on file, a person or an organisation.
  */
-export type PayerChoice = "self" | "guardian" | "person" | "organisation";
+export type PayerChoice = "self" | "guardian" | "other_parent" | "person" | "organisation";
 
 export function payerChoices(
   flow: RecipientFlow,
@@ -265,7 +265,9 @@ export const OTHER_PAYER_CHOICES = ["person", "organisation"] as const satisfies
  */
 export function payerPartyOf(payer: LeadRequestPayer | null | undefined, parentPays: boolean): PayerParty | "" {
   if (!payer) return "";
-  if (payer.payer_kind === "self" || payer.payer_kind === "representative" || parentPays) return "patient";
+  if (payer.payer_kind === "self" || parentPays) return "patient";
+  // The other parent of the minor pays: another person than the signed-in parent.
+  if (payer.payer_kind === "representative") return "other";
   return payer.payer_kind === "third_party" ? "other" : "";
 }
 

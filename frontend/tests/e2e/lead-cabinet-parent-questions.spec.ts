@@ -244,12 +244,15 @@ test.describe("Parent country follow-up", () => {
       await expect(person.getByRole("heading", { name: text.childSections.address, exact: true })).toBeVisible();
       await expect(person.getByRole("heading", { name: text.childSections.contact, exact: true })).toBeVisible();
       await expect(page.locator("#lead-request-salutation")).toHaveCount(0);
-      await expect(page.getByTestId("lead-request-rep1-identity-upload")).toContainText(text.identityFiles);
-      await expect(page.getByTestId("lead-request-rep1-identity-upload")).not.toContainText(text.childIdentityFiles);
-      await expect(page.getByTestId("lead-request-rep2-identity-upload")).toContainText(text.identityFiles);
-      await expect(page.getByTestId("lead-request-rep2-identity-upload")).not.toContainText(text.childIdentityFiles);
+      // The parents' identity copies are uploaded on step "Document" only (QA 2026-10-22).
+      await expect(person.getByTestId("lead-request-rep1-identity-upload")).toHaveCount(0);
+      await expect(person.getByTestId("lead-request-rep2-identity-upload")).toHaveCount(0);
       await step(page, "identity");
       const identity = page.getByTestId("lead-request-step-identity");
+      await expect(identity.getByTestId("lead-request-rep1-identity-upload")).toContainText(text.identityFiles);
+      await expect(identity.getByTestId("lead-request-rep1-identity-upload")).not.toContainText(text.childIdentityFiles);
+      await expect(identity.getByTestId("lead-request-rep2-identity-upload")).toContainText(text.identityFiles);
+      await expect(identity.getByTestId("lead-request-rep2-identity-upload")).not.toContainText(text.childIdentityFiles);
       await expect(identity.getByRole("heading", { name: text.childDocumentTitle, exact: true })).toBeVisible();
       await expect(identity).toContainText(text.childIdentityFiles);
       await expect(identity.getByRole("button", { name: text.childIdentityUploadButton, exact: true })).toBeVisible();
@@ -370,9 +373,8 @@ test.describe("Parent country follow-up", () => {
     await expect(mother.getByRole("combobox", { name: leadRequestText("de").fields.country, exact: true })).toBeVisible();
     await expect(mother.locator("#lead-request-rep1_date_of_birth")).toHaveCount(0);
     await expect(mother.locator("#lead-request-rep1_street")).toHaveValue("Synthetic street 1");
-    // The parent's ID copy is asked from the start (2026-10-19), not only at the document stage.
-    await expect(page.getByTestId("lead-request-rep1-identity-upload")).toBeVisible();
-    await expect(page.getByTestId("lead-request-rep2-identity-upload")).toBeVisible();
+    // The parent's ID copy is asked from the start (2026-10-19), on step "Document" (QA 2026-10-22).
+    await expect(page.getByTestId("lead-request-rep1-identity-upload")).toHaveCount(0);
     await page.setViewportSize({ width: 1440, height: 1000 });
     await mother.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("parent-short-1440.png"), fullPage: true, animations: "disabled" });
@@ -383,8 +385,6 @@ test.describe("Parent country follow-up", () => {
     await page.getByTestId("lead-request-parent-document-details").click();
     await expect(mother.locator("#lead-request-rep1_date_of_birth")).toHaveValue("02.03.1985");
     await expect(mother.locator("#lead-request-rep1_street")).toHaveValue("Synthetic street 1");
-    await expect(page.getByTestId("lead-request-rep1-identity-upload")).toBeVisible();
-    await expect(page.getByTestId("lead-request-rep2-identity-upload")).toBeVisible();
     await page.getByTestId("lead-request-parent-document-details").click();
     await expect(mother.locator("#lead-request-rep1_date_of_birth")).toHaveCount(0);
     await expect(mother.locator("#lead-request-rep1_street")).toHaveValue("Synthetic street 1");
@@ -434,8 +434,15 @@ test.describe("Parent country follow-up", () => {
     await expect(page.locator("#lead-request-rep1_street")).toHaveValue("Synthetic street 1");
     await expect(page.locator("#lead-request-rep1_birth_place")).toHaveCount(0);
     await expect(page.locator("#lead-request-rep1_birth_country")).toHaveCount(0);
+    // The required copies: on step "Document", whose badge and list name them (QA 2026-10-22).
+    await expect(page.getByTestId("lead-request-step-person").getByTestId("lead-request-step-missing")).toHaveCount(0);
+    await step(page, "identity");
+    await expect(page.locator('[data-step="identity"]')).toContainText("2");
     await expect(page.getByTestId("lead-request-rep1-identity-upload")).toBeVisible();
     await expect(page.getByTestId("lead-request-rep2-identity-upload")).toBeVisible();
+    await page.getByRole("button", { name: "Weiter", exact: true }).click();
+    const missing = page.getByTestId("lead-request-step-identity").getByTestId("lead-request-step-missing");
+    await expect(missing.getByTestId("lead-request-missing-item")).toHaveText([/^Sie: /, /^Anderer Elternteil: /]);
   });
 
   test("optional parent details preserve a changed address across hide and show", async ({ page }) => {

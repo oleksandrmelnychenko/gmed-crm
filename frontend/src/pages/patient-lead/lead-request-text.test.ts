@@ -427,14 +427,14 @@ describe("lead cabinet languages", () => {
     expect(ru.recipient.isPayer).toBe("Получатель счёта является плательщиком");
     expect(ru.hasRepresentativeQuestion).toBe("Действует ли кто-то от вашего имени?");
     // Insurance is no answer of the cabinet: a person or an organisation.
-    expect(Object.keys(ru.recipient.payerOptions)).toEqual(["self", "guardian", "person", "organisation"]);
+    expect(Object.keys(ru.recipient.payerOptions)).toEqual(["self", "guardian", "other_parent", "person", "organisation"]);
     expect(submitFieldLabel(ru, "invoice_recipient_is_payer")).toBe("Получатель счёта является плательщиком");
     expect(submitFieldLabel(ru, "recipient_relationship_kind")).toBe("Получатель счёта: Кем приходится пациенту?");
     expect(submitFieldLabel(leadRequestText("de"), "recipient_city")).toBe("Rechnungsempfänger: Ort");
     expect(submitFieldLabel(leadRequestText("de"), "payer_payment_reason")).toBe(
       "Zahler: Warum erfolgt die Zahlung über die Organisation?",
     );
-    expect(submitFieldLabel(ru, "has_insurance", true)).toBe("Есть ли у пациента медицинская страховка?");
+    expect(submitFieldLabel(ru, "has_insurance", true)).toBe("Есть ли у вашего ребёнка медицинская страховка?");
     const treatment = /behandlung|treatment|лечени|лікуванн/i;
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);
@@ -471,11 +471,11 @@ describe("lead cabinet languages", () => {
     ]);
     const ru = leadRequestText("ru");
     expect(ru.recipient.payerParty).toEqual({
-      patient: "Плательщиком счёта является пациент",
+      patient: "Плательщиком счёта являюсь я",
       other: "Плательщиком счёта является другое лицо или организация",
     });
     expect(leadRequestText("de").recipient.payerParty).toEqual({
-      patient: "Zahler ist die Patientin / der Patient",
+      patient: "Zahler bin ich",
       other: "Zahler ist eine andere Person oder Organisation",
     });
     // A parent's login reads the first answer as the parent who pays.

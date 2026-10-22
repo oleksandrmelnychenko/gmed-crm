@@ -79,6 +79,23 @@ export function GoToSectionButton({
  */
 export const MissingShownContext = createContext(false);
 
+/**
+ * The keys the step on screen still misses, once its "Next" was pressed, and
+ * the word for an empty required field: every field whose id is
+ * `lead-request-<key>` then says so below itself, not only the yellow list at
+ * the top (QA 2026-10-22: a parent on a phone did not see which field was meant).
+ */
+export const StepMissingContext = createContext<{ keys: ReadonlySet<string>; message: string } | null>(null);
+
+const FIELD_ID_PREFIX = "lead-request-";
+
+/** The "required" message of a field the step still misses after "Next"; undefined otherwise. */
+export function useStepMissingError(id: string): string | undefined {
+  const missing = useContext(StepMissingContext);
+  if (!missing || !id.startsWith(FIELD_ID_PREFIX)) return undefined;
+  return missing.keys.has(id.slice(FIELD_ID_PREFIX.length)) ? missing.message : undefined;
+}
+
 export function errorBody(error: unknown): Record<string, unknown> | null {
   return error instanceof ApiRequestError && error.body ? (error.body as Record<string, unknown>) : null;
 }
@@ -267,6 +284,7 @@ export function FormField({
   error,
   required = false,
   className,
+  label,
   children,
 }: {
   field: PersonalField;
@@ -274,12 +292,14 @@ export function FormField({
   error?: string;
   required?: boolean;
   className?: string;
+  /** Another label than the field's own (the child's phone in a parent's login). */
+  label?: string;
   children: ReactNode;
 }) {
   return (
     <LabeledField
       id={`lead-request-${field}`}
-      label={text.fields[field]}
+      label={label ?? text.fields[field]}
       error={error}
       required={required}
       className={className}
@@ -325,6 +345,8 @@ export function LabeledField({
   aside?: ReactNode;
   children: ReactNode;
 }) {
+  const stepMissing = useStepMissingError(id);
+  const shownError = error ?? (required ? stepMissing : undefined);
   const labelElement = (
     <label htmlFor={id} className={cn(question ? "text-sm leading-snug text-foreground" : tokens.text.label, "block")}>
       {label}
@@ -342,9 +364,9 @@ export function LabeledField({
         labelElement
       )}
       {children}
-      {error ? (
+      {shownError ? (
         <p id={`${id}-error`} role="alert" className="text-xs text-destructive">
-          {error}
+          {shownError}
         </p>
       ) : null}
     </div>
@@ -524,7 +546,7 @@ export function MissingList({
       data-testid={testId}
     >
       <p className="font-medium">{title}</p>
-      <ul className="mt-1 list-inside list-disc space-y-0.5 text-[13px] leading-5">
+      <ul className="mt-1 list-outside list-disc space-y-0.5 pl-5 text-[13px] leading-5">
         {items.map(({ label, field }) => (
           <li key={label} className="break-words">
             {goTo && step && field ? (

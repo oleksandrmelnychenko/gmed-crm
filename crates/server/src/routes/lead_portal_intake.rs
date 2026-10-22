@@ -1056,7 +1056,9 @@ fn country_code(value: &str, field: &'static str) -> Result<Option<String>, Fiel
     if code.is_empty() {
         return Ok(None);
     }
-    if code.len() == 2 && code.chars().all(|ch| ch.is_ascii_uppercase()) {
+    // A known ISO code only, like the representatives, the payer and the
+    // invoice recipient: "XX" is no country (QA 2026-10-22).
+    if crate::services::citizenships::is_country_code(&code) {
         Ok(Some(code))
     } else {
         Err(field_error(field, "Use an ISO 3166-1 alpha-2 country code"))
@@ -6991,6 +6993,21 @@ mod tests {
                     ..Default::default()
                 },
                 "country",
+            ),
+            // Two letters that name no country (QA 2026-10-22).
+            (
+                PersonalDataPatch {
+                    country: Some("XX".into()),
+                    ..Default::default()
+                },
+                "country",
+            ),
+            (
+                PersonalDataPatch {
+                    citizenships: Some(vec!["DE".into(), "QQ".into()]),
+                    ..Default::default()
+                },
+                "citizenships",
             ),
             (
                 PersonalDataPatch {

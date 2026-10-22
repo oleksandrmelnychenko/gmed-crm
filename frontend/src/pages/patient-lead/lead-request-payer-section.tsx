@@ -36,6 +36,7 @@ import {
   draftFromPayer,
   knowsOrganisationMask,
   knowsPayerType,
+  otherParentOf,
   payerAnswer,
   payerAnswerSavable,
   payerChoiceOf,
@@ -242,6 +243,8 @@ export function PayerSection({
   const typed = knowsPayerType(request);
   // A parent's own data on file: the parent may answer "I pay".
   const template = guardian && typed ? (request.payer_self_template ?? null) : null;
+  // The other parent of the minor, for "the other parent pays".
+  const otherParent = typed && choices.includes("other_parent") ? otherParentOf(request) : null;
   const answered = payerAnsweredByPayer(request);
   const [draft, setDraft] = useState<PayerDraft>(() => {
     const parentPays = payerAnswer(request.payer, template) === "guardian";
@@ -262,7 +265,8 @@ export function PayerSection({
   const serverAsksConsent = request.progress.missing_for_submit.includes("payer_contact_consent");
   // Never about a parent of the minor who pays (owner decision 2026-10-19).
   const consentAsked = typed
-    && ((!draft.guardian_pays && request.payer?.payer_kind !== "representative") || serverAsksConsent);
+    && ((!draft.guardian_pays && !(draft.representative_id && payerTypeOf(draft) === "person")
+      && request.payer?.payer_kind !== "representative") || serverAsksConsent);
   const costConsent = { request, text, enqueue, onChange, onSaveState };
 
   if (answered && ownAccountOnly) return null;
@@ -295,11 +299,12 @@ export function PayerSection({
   const choice = payerChoiceOf(draft);
   const choose = (next: string) => {
     if (next === choice) return;
-    setDraft((current) => withPayerChoice(current, next, template));
+    setDraft((current) => withPayerChoice(current, next, template, otherParent));
     // Why somebody pays was said about the payer of the answer before.
     if (identification?.draft.payment_background) identification.set("payment_background", "");
   };
-  const thirdParty = draft.payer_kind === "third_party";
+  // The other parent pays: a representative named by id, no third party's form (owner decision 2026-10-19).
+  const thirdParty = draft.payer_kind === "third_party" && choice !== "other_parent";
   const payerType = typed ? payerTypeOf(draft) : "person";
   const organisation = payerType !== "person";
   // The organisation mask (trigger flow): a server that sends its keys knows it.
@@ -319,8 +324,13 @@ export function PayerSection({
     required,
     className,
   });
+  const otherParentName = otherParent ? [otherParent.first_name, otherParent.last_name].filter(Boolean).join(" ") : "";
   const choiceLabel = (value: PayerChoice) =>
-    value === "self" && guardian ? text.recipient.payerSelfGuardian : text.recipient.payerOptions[value];
+    value === "self" && guardian
+      ? text.recipient.payerSelfGuardian
+      : value === "other_parent" && otherParentName
+        ? `${text.recipient.payerOptions.other_parent} (${otherParentName})`
+        : text.recipient.payerOptions[value];
 
   if (ownAccountOnly) {
     return (

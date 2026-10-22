@@ -48,6 +48,14 @@ export function fieldElement(scope: ParentNode, key: string): HTMLElement | null
   if (key === "request_reason") return byTestId(scope, "lead-request-reason");
   const representative = representativeSubmitPart(key);
   if (representative) {
+    // An upload of a person: its own button (a parent's identity copy is on step "Document").
+    const upload =
+      representative.part === "id_upload"
+        ? byTestId(scope, `lead-request-${representative.slot}-identity-upload`)
+        : representative.part === "authority_upload"
+          ? byTestId(scope, `lead-request-${representative.slot}-authority-upload`)
+          : null;
+    if (upload) return upload;
     return (
       byTestId(scope, `lead-request-representative-${representative.slot}`) ??
       byId(scope, SECTION_ANCHORS.representatives)

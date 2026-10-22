@@ -119,6 +119,11 @@ describe("lead cabinet steps", () => {
   it("maps every key of an older server to a step", () => {
     expect(stepOfField("birth_place")).toBe("person");
     expect(stepOfField("rep2_email")).toBe("person");
+    // A minor's parents upload their identity copies on step "Document" (QA 2026-10-22); an adult's representative in step 1.
+    expect(stepOfField("rep1_id_upload")).toBe("identity");
+    expect(stepOfField("rep2_id_upload")).toBe("identity");
+    expect(stepOfField("rep2_authority_upload")).toBe("person");
+    expect(stepOfField("agent_id_upload")).toBe("person");
     expect(stepOfField("has_representative")).toBe("person");
     expect(stepOfField("habitual_residence_country")).toBe("contact");
     expect(stepOfField("contact_channels")).toBe("contact");

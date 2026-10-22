@@ -27,6 +27,7 @@ import {
   RELATIONSHIP_KINDS,
   costEstimateConsentAsked,
   draftFromPayer,
+  otherParentOf,
   payerAnswer,
   payerIdentityKey,
   unansweredPayerDraft,
@@ -41,6 +42,7 @@ import {
   CabinetSection as Section,
   LabeledField,
   RequiredMark,
+  useStepMissingError,
   errorBody,
   useAutosave,
   runDraftSave,
@@ -279,6 +281,8 @@ export function InvoiceRecipientSection({
   };
 
   const options = recipientOptions(text, request);
+  // Unanswered after "Next": said at the question too, not only in the list at the top.
+  const recipientMissing = useStepMissingError("lead-request-invoice_recipient");
   // The data a payer needs are required of the recipient who pays (owner request 2026-10-07): the
   // e-mail also of an organisation, which answers on its own link (QA 2026-10-11 A-35), the phone of a person.
   const emailRequired = third && recipientPays;
@@ -324,9 +328,9 @@ export function InvoiceRecipientSection({
                 );
               })}
             </div>
-            {errorFor("recipient") ? (
+            {errorFor("recipient") || (!draft.recipient && recipientMissing) ? (
               <p role="alert" className="text-xs text-destructive">
-                {errorFor("recipient")}
+                {errorFor("recipient") || recipientMissing}
               </p>
             ) : null}
           </div>
@@ -558,7 +562,13 @@ export function InvoiceRecipientSection({
           enqueue={enqueue}
           onChange={onChange}
           onSaveState={partState("payer")}
-          choices={guardian && invoiceParent && !invoiceParent.mine ? ["guardian", ...OTHER_PAYER_CHOICES] : OTHER_PAYER_CHOICES}
+          // A parent of the minor never pays as a third party (owner decision 2026-10-19): the signed-in
+          // parent is "I (as a parent)", the other parent of joint custody has an answer of its own.
+          choices={guardian && invoiceParent && !invoiceParent.mine
+            ? ["guardian", ...OTHER_PAYER_CHOICES]
+            : otherParentOf(request) && (third || invoiceParent?.mine)
+              ? ["other_parent", ...OTHER_PAYER_CHOICES]
+              : OTHER_PAYER_CHOICES}
           flow={flow}
           recipient={draft}
           question={text.recipient.payerTypeQuestion}

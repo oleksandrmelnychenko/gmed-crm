@@ -138,6 +138,8 @@ export type LeadRequestText = {
   language: string;
   sectionPerson: string;
   childSections: Record<"person" | "address" | "contact" | "identity" | "insurance" | "request" | "upload", string>;
+  /** The phone field in a parent's login: the child's own number, optional. */
+  childPhone: string;
   childIdentityFiles: string;
   childIdentityUploadButton: string;
   childIdentityUploadHint: string;
@@ -464,6 +466,10 @@ export type LeadRequestText = {
   ownRepresentativeDocumentHint: string;
   /** The parent is not yet a representative of the request: the own copy waits for that section. */
   ownRepresentativeDocumentNeedsPerson: (section: string) => string;
+  /** The other parent's identity copy on step "Document" (QA 2026-10-22): uploaded by the signed-in parent. */
+  otherParentDocumentTitle: (name: string) => string;
+  otherParentDocumentHint: string;
+  otherParentDocumentNeedsPerson: (section: string) => string;
   payerOwnMissingTitle: string;
   payerNoticeMissing: string;
   payerDeclarationLabel: string;
@@ -802,6 +808,26 @@ export function followUpFieldLabel(
   return key;
 }
 
+/** The child's section a personal field is asked in (a parent's login). */
+const CHILD_SECTION_OF: Partial<Record<PersonalField, keyof LeadRequestText["childSections"]>> = {
+  first_name: "person",
+  last_name: "person",
+  middle_name: "person",
+  date_of_birth: "person",
+  legal_sex: "person",
+  citizenships: "person",
+  street_address: "address",
+  zip_code: "address",
+  city: "address",
+  country: "address",
+  phone: "contact",
+  primary_language: "contact",
+  insurance_type: "insurance",
+  insurance_provider: "insurance",
+  insurance_number: "insurance",
+  insurance_covers_germany: "insurance",
+};
+
 /**
  * A field in the list of what is still missing before sending. Fields of a
  * section whose labels do not speak for themselves carry the section's name.
@@ -815,9 +841,16 @@ export function submitFieldLabel(
   guardian = false,
   payerType: string | null | undefined = null,
   minor = false,
+  /** The place of the parent whose login reads the list, and the custody: "1st representative – you". */
+  who: { mineSlot?: RepresentativeSlot | null; custody?: Custody | null } = {},
 ): string {
   if (field === "id_document_upload" && minor) return text.childIdentityFiles;
   if (field === "has_insurance" && guardian) return text.hasInsuranceGuardian;
+  // A parent reads the child's fields next to the own ones: "Date of birth" alone does not say whose.
+  if (field in text.fields && minor) {
+    const section = CHILD_SECTION_OF[field as PersonalField];
+    if (section) return `${text.childSections[section]}: ${text.fields[field as PersonalField]}`;
+  }
   if (field in text.fields) return text.fields[field as PersonalField];
   // Step 3: the two questions stand alone, a field of the third party carries the recipient.
   if (field === "invoice_recipient") return text.recipient.question;
@@ -850,7 +883,16 @@ export function submitFieldLabel(
         : person.part === "authority_upload"
           ? representativeUploadLabel(text, person.slot, "authority")
           : person.part === "name_latin" ? text.namePassportCorrection : representativeFieldLabel(text, person.part);
-    return `${text.representativeCaptions[person.slot]}: ${label}`;
+    // A parent's login: "You: …" and "Other parent: …" instead of the place numbers (QA 2026-10-22).
+    const parents = ["rep1", "rep2"];
+    const capital = (value: string) => value.charAt(0).toLocaleUpperCase() + value.slice(1);
+    const caption =
+      who.mineSlot && person.slot === who.mineSlot
+        ? capital(text.representativeYou)
+        : who.mineSlot && parents.includes(who.mineSlot) && parents.includes(person.slot) && who.custody === "joint"
+          ? capital(text.representativeOtherParent)
+          : text.representativeCaptions[person.slot];
+    return `${caption}: ${label}`;
   }
   // A missing answer names the question in short.
   const topic = LEGAL_TOPIC_OF[field];
@@ -1053,7 +1095,7 @@ const de: LeadRequestText = {
   payerBlockPerson: "Angaben zur zahlenden Person",
   payerBlockContact: "Kontakt",
   payerBlockConsent: "Einwilligungen",
-  hasInsuranceGuardian: "Hat die Patientin / der Patient eine Krankenversicherung?",
+  hasInsuranceGuardian: "Hat Ihr Kind eine Krankenversicherung?",
   recipient: {
     section: "Rechnungsempfänger",
     confirmPayerChange: "Diesen Rechnungsempfänger als Zahler bestätigen",
@@ -1082,7 +1124,7 @@ const de: LeadRequestText = {
     phone: "Telefon",
     isPayer: "Der Rechnungsempfänger ist auch der Zahler",
     payerParty: {
-      patient: "Zahler ist die Patientin / der Patient",
+      patient: "Zahler bin ich",
       other: "Zahler ist eine andere Person oder Organisation",
     },
     payerPartyGuardian: {
@@ -1095,6 +1137,7 @@ const de: LeadRequestText = {
     payerOptions: {
       self: "Ich selbst",
       guardian: "Ich (als Elternteil)",
+      other_parent: "Der andere Elternteil",
       person: "Eine Privatperson",
       organisation: "Eine Organisation",
     },
@@ -1243,9 +1286,10 @@ const de: LeadRequestText = {
   sectionLegalRepresentatives: "Gesetzliche Vertreter",
   parentShortForm: "Kurze Angaben anzeigen",
   childSections: { person: "Persönliche Daten des Kindes", address: "Adresse des Kindes", contact: "Kontakt zur Anfrage des Kindes", identity: "Ausweisdokument des Kindes", insurance: "Versicherung des Kindes", request: "Anliegen zum Kind", upload: "Medizinische Unterlagen des Kindes" },
+  childPhone: "Telefon des Kindes (falls vorhanden)",
   childIdentityFiles: "Scan oder Foto des Ausweisdokuments des Kindes",
   childIdentityUploadButton: "Ausweisdokument des Kindes hochladen",
-  childIdentityUploadHint: "Bitte laden Sie einen gut lesbaren Scan oder ein Foto des Ausweisdokuments des Kindes hoch. Die Dokumente der Eltern gehören in den jeweiligen Vertreterblock.",
+  childIdentityUploadHint: "Bitte laden Sie einen gut lesbaren Scan oder ein Foto des Ausweisdokuments des Kindes hoch: PDF, JPG oder PNG, bis 25 MB pro Datei.",
   parentDocumentDetails: "Angaben für den Vertrag anzeigen",
   parentShortFormIntro: "Für die erste Anfrage genügen die Namen, Kontaktdaten, das Wohnsitzland und die Staatsangehörigkeiten der vertretenden Eltern. Weitere Angaben und Nachweise werden vor Vertrag und Unterschrift benötigt. Bereits gespeicherte Daten bleiben erhalten.",
   custodyQuestion: "Wer vertritt das Kind?",
@@ -1387,6 +1431,9 @@ const de: LeadRequestText = {
   ownRepresentativeDocumentTitle: "Ihr Ausweisdokument (Elternteil / gesetzlicher Vertreter)",
   ownRepresentativeDocumentHint: "Bitte laden Sie einen gut lesbaren Scan oder ein Foto Ihres eigenen Ausweisdokuments hoch.",
   ownRepresentativeDocumentNeedsPerson: (section) => `Um Ihr eigenes Ausweisdokument hochzuladen, tragen Sie bitte zuerst Ihre Angaben im Abschnitt „${section}“ ein.`,
+  otherParentDocumentTitle: (name) => (name ? `Ausweisdokument des anderen Elternteils (${name})` : "Ausweisdokument des anderen Elternteils"),
+  otherParentDocumentHint: "Bitte laden Sie einen gut lesbaren Scan oder ein Foto des Ausweisdokuments des anderen Elternteils hoch.",
+  otherParentDocumentNeedsPerson: (section) => `Tragen Sie zuerst den anderen Elternteil im Abschnitt „${section}“ ein; danach können Sie hier sein Ausweisdokument hochladen.`,
   payerOwnMissingTitle: "Für das Senden fehlt noch:",
   payerNoticeMissing: "Datenschutzhinweis bestätigen",
   payerDeclarationLabel: "Ich bestätige, dass meine Angaben als zahlende Person vollständig und richtig sind.",
@@ -1592,7 +1639,7 @@ const ru: LeadRequestText = {
   payerBlockPerson: "Данные плательщика",
   payerBlockContact: "Контакты",
   payerBlockConsent: "Согласия",
-  hasInsuranceGuardian: "Есть ли у пациента медицинская страховка?",
+  hasInsuranceGuardian: "Есть ли у вашего ребёнка медицинская страховка?",
   recipient: {
     section: "Получатель счёта",
     confirmPayerChange: "Подтвердить этого получателя как плательщика",
@@ -1620,7 +1667,7 @@ const ru: LeadRequestText = {
     phone: "Телефон",
     isPayer: "Получатель счёта является плательщиком",
     payerParty: {
-      patient: "Плательщиком счёта является пациент",
+      patient: "Плательщиком счёта являюсь я",
       other: "Плательщиком счёта является другое лицо или организация",
     },
     payerPartyGuardian: {
@@ -1633,6 +1680,7 @@ const ru: LeadRequestText = {
     payerOptions: {
       self: "Я сам(а)",
       guardian: "Я (как родитель)",
+      other_parent: "Второй родитель",
       person: "Физическое лицо",
       organisation: "Организация",
     },
@@ -1778,9 +1826,10 @@ const ru: LeadRequestText = {
   sectionLegalRepresentatives: "Законные представители",
   parentShortForm: "Показать короткую форму",
   childSections: { person: "Личные данные ребёнка", address: "Адрес ребёнка", contact: "Контакт по заявке ребёнка", identity: "Документ, удостоверяющий личность ребёнка", insurance: "Страховка ребёнка", request: "Обращение по поводу ребёнка", upload: "Медицинские документы ребёнка" },
+  childPhone: "Телефон ребёнка (если есть)",
   childIdentityFiles: "Скан или фото документа, удостоверяющего личность ребёнка",
   childIdentityUploadButton: "Загрузить документ ребёнка",
-  childIdentityUploadHint: "Загрузите читаемый скан или фото документа ребёнка. Документы родителей добавляются отдельно, в блоке соответствующего представителя.",
+  childIdentityUploadHint: "Загрузите читаемый скан или фото документа ребёнка: PDF, JPG или PNG, до 25 МБ на файл.",
   parentDocumentDetails: "Показать данные для договора",
   parentShortFormIntro: "Для первого обращения достаточно имён, контактов, страны проживания и гражданства родителей, представляющих ребёнка. Остальные сведения и документы понадобятся перед договором и подписью. Уже сохранённые данные сохраняются.",
   custodyQuestion: "Кто представляет ребёнка?",
@@ -1924,6 +1973,9 @@ const ru: LeadRequestText = {
   ownRepresentativeDocumentTitle: "Ваш документ (родитель / законный представитель)",
   ownRepresentativeDocumentHint: "Загрузите читаемый скан или фото вашего собственного документа, удостоверяющего личность.",
   ownRepresentativeDocumentNeedsPerson: (section) => `Чтобы загрузить свой документ, сначала укажите свои данные в разделе «${section}».`,
+  otherParentDocumentTitle: (name) => (name ? `Документ второго родителя (${name})` : "Документ второго родителя"),
+  otherParentDocumentHint: "Загрузите читаемый скан или фото документа, удостоверяющего личность второго родителя.",
+  otherParentDocumentNeedsPerson: (section) => `Сначала укажите второго родителя в разделе «${section}» — затем здесь можно загрузить его документ.`,
   payerOwnMissingTitle: "Для отправки ещё не хватает:",
   payerNoticeMissing: "Подтвердить уведомление о защите данных",
   payerDeclarationLabel: "Я подтверждаю, что мои данные как плательщика полны и верны.",
@@ -2128,7 +2180,7 @@ const uk: LeadRequestText = {
   payerBlockPerson: "Дані платника",
   payerBlockContact: "Контакти",
   payerBlockConsent: "Згоди",
-  hasInsuranceGuardian: "Чи є в пацієнта медична страховка?",
+  hasInsuranceGuardian: "Чи є у вашої дитини медична страховка?",
   recipient: {
     section: "Отримувач рахунку",
     confirmPayerChange: "Підтвердити цього отримувача як платника",
@@ -2156,7 +2208,7 @@ const uk: LeadRequestText = {
     phone: "Телефон",
     isPayer: "Отримувач рахунку є платником",
     payerParty: {
-      patient: "Платником рахунку є пацієнт",
+      patient: "Платником рахунку є я",
       other: "Платником рахунку є інша особа або організація",
     },
     payerPartyGuardian: {
@@ -2169,6 +2221,7 @@ const uk: LeadRequestText = {
     payerOptions: {
       self: "Я сам(а)",
       guardian: "Я (як один із батьків)",
+      other_parent: "Другий із батьків",
       person: "Фізична особа",
       organisation: "Організація",
     },
@@ -2314,9 +2367,10 @@ const uk: LeadRequestText = {
   sectionLegalRepresentatives: "Законні представники",
   parentShortForm: "Показати коротку форму",
   childSections: { person: "Особисті дані дитини", address: "Адреса дитини", contact: "Контакт щодо заявки дитини", identity: "Документ, що посвідчує особу дитини", insurance: "Страховка дитини", request: "Звернення щодо дитини", upload: "Медичні документи дитини" },
+  childPhone: "Телефон дитини (якщо є)",
   childIdentityFiles: "Скан або фото документа, що посвідчує особу дитини",
   childIdentityUploadButton: "Завантажити документ дитини",
-  childIdentityUploadHint: "Завантажте читабельний скан або фото документа дитини. Документи батьків додаються окремо, у блоці відповідного представника.",
+  childIdentityUploadHint: "Завантажте читабельний скан або фото документа дитини: PDF, JPG або PNG, до 25 МБ на файл.",
   parentDocumentDetails: "Показати дані для договору",
   parentShortFormIntro: "Для першого звернення достатньо імен, контактів, країни проживання та громадянства батьків, які представляють дитину. Решта відомостей і документів знадобиться перед договором і підписом. Уже збережені дані залишаються.",
   custodyQuestion: "Хто представляє дитину?",
@@ -2460,6 +2514,9 @@ const uk: LeadRequestText = {
   ownRepresentativeDocumentTitle: "Ваш документ (батько чи мати / законний представник)",
   ownRepresentativeDocumentHint: "Завантажте читабельний скан або фото вашого власного документа, що посвідчує особу.",
   ownRepresentativeDocumentNeedsPerson: (section) => `Щоб завантажити власний документ, спершу вкажіть свої дані в розділі «${section}».`,
+  otherParentDocumentTitle: (name) => (name ? `Документ другого з батьків (${name})` : "Документ другого з батьків"),
+  otherParentDocumentHint: "Завантажте читабельний скан або фото документа, що посвідчує особу другого з батьків.",
+  otherParentDocumentNeedsPerson: (section) => `Спершу вкажіть другого з батьків у розділі «${section}» — після цього тут можна завантажити його документ.`,
   payerOwnMissingTitle: "Для надсилання ще бракує:",
   payerNoticeMissing: "Підтвердити повідомлення про захист даних",
   payerDeclarationLabel: "Я підтверджую, що мої дані як платника повні та правильні.",
@@ -2664,7 +2721,7 @@ const en: LeadRequestText = {
   payerBlockPerson: "Payer's details",
   payerBlockContact: "Contact",
   payerBlockConsent: "Consents",
-  hasInsuranceGuardian: "Does the patient have health insurance?",
+  hasInsuranceGuardian: "Does your child have health insurance?",
   recipient: {
     section: "Invoice recipient",
     confirmPayerChange: "Confirm this recipient as the payer",
@@ -2692,7 +2749,7 @@ const en: LeadRequestText = {
     phone: "Phone",
     isPayer: "The invoice recipient is also the payer",
     payerParty: {
-      patient: "The payer is the patient",
+      patient: "I am the payer",
       other: "The payer is another person or organisation",
     },
     payerPartyGuardian: {
@@ -2705,6 +2762,7 @@ const en: LeadRequestText = {
     payerOptions: {
       self: "Me",
       guardian: "Me (as a parent)",
+      other_parent: "The other parent",
       person: "A private person",
       organisation: "An organisation",
     },
@@ -2844,9 +2902,10 @@ const en: LeadRequestText = {
   sectionLegalRepresentatives: "Legal representatives",
   parentShortForm: "Show the short form",
   childSections: { person: "Child’s personal details", address: "Child’s address", contact: "Contact for the child’s request", identity: "Child’s identity document", insurance: "Child’s insurance", request: "Reason for the child’s request", upload: "Child’s medical documents" },
+  childPhone: "Child’s phone (if any)",
   childIdentityFiles: "Scan or photo of the child’s identity document",
   childIdentityUploadButton: "Upload the child’s identity document",
-  childIdentityUploadHint: "Upload a readable scan or photo of the child’s identity document. Parents’ documents are added separately in the respective representative’s section.",
+  childIdentityUploadHint: "Upload a readable scan or photo of the child’s identity document: PDF, JPG or PNG, up to 25 MB per file.",
   parentDocumentDetails: "Show details for the contract",
   parentShortFormIntro: "For the initial inquiry, we only need the names, contact details, country of residence and citizenships of the parents representing the child. Further details and documents will be needed before the contract and signature. Previously saved data is retained.",
   custodyQuestion: "Who represents the child?",
@@ -2986,6 +3045,9 @@ const en: LeadRequestText = {
   ownRepresentativeDocumentTitle: "Your identity document (parent / legal representative)",
   ownRepresentativeDocumentHint: "Upload a readable scan or photo of your own identity document.",
   ownRepresentativeDocumentNeedsPerson: (section) => `To upload your own document, first enter your details in the section "${section}".`,
+  otherParentDocumentTitle: (name) => (name ? `Other parent’s identity document (${name})` : "Other parent’s identity document"),
+  otherParentDocumentHint: "Upload a readable scan or photo of the other parent’s identity document.",
+  otherParentDocumentNeedsPerson: (section) => `First enter the other parent in the section "${section}"; then you can upload their document here.`,
   payerOwnMissingTitle: "Still missing before sending:",
   payerNoticeMissing: "Confirm the privacy notice",
   payerDeclarationLabel: "I confirm that my details as the paying person are complete and correct.",

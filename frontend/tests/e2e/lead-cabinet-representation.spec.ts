@@ -881,6 +881,10 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(page.locator("#lead-request-rep2_date_of_birth")).toBeDisabled();
     await second.getByRole("textbox", { name: "E-Mail" }).fill("ben.muster@example.com");
     await expect.poll(() => calls.persons.at(-1)).toEqual({ id: benId, status: 200, body: { email: "ben.muster@example.com" } });
+    // The parents' identity copies are uploaded on step "Document" (QA 2026-10-22).
+    await expect(second.getByTestId("lead-request-rep2-identity-upload")).toHaveCount(0);
+    await step(page, "identity");
+    await expect(page.getByTestId("lead-request-other-parent-document")).toContainText("Ben Muster");
     await page.locator("#lead-request-rep2-identity-files").setInputFiles(scan);
     await expect(page.getByTestId("lead-request-rep2-identity-list")).toContainText("ausweis.jpg");
     expect(calls.uploads).toEqual([{ id: benId, kind: "identity" }]);
@@ -997,8 +1001,10 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     });
     await page.goto("/");
     const second = page.getByTestId("lead-request-representative-rep2");
-    await expect(second.getByRole("textbox", { name: "Vorname" })).toHaveValue("Ben");
+    await step(page, "identity");
     await expect(page.getByTestId("lead-request-rep2-identity-list")).toContainText("ausweis.jpg");
+    await step(page, "person");
+    await expect(second.getByRole("textbox", { name: "Vorname" })).toHaveValue("Ben");
 
     const asked: string[] = [];
     onNextConfirm(page, true, asked);
@@ -1008,7 +1014,6 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     expect(calls.removed).toEqual([BEN]);
     expect(request.representation.representatives.map((item) => item.id)).toEqual([ANNA]);
     await expect(second.getByRole("textbox", { name: "Nachname" })).toHaveValue("");
-    await expect(page.getByTestId("lead-request-rep2-identity-list")).toHaveText("");
     await expect(second.getByRole("button", { name: "Entfernen" })).toHaveCount(0);
 
     // Somebody else can be named in the same place: a new person with a new id.
@@ -1116,5 +1121,31 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(page.getByTestId("lead-request-summary-representation-rep1")).toBeVisible();
     expect(await overflow()).toBeLessThanOrEqual(1);
     expect(await overhang("lead-request-send")).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe("lead cabinet: what is missing, at its field (QA 2026-10-22)", () => {
+  test("Next marks the empty required fields of the step, and a parent reads whose they are", async ({ page }) => {
+    await setup(page, {
+      minor: true,
+      prepare: (prepared) => {
+        prepared.representation.custody_stated = true;
+        prepared.representation.representatives.push(anna());
+      },
+    });
+    await page.goto("/");
+    const stepBox = page.getByTestId("lead-request-step-person");
+    await expect(stepBox.getByText("Pflichtfeld")).toHaveCount(0);
+    await page.getByRole("button", { name: "Weiter", exact: true }).click();
+    const list = page.getByTestId("lead-request-step-missing");
+    await expect(list).toContainText("Sie: Staatsangehörigkeit(en)");
+    await expect(list).toContainText("Anderer Elternteil: Nachname");
+    await expect(list).not.toContainText("1. Vertreter/in");
+    // The field says it below itself, the one filled in does not.
+    const own = page.getByTestId("lead-request-representative-rep1");
+    await expect(own.locator("#lead-request-rep1_citizenships-error")).toHaveText("Pflichtfeld");
+    await expect(own.locator("#lead-request-rep1_first_name-error")).toHaveCount(0);
+    // The child's own phone is optional and named as the child's.
+    await expect(stepBox.locator('label[for="lead-request-phone"]')).toHaveText("Telefon des Kindes (falls vorhanden)");
   });
 });

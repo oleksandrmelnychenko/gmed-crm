@@ -483,7 +483,7 @@ const RECIPIENT = "Wer ist Rechnungsempfänger?";
 const IS_PAYER = "Der Rechnungsempfänger ist auch der Zahler";
 const WHO_PAYS = "Wer ist der Zahler?";
 const PAYER_TYPE = "Zahler ist";
-const PATIENT_PAYS = "Zahler ist die Patientin / der Patient";
+const PATIENT_PAYS = "Zahler bin ich";
 const OTHER_PAYS = "Zahler ist eine andere Person oder Organisation";
 const METHOD = "Welche Zahlungsart für Rechnungen bevorzugen Sie?";
 
@@ -773,7 +773,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await page.goto("/");
     await step(page, "billing");
     const stepBox = page.getByTestId("lead-request-step-billing");
-    await expect(stepBox.getByRole("combobox", { name: "Hat die Patientin / der Patient eine Krankenversicherung?" })).toBeVisible();
+    await expect(stepBox.getByRole("combobox", { name: "Hat Ihr Kind eine Krankenversicherung?" })).toBeVisible();
     await stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }).check();
     await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toBeChecked();
     await expect
@@ -803,7 +803,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     // A parent's login reads the patient's answer as the parent who pays.
     const parties = stepBox.getByTestId("lead-request-payer-party");
     await expect(parties.getByRole("radio")).toHaveCount(2);
-    await expect(parties).not.toContainText(PATIENT_PAYS);
+    await expect(parties.getByRole("radio", { name: PATIENT_PAYS, exact: true })).toHaveCount(0);
     await parties.getByRole("radio", { name: "Zahler bin ich (als Elternteil)" }).check();
     await expect
       .poll(() => calls.payer.at(-1))
@@ -1005,6 +1005,37 @@ test("changing the default checked recipient cannot replace an existing payer un
   await expect.poll(() => calls.payer.at(-1)).toMatchObject({ first_name: "Another", last_name: "Recipient", contact_consent: false });
   expect(calls.payer.at(-1)).not.toHaveProperty("date_of_birth");
   expect(calls.payer.at(-1)).not.toHaveProperty("citizenships");
+});
+
+test("the other parent pays: named as that representative, never as a third party (QA 2026-10-22)", async ({ page }) => {
+  const { calls } = await setup(page, { minor: true, prepare: (request) => {
+    request.representation = twoParents(MOTHER);
+    request.payer_self_template = { representative_id: MOTHER, first_name: "Maria", last_name: "Muster", date_of_birth: "1985-04-12",
+      email: "maria.muster@example.com", phone: null } as typeof request.payer_self_template;
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  const stepBox = page.getByTestId("lead-request-step-billing");
+  await stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }).check();
+  await stepBox.getByRole("checkbox", { name: IS_PAYER }).uncheck();
+  await choose(page, stepBox.getByRole("combobox", { name: PAYER_TYPE }), "Der andere Elternteil (Ben Muster)");
+  await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "representative", payer_representative_id: FATHER });
+  // No third party's form and no consent to contact a parent.
+  await expect(stepBox.getByRole("textbox", { name: "Vorname" })).toHaveCount(0);
+  await expect(stepBox.getByTestId("lead-request-payer-consent")).toHaveCount(0);
+});
+
+test("an unanswered recipient says so at the question after Next (QA 2026-10-22)", async ({ page }) => {
+  await setup(page);
+  await page.goto("/");
+  await step(page, "billing");
+  const stepBox = page.getByTestId("lead-request-step-billing");
+  await expect(stepBox.getByRole("alert")).toHaveCount(0);
+  await page.getByRole("button", { name: "Weiter", exact: true }).click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "billing");
+  await expect(stepBox.getByTestId("lead-request-invoice-recipient").getByRole("alert")).toHaveText("Pflichtfeld");
+  await stepBox.getByRole("radio", { name: "Ich", exact: true }).check();
+  await expect(stepBox.getByTestId("lead-request-invoice-recipient").getByRole("alert")).toHaveCount(0);
 });
 
 test("guardian does not overwrite a stored self payer simply by opening billing", async ({ page }) => {

@@ -7,6 +7,7 @@ import type {
   LeadRequestPayer,
   LeadRequestPayerInput,
   LeadRequestPersonalData,
+  LeadRequestRepresentative,
   PayerSelfTemplate,
   PayerType,
   PersonalDataPatch,
@@ -609,15 +610,36 @@ export function payerDraftFromRecipient(
   };
 }
 
+/** The other parent of a minor as the answer "the other parent pays" names it. */
+export type OtherParentPayer = Pick<
+  LeadRequestRepresentative,
+  "id" | "first_name" | "last_name" | "date_of_birth" | "citizenships" | "street" | "zip" | "city" | "country" | "phone" | "email"
+>;
+
+/**
+ * The other parent of a minor whose login this is: the representative in the
+ * other place of joint custody (`rep1` / `rep2`), or null.
+ */
+export function otherParentOf(request: Pick<LeadRequest, "access_kind" | "minor" | "representation">): LeadRequestRepresentative | null {
+  if (request.access_kind !== "guardian" || !request.minor) return null;
+  const parents = request.representation?.representatives.filter((person) => person.slot === "rep1" || person.slot === "rep2") ?? [];
+  if (!parents.some((person) => person.mine)) return null;
+  return parents.find((person) => !person.mine) ?? null;
+}
+
 /**
  * The one answer of "who pays" in step 3 (owner spec 2026-10-11): the
  * patient, the paying parent, a person or an organisation (a company, an
  * organisation or an insurer stored before counts as an organisation).
  */
-export function payerChoiceOf(draft: Pick<PayerDraft, "payer_kind" | "guardian_pays" | "payer_type">): PayerChoice | "" {
+export function payerChoiceOf(
+  draft: Pick<PayerDraft, "payer_kind" | "guardian_pays" | "payer_type"> & Pick<Partial<PayerDraft>, "representative_id">,
+): PayerChoice | "" {
   if (draft.payer_kind === "self") return "self";
   if (draft.payer_kind !== "third_party") return "";
   if (draft.guardian_pays) return "guardian";
+  // The other parent of the minor, named by id (owner decision 2026-10-19: a representative, never a third party).
+  if (draft.representative_id && payerTypeOf(draft) === "person") return "other_parent";
   return organisationPayerType(draft.payer_type) ? "organisation" : "person";
 }
 
@@ -631,8 +653,29 @@ export function withPayerChoice(
   draft: PayerDraft,
   choice: string,
   template: PayerSelfTemplate | null | undefined = null,
+  /** The other parent of the minor, for the answer "the other parent pays". */
+  otherParent: OtherParentPayer | null = null,
 ): PayerDraft {
   if (choice === payerChoiceOf(draft)) return draft;
+  if (choice === "other_parent" && otherParent) {
+    return {
+      ...withoutPayerParty({ ...draft, contact_consent: false }),
+      payer_kind: "third_party",
+      representative_id: otherParent.id,
+      payer_type: "person",
+      first_name: otherParent.first_name ?? "",
+      last_name: otherParent.last_name ?? "",
+      date_of_birth: otherParent.date_of_birth ?? "",
+      citizenships: [...(otherParent.citizenships ?? [])],
+      relationship_kind: "parent",
+      street: otherParent.street ?? "",
+      zip: otherParent.zip ?? "",
+      city: otherParent.city ?? "",
+      country: otherParent.country ?? "",
+      phone: otherParent.phone ?? "",
+      email: otherParent.email ?? "",
+    };
+  }
   if (choice === "self" || choice === "guardian" || choice === "") {
     return withPayerAnswer(draft, choice === "guardian" ? "guardian" : choice, template);
   }
@@ -760,6 +803,8 @@ export function payerAnswerSavable(saved: PayerDraft, draft: PayerDraft, typed =
   if (draft.payer_kind !== "third_party" || !saved.payer_kind || payerIdentityKey(saved) === payerIdentityKey(draft)) return true;
   if (saved.payer_kind === "third_party" && !thirdPartyPayerNamed(saved, typed)) return true;
   if (draft.guardian_pays) return Boolean(oneLine(draft.first_name) && oneLine(draft.last_name));
+  // The other parent is named by id: the representative's own data, nothing to check here.
+  if (draft.representative_id) return true;
   const named = (typed ? payerTypeOf(draft) : "person") === "person"
     ? Boolean(oneLine(draft.first_name) && oneLine(draft.last_name)) : Boolean(oneLine(draft.organisation_name));
   return named && Boolean(draft.country && (payerTypeOf(draft) !== "person" || oneLine(draft.city)));

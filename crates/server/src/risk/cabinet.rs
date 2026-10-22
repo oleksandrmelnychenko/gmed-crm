@@ -173,7 +173,9 @@ pub fn step_of(key: &str) -> &'static str {
     match key {
         "street_address" | "zip_code" | "city" | "country" | "phone" | "primary_language"
         | "email" | "contact_channels" => "contact",
-        "id_document_upload" => "identity",
+        // A minor's parents upload their identity copies on step "Document"
+        // (QA 2026-10-22): the badge and the list of that step count them.
+        "id_document_upload" | "rep1_id_upload" | "rep2_id_upload" => "identity",
         "pep_self" | "pep_related" | "sanctions_links" => "declarations",
         "request_reason" => "documents",
         "payment_method" => "billing",
@@ -1404,6 +1406,8 @@ mod tests {
             "has_representative",
             "under_guardianship",
             "rep1_phone",
+            "rep1_id_upload",
+            "agent_id_upload",
             "street_address",
             "id_document_upload",
             "has_insurance",
@@ -1419,9 +1423,9 @@ mod tests {
         assert_eq!(
             by_step,
             json!({
-                "person": ["first_name", "birth_place", "has_representative", "under_guardianship", "rep1_phone"],
+                "person": ["first_name", "birth_place", "has_representative", "under_guardianship", "rep1_phone", "agent_id_upload"],
                 "contact": ["street_address"],
-                "identity": ["id_document_upload"],
+                "identity": ["rep1_id_upload", "id_document_upload"],
                 "billing": [
                     "has_insurance",
                     "invoice_recipient",

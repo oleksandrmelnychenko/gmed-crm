@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { ArrowLeft, ArrowRight, CircleAlert, LoaderCircle, Upload } from "lucide-react";
 
@@ -60,6 +60,7 @@ import {
   MissingShownContext,
   SECTION_ANCHORS,
   SaveIndicator,
+  StepMissingContext,
   StepFooter,
   UploadedFileList,
   errorBody,
@@ -150,9 +151,14 @@ function StepFrame({
   children: ReactNode;
 }) {
   const guardian = request.access_kind === "guardian";
+  // "1st representative – you": a parent sees which of the two persons is meant.
+  const who = {
+    mineSlot: request.representation?.representatives.find((person) => person.mine)?.slot ?? null,
+    custody: request.representation?.custody ?? null,
+  };
   const labels = [
     ...extraMissing.map((item) => item.label),
-    ...missing.map((key) => submitFieldLabel(text, key as SubmitField, guardian, request.payer?.payer_type, request.minor)),
+    ...missing.map((key) => submitFieldLabel(text, key as SubmitField, guardian, request.payer?.payer_type, request.minor, who)),
   ];
   // Every item leads to its field (owner report 2026-10-21).
   const fields = [...extraMissing.map((item) => item.field), ...missing];
@@ -160,6 +166,12 @@ function StepFrame({
   // press with something missing shows it and stays, the next press goes on. The page keeps
   // which steps showed it, for the badges of the step bar.
   const showMissing = nav.missingShown;
+  // The empty required fields say so below themselves too, once "Next" was pressed.
+  const missingKey = fields.filter(Boolean).join("|");
+  const stepMissing = useMemo(
+    () => (showMissing ? { keys: new Set(missingKey.split("|").filter(Boolean)), message: text.required } : null),
+    [showMissing, missingKey, text.required],
+  );
   const next = () => {
     // The page validates the fresh server response after flushing this step.
     nav.onNext?.();
@@ -167,7 +179,9 @@ function StepFrame({
   return (
     <section className="space-y-6" data-testid={testId}>
       {showMissing ? <MissingList title={text.stepMissingTitle} labels={labels} fields={fields} step={step} testId="lead-request-step-missing" /> : null}
-      <MissingShownContext.Provider value={showMissing}>{children}</MissingShownContext.Provider>
+      <MissingShownContext.Provider value={showMissing}>
+        <StepMissingContext.Provider value={stepMissing}>{children}</StepMissingContext.Provider>
+      </MissingShownContext.Provider>
       <StepFooter
         index={nav.index}
         total={nav.total}
@@ -527,7 +541,13 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
       </Section>
       <Section title={childSectionTitle(text, "contact", request.minor)}>
         <div className={GRID}>
-          <FormField field="phone" text={text} error={errorFor("phone")} required={request.access_kind !== "guardian"}>
+          <FormField
+            field="phone"
+            text={text}
+            error={errorFor("phone")}
+            required={!request.minor}
+            label={request.minor ? text.childPhone : undefined}
+          >
             <Input
               {...fieldProps("phone")}
               className={inputClass}
@@ -688,6 +708,9 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
       {parentOfMinor ? (
         <OwnRepresentativeDocumentSection request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
       ) : null}
+      {parentOfMinor ? (
+        <OtherParentDocumentSection request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
+      ) : null}
     </StepFrame>
   );
 }
@@ -715,7 +738,7 @@ export function OwnRepresentativeDocumentSection({
       <Section title={text.ownRepresentativeDocumentTitle}>
         {me && slot ? (
           <div className="space-y-2">
-            <p className="text-sm leading-6 text-muted-foreground">{text.ownRepresentativeDocumentHint}</p>
+            <p className="text-xs leading-5 text-muted-foreground">{text.ownRepresentativeDocumentHint}</p>
             <RepresentativeUpload
               request={request}
               slot={slot}
@@ -742,6 +765,66 @@ export function OwnRepresentativeDocumentSection({
               anchor={SECTION_ANCHORS.representatives}
               label={text.goToSection(text.sectionLegalRepresentatives)}
               testId="lead-request-own-document-go"
+            />
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+/**
+ * The other parent's identity copy on step "Document" (QA 2026-10-22): with
+ * joint custody both parents' copies are uploaded here, where the missing
+ * list of this step points (`rep1_id_upload` / `rep2_id_upload`), not in the
+ * persons' forms of step 1. Until that parent is named there, a pointer.
+ */
+export function OtherParentDocumentSection({
+  request,
+  text,
+  lang,
+  enqueue,
+  onChange,
+}: Pick<StepProps, "request" | "text" | "lang" | "enqueue" | "onChange">) {
+  const representation = request.representation;
+  const mine = representation?.representatives.find((person) => person.mine && person.slot !== null)?.slot ?? null;
+  const slot = mine === "rep2" ? "rep1" : mine === "rep1" && representation?.custody === "joint" ? "rep2" : null;
+  if (!slot) return null;
+  const person = representation?.representatives.find((item) => item.slot === slot) ?? null;
+  const required = representation?.document_stage === true || request.progress.missing_for_submit.includes(`${slot}_id_upload`);
+  const name = person ? [person.first_name, person.last_name].filter(Boolean).join(" ") : "";
+  return (
+    <div className="scroll-mt-4" data-testid="lead-request-other-parent-document">
+      <Section title={text.otherParentDocumentTitle(name)}>
+        {person ? (
+          <div className="space-y-2">
+            <p className="text-xs leading-5 text-muted-foreground">{text.otherParentDocumentHint}</p>
+            <RepresentativeUpload
+              request={request}
+              slot={slot}
+              kind="identity"
+              label={text.identityFiles}
+              required={required}
+              person={person}
+              documents={person.identity_documents}
+              text={text}
+              lang={lang}
+              enqueue={enqueue}
+              onChange={onChange}
+            />
+          </div>
+        ) : (
+          <div
+            role="note"
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+            data-testid="lead-request-other-parent-document-needs-person"
+          >
+            <p>{text.otherParentDocumentNeedsPerson(text.sectionLegalRepresentatives)}</p>
+            <GoToSectionButton
+              step="person"
+              anchor={SECTION_ANCHORS.representatives}
+              label={text.goToSection(text.sectionLegalRepresentatives)}
+              testId="lead-request-other-parent-document-go"
             />
           </div>
         )}

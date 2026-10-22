@@ -98,7 +98,10 @@ const DECLARATION_KEYS: ReadonlySet<string> = new Set([
  * first step.
  */
 export function stepOfField(field: string): FormStep {
-  if (PERSON_KEYS.has(field) || representativeSubmitPart(field)) return "person";
+  // A minor's parents upload their identity copies on step "Document" (QA 2026-10-22), like the server's `step_of`.
+  const person = representativeSubmitPart(field);
+  if (person?.part === "id_upload" && (person.slot === "rep1" || person.slot === "rep2")) return "identity";
+  if (PERSON_KEYS.has(field) || person) return "person";
   if (CONTACT_KEYS.has(field)) return "contact";
   if (field === "id_document_upload" || field.startsWith("id_")) return "identity";
   if (

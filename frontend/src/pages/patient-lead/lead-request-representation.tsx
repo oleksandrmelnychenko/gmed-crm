@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { LoaderCircle, Trash2, Upload } from "lucide-react";
+import { CircleAlert, LoaderCircle, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
@@ -654,7 +654,10 @@ function RepresentativeBlock({
       </div>
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="sm:col-span-2 lg:col-span-3">
-          <StatusChip tone="warning" className="whitespace-normal">{text.namePassportHint}</StatusChip>
+          <StatusChip tone="warning" className="items-start whitespace-normal rounded-lg px-2.5 py-1.5">
+            <CircleAlert aria-hidden="true" className="mt-[3px]" />
+            <span>{text.namePassportHint}</span>
+          </StatusChip>
           {(["first_name", "last_name"] as const).map((field) => {
             const suggestion = suggestPassportSpelling(form.draft[field], lang);
             return nameNeedsLatinSpelling(form.draft[field]) ? (
@@ -940,7 +943,7 @@ export function RepresentationSection({
       uploads={whole(slot)}
       // A parent uploads the identity document copy as soon as the person
       // exists, not only at the document stage (owner report 2026-10-19).
-      identityUpload={whole(slot) || (minor && representativeInSlot(representation, slot) !== null)}
+      identityUpload={minor ? mode !== "base" : whole(slot)}
       text={text}
       lang={lang}
       enqueue={enqueue}
