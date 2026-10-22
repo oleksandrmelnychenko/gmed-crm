@@ -6,8 +6,11 @@ import type { DocumentItem } from "@/pages/documents/model/types";
 import {
   adultActingPersons,
   currentGwgSheet,
+  gwgPayerSheetMissingText,
   gwgRepresentativeSubject,
   gwgSheetErrorText,
+  isGwgLegalEntitySheet,
+  isGwgPayerSheetIncomplete,
   gwgSheetPlan,
   gwgSheetRequest,
   gwgSheetSubject,
@@ -231,14 +234,33 @@ describe("which sheets the wizard offers", () => {
     expect(adultActingPersons(undefined)).toEqual([]);
   });
 
-  it("makes no sheet for natural persons for an organisation", () => {
-    const plan = gwgSheetPlan({
-      minor: false,
-      representatives: [],
-      payer: { payer_kind: "third_party", payer_type: "company" },
-    });
-    expect(plan.buttons).toEqual([{ subject: "contract_partner", personName: "" }]);
-    expect(plan.payerIsOrganisation).toBe(true);
+  it("offers a paying organisation the sheet for legal entities", () => {
+    // Owner decision 2026-10-22: the same subject `payer`, the server makes
+    // the form for legal entities.
+    for (const payerType of ["company", "organisation", "insurance"]) {
+      const plan = gwgSheetPlan({
+        minor: false,
+        representatives: [],
+        payer: { payer_kind: "third_party", payer_type: payerType },
+      });
+      expect(plan.buttons).toEqual([
+        { subject: "contract_partner", personName: "" },
+        { subject: "payer", personName: "", organisation: true },
+      ]);
+      expect(plan.payerIsOrganisation).toBe(true);
+    }
+    // A minor's paying organisation is never one of the parents: no waiting.
+    expect(
+      gwgSheetPlan({
+        minor: true,
+        representatives: [{ id: ANNA_ID, name: "Anna Muster" }],
+        payer: { payer_kind: "third_party", payer_type: "company" },
+        payerSamePersonUnknown: true,
+      }).buttons,
+    ).toEqual([
+      { subject: ANNA, personName: "Anna Muster" },
+      { subject: "payer", personName: "", organisation: true },
+    ]);
     // The type of a payer that is no longer a third party does not matter.
     expect(gwgSheetPlan({ minor: false, representatives: [], payer: { payer_kind: "self", payer_type: "company" } }).payerIsOrganisation)
       .toBe(false);
@@ -335,6 +357,39 @@ describe("refusals of the server to make a sheet", () => {
     expect(gwgSheetErrorText(onlyCode, ru)).not.toBeNull();
     const onlyError = new ApiRequestError("Unprocessable", { status: 422, body: { error: "representative_sheet_not_available" } });
     expect(gwgSheetErrorText(onlyError, ru)).not.toBeNull();
+  });
+
+  it("lists what the paying organisation's sheet lacks before its signature can be confirmed", () => {
+    const missing = [
+      "payer_statement_not_submitted",
+      "payer_legal_form",
+      "payer_id_document_expired",
+      "payer_beneficial_owners",
+      "payer_payment_reason",
+      "payer_something_new",
+    ];
+    const incomplete = new ApiRequestError("Unprocessable", {
+      status: 422,
+      body: { error: "Unprocessable Entity", code: "payer_details_incomplete", scope: "payer", missing },
+    });
+    expect(isGwgPayerSheetIncomplete(incomplete)).toBe(true);
+    expect(gwgSheetErrorText(incomplete, ru)).toBe(
+      "Подтвердить подпись нельзя: не хватает данных организации-плательщика: плательщик ещё не отправил ответы по своей ссылке, правовая форма, документ просрочен — нужен действующий, бенефициары (или ответ «нет лиц с долей более 25 %»), причина оплаты, something new. Данные вносит плательщик по своей ссылке или сотрудники в разделе «Кто платит»; затем сформируйте лист заново.",
+    );
+    expect(gwgSheetErrorText(incomplete, de)).toContain(
+      "Es fehlen Angaben der zahlenden Organisation: Angaben des Kostenübernehmers über den eigenen Zugang fehlen, Rechtsform, Ausweis abgelaufen",
+    );
+    expect(gwgPayerSheetMissingText(undefined, ru)).toBe(
+      "Подтвердить подпись нельзя: не хватает данных организации-плательщика. Данные вносит плательщик по своей ссылке или сотрудники в разделе «Кто платит»; затем сформируйте лист заново.",
+    );
+    expect(isGwgPayerSheetIncomplete(refusal("representative_details_incomplete"))).toBe(false);
+    expect(isGwgPayerSheetIncomplete(new Error("payer_details_incomplete"))).toBe(false);
+  });
+
+  it("tells the sheet for legal entities by the form the server recorded", () => {
+    expect(isGwgLegalEntitySheet({ generated_bindings: { gwg_identification: { subject: "payer", form: "legal_entity" } } })).toBe(true);
+    expect(isGwgLegalEntitySheet({ generated_bindings: { gwg_identification: { subject: "payer" } } })).toBe(false);
+    expect(isGwgLegalEntitySheet({ generated_bindings: null })).toBe(false);
   });
 
   it("leaves other errors to the usual wording", () => {

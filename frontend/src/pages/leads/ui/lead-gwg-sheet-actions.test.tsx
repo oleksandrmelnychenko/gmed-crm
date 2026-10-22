@@ -81,12 +81,20 @@ describe("LeadGwgSheetActions", () => {
     expect(button(german, "payer")).toContain("Für Kostenübernehmer aktualisieren");
   });
 
-  it("explains why an organisation gets no sheet for natural persons", () => {
-    const html = render(
-      gwgSheetPlan({ minor: false, representatives: [], payer: { payer_kind: "third_party", payer_type: "company" } }),
-    );
-    expect(buttonCount(html)).toBe(1);
-    expect(html).toContain("Для организации лист для физических лиц не формируется");
+  it("offers a paying organisation the sheet for legal entities instead of a note", () => {
+    // Owner decision 2026-10-22.
+    const plan = gwgSheetPlan({ minor: false, representatives: [], payer: { payer_kind: "third_party", payer_type: "company" } });
+    const html = render(plan);
+    expect(buttonCount(html)).toBe(2);
+    expect(button(html, "payer")).toContain("Сформировать для организации-плательщика");
+    expect(button(html, "payer")).toContain('data-form="legal_entity"');
+    expect(html).not.toContain("лист для физических лиц не формируется");
+    expect(html).not.toContain("gwg-identification-payer-organisation");
+    const legalEntity = { ...sheet("payer", "doc-org"), generated_bindings: { gwg_identification: { subject: "payer", form: "legal_entity" } } } as DocumentItem;
+    expect(button(render(plan, { documents: [legalEntity] }), "payer")).toContain("Обновить для организации-плательщика");
+    const german = render(plan, { lang: "de" });
+    expect(button(german, "payer")).toContain("Für zahlende Organisation erstellen");
+    expect(button(render(plan, { lang: "de", documents: [legalEntity] }), "payer")).toContain("Für zahlende Organisation aktualisieren");
   });
 
   it("offers a minor one sheet per legal representative, named after the person, and none for the child", () => {

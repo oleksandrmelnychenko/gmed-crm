@@ -1089,9 +1089,11 @@ async fn an_organisation_pays_under_its_name_and_staff_keep_what_their_form_leav
         "{current}"
     );
 
-    // The identification sheet is the form for natural persons: none for the
-    // company, the patient's own as before.
-    let (status, refused) = json_request(
+    // The company gets the sheet for legal entities (owner decision
+    // 2026-10-22): same template and numbering, named after the company and
+    // recorded with its form. The payer has not answered on the own link yet:
+    // the sheet is made, its signature cannot be confirmed.
+    let (status, legal_entity) = json_request(
         &app,
         "POST",
         "/api/v1/documents/generate",
@@ -1099,15 +1101,79 @@ async fn an_organisation_pays_under_its_name_and_staff_keep_what_their_form_leav
         Some(generate("gwg_identification", Some("payer"))),
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "{legal_entity}");
+    let legal_entity_id = Uuid::parse_str(legal_entity["id"].as_str().unwrap()).unwrap();
+    let (template, auto_name, number, bindings): (
+        Option<String>,
+        String,
+        Option<String>,
+        Option<Value>,
+    ) = sqlx::query_as(
+        "SELECT generated_template_id, auto_name, document_number, generated_bindings
+         FROM documents WHERE id = $1",
+    )
+    .bind(legal_entity_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(template.as_deref(), Some("gwg_identification"));
+    assert!(
+        auto_name.starts_with("Dokumentationsbogen juristische Personen · Beispiel GmbH · "),
+        "{auto_name}"
+    );
+    assert!(
+        number
+            .as_deref()
+            .is_some_and(|number| number.starts_with("GWG-")),
+        "{number:?}"
+    );
+    let bindings = bindings.unwrap_or_default();
+    assert_eq!(
+        bindings["gwg_identification"]["subject"], "payer",
+        "{bindings}"
+    );
+    assert_eq!(
+        bindings["gwg_identification"]["form"], "legal_entity",
+        "{bindings}"
+    );
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{legal_entity_id}/mark-signed"),
+        &ceo,
+        Some(json!({ "compliance_kind": "other" })),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
-    assert_eq!(
-        refused["code"], "payer_is_not_a_natural_person",
-        "{refused}"
-    );
-    assert_eq!(
-        refused["error"], "payer_is_not_a_natural_person",
-        "{refused}"
-    );
+    assert_eq!(refused["code"], "payer_details_incomplete", "{refused}");
+    assert_eq!(refused["scope"], "payer", "{refused}");
+    let missing = refused["missing"].as_array().cloned().unwrap_or_default();
+    for key in [
+        "payer_statement_not_submitted",
+        "payer_legal_form",
+        "payer_representative_name",
+        "payer_id_document_number",
+        "payer_id_upload",
+        "payer_beneficial_owners",
+        "payer_payment_reason",
+        "payer_pep",
+        "payer_sanctions_links",
+    ] {
+        assert!(missing.contains(&json!(key)), "{key}: {refused}");
+    }
+    // Name and seat are known from the declaration.
+    for key in ["payer_organisation_name", "payer_seat_address"] {
+        assert!(!missing.contains(&json!(key)), "{key}: {refused}");
+    }
+    let signed: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT signed_at FROM documents WHERE id = $1")
+            .bind(legal_entity_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(signed.is_none());
+
+    // The patient's own sheet as before.
     let (status, sheet) = json_request(
         &app,
         "POST",

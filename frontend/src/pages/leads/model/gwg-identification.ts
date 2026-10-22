@@ -7,7 +7,9 @@ import type { DocumentItem } from "@/pages/documents/model/types";
  * A minor has no sheet of his own — each legal representative gets one. The
  * representative and the legal guardian an adult named in the cabinet get one
  * each beside the adult's own (owner decision 2026-10-10). The server fills
- * the sheet from the lead; the only choice is whose sheet it is.
+ * the sheet from the lead; the only choice is whose sheet it is. A payer
+ * that is a company, an organisation or an insurer gets the sheet for legal
+ * entities under the same subject `payer` (owner decision 2026-10-22).
  */
 export const GWG_IDENTIFICATION_TEMPLATE = "gwg_identification";
 
@@ -124,7 +126,22 @@ export type GwgSheetButton = {
   subject: GwgSheetSubject;
   /** The representative the sheet is for; "" for the patient and the payer. */
   personName: string;
+  /**
+   * The payer is a company, an organisation or an insurer: the server makes
+   * the sheet for legal entities (owner decision 2026-10-22).
+   */
+  organisation?: true;
 };
+
+/** `generated_bindings.gwg_identification.form` of the sheet for legal entities. */
+export const GWG_LEGAL_ENTITY_FORM = "legal_entity";
+
+/** Whether a stored sheet is the one for legal entities (a paying organisation). */
+export function isGwgLegalEntitySheet(document: Pick<DocumentItem, "generated_bindings">): boolean {
+  const binding = document.generated_bindings?.gwg_identification;
+  const form = binding && typeof binding === "object" ? (binding as { form?: unknown }).form : null;
+  return form === GWG_LEGAL_ENTITY_FORM;
+}
 
 /**
  * The representative (slot `agent`) and the legal guardian (slot `guardian`)
@@ -142,16 +159,17 @@ export function adultActingPersons<T extends { slot: string | null }>(
 /**
  * Which sheets the wizard offers. Adult: the patient's, one for each person
  * who acts for the adult (representative, legal guardian) and, for a
- * third-party payer who is a natural person, the payer's. Minor: one per
- * legal representative and none for the child; the payer's own sheet is left
- * out when the payer is one of the representatives (the same person gets one
- * sheet), with a note that says so.
+ * third-party payer, the payer's — for a company, an organisation or an
+ * insurer the sheet for legal entities (owner decision 2026-10-22). Minor:
+ * one per legal representative and none for the child; the payer's own sheet
+ * is left out when the payer is one of the representatives (the same person
+ * gets one sheet), with a note that says so.
  */
 export type GwgSheetPlan = {
   buttons: GwgSheetButton[];
   /** A minor without a parent or guardian on file: no sheet can be made yet. */
   lacksRepresentative: boolean;
-  /** The payer is a company, an organisation or an insurer: no sheet for natural persons. */
+  /** The payer is a company, an organisation or an insurer: its button makes the sheet for legal entities. */
   payerIsOrganisation: boolean;
   /** The name of the representative the payer is the same person as; null otherwise. */
   payerSamePersonName: string | null;
@@ -196,6 +214,10 @@ export function gwgSheetPlan(input: {
   if (privatePayer && samePerson === null && !undecided) {
     buttons.push({ subject: "payer", personName: "" });
   }
+  // An organisation is never one of the parents: nothing to wait for.
+  if (payerIsOrganisation) {
+    buttons.push({ subject: "payer", personName: "", organisation: true });
+  }
   return {
     buttons,
     lacksRepresentative: input.minor && input.representatives.length === 0,
@@ -205,8 +227,16 @@ export function gwgSheetPlan(input: {
 }
 
 /**
- * A refusal of the server to make a sheet, as one localized sentence; `null`
- * for other errors. The server names the reason in `error` and `code`.
+ * «Подтвердить подпись» of the sheet for legal entities is refused while the
+ * organisation's data are incomplete (422 `payer_details_incomplete`, keys
+ * `payer_<field>` in `missing`).
+ */
+export const PAYER_DETAILS_INCOMPLETE = "payer_details_incomplete";
+
+/**
+ * A refusal of the server to make a sheet — or to confirm the signature of
+ * the sheet for legal entities —, as localized text; `null` for other
+ * errors. The server names the reason in `error` and `code`.
  */
 export function gwgSheetErrorText(error: unknown, tx: Tx): string | null {
   if (!(error instanceof ApiRequestError)) return null;
@@ -235,5 +265,63 @@ export function gwgSheetErrorText(error: unknown, tx: Tx): string | null {
       "Für Organisationen wird der Bogen für natürliche Personen nicht erstellt",
     );
   }
+  if (codes.includes(PAYER_DETAILS_INCOMPLETE)) {
+    return gwgPayerSheetMissingText(error.body?.missing, tx);
+  }
   return null;
+}
+
+const PAYER_SHEET_FIELD_LABELS: Record<string, [string, string]> = {
+  statement_not_submitted: ["плательщик ещё не отправил ответы по своей ссылке", "Angaben des Kostenübernehmers über den eigenen Zugang fehlen"],
+  not_an_organisation: ["плательщик больше не организация — сформируйте лист заново", "der Zahler ist keine Organisation mehr – Bogen neu erstellen"],
+  organisation_name: ["название", "Firma / Name"],
+  legal_form: ["правовая форма", "Rechtsform"],
+  seat_address: ["юридический адрес", "Sitz / Anschrift"],
+  representative_name: ["представитель организации", "vertretungsberechtigte Person"],
+  id_document_type: ["вид документа представителя", "Ausweisart der vertretungsberechtigten Person"],
+  id_document_number: ["номер документа", "Ausweisnummer"],
+  id_issuing_authority: ["кем выдан документ", "ausstellende Behörde"],
+  id_issuing_country: ["страна выдачи документа", "Ausstellungsland"],
+  id_valid_until: ["срок действия документа", "gültig bis"],
+  id_document_expired: ["документ просрочен — нужен действующий", "Ausweis abgelaufen – ein gültiger ist nötig"],
+  id_document_unreadable: ["документ нечитаем — нужен новый скан", "Ausweis unleserlich – neuer Scan nötig"],
+  id_document_number_invalid: ["номер документа в неверном формате", "Ausweisnummer im falschen Format"],
+  id_issuing_country_invalid: ["страна выдачи не из списка", "Ausstellungsland nicht aus der Liste"],
+  id_dates_invalid: ["даты документа не сходятся", "Ausweisdaten passen nicht zusammen"],
+  id_upload: ["скан документа представителя", "Ausweiskopie der vertretungsberechtigten Person"],
+  beneficial_owners: ["бенефициары (или ответ «нет лиц с долей более 25 %»)", "wirtschaftlich Berechtigte (oder „keine Person über 25 %“)"],
+  payment_reason: ["причина оплаты", "Zweck der Zahlung"],
+  pep: ["ответы о PEP", "Angaben zu PEP"],
+  sanctions_links: ["ответ о связях с санкциями", "Angabe zu Sanktionsverbindungen"],
+  funds: ["источник средств", "Herkunft der Mittel"],
+};
+
+/**
+ * "Подтвердить подпись нельзя: не хватает данных организации-плательщика: …"
+ * from the keys of the refusal; unknown keys are shown as they are.
+ */
+export function gwgPayerSheetMissingText(missing: unknown, tx: Tx): string {
+  const labels: string[] = [];
+  for (const key of Array.isArray(missing) ? missing : []) {
+    if (typeof key !== "string") continue;
+    const field = key.startsWith("payer_") ? key.slice("payer_".length) : key;
+    const pair = PAYER_SHEET_FIELD_LABELS[field];
+    const label = pair ? tx(...pair) : field.replaceAll("_", " ");
+    if (!labels.includes(label)) labels.push(label);
+  }
+  const base = tx(
+    "Подтвердить подпись нельзя: не хватает данных организации-плательщика",
+    "Die Unterschrift kann nicht bestätigt werden: Es fehlen Angaben der zahlenden Organisation",
+  );
+  const hint = tx(
+    "Данные вносит плательщик по своей ссылке или сотрудники в разделе «Кто платит»; затем сформируйте лист заново.",
+    "Die Angaben macht der Kostenübernehmer über den eigenen Zugang oder das Team unter „Wer zahlt“; danach den Bogen neu erstellen.",
+  );
+  return labels.length > 0 ? `${base}: ${labels.join(", ")}. ${hint}` : `${base}. ${hint}`;
+}
+
+/** The refusal names the paying organisation's data: the wizard offers the way to the payer section. */
+export function isGwgPayerSheetIncomplete(error: unknown): boolean {
+  if (!(error instanceof ApiRequestError)) return false;
+  return [error.body?.code, error.body?.error, error.code].includes(PAYER_DETAILS_INCOMPLETE);
 }

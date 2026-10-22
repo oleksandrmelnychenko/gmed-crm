@@ -296,17 +296,17 @@ test("staff turn a private payer into a company: name and seat instead of the pe
   expect(saves.at(-1)).not.toHaveProperty("invoice_vat_id");
   expect(saves.at(-1)).not.toHaveProperty("invoice_tax_number");
 
-  // The saved company stays in the form; no sheet for natural persons for it.
+  // The saved company stays in the form; it gets the sheet for legal
+  // entities instead of the one for natural persons (owner 2026-10-22).
   await expect(type).toContainText("Компания");
   await expect(section.getByLabel(/^Название/)).toHaveValue("Beispiel GmbH");
   await expect(relationship).toContainText("Работодатель");
   await expect(sheetActions.getByRole("button", { name: "Сформировать для плательщика", exact: true })).toHaveCount(0);
-  await expect(wizard.getByTestId("gwg-identification-payer-organisation")).toHaveText(
-    "Для организации лист для физических лиц не формируется",
-  );
+  await expect(sheetActions.getByRole("button", { name: "Сформировать для организации-плательщика", exact: true })).toBeEnabled();
+  await expect(wizard.getByTestId("gwg-identification-payer-organisation")).toHaveCount(0);
   await expect(sheetActions.getByRole("button", { name: "Сформировать для пациента", exact: true })).toBeEnabled();
   await sheetActions.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: testInfo.outputPath("lead-payer-company-sheet-note-ru-desktop.png"), animations: "disabled" });
+  await page.screenshot({ path: testInfo.outputPath("lead-payer-company-sheet-action-ru-desktop.png"), animations: "disabled" });
 });
 
 test("a stored company with the lead's consent, in German", async ({ page }, testInfo) => {
@@ -324,9 +324,8 @@ test("a stored company with the lead's consent, in German", async ({ page }, tes
   await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("Einverständnis zur Weitergabe der Kontaktdaten an den Zahler:");
   await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("erteilt");
   await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("05.10.2026 11:30");
-  await expect(wizard.getByTestId("gwg-identification-payer-organisation")).toHaveText(
-    "Für Organisationen wird der Bogen für natürliche Personen nicht erstellt",
-  );
+  await expect(wizard.getByTestId("gwg-identification-payer-organisation")).toHaveCount(0);
+  await expect(sheetActions.getByRole("button", { name: "Für zahlende Organisation erstellen", exact: true })).toBeVisible();
   await expect(sheetActions.getByRole("button", { name: "Für Kostenübernehmer erstellen", exact: true })).toHaveCount(0);
   await section.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-payer-company-de-desktop.png"), animations: "disabled" });

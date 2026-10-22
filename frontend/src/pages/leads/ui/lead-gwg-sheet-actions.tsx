@@ -24,6 +24,11 @@ function sheetButtonLabel(button: GwgSheetButton, exists: boolean, tx: Tx): stri
       ? tx("Обновить для пациента", "Für Patient/in aktualisieren")
       : tx("Сформировать для пациента", "Für Patient/in erstellen");
   }
+  if (button.subject === "payer" && button.organisation) {
+    return exists
+      ? tx("Обновить для организации-плательщика", "Für zahlende Organisation aktualisieren")
+      : tx("Сформировать для организации-плательщика", "Für zahlende Organisation erstellen");
+  }
   if (button.subject === "payer") {
     return exists
       ? tx("Обновить для плательщика", "Für Kostenübernehmer aktualisieren")
@@ -39,7 +44,8 @@ function sheetButtonLabel(button: GwgSheetButton, exists: boolean, tx: Tx): stri
  * The buttons that make a GwG identification sheet, in the head of the
  * wizard's sheet section. Adult: the patient's sheet, one for each
  * representative or legal guardian the adult named in the cabinet and, for a
- * third-party payer who is a natural person, the payer's. Minor: one sheet per legal
+ * third-party payer, the payer's (for a paying organisation the sheet for
+ * legal entities, owner decision 2026-10-22). Minor: one sheet per legal
  * representative and none for the child; a payer who is one of the
  * representatives gets no second sheet. What cannot be made says why.
  */
@@ -79,6 +85,10 @@ export function LeadGwgSheetActions({
           className="h-8 max-w-full rounded-lg"
           disabled={disabled}
           data-testid={`gwg-identification-generate-${button.subject}`}
+          data-form={button.organisation ? "legal_entity" : undefined}
+          title={button.organisation
+            ? tx("Лист для юридических лиц (Dokumentationsbogen juristische Personen)", "Dokumentationsbogen juristische Personen")
+            : undefined}
           onClick={() => onGenerate(button)}
         >
           {busy === gwgSheetBusyKey(button.subject)
@@ -89,14 +99,6 @@ export function LeadGwgSheetActions({
           </span>
         </Button>
       ))}
-      {plan.payerIsOrganisation ? (
-        <span className="self-center text-xs text-muted-foreground" data-testid="gwg-identification-payer-organisation">
-          {tx(
-            "Для организации лист для физических лиц не формируется",
-            "Für Organisationen wird der Bogen für natürliche Personen nicht erstellt",
-          )}
-        </span>
-      ) : null}
       {plan.payerSamePersonName !== null ? (
         <span className="self-center text-xs text-muted-foreground" data-testid="gwg-identification-payer-same-person">
           {tx(

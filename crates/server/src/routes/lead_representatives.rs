@@ -965,6 +965,10 @@ pub(crate) enum SignatureDetails {
     /// The own document of somebody else (the GwG sheet of the payer, whose
     /// data come from the payer's own link): no representative's data.
     Nobody,
+    /// The GwG sheet for legal entities of a paying company, organisation or
+    /// insurer (owner decision 2026-10-22): the organisation's data, the
+    /// person who acts for it, its beneficial owners and its answers.
+    PayerOrganisation,
 }
 
 impl SignatureDetails {
@@ -978,12 +982,21 @@ impl SignatureDetails {
         if !gwg_sheet {
             return Self::Contract;
         }
-        let subject = bindings
-            .and_then(|bindings| bindings.get("gwg_identification"))
+        let binding = bindings.and_then(|bindings| bindings.get("gwg_identification"));
+        let subject = binding
             .and_then(|binding| binding.get("subject"))
             .and_then(Value::as_str);
         if subject.map(str::trim) == Some("contract_partner") {
             return Self::Patient;
+        }
+        // The server records the form of the payer's sheet when it makes one.
+        let form = binding
+            .and_then(|binding| binding.get(crate::routes::documents::GWG_SHEET_FORM_KEY))
+            .and_then(Value::as_str);
+        if subject.map(str::trim) == Some("payer")
+            && form == Some(crate::routes::documents::GWG_LEGAL_ENTITY_FORM)
+        {
+            return Self::PayerOrganisation;
         }
         subject
             .and_then(subject_representative)
@@ -1006,6 +1019,17 @@ pub(crate) async fn signature_details_missing(
             contract_subject_details_missing(conn, lead_id, patient_id, order_id).await
         }
         SignatureDetails::Nobody => Ok(Vec::new()),
+        SignatureDetails::PayerOrganisation => {
+            for lead_id in subject_leads(conn, lead_id, patient_id, order_id).await? {
+                let missing =
+                    crate::routes::documents::gwg_legal_entity_signature_missing(conn, lead_id)
+                        .await?;
+                if !missing.is_empty() {
+                    return Ok(missing);
+                }
+            }
+            Ok(Vec::new())
+        }
         SignatureDetails::Patient => {
             for lead_id in subject_leads(conn, lead_id, patient_id, order_id).await? {
                 let missing =
@@ -1172,6 +1196,14 @@ pub(crate) fn signature_details_incomplete(
     details: SignatureDetails,
     missing: &[String],
 ) -> axum::response::Response {
+    if details == SignatureDetails::PayerOrganisation {
+        return intake::coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "payer_details_incomplete",
+            "Complete the paying organisation's details before confirming the signature",
+            json!({"missing":missing, "scope":"payer"}),
+        );
+    }
     if !matches!(
         details,
         SignatureDetails::Representative(_) | SignatureDetails::Patient
@@ -4353,6 +4385,27 @@ mod tests {
         assert_eq!(
             SignatureDetails::of_document(None, "gwg_identification", None),
             SignatureDetails::Nobody
+        );
+        // The sheet for legal entities of a paying organisation checks the
+        // organisation's data (owner decision 2026-10-22); the form belongs
+        // to the payer's sheet only.
+        assert_eq!(
+            SignatureDetails::of_document(
+                Some("gwg_identification"),
+                "gwg_identification",
+                Some(&json!({"gwg_identification": {"subject": "payer", "form": "legal_entity"}}))
+            ),
+            SignatureDetails::PayerOrganisation
+        );
+        assert_eq!(
+            SignatureDetails::of_document(
+                Some("gwg_identification"),
+                "gwg_identification",
+                Some(
+                    &json!({"gwg_identification": {"subject": "contract_partner", "form": "legal_entity"}})
+                )
+            ),
+            SignatureDetails::Patient
         );
         // A contract keeps the check of the contracting representatives.
         for template in ["framework_contract", "single_order", "cost_estimate"] {

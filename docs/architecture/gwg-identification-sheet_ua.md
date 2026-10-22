@@ -37,10 +37,11 @@ PDF, а формує власний документ у фірмовому оф�
   лід відмовився, зіпсоване значення) — 422
   `representative_sheet_not_available`. Обидва коди — у полях `error` і
   `code`.
-- Лист платника — лише для фізичної особи. Якщо платить компанія, організація
-  чи страховик (`payer_type` ≠ `person`, фаза 1b-1), формування відповідає 422
-  `payer_is_not_a_natural_person` (код у полях `error` і `code`): для
-  юридичних осіб федеральний бланк інший, і в цю фазу він не входить.
+- Якщо платить компанія, організація чи страховик (`payer_type` ≠ `person`),
+  той самий запит (`subject = payer`) формує окремий лист для юридичних осіб
+  (рішення власника 2026-10-22, розділ
+  [нижче](#dokumentationsbogen-juristische-personen-рішення-власника-2026-10-22)).
+  Код 422 `payer_is_not_a_natural_person` більше не повертається.
 - Підписує лише співробітник GMED (`SignerPolicy::AgencyOnly`), як і додаток
   § 15; у вікні клієнтського підпису картки ні цей лист, ні форма § 15 не
   пропонуються (QA 2026-10-10 B-9). Рядок підпису: «Datum: ДД.ММ.РРРР
@@ -125,6 +126,65 @@ PDF, а формує власний документ у фірмовому оф�
   ще й e-mail пацієнта) — підпис представника чи Betreuer пацієнта не
   ідентифікує. Без відомої власної адреси не рахується підпис з адреси
   представника; підпис без адреси — лише поки за пацієнта ніхто не діє.
+
+## Dokumentationsbogen juristische Personen (рішення власника 2026-10-22)
+
+Код: `crates/server/src/routes/gwg_legal_entity_sheet.rs` (дочірній модуль
+`documents.rs`). Платник-організація (`lead_payer_declarations.payer_type` =
+`company` | `organisation` | `insurance`) отримує «Dokumentationsbogen –
+Identifizierung juristischer Personen» з підзаголовком «Freiwillige Anwendung
+– GMED ist kein Verpflichteter nach § 2 GwG».
+
+- **Той самий конвеєр.** Шаблон `gwg_identification`, `subject = payer`,
+  номер `GWG-`, версії (нове формування замінює чинний лист платника), перегляд
+  і «Подтвердить подпись». Сервер сам обирає форму за типом платника і
+  записує її в `generated_bindings.gwg_identification.form = "legal_entity"`
+  (з клієнта це поле не береться). Назва: «Dokumentationsbogen juristische
+  Personen · <назва організації> · ДД.ММ.РРРР».
+- **Зміст** (структура федерального бланка для юридичних осіб): шапка — Firma
+  / Name, роль «Kostenübernehmer (Unternehmen / Organisation / Versicherung)»,
+  Aufzeichnende Stelle, Bearbeiter/in, Auftrags-Nr., Datum, Behandelte Person
+  (ім'я й дата народження пацієнта). 1 — Firma, Rechtsform, Registergericht і
+  Registernummer (soweit vorhanden), USt-IdNr. (якщо є), адреса Sitz,
+  Mitglieder des Vertretungsorgans / gesetzliche Vertreter (soweit bekannt),
+  джерело даних, спосіб оплати. 2 — особа, що діє за організацію: ім'я з
+  функцією, дата народження й адреса (якщо відомі), документ особи й позначка
+  копії. 3 — wirtschaftlich Berechtigte з посилання (ім'я, дата й місце
+  народження, проживання, частка) або позначка «немає особи понад 25 %»
+  (fiktiver wB, § 3 Abs. 2 Satz 5 GwG), вжиті заходи. 4 — мета відносин і
+  «Zweck der Zahlung» (`lead_payer_statements.payment_reason`; без нього —
+  слова пацієнта `lead_gwg_declarations.payment_background` з позначкою). 5 —
+  відповіді платника про PEP, санкції, країну високого ризику; джерело коштів
+  — лише коли посилена перевірка обов'язкова; питання a)–d). 6 — Grund der
+  Aufzeichnung. Підпис «Datum / Bearbeiter/in / Unterschrift» — як на листі
+  фізичної особи.
+- **Джерела.** Декларація (`organisation_name`, `organisation_legal_form`,
+  `organisation_register_number`, адреса Sitz, спосіб оплати) і надіслані
+  відповіді платника за посиланням (`lead_payer_statements`, `submitted_at`):
+  назва, правова форма, реєстр, USt-IdNr., Sitz, представник
+  (`representative_*`), документ особи (`id_*`), скан `payer_identity`,
+  `beneficial_owners` / `beneficial_owners_none`, `payment_reason`, `pep_*`,
+  `sanctions_links*`, `high_risk_country*`, `funds_*`. Відповіді платника
+  мають перевагу, декларація заповнює прогалини.
+- **Що блокує підтвердження.** Лист формується з прогалинами («—»), але
+  «Подтвердить подпись» (і `mark-signed`, і електронний підпис агенції)
+  відповідає 422 `payer_details_incomplete`, `scope = payer`, `missing` — ключі
+  `payer_<поле>`: `statement_not_submitted`, `organisation_name`,
+  `legal_form`, `seat_address`, `representative_name`, проблеми документа особи
+  (`id_document_type` … `id_valid_until`, `id_document_expired`,
+  `id_document_number_invalid`, `id_issuing_country_invalid`,
+  `id_dates_invalid`), `id_upload`, `beneficial_owners`, `payment_reason`,
+  `pep`, `sanctions_links`, `funds` (лише за обов'язкової посиленої
+  перевірки), `not_an_organisation` (платник уже не організація — лист
+  застарів). Registernummer не обов'язковий (у бланку «falls vorhanden»).
+  Перевірка — `lead_representatives::SignatureDetails::PayerOrganisation`.
+- **Майстер.** Замість примітки «для организации лист для физлиц не
+  формируется» — кнопка «Сформировать / Обновить для организации-плательщика»
+  («Für zahlende Organisation erstellen / aktualisieren»); заголовок секції
+  тоді «Листы идентификации по GwG» / «Dokumentationsbögen (GwG)». Відмова в
+  підтвердженні показує список полів під рядком документа (і в перегляді) з
+  кнопкою «Перейти к плательщику» / «Zum Kostenübernehmer» до розділу «Кто
+  платит».
 
 ## Ідентифікація за кваліфікованим електронним підписом (§ 12 Abs. 1 GwG)
 

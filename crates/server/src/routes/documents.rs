@@ -1,6 +1,15 @@
 #![allow(clippy::result_large_err, clippy::too_many_arguments)]
+#[path = "gwg_legal_entity_sheet.rs"]
+mod gwg_legal_entity;
 #[path = "order_intake_documents.rs"]
 mod intake_documents;
+
+/// What the signature of a paying organisation's GwG sheet still lacks
+/// (`lead_representatives::SignatureDetails::PayerOrganisation`).
+pub(crate) use gwg_legal_entity::{
+    FORM_BINDING_KEY as GWG_SHEET_FORM_KEY, LEGAL_ENTITY_FORM as GWG_LEGAL_ENTITY_FORM,
+    signature_missing as gwg_legal_entity_signature_missing,
+};
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
@@ -3148,7 +3157,9 @@ enum GwgSheetSubject {
     /// The patient himself. Not for a minor: the parents are the persons to
     /// identify there.
     ContractPartner,
-    /// The third-party payer of the lead (a natural person).
+    /// The third-party payer of the lead: a natural person, or — on the
+    /// sheet for legal entities (`gwg_legal_entity`) — a company, an
+    /// organisation or an insurer.
     Payer,
     /// A person who acts for the lead: a legal representative of a minor, or
     /// the representative or legal guardian an adult named in the cabinet
@@ -3697,8 +3708,8 @@ async fn load_gwg_identification_sheet(
             ));
         };
         // The sheet is the form for natural persons. A company, an
-        // organisation or an insurer needs the form for legal entities, which
-        // is not generated here.
+        // organisation or an insurer gets the form for legal entities
+        // (`gwg_legal_entity`, chosen before this loader runs).
         if payer.is_organisation() {
             return Err(gwg_sheet_refusal(
                 "payer_is_not_a_natural_person",
@@ -16692,6 +16703,31 @@ async fn generate_document(
     };
     // The person a GwG identification sheet is for, which names the document.
     let mut gwg_sheet_person: Option<String> = None;
+    // The paying organisation a legal-entity GwG sheet is for.
+    let mut gwg_legal_entity_name: Option<String> = None;
+    // A company, an organisation or an insurer that pays gets the sheet for
+    // legal entities (owner decision 2026-10-22) instead of the sheet for
+    // natural persons; `None` for every other document and payer.
+    let gwg_legal_entity_sheet = match lead_id {
+        Some(lead_uuid)
+            if template_match_id == "gwg_identification"
+                && matches!(
+                    GwgSheetSubject::parse(
+                        bindings
+                            .gwg_identification
+                            .as_ref()
+                            .and_then(|binding| binding.subject.as_deref()),
+                    ),
+                    Ok(GwgSheetSubject::Payer)
+                ) =>
+        {
+            match gwg_legal_entity::load_for_generation(&state, lead_uuid, auth.user_id).await {
+                Ok(sheet) => sheet,
+                Err(resp) => return resp,
+            }
+        }
+        _ => None,
+    };
     let (preview_html, pdf_bytes) = match template_match_id {
         "__manual_generated_text" => {
             let manual_text = manual_text
@@ -18157,6 +18193,47 @@ async fn generate_document(
             };
             (preview, pdf_bytes)
         }
+        "gwg_identification" if gwg_legal_entity_sheet.is_some() => {
+            let sheet = gwg_legal_entity_sheet
+                .as_ref()
+                .expect("the guard checked the legal entity sheet");
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let organisation = sheet.display_name();
+            let preview = admin_preview_html(
+                gwg_legal_entity::PREVIEW_TITLE,
+                &[organisation.clone(), generated_doc_id.clone()],
+            );
+            gwg_legal_entity_name = Some(organisation);
+            // The confirmation checks the data of this form
+            // (`lead_representatives::SignatureDetails::PayerOrganisation`).
+            generated_bindings_snapshot.get_or_insert_with(|| json!({}))["gwg_identification"]
+                [gwg_legal_entity::FORM_BINDING_KEY] = json!(gwg_legal_entity::LEGAL_ENTITY_FORM);
+            let pdf_bytes = match gwg_legal_entity::build_pdf(
+                sheet,
+                &agency,
+                generated_order_reference(
+                    bindings.order_number.as_deref(),
+                    order_number.as_deref(),
+                ),
+                &generated_doc_id,
+            ) {
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
+                Err(message) => {
+                    tracing::error!(
+                        template_id = template.id,
+                        ?lead_id,
+                        "build GwG legal entity sheet PDF"
+                    );
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
         "gwg_identification" => {
             let Some(lead_uuid) = lead_id else {
                 return err(
@@ -18490,9 +18567,15 @@ async fn generate_document(
     // The GwG sheet is named after the person on it — the patient, the payer
     // or a person who acts for the lead —, like every lead document "title ·
     // name · date" (QA 2026-10-11).
-    let auto_name = match gwg_sheet_person.filter(|person| !person.is_empty()) {
-        Some(person) => default_generated_document_name(template, &person, generated_at, language),
-        None => auto_name,
+    let auto_name = match (
+        gwg_legal_entity_name.filter(|name| !name.is_empty()),
+        gwg_sheet_person.filter(|person| !person.is_empty()),
+    ) {
+        (Some(organisation), _) => gwg_legal_entity::document_name(&organisation, generated_at),
+        (None, Some(person)) => {
+            default_generated_document_name(template, &person, generated_at, language)
+        }
+        (None, None) => auto_name,
     };
     let original_filename = generated_document_file_name(&auto_name, template.file_extension);
     let ursprung = body

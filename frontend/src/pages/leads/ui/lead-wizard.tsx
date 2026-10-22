@@ -70,6 +70,7 @@ import { CitizenshipMultiSelect, normalizeCitizenships } from "@/components/ui/c
 import { nationalityCountryCode } from "@/pages/patients/model/nationalities";
 import {
   patientDeclarationLeadId,
+  PAYER_SECTION_ID,
   payerAmlCountries,
   payerGateErrorText,
   payerReadinessReasonFields,
@@ -107,6 +108,7 @@ import {
   gwgSheetErrorText,
   gwgSheetPlan,
   gwgSheetRequest,
+  isGwgPayerSheetIncomplete,
   isOtherPersonUploadArt,
   type GwgSheetButton,
 } from "../model/gwg-identification";
@@ -810,6 +812,8 @@ const RISK_ASSESSMENT_SECTION_ID = "lead-wizard-risk-assessment";
 const ENHANCED_CHECK_SECTION_ID = "lead-wizard-enhanced-check";
 /** The preview's refusal leads to the risk assessment instead of a person's identity data. */
 const PREVIEW_JUMP_RISK = "risk-assessment";
+/** The preview's refusal of an organisation's GwG sheet leads to "who pays". */
+const PREVIEW_JUMP_PAYER = "payer-declaration";
 const SERVICE_SPECIALTIES_ID = "lead-wizard-specialties";
 const MEDICAL_ANAMNESE_ID = "lead-wizard-anamnese";
 const ORDER_DATE_FROM_ID = "lead-wizard-program-date-from";
@@ -6079,9 +6083,13 @@ export function LeadWizard({
       const representativeId = slot
         ? step1Portal.intake?.representation?.representatives.find((person) => person.slot === slot)?.id ?? null
         : null;
+      // The sheet for legal entities names the paying organisation's data (owner 2026-10-22).
+      const payerSheet = isGwgPayerSheetIncomplete(nextError);
       if (fromPreview) {
         setDocumentPreviewError(gate ?? errorText(nextError, tx));
-        setDocumentPreviewJump(riskGateRefusal(nextError) ? PREVIEW_JUMP_RISK : slot === "patient" ? "patient" : representativeId);
+        setDocumentPreviewJump(riskGateRefusal(nextError)
+          ? PREVIEW_JUMP_RISK
+          : payerSheet ? PREVIEW_JUMP_PAYER : slot === "patient" ? "patient" : representativeId);
       } else if (gate || leadErrorBlockingReasons(nextError).length === 0) {
         // Next to the pressed button, not at the bottom of the step (DEV 2026-10-19),
         // with the way to what blocks it (QA 2026-10-22: the text named the
@@ -6098,6 +6106,14 @@ export function LeadWizard({
                   openValidationIssue({ key: "risk-assessment", step: "documents", message: "", fieldId: RISK_ASSESSMENT_SECTION_ID });
                 },
               }
+            : payerSheet
+              ? {
+                  label: tx("Перейти к плательщику", "Zum Kostenübernehmer"),
+                  onClick: () => {
+                    setDocumentRowError(null);
+                    openValidationIssue({ key: "payer-declaration", step: "documents", message: "", fieldId: PAYER_SECTION_ID });
+                  },
+                }
             : representativeId || slot === "patient"
               ? {
                   label: tx("Перейти к данным документа", "Zu den Ausweisdaten"),
@@ -7123,9 +7139,20 @@ ${serviceCommentLines.join("\n")}`
             - Math.max(0, (panel.clientHeight - fieldRect.height) / 2),
         });
         field.focus({ preventScroll: true });
+        window.requestAnimationFrame(() => keepFocus(field, 0));
       } else if (++attempts < 30) {
         window.requestAnimationFrame(focusField);
       }
+    };
+    // A jump pressed on a control that then goes away (the refusal under a
+    // document row) makes the dialog take the focus back a frame later: keep
+    // it on the target for a few frames, unless the user moved on.
+    const keepFocus = (field: HTMLElement, frames: number) => {
+      const active = document.activeElement;
+      if (active !== field && (active === document.body || active?.getAttribute("role") === "dialog")) {
+        field.focus({ preventScroll: true });
+      }
+      if (frames < 10) window.requestAnimationFrame(() => keepFocus(field, frames + 1));
     };
     window.requestAnimationFrame(focusField);
   }
@@ -8716,7 +8743,10 @@ ${serviceCommentLines.join("\n")}`
               {leadId ? (
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
-                  title={tx("Лист идентификации по GwG", "Dokumentationsbogen natürliche Personen (GwG)")}
+                  title={gwgSheets.payerIsOrganisation
+                    // A paying organisation adds the sheet for legal entities (owner 2026-10-22).
+                    ? tx("Листы идентификации по GwG", "Dokumentationsbögen (GwG)")
+                    : tx("Лист идентификации по GwG", "Dokumentationsbogen natürliche Personen (GwG)")}
                   accessory={(
                     <LeadGwgSheetActions
                       plan={gwgSheets}
@@ -11344,6 +11374,8 @@ ${serviceCommentLines.join("\n")}`
                     replaceDocumentPreview(null);
                     if (target === PREVIEW_JUMP_RISK) {
                       openValidationIssue({ key: "risk-assessment", step: "documents", message: "", fieldId: RISK_ASSESSMENT_SECTION_ID });
+                    } else if (target === PREVIEW_JUMP_PAYER) {
+                      openValidationIssue({ key: "payer-declaration", step: "documents", message: "", fieldId: PAYER_SECTION_ID });
                     } else if (target) {
                       openRepresentativeIdData(target);
                     }
@@ -11351,7 +11383,9 @@ ${serviceCommentLines.join("\n")}`
                 >
                   {documentPreviewJump === PREVIEW_JUMP_RISK
                     ? tx("Перейти к оценке риска", "Zur Risikobewertung")
-                    : tx("Перейти к данным документа", "Zu den Ausweisdaten")}
+                    : documentPreviewJump === PREVIEW_JUMP_PAYER
+                      ? tx("Перейти к плательщику", "Zum Kostenübernehmer")
+                      : tx("Перейти к данным документа", "Zu den Ausweisdaten")}
                 </Button>
               ) : null}
             </div>
