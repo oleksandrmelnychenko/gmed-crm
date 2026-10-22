@@ -176,6 +176,27 @@ describe("identity document data entered by staff", () => {
     expect(html).toContain("lead-representatives-id-data");
     expect(html).toContain("Mia Muster");
     expect(html).toContain("lead-representative-id-data-rep-1");
+    // The lead's cabinet upload is the patient's scan (QA 2026-10-22).
+    const uploaded = normalizeLeadPortalIntake({
+      lead_id: "lead-1",
+      identification: { id_valid_until: "2031-04-30" },
+      identity_documents: [{ id: "doc-pass-1", file_name: "pass-front.pdf", uploaded_at: "2026-10-07T06:40:00Z", reviewed: false }],
+    });
+    const withUpload = withPickers(
+      <LeadIdentityDocumentData leadId="lead-1" intake={uploaded} patientScanIds={[]} tx={ru} lang="ru" onSaved={() => undefined} />,
+    );
+    expect(withUpload).toContain("lead-id-cabinet-scans");
+    expect(withUpload).toContain("pass-front.pdf");
+    expect(withUpload).not.toContain("Скан не загружен");
+    expect(withUpload).toContain("Заполните по скану: вид документа, номер, кем выдан, страна выдачи");
+    const listedByWizard = withPickers(
+      <LeadIdentityDocumentData leadId="lead-1" intake={uploaded} patientScanIds={["doc-pass-1"]} tx={ru} lang="ru" onSaved={() => undefined} />,
+    );
+    expect(listedByWizard).not.toContain("lead-id-cabinet-scans");
+    const none = withPickers(
+      <LeadIdentityDocumentData leadId="lead-1" intake={{ ...uploaded!, identity_documents: [] }} patientScanIds={[]} tx={ru} lang="ru" onSaved={() => undefined} />,
+    );
+    expect(none).toContain("Скан не загружен: сначала загрузите документ");
     const hidden = normalizeLeadPortalIntake({ lead_id: "lead-1", identification_hidden: true });
     expect(
       renderToStaticMarkup(<LeadIdentityDocumentData leadId="lead-1" intake={hidden} tx={de} lang="de" onSaved={() => undefined} />),

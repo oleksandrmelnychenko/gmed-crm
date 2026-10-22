@@ -1033,8 +1033,7 @@ test("a parent's typed document data are saved whole and stay in the form", asyn
   // A number that breaks the rules is named at the field and never sent.
   const saves = calls.idSaves.length;
   await form.locator('input[name="id_document_number"]').fill("ab/1");
-  await outside.click();
-  await expect(form.getByText("Только латинские буквы A–Z, цифры, пробел, «-» и «<»")).toBeVisible();
+  await outside.click();  await expect(form.getByText("Только латинские буквы A–Z, цифры, пробел, «-» и «<»")).toBeVisible();
   await expect(form.getByTestId(`lead-representative-id-data-${BEN_ID}-unsaved`)).toBeVisible();
   await page.waitForTimeout(500);
   expect(calls.idSaves).toHaveLength(saves);

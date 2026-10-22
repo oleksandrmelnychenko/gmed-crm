@@ -7,7 +7,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
-import { appDateKey } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import {
@@ -530,7 +530,7 @@ export function LeadIdentityDocumentData({
   lang,
   disabled = false,
   patientScans,
-  patientScanCount = null,
+  patientScanIds = null,
   patientBirthDate = null,
   representativeFiles,
   today = appDateKey(),
@@ -549,8 +549,13 @@ export function LeadIdentityDocumentData({
    * the representative's).
    */
   patientScans?: ReactNode;
-  /** How many scans of the patient's document there are; `null` when unknown. */
-  patientScanCount?: number | null;
+  /**
+   * The ids of the scans `patientScans` lists; `null` when unknown. The
+   * lead's own cabinet uploads not among them are listed here too and count
+   * as the scan (QA 2026-10-22: «Файл не загружен» next to the lead's
+   * pass-front.pdf).
+   */
+  patientScanIds?: readonly string[] | null;
   patientBirthDate?: string | null;
   /** A representative's own uploads of a kind, under that person's card. */
   representativeFiles?: (person: LeadRepresentative, kind: RepresentativeUploadKind) => ReactNode;
@@ -563,12 +568,26 @@ export function LeadIdentityDocumentData({
   // The role may not read the GwG data: only the scans.
   if (intake?.identification_hidden) return patientScans ? <>{patientScans}</> : null;
   const representatives = intake?.representation?.representatives ?? [];
+  const listed = new Set(patientScanIds ?? []);
+  const cabinetScans = (intake?.identity_documents ?? []).filter((file) => !listed.has(file.id));
+  const patientScanCount = patientScanIds ? patientScanIds.length + cabinetScans.length : null;
   return (
     <div className="space-y-3" data-testid="lead-identity-document-data">
       {representatives.length > 0 ? (
         <h4 className="text-xs font-semibold text-foreground">{tx("Документ пациента", "Ausweis des Patienten")}</h4>
       ) : null}
       {patientScans ? <div data-testid="lead-id-patient-scans">{patientScans}</div> : null}
+      {cabinetScans.length > 0 ? (
+        <ul className="space-y-1 text-xs" data-testid="lead-id-cabinet-scans">
+          {cabinetScans.map((file) => (
+            <li key={file.id} className="flex flex-wrap items-baseline gap-x-2">
+              <span className="font-medium text-foreground [overflow-wrap:anywhere]">{file.file_name || "—"}</span>
+              {file.uploaded_at ? <span className="text-muted-foreground">{formatAppDate(file.uploaded_at)}</span> : null}
+              <span className="text-muted-foreground">{tx("Из кабинета", "Aus dem Kabinett")}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <LeadIdentityDocumentDataForm
         source={intake?.identification ?? null}
         fallbackValidUntil={fallbackValidUntil}

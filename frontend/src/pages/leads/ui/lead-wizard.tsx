@@ -9002,11 +9002,15 @@ ${serviceCommentLines.join("\n")}`
                 </StatusChip>
                 {/* Trigger flow 2026-10-07: staff enter the document data from the scan; the lead only uploads it. */}
                 {(() => {
+                  // The lead's cabinet uploads are the scan too: listed by the
+                  // document data block, never "no file" next to them.
+                  const cabinetScanIds = new Set((step1Portal.intake?.identity_documents ?? []).map((file) => file.id));
+                  const hasCabinetScan = [...cabinetScanIds].some((id) => !wizardDocuments.identity.some((document) => document.id === id));
                   const patientScans = (
                     <WizardDocumentRows
                       documents={wizardDocuments.identity}
                       complianceKind="identity"
-                      emptyLabel={tx("Файл не загружен", "Keine Datei hochgeladen")}
+                      emptyLabel={hasCabinetScan ? "" : tx("Файл не загружен", "Keine Datei hochgeladen")}
                       lang={lang}
                       busy={busy}
                       disabled={isBusy}
@@ -9028,7 +9032,7 @@ ${serviceCommentLines.join("\n")}`
                       lang={lang}
                       disabled={isBusy}
                       patientScans={patientScans}
-                      patientScanCount={wizardDocuments.identity.length}
+                      patientScanIds={wizardDocuments.identity.map((document) => document.id)}
                       patientBirthDate={draft.birthDate || null}
                       representativeFiles={representativeFileRows}
                       onSaved={() => {
