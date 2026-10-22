@@ -3026,7 +3026,7 @@ test.describe("lead onboarding wizard", () => {
     await expect(receivedAtCell).toContainText(/02\.04\.2026/);
     await expect(receivedAtCell).toContainText(/\d{2}:\d{2}/);
     await expect(page.getByRole("columnheader", { name: "Aktionen" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "In Konsole übernehmen" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Vollständige Bearbeitung öffnen" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Konvertieren|Convert/i })).toHaveCount(0);
   });
 

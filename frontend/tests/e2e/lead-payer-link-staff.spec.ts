@@ -608,7 +608,7 @@ test("the enhanced check follows the server's rule: a black-list citizenship req
   const hints = section.getByTestId("lead-wizard-enhanced-check-hint");
   await expect(hints).toHaveText([
     "möglicher Sanktionstreffer wartet auf die Entscheidung",
-    "PEP: nach § 15 GwG ist in der Regel eine verstärkte Prüfung erforderlich – Entscheidung des Mitarbeiters",
+    "PEP: nach GMED-Regel (Orientierung § 15 GwG) ist in der Regel eine verstärkte Prüfung erforderlich – Entscheidung des Mitarbeiters",
   ]);
   // The documents step names the missing document as long as the rule requires it.
   await section.scrollIntoViewIfNeeded();
@@ -637,7 +637,7 @@ test("a PEP alone leaves the enhanced check voluntary", async ({ page }) => {
   await expect(section).toHaveAttribute("data-required", "false");
   await expect(section.getByTestId("lead-wizard-enhanced-check-status")).toContainText("Добровольная проверка");
   await expect(section.getByTestId("lead-wizard-enhanced-check-hint")).toHaveText(
-    "PEP: по § 15 GwG обычно требуется усиленная проверка — решение за сотрудником",
+    "PEP: по правилу GMED (ориентир § 15 GwG) обычно требуется усиленная проверка — решение за сотрудником",
   );
   // Staff may still carry it out: the sheet opens as a voluntary check.
   await section.getByRole("button", { name: "Заполнить проверку" }).click();

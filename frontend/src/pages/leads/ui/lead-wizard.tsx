@@ -7950,9 +7950,9 @@ ${serviceCommentLines.join("\n")}`
                           <ShieldCheck aria-hidden="true" />
                           {/* The same name as the documents step and the form (owner 2026-10-19). */}
                           {amlRequired
-                            ? tx("Усиленная AML-проверка (§ 15 GwG): обязательна", "Verstärkte Sorgfaltspflichten (§ 15 GwG): erforderlich")
+                            ? tx("Усиленная AML-проверка (ориентир § 15 GwG): требуется по правилу GMED", "Verstärkte AML-Prüfung (Orientierung § 15 GwG): nach GMED-Regel erforderlich")
                             : amlCheckSettled(enhancedCheck)
-                              ? tx("Усиленная AML-проверка (§ 15 GwG): добровольная", "Verstärkte Sorgfaltspflichten (§ 15 GwG): freiwillig")
+                              ? tx("Усиленная AML-проверка (ориентир § 15 GwG): добровольная", "Verstärkte AML-Prüfung (Orientierung § 15 GwG): freiwillig")
                               : tx("Усиленная AML-проверка (§ 15 GwG)", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
                         </StatusChip>
                         {amlRequired && amlRequiredText ? (

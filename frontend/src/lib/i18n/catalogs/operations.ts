@@ -1109,8 +1109,8 @@ export const operationsRu: OperationsTranslations = {
     "Это короткая входящая заявка. Проверьте данные и переведите её в консольного лида для полного процесса.",
   lead_contact_form_snapshot: "Короткая форма",
   lead_questionnaire_snapshot: "Опросник",
-  lead_promote_to_console: "Перевести в консоль",
-  lead_promoting_to_console: "Переводим...",
+  lead_promote_to_console: "Открыть полное оформление",
+  lead_promoting_to_console: "Открываем...",
   lead_promote_to_console_description:
     "После перехода откроется полный шаблон консольного лида с квалификацией, процессом и конверсией.",
   lead_promote_to_console_success: "Лид переведён в консольный формат.",
@@ -1769,8 +1769,8 @@ export const operationsDe: OperationsTranslations = {
     "Dies ist eine kurze eingehende Anfrage. Daten prüfen und danach in den Konsolen-Lead für den vollständigen Prozess überführen.",
   lead_contact_form_snapshot: "Kurzformular",
   lead_questionnaire_snapshot: "Fragebogen",
-  lead_promote_to_console: "In Konsole übernehmen",
-  lead_promoting_to_console: "Wird übernommen...",
+  lead_promote_to_console: "Vollständige Bearbeitung öffnen",
+  lead_promoting_to_console: "Wird geöffnet...",
   lead_promote_to_console_description:
     "Danach öffnet sich der vollständige Konsolen-Lead mit Qualifikation, Workflow und Konvertierung.",
   lead_promote_to_console_success: "Lead wurde in den Konsolenmodus übernommen.",

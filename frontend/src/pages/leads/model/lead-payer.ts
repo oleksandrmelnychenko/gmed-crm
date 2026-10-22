@@ -881,9 +881,9 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
       "Zahlenden Elternteil / gesetzlichen Vertreter auswählen",
     ),
     payer_not_informed: tx("Подтвердите, что плательщик проинформирован об обработке его данных", "Bestätigen, dass der Kostenübernehmer über die Verarbeitung seiner Daten informiert wurde"),
-    cost_assumption_missing: tx("Создайте согласие плательщика (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung erstellen"),
-    cost_assumption_outdated: tx("Плательщик изменён — создайте новое согласие плательщика", "Kostenübernehmer geändert – neue Kostenübernahmeerklärung erstellen"),
-    cost_assumption_unsigned: tx("Получите подпись плательщика на согласии", "Unterschrift des Kostenübernehmers einholen"),
+    cost_assumption_missing: tx("Создайте заявление о принятии расходов (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung erstellen"),
+    cost_assumption_outdated: tx("Плательщик изменён — создайте новое заявление о принятии расходов", "Kostenübernehmer geändert – neue Kostenübernahmeerklärung erstellen"),
+    cost_assumption_unsigned: tx("Получите подпись плательщика на заявлении о принятии расходов", "Unterschrift des Kostenübernehmers einholen"),
     client_order_signature_missing: tx("Сначала клиент подписывает заказ", "Zuerst unterschreibt der Kunde den Auftrag"),
   };
   return labels[code] ?? tx("Проверьте данные плательщика", "Angaben zum Zahler prüfen");

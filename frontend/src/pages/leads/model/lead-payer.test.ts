@@ -562,7 +562,7 @@ describe("payer AML and signing order", () => {
     });
     expect(payerGateErrorText(error, tx)).toBe(
       "GMED подписывает последним: "
-        + "Сначала клиент подписывает заказ; Получите подпись плательщика на согласии",
+        + "Сначала клиент подписывает заказ; Получите подпись плательщика на заявлении о принятии расходов",
     );
     expect(payerGateErrorText(new Error("other"), tx)).toBeNull();
   });
@@ -634,7 +634,7 @@ describe("payer AML and signing order", () => {
 
   it("translates every payer readiness reason of the server", () => {
     const labels = payerReadinessReasonLabels(tx);
-    expect(labels["Cost assumption declaration is not signed"]).toBe("Получите подпись плательщика на согласии");
+    expect(labels["Cost assumption declaration is not signed"]).toBe("Получите подпись плательщика на заявлении о принятии расходов");
     expect(Object.values(labels)).not.toContain("Проверьте данные плательщика");
   });
 });

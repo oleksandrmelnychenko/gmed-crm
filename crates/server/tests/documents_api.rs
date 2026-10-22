@@ -7458,20 +7458,20 @@ async fn gwg_identification_sheets_of_a_minors_parents_name_the_beneficial_owner
     };
 
     let text = sheet_text(format!("representative:{sofia}")).await;
-    assert!(text.contains("Zugleich Kostenträger/in"), "{text:?}");
+    assert!(text.contains("Zugleich Zahler/in"), "{text:?}");
     assert!(
         text.contains("[X] Der Vertragspartner handelt im eigenen wirtschaftlichen Interesse"),
         "{text:?}"
     );
     assert!(
-        text.contains("Angaben der gesetzlichen Vertretung als Kostenträger/in im Patientenportal"),
+        text.contains("Angaben der gesetzlichen Vertretung als Zahler/in im Patientenportal"),
         "{text:?}"
     );
     assert!(text.contains("Zahlung aus eigenen Mitteln"), "{text:?}");
     assert!(text.contains("Gehalt als Lehrerin"), "{text:?}");
 
     let text = sheet_text(format!("representative:{jonas}")).await;
-    assert!(!text.contains("Zugleich Kostenträger/in"), "{text:?}");
+    assert!(!text.contains("Zugleich Zahler/in"), "{text:?}");
     assert!(
         text.contains("[X] Der Vertragspartner handelt auf Veranlassung"),
         "{text:?}"

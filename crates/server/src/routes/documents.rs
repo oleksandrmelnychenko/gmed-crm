@@ -4247,11 +4247,11 @@ fn gwg_represented_beneficial_owner(
 const GWG_PAYER_STATEMENT_SOURCE: &str = "Angaben des Kostenübernehmers über den eigenen Zugang";
 /// Section 3 of the sheet of a minor's paying parent who was not asked the
 /// payer's questions (no enhanced check required).
-const GWG_PAYING_PARENT_MEASURES: &str = "Befragung des Vertragspartners: Vertragsschluss im eigenen Namen zugunsten des Kindes (§ 328 BGB), Zahlung als Kostenträger/in (Angaben im Patientenformular)";
+const GWG_PAYING_PARENT_MEASURES: &str = "Befragung des Vertragspartners: Vertragsschluss im eigenen Namen zugunsten des Kindes (§ 328 BGB), Zahlung als Zahler/in (Angaben im Patientenformular)";
 /// The same questions answered by a paying parent (or guardian) of a minor in
 /// the own section of the patient portal.
 const GWG_PARENT_PAYER_STATEMENT_SOURCE: &str =
-    "Angaben der gesetzlichen Vertretung als Kostenträger/in im Patientenportal";
+    "Angaben der gesetzlichen Vertretung als Zahler/in im Patientenportal";
 
 /// The payer's sent statement for section 3 of the payer's sheet — or of the
 /// sheet of the parent who pays —; `None` while it has not been sent.
@@ -22807,7 +22807,7 @@ fn build_enhanced_due_diligence_pdf(
         "Durchführung verstärkter Sorgfaltspflichten",
     );
     layout.text_block_centered(
-        "nach § 15 Geldwäschegesetz (GwG) für Verpflichtete aus dem Nichtfinanzsektor (§ 2 Abs. 1 Nrn. 6, 8, 11, 13, 14, 16 GwG) ohne die Pflichten bei Korrespondenzbeziehungen (§ 15 Abs. 7 GwG)",
+        "nach § 15 Geldwäschegesetz (GwG) ohne die Pflichten bei Korrespondenzbeziehungen (§ 15 Abs. 7 GwG). Freiwillige Anwendung – GMED ist kein Verpflichteter nach § 2 GwG",
         9.5,
         false,
         TreatmentPlanPdfColor::Muted,
@@ -23080,7 +23080,7 @@ fn build_gwg_identification_pdf(
         "Identifizierung natürlicher Personen nach dem Geldwäschegesetz (GwG)",
     );
     layout.text_block_centered(
-        "für Verpflichtete aus dem Nichtfinanzsektor (§ 2 Abs. 1 Nrn. 6, 8, 13, 14, 16 GwG)",
+        "Freiwillige Anwendung – GMED ist kein Verpflichteter nach § 2 GwG",
         9.5,
         false,
         TreatmentPlanPdfColor::Muted,
@@ -23114,7 +23114,7 @@ fn build_gwg_identification_pdf(
         };
         meta.push((label, treated_person.clone()));
         if sheet.also_payer {
-            meta.push(("Zugleich Kostenträger/in", "ja".to_string()));
+            meta.push(("Zugleich Zahler/in", "ja".to_string()));
         }
     }
     legal_meta_grid(&mut layout, &meta);
@@ -23380,9 +23380,9 @@ fn build_gwg_identification_pdf(
         &mut layout,
         "Getroffene Maßnahmen zur Ermittlung des wB",
         sheet.beneficial_owner_measures.as_deref().or_else(|| {
-            sheet.acts_on_own_account.map(
-                |_| "Befragung des Vertragspartners (Erklärung zum Kostenträger in der Anfrage)",
-            )
+            sheet
+                .acts_on_own_account
+                .map(|_| "Befragung des Vertragspartners (Erklärung zum Zahler in der Anfrage)")
         }),
     );
 
@@ -38523,7 +38523,7 @@ mod tests {
         assert!(text.contains("Gesetzliche/r Vertreter/in (Elternteil)"));
         assert!(text.contains("Behandelte Person"));
         assert!(text.contains("Mia Muster, geb. 05.04.2016"));
-        assert!(text.contains("Zugleich Kostenträger/in"));
+        assert!(text.contains("Zugleich Zahler/in"));
         assert!(text.contains("Personalausweis, Nr. L01X00T47, gültig bis 01.02.2031"));
         assert!(text.contains("[X] Die erforderliche Kopie/Fotografie"));
         assert!(text.contains("der Vertragspartner handelt selbst"));
@@ -38545,7 +38545,7 @@ mod tests {
         )
         .unwrap();
         let text = assert_legal_pdf_chrome(&bytes, "GWG-20261005-UNITTEST0005");
-        assert!(!text.contains("Zugleich Kostenträger/in"));
+        assert!(!text.contains("Zugleich Zahler/in"));
         assert!(!text.contains("eigener Bogen"));
         assert!(text.contains("[X] Der Nachweis der Vertretungsberechtigung für das Kind"));
 

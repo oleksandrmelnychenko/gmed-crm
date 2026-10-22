@@ -79,7 +79,7 @@ describe("LeadPayerSignatureFlow", () => {
       expect(html).toContain(lang === "ru" ? "Для создания пациента нужны юридически действительные подписи" : "Für die Patientenanlage sind rechtswirksame Unterschriften erforderlich");
       expect(html).not.toContain(lang === "ru" ? "Ожидается подпись клиента" : "Unterschrift des Kunden ausstehend");
       expect(html).not.toContain(lang === "ru" ? "Сначала клиент подписывает заказ" : "Zuerst unterschreibt der Kunde");
-      expect(html).not.toContain(lang === "ru" ? "Создайте согласие плательщика" : "Kostenübernahmeerklärung erstellen");
+      expect(html).not.toContain(lang === "ru" ? "Создайте заявление о принятии расходов" : "Kostenübernahmeerklärung erstellen");
       expect(value.client_signed_order).toBe(false);
       expect(value.agency_may_sign).toBe(false);
     });
@@ -104,7 +104,7 @@ describe("LeadPayerSignatureFlow", () => {
       const html = renderToStaticMarkup(<LeadPayerSignatureFlow leadId="synthetic-lead" status={value} documents={[]}
         disabled={false} canGenerate={false} tx={lang === "de" ? de : tx} renderDocuments={() => null} onChanged={() => {}} errorText={() => "error"} />);
       expect(html).toContain(lang === "ru" ? "Ожидается подпись клиента" : "Unterschrift des Kunden ausstehend");
-      expect(html).toContain(lang === "ru" ? "Согласие плательщика не требуется" : "Kostenübernahmeerklärung nicht erforderlich");
+      expect(html).toContain(lang === "ru" ? "Заявление о принятии расходов не требуется" : "Kostenübernahmeerklärung nicht erforderlich");
       expect(html).toContain(lang === "ru" ? "GMED: подпись пока недоступна" : "GMED: Unterschrift noch gesperrt");
       expect(html).not.toContain(lang === "ru" ? "Клиент подписал" : "Kunde hat den Auftrag unterzeichnet");
       expect(html).not.toContain(lang === "ru" ? "Плательщик подписал" : "Kostenübernehmer hat unterschrieben");
@@ -113,10 +113,10 @@ describe("LeadPayerSignatureFlow", () => {
   it("shows the signing order and why GMED waits", () => {
     const html = render(status());
     expect(html).toContain("Клиент подписал");
-    expect(html).toContain("Ожидается согласие плательщика");
+    expect(html).toContain("Ожидается заявление о принятии расходов");
     expect(html).toContain("GMED: подпись пока недоступна");
-    expect(html).toContain("Создайте согласие плательщика (Kostenübernahmeerklärung)");
-    expect(html).toContain("Создать согласие плательщика");
+    expect(html).toContain("Создайте заявление о принятии расходов (Kostenübernahmeerklärung)");
+    expect(html).toContain("Создать заявление о принятии расходов");
   });
 
   it("marks the payer step as not required for a self-payer", () => {
@@ -127,7 +127,7 @@ describe("LeadPayerSignatureFlow", () => {
     }));
     expect(html).toContain("не требуется");
     expect(html).toContain("GMED подписал");
-    expect(html).not.toContain("Создать согласие плательщика");
+    expect(html).not.toContain("Создать заявление о принятии расходов");
   });
 });
 

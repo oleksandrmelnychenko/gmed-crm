@@ -113,7 +113,7 @@ describe("payer package labels", () => {
   it("names the four documents", () => {
     expect(payerPackageRows(null).map((row) => [payerPackageSlotLabel(row.slot, ru), row.document])).toEqual([
       ["Анкета плательщика", null],
-      ["Согласие плательщика", null],
+      ["Заявление о принятии расходов", null],
       ["Заявление пациента об оплате третьим лицом", null],
       ["Смета для плательщика", null],
     ]);

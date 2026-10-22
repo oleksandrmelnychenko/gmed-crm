@@ -39,7 +39,7 @@ function kindLabel(kind: DocumentComplianceKind, tx: Bilingual): string {
     case "enhanced_due_diligence":
       return tx("Усиленная AML-проверка", "Verstärkte AML-Sorgfaltsprüfung");
     case "cost_coverage_declaration":
-      return tx("Согласие плательщика (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung");
+      return tx("Заявление о принятии расходов (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung");
     case "other":
       return tx("Другое", "Sonstiges");
   }

@@ -87,9 +87,9 @@ describe("the enhanced check of the owner's rule (2026-10-07)", () => {
     expect(enhancedCheckReasonLabel(RISK_ASSESSMENT_REASON, ru)).toBe("по результатам оценки риска (см. «Оценка риска»)");
     expect(enhancedCheckReasonLabel(RISK_ASSESSMENT_REASON, de)).not.toContain("Stufe");
     expect(pepEnhancedCheckHint(de)).toBe(
-      "PEP: nach § 15 GwG ist in der Regel eine verstärkte Prüfung erforderlich – Entscheidung des Mitarbeiters",
+      "PEP: nach GMED-Regel (Orientierung § 15 GwG) ist in der Regel eine verstärkte Prüfung erforderlich – Entscheidung des Mitarbeiters",
     );
-    expect(pepEnhancedCheckHint(ru)).toBe("PEP: по § 15 GwG обычно требуется усиленная проверка — решение за сотрудником");
+    expect(pepEnhancedCheckHint(ru)).toBe("PEP: по правилу GMED (ориентир § 15 GwG) обычно требуется усиленная проверка — решение за сотрудником");
   });
 
   it("prints the risk tier of what required or prompted the check", () => {

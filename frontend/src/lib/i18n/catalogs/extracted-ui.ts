@@ -4808,7 +4808,7 @@ export const extractedUiRu = {
   "document_art_patient_sticker": "Этикетка пациента",
   "document_art_single_order": "Документ заказа",
   "document_art_order_cost_estimate": "Смета к заказу",
-  "document_art_cost_coverage_declaration": "Гарантийное письмо об оплате",
+  "document_art_cost_coverage_declaration": "Заявление о принятии расходов",
   "document_art_cost_estimate": "Предварительный расчёт медицинских расходов",
   "document_art_appointment_confirmation": "Подтверждение записи",
   "document_art_confidentiality_release": "Освобождение от врачебной тайны",

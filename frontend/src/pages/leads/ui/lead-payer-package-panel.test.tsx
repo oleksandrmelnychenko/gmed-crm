@@ -83,7 +83,7 @@ describe("LeadPayerPackagePanel", () => {
     const html = render(state());
     expect(html).toContain("Документы плательщику на подпись");
     expect(html).not.toContain("Плательщик получает один пакет из четырёх документов");
-    for (const label of ["Анкета плательщика", "Согласие плательщика", "Заявление пациента об оплате третьим лицом", "Смета для плательщика"]) {
+    for (const label of ["Анкета плательщика", "Заявление о принятии расходов", "Заявление пациента об оплате третьим лицом", "Смета для плательщика"]) {
       expect(html).toContain(label);
     }
     expect(html.match(/ещё не создан/g)).toHaveLength(4);
@@ -193,7 +193,7 @@ describe("LeadPayerSignatureFlow with the payer package", () => {
         payerPackage={{ panel: true, canEdit: true }}
       />,
     );
-    expect(html).toContain("Создать согласие плательщика");
+    expect(html).toContain("Создать заявление о принятии расходов");
     expect(html).not.toContain('data-testid="lead-payer-package"');
   });
 });

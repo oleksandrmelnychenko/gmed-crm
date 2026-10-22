@@ -41,7 +41,7 @@ export function payerPackageSlotLabel(slot: PayerPackageSlot, tx: Tx): string {
     case "self_disclosure":
       return tx("Анкета плательщика", "Selbstauskunft der zahlenden Person");
     case "cost_coverage":
-      return tx("Согласие плательщика", "Kostenübernahmeerklärung");
+      return tx("Заявление о принятии расходов", "Kostenübernahmeerklärung");
     case "patient_statement":
       return tx("Заявление пациента об оплате третьим лицом", "Erklärung zur Kostenübernahme durch Dritte");
     case "cost_estimate":

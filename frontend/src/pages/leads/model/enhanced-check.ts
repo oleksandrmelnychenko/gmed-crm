@@ -137,11 +137,14 @@ export function enhancedCheckReasonsText(reasons: readonly string[], tx: Tx): st
   return reasons.map((reason) => enhancedCheckReasonLabel(reason, tx)).join(", ");
 }
 
-/** The hint for a PEP answer: § 15 GwG usually asks for the check, staff decide. */
+/**
+ * The hint for a PEP answer: GMED's own rule (§ 15 GwG as orientation only,
+ * GMED is not obliged under § 2 GwG) usually asks for the check, staff decide.
+ */
 export function pepEnhancedCheckHint(tx: Tx): string {
   return tx(
-    "PEP: по § 15 GwG обычно требуется усиленная проверка — решение за сотрудником",
-    "PEP: nach § 15 GwG ist in der Regel eine verstärkte Prüfung erforderlich – Entscheidung des Mitarbeiters",
+    "PEP: по правилу GMED (ориентир § 15 GwG) обычно требуется усиленная проверка — решение за сотрудником",
+    "PEP: nach GMED-Regel (Orientierung § 15 GwG) ist in der Regel eine verstärkte Prüfung erforderlich – Entscheidung des Mitarbeiters",
   );
 }
 

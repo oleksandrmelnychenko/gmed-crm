@@ -242,7 +242,7 @@ export function payerLinkCabinetNote(tx: Tx): string {
  */
 export function payerRepresentativeNote(tx: Tx): string {
   return tx(
-    "Платит родитель / законный представитель ребёнка — он сторона договора: ссылка плательщика и согласие плательщика не нужны",
+    "Платит родитель / законный представитель ребёнка — он сторона договора: ссылка плательщика и заявление о принятии расходов не нужны",
     "Es zahlt ein Elternteil / gesetzlicher Vertreter des Kindes als Vertragspartei: Zahler-Link und Kostenübernahmeerklärung entfallen",
   );
 }

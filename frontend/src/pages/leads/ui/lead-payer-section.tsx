@@ -180,7 +180,7 @@ export function PayerRepresentativeCard({ person, lang, tx }: { person: PayerRep
       </dl>
       <p className="text-xs leading-5 text-muted-foreground">
         {tx(
-          "Данные меняются в блоке законных представителей. Отдельное согласие плательщика (Kostenübernahmeerklärung) не нужно: родитель подписывает договор сам.",
+          "Данные меняются в блоке законных представителей. Отдельное заявление о принятии расходов (Kostenübernahmeerklärung) не нужно: родитель подписывает договор сам.",
           "Die Angaben werden im Block der gesetzlichen Vertreter geändert. Eine Kostenübernahmeerklärung ist nicht nötig: der Elternteil unterschreibt den Vertrag selbst.",
         )}
       </p>
@@ -787,7 +787,7 @@ export function LeadPayerDeclarationSection({
         {payingParent ? (
           <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800" data-testid="lead-payer-paying-parent">
             {tx(
-              "Платит один из родителей — законный представитель ребёнка. Он подписывает заказ сам, отдельное согласие плательщика (Kostenübernahmeerklärung) не нужно.",
+              "Платит один из родителей — законный представитель ребёнка. Он подписывает заказ сам, отдельное заявление о принятии расходов (Kostenübernahmeerklärung) не нужно.",
               "Es zahlt ein Elternteil als gesetzlicher Vertreter des Kindes. Er unterschreibt den Auftrag selbst; eine gesonderte Kostenübernahmeerklärung ist nicht nötig.",
             )}
           </p>
@@ -1094,8 +1094,8 @@ function SequenceStep({ state, actor, tx }: { state: SignatureStepState; actor: 
   const label = actor === "client"
     ? state === "done" ? tx("Клиент подписал заказ", "Kunde hat den Auftrag unterzeichnet") : tx("Ожидается подпись клиента", "Unterschrift des Kunden ausstehend")
     : actor === "payer"
-      ? state === "not_required" ? tx("Согласие плательщика не требуется", "Kostenübernahmeerklärung nicht erforderlich")
-        : state === "done" ? tx("Плательщик подписал согласие", "Kostenübernehmer hat unterschrieben") : tx("Ожидается согласие плательщика", "Unterschrift des Kostenübernehmers ausstehend")
+      ? state === "not_required" ? tx("Заявление о принятии расходов не требуется", "Kostenübernahmeerklärung nicht erforderlich")
+        : state === "done" ? tx("Плательщик подписал заявление о принятии расходов", "Kostenübernehmer hat unterschrieben") : tx("Ожидается заявление о принятии расходов", "Unterschrift des Kostenübernehmers ausstehend")
       : state === "done" ? tx("GMED подписал заказ", "GMED hat den Auftrag unterzeichnet")
         : state === "blocked" ? tx("GMED: подпись пока недоступна", "GMED: Unterschrift noch gesperrt") : tx("GMED: можно подписывать", "GMED: Unterschrift möglich");
   return <StatusChip data-signature-step={actor} data-step-state={state} tone={state === "done" ? "success" : state === "not_required" ? "neutral" : "warning"}>
@@ -1213,8 +1213,8 @@ export function LeadPayerSignatureFlow({
         >
           {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
           {documents.length > 0
-            ? tx("Новая версия согласия плательщика", "Neue Kostenübernahmeerklärung")
-            : tx("Создать согласие плательщика", "Kostenübernahmeerklärung erstellen")}
+            ? tx("Новая версия заявления о принятии расходов", "Neue Kostenübernahmeerklärung")
+            : tx("Создать заявление о принятии расходов", "Kostenübernahmeerklärung erstellen")}
         </Button>
       ) : undefined}
     >
@@ -1243,7 +1243,7 @@ export function LeadPayerSignatureFlow({
       {required ? (
         documents.length > 0
           ? renderDocuments(documents)
-          : <p className="text-xs text-muted-foreground">{tx("Согласие плательщика ещё не создано", "Kostenübernahmeerklärung wurde noch nicht erstellt")}</p>
+          : <p className="text-xs text-muted-foreground">{tx("Заявление о принятии расходов ещё не создано", "Kostenübernahmeerklärung wurde noch nicht erstellt")}</p>
       ) : null}
       {packagePanelShown && packageState ? (
         <LeadPayerPackagePanel
@@ -1289,7 +1289,7 @@ export function LeadPayerSignatureFlow({
                       ? tx("Нужна юридически действительная подпись заказа", "Eine rechtswirksame Auftragsunterschrift ist erforderlich")
                       : tx("Завершите подписание пакета в Skribble", "Paketunterzeichnung in Skribble abschließen")
                     : operationalProgress && code === "cost_assumption_unsigned"
-                      ? tx("Юридический статус согласия плательщика ещё не подтверждён", "Die rechtswirksame Kostenübernahmeerklärung ist noch nicht bestätigt")
+                      ? tx("Юридический статус заявления о принятии расходов ещё не подтверждён", "Die rechtswirksame Kostenübernahmeerklärung ist noch nicht bestätigt")
                       : payerReasonLabel(code, tx)}</span>
                 </span>
               ))}
