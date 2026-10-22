@@ -357,6 +357,58 @@ test("adding a parent: a father is not offered as a guardian by mistake", async 
   ]));
 });
 
+test("a guardian (Vormund) of a minor needs the custody «guardian»", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { calls } = await mount(page, { lang: "ru", ...minorWithParents() });
+  await page.getByRole("button", { name: "Добавить", exact: true }).click();
+  const editor = page.getByTestId("trusted-contact-editor");
+  await editor.getByLabel("Имя и фамилия").fill("Lena Vormund");
+  await editor.getByRole("combobox").nth(1).click();
+  await page.getByRole("option", { name: "Опекун по решению суда (не родитель)", exact: true }).click();
+  await editor.getByLabel("Телефон").fill("+49 30 100004");
+  const before = calls.updates.length;
+  await editor.getByRole("button", { name: "Добавить", exact: true }).click();
+  await expect(editor.locator("#trusted-contact-relation-error")).toHaveText(
+    "Опекун возможен только при опеке по решению суда; для родителя выберите Мать или Отец",
+  );
+  expect(calls.updates.length).toBe(before);
+});
+
+test("a contact the server refuses shows its message at that contact", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await mount(page, {
+    lang: "de",
+    ...minorWithParents(),
+    failUpdate: {
+      status: 422,
+      body: {
+        error: "trusted_contact_phone_invalid",
+        message: "Invalid trusted contact phone",
+        field: "trusted_contacts",
+        contact_index: 1,
+        contact_id: BEN_ID,
+        contact_name: "Ben Muster",
+        contact_field: "phone",
+      },
+    },
+  });
+  await page.locator("#lead-wizard-city").fill("Hamburg");
+  await expect(page.getByTestId("trusted-contact-server-error").first()).toHaveText(
+    "Kontaktperson „Ben Muster“: gültige Telefonnummer eingeben (mindestens 6 Ziffern).",
+  );
+});
+
+test("the medical tab gets its tick only once something in it is filled", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await mount(page, { lang: "ru", lead: { ...adultLead, readiness: { conversion_ready: false, blocking_reasons: [], steps: [{ key: "medical", label: "Medical", ready: true }], checks: [] } } });
+  const medicalTab = page.locator('[data-step="medical"]');
+  await expect(medicalTab).toContainText("2");
+  await expect(medicalTab).toContainText("необязательно, не заполнено");
+  await medicalTab.click();
+  await page.getByRole("dialog").first().getByLabel("Направивший врач").fill("Dr. Weber");
+  await expect(medicalTab).toContainText("выполнено");
+});
+
 test("on a phone the step bar keeps the active step in view", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const { wizard } = await mount(page, { lang: "ru" });

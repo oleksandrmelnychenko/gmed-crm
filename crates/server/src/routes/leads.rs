@@ -365,6 +365,243 @@ fn normalize_trusted_contacts(contacts: &[TrustedContactRequest]) -> Result<Valu
     Ok(Value::Array(normalized))
 }
 
+/// The contact of a list a write would store that the request adds or
+/// changes in a way the server refuses (owner 2026-10-22).
+#[derive(Debug, PartialEq, Eq)]
+enum TrustedContactIssue {
+    /// A new or changed phone number without the usual six digits.
+    InvalidPhone {
+        index: usize,
+        id: String,
+        name: String,
+    },
+    /// A minor's contact newly marked as guardian (Vormund): needs the
+    /// custody "guardian", which the caller checks.
+    GuardianRelation {
+        index: usize,
+        id: String,
+        name: String,
+    },
+}
+
+fn contact_text<'a>(contact: &'a Value, key: &str) -> Option<&'a str> {
+    contact
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+/// The stored entry a submitted contact continues: the same id, or for an
+/// entry without one (written before ids) the same name.
+fn stored_trusted_contact<'a>(stored: &'a Value, contact: &Value) -> Option<&'a Value> {
+    let entries = stored.as_array()?;
+    let id = contact_text(contact, "id");
+    if let Some(found) = id.and_then(|id| {
+        entries
+            .iter()
+            .find(|entry| contact_text(entry, "id") == Some(id))
+    }) {
+        return Some(found);
+    }
+    let name = contact_text(contact, "name")?.to_lowercase();
+    entries.iter().find(|entry| {
+        contact_text(entry, "id").is_none()
+            && contact_text(entry, "name").is_some_and(|value| value.to_lowercase() == name)
+    })
+}
+
+/// What a write of trusted contacts adds or changes against the stored list:
+/// a phone number is checked only when it is new or changed, and a guardian
+/// relation of a minor only when the contact is new or its relation changed,
+/// so older entries keep loading and saving as they are. The first issue in
+/// list order, phone before relation of the same contact.
+fn changed_trusted_contact_issue(
+    contacts: &Value,
+    stored: &Value,
+    minor: bool,
+) -> Option<TrustedContactIssue> {
+    for (index, contact) in contacts.as_array()?.iter().enumerate() {
+        let previous = stored_trusted_contact(stored, contact);
+        let id = contact_text(contact, "id").unwrap_or_default().to_string();
+        let name = contact_text(contact, "name")
+            .unwrap_or_default()
+            .to_string();
+        if let Some(phone) = contact_text(contact, "phone")
+            && previous.and_then(|entry| contact_text(entry, "phone")) != Some(phone)
+            && !crate::routes::patients::is_valid_contact_phone(phone)
+        {
+            return Some(TrustedContactIssue::InvalidPhone { index, id, name });
+        }
+        let relation = contact_text(contact, "relation");
+        if minor
+            && is_legal_guardian_relation(relation)
+            && !previous
+                .is_some_and(|entry| is_legal_guardian_relation(contact_text(entry, "relation")))
+        {
+            return Some(TrustedContactIssue::GuardianRelation { index, id, name });
+        }
+    }
+    None
+}
+
+/// The 422 of a refused trusted contact: the code, the list field and which
+/// entry (index and id) with the field of the entry, so the wizard shows it
+/// at the contact.
+fn trusted_contact_issue_response(issue: &TrustedContactIssue) -> axum::response::Response {
+    let (code, message, index, id, name, contact_field) = match issue {
+        TrustedContactIssue::InvalidPhone { index, id, name } => (
+            "trusted_contact_phone_invalid",
+            "Invalid trusted contact phone",
+            index,
+            id,
+            name,
+            "phone",
+        ),
+        TrustedContactIssue::GuardianRelation { index, id, name } => (
+            RELATION_GUARDIAN_NEEDS_CUSTODY,
+            "A guardian (Vormund) is possible only under a court-ordered guardianship; choose mother or father for a parent",
+            index,
+            id,
+            name,
+            "relation",
+        ),
+    };
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({
+            "error": code,
+            "code": code,
+            "message": message,
+            "field": "trusted_contacts",
+            "contact_index": index,
+            "contact_id": id,
+            "contact_name": name,
+            "contact_field": contact_field,
+        })),
+    )
+        .into_response()
+}
+
+/// A minor's parent or representative contact marked as guardian (Vormund)
+/// while the custody is not "guardian" (owner 2026-10-22).
+pub(crate) const RELATION_GUARDIAN_NEEDS_CUSTODY: &str = "relation_guardian_needs_custody";
+
+/// Refuses what [`changed_trusted_contact_issue`] finds; a guardian relation
+/// passes when the lead's stated custody is "guardian" (none stated for a new
+/// lead).
+async fn check_changed_trusted_contacts(
+    state: &AppState,
+    lead_id: Option<Uuid>,
+    contacts: &Value,
+    stored: &Value,
+    minor: bool,
+) -> Result<(), axum::response::Response> {
+    let Some(issue) = changed_trusted_contact_issue(contacts, stored, minor) else {
+        return Ok(());
+    };
+    if matches!(issue, TrustedContactIssue::GuardianRelation { .. })
+        && let Some(lead_id) = lead_id
+    {
+        let custody = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT custody FROM lead_gwg_declarations WHERE lead_id = $1",
+        )
+        .bind(lead_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %lead_id, "load lead custody");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        })?
+        .flatten();
+        if custody.as_deref() == Some(crate::routes::lead_representatives::CUSTODY_GUARDIAN) {
+            // The guardian relation is allowed; a later contact may still
+            // carry a new unusable phone number.
+            let phones_only = changed_trusted_contact_issue(contacts, stored, false);
+            return match phones_only {
+                Some(issue) => Err(trusted_contact_issue_response(&issue)),
+                None => Ok(()),
+            };
+        }
+    }
+    Err(trusted_contact_issue_response(&issue))
+}
+
+#[cfg(test)]
+mod changed_trusted_contact_tests {
+    use super::*;
+
+    const ID: &str = "7a4c2f1e-0000-4000-8000-000000000001";
+
+    fn contact(id: &str, name: &str, phone: &str, relation: &str) -> Value {
+        json!({ "id": id, "name": name, "phone": phone, "relation": relation })
+    }
+
+    #[test]
+    fn an_unchanged_invalid_phone_keeps_saving() {
+        let stored = json!([contact(ID, "Anna", "12", "mother")]);
+        let sent = json!([contact(ID, "Anna Maria", "12", "mother")]);
+        assert_eq!(changed_trusted_contact_issue(&sent, &stored, true), None);
+    }
+
+    #[test]
+    fn a_new_or_changed_invalid_phone_is_refused_with_its_index() {
+        let stored = json!([contact(ID, "Anna", "+49 170 1234567", "mother")]);
+        let changed = json!([contact(ID, "Anna", "abc", "mother")]);
+        assert_eq!(
+            changed_trusted_contact_issue(&changed, &stored, false),
+            Some(TrustedContactIssue::InvalidPhone {
+                index: 0,
+                id: ID.into(),
+                name: "Anna".into()
+            })
+        );
+        let added = json!([
+            contact(ID, "Anna", "+49 170 1234567", "mother"),
+            contact(
+                "7a4c2f1e-0000-4000-8000-000000000002",
+                "Ivan",
+                "123",
+                "father"
+            ),
+        ]);
+        assert!(matches!(
+            changed_trusted_contact_issue(&added, &stored, false),
+            Some(TrustedContactIssue::InvalidPhone { index: 1, .. })
+        ));
+    }
+
+    #[test]
+    fn a_legacy_entry_without_id_is_matched_by_name() {
+        let stored = json!([{ "name": "Anna", "phone": "12", "relation": "Опекун" }]);
+        let sent = json!([contact(ID, "anna", "12", "guardian")]);
+        assert_eq!(changed_trusted_contact_issue(&sent, &stored, true), None);
+    }
+
+    #[test]
+    fn a_new_guardian_of_a_minor_is_reported_an_adults_is_not() {
+        let stored = json!([contact(ID, "Anna", "", "mother")]);
+        let sent = json!([contact(ID, "Anna", "", "guardian")]);
+        assert!(matches!(
+            changed_trusted_contact_issue(&sent, &stored, true),
+            Some(TrustedContactIssue::GuardianRelation { index: 0, .. })
+        ));
+        assert_eq!(changed_trusted_contact_issue(&sent, &stored, false), None);
+        // A guardian already stored stays loadable and savable.
+        assert_eq!(changed_trusted_contact_issue(&sent, &sent, true), None);
+    }
+
+    #[test]
+    fn the_refusal_names_the_code_the_field_and_the_contact() {
+        let response = trusted_contact_issue_response(&TrustedContactIssue::GuardianRelation {
+            index: 2,
+            id: ID.into(),
+            name: "Anna".into(),
+        });
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+}
+
 #[derive(Deserialize)]
 struct ListLeadsQuery {
     search: Option<String>,
@@ -3039,6 +3276,12 @@ async fn create_lead(
         },
         None => json!([]),
     };
+    // Every contact of a new lead is new; no custody is stated yet.
+    if let Err(response) =
+        check_changed_trusted_contacts(&state, None, &trusted_contacts, &json!([]), minor).await
+    {
+        return response;
+    }
     let citizenships = match crate::services::citizenships::normalize_citizenships(
         body.citizenships.as_deref().unwrap_or_default(),
     ) {
@@ -4480,6 +4723,19 @@ async fn update_lead(
         .try_get("trusted_contacts")
         .unwrap_or_else(|_| json!([]));
     let effective_guardians = trusted_contacts.as_ref().unwrap_or(&current_guardians);
+    // A new or changed contact is checked; stored entries stay as they are.
+    if let Some(contacts) = trusted_contacts.as_ref()
+        && let Err(response) = check_changed_trusted_contacts(
+            &state,
+            Some(lead_id),
+            contacts,
+            &current_guardians,
+            is_minor_on(effective_birth_date, crate::app_time::today()),
+        )
+        .await
+    {
+        return response;
+    }
     let patient_ids = [
         current_identity
             .try_get::<Option<Uuid>, _>("repeat_patient_id")

@@ -3496,6 +3496,34 @@ pub(crate) async fn set_lead_custody(
         );
     }
     let previous = loaded.representation.answers.custody.clone();
+    // A contact marked as guardian (Vormund) needs the custody "guardian"
+    // (owner 2026-10-22): leaving it asks staff to change the relation first.
+    if previous != custody
+        && custody.as_deref() != Some(CUSTODY_GUARDIAN)
+        && let Some((index, person)) = loaded
+            .representation
+            .representatives
+            .iter()
+            .enumerate()
+            .find(|(_, person)| {
+                crate::routes::leads::is_legal_guardian_relation(person.relation.as_deref())
+            })
+    {
+        return intake::coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            crate::routes::leads::RELATION_GUARDIAN_NEEDS_CUSTODY,
+            "A contact is marked as guardian (Vormund); change its relation to mother or father first",
+            json!({
+                // The same error code as the contact save, so the screens show one text.
+                "error": crate::routes::leads::RELATION_GUARDIAN_NEEDS_CUSTODY,
+                "field": "custody",
+                "contact_index": index,
+                "contact_id": person.id,
+                "contact_name": person.name(),
+                "contact_field": "relation",
+            }),
+        );
+    }
     let confirmed = previous == custody && custody.is_some() && !loaded.custody_set_by_staff;
     let mut invalidated = Vec::new();
     if previous != custody {

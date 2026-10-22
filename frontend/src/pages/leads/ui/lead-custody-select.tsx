@@ -52,9 +52,10 @@ export function LeadCustodySelect({
       if (beforeSave && !(await beforeSave())) return;
       onSaved(await setLeadCustody(leadId, next));
     } catch (error) {
-      // The only thing the server refuses here is a lead who is not a minor.
+      // The server refuses a lead who is not a minor, and leaving "guardian"
+      // while a contact is still marked as guardian (its own translated text).
       setErrorMessage(
-        error instanceof ApiRequestError && error.status === 422
+        error instanceof ApiRequestError && error.status === 422 && error.code !== "relation_guardian_needs_custody"
           ? tx(
               "Кто представляет ребёнка, указывается только для несовершеннолетнего. Проверьте дату рождения",
               "Wer das Kind vertritt, wird nur für Minderjährige angegeben. Bitte das Geburtsdatum prüfen",

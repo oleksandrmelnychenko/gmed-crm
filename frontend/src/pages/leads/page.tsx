@@ -124,10 +124,30 @@ import {
   leadErrorMessage,
   leadTypeFromLead,
   leadPermissions,
+  leadServerFieldError,
   leadToGateForm,
   nonempty,
   useLeadLabels,
 } from "./model/leads-model";
+import {
+  EARLIEST_GATE_BIRTH_DATE,
+  GATE_SERVER_FIELDS,
+  leadGateFormErrors,
+  type LeadGateErrors,
+  type LeadGateField,
+} from "./model/lead-gate-form";
+import { isMinor, namedLanguageOptions } from "./model/lead-wizard.model";
+import { trustedContactRelationLabel } from "./model/lead-trusted-contacts";
+import { LANGUAGE_OPTIONS, englishLanguageName, languageLabel } from "@/components/ui/language-multi-select";
+import { CountrySelect } from "@/components/ui/country-select";
+
+/** Ids of the controls of «Данные для квалификации» (labels, errors, focus). */
+const GATE_FIELD_IDS: Record<LeadGateField, string> = {
+  email: "lead-gate-email",
+  phone: "lead-gate-phone",
+  dateOfBirth: "lead-gate-date-of-birth",
+  legalSex: "lead-gate-legal-sex",
+};
 import type {
   FailedLeadResolutionForm,
   LeadFilters,
@@ -470,6 +490,12 @@ function useLeadsPageContent() {
   const { staffGo } = useStaffNavigate();
   const [existingParentPatientId, setExistingParentPatientId] = useState<string | null>(null);
   const [wizardLeadId, setWizardLeadId] = useState<string | null>(null);
+  // «Данные для квалификации»: what the form or the server refused, at the field.
+  const [gateErrors, setGateErrors] = useState<LeadGateErrors>({});
+  // Why the birth-date field did not take what was typed (DD.MM.YYYY).
+  const [gateBirthDateEntryError, setGateBirthDateEntryError] = useState<string | null>(null);
+  // A save of the form that failed for another reason, shown above the form.
+  const [gateSaveError, setGateSaveError] = useState("");
   const [newLeadWizardOpen, setNewLeadWizardOpen] = useState(false);
   // A fresh wizard per "Новый лид": an open lead's wizard state must never carry
   // over into the new person (QA 2026-10-10, the new data overwrote the open lead).
@@ -1198,6 +1224,9 @@ function useLeadsPageContent() {
     // The reason chosen with «Не подходит» comes back while the outcome is still "none".
     const storedReason = leadFailureReasonDraft(detail.failed_outcome?.reason);
     setFailedReasonError("");
+    setGateErrors({});
+    setGateBirthDateEntryError(null);
+    setGateSaveError("");
     dispatchUiState((current) => ({
       gateForm: leadToGateForm(detail),
       failedLeadForm: {
@@ -1418,19 +1447,21 @@ function useLeadsPageContent() {
 
   async function handleSaveGateForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!permissions.canEdit || !selectedLeadId || !gateForm) return;
-    if (gateForm.email.trim() && !isValidEmailAddress(gateForm.email)) {
-      setDetailError(t.login_error_email_invalid);
-      return;
-    }
+    if (!permissions.canEdit || !selectedLeadId || !gateForm || !detail) return;
+    // Errors go to their field: a detail-level error would replace the whole panel.
+    const errors = leadGateFormErrors(gateForm, leadToGateForm(detail), appDateKey(), tx);
     const gateEmailNoMail = knownNoMailEmailError(gateForm.email, lang);
-    if (gateEmailNoMail) {
-      setDetailError(gateEmailNoMail);
+    if (gateEmailNoMail && !errors.email) errors.email = gateEmailNoMail;
+    if (gateBirthDateEntryError && !errors.dateOfBirth) errors.dateOfBirth = gateBirthDateEntryError;
+    setGateErrors(errors);
+    setGateSaveError("");
+    const firstInvalid = (["email", "phone", "dateOfBirth"] as const).find((field) => errors[field]);
+    if (firstInvalid) {
+      document.getElementById(GATE_FIELD_IDS[firstInvalid])?.focus();
       return;
     }
 
     setGateBusy(true);
-    setDetailError("");
     try {
       await updateLeadGate(selectedLeadId, {
         email: nonempty(gateForm.email),
@@ -1447,7 +1478,14 @@ function useLeadsPageContent() {
       });
       reload();
     } catch (saveError) {
-      setDetailError(localizeLeadError(saveError, t.common_failed_update));
+      const message = localizeLeadError(saveError, t.common_failed_update);
+      const field = GATE_SERVER_FIELDS[leadServerFieldError(saveError) ?? ""];
+      if (field) {
+        setGateErrors({ [field]: message });
+        document.getElementById(GATE_FIELD_IDS[field])?.focus();
+      } else {
+        setGateSaveError(message);
+      }
     } finally {
       setGateBusy(false);
     }
@@ -1586,6 +1624,24 @@ function useLeadsPageContent() {
         ? detailConversionGate.disabledReason ??
           t.lead_workflow_complete_required_fields
         : undefined;
+  // Out of the active work: closed as not suitable, archived, deleted. Its
+  // data are read, not edited, and nothing leads on from it but the list.
+  const detailOutOfWork = Boolean(detail) && (
+    detail?.failed_outcome.status !== "none"
+    || detail?.qualification_status === "archived"
+    || detail?.qualification_status === "deleted"
+  );
+  const detailIsConverted = Boolean(detail?.converted_patient_id) || detail?.qualification_status === "converted";
+  // One primary action in the header (QA 2026-10-22): the patient card of a
+  // converted lead, the conversion once it is possible, otherwise the wizard.
+  const detailCanOpenWizard = Boolean(detail) && permissions.canConvert && detailWizardIncomplete && !detailOutOfWork;
+  const detailCanConvertNow = Boolean(detail) && detailIsConsoleLead && permissions.canConvert
+    && !detailIsConverted && !detailOutOfWork && Boolean(detailConversionGate?.canConvert);
+  // The form «Данные для квалификации» edits an open lead only: a patient's
+  // data live in the patient card.
+  const gateEditable = permissions.canEdit && !detailOutOfWork && !detailIsConverted;
+  const gateLanguageOptions = namedLanguageOptions(LANGUAGE_OPTIONS, lang === "de" ? "de" : "ru");
+  const detailIsMinor = Boolean(detail?.date_of_birth) && isMinor(detail?.date_of_birth ?? "", new Date());
 
   const detailPaneNode: ReactNode = (
     <div className="flex h-full flex-col">
@@ -1600,11 +1656,23 @@ function useLeadsPageContent() {
                 {lang === "de" ? "Nur ansehen" : "Только просмотр"}
               </StatusBadge>
             ) : null}
-            {detail && permissions.canConvert && detailWizardIncomplete ? (
+            {detail && detailIsConverted && detail.converted_patient_id ? (
               <Button
                 type="button"
-                variant="outline"
                 size="sm"
+                data-testid="lead-open-patient"
+                onClick={() => staffGo(`/patients/${detail.converted_patient_id}`)}
+              >
+                <UserPlus className="size-3.5" />
+                {tx("Открыть карточку пациента", "Patientenakte öffnen")}
+              </Button>
+            ) : null}
+            {detail && detailCanOpenWizard ? (
+              <Button
+                type="button"
+                variant={detailIsConverted || detailCanConvertNow || detailCanPromoteToConsole ? "outline" : "default"}
+                size="sm"
+                data-testid="lead-open-wizard"
                 onClick={() => openLeadWizard(detail.id)}
               >
                 <ClipboardCheck className="size-3.5" />
@@ -1629,16 +1697,14 @@ function useLeadsPageContent() {
                   ? t.lead_promoting_to_console
                   : t.lead_promote_to_console}
               </Button>
-            ) : detail && detailIsConsoleLead && permissions.canConvert && !leadWorkflow?.leadConverted ? (
+            ) : detail && detailCanConvertNow ? (
+              // Shown once the conversion is possible; until then the process
+              // tab says what is missing and "Обработать" leads there.
               <Button
                 type="button"
                 size="sm"
                 className="shrink-0"
-                disabled={
-                  Boolean(actionBusy) ||
-                  !detailConversionGate?.canConvert ||
-                  detail.failed_outcome.status !== "none"
-                }
+                disabled={Boolean(actionBusy)}
                 title={detailConvertDisabledReason}
                 onClick={() => setPendingConvertLead(detail)}
               >
@@ -1718,12 +1784,15 @@ function useLeadsPageContent() {
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               {t.lead_loading_detail}
             </div>
-          ) : detailError ? (
+          ) : detailError && !detail ? (
             <div className="pt-1">
               <Banner tone="error">{detailError}</Banner>
             </div>
           ) : detail ? (
-            detailIsIntakeLead ? (
+            <>
+            {/* An action that failed on a loaded lead (download, status) keeps the lead in view. */}
+            {detailError ? <Banner tone="error">{detailError}</Banner> : null}
+            {detailIsIntakeLead ? (
               <div className="space-y-4">
                 <section className={cardClass("p-4")}>
                   <div className="flex flex-wrap items-center gap-2">
@@ -1986,6 +2055,9 @@ function useLeadsPageContent() {
                         {t.lead_compliance_signed_without_document}
                       </StatusBadge>
                     ) : null}
+                    {detailIsMinor ? (
+                      <StatusBadge tone="info">{tx("Несовершеннолетний", "Minderjährig")}</StatusBadge>
+                    ) : null}
                     {detail.failed_outcome.status !== "none" ? (
                       <StatusBadge tone={failedOutcomeTone(detail.failed_outcome.status)}>
                         {failedOutcomeLabel(detail.failed_outcome.status, t)}
@@ -2088,6 +2160,36 @@ function useLeadsPageContent() {
                     <DetailCard label={t.providers_street} value={dashOrValue(detail.street_address, t)} />
                   </div>
                 </section>
+
+                {/* A minor is reached through the parents; their names and roles as in the wizard (QA 2026-10-22). */}
+                {(detail.trusted_contacts ?? []).length > 0 || detailIsMinor ? (
+                  <section className={cardClass("p-4")} data-testid="lead-detail-contacts">
+                    <SectionTitle>
+                      {detailIsMinor
+                        ? tx("Родители и законные представители", "Eltern und gesetzliche Vertreter")
+                        : tx("Доверенные контакты", "Vertrauenskontakte")}
+                    </SectionTitle>
+                    {(detail.trusted_contacts ?? []).length === 0 ? (
+                      <p className="mt-3 text-sm text-muted-foreground">
+                        {tx("Представитель не указан — добавьте его в мастере лида", "Kein Vertreter angegeben – im Lead-Assistenten ergänzen")}
+                      </p>
+                    ) : (
+                      <ul className="mt-3 divide-y divide-border/70">
+                        {(detail.trusted_contacts ?? []).map((contact) => (
+                          <li key={contact.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2 text-sm">
+                            <span className="font-medium text-foreground">{contact.name}</span>
+                            {contact.relation ? (
+                              <span className="text-xs text-muted-foreground">{trustedContactRelationLabel(contact.relation, tx)}</span>
+                            ) : null}
+                            <span className="min-w-0 break-all text-xs text-muted-foreground">
+                              {[contact.email, contact.phone].filter(Boolean).join(" · ")}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                ) : null}
               </>
             ) : null}
 
@@ -2423,48 +2525,61 @@ function useLeadsPageContent() {
                       </div>
                     </div>
 
-                    {permissions.canEdit ? (
-                    <form className="mt-4 space-y-4" onSubmit={handleSaveGateForm}>
+                    {gateEditable ? (
+                    <form className="mt-4 space-y-4" onSubmit={handleSaveGateForm} noValidate>
                       <fieldset disabled={!permissions.canEdit} className="contents">
+                      {gateSaveError ? <Banner tone="error">{gateSaveError}</Banner> : null}
                       <div className="grid gap-4 md:grid-cols-2">
-                        <LeadField label={t.patients_email} htmlFor="lead-gate-email">
+                        <LeadField label={t.patients_email} htmlFor={GATE_FIELD_IDS.email} error={gateErrors.email}>
                           <Input
-                            id="lead-gate-email"
-                            className={shellInputClassName}
+                            id={GATE_FIELD_IDS.email}
+                            type="email"
+                            autoComplete="off"
+                            aria-invalid={Boolean(gateErrors.email)}
+                            aria-describedby={gateErrors.email ? `${GATE_FIELD_IDS.email}-error` : undefined}
+                            className={cn(shellInputClassName, gateErrors.email && "border-destructive")}
                             value={gateForm.email}
-                            onChange={(event) =>
+                            onChange={(event) => {
+                              setGateErrors((current) => ({ ...current, email: undefined }));
                               setGateForm((current) =>
                                 current
                                   ? { ...current, email: event.target.value }
                                   : current
-                              )
-                            }
+                              );
+                            }}
                           />
                           <EmailDomainWarning email={gateForm.email} lang={lang} />
                         </LeadField>
-                        <LeadField label={t.field_phone} htmlFor="lead-gate-phone">
+                        <LeadField label={t.field_phone} htmlFor={GATE_FIELD_IDS.phone} error={gateErrors.phone}>
                           <Input
-                            id="lead-gate-phone"
-                            className={shellInputClassName}
+                            id={GATE_FIELD_IDS.phone}
+                            type="tel"
+                            autoComplete="off"
+                            aria-invalid={Boolean(gateErrors.phone)}
+                            aria-describedby={gateErrors.phone ? `${GATE_FIELD_IDS.phone}-error` : undefined}
+                            className={cn(shellInputClassName, gateErrors.phone && "border-destructive")}
                             value={gateForm.phone}
-                            onChange={(event) =>
+                            onChange={(event) => {
+                              setGateErrors((current) => ({ ...current, phone: undefined }));
                               setGateForm((current) =>
                                 current
                                   ? { ...current, phone: event.target.value }
                                   : current
-                              )
-                            }
+                              );
+                            }}
                           />
                         </LeadField>
-                        <LeadField label={t.providers_country} htmlFor="lead-gate-country">
-                          <Input
-                            id="lead-gate-country"
-                            className={shellInputClassName}
+                        {/* The same pickers as the wizard: a stored code reads as its name (QA 2026-10-22). */}
+                        <LeadField label={tx("Страна проживания", "Wohnsitzland")}>
+                          <CountrySelect
                             value={gateForm.country}
-                            onChange={(event) =>
+                            lang={lang}
+                            className={selectClassName}
+                            aria-label={tx("Страна проживания", "Wohnsitzland")}
+                            onChange={(value) =>
                               setGateForm((current) =>
                                 current
-                                  ? { ...current, country: event.target.value }
+                                  ? { ...current, country: value ?? "" }
                                   : current
                               )
                             }
@@ -2474,10 +2589,10 @@ function useLeadsPageContent() {
                           label={t.lead_primary_language}
                           htmlFor="lead-gate-primary-language"
                         >
-                          <Input
+                          <NativeComboboxSelect
                             id="lead-gate-primary-language"
-                            className={shellInputClassName}
                             value={gateForm.primaryLanguage}
+                            className={selectClassName}
                             onChange={(event) =>
                               setGateForm((current) =>
                                 current
@@ -2485,32 +2600,54 @@ function useLeadsPageContent() {
                                   : current
                               )
                             }
-                          />
+                          >
+                            <option value="">{tx("Выберите", "Auswählen")}</option>
+                            {gateForm.primaryLanguage && !gateLanguageOptions.some((item) => item.value === gateForm.primaryLanguage) ? (
+                              <option value={gateForm.primaryLanguage}>{gateForm.primaryLanguage}</option>
+                            ) : null}
+                            {gateLanguageOptions.map((item) => (
+                              <option
+                                key={item.value}
+                                value={item.value}
+                                data-search-text={`${item.value} ${languageLabel(item.value, "ru")} ${languageLabel(item.value, "de")} ${englishLanguageName(item.value)}`}
+                              >
+                                {languageLabel(item.value, lang)}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
                         </LeadField>
                         <LeadField
                           label={t.field_birth_date}
-                          htmlFor="lead-gate-date-of-birth"
+                          htmlFor={GATE_FIELD_IDS.dateOfBirth}
+                          error={gateErrors.dateOfBirth ?? gateBirthDateEntryError}
                         >
                           <Input
-                            id="lead-gate-date-of-birth"
+                            id={GATE_FIELD_IDS.dateOfBirth}
                             type="date"
-                            min="1900-01-01"
+                            min={EARLIEST_GATE_BIRTH_DATE}
                             max={appDateKey()}
-                            className={shellInputClassName}
+                            onPickerValidation={setGateBirthDateEntryError}
+                            aria-invalid={Boolean(gateErrors.dateOfBirth ?? gateBirthDateEntryError)}
+                            aria-describedby={gateErrors.dateOfBirth ?? gateBirthDateEntryError ? `${GATE_FIELD_IDS.dateOfBirth}-error` : undefined}
+                            className={cn(shellInputClassName, (gateErrors.dateOfBirth ?? gateBirthDateEntryError) && "border-destructive")}
                             value={gateForm.dateOfBirth}
-                            onChange={(event) =>
+                            onChange={(event) => {
+                              setGateErrors((current) => ({ ...current, dateOfBirth: undefined }));
                               setGateForm((current) =>
                                 current
                                   ? { ...current, dateOfBirth: event.target.value }
                                   : current
-                              )
-                            }
+                              );
+                            }}
                           />
                         </LeadField>
-                        <LeadField label={t.lead_legal_sex} htmlFor="lead-gate-legal-sex">
+                        <LeadField label={t.lead_legal_sex} htmlFor={GATE_FIELD_IDS.legalSex} error={gateErrors.legalSex}>
                           <NativeComboboxSelect
+                            id={GATE_FIELD_IDS.legalSex}
                             value={gateForm.legalSex || "__unset__"}
-                            onChange={(event) =>
+                            aria-invalid={Boolean(gateErrors.legalSex)}
+                            onChange={(event) => {
+                              setGateErrors((current) => ({ ...current, legalSex: undefined }));
                               setGateForm((current) =>
                                 current
                                   ? {
@@ -2521,8 +2658,8 @@ function useLeadsPageContent() {
                                           : "",
                                     }
                                   : current
-                              )
-                            }
+                              );
+                            }}
                             className={selectClassName}
                           >
                             <option value="__unset__">{t.common_not_set}</option>
@@ -2538,6 +2675,7 @@ function useLeadsPageContent() {
                           htmlFor="lead-gate-compliance-status"
                         >
                           <NativeComboboxSelect
+                            id="lead-gate-compliance-status"
                             value={gateForm.complianceStatus}
                             onChange={(event) =>
                               setGateForm((current) =>
@@ -2570,9 +2708,10 @@ function useLeadsPageContent() {
                         {/* Notes mix medical content; a role without medical access neither reads nor overwrites them. */}
                         {detailMedicalHidden ? null : (
                           <LeadField label={t.patients_notes} htmlFor="lead-gate-notes">
-                            <Input
+                            <textarea
                               id="lead-gate-notes"
-                              className={shellInputClassName}
+                              rows={3}
+                              className={cn(textareaClassName, "min-h-[72px]")}
                               value={gateForm.notes}
                               onChange={(event) =>
                                 setGateForm((current) =>
@@ -2626,7 +2765,7 @@ function useLeadsPageContent() {
                       </div>
 
                       <div className="flex justify-end">
-                        <Button type="submit" disabled={gateBusy}>
+                        <Button type="submit" disabled={gateBusy} data-testid="lead-gate-save">
                           {gateBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                           {t.lead_save_gate_data}
                         </Button>
@@ -2638,7 +2777,7 @@ function useLeadsPageContent() {
                         <DetailCard label={t.patients_email} value={gateForm.email || t.common_not_set} />
                         <DetailCard label={t.field_phone} value={gateForm.phone || t.common_not_set} />
                         <DetailCard
-                          label={t.providers_country}
+                          label={tx("Страна проживания", "Wohnsitzland")}
                           value={countryNameForDisplay(gateForm.country, lang) || t.common_not_set}
                         />
                         <DetailCard
@@ -2677,10 +2816,17 @@ function useLeadsPageContent() {
                   <section className={cardClass("p-4")}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <SectionTitle>{t.lead_failed_resolution_title}</SectionTitle>
-                        <p className="mt-1 text-sm text-slate-600">
-                          {t.lead_failed_resolution_description}
-                        </p>
+                        {/* A closed lead reads what was decided, not the instruction to close it. */}
+                        <SectionTitle>
+                          {detail.failed_outcome.status !== "none"
+                            ? tx("Лид закрыт", "Lead geschlossen")
+                            : t.lead_failed_resolution_title}
+                        </SectionTitle>
+                        {detail.failed_outcome.status === "none" ? (
+                          <p className="mt-1 text-sm text-slate-600">
+                            {t.lead_failed_resolution_description}
+                          </p>
+                        ) : null}
                       </div>
                       {detail.failed_outcome.status !== "none" ? (
                         <Badge
@@ -2821,7 +2967,7 @@ function useLeadsPageContent() {
                         ) : null}
 
                         <div className="flex justify-end">
-                          <Button type="submit" disabled={failedLeadBusy}>
+                          <Button type="submit" variant="outline" disabled={failedLeadBusy}>
                             {failedLeadBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                             {t.lead_save_failed_resolution}
                           </Button>
@@ -3020,7 +3166,8 @@ function useLeadsPageContent() {
               </>
             ) : null}
             </div>
-            )
+            )}
+            </>
           ) : (
             <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
               {t.lead_select_from_queue}
@@ -3146,9 +3293,9 @@ function useLeadsPageContent() {
             </NativeComboboxSelect>
             </ToolbarField>
 
-            <ToolbarField label={t.common_archive}>
+            <ToolbarField label={tx("Архив", "Archiv")}>
             <NativeComboboxSelect
-              aria-label={t.common_archive}
+              aria-label={tx("Архив", "Archiv")}
               value={filters.includeArchived || "false"}
               onChange={(event) => {
                 const includeArchived = event.target.value === "true" ? "true" : "false";
@@ -3499,10 +3646,13 @@ export function LeadsPage(...args: Parameters<typeof useLeadsPageContent>) {
 function LeadField({
   label,
   htmlFor,
+  error,
   children,
 }: {
   label: ReactNode;
   htmlFor?: string;
+  /** Shown under the control (id `${htmlFor}-error`, for its aria-describedby). */
+  error?: string | null;
   children: ReactNode;
 }) {
   return (
@@ -3511,6 +3661,11 @@ function LeadField({
         {label}
       </label>
       {children}
+      {error ? (
+        <p id={htmlFor ? `${htmlFor}-error` : undefined} role="alert" className="text-xs font-medium text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -3525,11 +3680,13 @@ function SectionTitle({ children }: { children: ReactNode }) {
 }
 
 function DetailCard({ label, value }: { label: ReactNode; value: ReactNode }) {
+  // The label wraps before the value does: a long caption beside a short
+  // value broke the value inside a word («Не указан|о», QA 2026-10-22).
   return (
     <div className="flex min-w-0 items-center gap-3 rounded-lg py-2">
-      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="min-w-0 break-words text-sm text-muted-foreground">{label}</span>
       <span className="h-px min-w-6 flex-1 self-center bg-border/70" />
-      <span className="min-w-0 max-w-[48%] break-words text-right text-sm font-semibold leading-snug text-foreground">
+      <span className="max-w-[48%] shrink-0 break-words text-right text-sm font-semibold leading-snug text-foreground">
         {value}
       </span>
     </div>

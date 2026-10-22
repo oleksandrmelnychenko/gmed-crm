@@ -255,6 +255,19 @@ export function leadServerFieldError(error: unknown): string | null {
   return typeof field === "string" && field.trim() ? field.trim() : null;
 }
 
+/**
+ * The trusted contact a 422 refuses (`field: "trusted_contacts"` with the
+ * `contact_id` and the `contact_field` of the entry, leads.rs), so the wizard
+ * shows the message at that contact.
+ */
+export function leadServerContactError(error: unknown): { contactId: string; field: string } | null {
+  if (leadErrorStatus(error) !== 422) return null;
+  const body = leadErrorBody(error);
+  const contactId = typeof body?.contact_id === "string" ? body.contact_id.trim() : "";
+  if (!contactId) return null;
+  return { contactId, field: typeof body?.contact_field === "string" ? body.contact_field : "" };
+}
+
 export function leadErrorMessage(
   error: unknown,
   tx: LeadErrorTranslator,

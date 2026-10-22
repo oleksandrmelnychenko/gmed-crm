@@ -546,6 +546,10 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   minor_own_login_closed: "api_minor_own_login_closed",
   // The payer declaration's phone (lead_payer.rs, field `phone`).
   payer_phone_invalid: "api_payer_phone_invalid",
+  // Trusted contacts of a lead (leads.rs, lead_representatives.rs): a guardian of a minor needs
+  // the custody "guardian"; a new or changed phone number needs six digits.
+  relation_guardian_needs_custody: "api_relation_guardian_needs_custody",
+  trusted_contact_phone_invalid: "api_trusted_contact_phone_invalid",
   // Orders, contracts, quotes and the service catalogues (lib/order-api-errors.ts).
   ...ORDER_API_ERROR_KEYS,
   // Internal notes and re-billing waivers (lib/billing-api-errors.ts).

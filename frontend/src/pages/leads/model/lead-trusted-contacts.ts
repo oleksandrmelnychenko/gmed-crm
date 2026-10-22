@@ -42,6 +42,11 @@ export function isParentOrGuardianRelation(relation: string): boolean {
   return ["mother", "father", "parent", "guardian"].includes(relationKind(relation));
 }
 
+/** A guardian (Vormund) rather than a parent, as the server reads the relation. */
+export function isLegalGuardianRelation(relation: string): boolean {
+  return relationKind(relation) === "guardian";
+}
+
 /**
  * How a trusted contact is related to the client, as staff read it. A stored
  * value the list does not know (free text of older data) is shown as it is.

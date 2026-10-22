@@ -119,6 +119,7 @@ import {
 import { representativeName } from "../model/lead-gwg-statements";
 import {
   TRUSTED_CONTACT_RELATIONS,
+  isLegalGuardianRelation,
   isParentOrGuardianRelation,
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
@@ -128,6 +129,7 @@ import {
   trustedContactsPayload,
   type TrustedContactPayload,
 } from "../model/lead-trusted-contacts";
+import { medicalStepHasContent } from "../model/medical-step-content";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
 import { removeLeadRepresentativeData, removeLeadTrustedContact } from "../data/lead-representation-api";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
@@ -274,6 +276,7 @@ import {
   leadIntakeTypeFromLead,
   leadErrorBlockingReasons,
   leadErrorMessage,
+  leadServerContactError,
   leadServerFieldError,
   normalizeLeadServiceSelection,
   normalizeLeadServiceValue,
@@ -3389,6 +3392,8 @@ export function LeadWizard({
   const [masterValidationAttempted, setMasterValidationAttempted] = useState(false);
   // A field the server refused on the last save (422 with `field`), shown at the field.
   const [serverMasterError, setServerMasterError] = useState<{ field: MasterFieldKey; message: string } | null>(null);
+  // A trusted contact the server refused on the last save (422 with `contact_id`), shown at the contact.
+  const [serverContactError, setServerContactError] = useState<{ contactId: string; message: string } | null>(null);
   // Why the birth-date picker did not take what was typed (see `onPickerValidation`).
   const [birthDateEntryError, setBirthDateEntryError] = useState<string | null>(null);
   const [orderValidationAttempted, setOrderValidationAttempted] = useState(false);
@@ -5166,6 +5171,7 @@ export function LeadWizard({
         }
         lastSavedAutosaveSignatureRef.current = signature;
         setServerMasterError(null);
+        setServerContactError(null);
         if (currentAutosaveSignatureRef.current === signature) {
           if (savedDraft !== snapshot.draft) {
             const savedSignature = autosaveSnapshotSignature({ ...snapshot, draft: savedDraft });
@@ -5192,6 +5198,8 @@ export function LeadWizard({
           setExistingParentPatientId(existingParentPatientFromError(nextError)?.patientId ?? null);
           const refusedField = SERVER_MASTER_FIELDS[leadServerFieldError(nextError) ?? ""];
           setServerMasterError(refusedField ? { field: refusedField, message: errorText(nextError, tx) } : null);
+          const refusedContact = leadServerContactError(nextError);
+          setServerContactError(refusedContact ? { contactId: refusedContact.contactId, message: errorText(nextError, tx) } : null);
           setAutosaveError(errorText(nextError, tx));
           setAutosaveErrorDetail(autosaveErrorDetailText(stage, nextError));
           setAutosaveStatus("error");
@@ -5597,6 +5605,9 @@ export function LeadWizard({
       setTrustedContactRelationError(tx("Укажите, кто представляет ребёнка: мать, отец или опекун", "Bitte Mutter, Vater oder Vormund auswählen"));
       return;
     }
+    // What the server has for this contact: an older value it keeps is not
+    // checked again (owner 2026-10-22), as on the server.
+    const storedContact = trustedContactsBaseRef.current.find((contact) => contact.id === trustedContactEditor.id);
     if (trustedContactEditor.email.trim() && !isValidEmailAddress(trustedContactEditor.email)) {
       setTrustedContactEmailError(tx("Введите корректный адрес электронной почты", "Gültige E-Mail-Adresse eingeben"));
       return;
@@ -5607,7 +5618,7 @@ export function LeadWizard({
       return;
     }
     const contactPhone = trustedContactEditor.phone.trim();
-    if (contactPhone && !isValidPhoneNumber(contactPhone)) {
+    if (contactPhone && contactPhone !== (storedContact?.phone ?? "").trim() && !isValidPhoneNumber(contactPhone)) {
       setTrustedContactPhoneError(tx("Введите корректный номер телефона (не менее 6 цифр)", "Gültige Telefonnummer eingeben (mindestens 6 Ziffern)"));
       return;
     }
@@ -5624,6 +5635,22 @@ export function LeadWizard({
       ));
       return;
     }
+    // A guardian (Vormund) of a minor needs the custody "guardian" (owner
+    // 2026-10-22, the server refuses it too); a contact stored as guardian
+    // before keeps saving as it is.
+    if (
+      draft
+      && isMinor(draft.birthDate, new Date())
+      && isLegalGuardianRelation(trustedContactEditor.relation)
+      && !isLegalGuardianRelation(storedContact?.relation ?? "")
+      && step1Portal.intake?.representation?.custody !== "guardian"
+    ) {
+      setTrustedContactRelationError(tx(
+        "Опекун возможен только при опеке по решению суда; для родителя выберите Мать или Отец",
+        "Vormund ist nur bei gerichtlich angeordneter Vormundschaft möglich; für einen Elternteil Mutter oder Vater wählen",
+      ));
+      return;
+    }
 
     const normalizedContact: TrustedContactDraft = {
       ...trustedContactEditor,
@@ -5635,6 +5662,7 @@ export function LeadWizard({
     };
     setError("");
     clearServerValidation();
+    setServerContactError((current) => current?.contactId === normalizedContact.id ? null : current);
     setDraft((current) => {
       if (!current) return current;
       const exists = current.trustedContacts.some((contact) => contact.id === normalizedContact.id);
@@ -7351,6 +7379,17 @@ ${serviceCommentLines.join("\n")}`
     if (id === "release") return conversionReady;
     return readiness.get(id) ?? false;
   };
+  // The tick of the tab bar: the optional medical tab gets it only when
+  // something in it is filled (owner 2026-10-22); empty it stays neutral
+  // while the readiness above still counts it as ready.
+  const medicalTabFilled = Boolean(draft && medicalStepHasContent({
+    ...draft,
+    hasMedicalRecords,
+    medicalDocumentCount: medicalDocuments.length,
+  }));
+  const isStepTicked = (id: StepId) => (
+    id === "medical" ? medicalTabFilled && isStepReady(id) : isStepReady(id)
+  );
 
   if (!leadId && !createMode) return null;
   const autosaveIsDirty = autosaveStatus === "dirty"
@@ -7570,7 +7609,8 @@ ${serviceCommentLines.join("\n")}`
               <span ref={stepPillRef} className="t-tabs-pill lead-wizard-step-pill" aria-hidden="true" />
               {STEPS.map((item, itemIndex) => {
                 const selected = item.id === step;
-                const done = isStepReady(item.id);
+                const done = isStepTicked(item.id);
+                const optionalEmpty = item.id === "medical" && !done && isStepReady(item.id);
                 const StepIcon = STEP_ICONS[item.id];
                 return (
                   <button
@@ -7615,7 +7655,11 @@ ${serviceCommentLines.join("\n")}`
                     >
                       {done ? <Check aria-hidden="true" className="size-3" /> : itemIndex + 1}
                     </span>
-                    <span className="sr-only">{done ? tx(" — выполнено", " — erledigt") : tx(" — не завершено", " — noch offen")}</span>
+                    <span className="sr-only">{done
+                      ? tx(" — выполнено", " — erledigt")
+                      : optionalEmpty
+                        ? tx(" — необязательно, не заполнено", " — optional, nicht ausgefüllt")
+                        : tx(" — не завершено", " — noch offen")}</span>
                   </button>
                 );
               })}
@@ -8225,6 +8269,11 @@ ${serviceCommentLines.join("\n")}`
                                   ) : null}
                                   <span className="break-all">{[contact.email, contact.phone].filter(Boolean).join(" · ")}</span>
                                 </div>
+                                {serverContactError?.contactId === contact.id ? (
+                                  <p role="alert" className="mt-1 text-xs font-medium text-destructive" data-testid="trusted-contact-server-error">
+                                    {serverContactError.message}
+                                  </p>
+                                ) : null}
                               </div>
                               <Button type="button" variant="ghost" size="icon-sm" onClick={() => openTrustedContact(contact, true)} aria-label={tx("Редактировать представителя", "Vertreter bearbeiten")}>
                                 <Pencil aria-hidden="true" className="size-3.5" />
@@ -8970,6 +9019,11 @@ ${serviceCommentLines.join("\n")}`
                               {contact.phone ? <span>{contact.phone}</span> : null}
                               {contact.address ? <span className="break-words">{contact.address}</span> : null}
                             </div>
+                            {serverContactError?.contactId === contact.id ? (
+                              <p role="alert" className="mt-1 text-xs font-medium text-destructive" data-testid="trusted-contact-server-error">
+                                {serverContactError.message}
+                              </p>
+                            ) : null}
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
                             <Button

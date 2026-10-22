@@ -563,7 +563,7 @@ test.describe("lead live workflows", () => {
         nextResponse.url().includes(`/api/v1/leads/${scenario.leads.ready.id}/failed-flow`) &&
         nextResponse.request().method() === "POST",
     );
-    await detailSheet.getByRole("button", { name: /Bearbeitung nicht erfolgreicher Leads speichern|Save failed-lead resolution/i }).click();
+    await detailSheet.getByRole("button", { name: /^Lead schließen$|Save failed-lead resolution/i }).click();
     expect((await failedFlowResponse).ok()).toBe(true);
 
     await expect(detailSheet.getByText(/^Archiviert$|^Archived$/i).first()).toBeVisible();
