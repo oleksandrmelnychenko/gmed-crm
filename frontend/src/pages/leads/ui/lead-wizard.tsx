@@ -5961,7 +5961,7 @@ export function LeadWizard({
         : null;
       if (fromPreview) {
         setDocumentPreviewError(gate ?? errorText(nextError, tx));
-        setDocumentPreviewJump(riskGateRefusal(nextError) ? PREVIEW_JUMP_RISK : representativeId);
+        setDocumentPreviewJump(riskGateRefusal(nextError) ? PREVIEW_JUMP_RISK : slot === "patient" ? "patient" : representativeId);
       } else if (gate || leadErrorBlockingReasons(nextError).length === 0) {
         // Next to the pressed button, not at the bottom of the step (DEV 2026-10-19),
         // with the way to what blocks it (QA 2026-10-22: the text named the
@@ -5978,12 +5978,12 @@ export function LeadWizard({
                   openValidationIssue({ key: "risk-assessment", step: "documents", message: "", fieldId: RISK_ASSESSMENT_SECTION_ID });
                 },
               }
-            : representativeId
+            : representativeId || slot === "patient"
               ? {
                   label: tx("Перейти к данным документа", "Zu den Ausweisdaten"),
                   onClick: () => {
                     setDocumentRowError(null);
-                    openRepresentativeIdData(representativeId);
+                    openRepresentativeIdData(representativeId ?? "patient");
                   },
                 }
               : null,
@@ -7015,7 +7015,9 @@ ${serviceCommentLines.join("\n")}`
     setStep("documents");
     // The person's card is a <details>: open it, then go to its first field.
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      const form = document.querySelector<HTMLElement>(`[data-testid="lead-representative-id-data-${representativeId}"]`);
+      const form = document.querySelector<HTMLElement>(
+        representativeId === "patient" ? '[data-testid="lead-id-data"]' : `[data-testid="lead-representative-id-data-${representativeId}"]`,
+      );
       const card = form?.closest("details");
       if (card) card.open = true;
       form?.scrollIntoView({ block: "center" });
@@ -9026,6 +9028,8 @@ ${serviceCommentLines.join("\n")}`
                       lang={lang}
                       disabled={isBusy}
                       patientScans={patientScans}
+                      patientScanCount={wizardDocuments.identity.length}
+                      patientBirthDate={draft.birthDate || null}
                       representativeFiles={representativeFileRows}
                       onSaved={() => {
                         void reloadStep1PortalState();
@@ -11160,7 +11164,7 @@ ${serviceCommentLines.join("\n")}`
                     replaceDocumentPreview(null);
                     if (target === PREVIEW_JUMP_RISK) {
                       openValidationIssue({ key: "risk-assessment", step: "documents", message: "", fieldId: RISK_ASSESSMENT_SECTION_ID });
-                    } else {
+                    } else if (target) {
                       openRepresentativeIdData(target);
                     }
                   }}

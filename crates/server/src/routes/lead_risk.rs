@@ -33,6 +33,8 @@ use crate::risk::store::{self, Assessment, Cause, DecisionError};
 use crate::risk::{self, RiskConfig, Sticky, cabinet};
 use crate::routes::documents::MAX_FILE_SIZE;
 use crate::routes::lead_payer;
+use crate::routes::lead_portal_intake::FieldError;
+use crate::services::identity_document;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 
@@ -779,21 +781,26 @@ fn parse_identity_data(body: &Value, today: NaiveDate) -> Result<IdentityData, R
     {
         return Err(invalid("id_document_type", "Not one of the document types"));
     }
-    let issuing_country = match text("id_issuing_country", 2)? {
-        Some(Some(code)) => {
-            let code = code.to_ascii_uppercase();
-            if code.len() != 2 || !code.chars().all(|ch| ch.is_ascii_uppercase()) {
-                return Err(invalid("id_issuing_country", "Use an ISO country code"));
-            }
-            Some(Some(code))
-        }
+    // A country name from another source ("Ukraine") becomes its code.
+    let issuing_country = match text("id_issuing_country", 100)? {
+        Some(Some(value)) => Some(
+            identity_document::issuing_country(&value, "id_issuing_country")
+                .map_err(FieldError::into_response)?,
+        ),
+        other => other,
+    };
+    // Trimmed, upper case, only A-Z, digits, space, '-' and '<'.
+    let document_number = match text("id_document_number", 60)? {
+        Some(Some(value)) => Some(
+            identity_document::document_number(&value, "id_document_number")
+                .map_err(FieldError::into_response)?,
+        ),
         other => other,
     };
     let issued_on = date("id_issued_on")?;
-    if let Some(Some(issued)) = issued_on
-        && issued > today
-    {
-        return Err(invalid("id_issued_on", "Date of issue is in the future"));
+    if let Some(Some(issued)) = issued_on {
+        identity_document::check_dates(Some(issued), None, None, today)
+            .map_err(FieldError::into_response)?;
     }
     let unreadable = match object.get("id_document_unreadable") {
         None => None,
@@ -808,7 +815,7 @@ fn parse_identity_data(body: &Value, today: NaiveDate) -> Result<IdentityData, R
     };
     Ok(IdentityData {
         document_type,
-        document_number: text("id_document_number", 60)?,
+        document_number,
         issuing_authority: text("id_issuing_authority", 200)?,
         issuing_country,
         issued_on,
@@ -896,7 +903,8 @@ async fn put_identity_data(
     if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
         return response;
     }
-    let data = match parse_identity_data(&body, crate::app_time::today()) {
+    let today = crate::app_time::today();
+    let data = match parse_identity_data(&body, today) {
         Ok(data) => data,
         Err(response) => return response,
     };
@@ -904,7 +912,7 @@ async fn put_identity_data(
     let result = async {
         let mut tx = state.db.begin().await?;
         if !lock_identity_lead(&mut tx, lead_id).await? {
-            return Ok(None);
+            return Ok(Stored::NotFound);
         }
         sqlx::query(
             r#"INSERT INTO lead_gwg_declarations (lead_id) VALUES ($1)
@@ -913,6 +921,24 @@ async fn put_identity_data(
         .bind(lead_id)
         .execute(&mut *tx)
         .await?;
+        // The dates as they will be stored, with the patient's birth.
+        let stored = sqlx::query(
+            r#"SELECT g.id_issued_on, g.id_valid_until, l.date_of_birth
+               FROM lead_gwg_declarations g JOIN leads l ON l.id = g.lead_id
+               WHERE g.lead_id = $1"#,
+        )
+        .bind(lead_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if let Err(invalid) = merged_dates_check(
+            &data,
+            stored.try_get("id_issued_on")?,
+            stored.try_get("id_valid_until")?,
+            stored.try_get("date_of_birth")?,
+            today,
+        ) {
+            return Ok(Stored::Invalid(invalid));
+        }
         sqlx::query(
             r#"UPDATE lead_gwg_declarations SET
                    id_document_type = CASE WHEN $2 THEN $3 ELSE id_document_type END,
@@ -965,11 +991,11 @@ async fn put_identity_data(
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok::<_, sqlx::Error>(Some(identity_json(&row)))
+        Ok::<_, sqlx::Error>(Stored::Saved(identity_json(&row)))
     }
     .await;
     match result {
-        Ok(Some(value)) => {
+        Ok(Stored::Saved(value)) => {
             crate::realtime::publish_lead_event(
                 &state,
                 Some(auth.user_id),
@@ -980,9 +1006,35 @@ async fn put_identity_data(
             .await;
             Json(value).into_response()
         }
-        Ok(None) => not_found(),
+        Ok(Stored::Invalid(invalid)) => invalid.into_response(),
+        Ok(Stored::NotFound) => not_found(),
         Err(error) => database(error, "store identity data"),
     }
+}
+
+/// What a staff save of identity data came to.
+enum Stored {
+    Saved(Value),
+    NotFound,
+    /// The dates as they would be stored do not fit together (nothing stored).
+    Invalid(FieldError),
+}
+
+/// The dates after the save, checked together with the holder's birth: the
+/// body may send only one of them.
+fn merged_dates_check(
+    data: &IdentityData,
+    stored_issued_on: Option<NaiveDate>,
+    stored_valid_until: Option<NaiveDate>,
+    birth: Option<NaiveDate>,
+    today: NaiveDate,
+) -> Result<(), FieldError> {
+    identity_document::check_dates(
+        data.issued_on.unwrap_or(stored_issued_on),
+        data.valid_until.unwrap_or(stored_valid_until),
+        birth,
+        today,
+    )
 }
 
 /// `PUT /leads/{id}/representatives/{rid}/identity-document-data`
@@ -996,7 +1048,8 @@ async fn put_representative_identity_data(
     if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
         return response;
     }
-    let data = match parse_identity_data(&body, crate::app_time::today()) {
+    let today = crate::app_time::today();
+    let data = match parse_identity_data(&body, today) {
         Ok(data) => data,
         Err(response) => return response,
     };
@@ -1004,7 +1057,7 @@ async fn put_representative_identity_data(
     let result = async {
         let mut tx = state.db.begin().await?;
         if !lock_identity_lead(&mut tx, lead_id).await? {
-            return Ok(None);
+            return Ok(Stored::NotFound);
         }
         // A parent staff named in the wizard (or one taken over from a
         // linked patient) has no row until somebody stores one: the form
@@ -1018,8 +1071,38 @@ async fn put_representative_identity_data(
         )
         .await?
         {
-            return Ok(None);
+            return Ok(Stored::NotFound);
         }
+        // The dates as they will be stored, with the person's birth.
+        let birth = crate::routes::lead_representatives::load(&mut tx, lead_id)
+            .await?
+            .and_then(|loaded| {
+                loaded
+                    .representation
+                    .find(representative_id)
+                    .and_then(|person| person.date_of_birth)
+            });
+        let stored = sqlx::query(
+            r#"SELECT id_issued_on, id_valid_until FROM lead_representatives
+               WHERE lead_id = $1 AND contact_id = $2"#,
+        )
+        .bind(lead_id)
+        .bind(representative_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(stored) = stored else {
+            return Ok(Stored::NotFound);
+        };
+        if let Err(invalid) = merged_dates_check(
+            &data,
+            stored.try_get("id_issued_on")?,
+            stored.try_get("id_valid_until")?,
+            birth,
+            today,
+        ) {
+            return Ok(Stored::Invalid(invalid));
+        }
+        // `updated_at` follows the save (DEV 2026-10-22: the row looked untouched).
         let updated = sqlx::query(
             r#"UPDATE lead_representatives SET
                    id_document_type = CASE WHEN $3 THEN $4 ELSE id_document_type END,
@@ -1030,7 +1113,9 @@ async fn put_representative_identity_data(
                    id_valid_until = CASE WHEN $13 THEN $14 ELSE id_valid_until END,
                    id_document_unreadable = COALESCE($15, id_document_unreadable),
                    id_data_entered_by = $16,
-                   id_data_entered_at = clock_timestamp()
+                   id_data_entered_at = clock_timestamp(),
+                   updated_by = $16,
+                   updated_at = now()
                WHERE lead_id = $1 AND contact_id = $2"#,
         )
         .bind(lead_id)
@@ -1053,7 +1138,7 @@ async fn put_representative_identity_data(
         .await?
         .rows_affected();
         if updated == 0 {
-            return Ok(None);
+            return Ok(Stored::NotFound);
         }
         audit::write_in_transaction(
             &mut tx,
@@ -1078,12 +1163,13 @@ async fn put_representative_identity_data(
         .fetch_one(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok::<_, sqlx::Error>(Some(identity_json(&row)))
+        Ok::<_, sqlx::Error>(Stored::Saved(identity_json(&row)))
     }
     .await;
     match result {
-        Ok(Some(value)) => Json(value).into_response(),
-        Ok(None) => error(
+        Ok(Stored::Saved(value)) => Json(value).into_response(),
+        Ok(Stored::Invalid(invalid)) => invalid.into_response(),
+        Ok(Stored::NotFound) => error(
             StatusCode::NOT_FOUND,
             "not_found",
             "Representative not found",
@@ -1363,5 +1449,90 @@ mod tests {
         assert!(parse_identity_data(&json!({ "id_document_type": "visa" }), today()).is_err());
         assert!(parse_identity_data(&json!({ "first_name": "Anna" }), today()).is_err());
         assert!(parse_identity_data(&json!({ "id_valid_until": "31.01.2020" }), today()).is_err());
+    }
+
+    async fn refused(body: Value) -> (StatusCode, String) {
+        let response = parse_identity_data(&body, today()).unwrap_err();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        (
+            status,
+            format!(
+                "{}:{}",
+                value["code"].as_str().unwrap_or_default(),
+                value["field"].as_str().unwrap_or_default()
+            ),
+        )
+    }
+
+    #[tokio::test]
+    async fn staff_identity_data_are_normalised_and_refused_with_field_codes() {
+        let data = parse_identity_data(
+            &json!({ "id_document_number": "  fa  1234567 ", "id_issuing_country": "Ukraine" }),
+            today(),
+        )
+        .unwrap();
+        assert_eq!(data.document_number, Some(Some("FA 1234567".into())));
+        assert_eq!(data.issuing_country, Some(Some("UA".into())));
+        assert_eq!(
+            refused(json!({ "id_document_number": "AB1" })).await,
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "id_document_number_too_short:id_document_number".into()
+            )
+        );
+        assert_eq!(
+            refused(json!({ "id_document_number": "AB/12345" })).await.1,
+            "id_document_number_invalid:id_document_number"
+        );
+        assert_eq!(
+            refused(json!({ "id_issuing_country": "Atlantis" })).await.1,
+            "id_issuing_country_invalid:id_issuing_country"
+        );
+        assert_eq!(
+            refused(json!({ "id_issued_on": "2026-10-08" })).await.1,
+            "id_issued_on_future:id_issued_on"
+        );
+        // Only spaces clear the number.
+        assert_eq!(
+            parse_identity_data(&json!({ "id_document_number": "   " }), today())
+                .unwrap()
+                .document_number,
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn staff_identity_dates_are_checked_with_the_stored_ones_and_the_birth() {
+        let day = |y, m, d| NaiveDate::from_ymd_opt(y, m, d);
+        let only_valid =
+            parse_identity_data(&json!({ "id_valid_until": "2019-12-31" }), today()).unwrap();
+        // The stored date of issue stays: valid until before it is refused.
+        let refused =
+            merged_dates_check(&only_valid, day(2020, 1, 1), None, None, today()).unwrap_err();
+        assert_eq!(
+            (refused.code, refused.field),
+            ("id_valid_until_before_issue", "id_valid_until")
+        );
+        // Clearing the date of issue in the same body lets it through.
+        let cleared = parse_identity_data(
+            &json!({ "id_issued_on": null, "id_valid_until": "2019-12-31" }),
+            today(),
+        )
+        .unwrap();
+        assert!(merged_dates_check(&cleared, day(2020, 1, 1), None, None, today()).is_ok());
+        let issued =
+            parse_identity_data(&json!({ "id_issued_on": "2001-01-01" }), today()).unwrap();
+        assert_eq!(
+            merged_dates_check(&issued, None, None, day(2005, 3, 1), today())
+                .unwrap_err()
+                .code,
+            "id_issued_on_before_birth"
+        );
+        // An expired document is recorded (trigger T12); confirming it is refused elsewhere.
+        assert!(merged_dates_check(&only_valid, None, None, day(1990, 1, 1), today()).is_ok());
     }
 }

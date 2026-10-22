@@ -168,7 +168,9 @@ function useAnswersForm({
       // The message belongs to the refused value: it goes as soon as the value changes.
       const value = refused.values[field];
       if (value === undefined || value !== fieldValue(field, draft)) return undefined;
-      return refused.codes[field] === "id_document_expired" ? text.idDocumentExpired : text.invalidField;
+      const code = refused.codes[field];
+      if (code === "id_document_expired") return text.idDocumentExpired;
+      return (code ? text.idDocumentRules[code] : undefined) ?? text.invalidField;
     },
     flush: () => save(draftRef.current),
   };

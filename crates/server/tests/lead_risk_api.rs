@@ -1300,8 +1300,93 @@ async fn staff_store_the_document_data_of_a_parent_without_a_row() {
             Uuid::new_v4()
         ),
         &app.pm(),
-        Some(json!({ "id_document_number": "XX1" })),
+        Some(json!({ "id_document_number": "XX12345" })),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // DEV 2026-10-22: a full body is stored whole, normalised, and the row's
+    // `updated_at` follows; a body that breaks the rules stores nothing.
+    let before: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "SELECT updated_at FROM lead_representatives WHERE lead_id = $1 AND contact_id = $2",
+    )
+    .bind(lead_id)
+    .bind(parent_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    let (status, data) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{lead_id}/representatives/{parent_id}/identity-document-data"),
+        &app.pm(),
+        Some(json!({
+            "id_document_type": "passport",
+            "id_document_number": " fx 765 4321 ",
+            "id_issuing_authority": "Bürgeramt Mitte",
+            "id_issuing_country": "Ukraine",
+            "id_issued_on": "2021-10-21",
+            "id_valid_until": "2031-10-20",
+            "id_document_unreadable": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    assert_eq!(data["id_document_number"], "FX 765 4321");
+    assert_eq!(data["id_issuing_authority"], "Bürgeramt Mitte");
+    assert_eq!(data["id_issuing_country"], "UA");
+    let stored: (String, String, String, chrono::DateTime<chrono::Utc>) = sqlx::query_as(
+        r#"SELECT id_document_number, id_issuing_authority, id_issuing_country, updated_at
+           FROM lead_representatives WHERE lead_id = $1 AND contact_id = $2"#,
+    )
+    .bind(lead_id)
+    .bind(parent_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        (stored.0.as_str(), stored.1.as_str(), stored.2.as_str()),
+        ("FX 765 4321", "Bürgeramt Mitte", "UA")
+    );
+    assert!(stored.3 > before);
+    for (body, code, field) in [
+        (
+            json!({ "id_document_number": "AB1" }),
+            "id_document_number_too_short",
+            "id_document_number",
+        ),
+        (
+            json!({ "id_valid_until": "2020-01-01" }),
+            "id_valid_until_before_issue",
+            "id_valid_until",
+        ),
+        (
+            json!({ "id_issued_on": "1979-01-01" }),
+            "id_issued_on_before_birth",
+            "id_issued_on",
+        ),
+    ] {
+        let (status, refusal) = request(
+            &app,
+            "PUT",
+            &format!("/leads/{lead_id}/representatives/{parent_id}/identity-document-data"),
+            &app.pm(),
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refusal}");
+        assert_eq!(
+            (refusal["code"].as_str(), refusal["field"].as_str()),
+            (Some(code), Some(field))
+        );
+    }
+    let number: String = sqlx::query_scalar(
+        "SELECT id_document_number FROM lead_representatives WHERE lead_id = $1 AND contact_id = $2",
+    )
+    .bind(lead_id)
+    .bind(parent_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(number, "FX 765 4321");
 }

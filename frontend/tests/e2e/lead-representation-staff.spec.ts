@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { chooseComboboxOption } from "./helpers";
+
 // Who acts for a minor lead, in the staff wizard: the legal representatives as
 // the cabinet knows them (read-only), the identification per parent instead of
 // the child, one GwG sheet per parent, the custody stated by staff, the GwG
@@ -206,6 +208,12 @@ type Mock = {
   requestSentAt?: string;
   requestChanged?: boolean;
   refuseContactRemoval?: boolean;
+  /** Ben's document as on DEV 2026-10-22: only the type and the dates stored. */
+  benPartialId?: boolean;
+  /** How long the mocked server takes for a document data save. */
+  idSaveDelayMs?: number;
+  /** The portal state asked right after the first document save answers this late. */
+  staleIntakeMs?: number;
 };
 
 async function mount(page: Page, mock: Mock) {
@@ -216,7 +224,24 @@ async function mount(page: Page, mock: Mock) {
       under_guardianship: null,
       custody: "joint",
       custody_stated: false,
-      representatives: mock.motherOnly ? [annaPerson] : [annaPerson, benPerson],
+      representatives: mock.motherOnly
+        ? [annaPerson]
+        : [
+            annaPerson,
+            mock.benPartialId
+              ? {
+                  ...benPerson,
+                  id_document_type: "passport",
+                  id_document_number: null,
+                  id_issuing_authority: null,
+                  id_issuing_country: null,
+                  id_issued_on: "2026-10-01",
+                  id_valid_until: "2031-10-31",
+                  id_data_entered_by_name: "Intake QA",
+                  id_data_entered_at: "2026-10-12T08:00:00Z",
+                }
+              : benPerson,
+          ],
     } as Json & { representatives: Json[] },
     status: {
       // The child neither signs nor pays.
@@ -234,7 +259,10 @@ async function mount(page: Page, mock: Mock) {
     custody: [] as unknown[],
     removedData: [] as string[],
     removedContacts: [] as string[],
+    /** Bodies of the document data saves of a representative. */
+    idSaves: [] as Array<{ id: string; body: Json }>,
   };
+  let lateIntakeSent = false;
   await page.addInitScript((value) => {
     localStorage.setItem("gmed_lang", value);
     localStorage.setItem("gmed_access_token", "lead-representation-token");
@@ -247,7 +275,24 @@ async function mount(page: Page, mock: Mock) {
     const payment = path.match(/^\/leads\/[^/]+\/identification-status\/([^/]+)\/own-account-payment$/);
     const removal = path.match(/^\/leads\/[^/]+\/representatives\/([^/]+)$/);
     const contactRemoval = path.match(/^\/leads\/[^/]+\/trusted-contacts\/([^/]+)$/);
+    const idData = path.match(/^\/leads\/[^/]+\/representatives\/([^/]+)\/identity-document-data$/);
     let response: unknown = [];
+    if (idData && method === "PUT") {
+      const body = request.postDataJSON() as Json;
+      calls.idSaves.push({ id: idData[1], body });
+      if (mock.idSaveDelayMs) await new Promise((resolve) => setTimeout(resolve, mock.idSaveDelayMs));
+      let stored: Json = {};
+      state.representation = {
+        ...state.representation,
+        representatives: state.representation.representatives.map((person) => {
+          if (person.id !== idData[1]) return person;
+          stored = { ...person, ...body, id_data_entered_by_name: "Intake QA", id_data_entered_at: new Date().toISOString() };
+          return stored;
+        }),
+      };
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(stored) });
+      return;
+    }
     if (path === "/me") {
       response = { id: "repr-user", email: "intake@example.com", name: "Intake QA", role: "ceo", created_at: "2026-01-01T00:00:00Z" };
     } else if (path === "/sanctions/check") {
@@ -272,6 +317,13 @@ async function mount(page: Page, mock: Mock) {
       };
       response = { representation: state.representation };
     } else if (path === `/leads/${leadId}/portal-intake`) {
+      // The reload after the first document save answers late, with what was
+      // stored when it was asked (a reload that overtakes a later save).
+      const representation = JSON.parse(JSON.stringify(state.representation)) as Json;
+      if (mock.staleIntakeMs && calls.idSaves.length === 1 && !lateIntakeSent) {
+        lateIntakeSent = true;
+        await new Promise((resolve) => setTimeout(resolve, mock.staleIntakeMs));
+      }
       response = {
         lead_id: leadId,
         fill_mode: "patient",
@@ -291,7 +343,7 @@ async function mount(page: Page, mock: Mock) {
         identification: { birth_place: "Berlin", birth_country: "DE", contact_channels: ["email"] },
         identification_updated_at: "2026-10-05T09:20:00Z",
         identity_documents: [],
-        representation: state.representation,
+        representation,
         // 11:40 in Berlin.
         representation_updated_at: "2026-10-05T09:40:00Z",
       };
@@ -925,4 +977,65 @@ test("staff reuse a mother who is still a lead without creating a patient link",
   const written = (calls.updates.at(-1)?.trusted_contacts as Json[]).find(c => c.id === ANNA_ID)!;
   expect(written).toMatchObject({ relation: "mother", email: "existing.leadmother@example.test", birth_date: "1985-05-01" });
   expect(written.related_patient_id ?? null).toBeNull();
+});
+
+test("a parent's typed document data are saved whole and stay in the form", async ({ page }) => {
+  // DEV 2026-10-22: the number, the authority and the country of a parent's
+  // passport were typed, "Сохранить данные документа" was pressed, and the
+  // form fell back to the stored type and dates; the server kept them empty.
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard, calls } = await mount(page, { lang: "ru", benPartialId: true, idSaveDelayMs: 300, staleIntakeMs: 2500 });
+  const form = wizard.getByTestId(`lead-representative-id-data-${BEN_ID}`);
+  const card = form.locator("xpath=ancestor::details[1]");
+  if (!(await card.evaluate((node) => (node as HTMLDetailsElement).open))) {
+    await card.locator("summary").click();
+  }
+  await expect(form).toBeVisible();
+  const outside = wizard.getByTestId("lead-identity-document-data").locator("h4").first();
+  // The number first, then staff leave the form: stored at once.
+  await form.locator('input[name="id_document_number"]').fill("c01x00t47");
+  await outside.click();
+  await expect.poll(() => calls.idSaves.length).toBe(1);
+  expect(calls.idSaves[0].body).toMatchObject({ id_document_number: "C01X00T47", id_issuing_country: null });
+  // Opening the country list is no leaving: nothing half-typed is sent.
+  await form.locator('input[name="id_issuing_authority"]').fill("Bürgeramt Mitte");
+  await chooseComboboxOption(page, form.getByRole("combobox", { name: "Страна выдачи" }), /^Германия$/);
+  expect(calls.idSaves).toHaveLength(1);
+  await form.getByTestId(`lead-representative-id-data-${BEN_ID}-save`).click();
+  await expect(form.getByTestId(`lead-representative-id-data-${BEN_ID}-saved`)).toBeVisible();
+  // The late reload of the first save (only the number) must not reset the form.
+  await page.waitForTimeout(3000);
+  // Whatever was sent last is what the server keeps.
+  expect(calls.idSaves.at(-1)?.body).toEqual({
+    id_document_type: "passport",
+    id_document_number: "C01X00T47",
+    id_issuing_authority: "Bürgeramt Mitte",
+    id_issuing_country: "DE",
+    id_issued_on: "2026-10-01",
+    id_valid_until: "2031-10-31",
+    id_document_unreadable: false,
+  });
+  await expect(form.locator('input[name="id_document_number"]')).toHaveValue("C01X00T47");
+  await expect(form.locator('input[name="id_issuing_authority"]')).toHaveValue("Bürgeramt Mitte");
+  await expect(form.getByRole("combobox", { name: "Страна выдачи" })).toContainText("Германия");
+  await expect(form.getByTestId(`lead-representative-id-data-${BEN_ID}-unsaved`)).toHaveCount(0);
+  // Leaving the form after the save sends nothing stale.
+  const count = calls.idSaves.length;
+  await form.locator('input[name="id_issuing_authority"]').click();
+  await outside.click();
+  await page.waitForTimeout(800);
+  expect(calls.idSaves.slice(count).every((call) => call.body.id_document_number === "C01X00T47")).toBe(true);
+  await expect(form.locator('input[name="id_document_number"]')).toHaveValue("C01X00T47");
+  await expect(form.getByTestId(`lead-representative-id-data-${BEN_ID}-status`)).toHaveText(
+    "Данные заполнены · действителен до 31.10.2031",
+  );
+
+  // A number that breaks the rules is named at the field and never sent.
+  const saves = calls.idSaves.length;
+  await form.locator('input[name="id_document_number"]').fill("ab/1");
+  await outside.click();
+  await expect(form.getByText("Только латинские буквы A–Z, цифры, пробел, «-» и «<»")).toBeVisible();
+  await expect(form.getByTestId(`lead-representative-id-data-${BEN_ID}-unsaved`)).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(calls.idSaves).toHaveLength(saves);
 });

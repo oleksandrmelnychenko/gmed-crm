@@ -829,6 +829,8 @@ export function riskDecisionErrorText(error: unknown, tx: Tx): string | null {
 }
 
 const REPRESENTATIVE_SLOT_LABELS: Record<string, [string, string]> = {
+  // The patient's own GwG sheet (owner 2026-10-22): the patient's document.
+  patient: ["пациент", "Patient/in"],
   rep1: ["первый родитель / представитель", "erster Elternteil / Vertreter"],
   rep2: ["второй родитель", "zweiter Elternteil"],
   agent: ["представитель", "Bevollmächtigte Person"],
@@ -855,6 +857,11 @@ const REPRESENTATIVE_FIELD_LABELS: Record<string, [string, string]> = {
   id_issuing_authority: ["кем выдан документ", "ausstellende Behörde"],
   id_issuing_country: ["страна выдачи документа", "Ausstellungsland"],
   id_valid_until: ["срок действия документа", "gültig bis"],
+  id_document_expired: ["документ просрочен — нужен действующий", "Ausweis abgelaufen – ein gültiger ist nötig"],
+  id_document_unreadable: ["документ нечитаем — нужен новый скан", "Ausweis unleserlich – neuer Scan nötig"],
+  id_document_number_invalid: ["номер документа в неверном формате", "Ausweisnummer im falschen Format"],
+  id_issuing_country_invalid: ["страна выдачи не из списка", "Ausstellungsland nicht aus der Liste"],
+  id_dates_invalid: ["даты документа не сходятся", "Ausweisdaten passen nicht zusammen"],
   authority_upload: ["подтверждение полномочий", "Vollmachtsnachweis"],
 };
 
@@ -919,7 +926,13 @@ export function riskGateErrorText(error: unknown, tx: Tx): string | null {
   const code = error.body?.code ?? error.body?.error ?? error.code;
   if (code === "representative_details_incomplete") {
     // A per-person document (the GwG sheet of one parent) names only that person's data.
-    const base = error.body?.scope === "person" ? tx(
+    const onlyDocument = Array.isArray(error.body?.missing)
+      && (error.body.missing as unknown[]).length > 0
+      && (error.body.missing as unknown[]).every((key) => representativeDocumentFieldsMissing([key]));
+    const base = error.body?.scope === "person" && onlyDocument ? tx(
+      "Подтвердить идентификацию нельзя: документ, удостоверяющий личность, не годится.",
+      "Die Identifizierung kann nicht bestätigt werden: Das Ausweisdokument genügt nicht.",
+    ) : error.body?.scope === "person" ? tx(
       "Перед подтверждением подписи дополните данные этого лица в разделе «Данные клиента».",
       "Bitte vervollständigen Sie vor der Bestätigung der Unterschrift die Daten dieser Person unter „Personendaten“.",
     ) : tx(

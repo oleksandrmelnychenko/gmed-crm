@@ -1551,7 +1551,8 @@ fn apply_answers_patch(
                     intake::one_of(text_of(value, key)?, key, &intake::ID_DOCUMENT_TYPE_VALUES)?;
             }
             "id_document_number" => {
-                next.id_document_number = intake::clean_text(text_of(value, key)?, key, 60)?;
+                next.id_document_number =
+                    crate::services::identity_document::document_number(text_of(value, key)?, key)?;
             }
             "id_issuing_authority" => {
                 next.id_issuing_authority = intake::clean_text(text_of(value, key)?, key, 200)?;
@@ -1652,6 +1653,19 @@ fn apply_answers_patch(
     }
     if next.beneficial_owners_none == Some(true) {
         next.beneficial_owners.clear();
+    }
+    // The document's dates fit together and the payer's birth, checked only
+    // when one of them changes (an old stored answer still loads).
+    if ["id_issued_on", "id_valid_until"]
+        .iter()
+        .any(|key| patch.contains_key(*key))
+    {
+        crate::services::identity_document::check_dates(
+            next.id_issued_on,
+            next.id_valid_until,
+            next.date_of_birth,
+            today,
+        )?;
     }
     Ok(next)
 }

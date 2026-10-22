@@ -101,6 +101,8 @@ export type PayerLinkText = {
   choose: string;
   invalidField: string;
   idDocumentExpired: string;
+  /** Refusals of the identity document rules, by the server's code (owner 2026-10-22). */
+  idDocumentRules: Record<string, string>;
   privacyNotice: (patient: string, organisation?: boolean) => readonly string[];
   privacyLink: string;
   privacyAck: string;
@@ -263,6 +265,15 @@ const de: PayerLinkText = {
   choose: "Auswählen",
   invalidField: "Bitte prüfen Sie diese Angabe.",
   idDocumentExpired: "Das Dokument ist abgelaufen. Bitte geben Sie ein gültiges Dokument an.",
+  idDocumentRules: {
+    id_document_number_invalid: "Nur lateinische Buchstaben A–Z, Ziffern, Leerzeichen, „-“ und „<“.",
+    id_document_number_too_short: "Die Nummer ist zu kurz: mindestens 5 Buchstaben oder Ziffern.",
+    id_document_number_too_long: "Die Nummer ist zu lang: höchstens 30 Zeichen.",
+    id_issued_on_future: "Das Ausstellungsdatum darf nicht in der Zukunft liegen.",
+    id_issued_on_too_early: "Das Ausstellungsdatum ist zu früh.",
+    id_issued_on_before_birth: "Das Ausstellungsdatum liegt vor dem Geburtsdatum.",
+    id_valid_until_before_issue: "„Gültig bis“ muss nach dem Ausstellungsdatum liegen.",
+  },
   privacyNotice: (patient, organisation) => [
     organisation
       ? `${patient} hat Ihre Organisation als zahlende Partei benannt und uns dafür ihren Namen und ihre Kontaktdaten mitgeteilt.`
@@ -548,6 +559,15 @@ const en: PayerLinkText = {
   choose: "Select",
   invalidField: "Please check this entry.",
   idDocumentExpired: "The document has expired. Please enter a valid document.",
+  idDocumentRules: {
+    id_document_number_invalid: "Only Latin letters A–Z, digits, spaces, “-” and “<”.",
+    id_document_number_too_short: "The number is too short: at least 5 letters or digits.",
+    id_document_number_too_long: "The number is too long: at most 30 characters.",
+    id_issued_on_future: "The date of issue cannot be in the future.",
+    id_issued_on_too_early: "The date of issue is too early.",
+    id_issued_on_before_birth: "The date of issue is before the date of birth.",
+    id_valid_until_before_issue: "“Valid until” must be after the date of issue.",
+  },
   privacyNotice: (patient, organisation) => [
     organisation
       ? `${patient} has named your organisation as the paying party and gave us its name and contact details for this purpose.`
@@ -831,6 +851,15 @@ const uk: PayerLinkText = {
   choose: "Виберіть",
   invalidField: "Будь ласка, перевірте це поле.",
   idDocumentExpired: "Термін дії документа минув. Будь ласка, вкажіть дійсний документ.",
+  idDocumentRules: {
+    id_document_number_invalid: "Лише латинські літери A–Z, цифри, пробіл, «-» і «<».",
+    id_document_number_too_short: "Номер закороткий: щонайменше 5 літер або цифр.",
+    id_document_number_too_long: "Номер задовгий: не більше 30 символів.",
+    id_issued_on_future: "Дата видачі не може бути в майбутньому.",
+    id_issued_on_too_early: "Дата видачі занадто рання.",
+    id_issued_on_before_birth: "Дата видачі раніша за дату народження.",
+    id_valid_until_before_issue: "«Дійсний до» має бути пізніше за дату видачі.",
+  },
   privacyNotice: (patient, organisation) => [
     organisation
       ? `${patient} вказав(ла) вашу організацію як платника і для цього повідомив(ла) нам її назву та контактні дані.`
@@ -1118,6 +1147,15 @@ const ru: PayerLinkText = {
   choose: "Выберите",
   invalidField: "Пожалуйста, проверьте это поле.",
   idDocumentExpired: "Срок действия документа истёк. Пожалуйста, укажите действующий документ.",
+  idDocumentRules: {
+    id_document_number_invalid: "Только латинские буквы A–Z, цифры, пробел, «-» и «<».",
+    id_document_number_too_short: "Номер слишком короткий: минимум 5 букв или цифр.",
+    id_document_number_too_long: "Номер слишком длинный: максимум 30 знаков.",
+    id_issued_on_future: "Дата выдачи не может быть в будущем.",
+    id_issued_on_too_early: "Дата выдачи слишком ранняя.",
+    id_issued_on_before_birth: "Дата выдачи раньше даты рождения.",
+    id_valid_until_before_issue: "«Действителен до» должен быть позже даты выдачи.",
+  },
   privacyNotice: (patient, organisation) => [
     organisation
       ? `${patient} указал(а) вашу организацию как плательщика и для этого сообщил(а) нам её название и контактные данные.`

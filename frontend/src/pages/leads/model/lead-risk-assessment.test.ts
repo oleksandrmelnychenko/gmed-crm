@@ -274,6 +274,22 @@ describe("the risk assessment of a lead (staff)", () => {
       code: "Unprocessable Entity",
       body: { error: "Unprocessable Entity", code: "representative_details_incomplete" },
     }), ru)).toContain("родителей");
+    // The patient's own GwG sheet with an expired document (owner 2026-10-22).
+    const expired = new ApiRequestError("Unprocessable Entity", {
+      status: 422,
+      code: "Unprocessable Entity",
+      body: {
+        error: "Unprocessable Entity",
+        code: "representative_details_incomplete",
+        scope: "person",
+        missing: ["patient_id_issuing_authority", "patient_id_document_expired"],
+      },
+    });
+    const text = riskGateErrorText(expired, ru) ?? "";
+    expect(text).toContain("Подтвердить идентификацию нельзя");
+    expect(text).toContain("пациент — кем выдан документ, документ просрочен — нужен действующий");
+    expect(text).toContain("«Документ, удостоверяющий личность»");
+    expect(representativeDocumentSlot(expired)).toBe("patient");
   });
 
   it("names deputies only from eligible roles", () => {

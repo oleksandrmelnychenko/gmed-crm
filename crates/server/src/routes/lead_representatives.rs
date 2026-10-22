@@ -193,6 +193,8 @@ pub(crate) struct Extras {
     pub id_issuing_country: Option<String>,
     pub id_issued_on: Option<NaiveDate>,
     pub id_valid_until: Option<NaiveDate>,
+    /// Staff marked the scan unreadable: a new one is needed.
+    pub id_document_unreadable: bool,
     pub country_questions: Value,
 }
 
@@ -226,6 +228,9 @@ impl Extras {
             id_issuing_country: text("id_issuing_country"),
             id_issued_on: date("id_issued_on"),
             id_valid_until: date("id_valid_until"),
+            id_document_unreadable: row
+                .try_get::<bool, _>("id_document_unreadable")
+                .unwrap_or(false),
             country_questions: row
                 .try_get("country_questions")
                 .unwrap_or_else(|_| json!({})),
@@ -945,8 +950,12 @@ pub(crate) enum SignatureDetails {
     /// The own document of one representative (its GwG sheet): that person's
     /// data only.
     Representative(Uuid),
-    /// The own document of somebody who is no representative (the GwG sheet
-    /// of the patient or of the payer): no representative's data.
+    /// The GwG sheet of the adult patient: the patient's own identity
+    /// document (owner 2026-10-22: an expired or incomplete document cannot
+    /// identify), no representative's data.
+    Patient,
+    /// The own document of somebody else (the GwG sheet of the payer, whose
+    /// data come from the payer's own link): no representative's data.
     Nobody,
 }
 
@@ -961,10 +970,14 @@ impl SignatureDetails {
         if !gwg_sheet {
             return Self::Contract;
         }
-        bindings
+        let subject = bindings
             .and_then(|bindings| bindings.get("gwg_identification"))
             .and_then(|binding| binding.get("subject"))
-            .and_then(Value::as_str)
+            .and_then(Value::as_str);
+        if subject.map(str::trim) == Some("contract_partner") {
+            return Self::Patient;
+        }
+        subject
             .and_then(subject_representative)
             .map_or(Self::Nobody, Self::Representative)
     }
@@ -985,6 +998,16 @@ pub(crate) async fn signature_details_missing(
             contract_subject_details_missing(conn, lead_id, patient_id, order_id).await
         }
         SignatureDetails::Nobody => Ok(Vec::new()),
+        SignatureDetails::Patient => {
+            for lead_id in subject_leads(conn, lead_id, patient_id, order_id).await? {
+                let missing =
+                    patient_identity_missing(conn, lead_id, crate::app_time::today()).await?;
+                if !missing.is_empty() {
+                    return Ok(missing);
+                }
+            }
+            Ok(Vec::new())
+        }
         SignatureDetails::Representative(id) => {
             for lead_id in subject_leads(conn, lead_id, patient_id, order_id).await? {
                 let Some(loaded) = load(conn, lead_id).await? else {
@@ -1003,6 +1026,62 @@ pub(crate) async fn signature_details_missing(
     }
 }
 
+/// Why the patient's identity document cannot identify today, as keys
+/// `patient_<problem>` (see [`crate::services::identity_document::problems`]).
+/// The stored document data are the one source; the wizard's old "passport
+/// valid until" is read only while nothing was stored there (like the sheet).
+pub(crate) async fn patient_identity_missing(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    today: NaiveDate,
+) -> Result<Vec<String>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT l.date_of_birth, l.wizard_state->>'passport_expiry' AS legacy_valid_until,
+                  g.id_document_type, g.id_document_number, g.id_issuing_authority,
+                  g.id_issuing_country, g.id_issued_on, g.id_valid_until,
+                  COALESCE(g.id_document_unreadable, false) AS id_document_unreadable
+           FROM leads l
+           LEFT JOIN lead_gwg_declarations g ON g.lead_id = l.id
+           WHERE l.id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(Vec::new());
+    };
+    let text = |column: &str| row.try_get::<Option<String>, _>(column).ok().flatten();
+    let (kind, number, authority, country) = (
+        text("id_document_type"),
+        text("id_document_number"),
+        text("id_issuing_authority"),
+        text("id_issuing_country"),
+    );
+    let valid_until = row
+        .try_get::<Option<NaiveDate>, _>("id_valid_until")?
+        .or_else(|| {
+            text("legacy_valid_until")
+                .and_then(|value| NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").ok())
+        });
+    let document = crate::services::identity_document::Document {
+        kind: kind.as_deref(),
+        number: number.as_deref(),
+        authority: authority.as_deref(),
+        country: country.as_deref(),
+        issued_on: row.try_get("id_issued_on")?,
+        valid_until,
+        unreadable: row.try_get("id_document_unreadable")?,
+    };
+    Ok(crate::services::identity_document::problems(
+        &document,
+        row.try_get("date_of_birth")?,
+        today,
+    )
+    .into_iter()
+    .map(|problem| format!("patient_{problem}"))
+    .collect())
+}
+
 /// What one representative still lacks for a document of their own, as keys
 /// `<slot>_<field>`: the full list of their place, never the other parent's.
 /// A person on file without a place in the form (a third parent) needs none.
@@ -1012,13 +1091,13 @@ pub(crate) fn missing_for_representative(
     representative_id: Uuid,
 ) -> Vec<String> {
     let representation = &loaded.representation;
-    let Some(slot) = representation
-        .find(representative_id)
-        .and_then(|person| person.slot)
-    else {
+    let Some(person) = representation.find(representative_id) else {
         return Vec::new();
     };
-    if representation.minor {
+    let Some(slot) = person.slot else {
+        return Vec::new();
+    };
+    let mut missing = if representation.minor {
         let mut missing = place_missing(loaded, today, slot, &MINOR_REQUIRED);
         if slot == SLOT_REP1 && representation.answers.custody() == CUSTODY_GUARDIAN {
             missing.extend(place_missing(
@@ -1031,6 +1110,42 @@ pub(crate) fn missing_for_representative(
         missing
     } else {
         place_missing(loaded, today, slot, &ADULT_REQUIRED)
+    };
+    add_identity_problems(&mut missing, slot, person, today);
+    missing
+}
+
+/// The person's own GwG sheet identifies only with a readable, valid and
+/// consistent document (owner 2026-10-22): an expired one is named as such
+/// instead of "valid until" missing; an unreadable scan, a number or country
+/// that breaks the rules and dates out of order are named too.
+fn add_identity_problems(
+    missing: &mut Vec<String>,
+    slot: &str,
+    person: &Representative,
+    today: NaiveDate,
+) {
+    let extras = &person.extras;
+    let document = crate::services::identity_document::Document {
+        kind: extras.id_document_type.as_deref(),
+        number: extras.id_document_number.as_deref(),
+        authority: extras.id_issuing_authority.as_deref(),
+        country: extras.id_issuing_country.as_deref(),
+        issued_on: extras.id_issued_on,
+        valid_until: extras.id_valid_until,
+        unreadable: extras.id_document_unreadable,
+    };
+    let problems =
+        crate::services::identity_document::problems(&document, person.date_of_birth, today);
+    if problems.contains(&"id_document_expired") {
+        let valid_until = format!("{slot}_id_valid_until");
+        missing.retain(|key| key != &valid_until);
+    }
+    for problem in problems {
+        let key = format!("{slot}_{problem}");
+        if !missing.contains(&key) {
+            missing.push(key);
+        }
     }
 }
 
@@ -1049,7 +1164,10 @@ pub(crate) fn signature_details_incomplete(
     details: SignatureDetails,
     missing: &[String],
 ) -> axum::response::Response {
-    if !matches!(details, SignatureDetails::Representative(_)) {
+    if !matches!(
+        details,
+        SignatureDetails::Representative(_) | SignatureDetails::Patient
+    ) {
         return contract_details_incomplete(missing);
     }
     intake::coded(
@@ -1620,7 +1738,8 @@ fn apply_person_patch(
             intake::one_of(value, "id_document_type", &intake::ID_DOCUMENT_TYPE_VALUES)?;
     }
     if let Some(value) = patch.text("id_document_number") {
-        next.id_document_number = intake::clean_text(value, "id_document_number", 60)?;
+        next.id_document_number =
+            crate::services::identity_document::document_number(value, "id_document_number")?;
     }
     if let Some(value) = patch.text("id_issuing_authority") {
         next.id_issuing_authority = intake::clean_text(value, "id_issuing_authority", 200)?;
@@ -1652,6 +1771,16 @@ fn apply_person_patch(
             });
         }
         next.id_valid_until = valid_until;
+    }
+    // The dates of the document fit together and the holder's birth, checked
+    // only when one of them changes (old rows still load and save).
+    if patch.text("id_issued_on").is_some() || patch.text("id_valid_until").is_some() {
+        crate::services::identity_document::check_dates(
+            next.id_issued_on,
+            next.id_valid_until,
+            next.date_of_birth,
+            today,
+        )?;
     }
     // The trusted contact entry is named by it, and the wizard refuses a
     // contact without a name.
@@ -4110,6 +4239,15 @@ mod tests {
                 Some(&bindings)
             ),
             SignatureDetails::Representative(representative)
+        );
+        // The patient's own sheet checks the patient's document.
+        assert_eq!(
+            SignatureDetails::of_document(
+                Some("gwg_identification"),
+                "gwg_identification",
+                Some(&json!({"gwg_identification": {"subject": "contract_partner"}}))
+            ),
+            SignatureDetails::Patient
         );
         for subject in [
             json!({"gwg_identification": {"subject": "payer"}}),

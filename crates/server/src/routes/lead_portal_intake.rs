@@ -1588,7 +1588,8 @@ pub(crate) fn apply_identification_patch(
         next.id_document_type = one_of(text(value), "id_document_type", &ID_DOCUMENT_TYPE_VALUES)?;
     }
     if let Some(value) = &patch.id_document_number {
-        next.id_document_number = clean_text(text(value), "id_document_number", 60)?;
+        next.id_document_number =
+            crate::services::identity_document::document_number(text(value), "id_document_number")?;
     }
     if let Some(value) = &patch.id_issuing_authority {
         next.id_issuing_authority = clean_text(text(value), "id_issuing_authority", 200)?;
@@ -1621,6 +1622,15 @@ pub(crate) fn apply_identification_patch(
             });
         }
         next.id_valid_until = valid_until;
+    }
+    // The two dates fit together, checked only when one of them changes.
+    if patch.id_issued_on.is_some() || patch.id_valid_until.is_some() {
+        crate::services::identity_document::check_dates(
+            next.id_issued_on,
+            next.id_valid_until,
+            None,
+            today,
+        )?;
     }
     if let Some(value) = patch.pep_self {
         next.pep_self = value;
@@ -7351,7 +7361,17 @@ mod tests {
             (
                 json!({ "id_document_number": "1".repeat(61) }),
                 "id_document_number",
-                "invalid_field",
+                "id_document_number_too_long",
+            ),
+            (
+                json!({ "id_document_number": "AB/12345" }),
+                "id_document_number",
+                "id_document_number_invalid",
+            ),
+            (
+                json!({ "id_issued_on": "2021-02-01", "id_valid_until": "2021-01-31" }),
+                "id_valid_until",
+                "id_document_expired",
             ),
             (
                 json!({ "id_issued_on": "2026-10-04" }),

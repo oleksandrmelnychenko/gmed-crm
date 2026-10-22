@@ -13,7 +13,14 @@ import {
   identityDocumentDraftChanged,
   identityDocumentEnteredLine,
   identityDocumentExpired,
+  identityDocumentFieldErrors,
   identityDocumentInput,
+  identityDocumentMissing,
+  identityDocumentSourceIsStale,
+  identityDocumentStatus,
+  identityDocumentStatusText,
+  identityFieldErrorText,
+  normalizeDocumentNumber,
 } from "../model/lead-identity-document-data";
 import { LeadIdentityDocumentData, LeadIdentityDocumentDataForm } from "./lead-identity-document-data";
 import { LeadPatientConcern, patientConcernTransferMode } from "./lead-patient-concern";
@@ -80,7 +87,7 @@ describe("identity document data entered by staff", () => {
     expect(identityDocumentEnteredLine({}, ru)).toBe("");
   });
 
-  it("renders the form with every field, the expiry warning and the unreadable box", () => {
+  it("renders the form with every field, one status line and the unreadable box", () => {
     const html = withPickers(
       <LeadIdentityDocumentDataForm source={stored} save={async () => undefined} tx={ru} lang="ru" testId="lead-id-data" today="2026-10-07" />,
     );
@@ -89,10 +96,68 @@ describe("identity document data entered by staff", () => {
     }
     expect(html).toContain("Страна выдачи");
     expect(html).toContain("Документ нечитаем");
-    expect(html).toContain("lead-id-data-expired");
+    // Unreadable comes first: a new scan is the next step.
+    expect(html).toContain("Документ нечитаем: запросите новый скан");
     expect(html).toContain("Внесено сотрудником: Ben Muster · 07.10.2026 12:00");
-    // Nothing changed yet: nothing to save.
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*data-testid="lead-id-data-save"/);
+    // Nothing changed yet: no save button, no "unsaved".
+    expect(html).not.toContain("lead-id-data-save");
+    expect(html).not.toContain("lead-id-data-unsaved");
+
+    const readable = withPickers(
+      <LeadIdentityDocumentDataForm
+        source={{ ...stored, id_document_unreadable: false }}
+        save={async () => undefined}
+        tx={de}
+        lang="de"
+        testId="lead-id-data"
+        today="2026-10-07"
+      />,
+    );
+    expect(readable).toContain("lead-id-data-expired");
+    expect(readable).toContain("Ausweis abgelaufen seit 30.04.2025");
+    expect(readable).toContain('data-status="expired"');
+  });
+
+  it("checks each field like the server and names what is missing", () => {
+    const draft = identityDocumentDraft({ ...stored, id_document_unreadable: false });
+    const rules = { today: "2026-10-07", birthDate: "1990-05-01" };
+    expect(identityDocumentFieldErrors(draft, rules)).toEqual({});
+    expect(normalizeDocumentNumber("  fa  123 4567 ")).toBe("FA 123 4567");
+    expect(identityDocumentInput({ ...draft, number: " fa 1234567 " }).id_document_number).toBe("FA 1234567");
+    expect(identityDocumentFieldErrors({ ...draft, number: "AB1" }, rules).number).toBe("id_document_number_too_short");
+    expect(identityDocumentFieldErrors({ ...draft, number: "AB/12345" }, rules).number).toBe("id_document_number_invalid");
+    expect(identityDocumentFieldErrors({ ...draft, number: "АБ123456" }, rules).number).toBe("id_document_number_invalid");
+    expect(identityDocumentFieldErrors({ ...draft, number: "A".repeat(31) }, rules).number).toBe("id_document_number_too_long");
+    expect(identityDocumentFieldErrors({ ...draft, number: "P<UKR12345" }, rules)).toEqual({});
+    expect(identityDocumentFieldErrors({ ...draft, issuedOn: "2026-10-08" }, rules).issuedOn).toBe("id_issued_on_future");
+    expect(identityDocumentFieldErrors({ ...draft, issuedOn: "1989-01-01" }, rules).issuedOn).toBe("id_issued_on_before_birth");
+    expect(identityDocumentFieldErrors({ ...draft, validUntil: draft.issuedOn }, rules).validUntil).toBe("id_valid_until_before_issue");
+    expect(identityDocumentFieldErrors({ ...draft, country: "XX" }, rules).country).toBe("id_issuing_country_invalid");
+    // A stored country name becomes its code.
+    expect(identityDocumentDraft({ ...stored, id_issuing_country: "Ukraine" }).country).toBe("UA");
+    expect(identityDocumentMissing({ ...draft, number: " ", authority: "" })).toEqual(["number", "authority"]);
+    expect(identityFieldErrorText("id_document_number_too_short", ru)).toBe("Номер слишком короткий: минимум 5 букв или цифр");
+  });
+
+  it("gives one status per document: scan, unreadable, missing fields, expired or complete", () => {
+    const draft = identityDocumentDraft({ ...stored, id_document_unreadable: false, id_valid_until: "2031-01-31" });
+    const at = (next: typeof draft, scans: number | null = 1) =>
+      identityDocumentStatus(next, { today: "2026-10-07", scans, errors: identityDocumentFieldErrors(next, { today: "2026-10-07" }) });
+    expect(at(draft, 0).kind).toBe("no_scan");
+    expect(identityDocumentStatusText(at({ ...draft, unreadable: true }), ru)).toBe("Документ нечитаем: запросите новый скан");
+    expect(identityDocumentStatusText(at({ ...draft, number: "", country: "" }), ru)).toBe("Заполните по скану: номер, страна выдачи");
+    expect(at({ ...draft, validUntil: "2026-10-06" }).kind).toBe("expired");
+    // The last day still counts.
+    expect(at({ ...draft, validUntil: "2026-10-07" }).kind).toBe("complete");
+    expect(at({ ...draft, number: "AB" }).kind).toBe("invalid");
+    expect(identityDocumentStatusText(at(draft, null), de)).toBe("Daten vollständig · gültig bis 31.01.2031");
+  });
+
+  it("knows a reload older than the last save", () => {
+    expect(identityDocumentSourceIsStale("2026-10-22T12:15:50Z", "2026-10-22T12:15:53Z")).toBe(true);
+    expect(identityDocumentSourceIsStale(null, "2026-10-22T12:15:53Z")).toBe(true);
+    expect(identityDocumentSourceIsStale("2026-10-22T12:15:53Z", "2026-10-22T12:15:53Z")).toBe(false);
+    expect(identityDocumentSourceIsStale("2026-10-22T12:16:00Z", null)).toBe(false);
   });
 
   it("adds one form per representative and hides everything from a role without the GwG data", () => {

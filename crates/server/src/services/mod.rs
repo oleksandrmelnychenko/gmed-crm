@@ -9,6 +9,7 @@ pub mod contracting_party;
 pub mod contracting_party_backfill;
 pub mod drug_matching;
 pub mod gba_ais;
+pub mod identity_document;
 pub mod interpreter_booking_links;
 pub mod interpreter_suggestions;
 pub mod lead_guardian_identity;
