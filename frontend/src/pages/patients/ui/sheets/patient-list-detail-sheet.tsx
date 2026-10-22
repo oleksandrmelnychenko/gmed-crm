@@ -474,7 +474,7 @@ function PatientDetailSheet({
       const contactPayload = patientContactFormsToPayload(form.contacts);
       const trustedContacts = patientTrustedContactsToPayload(form.trustedContacts);
       if (trustedContacts.some((contact) => !contact.name)) {
-        throw new Error("Укажите имя доверенного контакта");
+        throw new Error("Укажите имя контакта или представителя");
       }
       const typedEmails = [
         ...form.contacts.filter((contact) => contact.contactKind === "email").map((contact) => contact.value),

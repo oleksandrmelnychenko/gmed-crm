@@ -1,4 +1,4 @@
-import { appDateKey } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { existingParentPatientFromError } from "./model/parent-profile-reuse";
 import { toast } from "@/components/ui/toast";
 import { isValidEmailAddress } from "@/lib/contact-validation";
@@ -96,6 +96,7 @@ import {
   leadStatusTone,
   retentionCountdownHint,
   retentionCountdownLabel,
+  retentionDeadlineNotice,
 } from "./appearance/status-appearance";
 import {
   convertLead,
@@ -923,18 +924,19 @@ function useLeadsPageContent() {
         filterType: "number",
         group: "qualification",
         sortable: true,
-        width: 170,
+        width: 190,
         render: (row) => {
           const days = daysUntilRetentionDeadline(row.retention_deadline_at);
-          return days != null ? (
+          return days != null && row.retention_deadline_at ? (
             <span
-              title={retentionCountdownHint(lang)}
+              data-lead-retention-countdown
+              title={`${retentionDeadlineNotice(row.retention_deadline_at, days, lang)}. ${retentionCountdownHint(lang)}`}
               className={cn(
                 "whitespace-nowrap text-xs font-medium tabular-nums",
                 days <= 3 ? "text-destructive" : "text-amber-700",
               )}
             >
-              {retentionCountdownLabel(days, lang)}
+              {formatAppDate(row.retention_deadline_at)} · {retentionCountdownLabel(days, lang)}
             </span>
           ) : (
             <span className="text-xs text-foreground">—</span>
@@ -1807,12 +1809,12 @@ function useLeadsPageContent() {
                         · {daysInStatusLabel(daysInStatus(detail.status_changed_at)!, lang)}
                       </span>
                     ) : null}
-                    {daysUntilRetentionDeadline(detail.retention_deadline_at) != null ? (
+                    {detail.retention_deadline_at && daysUntilRetentionDeadline(detail.retention_deadline_at) != null ? (
                       <StatusBadge
                         tone={daysUntilRetentionDeadline(detail.retention_deadline_at)! <= 3 ? "error" : "warning"}
                       >
-                        <span title={retentionCountdownHint(lang)}>
-                          {retentionCountdownLabel(daysUntilRetentionDeadline(detail.retention_deadline_at)!, lang)}
+                        <span data-lead-retention-countdown title={retentionCountdownHint(lang)}>
+                          {retentionDeadlineNotice(detail.retention_deadline_at, daysUntilRetentionDeadline(detail.retention_deadline_at)!, lang)}
                         </span>
                       </StatusBadge>
                     ) : null}
@@ -2167,7 +2169,7 @@ function useLeadsPageContent() {
                     <SectionTitle>
                       {detailIsMinor
                         ? tx("Родители и законные представители", "Eltern und gesetzliche Vertreter")
-                        : tx("Доверенные контакты", "Vertrauenskontakte")}
+                        : tx("Контакты и представители", "Kontakte und Vertretung")}
                     </SectionTitle>
                     {(detail.trusted_contacts ?? []).length === 0 ? (
                       <p className="mt-3 text-sm text-muted-foreground">

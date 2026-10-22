@@ -4185,6 +4185,12 @@ async fn an_unqualified_lead_without_consent_is_purged_with_everything_it_owns()
         json_request(&app, "GET", &format!("/api/v1/leads/{young}"), &pm, None).await;
     assert_eq!(status, StatusCode::OK, "{detail}");
     assert!(detail["retention_deadline_at"].is_string(), "{detail}");
+    // The invoiced lead is never deleted automatically, so it shows no
+    // deadline (owner decision 2026-10-23: the countdown follows the sweep).
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{invoiced}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail["retention_deadline_at"].is_null(), "{detail}");
 }
 
 /// QA B-18 a (decision 2026-10-11): a repeat intake of an existing patient

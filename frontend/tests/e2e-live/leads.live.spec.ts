@@ -187,7 +187,7 @@ async function saveLeadGateData(
     // Compliance is "signed" from the seeded DSGVO signature; staff cannot choose it.
     for (const consent of [
       /Medizinische Einwilligung liegt vor|Healthcare consent available/i,
-      /Datenschutzhinweise bestätigt|Privacy practices accepted/i,
+      /Einwilligung zur Bearbeitung der Anfrage|Inquiry processing consent given/i,
     ]) {
       await sheet
         .locator("label")
@@ -312,14 +312,14 @@ test.describe("lead live workflows", () => {
       wizard.getByRole("heading", { name: "Schweigepflichtsentbindung" }),
     ).toBeVisible();
     await expect(
-      wizard.getByText("Vertrauenskontakt / zusätzlicher Empfänger", { exact: true }),
+      wizard.getByText("Kontakte und Vertretung", { exact: true }),
     ).toBeVisible();
-    const trustedContacts = wizard.getByRole("list", { name: "Vertrauenskontakte" });
+    const trustedContacts = wizard.getByRole("list", { name: "Kontakte und Vertretung" });
     await expect(trustedContacts.getByText("Alex Beispiel", { exact: true })).toBeVisible();
     await expect(trustedContacts.getByText("Maria Beispiel", { exact: true })).toBeVisible();
 
     await wizard.getByRole("button", { name: "Kontakt hinzufügen" }).click();
-    const contactSheet = page.getByRole("dialog", { name: "Vertrauenskontakt hinzufügen" });
+    const contactSheet = page.getByRole("dialog", { name: "Kontakt oder Vertretung hinzufügen" });
     await expect(contactSheet).toBeVisible();
     await contactSheet.getByRole("textbox", { name: "Vor- und Nachname" }).fill("Petra Beispiel");
     await contactSheet.getByRole("textbox", { name: "E-Mail" }).fill("petra@example.test");

@@ -4,6 +4,7 @@ import {
   daysUntilRetentionDeadline,
   leadSourceTone,
   retentionCountdownLabel,
+  retentionDeadlineNotice,
   withFinalPeriod,
 } from "./status-appearance";
 
@@ -46,5 +47,17 @@ describe("daysUntilRetentionDeadline", () => {
     expect(withFinalPeriod(retentionCountdownLabel(14, "de"))).toBe("Löschung in 14 T.");
     expect(withFinalPeriod(retentionCountdownLabel(14, "ru"))).toBe("Удаление через 14 дн.");
     expect(withFinalPeriod(retentionCountdownLabel(0, "de"))).toBe("Löschung heute.");
+  });
+
+  it("states the date, the days left and what stops the deletion (2026-10-23)", () => {
+    expect(retentionDeadlineNotice("2026-10-17T08:00:00Z", 3, "ru")).toBe(
+      "Лид будет удалён 17.10.2026 (через 3 дн.), пока не подписан пакет DSGVO",
+    );
+    expect(retentionDeadlineNotice("2026-10-17T08:00:00Z", 3, "de")).toBe(
+      "Lead wird am 17.10.2026 gelöscht (in 3 T.), solange das DSGVO-Paket nicht unterschrieben ist",
+    );
+    expect(retentionDeadlineNotice("2026-10-17T08:00:00Z", 0, "ru")).toBe(
+      "Лид будет удалён 17.10.2026 (сегодня), пока не подписан пакет DSGVO",
+    );
   });
 });

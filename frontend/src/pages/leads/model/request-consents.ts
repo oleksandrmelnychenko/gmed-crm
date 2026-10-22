@@ -1,5 +1,6 @@
 /**
- * The two consents a request confirms itself (privacy notice, health data):
+ * The two consents a request confirms itself (processing of the inquiry,
+ * health data):
  * they are never taken over from the patient card. The status line and the
  * note of a repeat intake name exactly the consent that is still unticked,
  * instead of "not ticked" while the privacy notice already is (QA 2026-10-12
@@ -10,7 +11,7 @@ type Bilingual = (ru: string, de: string) => string;
 
 function missingConsentNames(privacy: boolean, healthcare: boolean, tx: Bilingual): string[] {
   return [
-    privacy ? null : tx("политика конфиденциальности", "Datenschutzhinweise"),
+    privacy ? null : tx("согласие на обработку запроса", "Einwilligung zur Bearbeitung der Anfrage"),
     healthcare ? null : tx("согласие на обработку медицинских данных", "Einwilligung zu Gesundheitsdaten"),
   ].filter((name): name is string => Boolean(name));
 }

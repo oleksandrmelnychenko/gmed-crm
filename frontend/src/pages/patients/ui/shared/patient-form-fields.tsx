@@ -338,8 +338,8 @@ export function PatientFormFields({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
             {lang === "de"
-              ? "Mehrere Vertrauenskontakte können hinterlegt werden."
-              : "Можно добавить несколько доверенных контактов."}
+              ? "Mehrere Kontakte und Vertretungen können hinterlegt werden."
+              : "Можно добавить несколько контактов и представителей."}
           </p>
           {!readOnly ? (
             <Button
@@ -365,8 +365,8 @@ export function PatientFormFields({
         {form.trustedContacts.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border px-3 py-5 text-center text-sm text-muted-foreground">
             {lang === "de"
-              ? "Noch keine Vertrauenskontakte hinzugefügt."
-              : "Доверенные контакты пока не добавлены."}
+              ? "Noch keine Kontakte oder Vertretungen hinzugefügt."
+              : "Контакты и представители пока не добавлены."}
           </div>
         ) : (
           <div className="space-y-2.5">
@@ -381,7 +381,7 @@ export function PatientFormFields({
                 <div key={contact.id} className="rounded-lg border border-border/70 bg-card p-3">
                   <div className="mb-2.5 flex items-center justify-between gap-3">
                     <p className="text-xs font-semibold text-foreground">
-                      {lang === "de" ? "Vertrauenskontakt" : "Доверенный контакт"} {index + 1}
+                      {lang === "de" ? "Kontakt / Vertretung" : "Контакт / представитель"} {index + 1}
                     </p>
                     {!readOnly ? (
                       <Button

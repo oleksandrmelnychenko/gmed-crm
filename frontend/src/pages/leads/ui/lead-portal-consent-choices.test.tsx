@@ -19,7 +19,7 @@ describe("portal consent facts in the staff wizard", () => {
   it("shows the stored trusted list independently of a consent choice and does not grant permission", () => {
     const intake = state({ trusted_persons: [{ name: "Eva Muster", relation: "friend", contact: "eva@example.com" }] });
     const html = renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={tx} />);
-    expect(html).toContain("Доверенные лица (из кабинета)");
+    expect(html).toContain("Получатели информации (Auskunft an Dritte)");
     expect(html).toContain("друг / знакомый");
     expect(html).toContain("Eva Muster");
     expect(html).not.toContain(">Разрешено<");

@@ -401,7 +401,7 @@ export function PortalInquiryConsentLine({ intake, tx }: { intake: LeadPortalInt
   return (
     <div className="space-y-1" data-testid="portal-inquiry-consent">
       <PortalConsentRecord
-        label={tx("Согласие на обработку данных обращения (портал)", "Einwilligung zur Bearbeitung der Anfrage (Portal)")}
+        label={tx("Согласие на обработку запроса (кабинет)", "Einwilligung zur Bearbeitung der Anfrage (Kundenkabinett)")}
         consent={latestPortalConsent(intake.consents, "lead_inquiry_processing")}
         tx={tx}
       />

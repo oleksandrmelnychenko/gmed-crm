@@ -383,7 +383,7 @@ async fn send_login_email(
         .ok()
         .flatten()
         .is_some()
-        || crate::routes::leads::is_consented_repeat_intake(&state.db, lead_id).await;
+        || crate::routes::leads::is_outside_unqualified_purge(&state.db, lead_id).await;
     let complete_by = match (
         outside_rule,
         row.try_get::<String, _>("compliance_status").ok(),

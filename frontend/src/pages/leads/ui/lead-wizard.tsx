@@ -235,7 +235,7 @@ import {
 import {
   daysUntilRetentionDeadline,
   retentionCountdownHint,
-  retentionCountdownLabel,
+  retentionDeadlineNotice,
   withFinalPeriod,
 } from "../appearance/status-appearance";
 import type { DocumentItem } from "@/pages/documents/model/types";
@@ -2368,20 +2368,20 @@ function minorIdentityReasonLabel(tx: Tx) {
 function readinessReasonLabel(reason: string, tx: Tx) {
   const labels: Record<string, string> = {
     "Lead must be qualified before conversion": tx("Подтвердите данные обращения", "Angaben zum Anliegen bestätigen"),
-    // Both mean the same fact: the generated consent form (Anlage 1) carries
-    // no signature yet. The consents given in the cabinet do not replace the
+    // Both mean the same fact: the signed DSGVO package (the generated consent
+    // form, Anlage 1) is missing (owner naming 2026-10-23). The consents given in the cabinet do not replace the
     // signed form, and the optional disclosure to third parties is no part of it.
-    "Compliance is not signed yet": tx("Форма согласия (приложение 1) ещё не подписана", "Einverständniserklärung (Anlage 1) noch nicht unterschrieben"),
+    "Compliance is not signed yet": tx("Нет подписанного пакета DSGVO (форма согласия, приложение 1)", "Unterschriebenes DSGVO-Paket fehlt (Einverständniserklärung, Anlage 1)"),
     "Birth date is missing": tx("Укажите дату рождения", "Geburtsdatum angeben"),
     "Legal sex is missing": tx("Укажите пол по документам", "Geschlecht laut Ausweisdokument angeben"),
     "Email or phone is required": tx("Укажите электронную почту или телефон", "E-Mail-Adresse oder Telefonnummer angeben"),
-    "Privacy practices consent is missing": tx("Подтвердите ознакомление с политикой конфиденциальности", "Datenschutzhinweise bestätigen"),
+    "Privacy practices consent is missing": tx("Получите согласие на обработку запроса (в кабинете или на бумаге)", "Einwilligung zur Bearbeitung der Anfrage einholen (Kundenkabinett oder Papier)"),
     "Healthcare consent is missing": tx("Получите согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten einholen"),
     "Complete street, city and postal code": tx("Заполните улицу, город и почтовый индекс", "Straße, Ort und Postleitzahl vollständig angeben"),
     "Complete city and postal code": tx("Заполните город и почтовый индекс", "Ort und Postleitzahl vollständig angeben"),
     "Requested specialty is missing": tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
     "Identity document is not verified": tx("Подтвердите документ, удостоверяющий личность", "Ausweisdokument bestätigen"),
-    "Signed DSGVO document is missing": tx("Форма согласия (приложение 1) ещё не подписана", "Einverständniserklärung (Anlage 1) noch nicht unterschrieben"),
+    "Signed DSGVO document is missing": tx("Нет подписанного пакета DSGVO (форма согласия, приложение 1)", "Unterschriebenes DSGVO-Paket fehlt (Einverständniserklärung, Anlage 1)"),
     "Signed confidentiality release is missing": tx("Нужно подписанное освобождение от медицинской тайны", "Unterzeichnete Schweigepflichtsentbindung erforderlich"),
     [SELF_DISCLOSURE_UNSIGNED_REASON]: tx("Анкета пациента не подписана — обязательна при первичном оформлении нового пациента", "Patientenformular nicht unterschrieben – Pflicht bei der Erstaufnahme eines neuen Patienten"),
     "Enhanced due diligence document is missing": tx("Заполните усиленную AML-проверку и создайте документ", "Verstärkte AML-Sorgfaltsprüfung ausfüllen und Dokument erstellen"),
@@ -3187,7 +3187,8 @@ export function LeadWizard({
   const enhancedCheck = enhancedCheckState.check;
   const riskCountryLists = useRiskCountryLists(open);
   const reloadEnhancedCheck = enhancedCheckState.reload;
-  const retentionDays = daysUntilRetentionDeadline(lead?.retention_deadline_at);
+  const retentionDeadline = lead?.retention_deadline_at ?? null;
+  const retentionDays = daysUntilRetentionDeadline(retentionDeadline);
   // A repeat intake (lead opened for an existing patient) keeps its patient
   // review even when reopened from the leads registry, so the patient's valid
   // documents and contracts are reused instead of recreated. A first intake
@@ -7220,7 +7221,7 @@ ${serviceCommentLines.join("\n")}`
       // when neither consent is (QA 2026-10-12 B3-01).
       status: requestConsentStatus(privacyConsentGiven, healthcareConsentGiven, tx),
       detail: [
-        `${tx("Политика конфиденциальности", "Datenschutzhinweise")}: ${cabinetConsents.privacy ? tx("да (кабинет)", "ja (Kundenkabinett)") : draft.privacyConsent ? tx("да", "ja") : tx("нет", "nein")}`,
+        `${tx("Согласие на обработку запроса", "Einwilligung zur Bearbeitung der Anfrage")}: ${cabinetConsents.privacy ? tx("да (кабинет)", "ja (Kundenkabinett)") : draft.privacyConsent ? tx("да (на бумаге)", "ja (Papier)") : tx("нет", "nein")}`,
         `${tx("Медицинские данные", "Gesundheitsdaten")}: ${cabinetConsents.healthcare ? tx("да (кабинет)", "ja (Kundenkabinett)") : draft.healthcareConsent ? tx("да", "ja") : tx("нет", "nein")}`,
       ].join(" · "),
       action: missingConsentField ? {
@@ -7493,8 +7494,8 @@ ${serviceCommentLines.join("\n")}`
                     ? tx("Новый лид", "Neuer Lead")
                     : tx("Оформление обращения", "Lead-Aufnahme")}
               </h2>
-              {/* The countdown sits after the name; what it means is in the tooltip, not in a banner. */}
-              {retentionDays != null ? (
+              {/* The countdown sits after the name: date, days left and what stops it (2026-10-23); the rule is in the tooltip. */}
+              {retentionDays != null && retentionDeadline ? (
                 <StatusChip
                   role="status"
                   data-lead-retention-countdown
@@ -7503,8 +7504,7 @@ ${serviceCommentLines.join("\n")}`
                   className="shrink-0"
                 >
                   <CircleAlert aria-hidden="true" className="size-3.5" />
-                  {/* "Löschung in 14 T." already ends with a period. */}
-                  {withFinalPeriod(retentionCountdownLabel(retentionDays, lang))}
+                  {withFinalPeriod(retentionDeadlineNotice(retentionDeadline, retentionDays, lang))}
                 </StatusChip>
               ) : null}
             </div>
@@ -8958,15 +8958,15 @@ ${serviceCommentLines.join("\n")}`
                   {/* A consent given in the cabinet (adult lead, or a parent / guardian
                       for a minor) shows here as given and locks the toggle; the toggle
                       itself records only a consent obtained outside the cabinet (paper). */}
-                  <ToggleRow id={PRIVACY_CONSENT_ID} checked={privacyConsentGiven} disabled={isBusy || cabinetConsents.privacy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
+                  <ToggleRow id={PRIVACY_CONSENT_ID} checked={privacyConsentGiven} disabled={isBusy || cabinetConsents.privacy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Согласие на обработку запроса получено на бумаге", "Einwilligung zur Bearbeitung der Anfrage auf Papier erhalten")} />
                   <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={healthcareConsentGiven} disabled={isBusy || cabinetConsents.healthcare} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
                   {cabinetConsents.privacy || cabinetConsents.healthcare ? (
                     <p data-testid="cabinet-consents-note" className="pt-1 text-xs leading-5 text-muted-foreground">
                       {cabinetConsents.privacy && cabinetConsents.healthcare
                         ? tx("Оба согласия даны в кабинете — отдельная отметка не нужна.", "Beide Einwilligungen wurden im Kundenkabinett erteilt – keine gesonderte Bestätigung nötig.")
                         : cabinetConsents.privacy
-                          ? tx("Согласие на обработку данных обращения дано в кабинете. Согласие на медицинские данные отметьте, только если получили его иначе (например, на бумаге).", "Die Einwilligung zur Bearbeitung der Anfrage liegt aus dem Kundenkabinett vor. Die Einwilligung zu Gesundheitsdaten nur bestätigen, wenn sie anders (z. B. auf Papier) vorliegt.")
-                          : tx("Согласие на медицинские данные дано в кабинете. Ознакомление с политикой отметьте, только если получили его иначе (например, на бумаге).", "Die Einwilligung zu Gesundheitsdaten liegt aus dem Kundenkabinett vor. Die Datenschutzhinweise nur bestätigen, wenn dies anders (z. B. auf Papier) vorliegt.")}
+                          ? tx("Согласие на обработку запроса дано в кабинете. Согласие на медицинские данные отметьте, только если получили его иначе (например, на бумаге).", "Die Einwilligung zur Bearbeitung der Anfrage liegt aus dem Kundenkabinett vor. Die Einwilligung zu Gesundheitsdaten nur bestätigen, wenn sie anders (z. B. auf Papier) vorliegt.")
+                          : tx("Согласие на медицинские данные дано в кабинете. Согласие на обработку запроса отметьте, только если получили его на бумаге.", "Die Einwilligung zu Gesundheitsdaten liegt aus dem Kundenkabinett vor. Die Einwilligung zur Bearbeitung der Anfrage nur bestätigen, wenn sie auf Papier vorliegt.")}
                     </p>
                   ) : null}
                 </div>
@@ -8988,7 +8988,7 @@ ${serviceCommentLines.join("\n")}`
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className={cn(tokens.text.label, "font-semibold")}>
-                          {tx("Доверенное лицо / дополнительный получатель", "Vertrauenskontakt / zusätzlicher Empfänger")}
+                          {tx("Контакты и представители", "Kontakte und Vertretung")}
                         </span>
                         <CountBadge>{draft.trustedContacts.length}</CountBadge>
                       </div>
@@ -9000,10 +9000,10 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                   {draft.trustedContacts.length === 0 ? (
                     <EmptyCell>
-                      {tx("Доверенные контакты пока не добавлены", "Noch keine Vertrauenskontakte hinzugefügt")}
+                      {tx("Контакты и представители пока не добавлены", "Noch keine Kontakte oder Vertretungen hinzugefügt")}
                     </EmptyCell>
                   ) : (
-                    <ul aria-label={tx("Доверенные контакты", "Vertrauenskontakte")} className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
+                    <ul aria-label={tx("Контакты и представители", "Kontakte und Vertretung")} className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
                       {draft.trustedContacts.map((contact) => (
                         <li key={contact.id} className="flex items-start gap-3 px-3 py-3">
                           <div className="min-w-0 flex-1">
@@ -10760,8 +10760,8 @@ ${serviceCommentLines.join("\n")}`
                       ? tx("Редактировать родителя или законного представителя", "Elternteil oder gesetzlichen Vertreter bearbeiten")
                       : tx("Добавить родителя или законного представителя", "Elternteil oder gesetzlichen Vertreter hinzufügen"))
                   : editingTrustedContact
-                    ? tx("Редактировать доверенный контакт", "Vertrauenskontakt bearbeiten")
-                    : tx("Добавить доверенный контакт", "Vertrauenskontakt hinzufügen")}
+                    ? tx("Редактировать контакт или представителя", "Kontakt oder Vertretung bearbeiten")
+                    : tx("Добавить контакт или представителя", "Kontakt oder Vertretung hinzufügen")}
                 footer={(
                   <SheetFormFooter
                     cancelLabel={tx("Отмена", "Abbrechen")}

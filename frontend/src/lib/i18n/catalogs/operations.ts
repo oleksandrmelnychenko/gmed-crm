@@ -1004,14 +1004,14 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_check_birth_date_present: "Дата рождения заполнена",
   lead_readiness_check_legal_sex_present: "Юридический пол заполнен",
   lead_readiness_check_primary_contact_present: "Электронная почта или телефон есть",
-  lead_readiness_check_privacy_consent: "Правила приватности приняты",
+  lead_readiness_check_privacy_consent: "Согласие на обработку запроса получено",
   lead_readiness_check_healthcare_consent: "Медицинское согласие есть",
-  lead_readiness_reason_compliance_not_signed: "Форма согласия (приложение 1) ещё не подписана",
+  lead_readiness_reason_compliance_not_signed: "Нет подписанного пакета DSGVO (форма согласия, приложение 1)",
   lead_readiness_reason_birth_date_missing: "Не указана дата рождения",
   lead_readiness_reason_legal_sex_missing: "Не указан юридический пол",
   lead_readiness_reason_primary_contact_missing: "Нужна электронная почта или телефон",
   lead_readiness_reason_privacy_missing:
-    "Нет согласия с правилами приватности",
+    "Нет согласия на обработку запроса",
   lead_readiness_reason_healthcare_missing: "Нет медицинского согласия",
   lead_readiness_reason_lead_must_be_qualified:
     "Перед созданием пациента лид должен быть квалифицирован",
@@ -1047,7 +1047,7 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_reason_anamnesis_incomplete: "Анамнез заполнен не полностью",
   lead_readiness_reason_identity_not_verified:
     "Документ, удостоверяющий личность, не проверен",
-  lead_readiness_reason_dsgvo_document_missing: "Форма согласия (приложение 1) ещё не подписана",
+  lead_readiness_reason_dsgvo_document_missing: "Нет подписанного пакета DSGVO (форма согласия, приложение 1)",
   lead_readiness_reason_confidentiality_release_missing:
     "Нет подписанного освобождения от врачебной тайны",
   lead_readiness_reason_self_disclosure_unsigned:
@@ -1122,7 +1122,7 @@ export const operationsRu: OperationsTranslations = {
   lead_promote_to_console_success: "Лид переведён в консольный формат.",
   lead_console_promoted_at: "Переведён в консоль",
   lead_healthcare_consent_available: "Получено согласие на обработку медицинских данных",
-  lead_privacy_practices_accepted: "Клиент ознакомлен с политикой конфиденциальности",
+  lead_privacy_practices_accepted: "Согласие на обработку запроса получено на бумаге",
   lead_save_gate_data: "Сохранить данные",
   lead_failed_resolution_title: "Закрыть лид",
   lead_failed_resolution_description:
@@ -1210,7 +1210,7 @@ export const operationsRu: OperationsTranslations = {
   lead_consent_automated_contact: "Автоматический контакт",
   lead_consent_healthcare: "Медицинское согласие",
   lead_consent_opt_out: "Отказ от согласия",
-  lead_consent_privacy_practices: "Политика конфиденциальности",
+  lead_consent_privacy_practices: "Согласие на обработку запроса (на бумаге)",
   lead_email_consent: "Согласие на электронную почту",
   lead_whatsapp_consent: "Согласие на WhatsApp",
   lead_attachments: "Вложения",
@@ -1659,18 +1659,18 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_check_birth_date_present: "Geburtsdatum erfasst",
   lead_readiness_check_legal_sex_present: "Rechtliches Geschlecht erfasst",
   lead_readiness_check_primary_contact_present: "E-Mail oder Telefon vorhanden",
-  lead_readiness_check_privacy_consent: "Datenschutzpraxis akzeptiert",
+  lead_readiness_check_privacy_consent: "Einwilligung zur Bearbeitung der Anfrage liegt vor",
   lead_readiness_check_healthcare_consent:
     "Medizinische Einwilligung liegt vor",
   lead_readiness_reason_compliance_not_signed:
-    "Einverständniserklärung (Anlage 1) noch nicht unterschrieben",
+    "Unterschriebenes DSGVO-Paket fehlt (Einverständniserklärung, Anlage 1)",
   lead_readiness_reason_birth_date_missing: "Geburtsdatum fehlt",
   lead_readiness_reason_legal_sex_missing:
     "Rechtliches Geschlecht fehlt",
   lead_readiness_reason_primary_contact_missing:
     "E-Mail oder Telefon ist erforderlich",
   lead_readiness_reason_privacy_missing:
-    "Einwilligung zur Datenschutzpraxis fehlt",
+    "Einwilligung zur Bearbeitung der Anfrage fehlt",
   lead_readiness_reason_healthcare_missing:
     "Medizinische Einwilligung fehlt",
   lead_readiness_reason_lead_must_be_qualified:
@@ -1707,7 +1707,7 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_reason_specialty_missing: "Gewünschte Fachrichtung fehlt",
   lead_readiness_reason_anamnesis_incomplete: "Anamnese ist unvollständig",
   lead_readiness_reason_identity_not_verified: "Ausweisdokument ist nicht geprüft",
-  lead_readiness_reason_dsgvo_document_missing: "Einverständniserklärung (Anlage 1) noch nicht unterschrieben",
+  lead_readiness_reason_dsgvo_document_missing: "Unterschriebenes DSGVO-Paket fehlt (Einverständniserklärung, Anlage 1)",
   lead_readiness_reason_confidentiality_release_missing:
     "Unterschriebene Schweigepflichtsentbindung fehlt",
   lead_readiness_reason_self_disclosure_unsigned: "Patientenformular ist nicht unterschrieben",
@@ -1785,7 +1785,7 @@ export const operationsDe: OperationsTranslations = {
   lead_promote_to_console_success: "Lead wurde in den Konsolenmodus übernommen.",
   lead_console_promoted_at: "In Konsole übernommen",
   lead_healthcare_consent_available: "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor",
-  lead_privacy_practices_accepted: "Datenschutzhinweise wurden bestätigt",
+  lead_privacy_practices_accepted: "Einwilligung zur Bearbeitung der Anfrage auf Papier erhalten",
   lead_save_gate_data: "Daten speichern",
   lead_failed_resolution_title: "Lead schließen",
   lead_failed_resolution_description:
@@ -1873,7 +1873,7 @@ export const operationsDe: OperationsTranslations = {
   lead_consent_automated_contact: "Automatisierte Kontaktaufnahme",
   lead_consent_healthcare: "Medizinische Einwilligung",
   lead_consent_opt_out: "Abmeldung",
-  lead_consent_privacy_practices: "Datenschutzhinweise",
+  lead_consent_privacy_practices: "Einwilligung zur Bearbeitung der Anfrage (Papier)",
   lead_email_consent: "E-Mail-Einwilligung",
   lead_whatsapp_consent: "WhatsApp-Einwilligung",
   lead_attachments: "Anhänge",

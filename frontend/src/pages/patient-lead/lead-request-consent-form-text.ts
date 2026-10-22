@@ -80,7 +80,7 @@ const de: ConsentFormText = {
   unsaved: "Ihre Änderungen sind noch nicht gespeichert.",
   byGuardianOnly:
     "Für Minderjährige wählen die Eltern bzw. der Vormund mit ihrem eigenen Zugang, wozu sie einwilligen. Hier ist nichts auszuwählen.",
-  recipientsTitle: "Vertrauenspersonen und Institutionen",
+  recipientsTitle: "Auskunftsberechtigte (Auskunft an Dritte)",
   recipientsHint: "Nennen Sie, an wen GMED Ihre Daten übermitteln darf (höchstens 5). Nur diese Personen stehen im Formular.",
   recipientName: "Name bzw. Name der Institution",
   recipientRelation: "Wer ist das?",
@@ -146,7 +146,7 @@ const en: ConsentFormText = {
   unsaved: "Your changes are not saved yet.",
   byGuardianOnly:
     "For a minor, the parents or the guardian choose what they consent to with their own access. There is nothing to choose here.",
-  recipientsTitle: "Trusted persons and institutions",
+  recipientsTitle: "Information recipients (Auskunft an Dritte)",
   recipientsHint: "Name who GMED may pass your data on to (at most 5). Only these persons appear on the form.",
   recipientName: "Name or name of the institution",
   recipientRelation: "Who is this?",
@@ -210,7 +210,7 @@ const uk: ConsentFormText = {
   unsaved: "Зміни ще не збережено.",
   byGuardianOnly:
     "За неповнолітнього батьки або опікун обирають, на що погоджуються, через свій власний доступ. Тут нічого обирати не потрібно.",
-  recipientsTitle: "Довірені особи та установи",
+  recipientsTitle: "Отримувачі інформації (Auskunft an Dritte)",
   recipientsHint: "Вкажіть, кому GMED може передавати ваші дані (не більше 5). У формі будуть лише ці особи.",
   recipientName: "Ім’я та прізвище або назва установи",
   recipientRelation: "Хто це?",
@@ -274,7 +274,7 @@ const ru: ConsentFormText = {
   unsaved: "Изменения ещё не сохранены.",
   byGuardianOnly:
     "За несовершеннолетнего родители или опекун выбирают, на что они соглашаются, через свой собственный доступ. Здесь ничего выбирать не нужно.",
-  recipientsTitle: "Доверенные лица и учреждения",
+  recipientsTitle: "Получатели информации (Auskunft an Dritte)",
   recipientsHint: "Укажите, кому GMED может передавать ваши данные (не более 5). В форме будут только эти лица.",
   recipientName: "Имя и фамилия или название учреждения",
   recipientRelation: "Кто это?",

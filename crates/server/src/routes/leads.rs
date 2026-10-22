@@ -896,21 +896,19 @@ async fn list_leads(
     .await
     {
         Ok(rows) => {
-            let repeat_ids: Vec<Uuid> = rows
+            // Only the leads the rule gives a date need the exception lookup.
+            let dated_ids: Vec<Uuid> = rows
                 .iter()
                 .filter(|row| {
-                    row.try_get::<Option<Uuid>, _>("repeat_patient_id")
-                        .ok()
-                        .flatten()
-                        .is_some()
+                    !lead_retention_deadline_json(retention.as_ref(), row, false).is_null()
                 })
                 .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
                 .collect();
-            let consented_repeat_intakes =
-                match repeat_intakes_with_patient_consent(&state.db, &repeat_ids).await {
+            let outside_purge =
+                match leads_outside_unqualified_purge(&state.db, &dated_ids).await {
                     Ok(value) => value,
                     Err(e) => {
-                        tracing::error!(error = %e, "list leads: repeat patient consent");
+                        tracing::error!(error = %e, "list leads: purge exceptions");
                         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
                     }
                 };
@@ -972,7 +970,7 @@ async fn list_leads(
                     "retention_deadline_at": lead_retention_deadline_json(
                         retention.as_ref(),
                         &r,
-                        consented_repeat_intakes.contains(&lead_id),
+                        outside_purge.contains(&lead_id),
                     ),
                     "qualification_ready": qualification_ready,
                     "conversion_ready": conversion_ready,
@@ -1848,7 +1846,7 @@ fn evaluate_lead_conversion_readiness(
         }),
         json!({
             "key": "privacy_consent",
-            "label": "Privacy practices accepted",
+            "label": "Inquiry processing consent given",
             "passed": input.consent_privacy_practices,
             "blocking_for": "qualification",
             "stage": "documents",
@@ -4048,28 +4046,19 @@ async fn get_lead(
     obj.insert("readiness".into(), readiness.payload);
     obj.insert("failed_outcome".into(), failed_outcome_payload(&row));
     obj.insert("lifecycle".into(), lifecycle);
-    let is_repeat_intake = row
-        .try_get::<Option<Uuid>, _>("repeat_patient_id")
-        .ok()
-        .flatten()
-        .is_some();
-    let repeat_patient_consented = if is_repeat_intake {
-        match repeat_intakes_with_patient_consent(&state.db, &[lead_id]).await {
-            Ok(ids) => ids.contains(&lead_id),
-            Err(e) => {
-                tracing::error!(error = %e, lead_id = %lead_id, "load lead: repeat patient consent");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load lead");
-            }
+    let outside_purge = match leads_outside_unqualified_purge(&state.db, &[lead_id]).await {
+        Ok(ids) => ids.contains(&lead_id),
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "load lead: purge exceptions");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load lead");
         }
-    } else {
-        false
     };
     obj.insert(
         "retention_deadline_at".into(),
         lead_retention_deadline_json(
             load_unqualified_lead_retention(&state.db).await.as_ref(),
             &row,
-            repeat_patient_consented,
+            outside_purge,
         ),
     );
 
@@ -10165,9 +10154,9 @@ pub struct UnqualifiedLeadRetention {
 impl UnqualifiedLeadRetention {
     /// When the lead is purged, or `None` while the rule does not apply to
     /// it. Mirrors [`UNQUALIFIED_LEAD_SUBJECT_SQL`] and the deadline
-    /// expression of the sweep; edit them together. The exception for a
-    /// repeat intake of a consented patient needs the patient record and is
-    /// applied by the callers (`repeat_intakes_with_patient_consent`).
+    /// expression of the sweep; edit them together. The exceptions that need
+    /// other records (a consented repeat intake, an invoice, conversion) are
+    /// applied by the callers (`leads_outside_unqualified_purge`).
     pub fn deadline(
         &self,
         qualification_status: &str,
@@ -10210,9 +10199,6 @@ macro_rules! repeat_patient_consented_sql {
     };
 }
 
-/// The condition of `repeat_patient_consented_sql!` as a constant.
-const REPEAT_PATIENT_CONSENTED_SQL: &str = repeat_patient_consented_sql!();
-
 /// Which leads the rule covers (alias `l`; `$4` is the anonymisation sentinel).
 /// A repeat intake of a patient with a valid signed DSGVO consent is not
 /// covered: the consent is the basis to keep its data (decision 2026-10-11).
@@ -10227,33 +10213,54 @@ const UNQUALIFIED_LEAD_SUBJECT_SQL: &str = concat!(
     repeat_patient_consented_sql!()
 );
 
-/// The leads among `lead_ids` that are repeat intakes of a patient with a
-/// valid signed DSGVO consent: the unqualified-lead rule does not apply to
-/// them, so they carry no deletion deadline.
-async fn repeat_intakes_with_patient_consent(
+/// An invoice of an order of the lead (alias `l`) that is not cancelled. It
+/// keeps the lead for accounting (§ 257 HGB, § 147 AO): the sweep never
+/// deletes such a lead automatically but leaves it for a manual decision.
+const UNQUALIFIED_LEAD_INVOICED_SQL: &str = r#"(
+    EXISTS (
+        SELECT 1 FROM invoices i JOIN orders o ON o.id = i.order_id
+        WHERE o.source_lead_id = l.id AND i.status <> 'cancelled'
+    ) OR EXISTS (
+        SELECT 1 FROM external_invoices e JOIN orders o ON o.id = e.order_id
+        WHERE o.source_lead_id = l.id AND e.status <> 'cancelled'
+    ))"#;
+
+/// The leads among `lead_ids` the sweep never deletes although
+/// [`UnqualifiedLeadRetention::deadline`] alone gives them a date: they are
+/// outside [`UNQUALIFIED_LEAD_SUBJECT_SQL`] (converted, deleted or
+/// anonymised, a repeat intake of a patient with a valid signed DSGVO
+/// consent) or an invoice keeps them ([`UNQUALIFIED_LEAD_INVOICED_SQL`]).
+/// They carry no deletion deadline, so no countdown is shown for them.
+async fn leads_outside_unqualified_purge(
     pool: &gmed_db::DbPool,
     lead_ids: &[Uuid],
 ) -> Result<std::collections::HashSet<Uuid>, sqlx::Error> {
     if lead_ids.is_empty() {
         return Ok(std::collections::HashSet::new());
     }
+    // The subject condition names the anonymisation sentinel `$4`; here it is `$2`.
+    let subject = UNQUALIFIED_LEAD_SUBJECT_SQL.replace("$4", "$2");
     let ids: Vec<Uuid> = sqlx::query_scalar(&format!(
-        "SELECT l.id FROM leads l WHERE l.id = ANY($1) AND {REPEAT_PATIENT_CONSENTED_SQL}"
+        r#"SELECT l.id FROM leads l
+           WHERE l.id = ANY($1)
+             AND (NOT COALESCE(({subject}), false) OR {UNQUALIFIED_LEAD_INVOICED_SQL})"#
     ))
     .bind(lead_ids)
+    .bind(ANONYMIZED_FIRST_NAME)
     .fetch_all(pool)
     .await?;
     Ok(ids.into_iter().collect())
 }
 
-/// Whether one lead is a repeat intake of a consented patient, for the
-/// cabinet and the sign-in e-mail that name the deletion date. A failed
-/// lookup counts as "no": the date is shown rather than hidden.
-pub(crate) async fn is_consented_repeat_intake(pool: &gmed_db::DbPool, lead_id: Uuid) -> bool {
-    match repeat_intakes_with_patient_consent(pool, &[lead_id]).await {
+/// Whether the sweep never deletes this lead
+/// ([`leads_outside_unqualified_purge`]), for the cabinet and the sign-in
+/// e-mail that name the deletion date. A failed lookup counts as "no": the
+/// date is shown rather than hidden.
+pub(crate) async fn is_outside_unqualified_purge(pool: &gmed_db::DbPool, lead_id: Uuid) -> bool {
+    match leads_outside_unqualified_purge(pool, &[lead_id]).await {
         Ok(ids) => ids.contains(&lead_id),
         Err(error) => {
-            tracing::warn!(lead_id = %lead_id, error = %error, "check repeat intake consent");
+            tracing::warn!(lead_id = %lead_id, error = %error, "check lead purge exceptions");
             false
         }
     }
@@ -10294,15 +10301,15 @@ pub async fn load_unqualified_lead_retention(
 }
 
 /// The deadline of a lead row for the API (`retention_deadline_at`): RFC 3339,
-/// or null while the rule does not apply to the lead. A repeat intake of a
-/// patient with a valid signed DSGVO consent
-/// ([`repeat_intakes_with_patient_consent`]) has none.
+/// or null while the rule does not apply to the lead. The same rule as the
+/// sweep: a lead the sweep never deletes ([`leads_outside_unqualified_purge`])
+/// has none.
 fn lead_retention_deadline_json(
     policy: Option<&UnqualifiedLeadRetention>,
     row: &sqlx::postgres::PgRow,
-    repeat_patient_consented: bool,
+    outside_purge: bool,
 ) -> Value {
-    if repeat_patient_consented {
+    if outside_purge {
         return Value::Null;
     }
     let deadline = policy.and_then(|policy| {
@@ -10428,15 +10435,9 @@ async fn purge_unqualified_lead(
 
     // An invoice keeps the lead for accounting (§ 257 HGB, § 147 AO): it is
     // never deleted automatically.
-    let invoiced: bool = sqlx::query_scalar(
-        r#"SELECT EXISTS (
-                   SELECT 1 FROM invoices i JOIN orders o ON o.id = i.order_id
-                   WHERE o.source_lead_id = $1 AND i.status <> 'cancelled'
-               ) OR EXISTS (
-                   SELECT 1 FROM external_invoices e JOIN orders o ON o.id = e.order_id
-                   WHERE o.source_lead_id = $1 AND e.status <> 'cancelled'
-               )"#,
-    )
+    let invoiced: bool = sqlx::query_scalar(&format!(
+        "SELECT {UNQUALIFIED_LEAD_INVOICED_SQL} FROM leads l WHERE l.id = $1"
+    ))
     .bind(lead_id)
     .fetch_one(&mut *tx)
     .await?;

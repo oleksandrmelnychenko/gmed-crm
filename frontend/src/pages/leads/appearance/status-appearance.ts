@@ -1,4 +1,5 @@
 import type { StatusTone } from "@/components/ui-shell";
+import { formatAppDate } from "@/lib/app-time-zone";
 
 /** Whole days elapsed since the lead entered its current status; null when unknown. */
 export function daysInStatus(
@@ -45,11 +46,30 @@ export function withFinalPeriod(label: string): string {
   return label.endsWith(".") ? label : `${label}.`;
 }
 
+/**
+ * The countdown as a full sentence (owner decision 2026-10-23): the date and
+ * the days left come from the server deadline (the same rule as the purge
+ * job), and the sentence names what stops it - the signed DSGVO package.
+ */
+export function retentionDeadlineNotice(
+  deadline: string,
+  days: number,
+  lang: string,
+): string {
+  const date = formatAppDate(deadline);
+  if (lang === "de") {
+    const when = days <= 0 ? "heute" : `in ${days} T.`;
+    return `Lead wird am ${date} gelöscht (${when}), solange das DSGVO-Paket nicht unterschrieben ist`;
+  }
+  const when = days <= 0 ? "сегодня" : `через ${days} дн.`;
+  return `Лид будет удалён ${date} (${when}), пока не подписан пакет DSGVO`;
+}
+
 /** What the countdown means, for a tooltip or a banner. */
 export function retentionCountdownHint(lang: string): string {
   return lang === "de"
-    ? "Ein Lead, der nicht qualifiziert ist und keine unterschriebene DSGVO-Einwilligung hat, wird mit allen Dokumenten automatisch gelöscht."
-    : "Лид, который не квалифицирован и не имеет подписанного согласия DSGVO, автоматически удаляется вместе со всеми документами.";
+    ? "Ein nicht qualifizierter Lead ohne unterschriebenes DSGVO-Paket wird 14 Tage nach der Anlage mit allen Dokumenten automatisch gelöscht. Nur das unterschriebene DSGVO-Paket stoppt die Löschung; die Einwilligung zur Bearbeitung der Anfrage reicht dafür nicht."
+    : "Неквалифицированный лид без подписанного пакета DSGVO автоматически удаляется вместе со всеми документами через 14 дней после создания. Удаление останавливает только подписанный пакет DSGVO; согласия на обработку запроса для этого недостаточно.";
 }
 
 export function leadStatusTone(status: string): StatusTone {

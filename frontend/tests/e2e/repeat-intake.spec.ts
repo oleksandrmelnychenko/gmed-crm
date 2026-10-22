@@ -567,6 +567,8 @@ test("a lead without consent shows when it will be deleted automatically", async
     route.fulfill({contentType: "application/json", body: JSON.stringify({...lead, retention_deadline_at: deadline})}),
   );
   await wizard.getByRole("button", {name: "Обновить", exact: true}).click();
-  await expect(countdown).toContainText("Удаление через 2 дн.");
+  // The full sentence of 2026-10-23: date, days left and what stops it.
+  const [year, month, day] = new Intl.DateTimeFormat("en-CA", {timeZone: "Europe/Berlin"}).format(new Date(deadline)).split("-");
+  await expect(countdown).toContainText(`Лид будет удалён ${day}.${month}.${year} (через 2 дн.), пока не подписан пакет DSGVO.`);
   await expect(countdown).toHaveAttribute("title", /автоматически удаляется вместе со всеми документами/);
 });

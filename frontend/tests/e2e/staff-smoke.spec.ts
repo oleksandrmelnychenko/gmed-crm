@@ -3801,7 +3801,7 @@ test.describe("lead onboarding wizard", () => {
     await documentsStep.click();
     await expect(documentsStep).toHaveAttribute("aria-current", "step");
     const privacyConsent = wizard.getByRole("checkbox", {
-      name: "Datenschutzhinweise wurden bestätigt",
+      name: "Einwilligung zur Bearbeitung der Anfrage auf Papier erhalten",
       exact: true,
     });
     await privacyConsent.uncheck();
@@ -3819,7 +3819,7 @@ test.describe("lead onboarding wizard", () => {
     await expect(documentsStep).toHaveAttribute("aria-current", "step");
     await expect(
       wizard.getByRole("button", {
-        name: "Unterlagen: Datenschutzhinweise bestätigen",
+        name: "Unterlagen: Einwilligung zur Bearbeitung der Anfrage einholen (Kundenkabinett oder Papier)",
         exact: true,
       }),
     ).toBeVisible();

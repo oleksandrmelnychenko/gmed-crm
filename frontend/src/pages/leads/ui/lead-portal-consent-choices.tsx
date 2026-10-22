@@ -61,7 +61,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
           disclosure consent exists only after a "Yes". */}
       <dl className="grid gap-x-5 gap-y-2 sm:grid-cols-2">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-          <dt>{tx("Предоставлять информацию доверенным лицам", "Auskunft an Vertrauenspersonen")}</dt>
+          <dt>{tx("Предоставлять информацию третьим лицам (Auskunft an Dritte)", "Auskunft an Dritte")}</dt>
           <dd><StatusChip tone={disclosureAllowed ? "success" : disclosureDenied ? "neutral" : "warning"} data-testid="portal-disclosure-decision">
             {disclosure?.allow_disclosure === true ? tx("Да", "Ja")
               : disclosureDefaultNo ? tx("Нет — не отвечено, по умолчанию", "Nein – nicht beantwortet, Standard")
@@ -69,7 +69,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
           </StatusChip></dd>
         </div>
         {disclosureDenied ? null : <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-          <dt>{tx("Согласие на передачу данных доверенным лицам", "Einwilligung zur Weitergabe an Vertrauenspersonen")}</dt>
+          <dt>{tx("Согласие на передачу данных получателям информации", "Einwilligung zur Weitergabe an Auskunftsberechtigte")}</dt>
           <dd><StatusChip tone={disclosureAllowed ? "success" : "warning"} data-testid="portal-disclosure-consent">
             {disclosure?.consent_given === true ? tx("Дано", "Erteilt") : disclosure?.consent_given === false ? tx("Не дано", "Nicht erteilt") : tx("Не зафиксировано", "Nicht dokumentiert")}
           </StatusChip></dd>
@@ -95,7 +95,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
         </details> : null}
       </div> : <p className="text-xs leading-5 text-muted-foreground">{tx("Отдельное решение и согласие на предоставление информации ещё не зафиксированы.", "Eine gesonderte Entscheidung und Einwilligung zur Auskunft sind noch nicht dokumentiert.")}</p>}
       {persons.length > 0 ? <div className="space-y-2 border-t border-border/50 pt-3" data-testid="portal-trusted-persons">
-        <h4 className="text-xs font-medium">{tx("Доверенные лица (из кабинета)", "Vertrauenspersonen (aus dem Kundenkabinett)")}</h4>
+        <h4 className="text-xs font-medium">{tx("Получатели информации (Auskunft an Dritte)", "Auskunftsberechtigte (Auskunft an Dritte)")}</h4>
         <p className="text-xs text-muted-foreground">{tx("Только получение информации. Не могут действовать от имени пациента или подписывать документы. Передача данных возможна только с соответствующим согласием.", "Nur für Auskünfte. Keine Vertretung und keine Unterschrift im Namen des Patienten. Die Datenübermittlung setzt eine entsprechende Einwilligung voraus.")}</p>
         <ul className="space-y-2 text-sm">{persons.map((person, index) => <li key={index} className="break-words leading-5">
           <span className="font-medium">{person.name}</span>{" · "}{relationLabels[person.relation as ConsentRecipientRelation] ?? relationLabels.other}{person.contact ? ` · ${person.contact}` : ""}

@@ -15,7 +15,7 @@ describe("consents of a request (QA 2026-10-12 B3-01)", () => {
     const status = requestConsentStatus(true, false, ru);
     expect(status).toBe("Ещё не отмечено: согласие на обработку медицинских данных");
     expect(status).not.toMatch(/Не отмечены/);
-    expect(requestConsentStatus(false, true, de)).toBe("Noch nicht bestätigt: Datenschutzhinweise");
+    expect(requestConsentStatus(false, true, de)).toBe("Noch nicht bestätigt: Einwilligung zur Bearbeitung der Anfrage");
     expect(repeatConsentNote(true, false, ru)).toContain(
       "ещё не отмечено: согласие на обработку медицинских данных",
     );

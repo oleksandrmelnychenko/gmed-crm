@@ -2327,11 +2327,11 @@ fn payer_not_self() -> axum::response::Response {
 // Request payload
 // ----------------------------------------------------------------------------
 
-/// When the unqualified-lead rule deletes the lead, if it applies (not to a
-/// repeat intake of a patient with a signed DSGVO consent).
+/// When the unqualified-lead rule deletes the lead, if the sweep would (not
+/// for a consented repeat intake, an invoiced or a converted lead).
 async fn retention_deadline(state: &AppState, row: &PgRow, lead_id: Uuid) -> Option<DateTime<Utc>> {
     let policy = crate::routes::leads::load_unqualified_lead_retention(&state.db).await?;
-    if crate::routes::leads::is_consented_repeat_intake(&state.db, lead_id).await {
+    if crate::routes::leads::is_outside_unqualified_purge(&state.db, lead_id).await {
         return None;
     }
     policy.deadline(
