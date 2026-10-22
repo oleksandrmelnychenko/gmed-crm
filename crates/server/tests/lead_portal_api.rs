@@ -1736,6 +1736,8 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         "contact_consent_required",
         "cost_estimate_consent_at",
         "cost_estimate_consent_required",
+        // Server-computed: the payer link locked the organisation details.
+        "organisation_details_locked",
         // The lead's own answers of the extra step: read-only for staff.
         "self_funds_source",
         "self_funds_description",

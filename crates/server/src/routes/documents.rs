@@ -26488,6 +26488,9 @@ pub(crate) async fn generate_lead_document(
         })
 }
 
+/// Fixed explanation of "Auskunft an Dritte" on the patient form PDF.
+const THIRD_PARTY_DISCLOSURE_INTRO: &str = "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
+
 /// The scoped release is printed from the immutable cabinet receipt, never
 /// inferred from a contact or an older generic Anlage 1 checkbox.
 fn append_third_party_disclosure_pdf(
@@ -26515,7 +26518,7 @@ fn append_third_party_disclosure_pdf(
         .filter(|_| disclosure.allow_disclosure)
         .map(crate::consent_choices::OwnConsentChoice::recipient_lines)
         .unwrap_or_default();
-    let intro = "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
+    let intro = THIRD_PARTY_DISCLOSURE_INTRO;
     let guardian_intro = "Die folgenden Angaben und die Einwilligung erklärt die vertretende Person für die oben bezeichnete Person.";
     let question = "Soll eine weitere Person Auskunft erhalten dürfen?";
     let no = "Nein, nur ich selbst.";
@@ -37593,6 +37596,11 @@ mod tests {
     /// What the lead's patient form never carries: nothing medical, no risk
     /// assessment, no sanctions screening, no staff decision, no estimate.
     fn assert_no_assessment_or_medical_data(text: &str) {
+        // The fixed "Auskunft an Dritte" explanation names "Behandlung" in
+        // general terms. Since 2026-10-22 an unanswered disclosure prints as
+        // "Nein", so the section is on every patient form; it carries no data.
+        assert!(text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO), "{text}");
+        let text = &text.replace(super::THIRD_PARTY_DISCLOSURE_INTRO, "");
         assert_nothing_medical_or_assessed(text);
         for word in [
             "Risiko",

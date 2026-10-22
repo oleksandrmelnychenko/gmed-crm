@@ -5668,7 +5668,9 @@ mod tests {
     #[test]
     fn a_new_payer_phone_follows_the_phone_rule() {
         let stored = Answers::default();
-        for phone in ["call me", "12345", "+43 1 2345"] {
+        // The server counts digits only (is_valid_payer_phone); the client also
+        // limits the characters around them.
+        for phone in ["call me", "12345", "+43 1 23"] {
             let error =
                 apply_answers_patch(&stored, &patch(json!({ "phone": phone })), false, today())
                     .unwrap_err();
