@@ -41,7 +41,7 @@ import { SignatureProgressChips } from "@/pages/documents/ui/signature-progress-
 import { normalizeLeadPortalBilling, type LeadPortalEnhancedDetails, type LeadPortalIntake, type PatientFieldMarker } from "../data/lead-portal-intake-api";
 import { billingStatements, payerOrganisationStatements, portalInvoiceTo } from "../model/lead-gwg-statements";
 import { createPayerAutosave, type PayerAutosave, type PayerAutosaveState } from "../model/lead-payer-autosave";
-import { standaloneCostAssumptionKept } from "../model/lead-payer-package";
+import { costCoveragePurpose, standaloneCostAssumptionKept } from "../model/lead-payer-package";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
 import { useLeadPayerPackage } from "../model/use-lead-payer-package";
 import { LeadPayerLinkPanel } from "./lead-payer-link-panel";
@@ -58,6 +58,7 @@ import {
   costEstimateConsentLine,
   invoiceTaxFieldsShown,
   isOrganisationPayerForm,
+  organisationDetailsFieldsShown,
   payerDeclarationPrefillForm,
   payerDeclarationToForm,
   payerFormMissing,
@@ -70,6 +71,8 @@ import {
   payerTypeLabel,
   statedFundsSourcesLabel,
   sourceOfFundsLabel,
+  taxNumberFormatWarning,
+  vatIdFormatWarning,
   withPayerDeclarationField,
   type PayerDeclaration,
   type PayerDeclarationForm,
@@ -401,7 +404,14 @@ export function LeadPayerDeclarationSection({
       : label;
   };
   const emailInvalid = payerEmailFormatInvalid(form);
-  const phoneInvalid = payerPhoneInvalid(form);
+  // The server refuses a new or changed number too (422 `payer_phone_invalid`, field `phone`).
+  const phoneRefused = autosave.status === "error"
+    && autosave.error instanceof ApiRequestError
+    && autosave.error.body?.error === "payer_phone_invalid";
+  const phoneInvalid = payerPhoneInvalid(form) || phoneRefused;
+  // Format hints only: the values are saved as typed (owner decision 2026-10-22).
+  const vatIdWarning = vatIdFormatWarning(form.invoiceVatId, tx);
+  const taxNumberWarning = taxNumberFormatWarning(form.invoiceTaxNumber, tx);
   const statusBadge = payerStatusBadge(data?.status, tx);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
   const contactConsentAt = data?.declaration?.contact_consent_at ?? null;
@@ -960,6 +970,42 @@ export function LeadPayerDeclarationSection({
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{addressFields}</div>
                 </fieldset>
               ) : null}
+              {organisation && organisationDetailsFieldsShown(form) ? (
+                <>
+                  <PayerField label={tx("Правовая форма", "Rechtsform")}>
+                    <Input
+                      className={inputClass}
+                      value={form.organisationLegalForm}
+                      maxLength={100}
+                      disabled={readOnly || form.organisationDetailsLocked}
+                      autoComplete="off"
+                      placeholder={tx("напр. GmbH", "z. B. GmbH")}
+                      data-testid="lead-payer-organisation-legal-form-input"
+                      onChange={(event) => patch("organisationLegalForm", event.target.value)}
+                    />
+                  </PayerField>
+                  <PayerField label={tx("Номер в торговом реестре (Handelsregister-Nr.)", "Handelsregister-Nr.")}>
+                    <Input
+                      className={inputClass}
+                      value={form.organisationRegisterNumber}
+                      maxLength={60}
+                      disabled={readOnly || form.organisationDetailsLocked}
+                      autoComplete="off"
+                      placeholder={tx("напр. HRB 12345", "z. B. HRB 12345")}
+                      data-testid="lead-payer-organisation-register-number-input"
+                      onChange={(event) => patch("organisationRegisterNumber", event.target.value)}
+                    />
+                  </PayerField>
+                  {form.organisationDetailsLocked ? (
+                    <p className="col-span-full text-xs text-muted-foreground" data-testid="lead-payer-organisation-details-locked">
+                      {tx(
+                        "Правовую форму и номер реестра плательщик указал сам по своей ссылке — изменить их нельзя.",
+                        "Rechtsform und Registernummer hat der Zahler selbst über seinen Link angegeben – sie sind nicht änderbar.",
+                      )}
+                    </p>
+                  ) : null}
+                </>
+              ) : null}
             </div>
             {organisation && organisationMask ? (
               <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-payer-organisation-cabinet">
@@ -1084,6 +1130,11 @@ export function LeadPayerDeclarationSection({
                     autoComplete="off"
                     onChange={(event) => patch("invoiceVatId", event.target.value)}
                   />
+                  {vatIdWarning ? (
+                    <span className="block text-xs text-amber-700 dark:text-amber-300" data-testid="lead-payer-vat-id-warning">
+                      {vatIdWarning}
+                    </span>
+                  ) : null}
                 </PayerField>
                 <PayerField label={tx("Steuernummer получателя счёта", "Steuernummer des Rechnungsempfängers")}>
                   <Input
@@ -1094,6 +1145,11 @@ export function LeadPayerDeclarationSection({
                     autoComplete="off"
                     onChange={(event) => patch("invoiceTaxNumber", event.target.value)}
                   />
+                  {taxNumberWarning ? (
+                    <span className="block text-xs text-amber-700 dark:text-amber-300" data-testid="lead-payer-tax-number-warning">
+                      {taxNumberWarning}
+                    </span>
+                  ) : null}
                 </PayerField>
               </div>
             ) : null}
@@ -1280,6 +1336,12 @@ export function LeadPayerSignatureFlow({
           tx={tx}
         />
       </div>}
+      {required ? (
+        <p className="text-xs text-muted-foreground" data-testid="lead-payer-cost-assumption-purpose">
+          {tx("Заявление о принятии расходов (Kostenübernahmeerklärung): ", "Kostenübernahmeerklärung: ")}
+          {costCoveragePurpose(tx)}
+        </p>
+      ) : null}
       {required ? (
         documents.length > 0
           ? renderDocuments(documents)

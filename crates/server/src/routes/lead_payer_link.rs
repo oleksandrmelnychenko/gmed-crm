@@ -102,6 +102,7 @@ pub(crate) const PRIVACY_TEXT_VERSION: &str = "payer-privacy-2026-10-06";
 const MAX_PAYER_UPLOADS: usize = 10;
 const MAX_BENEFICIAL_OWNERS: usize = 10;
 /// `numeric(12, 2)`: at most 9 999 999 999.99.
+#[cfg(test)]
 const MAX_TOTAL_CENTS: i64 = 999_999_999_999;
 /// 100 %, in hundredths.
 const FULL_SHARE: i64 = 10_000;
@@ -297,8 +298,9 @@ pub fn public_router() -> Router<AppState> {
         .layer(middleware::from_fn(payer_link_guard))
 }
 
-/// Staff (send, revoke, the expected total, the answers) and the paying
-/// parent's section of the lead cabinet.
+/// Staff (send, revoke, the answers) and the paying parent's section of the
+/// lead cabinet. The staff "expected total" is gone (T10/T11 retired
+/// 2026-10-12, endpoint removed 2026-10-22); the column keeps its history.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
@@ -306,10 +308,6 @@ pub fn router() -> Router<AppState> {
             get(staff_get).post(staff_send),
         )
         .route("/leads/{lead_id}/payer-link/revoke", post(staff_revoke))
-        .route(
-            "/leads/{lead_id}/payer-link/estimated-total",
-            post(staff_estimated_total),
-        )
         .route(
             "/me/lead-requests/{lead_id}/payer-questionnaire",
             get(cabinet_get).post(cabinet_patch),
@@ -691,7 +689,6 @@ struct Statement {
     confirmed_email: Option<String>,
     email_confirmed_at: Option<DateTime<Utc>>,
     answers: Answers,
-    estimated_total_cents: Option<i64>,
     declared_correct_at: Option<DateTime<Utc>>,
     submitted_at: Option<DateTime<Utc>>,
     adopted_at: Option<DateTime<Utc>>,
@@ -708,7 +705,7 @@ const STATEMENT_COLUMNS: &str = "link_id, privacy_ack_at, privacy_text_version, 
      relationship, occupation, industry, funds_sources, funds_description, pep_self, \
      pep_self_details, pep_related, pep_related_details, high_risk_country, \
      high_risk_country_code, sanctions_links, sanctions_links_details, legal_form, vat_id, \
-     payment_reason, estimated_total_eur::text AS estimated_total_eur, declared_correct_at, submitted_at, \
+     payment_reason, declared_correct_at, submitted_at, \
      adopted_at, updated_at";
 
 impl Statement {
@@ -791,8 +788,6 @@ impl Statement {
                 vat_id: text("vat_id"),
                 payment_reason: text("payment_reason"),
             },
-            estimated_total_cents: text("estimated_total_eur")
-                .and_then(|value| parse_cents(&value, MAX_TOTAL_CENTS)),
             declared_correct_at: time("declared_correct_at"),
             submitted_at: time("submitted_at"),
             adopted_at: time("adopted_at"),
@@ -4489,13 +4484,6 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
         "risk_hold": risk_hold,
         "mail_available": mail_available,
         "link": link_json,
-        // Information for staff only: the expected total never asks for
-        // the proof of funds (owner rule 2026-10-07).
-        "estimated_total_eur": context
-            .statement
-            .as_ref()
-            .and_then(|statement| statement.estimated_total_cents)
-            .map(cents_text),
         "questionnaire": questionnaire_value,
     }))
     .into_response()
@@ -4817,103 +4805,6 @@ async fn staff_revoke(
         return intake::internal(error, "commit payer link");
     }
     if !revoked.is_empty() {
-        publish(&state, Some(auth.user_id), lead_id, None).await;
-    }
-    staff_payload(&state, &auth, lead_id).await
-}
-
-/// `POST /leads/{id}/payer-link/estimated-total`: staff's expected total of
-/// the request (EUR, two decimals, or `null`).
-async fn staff_estimated_total(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(lead_id): Path<Uuid>,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
-        return response;
-    }
-    let value: Value = match serde_json::from_slice(&body) {
-        Ok(value) => value,
-        Err(_) => return invalid_field("body", "A JSON object is expected"),
-    };
-    let cents = match value.get("estimated_total_eur") {
-        None => return invalid_field("estimated_total_eur", "The expected total is missing"),
-        Some(Value::Null) => None,
-        Some(Value::String(text)) if text.trim().is_empty() => None,
-        Some(total) => match cents_of(total, MAX_TOTAL_CENTS) {
-            Some(cents) => Some(cents),
-            None => {
-                return invalid_field(
-                    "estimated_total_eur",
-                    "Use an amount in EUR with at most two decimals",
-                );
-            }
-        },
-    };
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(error) => return intake::internal(error, "begin payer estimate"),
-    };
-    let context = match lock_lead(&mut tx, lead_id).await {
-        Ok(true) => match load_context(&mut tx, lead_id).await {
-            Ok(Some(context)) => context,
-            Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
-            Err(error) => return intake::internal(error, "load payer link"),
-        },
-        Ok(false) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
-        Err(error) => return intake::internal(error, "lock lead"),
-    };
-    if context.converted {
-        return coded(
-            StatusCode::CONFLICT,
-            "lead_converted",
-            "The lead is converted",
-            json!({}),
-        );
-    }
-    let before = context
-        .statement
-        .as_ref()
-        .and_then(|statement| statement.estimated_total_cents);
-    if before != cents {
-        let stored = async {
-            sqlx::query(
-                r#"INSERT INTO lead_payer_statements (lead_id, source, estimated_total_eur)
-                   VALUES ($1, 'link', $2::numeric)
-                   ON CONFLICT (lead_id) DO UPDATE
-                   SET estimated_total_eur = EXCLUDED.estimated_total_eur"#,
-            )
-            .bind(lead_id)
-            .bind(cents.map(cents_text))
-            .execute(&mut *tx)
-            .await?;
-            audit::write_in_transaction(
-                &mut tx,
-                &audit::domain_event(
-                    "payer_estimated_total_updated",
-                    Some(auth.user_id),
-                    "lead",
-                    Some(lead_id),
-                    json!({ "set": cents.is_some() }),
-                ),
-            )
-            .await?;
-            // Informational for staff since the amount triggers were retired
-            // (owner 2026-10-12); the reassessment keeps the stored state fresh.
-            crate::risk::store::reassess(
-                &mut tx,
-                lead_id,
-                crate::risk::store::Cause::Staff,
-                Some(auth.user_id),
-            )
-            .await?;
-            tx.commit().await
-        }
-        .await;
-        if let Err(error) = stored {
-            return intake::internal(error, "store payer estimate");
-        }
         publish(&state, Some(auth.user_id), lead_id, None).await;
     }
     staff_payload(&state, &auth, lead_id).await

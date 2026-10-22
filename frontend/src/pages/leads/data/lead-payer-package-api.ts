@@ -122,6 +122,8 @@ export type LeadPayerPackageState = {
   signature_enabled: boolean;
   languages: string[];
   suggested_language: string | null;
+  /** The language the payer chose (`de`, `en`, `uk`, `ru`); null when unknown or on an older server. */
+  payer_language: string | null;
   signer: PayerPackageSigner | null;
   order: { id: string; number: string | null } | null;
   cost_estimate_document_id: string | null;
@@ -291,6 +293,7 @@ export function normalizeLeadPayerPackageState(value: unknown): LeadPayerPackage
     signature_enabled: raw.signature_enabled !== false,
     languages: languages.length > 0 ? languages : [...PAYER_PACKAGE_LANGUAGES],
     suggested_language: textOrNull(raw.suggested_language),
+    payer_language: textOrNull(raw.payer_language),
     signer: normalizeSigner(raw.signer),
     order: orderId ? { id: orderId, number: textOrNull(order?.number) } : null,
     cost_estimate_document_id: textOrNull(raw.cost_estimate_document_id),

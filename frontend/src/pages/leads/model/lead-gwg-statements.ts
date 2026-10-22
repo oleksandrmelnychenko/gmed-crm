@@ -679,7 +679,7 @@ export function billingStatements(
       }
     }
   }
-  invoice.push(statement("invoice_to", tx("Счёт направляется", "Rechnung geht an"), invoiceToLabel(invoiceTo, tx)));
+  invoice.push(statement("invoice_to", tx("Счёт направляется", "Rechnung geht an"), invoiceToLabel(invoiceTo, tx, minor)));
   if (invoiceTo === "other") {
     invoice.push(
       // The recipient's name stands in "Получатель счёта" already.

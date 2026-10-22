@@ -548,20 +548,35 @@ async fn staff_send_the_link_only_through_the_gate_and_resend_or_revoke_it() {
         with_login(&app, "GET", &path, &app.staff("ceo_assistant"), None).await;
     assert_eq!(status, StatusCode::OK, "{assistant}");
     assert_eq!(assistant["can_send"], false, "{assistant}");
-    for write in [
-        path.clone(),
-        format!("{path}/revoke"),
-        format!("{path}/estimated-total"),
-    ] {
+    for write in [path.clone(), format!("{path}/revoke")] {
         let (status, _) = with_login(
             &app,
             "POST",
             &write,
             &app.staff("ceo_assistant"),
-            Some(json!({ "estimated_total_eur": null })),
+            Some(json!({})),
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{write}");
+    }
+    // The staff "expected total" is gone (T10/T11 retired; endpoint removed
+    // 2026-10-22).
+    {
+        let (status, _) = with_login(
+            &app,
+            "POST",
+            &format!("{path}/estimated-total"),
+            &app.manager(),
+            Some(json!({ "estimated_total_eur": "12000" })),
+        )
+        .await;
+        assert!(
+            matches!(
+                status,
+                StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+            ),
+            "{status}"
+        );
     }
     let (status, _) = with_login(&app, "GET", &path, &app.staff("sales"), None).await;
     assert_eq!(status, StatusCode::OK);
@@ -1122,8 +1137,7 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
         1
     );
 
-    // The identity document; staff's expected total is information only, a
-    // second citizenship on the black list asks for the proof of funds (the
+    // The identity document; a second citizenship on the black list asks for the proof of funds (the
     // enhanced check of the owner's rule 2026-10-07: check level 2).
     let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass.pdf").await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
@@ -1133,28 +1147,15 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
         .as_str()
         .unwrap()
         .to_string();
-    let (status, refused) = with_login(
-        &app,
-        "POST",
-        &format!("{path}/estimated-total"),
-        &app.manager(),
-        Some(json!({ "estimated_total_eur": "12000.123" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
-    let (status, estimated) = with_login(
-        &app,
-        "POST",
-        &format!("{path}/estimated-total"),
-        &app.manager(),
-        Some(json!({ "estimated_total_eur": "12000" })),
-    )
-    .await;
+    let (status, estimated) = with_login(&app, "GET", &path, &app.manager(), None).await;
     assert_eq!(status, StatusCode::OK, "{estimated}");
-    assert_eq!(estimated["estimated_total_eur"], "12000.00");
+    assert!(
+        estimated.get("estimated_total_eur").is_none(),
+        "{estimated}"
+    );
     // The amount is no trigger since 2026-10-12 (owner: GMED sets the order;
-    // T10 / T11 retired): a friend (T4 + T5) paying 12 000 EUR stays at
-    // level 1, without the proof of funds.
+    // T10 / T11 retired, staff no longer enter an expected total): a friend
+    // (T4 + T5) stays at level 1, without the proof of funds.
     assert_eq!(estimated["questionnaire"]["check_level"], 1, "{estimated}");
     assert_eq!(estimated["questionnaire"]["funds_proof_required"], false);
     // A public office of the payer (a knock-out) keeps it so.
@@ -2027,16 +2028,17 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     named["phone"] = json!("+49 30 5550100");
     name_payer(&app, lead_id, &patient, named).await;
     submit_request(&app, lead_id).await;
-    let path = format!("/api/v1/leads/{lead_id}/payer-link");
-    let (status, estimated) = with_login(
-        &app,
-        "POST",
-        &format!("{path}/estimated-total"),
-        &app.manager(),
-        Some(json!({ "estimated_total_eur": "500" })),
+    // A historic expected total (the column stays; nothing writes it since
+    // the endpoint was removed 2026-10-22).
+    sqlx::query(
+        "INSERT INTO lead_payer_statements (lead_id, source, estimated_total_eur)
+         VALUES ($1, 'link', 500)
+         ON CONFLICT (lead_id) DO UPDATE SET estimated_total_eur = EXCLUDED.estimated_total_eur",
     )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{estimated}");
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
 
     // A fresh link: what the lead entered about the payer, as editable
     // defaults (owner 2026-10-10, QA C4-f); never an identity document.

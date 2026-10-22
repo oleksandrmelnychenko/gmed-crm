@@ -49,6 +49,66 @@ export function payerPackageSlotLabel(slot: PayerPackageSlot, tx: Tx): string {
   }
 }
 
+/**
+ * One short line under each document: what it is for (owner decision
+ * 2026-10-22), from the templates' purpose.
+ */
+export function payerPackageSlotPurpose(slot: PayerPackageSlot, tx: Tx): string {
+  switch (slot) {
+    case "self_disclosure":
+      return tx(
+        "Данные плательщика о себе и происхождении средств (GwG), из его анкеты",
+        "Angaben der zahlenden Person zu sich und zur Herkunft der Mittel (GwG), aus ihrem Fragebogen",
+      );
+    case "cost_coverage":
+      return costCoveragePurpose(tx);
+    case "patient_statement":
+      return tx(
+        "Пациент подтверждает, что расходы оплачивает третье лицо",
+        "Die Patientenseite bestätigt, dass ein Dritter die Kosten trägt",
+      );
+    case "cost_estimate":
+      return tx(
+        "Смета для плательщика (только с согласия пациента)",
+        "Kostenvoranschlag für den Zahler (nur mit Einwilligung der Patientin / des Patienten)",
+      );
+  }
+}
+
+/** What the Kostenübernahmeerklärung is for; also under the standalone declaration of "Кто платит". */
+export function costCoveragePurpose(tx: Tx): string {
+  return tx(
+    "Плательщик обязуется оплатить расходы пациента",
+    "Die zahlende Person verpflichtet sich, die Kosten der Patientin / des Patienten zu tragen",
+  );
+}
+
+/** The payer's languages Skribble does not invite in: such a payer gets the English invitation. */
+const UNSUPPORTED_INVITATION_LANGUAGES = new Set(["ru", "uk", "ua"]);
+
+/**
+ * The hint beside the invitation language when the payer prefers Russian or
+ * Ukrainian (Skribble invites in DE / EN / FR / IT only, owner decision
+ * 2026-10-22); `null` otherwise.
+ */
+export function payerPackageLanguageHint(
+  state: Pick<LeadPayerPackageState, "payer_language">,
+  chosenLanguage: string,
+  tx: Tx,
+): string | null {
+  const preferred = state.payer_language?.trim().toLowerCase();
+  if (!preferred || !UNSUPPORTED_INVITATION_LANGUAGES.has(preferred)) return null;
+  return chosenLanguage === "en"
+    ? tx(
+      "Skribble не поддерживает русский/украинский: письмо уйдёт на английском",
+      "Skribble unterstützt kein Russisch/Ukrainisch: Die Einladung geht auf Englisch",
+    )
+    : tx(
+      "Skribble не поддерживает русский/украинский: письмо уйдёт на выбранном языке",
+      "Skribble unterstützt kein Russisch/Ukrainisch: Die Einladung geht in der gewählten Sprache",
+    );
+}
+
 /** Each slot with its document of the package, in the bundle's order; `null` before preparing. */
 export function payerPackageRows(
   pkg: Pick<PayerPackage, "documents"> | null | undefined,

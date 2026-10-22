@@ -13,12 +13,14 @@ import {
   payerPackageChanged,
   payerPackageErrorText,
   payerPackageIdentificationText,
+  payerPackageLanguageHint,
   payerPackageLanguageOf,
   payerPackageOutdatedHeading,
   payerPackageOutdatedReasonText,
   payerPackageRows,
   payerPackageSignerText,
   payerPackageSlotLabel,
+  payerPackageSlotPurpose,
   payerPackageStatusLine,
   payerPackageSummaryText,
   standaloneCostAssumptionKept,
@@ -297,5 +299,35 @@ describe("payer package errors", () => {
   it("leaves anything else to the caller", () => {
     expect(payerPackageErrorText(error("forbidden"), de)).toBeNull();
     expect(payerPackageErrorText(new Error("network"), de)).toBeNull();
+  });
+});
+
+describe("payer package: what each document is for (owner decision 2026-10-22)", () => {
+  it("says it in one short line per document", () => {
+    expect(payerPackageSlotPurpose("cost_coverage", ru)).toBe("Плательщик обязуется оплатить расходы пациента");
+    expect(payerPackageSlotPurpose("patient_statement", ru)).toBe("Пациент подтверждает, что расходы оплачивает третье лицо");
+    expect(payerPackageSlotPurpose("cost_estimate", ru)).toBe("Смета для плательщика (только с согласия пациента)");
+    expect(payerPackageSlotPurpose("self_disclosure", ru)).toContain("GwG");
+    for (const slot of ["self_disclosure", "cost_coverage", "patient_statement", "cost_estimate"] as const) {
+      expect(payerPackageSlotPurpose(slot, de)).not.toBe(payerPackageSlotPurpose(slot, ru));
+    }
+  });
+});
+
+describe("payer package: Skribble's languages", () => {
+  it("tells staff that a Russian or Ukrainian payer is invited in English", () => {
+    const russian = state({ suggested_language: "en", payer_language: "ru" });
+    expect(russian.payer_language).toBe("ru");
+    expect(payerPackageLanguageHint(russian, "en", ru)).toBe(
+      "Skribble не поддерживает русский/украинский: письмо уйдёт на английском",
+    );
+    expect(payerPackageLanguageHint(state({ payer_language: "uk" }), "en", de)).toBe(
+      "Skribble unterstützt kein Russisch/Ukrainisch: Die Einladung geht auf Englisch",
+    );
+    expect(payerPackageLanguageHint(russian, "de", ru)).toContain("на выбранном языке");
+    expect(payerPackageLanguageHint(state({ payer_language: "de" }), "de", ru)).toBeNull();
+    // An older server sends no payer language.
+    expect(state().payer_language).toBeNull();
+    expect(payerPackageLanguageHint(state(), "en", ru)).toBeNull();
   });
 });

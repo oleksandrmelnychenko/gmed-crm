@@ -385,41 +385,6 @@ export function payerLinkResendQuestion(tx: Tx): string {
   );
 }
 
-/**
- * The expected total as typed: "12000", "12 000,50", "12.000,50" or
- * "12000.5" → "12000.50"; "" → null (cleared). `undefined` for anything that
- * is not an amount ≥ 0 with at most two decimals.
- */
-export function parseEstimatedTotal(input: string): string | null | undefined {
-  const compact = input.replace(/[\s']/g, "").replace(/(EUR|€)$/i, "");
-  // (`\s` also takes the no-break spaces of a copied "12 000".)
-  if (compact === "") return null;
-  let normalized = compact;
-  const lastComma = compact.lastIndexOf(",");
-  const lastDot = compact.lastIndexOf(".");
-  if (lastComma >= 0 && lastDot >= 0) {
-    // Both: the last one is the decimal separator, the other groups thousands.
-    const decimal = lastComma > lastDot ? "," : ".";
-    const group = decimal === "," ? "." : ",";
-    normalized = compact.split(group).join("").replace(decimal, ".");
-  } else if (lastComma >= 0) {
-    normalized = /^\d{1,3}(,\d{3})+$/.test(compact) && compact.split(",").length > 2
-      ? compact.split(",").join("")
-      : compact.replace(",", ".");
-  } else if (lastDot >= 0 && /^\d{1,3}(\.\d{3})+$/.test(compact)) {
-    // "12.000" in German: a thousands separator, not 12 euros.
-    normalized = compact.split(".").join("");
-  }
-  if (!/^\d{1,10}(\.\d{1,2})?$/.test(normalized)) return undefined;
-  const [whole, fraction = ""] = normalized.split(".");
-  return `${String(Number(whole))}.${fraction.padEnd(2, "0")}`;
-}
-
-/** "12000.00" as staff type it: "12000,00"; "" while none. */
-export function estimatedTotalInput(value: string | null | undefined): string {
-  return value ? value.replace(".", ",") : "";
-}
-
 /** "10 000" (RU) / "10.000" (DE): a number with the language's grouping (the owners' shares). */
 function amountLabel(value: number, tx: Tx): string {
   return value.toLocaleString(tx("ru-RU", "de-DE"), { maximumFractionDigits: 2 });

@@ -169,7 +169,7 @@ function LoadedCard({
   const representative = declaration && (isRepresentativePayer(declaration) || parentOfBefore) ? declaration : null;
   const addressWarning = recipient ? missingAddressWarning(recipient, tx) : null;
   const identificationRows = identification ? identificationLines(identification, tx) : [];
-  const invoiceTo = invoiceToStatement(declaration, tx, lang);
+  const invoiceTo = invoiceToStatement(declaration, tx, lang, summary.patient_is_minor);
   const invoiceTax = invoiceTaxStatement(declaration);
 
   return (

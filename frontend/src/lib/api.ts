@@ -544,6 +544,8 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   // A minor's own login while the parents have access (lead_portal_intake.rs, lead_portal_account.rs).
   lead_request_guardian_only: "api_lead_request_guardian_only",
   minor_own_login_closed: "api_minor_own_login_closed",
+  // The payer declaration's phone (lead_payer.rs, field `phone`).
+  payer_phone_invalid: "api_payer_phone_invalid",
   // Orders, contracts, quotes and the service catalogues (lib/order-api-errors.ts).
   ...ORDER_API_ERROR_KEYS,
   // Internal notes and re-billing waivers (lib/billing-api-errors.ts).

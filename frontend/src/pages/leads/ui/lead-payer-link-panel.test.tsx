@@ -15,7 +15,6 @@ const de = (_ru: string, text: string) => text;
 const controller = {
   send: async () => null,
   revoke: async () => null,
-  saveEstimatedTotal: async () => null,
   reload: async () => null,
 };
 
@@ -26,7 +25,6 @@ function state(patch: Record<string, unknown> = {}): LeadPayerLinkState {
     blocked_reason: null,
     mail_available: true,
     link: null,
-    estimated_total_eur: null,
     questionnaire: null,
     ...patch,
   })!;
@@ -72,7 +70,6 @@ describe("LeadPayerLinkPanel", () => {
           expires_at: "2026-11-05T10:00:00Z",
           last_email_status: "sent",
         },
-        estimated_total_eur: "12000.00",
       }),
       { tx: de },
     );

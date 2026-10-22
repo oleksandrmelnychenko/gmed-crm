@@ -294,7 +294,9 @@ describe("ownAccountPaymentLabel", () => {
 });
 
 describe("identificationPersons", () => {
-  const line = { detail: "", canConfirm: true, paymentExpected: true, wide: false, note: "" };
+  const line = { detail: "", canConfirm: true, paymentExpected: true, paidByThirdParty: false, wide: false, note: "" };
+  // Owner decision 2026-10-22: with a third-party payer only the payer's line expects the payment.
+  const notPaying = { paymentExpected: false, paidByThirdParty: true };
 
   it("lists the patient alone while the patient pays", () => {
     expect(identificationPersons(status(), ru)).toEqual([
@@ -306,9 +308,23 @@ describe("identificationPersons", () => {
   it("adds the payer when a third party pays", () => {
     const payer = { ...NOTHING, qes: SIGNED };
     expect(identificationPersons(status({ payer: { ...payer, same_person_as: null } }), de)).toEqual([
-      { ...line, subject: "contract_partner", role: "Patient/in", person: NOTHING },
+      { ...line, ...notPaying, subject: "contract_partner", role: "Patient/in", person: NOTHING },
       { ...line, subject: "payer", role: "Kostenübernehmer", person: payer },
     ]);
+  });
+
+  it("says on the adult patient's line that a third party pays", () => {
+    const persons = identificationPersons(status({ payer: { ...NOTHING, same_person_as: null } }), ru);
+    const patient = persons[0];
+    expect(ownAccountPaymentLabel(patient.person, ru, patient.paymentExpected, patient.paidByThirdParty)).toEqual({
+      tone: "neutral",
+      text: "Платёж с собственного счёта не ожидается (платит третье лицо)",
+    });
+    expect(ownAccountPaymentLabel(patient.person, de, false, true).text).toBe(
+      "Keine Zahlung vom eigenen Konto erwartet (Zahlung durch Dritte)",
+    );
+    // A payment confirmed before still shows (and can be taken back).
+    expect(ownAccountPaymentLabel({ ...NOTHING, own_account_payment: CONFIRMED }, ru, false, true).tone).toBe("success");
   });
 
   it("lists the legal representatives of a minor and no line for the child", () => {
@@ -330,6 +346,7 @@ describe("identificationPersons", () => {
         canConfirm: true,
         // Nobody is named as payer yet: either parent may pay.
         paymentExpected: true,
+        paidByThirdParty: false,
         wide: false,
         note: "",
       },
@@ -340,6 +357,7 @@ describe("identificationPersons", () => {
         person: NOTHING,
         canConfirm: true,
         paymentExpected: true,
+        paidByThirdParty: false,
         wide: false,
         // A signature is attributed by the signer's e-mail.
         note: "нет e-mail — подпись не засчитается",
@@ -369,9 +387,10 @@ describe("identificationPersons", () => {
       ],
     });
     expect(identificationPersons(adult, ru)).toEqual([
-      { ...line, subject: "contract_partner", role: "Пациент", person: NOTHING },
+      { ...line, ...notPaying, subject: "contract_partner", role: "Пациент", person: NOTHING },
       {
         ...line,
+        ...notPaying,
         subject: `representative:${BEN_ID}`,
         role: "Ben Vertreter",
         detail: "уполномоченный представитель",
@@ -379,6 +398,7 @@ describe("identificationPersons", () => {
       },
       {
         ...line,
+        ...notPaying,
         subject: `representative:${ANNA_ID}`,
         // Without a name the line is captioned by the role.
         role: "Опекун (Betreuer)",
@@ -431,7 +451,7 @@ describe("identificationPersons", () => {
       payer: { ...NOTHING, qes: SIGNED, same_person_as: null },
     });
     const persons = identificationPersons(minor, ru);
-    expect(persons[0]).toMatchObject({ subject: `representative:${ANNA_ID}`, paymentExpected: false });
+    expect(persons[0]).toMatchObject({ subject: `representative:${ANNA_ID}`, paymentExpected: false, paidByThirdParty: true });
     expect(persons[1]).toEqual({
       ...line,
       subject: "payer",

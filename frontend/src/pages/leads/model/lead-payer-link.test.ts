@@ -11,9 +11,7 @@ import {
 } from "../data/lead-payer-link-api";
 import {
   beneficialOwnerLine,
-  estimatedTotalInput,
   fundsProofMissing,
-  parseEstimatedTotal,
   payerCheckLevelLine,
   payerCheckReasonLabel,
   payerFundsSourceLabel,
@@ -119,7 +117,6 @@ function state(patch: Partial<LeadPayerLinkState> = {}): LeadPayerLinkState {
     blocked_reason: null,
     mail_available: true,
     link: null,
-    estimated_total_eur: null,
     questionnaire: null,
     ...patch,
   };
@@ -341,32 +338,6 @@ describe("payer link: errors of the writes", () => {
   });
 });
 
-describe("payer link: expected total", () => {
-  it("reads what staff type and sends two decimals", () => {
-    expect(parseEstimatedTotal("12000")).toBe("12000.00");
-    expect(parseEstimatedTotal(" 12 000,5 ")).toBe("12000.50");
-    expect(parseEstimatedTotal("12.000,50")).toBe("12000.50");
-    expect(parseEstimatedTotal("12,000.50")).toBe("12000.50");
-    expect(parseEstimatedTotal("12000.5")).toBe("12000.50");
-    expect(parseEstimatedTotal("12.000")).toBe("12000.00");
-    expect(parseEstimatedTotal("1.234.567")).toBe("1234567.00");
-    expect(parseEstimatedTotal("9500 €")).toBe("9500.00");
-    expect(parseEstimatedTotal("0")).toBe("0.00");
-    expect(parseEstimatedTotal("")).toBeNull();
-    expect(parseEstimatedTotal("   ")).toBeNull();
-    // A dot before three digits groups thousands, as staff write it in German.
-    expect(parseEstimatedTotal("10.555")).toBe("10555.00");
-    for (const invalid of ["-5", "abc", "12,345", "1.2.3,4,5", "10.5555"]) {
-      expect(parseEstimatedTotal(invalid), invalid).toBeUndefined();
-    }
-  });
-
-  it("shows the stored amount with a decimal comma", () => {
-    expect(estimatedTotalInput("12000.00")).toBe("12000,00");
-    expect(estimatedTotalInput(null)).toBe("");
-  });
-});
-
 describe("payer link: check level", () => {
   it("names level and the reasons of the enhanced check (owner rule 2026-10-07)", () => {
     expect(payerCheckLevelLine(2, ["payer_residence_blacklist", "patient_sanctioned"], de)).toBe(
@@ -504,6 +475,7 @@ describe("payer link: the server's answer", () => {
       can_send: false,
       blocked_reason: "request_not_submitted",
       link: { status: "unknown" },
+      // The retired expected total of an older server is no part of the state.
       estimated_total_eur: 12000,
       // An older server's threshold is no part of the state any more.
       funds_proof_threshold_eur: "10000",
@@ -515,7 +487,6 @@ describe("payer link: the server's answer", () => {
       risk_hold: null,
       mail_available: true,
       link: null,
-      estimated_total_eur: "12000.00",
       questionnaire: null,
     });
     expect(normalizeLeadPayerLinkState({ can_send: true, risk_hold: "review" })?.risk_hold).toBe("review");

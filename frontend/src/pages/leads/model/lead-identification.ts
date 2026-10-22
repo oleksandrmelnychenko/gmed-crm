@@ -204,13 +204,25 @@ export function qualifiedSignatureLabel(person: PersonIdentification, tx: Tx): I
  * The payment from the person's own account: awaited, not to be expected (the
  * stated route is cash, crypto or a payment through a third party:
  * `expected` false), or confirmed with the day and who confirmed it.
+ * `paidByThirdParty`: nothing is expected because a third party (person or
+ * organisation) pays — the label says so (owner decision 2026-10-22).
  */
-export function ownAccountPaymentLabel(person: PersonIdentification, tx: Tx, expected = true): IdentificationLabel {
+export function ownAccountPaymentLabel(
+  person: PersonIdentification,
+  tx: Tx,
+  expected = true,
+  paidByThirdParty = false,
+): IdentificationLabel {
   const payment = person.own_account_payment;
   if (!payment && !expected) {
     return {
       tone: "neutral",
-      text: tx("Платёж с собственного счёта не ожидается", "Keine Zahlung vom eigenen Konto zu erwarten"),
+      text: paidByThirdParty
+        ? tx(
+          "Платёж с собственного счёта не ожидается (платит третье лицо)",
+          "Keine Zahlung vom eigenen Konto erwartet (Zahlung durch Dritte)",
+        )
+        : tx("Платёж с собственного счёта не ожидается", "Keine Zahlung vom eigenen Konto zu erwarten"),
     };
   }
   if (!payment) {
@@ -247,9 +259,13 @@ export type IdentificationPerson = {
    * Whether a payment from this person's own account is to be expected at
    * all. A minor's legal representative who is not the named payer only
    * signs (owner decision 2026-10-19: the paying parent contracts and pays);
-   * true while it is not known who pays.
+   * true while it is not known who pays. An adult patient (and an adult's
+   * representative) with a third-party payer does not pay either: only the
+   * payer's line expects the payment (owner decision 2026-10-22).
    */
   paymentExpected: boolean;
+  /** No payment is expected on this line because a third party (not a parent) pays. */
+  paidByThirdParty: boolean;
   /** A caption that is a whole sentence stands on a line of its own. */
   wide: boolean;
   /** What stands in the way of this person's identification; "" when nothing does. */
@@ -286,11 +302,15 @@ function missingEmailNote(person: RepresentativeIdentification, tx: Tx): string 
  * is said on that parent's line, which alone expects the payment from the
  * own account (DEV 2026-10-22, Linda Testova: every parent got "confirm
  * payment" plus a second payer line); a parent who does not pay only signs.
+ * The same for an adult: with a third-party payer (person or organisation)
+ * only the payer's line expects the payment (owner decision 2026-10-22).
  */
 export function identificationPersons(status: LeadIdentificationStatus, tx: Tx): IdentificationPerson[] {
   const payingParent = payerSamePerson(status);
   // Somebody is named as payer: only that person pays.
   const payerKnown = status.payer !== null;
+  // A third party who is not one of the parents pays.
+  const thirdPartyPays = payerKnown && !payingParent;
   const persons: IdentificationPerson[] = status.minor
     ? status.representatives.map((representative) => {
         const pays = payingParent ? payingParent.subject === representative.subject : !payerKnown;
@@ -302,6 +322,7 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
           person: { qes: representative.qes, own_account_payment: representative.own_account_payment },
           canConfirm: true,
           paymentExpected: pays,
+          paidByThirdParty: !pays && thirdPartyPays,
           wide: false,
           note: missingEmailNote(representative, tx),
         };
@@ -313,7 +334,8 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
           detail: "",
           person: status.contract_partner,
           canConfirm: true,
-          paymentExpected: true,
+          paymentExpected: !thirdPartyPays,
+          paidByThirdParty: thirdPartyPays,
           wide: false,
           note: "",
         },
@@ -325,7 +347,8 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
           detail: actingPersonRoleLabel(acting, tx),
           person: { qes: acting.qes, own_account_payment: acting.own_account_payment },
           canConfirm: true,
-          paymentExpected: true,
+          paymentExpected: !thirdPartyPays,
+          paidByThirdParty: thirdPartyPays,
           wide: false,
           note: missingEmailNote(acting, tx),
         })),
@@ -340,6 +363,7 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
     person: { qes: payer.qes, own_account_payment: payer.own_account_payment },
     canConfirm: true,
     paymentExpected: true,
+    paidByThirdParty: false,
     wide: false,
     note: "",
   });

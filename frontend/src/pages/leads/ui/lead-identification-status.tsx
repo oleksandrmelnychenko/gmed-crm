@@ -104,7 +104,7 @@ export function LeadIdentificationStatusView({
         </p>
       ) : null}
       <ul className="space-y-2">
-        {persons.map(({ subject, role, detail, person, canConfirm, paymentExpected, wide, note }) => {
+        {persons.map(({ subject, role, detail, person, canConfirm, paymentExpected, paidByThirdParty, wide, note }) => {
           const confirmed = Boolean(person.own_account_payment);
           // Cash or a payment through a third party, or a parent who does not
           // pay (only signs): no own-account payment to confirm.
@@ -125,7 +125,7 @@ export function LeadIdentificationStatusView({
                 {detail ? <StatusChip className={cn(PARENT_ROLE_CHIP_CLASS, "whitespace-normal")}>{detail}</StatusChip> : null}
               </span>
               <Label label={qualifiedSignatureLabel(person, tx)} testId={`lead-identification-qes-${subject}`} />
-              <Label label={ownAccountPaymentLabel(person, tx, expected)} testId={`lead-identification-payment-${subject}`} />
+              <Label label={ownAccountPaymentLabel(person, tx, expected, paidByThirdParty)} testId={`lead-identification-payment-${subject}`} />
               {canEdit && canConfirm && (confirmed || expected) ? (
                 <Button
                   type="button"

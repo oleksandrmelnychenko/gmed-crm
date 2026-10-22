@@ -13,6 +13,7 @@ import {
   payerPackageBlockedReasonText,
   payerPackageErrorText,
   payerPackageIdentificationText,
+  payerPackageLanguageHint,
   payerPackageLanguageOf,
   payerPackageLanguages,
   payerPackageOutdatedHeading,
@@ -21,6 +22,7 @@ import {
   payerPackageSignatureDisabledText,
   payerPackageSignerText,
   payerPackageSlotLabel,
+  payerPackageSlotPurpose,
   payerPackageStatusLine,
   payerPackageTestModeLabel,
   type Tx,
@@ -71,6 +73,7 @@ export function LeadPayerPackagePanel({
   const rows = payerPackageRows(pkg);
   const status = pkg ? payerPackageStatusLine(pkg, tx) : null;
   const chosenLanguage = payerPackageLanguageOf(state, language);
+  const languageHint = payerPackageLanguageHint(state, chosenLanguage, tx);
   const signer = payerPackageSignerText(state.signer, tx);
   const identification = payerPackageIdentificationText(state.payer_identification, tx);
   const outdated = pkg?.outdated_reasons ?? [];
@@ -162,6 +165,9 @@ export function LeadPayerPackagePanel({
                 ) : (
                   <span className={cn("break-words text-sm", document ? "font-medium text-foreground" : "text-muted-foreground")}>{label}</span>
                 )}
+                <p className="break-words text-xs leading-5 text-muted-foreground" data-testid={`lead-payer-package-purpose-${slot}`}>
+                  {payerPackageSlotPurpose(slot, tx)}
+                </p>
                 <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   {document ? (
                     <>
@@ -255,6 +261,11 @@ export function LeadPayerPackagePanel({
                   </button>
                 ))}
               </div>
+              {languageHint ? (
+                <p className="w-full text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-payer-package-language-hint">
+                  {languageHint}
+                </p>
+              ) : null}
             </div>
           ) : null}
           <div className="flex flex-wrap gap-2">

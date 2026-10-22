@@ -31,6 +31,8 @@ import {
   STATED_FUNDS_SOURCES,
   statedFundsSourceLabel,
   statedFundsSourcesLabel,
+  taxNumberFormatWarning,
+  vatIdFormatWarning,
   type PayerDeclaration,
   type PayerDeclarationStatus,
 } from "./lead-payer";
@@ -504,6 +506,10 @@ describe("USt-IdNr. / Steuernummer of the invoice recipient (section 7, staff fi
     expect(invoiceToLabel("payer", de)).toBe("an die zahlende Person / Organisation");
     expect(invoiceToLabel("other", de)).toBe("an eine andere Adresse");
     expect(invoiceToLabel("parents", de)).toBe("parents");
+    // A minor never receives the invoice (legacy rows without the step-3 answer).
+    expect(invoiceToLabel("self", tx, true)).toBe("родителю / законному представителю");
+    expect(invoiceToLabel("self", de, true)).toBe("Elternteil / gesetzliche Vertretung");
+    expect(invoiceToLabel("payer", tx, true)).toBe("плательщику");
     expect(invoiceTaxLine(billed)).toBe("USt-IdNr. DE123456789");
     expect(invoiceTaxLine({ invoice_vat_id: " DE123456789 ", invoice_tax_number: "30/123/45678" })).toBe(
       "USt-IdNr. DE123456789 · Steuernummer 30/123/45678",
@@ -774,5 +780,92 @@ describe("a repeat intake starts from the patient's declaration (QA B-18)", () =
     // The same id on the repeat lead stays.
     expect(payerDeclarationPrefillForm({ ...earlier, payer_representative_id: "relation-ben" }, { current }).representativeId)
       .toBe("relation-ben");
+  });
+});
+
+describe("USt-IdNr. / Steuernummer format hints (owner decision 2026-10-22)", () => {
+  const tx = (ru: string) => ru;
+  it("warns about a USt-IdNr. that does not look like one, never about an empty or fitting one", () => {
+    expect(vatIdFormatWarning("", tx)).toBeNull();
+    expect(vatIdFormatWarning("DE123456789", tx)).toBeNull();
+    expect(vatIdFormatWarning("de 123 456 789", tx)).toBeNull();
+    expect(vatIdFormatWarning("ATU12345678", tx)).toBeNull();
+    expect(vatIdFormatWarning("DE12345", tx)).toContain("USt-IdNr.");
+    expect(vatIdFormatWarning("123456789", tx)).not.toBeNull();
+    expect(vatIdFormatWarning("FR1", tx)).not.toBeNull();
+  });
+
+  it("warns about a Steuernummer outside 10–13 digits or with other characters", () => {
+    expect(taxNumberFormatWarning(null, tx)).toBeNull();
+    expect(taxNumberFormatWarning("12/345/67890", tx)).toBeNull();
+    expect(taxNumberFormatWarning("2893081508152", tx)).toBeNull();
+    expect(taxNumberFormatWarning("123/456", tx)).toContain("Steuernummer");
+    expect(taxNumberFormatWarning("12-345-67890", tx)).not.toBeNull();
+  });
+});
+
+describe("an organisation payer's legal form and register number (staff, 2026-10-22)", () => {
+  const organisation = {
+    ...EMPTY_PAYER_DECLARATION_FORM,
+    kind: "third_party" as const,
+    payerType: "company" as const,
+    payerTypeSupport: "supported" as const,
+    organisationName: "Muster GmbH",
+  };
+
+  it("sends both for an organisation on a server that stores them", () => {
+    const body = payerDeclarationPayload({
+      ...organisation,
+      organisationDetailsSupport: "supported",
+      organisationLegalForm: " GmbH ",
+      organisationRegisterNumber: "",
+    });
+    expect(body).toMatchObject({ organisation_legal_form: "GmbH", organisation_register_number: null });
+  });
+
+  it("sends nothing once the payer answered on the own link, for a person or for an older server", () => {
+    const locked = payerDeclarationPayload({
+      ...organisation,
+      organisationDetailsSupport: "supported",
+      organisationDetailsLocked: true,
+      organisationLegalForm: "GmbH",
+    });
+    expect(locked).not.toHaveProperty("organisation_legal_form");
+    const older = payerDeclarationPayload({ ...organisation, organisationDetailsSupport: "unsupported", organisationLegalForm: "GmbH" });
+    expect(older).not.toHaveProperty("organisation_legal_form");
+    const person = payerDeclarationPayload({
+      ...organisation,
+      payerType: "person",
+      organisationDetailsSupport: "supported",
+      organisationLegalForm: "GmbH",
+    });
+    expect(person).not.toHaveProperty("organisation_register_number");
+    // Before the first save only what staff entered.
+    expect(payerDeclarationPayload({ ...organisation, organisationRegisterNumber: "HRB 1" })).toMatchObject({
+      organisation_register_number: "HRB 1",
+    });
+    expect(payerDeclarationPayload(organisation)).not.toHaveProperty("organisation_legal_form");
+  });
+
+  it("reads the stored values and the lock from the declaration", () => {
+    const response = normalizePayerDeclarationResponse({
+      declaration: {
+        payer_kind: "third_party",
+        payer_type: "company",
+        organisation_name: "Muster GmbH",
+        citizenships: [],
+        organisation_legal_form: "GmbH",
+        organisation_register_number: "HRB 12345",
+        organisation_details_locked: true,
+      },
+      status: { complete: false, missing: [] },
+    });
+    const form = payerDeclarationToForm(response!.declaration!);
+    expect(form).toMatchObject({
+      organisationLegalForm: "GmbH",
+      organisationRegisterNumber: "HRB 12345",
+      organisationDetailsSupport: "supported",
+      organisationDetailsLocked: true,
+    });
   });
 });

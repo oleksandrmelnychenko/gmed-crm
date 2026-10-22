@@ -1884,3 +1884,80 @@ async fn a_new_order_of_a_converted_patient_starts_with_the_declared_third_party
     assert!(full_order_payer(pool, order_id).await["name"].is_null());
     assert!(order_payer_audit(pool, order_id).await.is_empty());
 }
+
+/// Owner decisions 2026-10-22: staff enter an organisation payer's legal
+/// form and register number (locked once the payer answered through its own
+/// link), and a new payer phone that is no phone number is refused at its
+/// field; a stored legacy number still lets the other fields save.
+#[tokio::test]
+async fn staff_enter_an_organisations_register_data_and_a_wrong_payer_phone_is_refused() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let pm = app.bearer("patient_manager");
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+
+    let mut body = organisation_payer();
+    body["phone"] = json!("12");
+    let (status, error) = json_request(&app, "POST", &path, &pm, Some(body)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["error"], "payer_phone_invalid");
+    assert_eq!(error["field"], "phone");
+
+    let mut body = organisation_payer();
+    body["phone"] = json!("+43 1 5550100");
+    body["organisation_legal_form"] = json!(" GmbH ");
+    body["organisation_register_number"] = json!("FN 12345a");
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let declaration = &saved["declaration"];
+    assert_eq!(declaration["organisation_legal_form"], "GmbH", "{saved}");
+    assert_eq!(declaration["organisation_register_number"], "FN 12345a");
+    assert_eq!(declaration["organisation_details_locked"], false);
+
+    // Only the register number changes: the declaration itself stays.
+    body["organisation_register_number"] = json!("FN 99999b");
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        saved["declaration"]["organisation_register_number"],
+        "FN 99999b"
+    );
+    let mut too_long = body.clone();
+    too_long["organisation_legal_form"] = json!("x".repeat(101));
+    let (status, error) = json_request(&app, "POST", &path, &pm, Some(too_long)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["field"], "organisation_legal_form");
+
+    // A legacy number stored before the rule: the other fields still save.
+    sqlx::query("UPDATE lead_payer_declarations SET phone = '12' WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let mut legacy = body.clone();
+    legacy["phone"] = json!("12");
+    legacy["city"] = json!("Graz");
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(legacy)).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["declaration"]["city"], "Graz");
+
+    // The payer answered through its own link: staff no longer write them.
+    sqlx::query(
+        "INSERT INTO lead_payer_statements (lead_id, source, submitted_at)
+         VALUES ($1, 'link', now())
+         ON CONFLICT (lead_id) DO UPDATE SET submitted_at = now()",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let mut locked = body;
+    locked["phone"] = json!("12");
+    locked["city"] = json!("Graz");
+    locked["organisation_legal_form"] = json!("AG");
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(locked)).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["declaration"]["organisation_legal_form"], "GmbH");
+    assert_eq!(saved["declaration"]["organisation_details_locked"], true);
+}

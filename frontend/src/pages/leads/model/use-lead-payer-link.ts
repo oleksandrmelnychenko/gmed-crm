@@ -6,7 +6,6 @@ import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   fetchLeadPayerLink,
   revokeLeadPayerLink,
-  saveLeadPayerEstimatedTotal,
   sendLeadPayerLink,
   type LeadPayerLinkState,
   type PayerLinkSendInput,
@@ -23,7 +22,6 @@ export type LeadPayerLinkController = {
   reload: () => Promise<LeadPayerLinkState | null>;
   send: (input: PayerLinkSendInput) => Promise<LeadPayerLinkState | null>;
   revoke: () => Promise<LeadPayerLinkState | null>;
-  saveEstimatedTotal: (value: string | null) => Promise<LeadPayerLinkState | null>;
 };
 
 /**
@@ -89,10 +87,6 @@ export function useLeadPayerLink(leadId: string | null | undefined, enabled = tr
 
   const send = useCallback((input: PayerLinkSendInput) => write((id) => sendLeadPayerLink(id, input)), [write]);
   const revoke = useCallback(() => write((id) => revokeLeadPayerLink(id)), [write]);
-  const saveEstimatedTotal = useCallback(
-    (value: string | null) => write((id) => saveLeadPayerEstimatedTotal(id, value)),
-    [write],
-  );
 
   useEffect(() => {
     setData(null);
@@ -104,5 +98,5 @@ export function useLeadPayerLink(leadId: string | null | undefined, enabled = tr
     if (payerLinkChanged(event.payload?.change)) void reload();
   });
 
-  return { data, loading, error, reload, send, revoke, saveEstimatedTotal };
+  return { data, loading, error, reload, send, revoke };
 }

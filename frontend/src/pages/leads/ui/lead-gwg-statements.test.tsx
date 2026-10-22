@@ -770,7 +770,6 @@ const PAYER_LINK = normalizeLeadPayerLinkState({
   blocked_reason: null,
   mail_available: true,
   link: { status: "submitted", email: "viktor.zahler@example.com", sent_at: "2026-10-06T08:00:00Z" },
-  estimated_total_eur: "12000.00",
   questionnaire: {
     source: "link",
     payer_type: "person",

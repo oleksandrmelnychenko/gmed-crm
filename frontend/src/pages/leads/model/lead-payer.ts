@@ -151,6 +151,15 @@ export type PayerDeclaration = {
   /** The two staff fields of section 7; absent on an older server. */
   invoice_vat_id?: string | null;
   invoice_tax_number?: string | null;
+  /**
+   * An organisation's legal form and register number (Handelsregister-Nr.):
+   * from the lead's cabinet or entered by staff (2026-10-22); absent on an
+   * older server.
+   */
+  organisation_legal_form?: string | null;
+  organisation_register_number?: string | null;
+  /** The payer submitted its own answers through the payer link: the two fields above are locked. */
+  organisation_details_locked?: boolean;
   /** Section 8 (payment route), answered by the payer; read in "Данные от пациента". */
   payment_method?: PaymentMethod | null;
   payment_method_details?: string | null;
@@ -376,6 +385,13 @@ export type PayerDeclarationForm = {
    * the unknown keys, so they are neither offered nor sent.
    */
   invoiceTaxSupport: PayerTypeSupport;
+  /** An organisation's legal form and register number (staff may enter them, 2026-10-22). */
+  organisationLegalForm: string;
+  organisationRegisterNumber: string;
+  /** Whether the server stores the two fields (a loaded declaration carries the keys). */
+  organisationDetailsSupport: PayerTypeSupport;
+  /** The payer submitted its own answers through the payer link: not editable, not sent. */
+  organisationDetailsLocked: boolean;
 };
 
 /**
@@ -418,6 +434,10 @@ export const EMPTY_PAYER_DECLARATION_FORM: PayerDeclarationForm = {
   invoiceVatId: "",
   invoiceTaxNumber: "",
   invoiceTaxSupport: "unknown",
+  organisationLegalForm: "",
+  organisationRegisterNumber: "",
+  organisationDetailsSupport: "unknown",
+  organisationDetailsLocked: false,
 };
 
 function isSourceOfFunds(value: string | null | undefined): value is SourceOfFunds {
@@ -506,6 +526,10 @@ export function payerDeclarationToForm(
     invoiceVatId: declaration.invoice_vat_id ?? "",
     invoiceTaxNumber: declaration.invoice_tax_number ?? "",
     invoiceTaxSupport: Object.hasOwn(declaration, "invoice_vat_id") ? "supported" : "unsupported",
+    organisationLegalForm: declaration.organisation_legal_form ?? "",
+    organisationRegisterNumber: declaration.organisation_register_number ?? "",
+    organisationDetailsSupport: Object.hasOwn(declaration, "organisation_legal_form") ? "supported" : "unsupported",
+    organisationDetailsLocked: declaration.organisation_details_locked === true,
   };
 }
 
@@ -618,6 +642,35 @@ export type InvoiceTaxPayload = {
   invoice_tax_number: string | null;
 };
 
+/**
+ * Whether the staff form shows an organisation's legal form and register
+ * number as inputs: not for an older server that does not store them.
+ */
+export function organisationDetailsFieldsShown(form: Pick<PayerDeclarationForm, "organisationDetailsSupport">): boolean {
+  return form.organisationDetailsSupport !== "unsupported";
+}
+
+/**
+ * The organisation's legal form and register number in the save body: only
+ * for an organisation, never once the payer submitted its own answers
+ * (locked), never for an older server; before the first save only when
+ * staff entered one of them.
+ */
+function organisationDetailsPayload(
+  form: PayerDeclarationForm,
+  organisation: boolean,
+): { organisation_legal_form?: string | null; organisation_register_number?: string | null } {
+  if (!organisation || form.organisationDetailsLocked) return {};
+  const legalForm = form.organisationLegalForm.trim();
+  const registerNumber = form.organisationRegisterNumber.trim();
+  const sends = form.organisationDetailsSupport === "unknown"
+    ? legalForm !== "" || registerNumber !== ""
+    : form.organisationDetailsSupport === "supported";
+  return sends
+    ? { organisation_legal_form: legalForm || null, organisation_register_number: registerNumber || null }
+    : {};
+}
+
 /** The keys of the save body an older server does not know. */
 export type PayerTypePayload = {
   payer_type: PayerType | null;
@@ -709,6 +762,7 @@ export function payerDeclarationPayload(form: PayerDeclarationForm) {
     ...messenger,
     ...typed,
     ...invoiceTax,
+    ...organisationDetailsPayload(form, organisation),
   };
 }
 
@@ -734,10 +788,14 @@ export function withPayerDeclarationField<K extends keyof PayerDeclarationForm>(
  * "плательщику", "по другому адресу"; "не указано" while unanswered. The
  * same words stand in the wizard and on the patient card.
  */
-export function invoiceToLabel(value: InvoiceTo | string | null | undefined, tx: Tx): string {
+export function invoiceToLabel(value: InvoiceTo | string | null | undefined, tx: Tx, minor = false): string {
   switch (value) {
     case "self":
-      return tx("пациенту", "an die Patientin / den Patienten");
+      // A minor never receives the invoice: "self" is the parent who answered
+      // (legacy rows without the step-3 answer, owner decision 2026-10-22).
+      return minor
+        ? tx("родителю / законному представителю", "Elternteil / gesetzliche Vertretung")
+        : tx("пациенту", "an die Patientin / den Patienten");
     case "payer":
       return tx("плательщику", "an die zahlende Person / Organisation");
     case "other":
@@ -745,6 +803,37 @@ export function invoiceToLabel(value: InvoiceTo | string | null | undefined, tx:
     default:
       return value ? value : tx("не указано", "nicht angegeben");
   }
+}
+
+/**
+ * A hint (never blocking, owner decision 2026-10-22) when a typed USt-IdNr.
+ * does not look like one: two letters and 2–12 letters or digits; a German
+ * one is "DE" and nine digits. Spaces are ignored; null when empty or fine.
+ */
+export function vatIdFormatWarning(value: string | null | undefined, tx: Tx): string | null {
+  const compact = (value ?? "").replace(/\s+/g, "").toUpperCase();
+  if (!compact) return null;
+  const valid = compact.startsWith("DE") ? /^DE\d{9}$/.test(compact) : /^[A-Z]{2}[A-Z0-9]{2,12}$/.test(compact);
+  if (valid) return null;
+  return tx(
+    "Похоже, USt-IdNr. указан неверно: 2 буквы страны и 2–12 букв/цифр (для Германии DE + 9 цифр). Сохранится как есть.",
+    "Die USt-IdNr. sieht ungewöhnlich aus: 2 Buchstaben Länderkennung und 2–12 Buchstaben/Ziffern (Deutschland: DE + 9 Ziffern). Sie wird trotzdem gespeichert.",
+  );
+}
+
+/**
+ * A hint (never blocking) when a typed Steuernummer does not look like one:
+ * digits with optional "/" or spaces, 10–13 digits; null when empty or fine.
+ */
+export function taxNumberFormatWarning(value: string | null | undefined, tx: Tx): string | null {
+  const text = (value ?? "").trim();
+  if (!text) return null;
+  const digits = text.replace(/\D/g, "").length;
+  if (/^[\d/ ]+$/.test(text) && digits >= 10 && digits <= 13) return null;
+  return tx(
+    "Похоже, Steuernummer указан неверно: 10–13 цифр, допускаются «/» и пробелы. Сохранится как есть.",
+    "Die Steuernummer sieht ungewöhnlich aus: 10–13 Ziffern, „/“ und Leerzeichen erlaubt. Sie wird trotzdem gespeichert.",
+  );
 }
 
 /**

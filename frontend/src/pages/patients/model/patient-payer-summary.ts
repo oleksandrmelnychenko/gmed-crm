@@ -454,6 +454,8 @@ export function invoiceToStatement(
   declaration: PatientPayerDeclaration | null | undefined,
   tx: Tx,
   lang: string,
+  /** The patient is a minor: "self" is a parent / the legal representative. */
+  minor = false,
 ): InvoiceToStatement | null {
   if (!declaration || declaration.invoice_to === undefined) return null;
   const other = declaration.invoice_to === "other";
@@ -469,7 +471,7 @@ export function invoiceToStatement(
       )
     : "—";
   return {
-    label: invoiceToLabel(declaration.invoice_to, tx),
+    label: invoiceToLabel(declaration.invoice_to, tx, minor),
     name: other ? declaration.invoice_name : null,
     address: address === "—" ? null : address,
     email: declaration.invoice_to === "payer" ? null : declaration.invoice_email,
@@ -627,7 +629,7 @@ export function identificationLines(status: LeadIdentificationStatus, tx: Tx): I
     name: person.role,
     detail: person.detail,
     signature: qualifiedSignatureLabel(person.person, tx),
-    payment: ownAccountPaymentLabel(person.person, tx, person.paymentExpected),
+    payment: ownAccountPaymentLabel(person.person, tx, person.paymentExpected, person.paidByThirdParty),
     note: person.note,
   }));
 }

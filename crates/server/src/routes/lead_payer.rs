@@ -843,6 +843,16 @@ struct DeclarationInput {
     invoice_vat_id: Option<Option<String>>,
     #[serde(default, deserialize_with = "sent")]
     invoice_tax_number: Option<Option<String>>,
+    /// An organisation payer's legal form and register number
+    /// (Handelsregister-Nr.), entered by staff (owner decision 2026-10-22):
+    /// stored in the organisation mask the cabinet writes too
+    /// ([`crate::risk::cabinet::save_organisation_mask`]). A key that is left
+    /// out keeps the stored value; locked once the payer submitted its own
+    /// answers through the payer link.
+    #[serde(default, deserialize_with = "sent")]
+    organisation_legal_form: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    organisation_register_number: Option<Option<String>>,
 }
 
 /// A key that is present in the body, also with `null`; an absent key stays
@@ -865,6 +875,14 @@ fn text(value: &Option<String>, max: usize) -> Result<Option<String>, &'static s
         Some(value) if value.chars().count() > max => Err("payer_field_too_long"),
         Some(value) => Ok(Some(value.to_string())),
     }
+}
+
+/// The payer's phone number: the rule of the lead wizard and the patient
+/// record ([`crate::routes::patients::is_valid_contact_phone`], at least six
+/// digits). The one check for the payer declaration's phone, whoever writes
+/// it (staff form, cabinet, payer link).
+pub(crate) fn is_valid_payer_phone(value: &str) -> bool {
+    crate::routes::patients::is_valid_contact_phone(value.trim())
 }
 
 /// Validates and normalizes a submitted declaration. An incomplete
@@ -1004,6 +1022,15 @@ fn declaration_from_input(
         declaration.relationship_kind = relationship_kind;
         declaration.email = email;
         declaration.phone = text(&input.phone, SHORT_TEXT_MAX)?;
+        // A new or changed number must be a phone number (owner decision
+        // 2026-10-22); a stored legacy value is kept as it is, so the other
+        // fields of an older row still save.
+        if declaration.phone.as_deref().is_some_and(|phone| {
+            previous.and_then(|previous| previous.phone.as_deref()) != Some(phone)
+                && !is_valid_payer_phone(phone)
+        }) {
+            return Err("payer_phone_invalid");
+        }
         // A sent key wins; an absent one keeps the number of the same payer.
         declaration.messenger = match &input.messenger {
             Some(value) => text(value, MESSENGER_MAX).map_err(|_| "payer_messenger_too_long")?,
@@ -2150,6 +2177,21 @@ async fn get_payer_declaration(
     if payload["declaration"].is_object() {
         payload["declaration"]["contact_consent_required"] = required.clone();
         payload["declaration"]["cost_estimate_consent_required"] = required;
+        // An organisation's legal form and register number (the organisation
+        // mask; staff enter them since 2026-10-22), locked once the payer
+        // submitted its own answers through the payer link.
+        let (organisation, _) = match crate::risk::cabinet::payer_extras(&mut conn, lead_id).await {
+            Ok(extras) => extras,
+            Err(error) => return database_error(error, "load payer organisation details"),
+        };
+        let locked = match payer_statement_submitted(&mut conn, lead_id).await {
+            Ok(locked) => locked,
+            Err(error) => return database_error(error, "load payer statement"),
+        };
+        for key in ["organisation_legal_form", "organisation_register_number"] {
+            payload["declaration"][key] = organisation[key].clone();
+        }
+        payload["declaration"]["organisation_details_locked"] = json!(locked);
     }
     Json(payload).into_response()
 }
@@ -2247,11 +2289,20 @@ async fn save_payer_declaration(
         match declaration_from_input(&body, previous.as_ref(), crate::app_time::today()) {
             Ok(declaration) => declaration,
             Err(code) => {
-                return error(
+                // Field-level: the staff form marks the field the code names
+                // (`phone` for `payer_phone_invalid`).
+                let field = portal_field_of(code)
+                    .strip_prefix("payer_")
+                    .unwrap_or("payer");
+                return (
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    code,
-                    "Invalid payer declaration",
-                );
+                    Json(json!({
+                        "error": code,
+                        "field": field,
+                        "message": "Invalid payer declaration",
+                    })),
+                )
+                    .into_response();
             }
         };
     // A minor does not pay himself; a paying parent is the representative,
@@ -2354,7 +2405,44 @@ async fn save_payer_declaration(
         .as_ref()
         .is_none_or(|previous| previous.identity_key() != declaration.identity_key());
     if previous.as_ref() == Some(&declaration) {
-        drop(tx);
+        // Only the organisation's legal form or register number may have
+        // changed: they live beside the declaration.
+        let mask = match save_staff_organisation_mask(&mut tx, lead_id, &body).await {
+            Ok(Ok(changed)) => changed,
+            Ok(Err(response)) => return response,
+            Err(error) => return database_error(error, "save payer organisation details"),
+        };
+        if mask.is_empty() {
+            drop(tx);
+            return get_payer_declaration(State(state), Extension(auth), Path(lead_id)).await;
+        }
+        let mut event = audit::domain_event(
+            "update_lead_payer_declaration",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            Value::Null,
+        );
+        event.context = json!({
+            "changed_fields": mask,
+            "lead_id": lead_id,
+            "payer_kind": declaration.payer_kind,
+            "identity_changed": false,
+        });
+        if let Err(error) = audit::write_in_transaction(&mut tx, &event).await {
+            return database_error(error, "audit payer organisation details");
+        }
+        if let Err(error) = tx.commit().await {
+            return database_error(error, "commit payer organisation details");
+        }
+        crate::realtime::publish_lead_event(
+            &state,
+            Some(auth.user_id),
+            "lead.updated",
+            lead_id,
+            json!({ "payer_declaration_updated": true }),
+        )
+        .await;
         return get_payer_declaration(State(state), Extension(auth), Path(lead_id)).await;
     }
     if let Err(error) = store_declaration(
@@ -2382,13 +2470,20 @@ async fn save_payer_declaration(
     {
         return database_error(error, "reset payer link");
     }
-    let changed_fields = changed_json_fields(
+    // After the reset: another payer's mask is gone, the new one is staff's.
+    let mask_changed = match save_staff_organisation_mask(&mut tx, lead_id, &body).await {
+        Ok(Ok(changed)) => changed,
+        Ok(Err(response)) => return response,
+        Err(error) => return database_error(error, "save payer organisation details"),
+    };
+    let mut changed_fields = changed_json_fields(
         &previous
             .as_ref()
             .map(Declaration::to_json)
             .unwrap_or(Value::Null),
         &declaration.to_json(),
     );
+    changed_fields.extend(mask_changed.iter().map(|key| key.to_string()));
     let mut event = audit::domain_event(
         "update_lead_payer_declaration",
         Some(auth.user_id),
@@ -2432,6 +2527,57 @@ async fn save_payer_declaration(
     )
     .await;
     get_payer_declaration(State(state), Extension(auth), Path(lead_id)).await
+}
+
+/// Whether the payer sent its own answers through the payer link: the
+/// organisation's legal form and register number are then the payer's, and
+/// staff no longer write them (owner decision 2026-10-22).
+async fn payer_statement_submitted(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM lead_payer_statements
+                       WHERE lead_id = $1 AND submitted_at IS NOT NULL)",
+    )
+    .bind(lead_id)
+    .fetch_one(conn)
+    .await
+}
+
+/// The organisation's legal form and register number a staff body sends,
+/// stored in the organisation mask (the same columns and length limits as
+/// the cabinet's: 100 and 60 characters). Left-out keys keep the stored
+/// values; a person or a self-payer has no mask; nothing is written once the
+/// payer submitted its own answers. `Ok(Err(_))` is a field-level 422.
+async fn save_staff_organisation_mask(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    body: &DeclarationInput,
+) -> Result<Result<Vec<&'static str>, Response>, sqlx::Error> {
+    let mut mask = serde_json::Map::new();
+    for (key, value) in [
+        ("organisation_legal_form", &body.organisation_legal_form),
+        (
+            "organisation_register_number",
+            &body.organisation_register_number,
+        ),
+    ] {
+        if let Some(value) = value {
+            mask.insert(
+                key.to_string(),
+                value.clone().map(Value::String).unwrap_or(Value::Null),
+            );
+        }
+    }
+    if mask.is_empty() || payer_statement_submitted(&mut *conn, lead_id).await? {
+        return Ok(Ok(Vec::new()));
+    }
+    Ok(
+        crate::risk::cabinet::save_organisation_mask(conn, lead_id, &mask)
+            .await?
+            .map_err(|error| error.into_response()),
+    )
 }
 
 /// Writes the declaration of a lead. `identity_changed` dates the payer
@@ -2670,6 +2816,7 @@ fn portal_field_of(code: &str) -> &'static str {
         "payer_relationship_kind_invalid" => "payer_relationship_kind",
         "payer_date_of_birth_invalid" => "payer_date_of_birth",
         "payer_email_invalid" => "payer_email",
+        "payer_phone_invalid" => "payer_phone",
         "payer_messenger_too_long" => "payer_messenger",
         "payer_country_invalid" => "payer_country",
         "payer_citizenships_invalid" => "payer_citizenships",
@@ -3036,6 +3183,9 @@ fn declaration_from_portal(
         // The tax fields of the invoice recipient are staff's: kept as stored.
         invoice_vat_id: None,
         invoice_tax_number: None,
+        // The cabinet writes its organisation mask itself.
+        organisation_legal_form: None,
+        organisation_register_number: None,
     };
     let mut declaration = declaration_from_input(&staff, previous, today)?;
     declaration.own_account_answered = input.acts_on_own_account.is_some()
@@ -4330,6 +4480,8 @@ mod tests {
             payer_informed: true,
             invoice_vat_id: None,
             invoice_tax_number: None,
+            organisation_legal_form: None,
+            organisation_register_number: None,
         }
     }
 
@@ -4464,6 +4616,33 @@ mod tests {
         value = input("third_party");
         value.email = Some("no-at-sign".into());
         assert_eq!(from_input(&value), Err("payer_email_invalid"));
+        value = input("third_party");
+        value.phone = Some("+49 12".into());
+        assert_eq!(from_input(&value), Err("payer_phone_invalid"));
+        assert_eq!(portal_field_of("payer_phone_invalid"), "payer_phone");
+        value.phone = Some("+49 (30) 123-456".into());
+        assert!(from_input(&value).is_ok());
+    }
+
+    /// Owner decision 2026-10-22: only a new or changed number is checked; a
+    /// stored legacy value still lets the other fields save.
+    #[test]
+    fn a_legacy_payer_phone_is_kept_and_a_changed_one_is_checked() {
+        let mut value = input("third_party");
+        value.phone = Some("12".into());
+        let mut stored = from_input(&input("third_party")).unwrap();
+        stored.phone = Some("12".into());
+        value.city = Some("Wien".into());
+        let kept = declaration_from_input(&value, Some(&stored), today()).unwrap();
+        assert_eq!(kept.phone.as_deref(), Some("12"));
+        assert_eq!(kept.city.as_deref(), Some("Wien"));
+        value.phone = Some("123".into());
+        assert_eq!(
+            declaration_from_input(&value, Some(&stored), today()),
+            Err("payer_phone_invalid")
+        );
+        assert!(is_valid_payer_phone(" +43 1 5555 "));
+        assert!(!is_valid_payer_phone("abc"));
     }
 
     fn third_party_state(document: CostAssumptionDocument) -> PayerState {

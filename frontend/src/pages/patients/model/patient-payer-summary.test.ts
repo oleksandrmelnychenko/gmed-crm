@@ -637,6 +637,9 @@ describe("label helpers", () => {
     const self = { ...other, invoice_to: "self" as const };
     expect(invoiceToStatement(self, ru, "ru")).toEqual({ label: "пациенту", name: null, address: null, email: "rechnung@example.com" });
     expect(invoiceToStatement({ ...self, invoice_email: null }, de, "de")).toEqual({ label: "an die Patientin / den Patienten", name: null, address: null, email: null });
+    // A minor never receives the invoice: a legacy row without the step-3 answer names the parent (2026-10-22).
+    expect(invoiceToStatement(self, ru, "ru", true)?.label).toBe("родителю / законному представителю");
+    expect(invoiceToStatement(self, de, "de", true)?.label).toBe("Elternteil / gesetzliche Vertretung");
     // "To the payer": the invoice goes to the third party; no e-mail of its own.
     const payer = { ...thirdPartyDeclaration(), invoice_to: "payer", invoice_email: "stray@example.com", invoice_vat_id: null, invoice_tax_number: null };
     const payerDeclaration = normalizePatientPayerSummary({ patient_id: PATIENT_ID, declaration: payer })!.declaration!;

@@ -195,8 +195,6 @@ export type LeadPayerLinkState = {
   /** E-mail sending (Mittaro) is set up. */
   mail_available: boolean;
   link: PayerLinkInfo | null;
-  /** Decimal string with two places, e.g. "12000.00"; null while not entered. Information only. */
-  estimated_total_eur: string | null;
   questionnaire: StaffPayerQuestionnaire | null;
 };
 
@@ -220,19 +218,6 @@ export async function sendLeadPayerLink(leadId: string, input: PayerLinkSendInpu
 /** Revokes the active link; the answers stay. */
 export async function revokeLeadPayerLink(leadId: string): Promise<LeadPayerLinkState | null> {
   return normalizeLeadPayerLinkState(await apiFetch<unknown>(`${base(leadId)}/revoke`, { method: "POST" }));
-}
-
-/** The expected total amount in EUR ("12000.00"); `null` clears it. */
-export async function saveLeadPayerEstimatedTotal(
-  leadId: string,
-  value: string | null,
-): Promise<LeadPayerLinkState | null> {
-  return normalizeLeadPayerLinkState(
-    await apiFetch<unknown>(`${base(leadId)}/estimated-total`, {
-      method: "POST",
-      body: JSON.stringify({ estimated_total_eur: value }),
-    }),
-  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -438,7 +423,6 @@ export function normalizeLeadPayerLinkState(value: unknown): LeadPayerLinkState 
     risk_hold: raw.risk_hold === "review" || raw.risk_hold === "rejected" ? raw.risk_hold : null,
     mail_available: raw.mail_available !== false,
     link: normalizeLink(raw.link),
-    estimated_total_eur: decimalOrNull(raw.estimated_total_eur),
     questionnaire: normalizeStaffPayerQuestionnaire(raw.questionnaire),
   };
 }

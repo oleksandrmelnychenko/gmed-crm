@@ -126,6 +126,26 @@ fn blocked_message(reason: &str) -> &'static str {
     }
 }
 
+/// The invitation language for the payer's own language: Skribble invites in
+/// German, English, French and Italian only; a payer who chose Russian or
+/// Ukrainian gets the English invitation (owner decision 2026-10-22), any
+/// other or no language the German one.
+fn suggested_invitation_language(payer_language: Option<&str>) -> &'static str {
+    let language = payer_language
+        .map(|language| language.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if let Some(supported) = document_signatures::invitation_languages()
+        .iter()
+        .find(|supported| **supported == language)
+    {
+        return *supported;
+    }
+    match language.as_str() {
+        "ru" | "uk" | "ua" => "en",
+        _ => "de",
+    }
+}
+
 /// CEO and patient manager prepare and send; the other readers only look.
 fn may_send(auth: &AuthUser) -> bool {
     matches!(auth.role, Role::Ceo | Role::PatientManager)
@@ -743,12 +763,11 @@ async fn view(
                 .map(|payment| payment.confirmed_at),
         })
     });
-    let suggested_language = facts
+    let payer_language = facts
         .subject
         .as_ref()
-        .and_then(|subject| subject.language.as_deref())
-        .filter(|language| document_signatures::invitation_languages().contains(language))
-        .unwrap_or("de");
+        .and_then(|subject| subject.language.as_deref());
+    let suggested_language = suggested_invitation_language(payer_language);
     Ok(Some(json!({
         "mode": facts.subject.as_ref().map(|subject| subject.mode),
         "blocked_reason": blocked,
@@ -758,6 +777,9 @@ async fn view(
         "signature_enabled": signature_enabled,
         "languages": document_signatures::invitation_languages(),
         "suggested_language": suggested_language,
+        // The payer's own language: the wizard says when Skribble cannot
+        // invite in it (Russian, Ukrainian).
+        "payer_language": payer_language,
         "signer": facts.signer().map(|signer| json!({
             "first_name": Some(signer.first_name).filter(|value| !value.is_empty()),
             "last_name": Some(signer.last_name).filter(|value| !value.is_empty()),
@@ -1208,13 +1230,13 @@ async fn send(
         .filter(|language| !language.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| {
-            facts
-                .subject
-                .as_ref()
-                .and_then(|subject| subject.language.as_deref())
-                .filter(|language| document_signatures::invitation_languages().contains(language))
-                .unwrap_or("de")
-                .to_string()
+            suggested_invitation_language(
+                facts
+                    .subject
+                    .as_ref()
+                    .and_then(|subject| subject.language.as_deref()),
+            )
+            .to_string()
         });
     let request_id = match document_signatures::create_fixed_package(
         &state,
@@ -1392,6 +1414,17 @@ async fn cost_estimate_consent(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_russian_or_ukrainian_payer_is_invited_in_english() {
+        assert_eq!(suggested_invitation_language(Some("ru")), "en");
+        assert_eq!(suggested_invitation_language(Some("uk")), "en");
+        assert_eq!(suggested_invitation_language(Some("UA")), "en");
+        assert_eq!(suggested_invitation_language(Some("fr")), "fr");
+        assert_eq!(suggested_invitation_language(Some("en")), "en");
+        assert_eq!(suggested_invitation_language(Some("pl")), "de");
+        assert_eq!(suggested_invitation_language(None), "de");
+    }
 
     fn third_party() -> Declaration {
         Declaration {
