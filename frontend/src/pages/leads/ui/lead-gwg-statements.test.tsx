@@ -653,7 +653,7 @@ describe("LeadGwgStatements: invoice recipient and payment route", () => {
   it("shows the group after the economic interest, with the time of the last change", () => {
     const html = render(billingState(TRANSFER));
     const group = part(html, "lead-gwg-billing", 'data-testid="lead-gwg-answer-pep_self"');
-    expect(group).toContain("Счёт и оплата (разделы 7–8 анкеты)");
+    expect(group).toContain("Счёт и оплата");
     // 09:40 UTC is 11:40 in Berlin.
     expect(part(group, "lead-gwg-billing-updated", "</span>")).toContain("от пациента · 06.10.2026 11:40");
     expect(html.indexOf("lead-gwg-own-account")).toBeLessThan(html.indexOf('data-testid="lead-gwg-billing"'));
@@ -701,7 +701,7 @@ describe("LeadGwgStatements: invoice recipient and payment route", () => {
   it("notes that the third-party payer states the payment route himself", () => {
     const html = render(billingState({ ...TRANSFER, invoice_to: "payer", invoice_email: null, payment_route_by: "payer", payment_method: null, account_country: null, account_holder: null, bank_name: null, via_third_party: null }));
     expect(statement(html, "lead-gwg-billing-invoice_to")).toContain("плательщику");
-    expect(part(html, "lead-gwg-billing-by-payer", "</p>")).toContain("Способ оплаты укажет плательщик (собственная ссылка — следующий этап)");
+    expect(part(html, "lead-gwg-billing-by-payer", "</p>")).toContain("Способ оплаты укажет плательщик по своей ссылке");
     for (const key of ["payment_method", "account_country", "account_holder", "bank_name", "via_third_party", "flag"]) {
       expect(html).not.toContain(`lead-gwg-billing-${key}`);
     }
@@ -738,7 +738,7 @@ describe("LeadGwgStatements: invoice recipient and payment route", () => {
   it("reads in German too", () => {
     const html = render(billingState(CASH), null, "de");
     for (const text of [
-      "Rechnung und Zahlung (Abschnitte 7–8)",
+      "Rechnung und Zahlung",
       "vom Patienten · 06.10.2026 11:40",
       "Rechnung geht an",
       "an eine andere Adresse",
@@ -755,7 +755,7 @@ describe("LeadGwgStatements: invoice recipient and payment route", () => {
       expect(html).toContain(text);
     }
     expect(render(billingState({ payment_route_by: "payer", compliance_flags: [] }), null, "de")).toContain(
-      "Den Zahlungsweg gibt der Zahler selbst an (eigener Link folgt)",
+      "Den Zahlungsweg gibt der Zahler selbst über den eigenen Link an",
     );
   });
 });
@@ -925,9 +925,8 @@ describe("LeadGwgStatements: the extra step «Дополнительные св�
     );
     expect(statement(html, "lead-gwg-self-funds-proof")).toContain('data-warning="true"');
     expect(statement(html, "lead-gwg-self-funds-proof")).toContain("Nachweis der Mittelherkunft · erforderlich");
-    expect(part(html, "lead-self-funds-proof-missing", "</p>")).toContain(
-      "Verstärkte Prüfung erforderlich: Der Nachweis der Herkunft der Mittel des Patienten fehlt noch",
-    );
+    // One warning line only, in the wizard's enhanced-check section; here the row is amber.
+    expect(html).not.toContain("lead-self-funds-proof-missing");
     expect(html).toContain("verstärkte Prüfung erforderlich");
     expect(statement(html, "lead-gwg-self-funds-sources")).toContain("Einkommen");
   });

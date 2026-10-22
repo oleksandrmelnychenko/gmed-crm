@@ -1019,7 +1019,7 @@ export function LeadPayerDeclarationSection({
         {recipientStatements.length > 0 || invoiceTaxShown ? (
           <div className="space-y-3 border-t border-border/60 pt-3" data-testid="lead-payer-invoice-recipient">
             <AdminSectionTitle>
-              {tx("Получатель счёта (раздел 7 анкеты)", "Rechnungsempfänger (Abschnitt 7)")}
+              {tx("Получатель счёта (из кабинета)", "Rechnungsempfänger (aus dem Portal)")}
             </AdminSectionTitle>
             {cabinetBilling?.recipient_updated_at ? (
               <span className="inline-flex" data-testid="lead-payer-recipient-updated">

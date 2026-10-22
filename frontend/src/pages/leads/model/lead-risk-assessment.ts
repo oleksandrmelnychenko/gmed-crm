@@ -489,7 +489,7 @@ export function riskTriggerLabel(key: string, tx: Tx, subject = "patient"): stri
     case "T8":
       return tx("Больше одного плательщика", "Mehr als ein Zahler");
     case "T9":
-      return tx("Оплата наличными или криптовалютой", "Zahlung bar oder in Kryptowährung");
+      return tx("Оплата наличными (или криптовалютой — прежний ответ)", "Barzahlung (oder Kryptowährung – frühere Angabe)");
     case "T10":
       // Retired 2026-10-12 (owner): kept for the history of older assessments.
       return tx("Сумма обращения выше порога 1 (отменён)", "Wert der Anfrage über Schwelle 1 (entfallen)");
@@ -882,10 +882,10 @@ export function riskGateErrorText(error: unknown, tx: Tx): string | null {
     // A per-person document (the GwG sheet of one parent) names only that person's data.
     const base = error.body?.scope === "person" ? tx(
       "Перед подтверждением подписи дополните данные этого лица в разделе «Данные клиента».",
-      "Bitte vervollständigen Sie vor der Bestätigung der Unterschrift die Daten dieser Person unter „Kundendaten“.",
+      "Bitte vervollständigen Sie vor der Bestätigung der Unterschrift die Daten dieser Person unter „Personendaten“.",
     ) : tx(
       "Перед договором и подписью дополните данные родителей (законных представителей) в разделе «Данные клиента». В кабинете можно запросить блок «Представители».",
-      "Bitte vervollständigen Sie vor Vertrag und Unterschrift die Daten der Eltern bzw. gesetzlichen Vertreter unter „Kundendaten“. Im Portal können Sie den Block „Vertretung“ anfordern.",
+      "Bitte vervollständigen Sie vor Vertrag und Unterschrift die Daten der Eltern bzw. gesetzlichen Vertreter unter „Personendaten“. Im Portal können Sie den Block „Vertretung“ anfordern.",
     );
     const missing = representativeMissingText(error.body?.missing, tx);
     return missing ? `${base} ${missing}` : base;

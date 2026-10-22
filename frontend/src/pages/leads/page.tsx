@@ -3375,7 +3375,7 @@ function useLeadsPageContent() {
                   className="flex items-center gap-2 text-sm text-muted-foreground"
                 >
                   <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
-                  {lang === "de" ? "Wizard wird geladen…" : "Загрузка визарда…"}
+                  {lang === "de" ? "Lead wird geladen…" : "Загрузка обращения…"}
                 </div>
               </div>
             </div>

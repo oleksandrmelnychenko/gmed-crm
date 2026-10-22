@@ -84,7 +84,7 @@ describe("computeLeadConversionGate", () => {
     );
     expect(gate.canConvertRole).toBe(true);
     expect(gate.canConvert).toBe(false);
-    expect(gate.disabledReason).toContain("Квалификация и конверсия");
+    expect(gate.disabledReason).toContain("Квалификация и создание пациента");
   });
 
   it("falls back to enabled when the server does not ship conversion_ready", () => {

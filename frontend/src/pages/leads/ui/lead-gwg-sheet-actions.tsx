@@ -27,7 +27,7 @@ function sheetButtonLabel(button: GwgSheetButton, exists: boolean, tx: Tx): stri
   if (button.subject === "payer") {
     return exists
       ? tx("Обновить для плательщика", "Für Kostenübernehmer aktualisieren")
-      : tx("Для плательщика", "Für Kostenübernehmer erstellen");
+      : tx("Сформировать для плательщика", "Für Kostenübernehmer erstellen");
   }
   const name = button.personName || tx("представителя", "Vertreter/in");
   return exists
@@ -101,7 +101,7 @@ export function LeadGwgSheetActions({
         <span className="self-center text-xs text-muted-foreground" data-testid="gwg-identification-payer-same-person">
           {tx(
             `отдельный лист не нужен: плательщик — представитель ${plan.payerSamePersonName || "без имени"}`,
-            `kein eigener Bogen nötig: Kostenträger ist Vertreter/in ${plan.payerSamePersonName || "ohne Namen"}`,
+            `kein eigener Bogen nötig: Zahler ist Vertreter/in ${plan.payerSamePersonName || "ohne Namen"}`,
           )}
         </span>
       ) : null}

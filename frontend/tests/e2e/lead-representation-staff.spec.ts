@@ -597,7 +597,7 @@ test("a refused sheet says why, in German too", async ({ page }) => {
   await expect(row("payer").line).toContainText("Kostenträger — dieselbe Person wie Vertreter/in Anna Muster");
   await expect(row(BEN).line).toContainText("keine E-Mail – die Signatur wird nicht angerechnet");
   await expect(sheetActions.getByTestId("gwg-identification-payer-same-person")).toHaveText(
-    "kein eigener Bogen nötig: Kostenträger ist Vertreter/in Anna Muster",
+    "kein eigener Bogen nötig: Zahler ist Vertreter/in Anna Muster",
   );
   await expect(sheetActions.getByRole("button", { name: "Für Ben Muster aktualisieren", exact: true })).toBeVisible();
   await sheetActions.getByRole("button", { name: "Für Anna Muster erstellen", exact: true }).click();

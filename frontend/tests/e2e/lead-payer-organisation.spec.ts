@@ -226,7 +226,7 @@ test("staff turn a private payer into a company: name and seat instead of the pe
   await expect(consent).toHaveText("Согласие пациента на передачу контактов плательщику: ещё не дано");
   await expect(consent.locator("input, button")).toHaveCount(0);
   // The GwG sheet for natural persons can be created for this payer.
-  await expect(sheetActions.getByRole("button", { name: "Для плательщика", exact: true })).toBeVisible();
+  await expect(sheetActions.getByRole("button", { name: "Сформировать для плательщика", exact: true })).toBeVisible();
   await expect(wizard.getByTestId("gwg-identification-payer-organisation")).toHaveCount(0);
 
   await type.click();
@@ -300,7 +300,7 @@ test("staff turn a private payer into a company: name and seat instead of the pe
   await expect(type).toContainText("Компания");
   await expect(section.getByLabel(/^Название/)).toHaveValue("Beispiel GmbH");
   await expect(relationship).toContainText("Работодатель");
-  await expect(sheetActions.getByRole("button", { name: "Для плательщика", exact: true })).toHaveCount(0);
+  await expect(sheetActions.getByRole("button", { name: "Сформировать для плательщика", exact: true })).toHaveCount(0);
   await expect(wizard.getByTestId("gwg-identification-payer-organisation")).toHaveText(
     "Для организации лист для физических лиц не формируется",
   );
@@ -354,7 +354,7 @@ test("staff add USt-IdNr. and Steuernummer of the invoice recipient; where the i
 
   // Section 7 remains read-only, without the redundant routing sentence.
   const recipient = section.getByTestId("lead-payer-invoice-recipient");
-  await expect(recipient).toContainText("Получатель счёта (раздел 7 анкеты)");
+  await expect(recipient).toContainText("Получатель счёта (из кабинета)");
   await expect(recipient.getByTestId("lead-payer-invoice-to")).toHaveCount(0);
   await expect(recipient.locator("select, [role=radio], [role=combobox]")).toHaveCount(0);
   // The two staff inputs, empty so far.
@@ -389,7 +389,7 @@ test("staff add USt-IdNr. and Steuernummer of the invoice recipient; where the i
 test("the lead's choice of another address is named, in German", async ({ page }) => {
   const { section } = await mount(page, "de", { ...billedCompany, invoice_to: "other", invoice_name: "Beispiel Stiftung", invoice_vat_id: "DE987654321" });
   const recipient = section.getByTestId("lead-payer-invoice-recipient");
-  await expect(recipient).toContainText("Rechnungsempfänger (Abschnitt 7)");
+  await expect(recipient).toContainText("Rechnungsempfänger (aus dem Portal)");
   await expect(recipient.getByTestId("lead-payer-invoice-to")).toHaveCount(0);
   await expect(recipient.getByTestId("lead-payer-recipient-invoice_name")).toContainText("Beispiel Stiftung");
   await expect(recipient.getByLabel(/^USt-IdNr\. des Rechnungsempfängers/)).toHaveValue("DE987654321");
@@ -422,6 +422,6 @@ test("an older backend keeps the form of a private person and gets none of the n
     expect(saves.at(-1)).not.toHaveProperty(key);
   }
   // The payer is a person there: the sheet can be created.
-  await expect(sheetActions.getByRole("button", { name: "Для плательщика", exact: true })).toBeVisible();
+  await expect(sheetActions.getByRole("button", { name: "Сформировать для плательщика", exact: true })).toBeVisible();
   await expect(wizard.getByTestId("gwg-identification-payer-organisation")).toHaveCount(0);
 });

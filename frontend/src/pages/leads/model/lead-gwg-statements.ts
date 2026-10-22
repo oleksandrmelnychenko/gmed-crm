@@ -758,8 +758,8 @@ export function expectedTotalLabel(value: string | null | undefined): string {
 /** The note that stands in for section 8 while the third-party payer answers it himself. */
 export function paymentRouteByPayerNote(tx: Tx): string {
   return tx(
-    "Способ оплаты укажет плательщик (собственная ссылка — следующий этап)",
-    "Den Zahlungsweg gibt der Zahler selbst an (eigener Link folgt)",
+    "Способ оплаты укажет плательщик по своей ссылке",
+    "Den Zahlungsweg gibt der Zahler selbst über den eigenen Link an",
   );
 }
 

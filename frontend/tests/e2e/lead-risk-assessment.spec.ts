@@ -477,7 +477,7 @@ test("the CEO saves the risk configuration and sees the review queue", async ({ 
   const settings = page.getByTestId("risk-config");
   await expect(settings).toBeVisible(lazyPageLoad);
   await expect(settings.getByTestId("risk-config-version")).toHaveText("Версия 1");
-  await expect(settings.getByTestId("risk-points")).toContainText("Оплата наличными или криптовалютой");
+  await expect(settings.getByTestId("risk-points")).toContainText("Оплата наличными (или криптовалютой — прежний ответ)");
 
   const queue = page.getByTestId("risk-review-queue");
   await expect(queue.getByTestId("risk-review-row")).toContainText("Anna Muster");

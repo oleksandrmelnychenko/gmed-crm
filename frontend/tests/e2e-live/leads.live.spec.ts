@@ -117,7 +117,7 @@ async function openLeadQualificationPane(
     .getByRole("button", { name: /Qualifikation|Qualification/i })
     .click();
   await expect(
-    detailPane.getByRole("button", { name: /Gate-Daten speichern|Save gate data/i }),
+    detailPane.getByRole("button", { name: /Daten speichern|Save gate data/i }),
   ).toBeVisible();
   // Every lead reload re-initialises the gate form from the server, so let the
   // detail requests settle before typing (edits made earlier would be lost).
@@ -183,11 +183,11 @@ async function saveLeadGateData(
 ) {
   await expect(async () => {
     await fillLeadGateDate(sheet, dateOfBirth);
-    await selectLeadGateOption(page, sheet, /Rechtliches Geschlecht|Legal sex/i, /Weiblich|female/i);
+    await selectLeadGateOption(page, sheet, /Geschlecht laut Ausweisdokument|Legal sex/i, /Weiblich|female/i);
     // Compliance is "signed" from the seeded DSGVO signature; staff cannot choose it.
     for (const consent of [
       /Medizinische Einwilligung liegt vor|Healthcare consent available/i,
-      /Datenschutzpraxis akzeptiert|Privacy practices accepted/i,
+      /Datenschutzhinweise bestätigt|Privacy practices accepted/i,
     ]) {
       await sheet
         .locator("label")
@@ -203,7 +203,7 @@ async function saveLeadGateData(
         { timeout: 10_000 },
       ),
       sheet
-        .getByRole("button", { name: /Gate-Daten speichern|Save gate data/i })
+        .getByRole("button", { name: /Daten speichern|Save gate data/i })
         .click({ timeout: 5_000 }),
     ]);
     expect(response.ok(), await response.text()).toBe(true);
@@ -553,7 +553,7 @@ test.describe("lead live workflows", () => {
     );
 
     // The reason is chosen from a list; «Andere» takes an own text (QA 2026-10-11, A-39a).
-    await chooseComboboxOption(page, detailSheet.getByLabel(/^Fehlergrund$/), /^Andere$/);
+    await chooseComboboxOption(page, detailSheet.getByLabel(/^Ablehnungsgrund$/), /^Andere$/);
     await detailSheet.getByLabel(/^Grund beschreiben$/).fill("No medical fit for current program");
     await detailSheet.getByLabel(/Interne Notiz|Internal note/i).fill(
       "Archived after PM review in live E2E flow.",
@@ -719,7 +719,7 @@ test.describe("lead live workflows", () => {
       .getByRole("button", { name: /Prozess|Process/i })
       .click();
     await expect(detailSheet.getByText(/Qualifikation bereit|Qualification ready/i)).toBeVisible();
-    await expect(detailSheet.getByText(/Konvertierung blockiert|Conversion blocked/i)).toBeVisible();
+    await expect(detailSheet.getByText(/Patientenanlage gesperrt|Conversion blocked/i)).toBeVisible();
 
     const qualifyResponse = page.waitForResponse(
       (nextResponse) =>
@@ -727,7 +727,7 @@ test.describe("lead live workflows", () => {
         nextResponse.request().method() === "POST",
     );
     await detailSheet
-      .getByRole("button", { name: /Als qualified markieren|Отметить квалифицированным/i })
+      .getByRole("button", { name: /Als qualifiziert markieren|Отметить квалифицированным/i })
       .click();
     const qualifiedLeadResponse = await qualifyResponse;
     expect(qualifiedLeadResponse.ok()).toBe(true);

@@ -288,7 +288,7 @@ test("an adult's answers about a representative stand after the identity documen
   // The representative of an adult is named on the lead's own sheet: the buttons stay as they are.
   const actions = wizard.getByTestId("gwg-identification-actions");
   await expect(actions.getByRole("button", { name: "Сформировать для пациента", exact: true })).toBeEnabled();
-  await expect(actions.getByRole("button", { name: "Для плательщика", exact: true })).toBeVisible();
+  await expect(actions.getByRole("button", { name: "Сформировать для плательщика", exact: true })).toBeVisible();
   // The lead's own badge stays the only one.
   await expect(block.getByTestId("patient-field-badge")).toHaveText("от пациента · 05.10.2026 11:20");
 });
@@ -368,7 +368,7 @@ test("the invoice recipient and the payment route follow the economic interest; 
   const { wizard, block } = await mount(page, "ru", { ...statements, ...cashBilling });
 
   const group = block.getByTestId("lead-gwg-billing");
-  await expect(group).toContainText("Счёт и оплата (разделы 7–8 анкеты)");
+  await expect(group).toContainText("Счёт и оплата");
   await expect(group.getByTestId("patient-field-badge")).toHaveText("от пациента · 05.10.2026 11:40");
   // The lead's own badge stays beside it.
   await expect(block.getByTestId("patient-field-badge")).toHaveCount(2);
@@ -437,12 +437,12 @@ test("a third-party payer states the payment route himself: one note instead of 
     billing_updated_at: "2026-10-05T09:40:00Z",
   });
   const group = block.getByTestId("lead-gwg-billing");
-  await expect(group).toContainText("Rechnung und Zahlung (Abschnitte 7–8)");
+  await expect(group).toContainText("Rechnung und Zahlung");
   await expect(group.getByTestId("lead-gwg-billing-invoice_to")).toContainText("an die zahlende Person / Organisation");
   await expect(group.getByTestId("lead-gwg-billing-invoice_name")).toHaveCount(0);
   await expect(group.getByTestId("lead-gwg-billing-invoice_tax")).toHaveCount(0);
   await expect(group.getByTestId("lead-gwg-billing-by-payer")).toHaveText(
-    "Den Zahlungsweg gibt der Zahler selbst an (eigener Link folgt)",
+    "Den Zahlungsweg gibt der Zahler selbst über den eigenen Link an",
   );
   for (const key of ["payment_method", "account_country", "account_holder", "bank_name", "via_third_party", "flag"]) {
     await expect(group.getByTestId(`lead-gwg-billing-${key}`)).toHaveCount(0);
@@ -470,5 +470,5 @@ test("a minor without a parent on file: the block and the sheet ask for one", as
   );
   // No sheet for the child; the third-party payer of this mock keeps the own one.
   await expect(actions.getByRole("button", { name: /пациента/ })).toHaveCount(0);
-  await expect(actions.getByRole("button")).toHaveText("Для плательщика");
+  await expect(actions.getByRole("button")).toHaveText("Сформировать для плательщика");
 });

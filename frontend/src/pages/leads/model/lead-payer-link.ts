@@ -312,8 +312,8 @@ export function payerLinkRiskHoldText(hold: PayerLinkRiskHold, tx: Tx): string {
     );
   }
   return tx(
-    "Оценка риска на уровне 3: ссылка плательщику ждёт решения или запроса блока D («Оценка риска» → «Запросить сведения»).",
-    "Risikobewertung Stufe 3: Der Zahler-Link wartet auf eine Entscheidung oder die Anforderung von Block D („Risikobewertung“ → „Weitere Angaben anfordern“).",
+    "Оценка риска на уровне 3: ссылка плательщику ждёт решения или запроса сведений «Анкета плательщика по ссылке» («Оценка риска» → «Запросить сведения»).",
+    "Risikobewertung Stufe 3: Der Zahler-Link wartet auf eine Entscheidung oder die Anforderung „Angaben des Zahlers (Link)“ („Risikobewertung“ → „Weitere Angaben anfordern“).",
   );
 }
 

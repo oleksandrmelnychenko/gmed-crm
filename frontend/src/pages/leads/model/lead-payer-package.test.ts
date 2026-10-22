@@ -114,7 +114,7 @@ describe("payer package labels", () => {
     expect(payerPackageRows(null).map((row) => [payerPackageSlotLabel(row.slot, ru), row.document])).toEqual([
       ["Анкета плательщика", null],
       ["Согласие плательщика", null],
-      ["Данные пациента о плательщике", null],
+      ["Заявление пациента об оплате третьим лицом", null],
       ["Смета для плательщика", null],
     ]);
     expect(payerPackageRows(state({}, {}).package).map((row) => payerPackageSlotLabel(row.slot, de))).toEqual([

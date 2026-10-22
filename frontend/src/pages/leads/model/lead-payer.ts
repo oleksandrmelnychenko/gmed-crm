@@ -992,8 +992,8 @@ export function payerGateErrorText(error: unknown, tx: Tx): string | null {
     ? error.body.reasons.filter((value): value is string => typeof value === "string")
     : [];
   const prefix = tx(
-    "GMED подписывает только после клиента и плательщика: ",
-    "GMED unterschreibt erst nach dem Kunden und dem Kostenübernehmer: ",
+    "GMED подписывает последним: ",
+    "GMED unterschreibt zuletzt: ",
   );
   return prefix + (reasons.length > 0
     ? reasons.map((code) => payerReasonLabel(code, tx)).join("; ")

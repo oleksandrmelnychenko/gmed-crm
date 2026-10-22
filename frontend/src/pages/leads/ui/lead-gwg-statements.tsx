@@ -440,7 +440,7 @@ function BillingGroup({
     <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "md:col-span-2")} data-testid="lead-gwg-billing">
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-xs font-semibold text-foreground">
-          {tx("Счёт и оплата (разделы 7–8 анкеты)", "Rechnung und Zahlung (Abschnitte 7–8)")}
+          {tx("Счёт и оплата", "Rechnung und Zahlung")}
         </h4>
         {updatedAt ? (
           <span className="inline-flex" data-testid="lead-gwg-billing-updated">
@@ -605,7 +605,8 @@ function LeadGwgFollowUpAnswers({
  * self-payer's own source of funds with the words and the proof, profession
  * and sector, and what the patient knows of a third party's funds ("со слов
  * пациента", never the payer's own declaration). The proof is required while
- * the enhanced check is; an amber line says when it is missing then.
+ * the enhanced check is; its row turns amber while it is missing (the
+ * enhanced-check section of the wizard carries the one warning line).
  * Read-only.
  */
 function EnhancedDetailsGroup({ details, tx, card = false }: { details: LeadPortalEnhancedDetails; tx: Tx; card?: boolean }) {
@@ -680,15 +681,6 @@ function EnhancedDetailsGroup({ details, tx, card = false }: { details: LeadPort
             "Herkunft der Mittel und Nachweis gibt der Zahler selbst an – über den eigenen Link.",
           )}
         </p>
-      ) : null}
-      {proofMissing ? (
-        <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-self-funds-proof-missing">
-          <CircleAlert aria-hidden="true" className="mt-0.5" />
-          <span>{tx(
-            "Требуется усиленная проверка: подтверждение источника средств пациента ещё не загружено",
-            "Verstärkte Prüfung erforderlich: Der Nachweis der Herkunft der Mittel des Patienten fehlt noch",
-          )}</span>
-        </StatusChip>
       ) : null}
     </div>
   );
@@ -1023,7 +1015,7 @@ export function LeadGwgStatements({
         {ownAccountShown || paymentBackgroundShown ? (
           <StatementGroup
             card
-            title={tx("Экономический интерес (раздел «Кто платит»)", "Wirtschaftliches Interesse (Abschnitt „Wer zahlt“)")}
+            title={tx("Экономический интерес", "Wirtschaftliches Interesse")}
             columns="grid-cols-1 sm:grid-cols-3"
           >
             {ownAccountShown ? (

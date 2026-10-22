@@ -283,7 +283,7 @@ describe("LeadPayerDeclarationSection: invoice recipient (section 7)", () => {
   it("keeps the recipient details and staff inputs without the redundant routing sentence", () => {
     const html = renderSection(selfPayer);
     const block = recipientBlock(html);
-    expect(block).toContain("Получатель счёта (раздел 7 анкеты)");
+    expect(block).toContain("Получатель счёта (из кабинета)");
     expect(block).not.toContain("Счёт направляется: ");
     expect(block).not.toContain("выбрал пациент в кабинете");
     expect(block).toContain("USt-IdNr. получателя счёта");
@@ -319,7 +319,7 @@ describe("LeadPayerDeclarationSection: invoice recipient (section 7)", () => {
 
   it("speaks German", () => {
     const block = recipientBlock(renderSection({ ...selfPayer, invoice_to: "payer" }, de));
-    expect(block).toContain("Rechnungsempfänger (Abschnitt 7)");
+    expect(block).toContain("Rechnungsempfänger (aus dem Portal)");
     expect(block).not.toContain("Rechnung geht an: ");
     expect(block).not.toContain("vom Patienten im Portal gewählt");
     expect(block).toContain("USt-IdNr. des Rechnungsempfängers");

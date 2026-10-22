@@ -71,7 +71,7 @@ describe("LeadGwgSheetActions", () => {
   it("adds the sheet of a private third-party payer and says update once a sheet exists", () => {
     const plan = gwgSheetPlan({ minor: false, representatives: [], payer: privatePayer });
     const fresh = render(plan);
-    expect(button(fresh, "payer")).toContain("Для плательщика");
+    expect(button(fresh, "payer")).toContain("Сформировать для плательщика");
     expect(buttonCount(fresh)).toBe(2);
     const existing = render(plan, { documents: [sheet("contract_partner", "doc-1"), sheet("payer", "doc-2")] });
     expect(button(existing, "contract_partner")).toContain("Обновить для пациента");
@@ -125,10 +125,10 @@ describe("LeadGwgSheetActions", () => {
     expect(button(html, "payer")).toBe("");
     expect(buttonCount(html)).toBe(2);
     expect(html).toContain("отдельный лист не нужен: плательщик — представитель Anna Muster");
-    expect(render(plan, { lang: "de" })).toContain("kein eigener Bogen nötig: Kostenträger ist Vertreter/in Anna Muster");
+    expect(render(plan, { lang: "de" })).toContain("kein eigener Bogen nötig: Zahler ist Vertreter/in Anna Muster");
     // Somebody else pays: the payer keeps the own button.
     const other = render(gwgSheetPlan({ minor: true, representatives: parents, payer: privatePayer }));
-    expect(button(other, "payer")).toContain("Для плательщика");
+    expect(button(other, "payer")).toContain("Сформировать для плательщика");
     expect(other).not.toContain("gwg-identification-payer-same-person");
   });
 

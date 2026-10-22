@@ -561,7 +561,7 @@ describe("payer AML and signing order", () => {
       },
     });
     expect(payerGateErrorText(error, tx)).toBe(
-      "GMED подписывает только после клиента и плательщика: "
+      "GMED подписывает последним: "
         + "Сначала клиент подписывает заказ; Получите подпись плательщика на согласии",
     );
     expect(payerGateErrorText(new Error("other"), tx)).toBeNull();

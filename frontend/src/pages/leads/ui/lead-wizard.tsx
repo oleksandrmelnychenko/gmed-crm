@@ -2416,7 +2416,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Cost estimate document is missing": tx("Создайте предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation erstellen"),
     "Preliminary cost calculation document is missing": tx("Создайте предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation erstellen"),
     [COST_ESTIMATE_WORK_TYPES_REASON]: tx("Выберите медицинские виды работ для предварительного расчёта", "Medizinische Leistungsarten für die vorläufige Kostenkalkulation auswählen"),
-    "Required prepayment is not complete": tx("Укажите полученную предоплату", "Erforderliche Vorauszahlung erfassen"),
+    "Required prepayment is not complete": tx("Предоплата получена не полностью", "Vorauszahlung noch nicht vollständig eingegangen"),
     "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
     ...payerReadinessReasonLabels(tx),
   };
@@ -8199,7 +8199,7 @@ ${serviceCommentLines.join("\n")}`
                     <option value="">{tx("Не указано", "Nicht angegeben")}</option>
                     <option value="yes">{tx("Да", "Ja")}</option>
                     <option value="no">{tx("Нет", "Nein")}</option>
-                    <option value="not_sure">{tx("Неизвестно", "Nicht sicher")}</option>
+                    <option value="not_sure">{tx("Не уверен", "Nicht sicher")}</option>
                   </NativeComboboxSelect>
                 </Field>
               </div>
@@ -8601,8 +8601,8 @@ ${serviceCommentLines.join("\n")}`
                       <StatusChip tone="warning" data-testid="lead-wizard-self-funds-proof-missing">
                         <CircleAlert aria-hidden="true" />
                         <span>{tx(
-                          "Требуется усиленная проверка: подтверждение источника средств пациента ещё не загружено",
-                          "Verstärkte Prüfung erforderlich: Der Nachweis der Herkunft der Mittel des Patienten fehlt noch",
+                          "Подтверждение источника средств пациента ещё не загружено",
+                          "Der Nachweis der Herkunft der Mittel des Patienten fehlt noch",
                         )}</span>
                       </StatusChip>
                     ) : null}

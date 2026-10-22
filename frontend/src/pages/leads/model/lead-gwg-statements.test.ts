@@ -686,7 +686,7 @@ describe("labels of sections 7–8", () => {
       "Требуется проверка комплаенса: наличные, платёж через третье лицо",
     );
     expect(complianceFlagsLine(["crypto_payment"], de)).toBe("Compliance-Prüfung erforderlich: Kryptowährung");
-    expect(paymentRouteByPayerNote(de)).toBe("Den Zahlungsweg gibt der Zahler selbst an (eigener Link folgt)");
+    expect(paymentRouteByPayerNote(de)).toBe("Den Zahlungsweg gibt der Zahler selbst über den eigenen Link an");
   });
 });
 
