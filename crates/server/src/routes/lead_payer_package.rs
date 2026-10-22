@@ -138,7 +138,7 @@ fn suggested_invitation_language(payer_language: Option<&str>) -> &'static str {
         .iter()
         .find(|supported| **supported == language)
     {
-        return *supported;
+        return supported;
     }
     match language.as_str() {
         "ru" | "uk" | "ua" => "en",
