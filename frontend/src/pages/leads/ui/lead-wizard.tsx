@@ -297,6 +297,15 @@ import {
   sortWizardDocumentsNewestFirst,
 } from "./lead-wizard-document-metadata";
 import { LeadGwgStatements } from "./lead-gwg-statements";
+import { LeadAmlPepReviews } from "./lead-aml-pep-reviews";
+import {
+  parsePepReviews,
+  PEP_SUBJECT_PATIENT,
+  pepPersons,
+  type PepReviews,
+  withoutPepReviewStamp,
+  withPepReview,
+} from "../model/pep-review";
 import { enhancedFundsProofOutstanding } from "../model/lead-gwg-statements";
 import { LeadRiskAssessmentPanel } from "./lead-risk-assessment-panel";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
@@ -422,6 +431,11 @@ type AmlEnhancedDueDiligenceDraft = {
   pepBeneficialOwner: boolean;
   /** Staff checked the PEP status (owner 2026-10-09: the lead is asked only with the enhanced check). */
   pepStatusChecked: boolean;
+  /**
+   * Staff's PEP review of each representative and of the payer, and the
+   * server's day and reviewer of every review (owner decision 2026-10-23).
+   */
+  pepReviews: PepReviews;
   pepOfficeFunction: string;
   pepAssetOrigin: string;
   /** Links to sanctioned persons the lead (block J) or the payer stated. */
@@ -682,6 +696,7 @@ function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
     pepContractPartner: false,
     pepBeneficialOwner: false,
     pepStatusChecked: false,
+    pepReviews: {},
     pepOfficeFunction: "",
     pepAssetOrigin: "",
     sanctionsLinks: "",
@@ -1220,6 +1235,7 @@ function amlEnhancedDueDiligenceFromLead(lead: LeadDetail): AmlEnhancedDueDilige
     pepContractPartner: stored["pepContractPartner"] === true,
     pepBeneficialOwner: stored["pepBeneficialOwner"] === true,
     pepStatusChecked: stored["pepStatusChecked"] === true,
+    pepReviews: parsePepReviews(stored["pepReviews"]),
     pepOfficeFunction: inputString(stored["pepOfficeFunction"]),
     pepAssetOrigin: inputString(stored["pepAssetOrigin"]),
     sanctionsLinks: inputString(stored["sanctionsLinks"]),
@@ -4444,9 +4460,11 @@ export function LeadWizard({
       return value !== null && value !== undefined;
     });
   }, [draft]);
+  // Staff's conclusion "PEP" for the patient or any other person (2026-10-23).
   const amlPepTriggered = Boolean(
     draft?.amlEnhancedDueDiligence.pepContractPartner
-    || draft?.amlEnhancedDueDiligence.pepBeneficialOwner,
+    || draft?.amlEnhancedDueDiligence.pepBeneficialOwner
+    || Object.values(draft?.amlEnhancedDueDiligence.pepReviews ?? {}).some((review) => review.isPep),
   );
   // Owner rule 2026-10-07: only the server's check requires the enhanced
   // check — or a black-list country shown here before it is saved.
@@ -5429,6 +5447,21 @@ export function LeadWizard({
       amlEnhancedDueDiligence: {
         ...current.amlEnhancedDueDiligence,
         [key]: checked,
+        // The stored day and reviewer describe the old decision; the server stamps the saved one.
+        pepReviews: withoutPepReviewStamp(current.amlEnhancedDueDiligence.pepReviews, PEP_SUBJECT_PATIENT),
+      },
+    } : current);
+  }
+
+  /** Staff's PEP review of a representative or the payer (owner decision 2026-10-23). */
+  function handleAmlPepReviewChange(subject: string, patch: { checked?: boolean; isPep?: boolean }) {
+    setError("");
+    clearServerValidation();
+    setDraft((current) => current ? {
+      ...current,
+      amlEnhancedDueDiligence: {
+        ...current.amlEnhancedDueDiligence,
+        pepReviews: withPepReview(current.amlEnhancedDueDiligence.pepReviews, subject, patch),
       },
     } : current);
   }
@@ -7392,6 +7425,27 @@ ${serviceCommentLines.join("\n")}`
   // guardian get one each beside the adult's, and a contact with GwG data
   // keeps them.
   const portalRepresentation = step1Portal.intake?.representation ?? null;
+  // PEP and sanctions answers per person and staff's review per person (owner
+  // decision 2026-10-23): the patient, each person who acts for the lead, the
+  // third-party payer — never one person's answer for another.
+  const amlPayerQuestionnaire = payerLink.data?.questionnaire ?? null;
+  const amlPayerSent = amlPayerQuestionnaire && amlPayerQuestionnaire.source !== "cabinet"
+    && (amlPayerQuestionnaire.submitted_at || amlPayerQuestionnaire.state === "submitted")
+    ? amlPayerQuestionnaire
+    : null;
+  const amlPayerDeclaration = payer.data?.declaration ?? null;
+  const amlPepPersons = draft ? pepPersons({
+    fields: draft.amlEnhancedDueDiligence,
+    patientName: `${draft.firstName} ${draft.lastName}`,
+    patientAnswers: step1Portal.intake?.identification_hidden ? null : step1Portal.intake?.identification ?? null,
+    representatives: portalRepresentation?.representatives ?? [],
+    thirdPartyPayer: amlPayerDeclaration?.payer_kind === "third_party",
+    payerName: amlPayerSent?.answers.organisation_name?.trim()
+      || [amlPayerSent?.answers.first_name, amlPayerSent?.answers.last_name].filter(Boolean).join(" ")
+      || amlPayerDeclaration?.organisation_name?.trim()
+      || [amlPayerDeclaration?.first_name, amlPayerDeclaration?.last_name].filter(Boolean).join(" "),
+    payerAnswers: amlPayerSent?.answers ?? null,
+  }) : [];
   // A representative's own files of one kind (QA 2026-10-10: they sat under
   // "Другие документы"), with who uploaded each — the cabinet or staff.
   const representativeFileRows = (person: LeadRepresentative, kind: RepresentativeUploadKind) => {
@@ -10586,29 +10640,16 @@ ${serviceCommentLines.join("\n")}`
                   <AdminSectionTitle>
                     {tx("Политически значимое лицо (PEP)", "Politisch exponierte Person (PeP)")}
                   </AdminSectionTitle>
-                  <div className="border-y border-border/70">
-                    <ToggleRow
-                      checked={draft.amlEnhancedDueDiligence.pepContractPartner}
-                      disabled={isBusy}
-                      onChange={(checked) => handleAmlPepChange("pepContractPartner", checked)}
-                      label={tx("Контрагент является PEP", "Vertragspartner ist eine PeP")}
-                    />
-                    <ToggleRow
-                      checked={draft.amlEnhancedDueDiligence.pepBeneficialOwner}
-                      disabled={isBusy}
-                      onChange={(checked) => handleAmlPepChange("pepBeneficialOwner", checked)}
-                      label={tx("Бенефициарный владелец является PEP", "Wirtschaftlich Berechtigter ist eine PeP")}
-                    />
-                    {/* Moved here from the personal data (owner 2026-10-19: no duplicate PEP block). */}
-                    <div data-testid="lead-aml-pep-status-checked">
-                      <ToggleRow
-                        checked={draft.amlEnhancedDueDiligence.pepStatusChecked}
-                        disabled={isBusy}
-                        onChange={(checked) => handleAmlPepChange("pepStatusChecked", checked)}
-                        label={tx("PEP-статус проверен (по базам или со слов клиента)", "PeP-Status geprüft (Datenbank oder Angabe des Kunden)")}
-                      />
-                    </div>
-                  </div>
+                  {/* Per person (owner 2026-10-23): who answered what, and staff's review of each person. */}
+                  <LeadAmlPepReviews
+                    persons={amlPepPersons}
+                    patient={draft.amlEnhancedDueDiligence}
+                    disabled={isBusy}
+                    tx={tx}
+                    Toggle={ToggleRow}
+                    onPatientChange={handleAmlPepChange}
+                    onReviewChange={handleAmlPepReviewChange}
+                  />
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field required={amlPepTriggered} label={tx("Должность / функция", "Amt / Funktion")}>
                       <Input

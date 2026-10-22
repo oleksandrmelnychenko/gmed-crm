@@ -82,7 +82,11 @@ pub(super) struct LegalEntitySheet {
     pub enhanced_check_required: bool,
     pub funds_sources: Vec<String>,
     pub funds_description: Option<String>,
-    /// Questions 5 a) to d).
+    /// Staff's review of the payer's PEP status (subject `payer`, owner
+    /// decision 2026-10-23): shown apart from the payer's own answers.
+    pub pep_review: crate::services::pep_review::PepReview,
+    /// Questions 5 a) to d). b) is staff's conclusion once staff reviewed
+    /// the payer, the payer's own answer before; never both ORed.
     pub increased_risk: bool,
     pub politically_exposed: bool,
     pub high_risk_third_country: bool,
@@ -116,6 +120,17 @@ fn trimmed(value: Option<&str>) -> Option<String> {
 
 fn date(value: Option<NaiveDate>) -> Option<String> {
     value.map(|day| day.format("%d.%m.%Y").to_string())
+}
+
+/// Question 5 b) of the sheet from the payer's own answers and staff's
+/// review of the payer (owner decision 2026-10-23).
+fn politically_exposed(sheet: &LegalEntitySheet) -> bool {
+    let answers = crate::services::pep_review::PersonAnswers {
+        pep_self: sheet.pep_self,
+        pep_related: sheet.pep_related,
+        ..Default::default()
+    };
+    crate::services::pep_review::politically_exposed(&answers, &sheet.pep_review)
 }
 
 /// "ja – <details>", "nein" or `None` (not answered).
@@ -441,6 +456,7 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
         "Familienmitglied oder nahestehende Person einer politisch exponierten Person (Angabe des Kostenübernehmers)",
         answer(sheet.pep_related, sheet.pep_related_details.as_deref()),
     ));
+    items.push(Line("Prüfung durch GMED", Some(sheet.pep_review.line())));
     items.push(Line(
         "Verbindungen zu sanktionierten Personen oder Unternehmen (Angabe des Kostenübernehmers)",
         answer(
@@ -781,10 +797,15 @@ pub(super) async fn load(
         sheet.payment_reason = Some(reason);
         sheet.payment_reason_from_patient = true;
     }
-    sheet.politically_exposed = aml.pep_contract_partner
-        || aml.pep_beneficial_owner
-        || sheet.pep_self == Some(true)
-        || sheet.pep_related == Some(true);
+    // The payer's own answers and staff's review of the payer (owner
+    // decision 2026-10-23); the patient's review never counts here.
+    sheet.pep_review = crate::services::pep_review::review_of(
+        wizard_state
+            .get("aml_enhanced_due_diligence")
+            .unwrap_or(&Value::Null),
+        crate::services::pep_review::SUBJECT_PAYER,
+    );
+    sheet.politically_exposed = politically_exposed(&sheet);
     let mut risk_countries: Vec<String> = Vec::new();
     risk_countries.extend(sheet.country.clone());
     risk_countries.extend(sheet.id_issuing_country.clone());
@@ -1159,6 +1180,42 @@ mod tests {
         assert_eq!(
             value(&items, "Zweck der Zahlung (Grund der Kostenübernahme)"),
             Some("Arbeitgeber (Angabe der Patientin / des Patienten)")
+        );
+    }
+
+    #[test]
+    fn question_b_shows_the_payers_answer_and_staffs_review_apart() {
+        use crate::services::pep_review::PepReview;
+        // Not reviewed: the payer's own "yes" (a relative of a PEP) answers b).
+        let open = complete();
+        assert!(politically_exposed(&open));
+        assert_eq!(
+            value(&content(&open, day(2026, 10, 22)), "Prüfung durch GMED"),
+            Some("noch nicht geprüft")
+        );
+        // Staff checked the payer and found no PEP: b) follows the review,
+        // the payer's answer stays printed as the payer's.
+        let reviewed = LegalEntitySheet {
+            pep_review: PepReview {
+                checked: true,
+                is_pep: false,
+                checked_on: Some(day(2026, 10, 23)),
+                checked_by: Some("Anna Prüferin".to_string()),
+            },
+            ..complete()
+        };
+        assert!(!politically_exposed(&reviewed));
+        let items = content(&reviewed, day(2026, 10, 23));
+        assert_eq!(
+            value(&items, "Prüfung durch GMED"),
+            Some("PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PeP")
+        );
+        assert_eq!(
+            value(
+                &items,
+                "Familienmitglied oder nahestehende Person einer politisch exponierten Person (Angabe des Kostenübernehmers)"
+            ),
+            Some("ja – Schwager, Bürgermeister")
         );
     }
 

@@ -69,6 +69,10 @@ type Mock = {
   riskCountries?: Json;
   /** The lead's citizenships. */
   citizenships?: string[];
+  /** The lead's stored wizard state. */
+  wizardState?: Json;
+  /** `GET …/portal-intake` (without `lead_id`). */
+  portalIntake?: Json;
 };
 
 async function mount(page: Page, mock: Mock) {
@@ -101,11 +105,13 @@ async function mount(page: Page, mock: Mock) {
         qualification_status: "in_progress",
         intake_model: "patient_first",
         repeat_patient_id: null,
-        wizard_state: {},
+        wizard_state: mock.wizardState ?? {},
         services: [],
         attachments: [],
         readiness: { conversion_ready: false, blocking_reasons: mock.reasons ?? [], steps: [], checks: [] },
       };
+    } else if (path === `/leads/${leadId}/portal-intake` && mock.portalIntake) {
+      response = { lead_id: leadId, ...mock.portalIntake };
     } else if (path === `/leads/${leadId}/enhanced-check`) {
       response = mock.enhancedCheck;
     } else if (path === "/compliance/risk-countries" && mock.riskCountries) {
@@ -251,4 +257,61 @@ test("the document preview names the refusal and leads to the risk assessment, i
   await preview.getByTestId("lead-document-preview-jump").click();
   await expect(preview).toHaveCount(0);
   await expect(wizard.getByRole("tab", { name: "Unterlagen", exact: false })).toHaveAttribute("aria-selected", "true");
+});
+
+test("the PEP panel shows each person's own answer and staff's review per person", async ({ page }, testInfo) => {
+  // Owner decision 2026-10-23 (DEV, Linda Testova): the parent's answers are
+  // the parent's, never the child's; staff's review is a layer per person.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const parentId = "00000000-0000-4000-8000-0000000000a1";
+  const { wizard } = await mount(page, {
+    lang: "ru",
+    enhancedCheck: { required: true, reasons: ["risk_assessment"], countries: [] },
+    wizardState: {
+      aml_enhanced_due_diligence: {
+        pepStatusChecked: false,
+        pepReviews: {
+          [`representative:${parentId}`]: { checked: true, isPep: false, checkedOn: "2026-10-23", checkedBy: "Anna Prüferin" },
+        },
+      },
+    },
+    portalIntake: {
+      minor: true,
+      identification: { pep_self: true, pep_related: false, sanctions_links: null },
+      representation: {
+        custody: "joint",
+        custody_stated: true,
+        representatives: [{
+          id: parentId,
+          slot: "rep1",
+          role: "legal_representative",
+          relation: "parent",
+          first_name: "Olga",
+          last_name: "Testova",
+          country_questions: { pep_self: false, pep_related: false, sanctions_links: false },
+        }],
+      },
+    },
+  });
+  const section = wizard.getByTestId("lead-wizard-enhanced-check-section");
+  await section.getByRole("button", { name: "Заполнить проверку" }).click();
+  const sheet = page.getByRole("dialog", { name: "Усиленная AML-проверка (ориентир § 15 GwG)" });
+  const patient = sheet.getByTestId("lead-aml-pep-person-patient");
+  const parent = sheet.getByTestId("lead-aml-pep-person-representative");
+  await expect(patient.getByTestId("lead-aml-pep-person-answer")).toHaveAttribute("data-value", "yes");
+  await expect(patient.getByTestId("lead-aml-pep-person-review")).toContainText("ещё не проверено");
+  await expect(parent).toContainText("Olga Testova");
+  await expect(parent.getByTestId("lead-aml-pep-person-answer")).toHaveAttribute("data-value", "no");
+  await expect(parent.getByTestId("lead-aml-pep-person-sanctions")).toHaveAttribute("data-value", "no");
+  await expect(parent.getByTestId("lead-aml-pep-person-review")).toContainText("PEP-статус проверен 23.10.2026 (Anna Prüferin) — итог: не PEP");
+  // The lead's "yes" never ticks staff's review box (display-only, owner 2026-10-06).
+  await expect(patient.getByRole("checkbox", { name: "Контрагент является PEP" })).not.toBeChecked();
+  // Staff conclude "PEP" for the parent only.
+  await parent.getByRole("checkbox", { name: "По итогам проверки является PEP" }).check();
+  await expect(parent.getByRole("checkbox", { name: "По итогам проверки является PEP" })).toBeChecked();
+  // The old day and reviewer no longer describe the new decision; the server stamps it on save.
+  await expect(parent.getByTestId("lead-aml-pep-person-review")).toHaveText("Проверка GMED: PEP-статус проверен — итог: является PEP");
+  await expect(patient.getByRole("checkbox", { name: "Контрагент является PEP" })).not.toBeChecked();
+  await parent.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("lead-aml-pep-per-person-ru.png"), animations: "disabled" });
 });

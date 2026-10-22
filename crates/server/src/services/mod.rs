@@ -27,3 +27,4 @@ pub mod patient_clinical_pdf;
 pub mod patient_lab_results_pdf;
 pub mod patient_medication_pdf;
 pub mod patient_pdf_brand;
+pub mod pep_review;

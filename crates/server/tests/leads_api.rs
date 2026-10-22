@@ -2277,6 +2277,83 @@ async fn the_pep_status_check_is_audited_as_its_own_action() {
 }
 
 #[tokio::test]
+async fn the_pep_review_is_stamped_and_audited_per_person() {
+    // Owner decision 2026-10-23: staff review the PEP status per person; the
+    // day and the reviewer are the server's, never the client's.
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Linda",
+            "last_name": "Muster",
+            "email": format!("linda-pep-{tag}@example.com"),
+            "source": "Test",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap().to_string();
+    let lead_uuid = Uuid::parse_str(&lead_id).unwrap();
+    let path = format!("/api/v1/leads/{lead_id}/update");
+    let parent = format!("representative:{}", Uuid::new_v4());
+    let stored = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, Value>(
+            "SELECT wizard_state -> 'aml_enhanced_due_diligence' -> 'pepReviews' FROM leads WHERE id = $1",
+        )
+        .bind(lead_uuid)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+
+    let mut reviews = serde_json::Map::new();
+    reviews.insert(
+        parent.clone(),
+        json!({ "checked": true, "isPep": false, "checkedOn": "1999-01-01", "checkedBy": "Forged" }),
+    );
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &pm,
+        Some(json!({ "wizard_state": { "aml_enhanced_due_diligence": {
+            "pepStatusChecked": false,
+            "pepReviews": Value::Object(reviews),
+        } } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let today = gmed_server::app_time::today()
+        .format("%Y-%m-%d")
+        .to_string();
+    let reviews = stored(app.suite.pool.clone()).await;
+    assert_eq!(reviews[parent.as_str()]["checked"], true);
+    assert_eq!(reviews[parent.as_str()]["checkedOn"], today.as_str());
+    assert_ne!(reviews[parent.as_str()]["checkedBy"], "Forged");
+    // The patient was not reviewed: no stamp of the patient.
+    assert!(reviews.get("patient").is_none(), "{reviews}");
+
+    let rows = sqlx::query_as::<_, (String, Value)>(
+        r#"SELECT action, context FROM audit_log
+           WHERE entity_id = $1 AND action = 'lead_pep_review_changed'"#,
+    )
+    .bind(lead_uuid)
+    .fetch_all(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].1["subject"], parent.as_str());
+    assert_eq!(rows[0].1["pep_status_checked"], true);
+    assert_eq!(rows[0].1["is_pep"], false);
+}
+
+#[tokio::test]
 async fn converted_lead_is_absent_from_registry_but_detail_remains_auditable() {
     let Some(app) = test_app().await else { return };
     let pm = app.auth_header("patient_manager");

@@ -3425,13 +3425,103 @@ struct GwgIdentificationSheet {
     /// "Getroffene Maßnahmen zur Ermittlung des wB" when it is not the
     /// questioning of the contract partner (the payer's own statement).
     beneficial_owner_measures: Option<String>,
-    /// Questions 5 a) to d) of the form.
+    /// Questions 5 a) to d) of the form. b) is staff's conclusion once staff
+    /// reviewed this person, the person's own answer before (owner decision
+    /// 2026-10-23, [`crate::services::pep_review::politically_exposed`]).
     increased_risk: bool,
     politically_exposed: bool,
     high_risk_third_country: bool,
     unusual_transaction: bool,
+    /// The PEP and sanctions answers of THIS person (the patient's own, a
+    /// representative's block R, the payer's statement), never another's.
+    person_answers: crate::services::pep_review::PersonAnswers,
+    /// Staff's review of this person's PEP status.
+    pep_review: crate::services::pep_review::PepReview,
     reviewer_name: String,
     review_date: NaiveDate,
+}
+
+/// Whose PEP and sanctions answers a sheet shows (owner decision
+/// 2026-10-23: per person, never the child's on a parent's sheet): the
+/// patient's own from the cabinet, a representative's from block R, the
+/// payer's from the own statement. A parent who also pays and left block R
+/// open answered the same questions in the payer's statement: those stand in.
+fn gwg_sheet_person_answers(
+    subject: GwgSheetSubject,
+    patient: &crate::services::pep_review::PersonAnswers,
+    representative_fields: Option<&Value>,
+    payer_statement: Option<&crate::services::pep_review::PersonAnswers>,
+    representative_pays: bool,
+) -> crate::services::pep_review::PersonAnswers {
+    use crate::services::pep_review::PersonAnswers;
+    match subject {
+        GwgSheetSubject::ContractPartner => patient.clone(),
+        GwgSheetSubject::Payer => payer_statement.cloned().unwrap_or_default(),
+        GwgSheetSubject::Representative(_) => {
+            let mut own = representative_fields
+                .map(PersonAnswers::from_country_questions)
+                .unwrap_or_default();
+            if representative_pays && let Some(statement) = payer_statement {
+                if own.pep_unanswered() {
+                    own.pep_self = statement.pep_self;
+                    own.pep_self_details = statement.pep_self_details.clone();
+                    own.pep_related = statement.pep_related;
+                    own.pep_related_details = statement.pep_related_details.clone();
+                }
+                if own.sanctions_links.is_none() {
+                    own.sanctions_links = statement.sanctions_links;
+                    own.sanctions_links_details = statement.sanctions_links_details.clone();
+                }
+            }
+            own
+        }
+    }
+}
+
+/// The subject of staff's PEP review for a sheet.
+fn gwg_sheet_review_subject(subject: GwgSheetSubject) -> String {
+    use crate::services::pep_review;
+    match subject {
+        GwgSheetSubject::ContractPartner => pep_review::SUBJECT_PATIENT.to_string(),
+        GwgSheetSubject::Payer => pep_review::SUBJECT_PAYER.to_string(),
+        GwgSheetSubject::Representative(id) => pep_review::representative_subject(id),
+    }
+}
+
+/// The payer's own PEP and sanctions answers from the sent statement;
+/// `None` while nothing was sent.
+async fn load_gwg_payer_statement_answers(
+    db: &gmed_db::DbPool,
+    lead_id: Uuid,
+) -> Result<Option<crate::services::pep_review::PersonAnswers>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT pep_self, pep_self_details, pep_related, pep_related_details,
+                  sanctions_links, sanctions_links_details
+           FROM lead_payer_statements
+           WHERE lead_id = $1 AND submitted_at IS NOT NULL"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(db)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let flag = |column: &str| row.try_get::<Option<bool>, _>(column).ok().flatten();
+    let text = |column: &str| {
+        row.try_get::<Option<String>, _>(column)
+            .ok()
+            .flatten()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    Ok(Some(crate::services::pep_review::PersonAnswers {
+        pep_self: flag("pep_self"),
+        pep_self_details: text("pep_self_details"),
+        pep_related: flag("pep_related"),
+        pep_related_details: text("pep_related_details"),
+        sanctions_links: flag("sanctions_links"),
+        sanctions_links_details: text("sanctions_links_details"),
+    }))
 }
 
 /// "Musterweg 1, 10115 Berlin, Deutschland": the address in one line, with
@@ -3678,12 +3768,6 @@ async fn load_gwg_identification_sheet(
     let mut sheet = GwgIdentificationSheet {
         reviewer_name: text("reviewer_name").unwrap_or_default(),
         review_date: today,
-        // The lead's own answers (PEP himself, or a family member or close
-        // associate) count like staff's.
-        politically_exposed: aml.pep_contract_partner
-            || aml.pep_beneficial_owner
-            || statements.pep_self == Some(true)
-            || statements.pep_related == Some(true),
         unusual_transaction: aml.unusual_complex_or_large
             || aml.unusual_pattern
             || aml.no_lawful_purpose,
@@ -4065,6 +4149,37 @@ async fn load_gwg_identification_sheet(
             ..GwgPaymentRoute::from_declaration(declaration)
         });
     }
+    // Question 5 b) per person (owner decision 2026-10-23): this person's
+    // own answers and staff's review of this person, never the patient's
+    // answers on a parent's or the payer's sheet and never both ORed.
+    let payer_statement_answers = load_gwg_payer_statement_answers(&state.db, lead_id)
+        .await
+        .map_err(|error| failed(error, "payer statement answers"))?;
+    let patient_answers = crate::services::pep_review::PersonAnswers {
+        pep_self: statements.pep_self,
+        pep_self_details: statements.pep_self_details.clone(),
+        pep_related: statements.pep_related,
+        pep_related_details: statements.pep_related_details.clone(),
+        sanctions_links: statements.sanctions_links,
+        sanctions_links_details: statements.sanctions_links_details.clone(),
+    };
+    let representative_fields = representative
+        .map(|person| super::lead_representatives::representative_question_fields(&person.extras));
+    sheet.person_answers = gwg_sheet_person_answers(
+        subject,
+        &patient_answers,
+        representative_fields.as_ref(),
+        payer_statement_answers.as_ref(),
+        sheet.also_payer,
+    );
+    sheet.pep_review = crate::services::pep_review::review_of(
+        wizard_state
+            .get("aml_enhanced_due_diligence")
+            .unwrap_or(&Value::Null),
+        &gwg_sheet_review_subject(subject),
+    );
+    sheet.politically_exposed =
+        crate::services::pep_review::politically_exposed(&sheet.person_answers, &sheet.pep_review);
     sheet.high_risk_third_country = aml.high_risk_country_transaction
         || aml.high_risk_country_resident
         || !aml.triggered_countries.is_empty()
@@ -23496,6 +23611,23 @@ fn build_gwg_identification_pdf(
         "b) Handelt es sich bei dem Vertragspartner oder dem wirtschaftlich Berechtigten um eine politisch exponierte Person, ein unmittelbares Familienmitglied dieser Person oder eine ihr bekanntermaßen nahestehende Person?",
         sheet.politically_exposed,
     );
+    // The person's own answer and staff's review, each on its own line
+    // (owner decision 2026-10-23).
+    aml_labeled_value(
+        &mut layout,
+        "Angabe der Person",
+        Some(sheet.person_answers.pep_line().as_str()),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Prüfung durch GMED",
+        Some(sheet.pep_review.line().as_str()),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Verbindungen zu sanktionierten Personen (Angabe der Person)",
+        Some(sheet.person_answers.sanctions_line().as_str()),
+    );
     gwg_yes_no_line(
         &mut layout,
         "c) Ist an der Geschäftsbeziehung ein von der EU-Kommission gelisteter Drittstaat mit hohem Risiko oder eine in diesem Drittstaat ansässige natürliche oder juristische Person beteiligt?",
@@ -38458,6 +38590,187 @@ mod tests {
         assert!(!text.contains("Zahlung von einem Konto"));
         // Nothing of the payment route on a sheet that is not the payer's.
         assert!(!text.contains("Angaben zum Zahlungsweg"));
+    }
+
+    #[test]
+    fn gwg_parent_sheet_uses_the_parents_own_pep_answers_not_the_childs() {
+        use crate::services::pep_review::{self, PersonAnswers};
+        // DEV 2026-10-22 (Linda Testova): the parent's sheet answered 5 b)
+        // from the child's cabinet answers. Owner decision 2026-10-23: per
+        // person.
+        let parent_id = Uuid::new_v4();
+        let child = PersonAnswers {
+            pep_self: Some(true),
+            pep_self_details: Some("Kinderparlament".to_string()),
+            pep_related: Some(false),
+            sanctions_links: Some(true),
+            ..PersonAnswers::default()
+        };
+        let parent_block_r = json!({
+            "pep_self": false,
+            "pep_related": false,
+            "sanctions_links": false,
+        });
+        let payer_statement = PersonAnswers {
+            pep_self: Some(true),
+            pep_related: Some(false),
+            sanctions_links: Some(false),
+            ..PersonAnswers::default()
+        };
+        let parent = super::gwg_sheet_person_answers(
+            super::GwgSheetSubject::Representative(parent_id),
+            &child,
+            Some(&parent_block_r),
+            Some(&payer_statement),
+            true,
+        );
+        assert_eq!(parent.pep_self, Some(false));
+        assert_eq!(parent.sanctions_links, Some(false));
+        assert_eq!(parent.pep_line(), "nein");
+        // A paying parent who left block R open answered as payer.
+        let open_block_r = json!({ "pep_self": null, "pep_related": null });
+        let paying = super::gwg_sheet_person_answers(
+            super::GwgSheetSubject::Representative(parent_id),
+            &child,
+            Some(&open_block_r),
+            Some(&payer_statement),
+            true,
+        );
+        assert_eq!(paying.pep_self, Some(true));
+        // A parent who does not pay never takes the payer's answers.
+        let not_paying = super::gwg_sheet_person_answers(
+            super::GwgSheetSubject::Representative(parent_id),
+            &child,
+            Some(&open_block_r),
+            Some(&payer_statement),
+            false,
+        );
+        assert_eq!(not_paying.pep_line(), "keine Angabe");
+        // The payer's sheet: the payer's statement, not the patient's answers.
+        let payer = super::gwg_sheet_person_answers(
+            super::GwgSheetSubject::Payer,
+            &child,
+            None,
+            None,
+            false,
+        );
+        assert_eq!(payer, PersonAnswers::default());
+        assert_eq!(
+            super::gwg_sheet_person_answers(
+                super::GwgSheetSubject::ContractPartner,
+                &child,
+                Some(&parent_block_r),
+                Some(&payer_statement),
+                false,
+            ),
+            child
+        );
+        // Each sheet reads the review of its own subject.
+        assert_eq!(
+            super::gwg_sheet_review_subject(super::GwgSheetSubject::Representative(parent_id)),
+            pep_review::representative_subject(parent_id)
+        );
+        assert_eq!(
+            super::gwg_sheet_review_subject(super::GwgSheetSubject::ContractPartner),
+            pep_review::SUBJECT_PATIENT
+        );
+        assert_eq!(
+            super::gwg_sheet_review_subject(super::GwgSheetSubject::Payer),
+            pep_review::SUBJECT_PAYER
+        );
+    }
+
+    #[test]
+    fn gwg_identification_sheet_shows_the_answer_and_the_staff_review_separately() {
+        use crate::services::pep_review::{PepReview, PersonAnswers};
+        let answers = PersonAnswers {
+            pep_self: Some(false),
+            pep_related: Some(true),
+            pep_related_details: Some("Bruder, Bürgermeister".to_string()),
+            sanctions_links: Some(false),
+            ..PersonAnswers::default()
+        };
+        // Staff checked the status and found no PEP: b) follows the review,
+        // the person's "yes" stays visible as the person's answer.
+        let review = PepReview {
+            checked: true,
+            is_pep: false,
+            checked_on: NaiveDate::from_ymd_opt(2026, 10, 23),
+            checked_by: Some("Anna Prüferin".to_string()),
+        };
+        let sheet = super::GwgIdentificationSheet {
+            role: "Gesetzliche/r Vertreter/in (Elternteil)",
+            first_name: "Olga".to_string(),
+            last_name: "Testova".to_string(),
+            politically_exposed: crate::services::pep_review::politically_exposed(
+                &answers, &review,
+            ),
+            person_answers: answers.clone(),
+            pep_review: review,
+            reviewer_name: "Bearbeiter Beispiel".to_string(),
+            review_date: NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+            ..Default::default()
+        };
+        assert!(!sheet.politically_exposed);
+        let bytes = super::build_gwg_identification_pdf(
+            &sheet,
+            &legal_test_agency(),
+            None,
+            "GWG-20261023-UNITTEST0001",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261023-UNITTEST0001");
+        let compact = |value: &str| value.split_whitespace().collect::<String>();
+        let text = compact(&text);
+        assert!(
+            text.contains(&compact(
+                "Angabe der Person ja – Familienmitglied oder nahestehende Person einer PeP (Bruder, Bürgermeister)"
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains(&compact(
+                "Prüfung durch GMED PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PeP"
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains(&compact(
+                "Verbindungen zu sanktionierten Personen (Angabe der Person) nein"
+            )),
+            "{text}"
+        );
+        assert!(text.contains(&compact("Keine Frage ist mit „Ja“ beantwortet")));
+
+        // Not reviewed yet: b) is the person's own answer, the review says so.
+        let open = super::GwgIdentificationSheet {
+            pep_review: PepReview::default(),
+            politically_exposed: crate::services::pep_review::politically_exposed(
+                &answers,
+                &PepReview::default(),
+            ),
+            ..sheet
+        };
+        assert!(open.politically_exposed);
+        let bytes = super::build_gwg_identification_pdf(
+            &open,
+            &legal_test_agency(),
+            None,
+            "GWG-20261023-UNITTEST0002",
+        )
+        .unwrap();
+        let text = compact(&assert_legal_pdf_chrome(
+            &bytes,
+            "GWG-20261023-UNITTEST0002",
+        ));
+        assert!(
+            text.contains(&compact("Prüfung durch GMED noch nicht geprüft")),
+            "{text}"
+        );
+        assert!(
+            text.contains(&compact("Frage a) ist mit „Nein“ beantwortet")),
+            "{text}"
+        );
     }
 
     #[test]

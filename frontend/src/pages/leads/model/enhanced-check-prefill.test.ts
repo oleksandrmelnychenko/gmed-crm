@@ -143,13 +143,15 @@ describe("applyAmlLeadPrefill", () => {
     countryName,
   });
 
-  it("fills the empty fields and ticks the PEP box", () => {
+  it("fills the empty fields and leaves staff's PEP review to staff", () => {
+    // Owner decision 2026-10-23: the lead's "yes" is the lead's answer, not
+    // staff's conclusion; it never ticks the review box.
     const filled = applyAmlLeadPrefill(emptyForm, prefill);
     expect(filled).toEqual({
       assetOrigin: "Angabe der Patientin/des Patienten: Ersparnisse",
       assetOriginEvidence: [{ documentId: "self-proof", filename: "auszug.pdf" }],
       additionalContractPartnerInfo: "Beruf: Ärztin",
-      pepContractPartner: true,
+      pepContractPartner: false,
       pepStatusChecked: false,
       pepOfficeFunction: "Bürgermeister",
       pepAssetOrigin: "Gehalt",

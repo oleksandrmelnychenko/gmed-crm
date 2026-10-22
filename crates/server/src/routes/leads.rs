@@ -4869,6 +4869,40 @@ async fn update_lead(
     } else {
         None
     };
+    // Staff's PEP review per person (owner decision 2026-10-23): the day and
+    // the reviewer of each review are the server's, set when staff change it.
+    let (wizard_state, changed_pep_reviews) = match body.wizard_state.clone() {
+        Some(mut next) => {
+            let (previous_aml, reviewer_name) =
+                match sqlx::query_as::<_, (Option<Value>, Option<String>)>(
+                    r#"SELECT (SELECT wizard_state -> 'aml_enhanced_due_diligence'
+                               FROM leads WHERE id = $1),
+                              (SELECT name FROM users WHERE id = $2)"#,
+                )
+                .bind(lead_id)
+                .bind(auth.user_id)
+                .fetch_one(&mut *tx)
+                .await
+                {
+                    Ok(row) => row,
+                    Err(e) => {
+                        tracing::error!(error = %e, lead_id = %lead_id, "read lead PEP reviews");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                    }
+                };
+            let changed = match next.get_mut("aml_enhanced_due_diligence") {
+                Some(aml) if aml.is_object() => crate::services::pep_review::stamp_reviews(
+                    previous_aml.as_ref().unwrap_or(&Value::Null),
+                    aml,
+                    crate::app_time::today(),
+                    reviewer_name.as_deref().unwrap_or_default(),
+                ),
+                _ => Vec::new(),
+            };
+            (Some(next), changed)
+        }
+        None => (None, Vec::new()),
+    };
     let update_result = sqlx::query(
         r#"UPDATE leads
            SET email = COALESCE($2, email),
@@ -4964,7 +4998,7 @@ async fn update_lead(
             .as_ref()
             .map(|value| value.to_string()),
     )
-    .bind(body.wizard_state.as_ref().map(|value| value.to_string()))
+    .bind(wizard_state.as_ref().map(|value| value.to_string()))
     .bind(body.middle_name.as_deref().map(str::trim))
     .bind(body.suffix.as_deref().map(str::trim))
     .bind(body.state.as_deref().map(str::trim))
@@ -5096,6 +5130,30 @@ async fn update_lead(
             .await
         {
             tracing::error!(error = %e, lead_id = %lead_id, "audit lead PEP check");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+    // A representative's or the payer's PEP review, audited per subject.
+    for change in &changed_pep_reviews {
+        if let Err(e) = audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "lead_pep_review_changed",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                // The subject is a role or a contact id; no personal data.
+                json!({
+                    "lead_id": lead_id,
+                    "subject": change.subject,
+                    "pep_status_checked": change.checked,
+                    "is_pep": change.is_pep,
+                }),
+            ),
+        )
+        .await
+        {
+            tracing::error!(error = %e, lead_id = %lead_id, "audit lead PEP review");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }

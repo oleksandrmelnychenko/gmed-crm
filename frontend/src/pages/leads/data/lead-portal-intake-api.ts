@@ -151,6 +151,14 @@ export type LeadRepresentative = {
   has_data: boolean;
   /** `portal` when the cabinet created the trusted contact, `staff` when it existed. */
   contact_origin: string | null;
+  /**
+   * This person's OWN answers of block R (owner decision 2026-10-23: PEP and
+   * sanctions answers are per person); null while unanswered, absent on an
+   * older server.
+   */
+  pep_self?: boolean | null;
+  pep_related?: boolean | null;
+  sanctions_links?: boolean | null;
 } & LeadStaffIdDataMarks;
 
 /** Who acts for the lead, as stated in the cabinet (and, for the custody, by staff). */
@@ -558,6 +566,17 @@ function normalizeIdentityDocuments(value: unknown): LeadIdentityDocument[] {
   });
 }
 
+/** The person's own PEP and sanctions answers of block R; nothing on a server that sends none. */
+function representativeLegalAnswers(value: unknown): Pick<LeadRepresentative, "pep_self" | "pep_related" | "sanctions_links"> {
+  const questions = asRecord(value);
+  if (!questions) return {};
+  return {
+    pep_self: answerOrNull(questions.pep_self),
+    pep_related: answerOrNull(questions.pep_related),
+    sanctions_links: answerOrNull(questions.sanctions_links),
+  };
+}
+
 function normalizeRepresentative(value: unknown): LeadRepresentative | null {
   const raw = asRecord(value);
   if (!raw || typeof raw.id !== "string" || !raw.id.trim()) return null;
@@ -591,6 +610,7 @@ function normalizeRepresentative(value: unknown): LeadRepresentative | null {
     has_login: raw.has_login === true,
     has_data: raw.has_data === true,
     contact_origin: textOrNull(raw.contact_origin),
+    ...representativeLegalAnswers(raw.country_questions),
     ...normalizeStaffIdDataMarks(raw),
   };
 }

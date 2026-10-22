@@ -62,6 +62,10 @@ const ACTIONS: Record<string, Pair> = {
   ],
   lead_pep_status_checked: ["Отмечен статус PEP", "PEP-Status markiert"],
   lead_pep_status_unchecked: ["Статус PEP снят", "PEP-Status entfernt"],
+  lead_pep_review_changed: [
+    "Изменена проверка PEP-статуса лица",
+    "PEP-Prüfung einer Person geändert",
+  ],
   lead_identity_document_data_updated: [
     "Данные документа личности лида изменены",
     "Ausweisdaten des Leads geändert",

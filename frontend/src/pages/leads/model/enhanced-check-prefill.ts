@@ -177,8 +177,9 @@ export function amlPrefillFromLeadAnswers(input: AmlLeadAnswers): AmlLeadPrefill
 }
 
 /**
- * The form with the answers in every field staff left empty. The PEP box is
- * ticked only while staff have not checked the PEP status themselves; the
+ * The form with the answers in every field staff left empty. The PEP boxes
+ * are staff's review and stay as staff set them (owner decision 2026-10-23:
+ * the lead's answer is shown per person, never copied into the review); the
  * proofs are named only while the form names none (staff may remove them).
  */
 export function applyAmlLeadPrefill<T extends AmlPrefillTarget>(form: T, prefill: AmlLeadPrefill): T {
@@ -188,7 +189,6 @@ export function applyAmlLeadPrefill<T extends AmlPrefillTarget>(form: T, prefill
     assetOrigin: fill(form.assetOrigin, prefill.assetOrigin),
     assetOriginEvidence: form.assetOriginEvidence.length > 0 ? form.assetOriginEvidence : prefill.evidence,
     additionalContractPartnerInfo: fill(form.additionalContractPartnerInfo, prefill.contractPartnerInfo),
-    pepContractPartner: form.pepContractPartner || (prefill.pepSelf && !form.pepStatusChecked),
     pepOfficeFunction: fill(form.pepOfficeFunction, prefill.pepOfficeFunction),
     pepAssetOrigin: fill(form.pepAssetOrigin, prefill.pepAssetOrigin),
     sanctionsLinks: fill(form.sanctionsLinks, prefill.sanctionsLinks),
