@@ -243,6 +243,13 @@ export type IdentificationPerson = {
    * who is a representative: it only repeats that person's labels.
    */
   canConfirm: boolean;
+  /**
+   * Whether a payment from this person's own account is to be expected at
+   * all. A minor's legal representative who is not the named payer only
+   * signs (owner decision 2026-10-19: the paying parent contracts and pays);
+   * true while it is not known who pays.
+   */
+  paymentExpected: boolean;
   /** A caption that is a whole sentence stands on a line of its own. */
   wide: boolean;
   /** What stands in the way of this person's identification; "" when nothing does. */
@@ -274,21 +281,31 @@ function missingEmailNote(person: RepresentativeIdentification, tx: Tx): string 
 /**
  * The lines of the block. Adult: the patient, one line per representative or
  * legal guardian named in the cabinet, and the payer when a third party pays.
- * Minor: no line for the child — one per legal representative, and the payer;
- * a payer who is one of the representatives is the same person and gets no
- * second confirmation.
+ * Minor: no line for the child — one per legal representative, and the payer
+ * when somebody else pays. A parent named as payer is one person: the payer
+ * is said on that parent's line, which alone expects the payment from the
+ * own account (DEV 2026-10-22, Linda Testova: every parent got "confirm
+ * payment" plus a second payer line); a parent who does not pay only signs.
  */
 export function identificationPersons(status: LeadIdentificationStatus, tx: Tx): IdentificationPerson[] {
+  const payingParent = payerSamePerson(status);
+  // Somebody is named as payer: only that person pays.
+  const payerKnown = status.payer !== null;
   const persons: IdentificationPerson[] = status.minor
-    ? status.representatives.map((representative) => ({
-        subject: representative.subject,
-        role: representative.name || tx("Законный представитель", "Gesetzliche/r Vertreter/in"),
-        detail: representativeRelationLabel(representative.relation, tx),
-        person: { qes: representative.qes, own_account_payment: representative.own_account_payment },
-        canConfirm: true,
-        wide: false,
-        note: missingEmailNote(representative, tx),
-      }))
+    ? status.representatives.map((representative) => {
+        const pays = payingParent ? payingParent.subject === representative.subject : !payerKnown;
+        const relation = representativeRelationLabel(representative.relation, tx);
+        return {
+          subject: representative.subject,
+          role: representative.name || tx("Законный представитель", "Gesetzliche/r Vertreter/in"),
+          detail: payingParent && pays ? `${relation} · ${tx("плательщик", "Kostenträger/in")}` : relation,
+          person: { qes: representative.qes, own_account_payment: representative.own_account_payment },
+          canConfirm: true,
+          paymentExpected: pays,
+          wide: false,
+          note: missingEmailNote(representative, tx),
+        };
+      })
     : [
         {
           subject: "contract_partner",
@@ -296,6 +313,7 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
           detail: "",
           person: status.contract_partner,
           canConfirm: true,
+          paymentExpected: true,
           wide: false,
           note: "",
         },
@@ -307,37 +325,21 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
           detail: actingPersonRoleLabel(acting, tx),
           person: { qes: acting.qes, own_account_payment: acting.own_account_payment },
           canConfirm: true,
+          paymentExpected: true,
           wide: false,
           note: missingEmailNote(acting, tx),
         })),
       ];
   const payer = status.payer;
-  if (!payer) return persons;
-  const samePerson = payer.same_person_as
-    ? status.representatives.find((representative) => representative.subject === payer.same_person_as)
-    : undefined;
-  if (samePerson) {
-    const name = samePerson.name || tx("без имени", "ohne Namen");
-    persons.push({
-      subject: "payer",
-      role: tx(
-        `Плательщик — тот же человек, что и представитель ${name}`,
-        `Kostenträger — dieselbe Person wie Vertreter/in ${name}`,
-      ),
-      detail: "",
-      person: { qes: samePerson.qes, own_account_payment: samePerson.own_account_payment },
-      canConfirm: false,
-      wide: true,
-      note: "",
-    });
-    return persons;
-  }
+  // A paying parent has no line of his own as payer: his line says it.
+  if (!payer || payingParent) return persons;
   persons.push({
     subject: "payer",
     role: tx("Плательщик", "Kostenübernehmer"),
     detail: "",
     person: { qes: payer.qes, own_account_payment: payer.own_account_payment },
     canConfirm: true,
+    paymentExpected: true,
     wide: false,
     note: "",
   });

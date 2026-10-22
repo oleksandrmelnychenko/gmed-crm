@@ -606,7 +606,7 @@ export function identificationLines(status: LeadIdentificationStatus, tx: Tx): I
     name: person.role,
     detail: person.detail,
     signature: qualifiedSignatureLabel(person.person, tx),
-    payment: ownAccountPaymentLabel(person.person, tx),
+    payment: ownAccountPaymentLabel(person.person, tx, person.paymentExpected),
     note: person.note,
   }));
 }

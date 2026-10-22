@@ -159,7 +159,7 @@ describe("LeadIdentificationStatusView", () => {
   it("lists the legal representatives of a minor instead of the child", () => {
     const html = render(MINOR);
     expect(line(html, "contract_partner")).toBe("");
-    expect(html).toContain("подписывают и платят законные представители");
+    expect(html).toContain("платёж подтверждается только у того, кто платит");
 
     const anna = line(html, ANNA);
     expect(anna).toContain("Anna Muster");
@@ -212,17 +212,20 @@ describe("LeadIdentificationStatusView", () => {
     expect(render(ADULT_REPRESENTED, { canEdit: false })).not.toMatch(/<button\b/);
   });
 
-  it("identifies a paying parent once: the payer line has the same labels and no button", () => {
+  it("identifies a paying parent once; the other parent only signs (DEV 2026-10-22)", () => {
     const html = render({ ...MINOR, payer: { qes: null, own_account_payment: null, same_person_as: ANNA } });
-    const payer = line(html, "payer");
-    expect(payer).toContain("Плательщик — тот же человек, что и представитель Anna Muster");
-    expect(payer).toContain("Квалифицированная подпись · 05.10.2026");
-    expect(payer).toContain("Платёж с собственного счёта подтверждён · 05.10.2026 · Petra Manager");
-    expect(payer).not.toMatch(/<button\b/);
-    // The representative's own line keeps the button.
-    expect(line(html, ANNA)).toMatch(/<button\b/);
+    // No second line for the payer.
+    expect(line(html, "payer")).toBe("");
+    const anna = line(html, ANNA);
+    expect(anna).toContain("родитель · плательщик");
+    expect(anna).toContain("Платёж с собственного счёта подтверждён · 05.10.2026 · Petra Manager");
+    expect(anna).toMatch(/<button\b/);
+    const ben = line(html, BEN);
+    expect(ben).toContain("Платёж с собственного счёта не ожидается");
+    expect(ben).not.toContain("Подтвердить платёж");
+    expect(ben).not.toMatch(/<button\b/);
     expect(render({ ...MINOR, payer: { qes: null, own_account_payment: null, same_person_as: ANNA } }, { lang: "de" }))
-      .toContain("Kostenträger — dieselbe Person wie Vertreter/in Anna Muster");
+      .toContain("Elternteil · Kostenträger/in");
   });
 
   it("says on the paying person's line when cash, crypto or a third party is declared, without a confirmation", () => {

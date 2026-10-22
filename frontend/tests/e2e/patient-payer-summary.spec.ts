@@ -261,7 +261,8 @@ const words = {
     notSigned: "Квалифицированной подписи ещё нет",
     paid: "Платёж с собственного счёта подтверждён · 06.10.2026 · Olek",
     awaiting: "Ожидается платёж с собственного счёта",
-    samePerson: "Плательщик — тот же человек, что и представитель Anna Muster",
+    samePerson: "родитель · плательщик",
+    notExpected: "Платёж с собственного счёта не ожидается",
     converted: "Зафиксировано при конвертации обращения 06.10.2026",
     openLead: "Открыть обращение",
     changedElsewhere: "Плательщика заказа или счёта меняют в заказе и в счёте",
@@ -305,7 +306,8 @@ const words = {
     notSigned: "Noch keine qualifizierte Signatur",
     paid: "Zahlung vom eigenen Konto bestätigt · 06.10.2026 · Olek",
     awaiting: "Zahlung vom eigenen Konto ausstehend",
-    samePerson: "Kostenträger — dieselbe Person wie Vertreter/in Anna Muster",
+    samePerson: "Elternteil · Kostenträger/in",
+    notExpected: "Keine Zahlung vom eigenen Konto zu erwarten",
     converted: "Bei der Umwandlung der Anfrage am 06.10.2026 festgehalten",
     openLead: "Anfrage öffnen",
     changedElsewhere: "Der Zahler eines Auftrags oder einer Rechnung wird dort geändert",
@@ -366,8 +368,10 @@ for (const lang of ["ru", "de"] as const) {
       await expect(anna).toContainText(w.paid);
       const ben = line(`identification-representative:${benContactId}`);
       await expect(ben).toContainText(w.notSigned);
-      await expect(ben).toContainText(w.awaiting);
-      await expect(line("identification-payer")).toContainText(w.samePerson);
+      // Anna pays (one line, marked as payer); Ben only signs.
+      await expect(ben).toContainText(w.notExpected);
+      await expect(anna).toContainText(w.samePerson);
+      await expect(line("identification-payer")).toHaveCount(0);
       // 6. The footer.
       await expect(line("footer")).toContainText(w.converted);
       await expect(line("footer")).toContainText(w.changedElsewhere);

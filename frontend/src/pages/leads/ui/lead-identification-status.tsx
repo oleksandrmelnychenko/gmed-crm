@@ -82,8 +82,8 @@ export function LeadIdentificationStatusView({
             <CircleAlert aria-hidden="true" className="mt-0.5" />
             <span>
               {tx(
-                "Пациент несовершеннолетний: подписывают и платят законные представители, у ребёнка своей строки нет.",
-                "Der Patient ist minderjährig: Es unterschreiben und zahlen die gesetzlichen Vertreter, das Kind hat keine eigene Zeile.",
+                "Пациент несовершеннолетний: подписывают законные представители, платёж подтверждается только у того, кто платит; у ребёнка своей строки нет.",
+                "Der Patient ist minderjährig: Es unterschreiben die gesetzlichen Vertreter, die Zahlung wird nur bei der zahlenden Person bestätigt; das Kind hat keine eigene Zeile.",
               )}
             </span>
           </StatusChip>
@@ -98,10 +98,11 @@ export function LeadIdentificationStatusView({
         </p>
       ) : null}
       <ul className="space-y-2">
-        {identificationPersons(status, tx).map(({ subject, role, detail, person, canConfirm, wide, note }) => {
+        {identificationPersons(status, tx).map(({ subject, role, detail, person, canConfirm, paymentExpected, wide, note }) => {
           const confirmed = Boolean(person.own_account_payment);
-          // Cash, crypto or a payment through a third party: no own-account payment to confirm.
-          const expected = !hinted.has(subject);
+          // Cash or a payment through a third party, or a parent who does not
+          // pay (only signs): no own-account payment to confirm.
+          const expected = paymentExpected && !hinted.has(subject);
           return (
             <li
               key={subject}

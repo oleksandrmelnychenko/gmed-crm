@@ -294,7 +294,7 @@ describe("ownAccountPaymentLabel", () => {
 });
 
 describe("identificationPersons", () => {
-  const line = { detail: "", canConfirm: true, wide: false, note: "" };
+  const line = { detail: "", canConfirm: true, paymentExpected: true, wide: false, note: "" };
 
   it("lists the patient alone while the patient pays", () => {
     expect(identificationPersons(status(), ru)).toEqual([
@@ -328,6 +328,8 @@ describe("identificationPersons", () => {
         detail: "родитель",
         person: { qes: SIGNED, own_account_payment: CONFIRMED },
         canConfirm: true,
+        // Nobody is named as payer yet: either parent may pay.
+        paymentExpected: true,
         wide: false,
         note: "",
       },
@@ -337,6 +339,7 @@ describe("identificationPersons", () => {
         detail: "опекун",
         person: NOTHING,
         canConfirm: true,
+        paymentExpected: true,
         wide: false,
         // A signature is attributed by the signer's e-mail.
         note: "нет e-mail — подпись не засчитается",
@@ -402,7 +405,7 @@ describe("identificationPersons", () => {
     });
   });
 
-  it("shows a paying parent once: the payer line repeats the representative and confirms nothing", () => {
+  it("shows a paying parent once and expects the payment only from that parent (DEV 2026-10-22)", () => {
     const minor = status({
       minor: true,
       representatives: [
@@ -413,32 +416,23 @@ describe("identificationPersons", () => {
       payer: { ...NOTHING, same_person_as: `representative:${ANNA_ID}` },
     });
     const persons = identificationPersons(minor, ru);
-    expect(persons.map((person) => person.subject)).toEqual([
-      `representative:${ANNA_ID}`,
-      `representative:${BEN_ID}`,
-      "payer",
-    ]);
-    expect(persons[2]).toEqual({
-      subject: "payer",
-      role: "Плательщик — тот же человек, что и представитель Anna Muster",
-      detail: "",
-      person: { qes: SIGNED, own_account_payment: CONFIRMED },
-      canConfirm: false,
-      wide: true,
-      note: "",
-    });
-    expect(identificationPersons(minor, de)[2].role).toBe(
-      "Kostenträger — dieselbe Person wie Vertreter/in Anna Muster",
-    );
+    // No second line for the payer.
+    expect(persons.map((person) => person.subject)).toEqual([`representative:${ANNA_ID}`, `representative:${BEN_ID}`]);
+    expect(persons[0]).toMatchObject({ detail: "родитель · плательщик", canConfirm: true, paymentExpected: true });
+    // The other parent only signs.
+    expect(persons[1]).toMatchObject({ detail: "родитель", paymentExpected: false });
+    expect(identificationPersons(minor, de)[0].detail).toBe("Elternteil · Kostenträger/in");
   });
 
-  it("keeps the own line of a payer who is somebody else", () => {
+  it("keeps the own line of a payer who is somebody else; the parents then only sign", () => {
     const minor = status({
       minor: true,
       representatives: [representative({ id: ANNA_ID, name: "Anna Muster" })],
       payer: { ...NOTHING, qes: SIGNED, same_person_as: null },
     });
-    expect(identificationPersons(minor, ru)[1]).toEqual({
+    const persons = identificationPersons(minor, ru);
+    expect(persons[0]).toMatchObject({ subject: `representative:${ANNA_ID}`, paymentExpected: false });
+    expect(persons[1]).toEqual({
       ...line,
       subject: "payer",
       role: "Плательщик",

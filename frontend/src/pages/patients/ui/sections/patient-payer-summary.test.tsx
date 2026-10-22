@@ -187,11 +187,11 @@ describe("PatientPayerSummaryCardView", () => {
     const benLine = block(html, `identification-${representativeSubject(BEN_CONTACT_ID)}`, "</li>");
     expect(benLine).toContain("Квалифицированной подписи ещё нет");
     expect(benLine).toContain('data-tone="neutral"');
-    expect(benLine).toContain("Ожидается платёж с собственного счёта");
-    expect(benLine).toContain('data-tone="warning"');
+    // Anna pays; Ben only signs.
+    expect(benLine).toContain("Платёж с собственного счёта не ожидается");
     expect(benLine).toContain("нет e-mail — подпись не засчитается");
-    const payerLine = block(html, "identification-payer", "</li>");
-    expect(payerLine).toContain("Плательщик — тот же человек, что и представитель Anna Muster");
+    expect(annaLine).toContain("родитель · плательщик");
+    expect(html).not.toContain("identification-payer");
     // With leads.view the request can be opened from the footer.
     expect(block(html, "footer", "</div></div>")).toContain('data-testid="patient-payer-summary-open-lead"');
     expect(html).toContain("Открыть обращение");

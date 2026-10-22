@@ -669,24 +669,22 @@ describe("label helpers", () => {
   it("lists the identification with the wizard's words", () => {
     const status = normalizePatientPayerSummary(minorExample())!.identification!;
     const lines = identificationLines(status, ru);
-    expect(lines.map((line) => line.name)).toEqual([
-      "Anna Muster",
-      "Ben Muster",
-      "Плательщик — тот же человек, что и представитель Anna Muster",
-    ]);
+    // The paying parent is said on her own line, not on a second payer line.
+    expect(lines.map((line) => line.name)).toEqual(["Anna Muster", "Ben Muster"]);
     expect(lines[0]).toMatchObject({
-      detail: "родитель",
+      detail: "родитель · плательщик",
       signature: { tone: "success", text: "Квалифицированная подпись · 05.10.2026" },
       payment: { tone: "success", text: "Платёж с собственного счёта подтверждён · 06.10.2026 · Olek" },
       note: "",
     });
     expect(lines[1]).toMatchObject({
       signature: { tone: "neutral", text: "Квалифицированной подписи ещё нет" },
-      payment: { tone: "warning", text: "Ожидается платёж с собственного счёта" },
+      // Ben does not pay: he only signs.
+      payment: { tone: "neutral", text: "Платёж с собственного счёта не ожидается" },
     });
     const german = identificationLines(status, de);
-    expect(german[0].detail).toBe("Elternteil");
+    expect(german[0].detail).toBe("Elternteil · Kostenträger/in");
     expect(german[0].signature.text).toBe("Qualifizierte Signatur · 05.10.2026");
-    expect(german[1].payment.text).toBe("Zahlung vom eigenen Konto ausstehend");
+    expect(german[1].payment.text).toBe("Keine Zahlung vom eigenen Konto zu erwarten");
   });
 });

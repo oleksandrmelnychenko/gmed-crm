@@ -485,11 +485,11 @@ test("each parent is identified instead of the child, and a paying parent only o
 
   await expect(identification).toContainText("Идентификация по квалифицированной подписи");
   await expect(identification.getByTestId("lead-identification-minor")).toContainText(
-    "подписывают и платят законные представители",
+    "платёж подтверждается только у того, кто платит",
   );
-  // No line for the child.
+  // No line for the child, and none of its own for the paying mother.
   await expect(row("contract_partner").line).toHaveCount(0);
-  await expect(identification.getByRole("listitem")).toHaveCount(3);
+  await expect(identification.getByRole("listitem")).toHaveCount(2);
 
   const anna = row(ANNA);
   await expect(anna.line).toContainText("Anna Muster");
@@ -505,28 +505,18 @@ test("each parent is identified instead of the child, and a paying parent only o
     "нет e-mail — подпись не засчитается",
   );
 
-  // The mother also pays: one person, the payer line repeats her labels and confirms nothing.
-  const payer = row("payer");
-  await expect(payer.line).toContainText("Плательщик — тот же человек, что и представитель Anna Muster");
-  await expect(payer.qes).toHaveText("Квалифицированная подпись · 05.10.2026");
-  await expect(payer.payment).toHaveText("Ожидается платёж с собственного счёта");
-  await expect(payer.line.getByRole("button")).toHaveCount(0);
-
-  await ben.line.getByRole("button", { name: "Подтвердить платёж" }).click();
-  await expect(ben.payment).toHaveText("Платёж с собственного счёта подтверждён · 05.10.2026 · Intake QA");
-  await expect(anna.payment).toHaveText("Ожидается платёж с собственного счёта");
+  // The mother also pays: her own line says so; no second payer line
+  // (DEV 2026-10-22). The father does not pay: he only signs.
+  await expect(row("payer").line).toHaveCount(0);
+  await expect(anna.line).toContainText("родитель · плательщик");
+  await expect(ben.payment).toHaveText("Платёж с собственного счёта не ожидается");
+  await expect(ben.line.getByRole("button")).toHaveCount(0);
 
   await anna.line.getByRole("button", { name: "Подтвердить платёж" }).click();
   await expect(anna.payment).toHaveText("Платёж с собственного счёта подтверждён · 05.10.2026 · Intake QA");
-  // The same person: the payer line follows.
-  await expect(payer.payment).toHaveText("Платёж с собственного счёта подтверждён · 05.10.2026 · Intake QA");
-  await expect(payer.line.getByRole("button")).toHaveCount(0);
   await expect(anna.line.getByRole("button", { name: "Отменить" })).toBeVisible();
-  // Each confirmation went to the representative, never to the child or the payer.
-  expect(calls.payments).toEqual([
-    { subject: BEN, body: { confirmed: true } },
-    { subject: ANNA, body: { confirmed: true } },
-  ]);
+  // The confirmation went to the paying representative, never to the child or the payer.
+  expect(calls.payments).toEqual([{ subject: ANNA, body: { confirmed: true } }]);
   await expect(identification.getByTestId("lead-identification-error")).toHaveCount(0);
 
   await identification.scrollIntoViewIfNeeded();
@@ -594,7 +584,8 @@ test("one GwG sheet per parent, none for the child and none twice for a paying p
 test("a refused sheet says why, in German too", async ({ page }) => {
   const { wizard, sheetActions, row, calls } = await mount(page, { lang: "de", refuseSheet: true });
 
-  await expect(row("payer").line).toContainText("Kostenträger — dieselbe Person wie Vertreter/in Anna Muster");
+  await expect(row(ANNA).line).toContainText("Elternteil · Kostenträger/in");
+  await expect(row("payer").line).toHaveCount(0);
   await expect(row(BEN).line).toContainText("keine E-Mail – die Signatur wird nicht angerechnet");
   await expect(sheetActions.getByTestId("gwg-identification-payer-same-person")).toHaveText(
     "kein eigener Bogen nötig: Zahler ist Vertreter/in Anna Muster",
