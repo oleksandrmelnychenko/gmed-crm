@@ -524,7 +524,7 @@ function FundsBlock({
         ) : null}
         {asks.occupation ? textField("occupation") : null}
         {asks.sector ? textField("sector") : null}
-        {asks.sector && !asks.occupation && request.payer_questionnaire ? (
+        {asks.sector && !asks.occupation && request.payer_questionnaire?.available ? (
           <p className={cn("text-xs leading-5 text-muted-foreground", FULL_ROW)}>{text.extraOccupationElsewhere}</p>
         ) : null}
         {/* A third party states the funds on the own link; the paying parent in the own payer section (note above). */}
