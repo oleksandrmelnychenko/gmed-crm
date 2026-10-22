@@ -4444,20 +4444,28 @@ async fn update_lead(
             != normalized_identity_phone(current_phone.as_deref())
     });
     // A changed address or number must be usable (the wizard checks the same);
-    // an older stored value does not block unrelated edits.
-    if changed_email
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|email| !email.is_empty() && !crate::email_address::is_valid_email(email))
+    // an older stored value does not block unrelated edits. "Changed" compares
+    // the text as typed: an unusable value has no normalized identity form
+    // (e.g. "abc" as a phone), so the identity comparison above would take it
+    // for an empty stored value.
+    let typed_change = |value: Option<&'_ str>, current: Option<&'_ str>| -> bool {
+        value
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty() && Some(value) != current.map(str::trim))
+    };
+    if typed_change(body.email.as_deref(), current_email.as_deref())
+        && body
+            .email
+            .as_deref()
+            .is_some_and(|email| !crate::email_address::is_valid_email(email.trim()))
     {
         return field_err("email", "Invalid email");
     }
-    if changed_phone
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|phone| {
-            !phone.is_empty() && !crate::routes::patients::is_valid_contact_phone(phone)
-        })
+    if typed_change(body.phone.as_deref(), current_phone.as_deref())
+        && body
+            .phone
+            .as_deref()
+            .is_some_and(|phone| !crate::routes::patients::is_valid_contact_phone(phone.trim()))
     {
         return field_err("phone", "Invalid phone");
     }

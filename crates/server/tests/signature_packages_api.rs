@@ -2338,11 +2338,13 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
     .await
     .unwrap();
     // GMED countersigns a lead's contract only with a complete payer declaration.
+    // A child does not pay himself: the paying parent is named (2026-10-19).
     sqlx::query(
-        "INSERT INTO lead_payer_declarations (lead_id, payer_kind, source_of_funds)
-         VALUES ($1, 'self', 'employment')",
+        "INSERT INTO lead_payer_declarations (lead_id, payer_kind, payer_representative_id, source_of_funds)
+         VALUES ($1, 'representative', $2, 'employment')",
     )
     .bind(lead)
+    .bind(mother)
     .execute(&env.pool)
     .await
     .unwrap();
