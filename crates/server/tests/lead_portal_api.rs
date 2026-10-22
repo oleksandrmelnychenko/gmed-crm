@@ -2936,6 +2936,25 @@ async fn purging_a_lead_clears_the_portal_intake() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
+/// The patient stays the invoice recipient but answers "the recipient is
+/// also the payer" with no, as the cabinet asks it before a third party who
+/// pays is named (step 3, owner decision 2026-10-11).
+async fn someone_else_pays_the_patients_invoice(app: &axum::Router, lead_id: Uuid, bearer: &str) {
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/billing"),
+        bearer,
+        Some(json!({ "invoice_recipient": "self", "invoice_recipient_is_payer": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["billing"]["invoice_recipient_is_payer"], false,
+        "{body}"
+    );
+}
+
 /// The payer keys of `progress.missing_for_submit`, with the reason why the
 /// third party pays.
 fn missing_for_the_payer(body: &Value) -> Vec<&str> {
@@ -2964,6 +2983,9 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     let manager = app.staff("patient_manager");
     // The rest of the request is complete: only the payer block decides.
     fill_in_complete_request(router, lead_id, &patient).await;
+    // The patient receives the invoice but does not pay it: the payer
+    // question follows (step 3, the invoice recipient is the one source).
+    someone_else_pays_the_patients_invoice(router, lead_id, &patient).await;
     // The company as the cabinet sends it; `extra` adds or replaces keys.
     let company = |extra: Value| {
         let mut body = json!({
@@ -6029,6 +6051,7 @@ async fn a_sister_who_pays_alone_asks_nothing_more() {
     let request = format!("/api/v1/me/lead-requests/{lead_id}");
     let payer = format!("{request}/payer");
     fill_in_complete_request(router, lead_id, &patient).await;
+    someone_else_pays_the_patients_invoice(router, lead_id, &patient).await;
     let sister = json!({
         "payer_kind": "third_party",
         "payer_type": "person",
