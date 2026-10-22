@@ -91,6 +91,8 @@ export type PayerLinkText = {
   codeRateLimited: (seconds: number | null) => string;
   stepOf: (index: number, total: number) => string;
   steps: Record<PayerStep, string>;
+  /** Step "funds" while the source of funds is not asked (only by a trigger, 2026-10-19): relationship and occupation. */
+  fundsStepWithoutFunds: string;
   organisationSteps: { details: string; identity: string };
   next: string;
   back: string;
@@ -159,7 +161,6 @@ export type PayerLinkText = {
   fundsProofHint: string;
   fundsProofButton: string;
   paymentMethods: Record<PaymentMethod, string>;
-  cashCryptoNote: string;
   /** Whom an organisation's declarations concern; a private person gets no intro (QA 2026-10-10). */
   declarationsIntroOrganisation: string;
   yesNo: { yes: string; no: string };
@@ -250,6 +251,7 @@ const de: PayerLinkText = {
     declarations: "Erklärungen",
     summary: "Zusammenfassung",
   },
+  fundsStepWithoutFunds: "Beziehung und Tätigkeit",
   organisationSteps: {
     details: "Angaben zur Organisation",
     identity: "Ausweisdokument der vertretungsberechtigten Person",
@@ -452,10 +454,9 @@ const de: PayerLinkText = {
     bank_transfer: "Überweisung",
     card: "Karte",
     cash: "Bar",
-    crypto: "Kryptowährung",
+    crypto: "Kryptowährung (nicht mehr unterstützt)",
     other: "Sonstiges",
   },
-  cashCryptoNote: "Barzahlungen prüft GMED gesondert (Geldwäschegesetz).",
   declarationsIntroOrganisation:
     "Die Fragen betreffen die Organisation, die vertretungsberechtigten Personen und die wirtschaftlich Berechtigten.",
   yesNo: { yes: "Ja", no: "Nein" },
@@ -542,6 +543,7 @@ const en: PayerLinkText = {
     declarations: "Declarations",
     summary: "Summary",
   },
+  fundsStepWithoutFunds: "Relationship and occupation",
   organisationSteps: {
     details: "Details of the organisation",
     identity: "Identity document of the authorised representative",
@@ -744,10 +746,9 @@ const en: PayerLinkText = {
     bank_transfer: "Bank transfer",
     card: "Card",
     cash: "Cash",
-    crypto: "Cryptocurrency",
+    crypto: "Cryptocurrency (no longer supported)",
     other: "Other",
   },
-  cashCryptoNote: "GMED checks cash payments separately (Money Laundering Act).",
   declarationsIntroOrganisation:
     "The questions concern the organisation, the persons authorised to represent it and its beneficial owners.",
   yesNo: { yes: "Yes", no: "No" },
@@ -832,6 +833,7 @@ const uk: PayerLinkText = {
     declarations: "Заяви",
     summary: "Підсумок",
   },
+  fundsStepWithoutFunds: "Зв'язок і рід занять",
   organisationSteps: {
     details: "Дані організації",
     identity: "Документ особи, уповноваженої представляти організацію",
@@ -1039,10 +1041,9 @@ const uk: PayerLinkText = {
     bank_transfer: "Банківський переказ",
     card: "Картка",
     cash: "Готівка",
-    crypto: "Криптовалюта",
+    crypto: "Криптовалюта (більше не підтримується)",
     other: "Інше",
   },
-  cashCryptoNote: "Оплату готівкою GMED перевіряє окремо (закон про запобігання відмиванню коштів).",
   declarationsIntroOrganisation: "Запитання стосуються організації, її уповноважених представників і кінцевих бенефіціарів.",
   yesNo: { yes: "Так", no: "Ні" },
   missingTitle: "Будь ласка, доповніть:",
@@ -1126,6 +1127,7 @@ const ru: PayerLinkText = {
     declarations: "Заявления",
     summary: "Итог",
   },
+  fundsStepWithoutFunds: "Связь и род занятий",
   organisationSteps: {
     details: "Данные организации",
     identity: "Документ лица, уполномоченного представлять организацию",
@@ -1333,10 +1335,9 @@ const ru: PayerLinkText = {
     bank_transfer: "Банковский перевод",
     card: "Карта",
     cash: "Наличные",
-    crypto: "Криптовалюта",
+    crypto: "Криптовалюта (больше не поддерживается)",
     other: "Другое",
   },
-  cashCryptoNote: "Оплату наличными GMED проверяет отдельно (закон о противодействии отмыванию денег).",
   declarationsIntroOrganisation: "Вопросы касаются организации, её уполномоченных представителей и конечных бенефициаров.",
   yesNo: { yes: "Да", no: "Нет" },
   missingTitle: "Пожалуйста, дополните:",
@@ -1372,9 +1373,13 @@ export function payerLinkText(lang: string | null | undefined): PayerLinkText {
 /** All four, for the tests. */
 export const PAYER_LINK_TEXTS: Readonly<Record<LeadCabinetLang, PayerLinkText>> = TEXTS;
 
-/** The title of a step; details and identity read differently for an organisation. */
-export function stepTitle(text: PayerLinkText, step: PayerStep, payerType: PayerType): string {
+/**
+ * The title of a step; details and identity read differently for an
+ * organisation, and step "funds" names no source of funds it does not ask.
+ */
+export function stepTitle(text: PayerLinkText, step: PayerStep, payerType: PayerType, fundsAsked = true): string {
   if (isOrganisation(payerType) && (step === "details" || step === "identity")) return text.organisationSteps[step];
+  if (step === "funds" && !fundsAsked) return text.fundsStepWithoutFunds;
   return text.steps[step];
 }
 

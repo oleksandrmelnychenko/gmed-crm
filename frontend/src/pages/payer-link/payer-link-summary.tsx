@@ -208,7 +208,7 @@ export function AnswersSummary({
       {groups.map((group) => (
         <section key={group.step} className="space-y-2 rounded-lg border border-border px-3 py-3" data-testid={`payer-link-summary-${group.step}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="min-w-0 text-sm font-semibold">{stepTitle(text, group.step, questionnaire.payer_type)}</h3>
+            <h3 className="min-w-0 text-sm font-semibold">{stepTitle(text, group.step, questionnaire.payer_type, questionnaire.funds_required !== false)}</h3>
             {onEdit ? (
               <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onEdit(group.step)}>
                 {text.edit}
@@ -266,7 +266,7 @@ export function MissingList({
         {groups.map((group) => (
           <li key={group.step} className="space-y-1">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="min-w-0 text-sm font-medium">{stepTitle(text, group.step, questionnaire.payer_type)}</span>
+              <span className="min-w-0 text-sm font-medium">{stepTitle(text, group.step, questionnaire.payer_type, questionnaire.funds_required !== false)}</span>
               {group.step !== "summary" ? (
                 <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => onGoTo(group.step)}>
                   {text.goToStep}

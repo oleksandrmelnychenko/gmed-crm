@@ -1573,7 +1573,7 @@ test.describe("payer link", () => {
       // A list opens inside the screen.
       await page.getByTestId("payer-link-summary-payment").getByRole("button", { name: "Ändern" }).click();
       await expect(stepTitle(page)).toHaveText("Zahlungsweg");
-      await expect(page.getByTestId("payer-link-payment-method-note")).toBeVisible();
+      await expect(page.getByTestId("payer-link-payment-method-note")).toHaveCount(0);
       // A company is asked how the payment is made.
       await page.getByRole("combobox", { name: "Welche Zahlungsart für Rechnungen bevorzugt die Organisation?" }).click();
       const edge = await page.getByRole("option", { name: "Sonstiges" }).evaluate((node) => node.getBoundingClientRect().right);

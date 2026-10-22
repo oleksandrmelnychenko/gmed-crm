@@ -725,7 +725,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(page.getByTestId("lead-request-follow-up-notice")).toHaveCount(0);
     await expect(followUp).not.toContainText("Wir benötigen ergänzende Angaben");
     await expect(page.getByTestId("lead-request-follow-up-A")).toContainText("Herkunft der Mittel");
-    await expect(page.getByTestId("lead-request-follow-up-B")).toContainText("Beziehung zur zahlenden Person");
+    // A self-payer has nothing to answer in block B: no heading with "nothing needed here".
+    await expect(page.getByTestId("lead-request-follow-up-B")).toHaveCount(0);
     for (const block of ["C", "F", "G", "H", "I", "J", "K", "L"]) {
       await expect(page.getByTestId(`lead-request-follow-up-${block}`)).toHaveCount(0);
     }
@@ -772,11 +773,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(page.getByTestId("lead-request-funds-proof-list")).toContainText("kontoauszug.pdf");
     await expect(page.getByTestId("lead-request-follow-up-A-missing")).toHaveCount(0);
 
-    // A self-payer has nothing to answer in staff-requested block B.
-    const blockB = page.getByTestId("lead-request-follow-up-B");
-    await expect(blockB).toContainText("Hier sind keine weiteren Angaben erforderlich.");
-    await expect(blockB.getByRole("textbox")).toHaveCount(0);
-    await expect(blockB.locator('input[type="file"]')).toHaveCount(0);
+    // A self-payer has nothing to answer in staff-requested block B: the block is not shown.
+    await expect(page.getByTestId("lead-request-follow-up-B")).toHaveCount(0);
     expect(calls.relationshipProofs).toBe(0);
     await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toHaveCount(0);
 

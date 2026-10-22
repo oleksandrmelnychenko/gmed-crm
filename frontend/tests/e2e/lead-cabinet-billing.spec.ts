@@ -456,7 +456,8 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await expect(billing.getByRole("radio", { name: "Eine andere Person (andere Anschrift)" })).toBeVisible();
     await expect(billing.getByRole("textbox", { name: /E-Mail für Rechnungen/ })).toHaveCount(0);
     await expect(billing).not.toContainText("USt-IdNr. oder Steuernummer trägt GMED bei Bedarf ein.");
-    await expect(route).toContainText("Den voraussichtlichen Gesamtbetrag trägt GMED ein.");
+    // The lead is not asked the expected total, nor told that GMED enters it (amount triggers retired 2026-10-12).
+    await expect(route).not.toContainText("Gesamtbetrag");
     await expect(page.getByTestId("lead-request-payment-route-by-payer")).toHaveCount(0);
 
     // Until the three questions are answered the request cannot be sent.
@@ -565,7 +566,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       });
     await expect(billing.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" })).toBeVisible();
 
-    // "Other" as method says what it is; cash is flagged; a card needs no bank.
+    // "Other" as method says what it is; cash gets no note on checks (no tipping-off); a card needs no bank.
     const method = route.getByRole("combobox", { name: METHOD_QUESTION });
     const details = route.getByRole("textbox", { name: "Bitte beschreiben", exact: true });
     const note = page.getByTestId("lead-request-payment-method-note");
@@ -580,7 +581,8 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await expect.poll(() => calls.billing.at(-1)).toEqual({ payment_method_details: "Scheck" });
     await choose(page, method, "Bar");
     await expect(details).toHaveCount(0);
-    await expect(note).toContainText("Barzahlungen prüft GMED gesondert (Geldwäschegesetz).");
+    await expect(note).toHaveCount(0);
+    await expect(route).not.toContainText("Geldwäschegesetz");
     await expect(route.getByRole("textbox", { name: "Kontoinhaber/in" })).toHaveCount(0);
     await expect.poll(() => calls.billing.at(-1)).toEqual({ payment_method: "cash", payment_method_details: "" });
     await choose(page, method, "Karte");
@@ -826,7 +828,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       await page.goto("/");
       await step(page, "billing");
       await expect(billing.getByRole("radio", { name: "Eine andere Person (andere Anschrift)" })).toBeChecked();
-      await expect(page.getByTestId("lead-request-payment-method-note")).toBeVisible();
+      await expect(page.getByTestId("lead-request-payment-method-note")).toHaveCount(0);
       await expect(route.getByRole("textbox", { name: "Bitte beschreiben (wer, welcher Dienst)" })).toBeVisible();
       expect(await overflow(page), `${width}px`).toBeLessThanOrEqual(1);
       expect(await widestOverhang(page, "lead-request-step-billing"), `${width}px`).toBeLessThanOrEqual(1);

@@ -594,14 +594,7 @@ function PayerQuestionnaireForm({
                   {proofRequired ? text.payerFundsProofRequired : text.payerFundsProofOptional}
                 </span>
               </p>
-              {proofRequired ? (
-                <p
-                  role="note"
-                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-snug text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-                >
-                  {text.payerFundsProofRequiredNote}
-                </p>
-              ) : null}
+              {/* "Required" alone: why the proof is required this time is never said (no tipping-off). */}
               <input
                 ref={fileInput}
                 id="lead-request-payer-funds-proof-files"

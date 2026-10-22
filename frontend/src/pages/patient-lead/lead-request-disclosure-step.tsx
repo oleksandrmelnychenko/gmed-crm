@@ -129,7 +129,6 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
         <TrustedPersonsEditor persons={draft.persons} lang={lang} disabled={busy} onChange={(persons) => update({ persons, consentGiven: false })} />
       </CabinetSection>
       <CabinetSection title={text.consentHeading}>
-        <p className="text-xs leading-5 text-muted-foreground">{text.consentNote}</p>
         <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/25 p-3.5 text-sm leading-6">
           <input type="checkbox" className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} disabled={busy} data-testid="disclosure-consent" onChange={(event) => update({ consentGiven: event.currentTarget.checked })} />
           <span>{disclosureConsentText(lang, companyName, disclosureSubject(request))}</span>

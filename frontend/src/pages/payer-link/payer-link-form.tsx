@@ -563,7 +563,7 @@ function DraftForm({
           <div className="h-full rounded-full bg-[var(--brand)] transition-[width]" style={{ width: `${progress}%` }} />
         </div>
         <h2 className="text-base font-semibold leading-snug" data-testid="payer-link-step-title">
-          {stepTitle(text, step, payerType)}
+          {stepTitle(text, step, payerType, questionnaire.funds_required !== false)}
         </h2>
       </div>
 

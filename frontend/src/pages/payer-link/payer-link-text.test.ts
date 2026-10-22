@@ -146,6 +146,9 @@ describe("payer page texts", () => {
     expect(fieldLabel(de, "organisation_name", "organisation")).toBe("Name der Organisation");
     expect(stepTitle(de, "details", "person")).toBe("Angaben zur Person");
     expect(stepTitle(de, "details", "insurance")).toBe("Angaben zur Organisation");
+    // The source of funds is asked only by a trigger (2026-10-19): the step names no question it does not ask.
+    expect(stepTitle(de, "funds", "person")).toBe("Beziehung und Herkunft der Mittel");
+    expect(stepTitle(de, "funds", "person", false)).toBe("Beziehung und Tätigkeit");
     expect(missingLabel(de, "street", "person")).toBe("Straße und Hausnummer");
     expect(missingLabel(de, "street", "organisation")).toBe("Sitz: Straße und Hausnummer");
     expect(missingLabel(de, "pep_related_details", "person")).toBe("Politisch exponierte nahestehende Person: Angaben");

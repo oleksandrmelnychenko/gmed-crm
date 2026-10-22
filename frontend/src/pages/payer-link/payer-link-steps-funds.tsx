@@ -331,7 +331,6 @@ export function PaymentStep({ context, suggestion }: { context: StepContext; sug
   const { draft } = form;
   // The payer's name is offered as account holder once, while the field is empty.
   const offered = useRef(false);
-  const flagged = draft.payment_method === "cash" || draft.payment_method === "crypto";
   return (
     <div className="space-y-4" data-testid="payer-link-step-payment">
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -367,13 +366,7 @@ export function PaymentStep({ context, suggestion }: { context: StepContext; sug
             />
           </Field>
         ) : null}
-        {flagged ? (
-          <div className="sm:col-span-2 lg:col-span-3">
-            <Notice tone="warning" role="note" testId="payer-link-payment-method-note">
-              {text.cashCryptoNote}
-            </Notice>
-          </div>
-        ) : null}
+        {/* No note on cash: what GMED checks is never told to the payer (no tipping-off). */}
         {asksAccount(draft.payment_method) ? (
           <>
             <Field context={context} field="account_country" className="sm:col-start-1">

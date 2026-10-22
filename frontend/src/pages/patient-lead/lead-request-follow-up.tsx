@@ -85,6 +85,26 @@ import { followUpFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 type Part = "identification" | "funds" | "billing" | "representation" | "payer" | "representative_questions";
 
+/**
+ * The heading of a block. A asks the profession and the sector only, unless
+ * it asks a source of funds here or a third party states it on the own link
+ * (the paying parent states it in the own payer section). R names no parent
+ * for an adult's representatives.
+ */
+function followUpBlockTitle(
+  request: Pick<LeadRequest, "follow_up" | "payer" | "payer_questionnaire" | "minor">,
+  block: FollowUpBlock,
+  text: LeadRequestText,
+): string {
+  if (block === "A") {
+    const asks = blockAAsks(request);
+    const funds = asks.funds || asks.payer_funds || (asks.payer_states_funds && !request.payer_questionnaire);
+    return funds ? text.followUpBlocks.A : text.followUpBlockAWork;
+  }
+  if (block === "R" && !request.minor) return text.followUpBlockRAdult;
+  return text.followUpBlocks[block];
+}
+
 const FULL_ROW = "sm:col-span-2 lg:col-span-3";
 
 export function FollowUpStep({
@@ -115,6 +135,10 @@ export function FollowUpStep({
 }) {
   const guardian = request.access_kind === "guardian";
   const blocks = openFollowUpBlocks(request);
+  // Block B without a third-party payer asks nothing: no heading with "nothing needed here".
+  const shownBlocks = blocks.filter(
+    (block) => block !== "B" || request.payer?.payer_kind === "third_party" || followUpMissing(request, "B").length > 0,
+  );
   const [states, setStates] = useState<Record<Part, SaveState>>({
     identification: "idle",
     funds: "idle",
@@ -258,9 +282,9 @@ export function FollowUpStep({
         </p>
       ) : null}
 
-      {blocks.map((block) => (
+      {shownBlocks.map((block) => (
         <div key={block} data-testid={`lead-request-follow-up-${block}`}>
-          <Section title={block === "A" && !blockAAsks(request).funds && !blockAAsks(request).payer_states_funds ? text.followUpBlockAWork : text.followUpBlocks[block]}>
+          <Section title={followUpBlockTitle(request, block, text)}>
             {showMissing ? (
               <MissingList
                 title={text.stepMissingTitle}
@@ -502,7 +526,8 @@ function FundsBlock({
         {asks.sector && !asks.occupation && request.payer_questionnaire ? (
           <p className={cn("text-xs leading-5 text-muted-foreground", FULL_ROW)}>{text.extraOccupationElsewhere}</p>
         ) : null}
-        {asks.payer_states_funds ? (
+        {/* A third party states the funds on the own link; the paying parent in the own payer section (note above). */}
+        {asks.payer_states_funds && !request.payer_questionnaire ? (
           <p
             role="note"
             className={cn("rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm leading-5 text-muted-foreground", FULL_ROW)}
@@ -553,7 +578,7 @@ function RelationshipBlock({
   const leadId = request.lead_id;
   const missing = followUpMissing(request, "B");
   const asks = (key: "payment_background" | "relationship_since") => missing.includes(key) || Boolean(request.identification?.[key]);
-  if (request.payer?.payer_kind !== "third_party") return <p className="text-sm text-muted-foreground">{{ de: "Hier sind keine weiteren Angaben erforderlich.", en: "No additional information is needed here.", ru: "Здесь не нужны дополнительные сведения.", uk: "Тут додаткові відомості не потрібні." }[lang] ?? "No additional information is needed here."}</p>;
+  if (request.payer?.payer_kind !== "third_party") return <p className="text-sm text-muted-foreground">{text.followUpNothingNeeded}</p>;
   return (
     <div className="space-y-4">
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">

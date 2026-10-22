@@ -817,7 +817,7 @@ test.describe("lead cabinet", () => {
     const other = page.getByTestId("lead-request-missing-other");
     await expect(other).toContainText("Weitere Angaben");
     await expect(other.getByRole("listitem")).toHaveCount(2);
-    await expect(page.getByTestId("lead-request-send").getByRole("button", { name: "An den Manager senden", exact: true })).toBeDisabled();
+    await expect(page.getByTestId("lead-request-send").getByRole("button", { name: "Anfrage senden", exact: true })).toBeDisabled();
   });
 
   test("a lead login keeps patient modules locked beside its request and utilities", async ({ page }) => {

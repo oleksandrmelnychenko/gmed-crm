@@ -603,7 +603,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         : ""],
       ...(!request.disclosure && choices.named_recipients ? storedTrustedPersons(request).map((person): Entry =>
         [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], person.contact, personScope(person, lang)].filter(Boolean).join(" · ")]) : []),
-      [text.saved, consent.chosen_at ? (consent.chosen_by_me === false ? wording.savedByOtherAt : wording.savedAt)(formatAppDateTime(consent.chosen_at)) : ""],
+      // Under "Saved" the date only, not the sentence "your choice … is saved" again; the other parent's choice says so.
+      [text.saved, consent.chosen_at ? (consent.chosen_by_me === false ? wording.savedByOtherAt(formatAppDateTime(consent.chosen_at)) : formatAppDateTime(consent.chosen_at)) : ""],
     ]);
   }
 

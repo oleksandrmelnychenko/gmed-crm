@@ -158,7 +158,7 @@ export type LeadRequestText = {
   insuranceCoverageOptions: { yes: string; no: string; not_sure: string };
   /** After sending, when the request was changed: why to send again. */
   changedAfterSend: string;
-  /** "Who pays" (owner request 2026-10-05). */
+  /** The payer section of step 3 (no own "who pays" step since 2026-10-11). */
   sectionPayer: string;
   payerQuestion: string;
   payerOptions: { self: string; third_party: string };
@@ -274,6 +274,11 @@ export type LeadRequestText = {
   followUpIntro: string;
   followUpBeforeSubmitIntro: string;
   representativeQuestionsIntro: string;
+  /** Block R of an adult patient: the persons are the patient's representatives, not parents (no child). */
+  representativeQuestionsIntroAdult: string;
+  followUpBlockRAdult: string;
+  /** Block B while nobody else pays: nothing is asked there. */
+  followUpNothingNeeded: string;
   followUpBlocks: Record<FollowUpBlock, string>;
   /** Block A while it asks only the profession and the sector (no source of funds, owner 2026-10-19). */
   followUpBlockAWork: string;
@@ -317,7 +322,6 @@ export type LeadRequestText = {
   /** Block C: through whom the payment goes and the expected total. */
   billingExtrasFields: Record<BillingExtrasField, string>;
   viaThirdPartyKindOptions: Record<(typeof VIA_THIRD_PARTY_KINDS)[number], string>;
-  expectedTotalHint: string;
   /** Block I: a new copy of the identity document. */
   identityRenewIntro: string;
   /** Step "Ausweis": the copy only, GMED enters the data from it. */
@@ -402,9 +406,6 @@ export type LeadRequestText = {
   invoiceEmailHint: string;
   vatHint: string;
   paymentMethodOptions: Record<PaymentMethod, string>;
-  /** Cash (and an older answer "cryptocurrency") is checked separately (money laundering act). */
-  cashCryptoNote: string;
-  totalAmountHint: string;
   /** Section 8 when the payer answers it: nothing is asked here. */
   paymentRouteByPayer: string;
   /** The same in the summary, as the value of the row "payment route". */
@@ -444,7 +445,6 @@ export type LeadRequestText = {
   payerFundsProofTitle: string;
   payerFundsProofRequired: string;
   payerFundsProofOptional: string;
-  payerFundsProofRequiredNote: string;
   payerFundsProofHint: string;
   payerFundsProofUpload: string;
   noPayerFundsProof: string;
@@ -904,10 +904,10 @@ const de: LeadRequestText = {
   removeDocument: "Entfernen",
   documentTakenOver: "Von uns übernommen",
   maxDocuments: (count) => `Höchstens ${count} Dateien pro Anfrage.`,
-  sendTitle: "An Ihren Ansprechpartner senden",
+  sendTitle: "An Ihre Ansprechperson senden",
   missingTitle: "Bitte noch ergänzen:",
   inquiryConsentMissing: "Bitte stimmen Sie unter „Einwilligung & Person“ der Verarbeitung Ihrer Angaben zu.",
-  sendButton: "An den Manager senden",
+  sendButton: "Anfrage senden",
   sending: "Wird gesendet…",
   sentTitle: "Vielen Dank!",
   sentBody: (dateTime) => `Ihre Angaben wurden am ${dateTime} gesendet.`,
@@ -950,7 +950,7 @@ const de: LeadRequestText = {
   insuranceCoverageOptions: { yes: "Ja", no: "Nein", not_sure: "Weiß ich nicht" },
   changedAfterSend:
     "Sie haben Ihre Anfrage nach dem Senden geändert. Senden Sie sie erneut, damit Ihre Ansprechperson die Änderungen erhält.",
-  sectionPayer: "Wer zahlt",
+  sectionPayer: "Zahler",
   payerQuestion: "Wer ist der Zahler?",
   payerOptions: { self: "Ich selbst", third_party: "Eine andere Person oder Organisation" },
   payerOptionsGuardian: {
@@ -1076,7 +1076,10 @@ const de: LeadRequestText = {
   },
   followUpSubmit: "Angaben senden",
   followUpBlockAWork: "Beruf und Branche",
-  representativeQuestionsIntro: "Bitte beantworten Sie die folgenden Fragen für die jeweils genannte Person. Die Angaben betreffen den Elternteil oder gesetzlichen Vertreter, nicht das Kind. Bereits gespeicherte Antworten werden übernommen. Die Herkunft der Mittel gibt nur die tatsächlich zahlende Person in ihrer eigenen Erklärung an.",
+  representativeQuestionsIntro: "Bitte beantworten Sie die folgenden Fragen für die jeweils genannte Person. Die Angaben betreffen den Elternteil oder gesetzlichen Vertreter, nicht das Kind. Bereits gespeicherte Antworten werden übernommen.",
+  representativeQuestionsIntroAdult: "Bitte beantworten Sie die folgenden Fragen für die jeweils genannte Person. Die Angaben betreffen die vertretende Person, nicht die Patientin / den Patienten. Bereits gespeicherte Antworten werden übernommen.",
+  followUpBlockRAdult: "Ergänzende Angaben der vertretenden Person",
+  followUpNothingNeeded: "Hier sind keine weiteren Angaben erforderlich.",
   followUpSending: "Wird gesendet…",
   followUpIncomplete: "Bitte ergänzen Sie zuerst die noch offenen Angaben.",
   followUpAnsweredAt: (dateTime) => `Ihre ergänzenden Angaben wurden am ${dateTime} gesendet. Ihre Angaben werden geprüft.`,
@@ -1121,7 +1124,6 @@ const de: LeadRequestText = {
     expected_total_eur: "Voraussichtlicher Gesamtbetrag (EUR)",
   },
   viaThirdPartyKindOptions: { person: "Über eine andere Person", psp: "Über einen Zahlungsdienstleister" },
-  expectedTotalHint: "Soweit bekannt, zum Beispiel aus dem Kostenvoranschlag.",
   identityRenewIntro: "Bitte laden Sie ein aktuelles, gut lesbares Foto oder einen Scan Ihres Ausweisdokuments hoch.",
   identityIntro:
     "Bitte laden Sie ein Foto oder einen Scan Ihres Ausweisdokuments hoch (bei einem Personalausweis Vorder- und Rückseite). Die Angaben aus dem Dokument trägt GMED ein.",
@@ -1273,8 +1275,6 @@ const de: LeadRequestText = {
     crypto: "Kryptowährung (nicht mehr unterstützt)",
     other: "Sonstiges",
   },
-  cashCryptoNote: "Barzahlungen prüft GMED gesondert (Geldwäschegesetz).",
-  totalAmountHint: "Den voraussichtlichen Gesamtbetrag trägt GMED ein.",
   paymentRouteByPayer: "Den Zahlungsweg gibt die zahlende Person / Organisation selbst an; GMED wendet sich dazu an sie.",
   paymentRouteByPayerShort: "gibt die zahlende Person an",
   sectionLegal: "Gesetzliche Fragen (Geldwäscheprävention)",
@@ -1291,7 +1291,7 @@ const de: LeadRequestText = {
     `Sie zahlen die Leistungen von GMED. Das Geldwäschegesetz verlangt dazu einige Angaben von Ihnen als zahlender Person. Name, Anschrift und Ausweis geben Sie im Abschnitt „${section}“ an.`,
   payerNoticeTitle: "Datenschutzhinweis für die zahlende Person",
   payerNotice:
-    "Verantwortlich für die Verarbeitung ist GMED. Ihre Angaben als zahlende Person erhalten wir von Ihnen und aus der Anfrage der Patientin / des Patienten. Wir verarbeiten sie, um Sie nach dem Geldwäschegesetz zu identifizieren (§§ 10–12 GwG), um die Kostenübernahme zu klären und um Rechnungen zu stellen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und c DSGVO. Wir speichern die Angaben fünf Jahre nach dem Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG). Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht, sich bei einer Datenschutzaufsichtsbehörde zu beschweren.",
+    "Verantwortlich für die Verarbeitung ist GMED. Ihre Angaben als zahlende Person erhalten wir von Ihnen und aus der Anfrage der Patientin / des Patienten. Wir verarbeiten sie, um Sie nach dem Geldwäschegesetz zu identifizieren (§§ 10–12 GwG), um die Zahlung abzuwickeln und um Rechnungen zu stellen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und c DSGVO. Wir speichern die Angaben fünf Jahre nach dem Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG). Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht, sich bei einer Datenschutzaufsichtsbehörde zu beschweren.",
   payerNoticeAck: "Ich habe die Datenschutzhinweise gelesen.",
   payerNoticeAckAt: (dateTime) => `Bestätigt am ${dateTime}`,
   payerNoticeFirst: "Bitte bestätigen Sie zuerst den Datenschutzhinweis. Danach können Sie Ihre Angaben als zahlende Person machen.",
@@ -1331,8 +1331,7 @@ const de: LeadRequestText = {
   },
   payerFundsProofTitle: "Nachweis der Herkunft der Mittel",
   payerFundsProofRequired: "erforderlich",
-  payerFundsProofOptional: "optional",
-  payerFundsProofRequiredNote: "Für diese Zahlung schreibt das Geldwäschegesetz einen Nachweis der Herkunft der Mittel vor.",
+  payerFundsProofOptional: "freiwillig",
   payerFundsProofHint: "Zum Beispiel Kontoauszug, Gehaltsnachweis, Kaufvertrag oder Erbschein. PDF, JPG oder PNG, bis 25 MB pro Datei.",
   payerFundsProofUpload: "Nachweis hochladen",
   noPayerFundsProof: "Noch kein Nachweis hochgeladen.",
@@ -1444,7 +1443,7 @@ const ru: LeadRequestText = {
   sendTitle: "Отправить вашему менеджеру",
   missingTitle: "Пожалуйста, дополните:",
   inquiryConsentMissing: "Пожалуйста, дайте согласие на обработку данных на шаге «Согласие и личные данные».",
-  sendButton: "Отправить менеджеру",
+  sendButton: "Отправить заявку",
   sending: "Отправляется…",
   sentTitle: "Спасибо!",
   sentBody: (dateTime) => `Ваши данные отправлены ${dateTime}.`,
@@ -1486,7 +1485,7 @@ const ru: LeadRequestText = {
   insuranceCoverageOptions: { yes: "Да", no: "Нет", not_sure: "Не знаю" },
   changedAfterSend:
     "После отправки вы изменили заявку. Отправьте её ещё раз, чтобы менеджер получил изменения.",
-  sectionPayer: "Кто оплачивает",
+  sectionPayer: "Плательщик",
   payerQuestion: "Кто является плательщиком?",
   payerOptions: { self: "Я сам(а)", third_party: "Другой человек или организация" },
   payerOptionsGuardian: {
@@ -1608,7 +1607,10 @@ const ru: LeadRequestText = {
   },
   followUpSubmit: "Отправить сведения",
   followUpBlockAWork: "Профессия и сфера деятельности",
-  representativeQuestionsIntro: "Ответьте на вопросы для каждого указанного человека. Это сведения о родителе или законном представителе, а не о ребёнке. Уже сохранённые ответы подставляются автоматически. Происхождение средств указывает только человек, который действительно платит, в своей декларации.",
+  representativeQuestionsIntro: "Ответьте на вопросы для каждого указанного человека. Это сведения о родителе или законном представителе, а не о ребёнке. Уже сохранённые ответы подставляются автоматически.",
+  representativeQuestionsIntroAdult: "Ответьте на вопросы для каждого указанного человека. Это сведения о представителе, а не о пациенте. Уже сохранённые ответы подставляются автоматически.",
+  followUpBlockRAdult: "Дополнительные сведения представителя",
+  followUpNothingNeeded: "Здесь не нужны дополнительные сведения.",
   followUpSending: "Отправляется…",
   followUpIncomplete: "Пожалуйста, сначала дополните недостающие сведения.",
   followUpAnsweredAt: (dateTime) => `Ваши дополнительные сведения отправлены ${dateTime}. Ваши данные проверяются.`,
@@ -1651,7 +1653,6 @@ const ru: LeadRequestText = {
     expected_total_eur: "Ожидаемая общая сумма (EUR)",
   },
   viaThirdPartyKindOptions: { person: "Через другого человека", psp: "Через платёжный сервис" },
-  expectedTotalHint: "Насколько известно, например из сметы расходов.",
   identityRenewIntro: "Пожалуйста, загрузите актуальное, хорошо читаемое фото или скан вашего документа.",
   identityIntro:
     "Пожалуйста, загрузите фото или скан документа, удостоверяющего личность (для ID-карты — обе стороны). Данные из документа вносит GMED.",
@@ -1752,10 +1753,10 @@ const ru: LeadRequestText = {
   representativeRemove: "Удалить",
   representativeRemoveConfirm: (who) =>
     `${who}: все данные и загруженные файлы этого человека будут удалены. Продолжить?`,
-  representativeGuardianIdentity: "Документ, удостоверяющий личность опекуна",
+  representativeGuardianIdentity: "Документ, удостоверяющий личность представителя, назначенного судом",
   representativeAuthority: {
     power_of_attorney: "Подтверждение полномочий (например, доверенность)",
-    guardianship_certificate: "Решение о назначении опекуна или удостоверение опекуна",
+    guardianship_certificate: "Решение суда о назначении представителя или его удостоверение (Betreuerausweis)",
     appointment_certificate: "Документ о назначении опекуном",
     sole_custody: "Подтверждение единоличного права опеки",
   },
@@ -1806,8 +1807,6 @@ const ru: LeadRequestText = {
     crypto: "Криптовалюта (больше не поддерживается)",
     other: "Другое",
   },
-  cashCryptoNote: "Оплату наличными GMED проверяет отдельно (закон о противодействии отмыванию денег).",
-  totalAmountHint: "Ожидаемую общую сумму вносит GMED.",
   paymentRouteByPayer:
     "Способ оплаты указывает сам плательщик (лицо или организация, которая платит); GMED обратится к нему по этому вопросу.",
   paymentRouteByPayerShort: "указывает плательщик",
@@ -1825,7 +1824,7 @@ const ru: LeadRequestText = {
     `Вы оплачиваете услуги GMED. Закон о противодействии отмыванию денег требует для этого некоторых данных о вас как о плательщике. Имя, адрес и документ, удостоверяющий личность, вы указываете в разделе «${section}».`,
   payerNoticeTitle: "Уведомление о защите данных для плательщика",
   payerNotice:
-    "Ответственный за обработку — GMED. Ваши данные как плательщика мы получаем от вас и из заявки пациента. Мы обрабатываем их, чтобы идентифицировать вас по Закону Германии о противодействии отмыванию денег (§§ 10–12 GwG), согласовать оплату расходов и выставлять счета. Правовое основание — ст. 6 ч. 1 п. b и c DSGVO (GDPR). Мы храним данные пять лет после окончания деловых отношений (§ 8 абз. 4 GwG). Вы вправе получить информацию о своих данных, потребовать их исправления, удаления или ограничения обработки, возразить против обработки, а также подать жалобу в надзорный орган по защите данных.",
+    "Ответственный за обработку — GMED. Ваши данные как плательщика мы получаем от вас и из заявки пациента. Мы обрабатываем их, чтобы идентифицировать вас по Закону Германии о противодействии отмыванию денег (§§ 10–12 GwG), провести оплату и выставлять счета. Правовое основание — ст. 6 ч. 1 п. b и c DSGVO (GDPR). Мы храним данные пять лет после окончания деловых отношений (§ 8 абз. 4 GwG). Вы вправе получить информацию о своих данных, потребовать их исправления, удаления или ограничения обработки, возразить против обработки, а также подать жалобу в надзорный орган по защите данных.",
   payerNoticeAck: "Я ознакомился(-ась) с информацией о защите данных.",
   payerNoticeAckAt: (dateTime) => `Подтверждено ${dateTime}`,
   payerNoticeFirst: "Сначала подтвердите, пожалуйста, уведомление о защите данных. После этого вы сможете указать данные плательщика.",
@@ -1867,7 +1866,6 @@ const ru: LeadRequestText = {
   payerFundsProofTitle: "Подтверждение источника средств",
   payerFundsProofRequired: "обязательно",
   payerFundsProofOptional: "по желанию",
-  payerFundsProofRequiredNote: "Для этого платежа закон о противодействии отмыванию денег требует подтверждения источника средств.",
   payerFundsProofHint: "Например, выписка со счёта, справка о доходах, договор купли-продажи или свидетельство о наследстве. PDF, JPG или PNG, до 25 МБ на файл.",
   payerFundsProofUpload: "Загрузить подтверждение",
   noPayerFundsProof: "Подтверждение ещё не загружено.",
@@ -1978,7 +1976,7 @@ const uk: LeadRequestText = {
   sendTitle: "Надіслати вашому менеджеру",
   missingTitle: "Будь ласка, доповніть:",
   inquiryConsentMissing: "Будь ласка, надайте згоду на обробку даних на кроці «Згода й особисті дані».",
-  sendButton: "Надіслати менеджеру",
+  sendButton: "Надіслати заявку",
   sending: "Надсилається…",
   sentTitle: "Дякуємо!",
   sentBody: (dateTime) => `Ваші дані надіслано ${dateTime}.`,
@@ -2020,7 +2018,7 @@ const uk: LeadRequestText = {
   insuranceCoverageOptions: { yes: "Так", no: "Ні", not_sure: "Не знаю" },
   changedAfterSend:
     "Після надсилання ви змінили заявку. Надішліть її ще раз, щоб менеджер отримав зміни.",
-  sectionPayer: "Хто оплачує",
+  sectionPayer: "Платник",
   payerQuestion: "Хто є платником?",
   payerOptions: { self: "Я сам(а)", third_party: "Інша людина або організація" },
   payerOptionsGuardian: {
@@ -2142,7 +2140,10 @@ const uk: LeadRequestText = {
   },
   followUpSubmit: "Надіслати відомості",
   followUpBlockAWork: "Професія та галузь",
-  representativeQuestionsIntro: "Дайте відповіді для кожної вказаної людини. Ці відомості стосуються батька, матері або законного представника, а не дитини. Уже збережені відповіді підставляються автоматично. Походження коштів зазначає лише людина, яка справді платить, у своїй декларації.",
+  representativeQuestionsIntro: "Дайте відповіді для кожної вказаної людини. Ці відомості стосуються батька, матері або законного представника, а не дитини. Уже збережені відповіді підставляються автоматично.",
+  representativeQuestionsIntroAdult: "Дайте відповіді для кожної вказаної людини. Ці відомості стосуються представника, а не пацієнта. Уже збережені відповіді підставляються автоматично.",
+  followUpBlockRAdult: "Додаткові відомості представника",
+  followUpNothingNeeded: "Тут додаткові відомості не потрібні.",
   followUpSending: "Надсилається…",
   followUpIncomplete: "Будь ласка, спершу доповніть відомості, яких бракує.",
   followUpAnsweredAt: (dateTime) => `Ваші додаткові відомості надіслано ${dateTime}. Ваші дані перевіряються.`,
@@ -2185,7 +2186,6 @@ const uk: LeadRequestText = {
     expected_total_eur: "Очікувана загальна сума (EUR)",
   },
   viaThirdPartyKindOptions: { person: "Через іншу особу", psp: "Через платіжний сервіс" },
-  expectedTotalHint: "Наскільки відомо, наприклад з кошторису.",
   identityRenewIntro: "Будь ласка, завантажте актуальне, добре читабельне фото або скан вашого документа.",
   identityIntro:
     "Будь ласка, завантажте фото або скан документа, що посвідчує особу (для ID-картки — обидва боки). Дані з документа вносить GMED.",
@@ -2286,10 +2286,10 @@ const uk: LeadRequestText = {
   representativeRemove: "Видалити",
   representativeRemoveConfirm: (who) =>
     `${who}: усі дані та завантажені файли цієї людини буде видалено. Продовжити?`,
-  representativeGuardianIdentity: "Документ, що посвідчує особу опікуна",
+  representativeGuardianIdentity: "Документ, що посвідчує особу представника, призначеного судом",
   representativeAuthority: {
     power_of_attorney: "Підтвердження повноважень (наприклад, довіреність)",
-    guardianship_certificate: "Рішення про призначення опікуна або посвідчення опікуна",
+    guardianship_certificate: "Рішення суду про призначення представника або його посвідчення (Betreuerausweis)",
     appointment_certificate: "Документ про призначення опікуном",
     sole_custody: "Підтвердження одноосібного права опіки",
   },
@@ -2340,8 +2340,6 @@ const uk: LeadRequestText = {
     crypto: "Криптовалюта (більше не підтримується)",
     other: "Інше",
   },
-  cashCryptoNote: "Оплату готівкою GMED перевіряє окремо (закон про запобігання відмиванню коштів).",
-  totalAmountHint: "Очікувану загальну суму вносить GMED.",
   paymentRouteByPayer:
     "Спосіб оплати вказує сам платник (особа або організація, яка платить); GMED звернеться до нього із цього приводу.",
   paymentRouteByPayerShort: "вказує платник",
@@ -2359,7 +2357,7 @@ const uk: LeadRequestText = {
     `Ви оплачуєте послуги GMED. Закон про протидію відмиванню грошей вимагає для цього деяких даних про вас як про платника. Ім'я, адресу та документ, що посвідчує особу, ви вказуєте в розділі «${section}».`,
   payerNoticeTitle: "Повідомлення про захист даних для платника",
   payerNotice:
-    "Відповідальним за обробку є GMED. Ваші дані як платника ми отримуємо від вас і із запиту пацієнта. Ми обробляємо їх, щоб ідентифікувати вас відповідно до Закону Німеччини про протидію відмиванню грошей (§§ 10–12 GwG), узгодити оплату витрат і виставляти рахунки. Правова підстава — ст. 6 ч. 1 п. b і c DSGVO (GDPR). Ми зберігаємо дані п'ять років після завершення ділових відносин (§ 8 абз. 4 GwG). Ви маєте право на доступ до своїх даних, їх виправлення, видалення або обмеження обробки, право заперечити проти обробки, а також право подати скаргу до наглядового органу із захисту даних.",
+    "Відповідальним за обробку є GMED. Ваші дані як платника ми отримуємо від вас і із запиту пацієнта. Ми обробляємо їх, щоб ідентифікувати вас відповідно до Закону Німеччини про протидію відмиванню грошей (§§ 10–12 GwG), провести оплату й виставляти рахунки. Правова підстава — ст. 6 ч. 1 п. b і c DSGVO (GDPR). Ми зберігаємо дані п'ять років після завершення ділових відносин (§ 8 абз. 4 GwG). Ви маєте право на доступ до своїх даних, їх виправлення, видалення або обмеження обробки, право заперечити проти обробки, а також право подати скаргу до наглядового органу із захисту даних.",
   payerNoticeAck: "Я ознайомився(-лася) з інформацією про захист даних.",
   payerNoticeAckAt: (dateTime) => `Підтверджено ${dateTime}`,
   payerNoticeFirst: "Спочатку підтвердьте, будь ласка, повідомлення про захист даних. Після цього ви зможете вказати дані платника.",
@@ -2401,7 +2399,6 @@ const uk: LeadRequestText = {
   payerFundsProofTitle: "Підтвердження походження коштів",
   payerFundsProofRequired: "обов'язково",
   payerFundsProofOptional: "за бажанням",
-  payerFundsProofRequiredNote: "Для цього платежу закон про протидію відмиванню грошей вимагає підтвердження походження коштів.",
   payerFundsProofHint: "Наприклад, виписка з рахунку, довідка про доходи, договір купівлі-продажу або свідоцтво про спадщину. PDF, JPG або PNG, до 25 МБ на файл.",
   payerFundsProofUpload: "Завантажити підтвердження",
   noPayerFundsProof: "Підтвердження ще не завантажено.",
@@ -2512,7 +2509,7 @@ const en: LeadRequestText = {
   sendTitle: "Send to your contact person",
   missingTitle: "Please add:",
   inquiryConsentMissing: "Please agree to the processing of your details in the step “Consent & person”.",
-  sendButton: "Send to the manager",
+  sendButton: "Send request",
   sending: "Sending…",
   sentTitle: "Thank you!",
   sentBody: (dateTime) => `Your details were sent on ${dateTime}.`,
@@ -2554,7 +2551,7 @@ const en: LeadRequestText = {
   insuranceCoverageOptions: { yes: "Yes", no: "No", not_sure: "Not sure" },
   changedAfterSend:
     "You changed your request after sending it. Send it again so that your contact person receives the changes.",
-  sectionPayer: "Who pays",
+  sectionPayer: "Payer",
   payerQuestion: "Who is the payer?",
   payerOptions: { self: "I do", third_party: "Another person or organisation" },
   payerOptionsGuardian: {
@@ -2676,7 +2673,10 @@ const en: LeadRequestText = {
   },
   followUpSubmit: "Send details",
   followUpBlockAWork: "Occupation and sector",
-  representativeQuestionsIntro: "Please answer the questions for each named person. These details concern the parent or legal representative, rather than the child. Previously saved answers are filled in automatically. Only the person actually paying states the source of funds in their own declaration.",
+  representativeQuestionsIntro: "Please answer the questions for each named person. These details concern the parent or legal representative, rather than the child. Previously saved answers are filled in automatically.",
+  representativeQuestionsIntroAdult: "Please answer the questions for each named person. These details concern the representative, rather than the patient. Previously saved answers are filled in automatically.",
+  followUpBlockRAdult: "Additional details of the representative",
+  followUpNothingNeeded: "No additional information is needed here.",
   followUpSending: "Sending…",
   followUpIncomplete: "Please first complete the details that are still open.",
   followUpAnsweredAt: (dateTime) => `Your additional details were sent on ${dateTime}. Your details are being reviewed.`,
@@ -2719,7 +2719,6 @@ const en: LeadRequestText = {
     expected_total_eur: "Expected total amount (EUR)",
   },
   viaThirdPartyKindOptions: { person: "Through another person", psp: "Through a payment service provider" },
-  expectedTotalHint: "As far as known, for example from the cost estimate.",
   identityRenewIntro: "Please upload a current, clearly readable photo or scan of your identity document.",
   identityIntro:
     "Please upload a photo or scan of your identity document (for an ID card both sides). GMED enters the details from the document.",
@@ -2813,10 +2812,10 @@ const en: LeadRequestText = {
   representativeRemove: "Remove",
   representativeRemoveConfirm: (who) =>
     `${who}: all details and uploaded files of this person will be removed. Continue?`,
-  representativeGuardianIdentity: "Identity document of the guardian",
+  representativeGuardianIdentity: "Identity document of the court-appointed representative",
   representativeAuthority: {
     power_of_attorney: "Proof of authority (e.g. power of attorney)",
-    guardianship_certificate: "Certificate of appointment or guardian's ID card",
+    guardianship_certificate: "Certificate of appointment or the representative's ID card (Betreuerausweis)",
     appointment_certificate: "Certificate of appointment as guardian",
     sole_custody: "Proof of sole custody",
   },
@@ -2867,8 +2866,6 @@ const en: LeadRequestText = {
     crypto: "Cryptocurrency (no longer supported)",
     other: "Other",
   },
-  cashCryptoNote: "GMED checks cash payments separately (Money Laundering Act).",
-  totalAmountHint: "GMED enters the expected total amount.",
   paymentRouteByPayer: "The paying person / organisation states the payment route themselves; GMED will contact them about it.",
   paymentRouteByPayerShort: "stated by the paying person",
   sectionLegal: "Legal questions (anti-money laundering)",
@@ -2884,7 +2881,7 @@ const en: LeadRequestText = {
     `You pay for GMED's services. German anti-money laundering law requires some details from you as the paying person. You enter your name, address and identity document in the section "${section}".`,
   payerNoticeTitle: "Privacy notice for the paying person",
   payerNotice:
-    "GMED is the controller. We receive your details as the paying person from you and from the patient's request. We process them to identify you under the German Anti-Money Laundering Act (sections 10–12 GwG), to arrange the cost coverage and to issue invoices. The legal basis is Art. 6(1)(b) and (c) GDPR. We keep the details for five years after the end of the business relationship (section 8(4) GwG). You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a data protection supervisory authority.",
+    "GMED is the controller. We receive your details as the paying person from you and from the patient's request. We process them to identify you under the German Anti-Money Laundering Act (sections 10–12 GwG), to handle the payment and to issue invoices. The legal basis is Art. 6(1)(b) and (c) GDPR. We keep the details for five years after the end of the business relationship (section 8(4) GwG). You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a data protection supervisory authority.",
   payerNoticeAck: "I have read the privacy information.",
   payerNoticeAckAt: (dateTime) => `Confirmed on ${dateTime}`,
   payerNoticeFirst: "Please confirm the privacy notice first. Then you can enter your details as the paying person.",
@@ -2925,7 +2922,6 @@ const en: LeadRequestText = {
   payerFundsProofTitle: "Proof of the source of funds",
   payerFundsProofRequired: "required",
   payerFundsProofOptional: "optional",
-  payerFundsProofRequiredNote: "For this payment German anti-money laundering law requires a proof of the source of funds.",
   payerFundsProofHint: "For example a bank statement, a payslip, a sales contract or a certificate of inheritance. PDF, JPG or PNG, up to 25 MB per file.",
   payerFundsProofUpload: "Upload proof",
   noPayerFundsProof: "No proof uploaded yet.",

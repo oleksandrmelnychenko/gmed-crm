@@ -80,7 +80,7 @@ test("cabinet edits, upload, submission and staff data survive a real API round 
   await expect(page.getByTestId("lead-request-missing")).toHaveCount(0);
   await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
   await settleDisposableClock(lead.id);
-  await page.getByRole("button", { name: "An den Manager senden", exact: true }).click();
+  await page.getByRole("button", { name: "Anfrage senden", exact: true }).click();
   await expect(page.getByTestId("lead-request-sent")).toBeVisible();
   await page.reload();
   await page.locator('[data-step="person"]').click();

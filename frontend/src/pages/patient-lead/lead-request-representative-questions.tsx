@@ -34,7 +34,10 @@ export function RepresentativeQuestionsBlock(props: Props) {
   }, [people, props.onSaveState]);
   return (
     <div className="space-y-4">
-      <p className="text-sm leading-relaxed text-muted-foreground">{props.text.representativeQuestionsIntro}</p>
+      {/* An adult's representatives are no parents: the intro names no child (lead QA 2026-10-10). */}
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        {!props.request.minor ? props.text.representativeQuestionsIntroAdult : props.text.representativeQuestionsIntro}
+      </p>
       {people.map((person) => <RepresentativeQuestionsForm key={person.id} {...props} person={person} onState={onState} />)}
     </div>
   );

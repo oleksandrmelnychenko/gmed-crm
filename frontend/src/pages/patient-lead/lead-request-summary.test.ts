@@ -184,7 +184,7 @@ describe("lead request summary", () => {
       "Kontakt",
       "Ausweisdokument",
       "Versicherung",
-      "Wer zahlt",
+      "Zahler",
       "Gesetzliche Fragen (Geldwäscheprävention)",
       "Ihre Unterlagen",
     ]);

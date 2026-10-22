@@ -350,6 +350,7 @@ function LeadRequestView({
   switchAfterSave: (leadId: string, action: () => void, onBlocked?: () => void) => Promise<void>;
 }) {
   const guardian = request.access_kind === "guardian";
+  const patientName = [request.personal_data.first_name, request.personal_data.last_name].filter(Boolean).join(" ");
   const latestRequest = useRef(request);
   useLayoutEffect(() => { latestRequest.current = request; }, [request]);
   const updateRequest = useCallback((next: LeadRequest) => {
@@ -473,8 +474,11 @@ function LeadRequestView({
       {/* The title and the deadline share one line (wrapping on a phone). */}
       <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-4 py-4 sm:px-5">
         <h1 className="text-lg font-semibold leading-tight">
+          {/* "Request for your child" only for a minor; an adult's representative reads "Request for <name>". */}
           {guardian
-            ? `${text.titleGuardian}: ${[request.personal_data.first_name, request.personal_data.last_name].filter(Boolean).join(" ")}`
+            ? request.minor
+              ? `${text.titleGuardian}: ${patientName}`
+              : `${text.requestFor} ${patientName}`
             : text.title}
         </h1>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">

@@ -336,7 +336,6 @@ export function BillingSections({
 
   const invoiceToError = form.errorFor("invoice_to");
   const accountAsked = asksAccount(draft.payment_method);
-  const flagged = draft.payment_method === "cash" || draft.payment_method === "crypto";
 
   const paymentMethodField = (
     <LabeledField {...labeled("payment_method")}>
@@ -471,15 +470,7 @@ export function BillingSections({
               {asks("payment_method_details") ? (
                 <LabeledField {...labeled("payment_method_details")}>{textInput("payment_method_details", 200)}</LabeledField>
               ) : null}
-              {flagged ? (
-                <p
-                  role="note"
-                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-snug text-amber-900 sm:col-span-2 lg:col-span-3 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-                  data-testid="lead-request-payment-method-note"
-                >
-                  {text.cashCryptoNote}
-                </p>
-              ) : null}
+              {/* No note on cash: what GMED checks is never told to the lead (no tipping-off). */}
               {/* The account the payment comes from: with a bank transfer or a card. */}
               {accountAsked ? (
                 <>
@@ -527,10 +518,7 @@ export function BillingSections({
                 onChange={onChange}
                 onSaveState={onSaveState}
               />
-            ) : (
-              // A server without block C asks no amount: GMED enters it.
-              <p className="text-xs leading-5 text-muted-foreground">{text.totalAmountHint}</p>
-            )}
+            ) : null}
           </div>
         ) : (
           <p

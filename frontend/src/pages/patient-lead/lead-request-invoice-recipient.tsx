@@ -519,7 +519,8 @@ export function InvoiceRecipientSection({
                       onChange={() => setPartyChoice(value)}
                     />
                     <span className="min-w-0">
-                      {(guardian ? text.recipient.payerPartyGuardian : text.recipient.payerParty)[value]}
+                      {/* "I pay (as a parent)" only for a minor's parent; an adult's representative reads "the patient". */}
+                      {(guardian && request.minor ? text.recipient.payerPartyGuardian : text.recipient.payerParty)[value]}
                     </span>
                   </label>
                 );
