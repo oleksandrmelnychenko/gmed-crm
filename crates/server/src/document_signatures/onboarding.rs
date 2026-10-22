@@ -21,13 +21,18 @@ pub(super) struct Item {
     pub pending_elsewhere: bool,
 }
 
-fn slots(minor: bool) -> Vec<&'static [&'static str]> {
+/// The expected documents; the patient form only where
+/// [`crate::lead_self_disclosure::required`] (owner decision 2026-10-23). The
+/// consent slot is always the last one.
+fn slots(minor: bool, self_disclosure_required: bool) -> Vec<&'static [&'static str]> {
     let mut slots = vec![
         &["framework_contract"][..],
         &["single_order"][..],
         &["order_cost_estimate"][..],
-        &["lead_self_disclosure"][..],
     ];
+    if self_disclosure_required {
+        slots.push(&[crate::lead_self_disclosure::TEMPLATE]);
+    }
     if minor {
         slots.push(&["consent_data_release_child", "consent_data_release_single"]);
     } else {
@@ -70,20 +75,26 @@ pub(super) async fn manifest(
         return Ok(None);
     }
     let minor = package::scope_is_minor(state, source).await?;
-    let mut slots = slots(minor);
+    let self_disclosure = crate::lead_self_disclosure::status(&state.db, lead_id)
+        .await
+        .map_err(db_error)?;
+    let mut slots = slots(minor, self_disclosure.required);
     if minor {
         let mut conn = state.db.acquire().await.map_err(db_error)?;
         let loaded = crate::routes::lead_representatives::load(&mut conn, lead_id)
             .await
             .map_err(db_error)?
             .unwrap_or_default();
-        slots[4] = if loaded.representation.answers.custody()
+        let consent: &'static [&'static str] = if loaded.representation.answers.custody()
             == crate::routes::lead_representatives::CUSTODY_JOINT
         {
             &["consent_data_release_child"]
         } else {
             &["consent_data_release_single"]
         };
+        if let Some(slot) = slots.last_mut() {
+            *slot = consent;
+        }
     }
     // Keep the current version even if it is archived, inaccessible or lacks
     // a PDF. Falling back to an older signed version would hide the problem.
@@ -218,16 +229,39 @@ mod tests {
     use super::*;
     #[test]
     fn initial_adult_and_minor_have_six_and_five_required_documents() {
-        assert_eq!(slots(false).len(), 6);
-        assert_eq!(slots(true).len(), 5);
+        assert_eq!(slots(false, true).len(), 6);
+        assert_eq!(slots(true, true).len(), 5);
         assert_eq!(
-            slots(true)[4],
+            slots(true, true)[4],
             ["consent_data_release_child", "consent_data_release_single"]
         );
         assert!(
-            !slots(false)
+            !slots(false, true)
                 .iter()
                 .any(|slot| slot.contains(&"privacy_information"))
+        );
+    }
+    #[test]
+    fn the_patient_form_is_expected_only_in_a_new_patients_first_onboarding() {
+        let first = crate::lead_self_disclosure::required(None, None);
+        let repeat = crate::lead_self_disclosure::required(None, Some(Uuid::new_v4()));
+        for minor in [false, true] {
+            assert!(
+                slots(minor, first)
+                    .iter()
+                    .any(|slot| slot.contains(&"lead_self_disclosure"))
+            );
+            assert!(
+                !slots(minor, repeat)
+                    .iter()
+                    .any(|slot| slot.contains(&"lead_self_disclosure"))
+            );
+        }
+        assert_eq!(slots(false, repeat).len(), 5);
+        // The consents stay the last slot, where a minor's custody variant goes.
+        assert_eq!(
+            slots(true, repeat).last().copied(),
+            Some(&["consent_data_release_child", "consent_data_release_single"][..])
         );
     }
     #[test]

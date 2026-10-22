@@ -48,7 +48,8 @@ export type SignatureRequest = {
   delivery_channel?: DeliveryChannel | null;
   evidence: { signatures?: { email: string; status: string; signed_at: string | null }[] };
 };
-export type SigningPackage = { template: string; templates?: string[]; documents: { id: string; title: string; version: number; template?: string | null }[] };
+/** `required: false` marks a slot the package may leave empty (e.g. the patient form of a repeat order). */
+export type SigningPackage = { template: string; templates?: string[]; required?: boolean; documents: { id: string; title: string; version: number; template?: string | null }[] };
 export type OnboardingManifest = {
   expected_count: number;
   items: { template: string; document_id: string | null; title: string | null; version: number | null;

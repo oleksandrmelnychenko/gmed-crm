@@ -207,6 +207,8 @@ type Mock = {
   /** When the lead (here: a parent) sent the request in the cabinet; not sent by default. */
   requestSentAt?: string;
   requestChanged?: boolean;
+  /** The server's rule for the patient form (owner decision 2026-10-23): required for a new patient, optional for a repeat order. */
+  selfDisclosureRequired?: boolean;
   refuseContactRemoval?: boolean;
   /** Ben's document as on DEV 2026-10-22: only the type and the dates stored. */
   benPartialId?: boolean;
@@ -218,7 +220,23 @@ type Mock = {
 
 async function mount(page: Page, mock: Mock) {
   const state = {
-    lead: { ...lead, trusted_contacts: mock.motherOnly ? [annaContact] : lead.trusted_contacts } as Json,
+    lead: {
+      ...lead,
+      trusted_contacts: mock.motherOnly ? [annaContact] : lead.trusted_contacts,
+      readiness: mock.selfDisclosureRequired === undefined
+        ? lead.readiness
+        : {
+            ...lead.readiness,
+            checks: [{
+              key: "self_disclosure_signed",
+              label: "Patient form signed (first onboarding of a new patient)",
+              passed: !mock.selfDisclosureRequired,
+              required: mock.selfDisclosureRequired,
+              blocking_for: "conversion",
+              stage: "documents",
+            }],
+          },
+    } as Json,
     representation: {
       has_representative: null,
       under_guardianship: null,
@@ -651,14 +669,20 @@ test("a refused sheet says why, in German too", async ({ page }) => {
 });
 
 test("the patient form waits until the request was sent", async ({ page }) => {
-  const { wizard, calls } = await mount(page, { lang: "de" });
+  const { wizard, calls } = await mount(page, { lang: "de", selfDisclosureRequired: true });
 
   const section = wizard.getByTestId("lead-wizard-self-disclosure-section");
   await expect(section).toHaveAttribute("data-available", "false");
   await expect(section.getByRole("heading", { name: "Patientenformular", exact: true })).toBeVisible();
+  // Owner decision 2026-10-23: a new patient's first onboarding needs it.
+  await expect(section).toHaveAttribute("data-requirement", "required");
+  await expect(section.getByTestId("lead-wizard-self-disclosure-requirement")).toHaveText(
+    "Pflicht: Erstaufnahme eines neuen Patienten",
+  );
   await expect(section.getByRole("button", { name: "Dokument erstellen", exact: true })).toBeDisabled();
+  // It says why the form cannot be made yet: it comes from the cabinet data.
   await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveText(
-    "Anfrage des Patienten noch nicht gesendet — danach kann das Formular erstellt werden.",
+    "Das Formular wird aus den Angaben im Kabinett erstellt. Der Patient hat die Anfrage noch nicht gesendet – danach kann das Formular erstellt werden.",
   );
   await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveClass(/bg-amber-50/);
   await expect(section).not.toContainText("Dokument wurde noch nicht erstellt");
@@ -666,11 +690,14 @@ test("the patient form waits until the request was sent", async ({ page }) => {
 });
 
 test("after the request was sent staff create the patient form from the server's data", async ({ page }) => {
-  const { wizard, calls } = await mount(page, { lang: "ru", requestSentAt: "2026-10-07T08:30:00Z" });
+  const { wizard, calls } = await mount(page, { lang: "ru", requestSentAt: "2026-10-07T08:30:00Z", selfDisclosureRequired: false });
 
   const section = wizard.getByTestId("lead-wizard-self-disclosure-section");
   await expect(section).toHaveAttribute("data-available", "true");
   await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveCount(0);
+  // A repeat order may go without it.
+  await expect(section).toHaveAttribute("data-requirement", "optional");
+  await expect(section.getByTestId("lead-wizard-self-disclosure-requirement")).toHaveText("Необязательно: повторный заказ");
   await section.getByRole("button", { name: "Создать документ", exact: true }).click();
   await expect.poll(() => calls.generated.length).toBe(1);
   expect(calls.generated[0]).toMatchObject({
@@ -689,7 +716,9 @@ test("the patient form waits for resubmission after the lead edits the answers",
   const section = wizard.getByTestId("lead-wizard-self-disclosure-section");
   await expect(section).toHaveAttribute("data-available", "false");
   await expect(section.getByRole("button", { name: "Dokument erstellen", exact: true })).toBeDisabled();
-  await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toContainText("Änderungen noch nicht erneut gesendet");
+  await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toContainText("nach dem erneuten Senden erstellt werden");
+  // Without the server's rule the wizard shows no requirement label.
+  await expect(section.getByTestId("lead-wizard-self-disclosure-requirement")).toHaveCount(0);
   expect(calls.generated).toHaveLength(0);
 });
 

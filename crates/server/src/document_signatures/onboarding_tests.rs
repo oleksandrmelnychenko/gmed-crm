@@ -162,11 +162,22 @@ pub(super) async fn verify_initial_manifest_and_paper_opt_in(
         .execute(pool)
         .await
         .unwrap();
+    let repeat_manifest = onboarding::manifest(&state, auth, &source)
+        .await
+        .unwrap()
+        .unwrap();
+    // A repeat order may go without the patient form (owner decision
+    // 2026-10-23); the minor's consent stays the last expected slot.
     assert!(
-        onboarding::manifest(&state, auth, &source)
-            .await
-            .unwrap()
-            .is_some()
+        repeat_manifest
+            .items
+            .iter()
+            .all(|item| item.template != "lead_self_disclosure")
+    );
+    assert_eq!(repeat_manifest.expected_count, 4);
+    assert_eq!(
+        repeat_manifest.items[3].template,
+        "consent_data_release_single"
     );
     let contract = Uuid::new_v4();
     sqlx::query("INSERT INTO framework_contracts(id,patient_id,contract_number,signed_at,valid_from,status,created_by)

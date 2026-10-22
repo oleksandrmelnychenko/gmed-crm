@@ -21,6 +21,7 @@ pub mod email_address;
 pub mod email_domain;
 pub mod file_scan;
 pub mod file_sniff;
+pub(crate) mod lead_self_disclosure;
 pub mod mail;
 pub mod money;
 pub(crate) mod order_document_texts;

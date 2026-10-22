@@ -1122,6 +1122,30 @@ async fn seed_complete_lead_onboarding(
         .await
         .map_err(|error| format!("insert lead compliance fixture: {error}"))?;
     }
+    // A new patient's first onboarding needs the signed patient form (owner
+    // decision 2026-10-23).
+    let self_disclosure_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, lead_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, mime_type, file_size,
+                generated_template_id, version_root_document_id, version_number,
+                uploaded_by, signed_at, signed_by
+           ) VALUES (
+                $1, $2, $3, $4, 'other', 'administrative',
+                'active', 'internal', false, 'application/pdf', 128,
+                $5, $1, 1, $6, now(), $6
+           )"#,
+    )
+    .bind(self_disclosure_id)
+    .bind(lead_id)
+    .bind(format!("lead_self_disclosure {tag}"))
+    .bind(format!("lead_self_disclosure-{tag}.pdf"))
+    .bind(crate::lead_self_disclosure::TEMPLATE)
+    .bind(created_by)
+    .execute(&state.db)
+    .await
+    .map_err(|error| format!("insert lead patient form fixture: {error}"))?;
 
     let contract_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO framework_contracts (

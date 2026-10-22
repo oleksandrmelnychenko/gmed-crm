@@ -1640,6 +1640,11 @@ async fn validate_lead_contact_identity(
 /// types only, so they must be chosen in the wizard first.
 const COST_ESTIMATE_WORK_TYPES_MISSING: &str = "Medical work types are not selected";
 
+/// The signed patient form (Patientenformular) is missing in a new patient's
+/// first onboarding; a repeat order may go without it (owner decision
+/// 2026-10-23, `crate::lead_self_disclosure`).
+const SELF_DISCLOSURE_UNSIGNED: &str = "Patient form is not signed";
+
 fn lead_cost_estimate_work_types_selected(wizard_state: &Value) -> bool {
     wizard_state
         .get("selected_specialization_work_type_ids")
@@ -1719,6 +1724,10 @@ struct LeadConversionReadinessInput {
     /// A parent or guardian contact with an e-mail or phone; for a minor it
     /// stands in for the child's own contact.
     guardian_contact_present: bool,
+    /// The patient form (Patientenformular): required and signed? Required
+    /// only in a new patient's first onboarding (owner decision 2026-10-23,
+    /// `crate::lead_self_disclosure`).
+    self_disclosure: crate::lead_self_disclosure::Status,
 }
 
 fn evaluate_lead_conversion_readiness(
@@ -1763,6 +1772,8 @@ fn evaluate_lead_conversion_readiness(
     // optional since 2026-10-19 (owner).
     let medical_ready = true;
     let service_ready = specialties_present;
+    // A repeat order may go without the patient form (owner decision 2026-10-23).
+    let self_disclosure_ready = !input.self_disclosure.required || input.self_disclosure.signed;
     // The risk assessment's check belongs to this step (`stage: documents`):
     // the step is not ready while staff still have to decide.
     let documents_ready = compliance_completed
@@ -1775,6 +1786,7 @@ fn evaluate_lead_conversion_readiness(
         && (!input.enhanced_due_diligence_required
             || (input.enhanced_due_diligence_document_generated
                 && input.enhanced_due_diligence_document_signed))
+        && self_disclosure_ready
         && input.payer.ready_for_conversion();
     // The VKS lists the selected medical work types, never the agency's services.
     let cost_estimate_ready = !input.cost_estimate_catalog_available
@@ -1873,6 +1885,14 @@ fn evaluate_lead_conversion_readiness(
             "key": "dsgvo_document_signed",
             "label": "DSGVO document signed",
             "passed": input.dsgvo_document_signed,
+            "blocking_for": "conversion",
+            "stage": "documents",
+        }),
+        json!({
+            "key": "self_disclosure_signed",
+            "label": "Patient form signed (first onboarding of a new patient)",
+            "passed": self_disclosure_ready,
+            "required": input.self_disclosure.required,
             "blocking_for": "conversion",
             "stage": "documents",
         }),
@@ -2031,6 +2051,9 @@ fn evaluate_lead_conversion_readiness(
     }
     if !input.confidentiality_release_signed {
         conversion_reasons.push("Signed confidentiality release is missing".to_string());
+    }
+    if !self_disclosure_ready {
+        conversion_reasons.push(SELF_DISCLOSURE_UNSIGNED.to_string());
     }
     if input.enhanced_due_diligence_required && !input.enhanced_due_diligence_document_generated {
         conversion_reasons.push("Enhanced due diligence document is missing".to_string());
@@ -2193,6 +2216,8 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
             &row.try_get::<Value, _>("trusted_contacts")
                 .unwrap_or_else(|_| json!([])),
         ),
+        // Set by `load_lead_conversion_readiness` from the owner's rule.
+        self_disclosure: Default::default(),
     }
 }
 
@@ -2567,6 +2592,9 @@ async fn load_lead_conversion_readiness(
         input.identity_document_verified = true;
     }
     drop(conn);
+    input.self_disclosure = crate::lead_self_disclosure::status(&state.db, lead_id)
+        .await
+        .map_err(enhanced_check_failed)?;
     apply_repeat_patient_readiness(state, lead_id, &mut input).await?;
     let legal_readiness = evaluate_lead_conversion_readiness(&input);
     if !state.dev_demo_onboarding {
@@ -2595,6 +2623,7 @@ async fn load_lead_conversion_readiness(
             }
             Some("privacy_consents") => input.dsgvo_document_signed = true,
             Some("confidentiality_release") => input.confidentiality_release_signed = true,
+            Some(crate::lead_self_disclosure::TEMPLATE) => input.self_disclosure.signed = true,
             Some(
                 "consent_data_release_child"
                 | "consent_data_release_single"
@@ -10946,7 +10975,56 @@ mod lead_conversion_readiness_tests {
             payer: crate::routes::lead_payer::PayerReadiness::ready(),
             risk_assessment_held: false,
             guardian_contact_present: false,
+            self_disclosure: crate::lead_self_disclosure::Status {
+                required: true,
+                signed: true,
+            },
         }
+    }
+
+    #[test]
+    fn a_new_patients_first_onboarding_needs_the_signed_patient_form() {
+        // Owner decision 2026-10-23: required for a new patient, optional
+        // for a repeat order.
+        let mut input = ready_input();
+        assert!(evaluate_lead_conversion_readiness(&input).conversion_ready);
+        input.self_disclosure.signed = false;
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(!readiness.conversion_ready);
+        assert!(
+            readiness
+                .conversion_reasons
+                .iter()
+                .any(|reason| reason == SELF_DISCLOSURE_UNSIGNED),
+            "{:?}",
+            readiness.conversion_reasons
+        );
+        let check = readiness.payload["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["key"] == "self_disclosure_signed")
+            .unwrap()
+            .clone();
+        assert_eq!(check["passed"], false);
+        assert_eq!(check["required"], true);
+        assert_eq!(readiness.payload["steps"][3]["ready"], false);
+
+        // A repeat request of an existing patient may go without it.
+        input.self_disclosure.required =
+            crate::lead_self_disclosure::required(None, Some(Uuid::new_v4()));
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(
+            readiness.conversion_ready,
+            "{:?}",
+            readiness.conversion_reasons
+        );
+        assert!(
+            !readiness
+                .conversion_reasons
+                .iter()
+                .any(|reason| reason == SELF_DISCLOSURE_UNSIGNED)
+        );
     }
 
     #[test]

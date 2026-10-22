@@ -391,6 +391,7 @@ export interface OperationsTranslations {
   lead_readiness_check_identity_document_verified: string;
   lead_readiness_check_dsgvo_document_signed: string;
   lead_readiness_check_confidentiality_release_signed: string;
+  lead_readiness_check_self_disclosure_signed: string;
   lead_readiness_check_enhanced_due_diligence_document_generated: string;
   lead_readiness_check_enhanced_due_diligence_document_signed: string;
   lead_readiness_check_contract_signed: string;
@@ -412,6 +413,7 @@ export interface OperationsTranslations {
   lead_readiness_reason_identity_not_verified: string;
   lead_readiness_reason_dsgvo_document_missing: string;
   lead_readiness_reason_confidentiality_release_missing: string;
+  lead_readiness_reason_self_disclosure_unsigned: string;
   lead_readiness_reason_edd_document_missing: string;
   lead_readiness_reason_edd_document_unsigned: string;
   lead_readiness_reason_framework_contract_terminated: string;
@@ -1020,6 +1022,8 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_check_dsgvo_document_signed: "Документ DSGVO подписан",
   lead_readiness_check_confidentiality_release_signed:
     "Освобождение от врачебной тайны подписано",
+  lead_readiness_check_self_disclosure_signed:
+    "Анкета пациента подписана (первичное оформление нового пациента)",
   lead_readiness_check_enhanced_due_diligence_document_generated:
     "Усиленная AML-проверка оформлена (если требуется)",
   lead_readiness_check_enhanced_due_diligence_document_signed:
@@ -1046,6 +1050,8 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_reason_dsgvo_document_missing: "Форма согласия (приложение 1) ещё не подписана",
   lead_readiness_reason_confidentiality_release_missing:
     "Нет подписанного освобождения от врачебной тайны",
+  lead_readiness_reason_self_disclosure_unsigned:
+    "Анкета пациента (Patientenformular) не подписана",
   lead_readiness_reason_edd_document_missing: "Нет документа усиленной AML-проверки",
   lead_readiness_reason_edd_document_unsigned: "Документ усиленной AML-проверки не подписан",
   lead_readiness_reason_framework_contract_terminated:
@@ -1676,6 +1682,8 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_check_dsgvo_document_signed: "DSGVO-Dokument unterschrieben",
   lead_readiness_check_confidentiality_release_signed:
     "Schweigepflichtsentbindung unterschrieben",
+  lead_readiness_check_self_disclosure_signed:
+    "Patientenformular unterschrieben (Erstaufnahme eines neuen Patienten)",
   lead_readiness_check_enhanced_due_diligence_document_generated:
     "Verstärkte AML-Sorgfaltsprüfung dokumentiert (falls erforderlich)",
   lead_readiness_check_enhanced_due_diligence_document_signed:
@@ -1702,6 +1710,7 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_reason_dsgvo_document_missing: "Einverständniserklärung (Anlage 1) noch nicht unterschrieben",
   lead_readiness_reason_confidentiality_release_missing:
     "Unterschriebene Schweigepflichtsentbindung fehlt",
+  lead_readiness_reason_self_disclosure_unsigned: "Patientenformular ist nicht unterschrieben",
   lead_readiness_reason_edd_document_missing:
     "Dokument zur verstärkten AML-Sorgfaltsprüfung fehlt",
   lead_readiness_reason_edd_document_unsigned:

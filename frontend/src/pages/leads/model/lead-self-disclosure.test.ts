@@ -6,6 +6,9 @@ import {
   LEAD_SELF_DISCLOSURE_TEMPLATE,
   leadSelfDisclosureAvailable,
   leadSelfDisclosureErrorText,
+  leadSelfDisclosureRequirement,
+  leadSelfDisclosureRequirementLabel,
+  leadSelfDisclosureUnavailableHint,
 } from "./lead-self-disclosure";
 
 const ru = (text: string) => text;
@@ -41,6 +44,29 @@ describe("the lead's patient form", () => {
     expect(leadSelfDisclosureErrorText(refusal, de)).toContain("erst erstellt werden, wenn der Patient die Anfrage");
     const onlyError = new ApiRequestError("Conflict", { status: 409, body: { error: "lead_request_not_sent" } });
     expect(leadSelfDisclosureErrorText(onlyError, de)).not.toBeNull();
+  });
+
+  it("says why it cannot be generated yet: it comes from the cabinet data", () => {
+    expect(leadSelfDisclosureUnavailableHint({ submitted_at: "2026-10-07T08:30:00Z" }, ru)).toBeNull();
+    expect(leadSelfDisclosureUnavailableHint(null, ru)).toContain("из данных кабинета");
+    expect(leadSelfDisclosureUnavailableHint({ submitted_at: null }, de)).toContain("noch nicht gesendet");
+    expect(
+      leadSelfDisclosureUnavailableHint({ submitted_at: "2026-10-07T08:30:00Z", changed_since_submit: true }, de),
+    ).toContain("erneuten Senden");
+  });
+
+  it("is required or optional as the server's readiness check says (owner decision 2026-10-23)", () => {
+    const check = (required?: boolean) => [
+      { key: "confidentiality_release_signed" },
+      { key: "self_disclosure_signed", required },
+    ];
+    expect(leadSelfDisclosureRequirement(check(true))).toBe("required");
+    expect(leadSelfDisclosureRequirement(check(false))).toBe("optional");
+    expect(leadSelfDisclosureRequirement(check(undefined))).toBeNull();
+    expect(leadSelfDisclosureRequirement([])).toBeNull();
+    expect(leadSelfDisclosureRequirement(undefined)).toBeNull();
+    expect(leadSelfDisclosureRequirementLabel("required", ru)).toBe("Обязательно: первичное оформление нового пациента");
+    expect(leadSelfDisclosureRequirementLabel("optional", de)).toBe("Optional: Folgeauftrag");
   });
 
   it("leaves other errors to the usual wording", () => {

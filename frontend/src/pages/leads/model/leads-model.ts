@@ -645,6 +645,7 @@ const LEAD_READINESS_CHECK_LABEL_KEYS: Partial<Record<string, TranslationKey>> =
   dsgvo_document_signed: "lead_readiness_check_dsgvo_document_signed",
   confidentiality_release_signed:
     "lead_readiness_check_confidentiality_release_signed",
+  self_disclosure_signed: "lead_readiness_check_self_disclosure_signed",
   enhanced_due_diligence_document_generated:
     "lead_readiness_check_enhanced_due_diligence_document_generated",
   enhanced_due_diligence_document_signed:
@@ -687,6 +688,7 @@ const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> 
   "Signed DSGVO document is missing": "lead_readiness_reason_dsgvo_document_missing",
   "Signed confidentiality release is missing":
     "lead_readiness_reason_confidentiality_release_missing",
+  "Patient form is not signed": "lead_readiness_reason_self_disclosure_unsigned",
   "Enhanced due diligence document is missing":
     "lead_readiness_reason_edd_document_missing",
   "Enhanced due diligence document is not signed":

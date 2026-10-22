@@ -329,6 +329,30 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
         .unwrap();
         document_ids.push(document_id);
     }
+    // A new patient's first onboarding needs the signed patient form (owner
+    // decision 2026-10-23); a repeat order may go without it.
+    let self_disclosure_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, lead_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, mime_type, file_size,
+                generated_template_id, version_root_document_id, version_number,
+                uploaded_by, signed_at, signed_by
+           ) VALUES (
+                $1, $2, $3, $4, 'other', 'administrative',
+                'active', 'internal', false, 'application/pdf', 128,
+                'lead_self_disclosure', $1, 1, $5, now(), $5
+           )"#,
+    )
+    .bind(self_disclosure_id)
+    .bind(lead_id)
+    .bind(format!("lead_self_disclosure {tag}"))
+    .bind(format!("lead_self_disclosure-{tag}.pdf"))
+    .bind(app.patient_manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    document_ids.push(self_disclosure_id);
 
     let contract_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO framework_contracts (

@@ -115,6 +115,8 @@ interface LeadReadinessCheck {
   passed: boolean;
   blocking_for: string | null;
   stage?: string;
+  /** `self_disclosure_signed`: the patient form is required (a new patient's first onboarding) or optional (repeat order). */
+  required?: boolean;
 }
 
 interface LeadReadinessStep {

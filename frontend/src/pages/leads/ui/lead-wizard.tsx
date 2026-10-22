@@ -120,6 +120,9 @@ import {
   LEAD_SELF_DISCLOSURE_TEMPLATE,
   leadSelfDisclosureAvailable,
   leadSelfDisclosureErrorText,
+  leadSelfDisclosureRequirement,
+  leadSelfDisclosureRequirementLabel,
+  leadSelfDisclosureUnavailableHint,
 } from "../model/lead-self-disclosure";
 import { representativeName } from "../model/lead-gwg-statements";
 import {
@@ -768,6 +771,9 @@ const PREPAYMENT_AMOUNT_ID = "lead-wizard-prepayment-amount";
 const PRIVACY_CONSENT_ID = "lead-wizard-privacy-consent";
 const HEALTHCARE_CONSENT_ID = "lead-wizard-healthcare-consent";
 const CONFIDENTIALITY_RELEASE_ID = "lead-wizard-confidentiality-release";
+const SELF_DISCLOSURE_SECTION_ID = "lead-wizard-self-disclosure";
+/** Server blocking reason (crates/server/src/routes/leads.rs `SELF_DISCLOSURE_UNSIGNED`). */
+const SELF_DISCLOSURE_UNSIGNED_REASON = "Patient form is not signed";
 const PRIVACY_DOCUMENT_ID = "lead-wizard-privacy-document";
 const IDENTITY_DOCUMENT_ID = "lead-wizard-identity-document";
 const FRAMEWORK_DOCUMENT_ID = "lead-wizard-framework-document";
@@ -2377,6 +2383,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Identity document is not verified": tx("Подтвердите документ, удостоверяющий личность", "Ausweisdokument bestätigen"),
     "Signed DSGVO document is missing": tx("Форма согласия (приложение 1) ещё не подписана", "Einverständniserklärung (Anlage 1) noch nicht unterschrieben"),
     "Signed confidentiality release is missing": tx("Нужно подписанное освобождение от медицинской тайны", "Unterzeichnete Schweigepflichtsentbindung erforderlich"),
+    [SELF_DISCLOSURE_UNSIGNED_REASON]: tx("Анкета пациента не подписана — обязательна при первичном оформлении нового пациента", "Patientenformular nicht unterschrieben – Pflicht bei der Erstaufnahme eines neuen Patienten"),
     "Enhanced due diligence document is missing": tx("Заполните усиленную AML-проверку и создайте документ", "Verstärkte AML-Sorgfaltsprüfung ausfüllen und Dokument erstellen"),
     "Enhanced due diligence document is not signed": tx("Получите подпись на документе усиленной AML-проверки", "Unterschrift für die verstärkte AML-Sorgfaltsprüfung einholen"),
     "Risk assessment waits for a staff decision": tx("Нужно решение по оценке риска (документы → «Оценка риска»)", "Entscheidung zur Risikobewertung nötig (Unterlagen → „Risikobewertung“)"),
@@ -2415,6 +2422,7 @@ function readinessReasonStep(reason: string): StepId {
     "Identity document is not verified": "documents",
     "Signed DSGVO document is missing": "documents",
     "Signed confidentiality release is missing": "documents",
+    [SELF_DISCLOSURE_UNSIGNED_REASON]: "documents",
     "Enhanced due diligence document is missing": "documents",
     "Enhanced due diligence document is not signed": "documents",
     "Risk assessment waits for a staff decision": "documents",
@@ -2494,6 +2502,7 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Signed DSGVO document is missing": PRIVACY_DOCUMENT_ID,
     "Compliance is not signed yet": PRIVACY_DOCUMENT_ID,
     "Signed confidentiality release is missing": CONFIDENTIALITY_RELEASE_ID,
+    [SELF_DISCLOSURE_UNSIGNED_REASON]: SELF_DISCLOSURE_SECTION_ID,
     "Enhanced due diligence document is missing": ENHANCED_CHECK_SECTION_ID,
     "Enhanced due diligence document is not signed": ENHANCED_CHECK_SECTION_ID,
     "Risk assessment waits for a staff decision": RISK_ASSESSMENT_SECTION_ID,
@@ -4052,9 +4061,10 @@ export function LeadWizard({
   const canReviewPortalUploads = Boolean(step1Portal.intake?.can_review_uploads);
   // The patient form is filled from the sent request: nothing to generate before.
   const leadRequestSent = leadSelfDisclosureAvailable(step1Portal.intake);
-  const leadFormUnavailableHint = step1Portal.intake?.changed_since_submit
-    ? tx("Ожидаем повторную отправку изменений пациентом — после этого можно создать анкету.", "Änderungen noch nicht erneut gesendet — danach kann das Formular erstellt werden.")
-    : tx("Ожидаем отправку заявки пациентом — после этого можно создать анкету.", "Anfrage des Patienten noch nicht gesendet — danach kann das Formular erstellt werden.");
+  const leadFormUnavailableHint = leadSelfDisclosureUnavailableHint(step1Portal.intake, tx);
+  // Owner decision 2026-10-23, decided by the server: required in a new
+  // patient's first onboarding, optional for a repeat order.
+  const selfDisclosureRequirement = leadSelfDisclosureRequirement(lead?.readiness.checks);
   const patientUploadDocuments = useMemo(() => {
     const ids = new Set(step1Portal.intake?.uploads.map((upload) => upload.document_id) ?? []);
     return documents.filter((item) => ids.has(item.id) && !item.file_deleted_at && item.has_stored_file !== false);
@@ -8817,7 +8827,14 @@ ${serviceCommentLines.join("\n")}`
               </div>
               {/* The lead's own answers as a document, signed inside the lead's package (owner request 2026-10-08). */}
               {leadId ? (
-                <div data-testid="lead-wizard-self-disclosure-section" data-available={leadRequestSent ? "true" : "false"}>
+                <div
+                  id={SELF_DISCLOSURE_SECTION_ID}
+                  tabIndex={-1}
+                  className="focus:outline-none"
+                  data-testid="lead-wizard-self-disclosure-section"
+                  data-available={leadRequestSent ? "true" : "false"}
+                  data-requirement={selfDisclosureRequirement ?? undefined}
+                >
                   <Section
                     className={WIZARD_DOCUMENT_SECTION_CLASS}
                     title={tx("Анкета пациента", "Patientenformular")}
@@ -8828,7 +8845,7 @@ ${serviceCommentLines.join("\n")}`
                         size="sm"
                         className="h-8 rounded-lg"
                         disabled={isBusy || !leadRequestSent}
-                        title={leadRequestSent ? undefined : leadFormUnavailableHint}
+                        title={leadFormUnavailableHint ?? undefined}
                         onClick={() => void generateLeadComplianceDocument(LEAD_SELF_DISCLOSURE_TEMPLATE)}
                       >
                         {busy === `generate-${LEAD_SELF_DISCLOSURE_TEMPLATE}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
@@ -8836,13 +8853,22 @@ ${serviceCommentLines.join("\n")}`
                       </Button>
                     )}
                   >
+                    {selfDisclosureRequirement ? (
+                      <StatusChip
+                        tone={selfDisclosureRequirement === "required" ? "info" : "neutral"}
+                        className="w-fit"
+                        data-testid="lead-wizard-self-disclosure-requirement"
+                      >
+                        {leadSelfDisclosureRequirementLabel(selfDisclosureRequirement, tx)}
+                      </StatusChip>
+                    ) : null}
                     <p className="text-xs leading-5 text-muted-foreground">
                       {tx(
                         "Ответы из кабинета. Подписывает пациент или законные представители вместе с договором, заказом и согласиями.",
                         "Angaben aus dem Portal. Der Patient oder die gesetzlichen Vertreter unterschreiben zusammen mit Vertrag, Auftrag und Einwilligungen.",
                       )}
                     </p>
-                    {!leadRequestSent ? (
+                    {leadFormUnavailableHint ? (
                       <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-wizard-self-disclosure-hint">
                         <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                         <span>{leadFormUnavailableHint}</span>

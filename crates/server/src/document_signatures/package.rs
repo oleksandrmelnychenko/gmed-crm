@@ -11,9 +11,9 @@ const MINOR_CONSENTS: &[&str] = &["consent_data_release_child", "consent_data_re
 
 /// The lead's patient form ("Patientenformular – Angaben und Erklärungen",
 /// owner request 2026-10-08): signed by the patient side inside the lead's
-/// package. Initial onboarding requires it; standalone consent requests and
-/// repeat orders keep the flexible preset behavior below.
-const LEAD_SELF_DISCLOSURE: &str = "lead_self_disclosure";
+/// package. A new patient's first onboarding requires it, a repeat order may
+/// go without it (owner decision 2026-10-23, [`crate::lead_self_disclosure`]).
+const LEAD_SELF_DISCLOSURE: &str = crate::lead_self_disclosure::TEMPLATE;
 
 /// The consent form «Einverständniserklärung zur Datenübermittlung»: it goes
 /// into an electronic package only with the person's own choice of its
@@ -24,20 +24,21 @@ const LEAD_SELF_DISCLOSURE: &str = "lead_self_disclosure";
 /// 2026-10-12 A2-06).
 const PRIVACY_CONSENTS: &str = crate::consent_choices::TEMPLATE;
 
-/// Preset slots a package may leave empty.
+/// Preset slots a package may leave empty. The patient form is optional only
+/// where [`crate::lead_self_disclosure::required`] says so.
 const OPTIONAL_SLOT_TEMPLATES: &[&str] = &[
-    LEAD_SELF_DISCLOSURE,
     PRIVACY_CONSENTS,
     "consent_data_release_child",
     "consent_data_release_single",
 ];
 
 /// Whether a package may go without a document for this slot.
-fn optional_slot(slot: &[&str]) -> bool {
+fn optional_slot(slot: &[&str], self_disclosure_required: bool) -> bool {
     !slot.is_empty()
-        && slot
-            .iter()
-            .all(|template| OPTIONAL_SLOT_TEMPLATES.contains(template))
+        && slot.iter().all(|template| {
+            OPTIONAL_SLOT_TEMPLATES.contains(template)
+                || (*template == LEAD_SELF_DISCLOSURE && !self_disclosure_required)
+        })
 }
 
 /// Documents suggested for signing together with the source, in bundle order
@@ -147,6 +148,24 @@ async fn source_slots(
     ))
 }
 
+/// Whether the source's package must carry the patient form: only the lead
+/// intake of a new patient ([`crate::lead_self_disclosure::required`]).
+async fn source_self_disclosure_required(
+    state: &AppState,
+    source: &PgRow,
+) -> Result<bool, Response> {
+    let Some(lead) = source
+        .get::<Option<Uuid>, _>("lead_id")
+        .filter(|_| is_lead_intake(source))
+    else {
+        return Ok(false);
+    };
+    Ok(crate::lead_self_disclosure::status(&state.db, lead)
+        .await
+        .map_err(db_error)?
+        .required)
+}
+
 pub(super) fn same_scope(source: &PgRow, candidate: &PgRow) -> bool {
     let lead: Option<Uuid> = source.get("lead_id");
     let patient: Option<Uuid> = source.get("patient_id");
@@ -206,7 +225,10 @@ pub(super) async fn signing_options(
     source: &PgRow,
 ) -> Result<Value, Response> {
     let mut packages = Vec::new();
-    for slot in source_slots(state, source).await? {
+    let slots = source_slots(state, source).await?;
+    let self_disclosure_required =
+        !slots.is_empty() && source_self_disclosure_required(state, source).await?;
+    for slot in slots {
         let mut choices = Vec::new();
         for id in scope_documents(state, source, slot).await? {
             if let Ok(row) = signature_document_access(state, auth, id, false).await
@@ -216,7 +238,11 @@ pub(super) async fn signing_options(
                 choices.push(json!({"id":id,"title":row.get::<String,_>("auto_name"),"version":row.get::<i32,_>("version_number"),"template":template_of(&row)}));
             }
         }
-        packages.push(json!({"template":slot[0],"templates":slot,"documents":choices}));
+        // A slot the package may leave empty is offered as optional.
+        let required = !optional_slot(slot, self_disclosure_required);
+        packages.push(
+            json!({"template":slot[0],"templates":slot,"required":required,"documents":choices}),
+        );
     }
     Ok(Value::Array(packages))
 }
@@ -281,8 +307,9 @@ pub(super) async fn preset_document_ids(
 
 /// Legacy `POST /documents/{id}/signature-requests`: the selected companions
 /// must fill the source's preset slots, one document per slot; an optional
-/// slot (the lead's patient form) may stay empty. They are put into bundle
-/// order; the generic endpoint accepts any combination.
+/// slot (a consent form without the person's choice, the patient form) may
+/// stay empty here. They are put into bundle order; the generic endpoint
+/// accepts any combination.
 pub(super) async fn legacy_signing_order(
     state: &AppState,
     auth: &AuthUser,
@@ -312,7 +339,10 @@ pub(super) async fn legacy_signing_order(
                 .as_deref()
                 .is_some_and(|template| slot.contains(&template))
         }) else {
-            if optional_slot(slot) {
+            // A new patient's first onboarding still needs the patient form:
+            // the onboarding manifest (same rule) refuses the request with
+            // the complete list of what is missing.
+            if optional_slot(slot, false) {
                 continue;
             }
             return Err(error(
@@ -1239,15 +1269,42 @@ mod tests {
             signing_slots(Some("framework_contract"), true, false).len(),
             4
         );
-        // The patient form exists only after the lead sent the request, and
-        // a consent form without the own choice of the cabinet is signed on
-        // paper (2026-10-12, also the minor's): those slots may stay empty,
-        // every other one may not.
-        assert!(optional_slot(&["lead_self_disclosure"]));
-        assert!(optional_slot(&["privacy_consents"]));
-        assert!(optional_slot(MINOR_CONSENTS));
-        assert!(!optional_slot(&["single_order"]));
-        assert!(!optional_slot(&[]));
+        // A consent form without the own choice of the cabinet is signed on
+        // paper (2026-10-12, also the minor's): that slot may stay empty.
+        // The patient form is required in a new patient's first onboarding
+        // and optional for a repeat order (owner decision 2026-10-23).
+        for self_disclosure_required in [true, false] {
+            assert!(optional_slot(
+                &["privacy_consents"],
+                self_disclosure_required
+            ));
+            assert!(optional_slot(MINOR_CONSENTS, self_disclosure_required));
+            assert!(!optional_slot(&["single_order"], self_disclosure_required));
+            assert!(!optional_slot(&[], self_disclosure_required));
+        }
+        assert!(!optional_slot(&["lead_self_disclosure"], true));
+        assert!(optional_slot(&["lead_self_disclosure"], false));
+        let first_onboarding = crate::lead_self_disclosure::required(None, None);
+        let repeat_order = crate::lead_self_disclosure::required(None, Some(Uuid::new_v4()));
+        let required_slots = |self_disclosure_required: bool| {
+            signing_slots(Some("framework_contract"), true, false)
+                .into_iter()
+                .filter(|slot| !optional_slot(slot, self_disclosure_required))
+                .map(|slot| slot[0])
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            required_slots(first_onboarding),
+            [
+                "single_order",
+                "lead_self_disclosure",
+                "confidentiality_release"
+            ]
+        );
+        assert_eq!(
+            required_slots(repeat_order),
+            ["single_order", "confidentiality_release"]
+        );
         let id = Uuid::new_v4();
         assert_eq!(
             attachment_id(
