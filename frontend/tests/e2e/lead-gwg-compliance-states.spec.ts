@@ -65,6 +65,10 @@ type Mock = {
   documents?: Json[];
   /** How `POST /documents/{id}/mark-signed` answers. */
   markSigned?: { status: number; body: Json };
+  /** `GET /compliance/risk-countries`: the configured lists; unset: the catch-all answer. */
+  riskCountries?: Json;
+  /** The lead's citizenships. */
+  citizenships?: string[];
 };
 
 async function mount(page: Page, mock: Mock) {
@@ -93,6 +97,7 @@ async function mount(page: Page, mock: Mock) {
         last_name: "Muster",
         email: "anna.muster@example.com",
         date_of_birth: "1980-04-02",
+        citizenships: mock.citizenships ?? [],
         qualification_status: "in_progress",
         intake_model: "patient_first",
         repeat_patient_id: null,
@@ -103,6 +108,9 @@ async function mount(page: Page, mock: Mock) {
       };
     } else if (path === `/leads/${leadId}/enhanced-check`) {
       response = mock.enhancedCheck;
+    } else if (path === "/compliance/risk-countries" && mock.riskCountries) {
+      calls.push({ path, body: null });
+      response = mock.riskCountries;
     } else if (path === "/documents" && url.searchParams.get("lead_id") === leadId) {
       response = mock.documents ?? [];
     } else if (/^\/documents\/[^/]+\/download$/.test(path)) {
@@ -171,6 +179,36 @@ test("the readiness item of a missing enhanced check leads to its section", asyn
   // The section is the target of the readiness item: it can take the focus.
   await expect(section).toHaveAttribute("id", "lead-wizard-enhanced-check");
   await expect(section).toHaveAttribute("tabindex", "-1");
+});
+
+test("the country hint follows the server's configured lists, not a list in the wizard", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  // The CEO put Syria on list 1: a citizenship there is an amber hint only.
+  const { wizard, calls } = await mount(page, {
+    lang: "ru",
+    enhancedCheck: { required: false, reasons: [], countries: [] },
+    citizenships: ["SY"],
+    riskCountries: { version: 2, high_risk: ["SY"], blacklist: ["KP"] },
+  });
+  const section = wizard.getByTestId("lead-wizard-enhanced-check-section");
+  await expect(section).toHaveAttribute("data-required", "false");
+  await expect(section.getByTestId("lead-wizard-enhanced-check-hint")).toContainText("Страна повышенного риска (Сирия)");
+  expect(calls.some((call) => call.path === "/compliance/risk-countries")).toBe(true);
+});
+
+test("a country off the configured lists gives no hint, whatever older lists said", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  // Russia was on the wizard's own list before 2026-10-23; the configuration decides now.
+  const { wizard } = await mount(page, {
+    lang: "ru",
+    enhancedCheck: { required: false, reasons: [], countries: [] },
+    citizenships: ["RU"],
+    riskCountries: { version: 2, high_risk: ["SY"], blacklist: ["KP", "IR", "MM"] },
+  });
+  const section = wizard.getByTestId("lead-wizard-enhanced-check-section");
+  await expect(section).toHaveAttribute("data-required", "false");
+  await expect(section.getByTestId("lead-wizard-enhanced-check-status")).toContainText("Добровольная проверка");
+  await expect(section.getByTestId("lead-wizard-enhanced-check-hint")).toHaveCount(0);
 });
 
 test("a refused signature confirmation of the GwG sheet is said under its row", async ({ page }, testInfo) => {

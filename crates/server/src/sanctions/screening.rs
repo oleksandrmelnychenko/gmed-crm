@@ -572,8 +572,10 @@ fn lead_subjects_from_row(
         &row.try_get::<Vec<String>, _>("citizenships")
             .unwrap_or_default(),
     );
-    if let Some(code) = country_code(&text(row, "registration_country"))
-        && !citizenships.contains(&code)
+    // `leads.citizenships` is the one source; the legacy registration
+    // country only while the list is empty.
+    if citizenships.is_empty()
+        && let Some(code) = country_code(&text(row, "registration_country"))
     {
         citizenships.push(code);
     }

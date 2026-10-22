@@ -275,8 +275,8 @@ struct UpdateLeadRequest {
     has_medical_records: Option<String>,
     // Empty string explicitly clears the link; omission leaves it unchanged.
     referrer_patient_id: Option<String>,
-    /// ISO 3166-1 alpha-2 codes; replaces the list. The first one is kept as
-    /// `wizard_state.registration_country` for older readers.
+    /// ISO 3166-1 alpha-2 codes; replaces the list (`leads.citizenships`, the
+    /// one source; the legacy `wizard_state.registration_country` is removed).
     citizenships: Option<Vec<String>>,
 }
 
@@ -5724,6 +5724,19 @@ fn lead_wizard_text(wizard_state: &Value, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The single `patients.nationality` of a lead: its first citizenship
+/// (`leads.citizenships`), the legacy `registration_country` only while the
+/// list is empty.
+fn lead_nationality(lead: &sqlx::postgres::PgRow, wizard_state: &Value) -> Option<String> {
+    let stored: Vec<String> = lead.try_get("citizenships").unwrap_or_default();
+    crate::services::citizenships::lead_citizenships(
+        &stored,
+        lead_wizard_text(wizard_state, "registration_country").as_deref(),
+    )
+    .into_iter()
+    .next()
+}
+
 fn lead_wizard_date(wizard_state: &Value, key: &str) -> Option<NaiveDate> {
     lead_wizard_text(wizard_state, key)
         .and_then(|value| NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok())
@@ -6061,7 +6074,7 @@ async fn create_prospect_patient(
                   street_address, city, zip_code, notes,
                   primary_concern_text, additional_concerns,
                   qualification_status, converted_patient_id, failed_outcome_status,
-                  prospect_patient_id, intake_model, wizard_state,
+                  prospect_patient_id, intake_model, wizard_state, citizenships,
                   to_jsonb(leads) AS lead_snapshot
            FROM leads WHERE id = $1
            FOR UPDATE"#,
@@ -6428,7 +6441,7 @@ async fn create_prospect_patient(
         None => explicit_insurance_type,
     };
     let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
-    let nationality = lead_wizard_text(&wizard_state, "registration_country");
+    let nationality = lead_nationality(&lead, &wizard_state);
     // Staff's identity data on the GwG statements are the one source; the
     // wizard field of older leads is the fallback (trigger flow 2026-10-07).
     let passport_expiry = match crate::risk::store::staff_id_valid_until(&mut tx, lead_id).await {
@@ -6781,7 +6794,7 @@ async fn convert_lead(
                   date_of_birth, legal_sex, qualification_status, converted_patient_id,
                   failed_outcome_status, street_address, city, zip_code, notes,
                   intake_model, prospect_patient_id,
-                  wizard_state, to_jsonb(leads) AS lead_snapshot
+                  wizard_state, citizenships, to_jsonb(leads) AS lead_snapshot
            FROM leads WHERE id = $1
            FOR UPDATE"#,
     )
@@ -7000,7 +7013,7 @@ async fn convert_lead(
     let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
     let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
     let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
-    let nationality = lead_wizard_text(&wizard_state, "registration_country");
+    let nationality = lead_nationality(&lead, &wizard_state);
     // Staff's identity data on the GwG statements are the one source; the
     // wizard field of older leads is the fallback (trigger flow 2026-10-07).
     let passport_expiry = match crate::risk::store::staff_id_valid_until(&mut tx, lead_id).await {

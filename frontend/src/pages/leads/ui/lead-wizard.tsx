@@ -85,8 +85,8 @@ import { amlPrefillFromLeadAnswers, applyAmlLeadPrefill } from "../model/enhance
 import { fetchLeadPortalIntake, type LeadRepresentative } from "../data/lead-portal-intake-api";
 import type { RepresentativeUploadKind } from "../data/lead-risk-api";
 import { useLeadEnhancedCheck } from "../model/use-lead-enhanced-check";
+import { useRiskCountryLists } from "../model/use-risk-country-lists";
 import {
-  ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES,
   enhancedCheckReasonsText,
   enhancedCheckRequired,
   enhancedCheckRequirementLabel,
@@ -94,10 +94,13 @@ import {
   enhancedCheckTitle,
   enhancedCheckTriggers,
   highRiskCountryHint,
+  isBlacklistCountry,
+  isRiskCountry,
   pepEnhancedCheckHint,
   RISK_ASSESSMENT_REASON,
   SANCTIONS_REVIEW_PENDING,
   type LeadEnhancedCheck,
+  type RiskCountryLists,
 } from "../model/enhanced-check";
 import { PAYER_PACKAGE_TEMPLATE_IDS } from "../data/lead-payer-package-api";
 import { useCan } from "@/lib/permissions";
@@ -455,7 +458,7 @@ type Draft = {
   state: string;
   zip: string;
   country: string;
-  /** ISO codes (several citizenships); the first one is also stored as registration_country. */
+  /** ISO codes (several citizenships), stored as `leads.citizenships` only. */
   citizenships: string[];
   passportExpiry: string;
   amlEnhancedDueDiligence: AmlEnhancedDueDiligenceDraft;
@@ -544,80 +547,21 @@ const ESTIMATED_OUTLAYS_REFERENCE_SUFFIX = ":estimated-outlays";
 
 // Owner rule 2026-10-07: only the black list (with a confirmed sanctions
 // match, decided by the server) requires the enhanced check; the longer
-// high-risk list is an amber hint for staff.
-const AML_HIGH_RISK_COUNTRY_CODES = new Set([
-  "AF", "DZ", "AO", "BO", "VG", "CI", "CD", "HT", "YE", "CM", "KE", "LA",
-  "LB", "MC", "MM", "NA", "NP", "RU", "SS", "SY", "TT", "VU", "VE", "VN",
-]);
-const AML_BLACKLIST_COUNTRY_CODES = new Set<string>(ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES);
-const AML_COUNTRY_CODE_ALIASES: Record<string, string> = {
-  afghanistan: "AF",
-  afghanistanischen: "AF",
-  algeria: "DZ",
-  algerien: "DZ",
-  angola: "AO",
-  bolivia: "BO",
-  bolivien: "BO",
-  "british virgin islands": "VG",
-  "britische jungferninseln": "VG",
-  "cote d'ivoire": "CI",
-  "côte d’ivoire": "CI",
-  "côte d'ivoire": "CI",
-  "democratic republic of the congo": "CD",
-  "demokratische republik kongo": "CD",
-  haiti: "HT",
-  yemen: "YE",
-  jemen: "YE",
-  cameroon: "CM",
-  kamerun: "CM",
-  kenya: "KE",
-  kenia: "KE",
-  laos: "LA",
-  lebanon: "LB",
-  libanon: "LB",
-  monaco: "MC",
-  myanmar: "MM",
-  "myanmar/birma": "MM",
-  burma: "MM",
-  namibia: "NA",
-  nepal: "NP",
-  "russian federation": "RU",
-  "russische föderation": "RU",
-  russia: "RU",
-  russland: "RU",
-  "south sudan": "SS",
-  südsudan: "SS",
-  syria: "SY",
-  syrien: "SY",
-  "trinidad and tobago": "TT",
-  "trinidad und tobago": "TT",
-  vanuatu: "VU",
-  venezuela: "VE",
-  vietnam: "VN",
-  "democratic people's republic of korea": "KP",
-  "demokratische volksrepublik korea": "KP",
-  "north korea": "KP",
-  nordkorea: "KP",
-  iran: "IR",
-};
-
-function normalizedAmlCountryCode(value: string | null | undefined) {
-  const normalized = value?.trim();
-  if (!normalized) return "";
-  const upper = normalized.toUpperCase();
-  if (/^[A-Z]{2}$/.test(upper)) return upper;
-  return AML_COUNTRY_CODE_ALIASES[normalized.toLocaleLowerCase()] ?? upper;
-}
-
-function amlRiskForCountries(...values: Array<string | null | undefined>): {
+// high-risk list is an amber hint for staff. Both lists are the server's
+// risk configuration (`useRiskCountryLists`), never hardcoded here.
+function amlRiskForCountries(
+  lists: RiskCountryLists,
+  ...values: Array<string | null | undefined>
+): {
   tier: AmlRiskTier;
   countries: string[];
 } | null {
-  const countries = [...new Set(values.map(normalizedAmlCountryCode).filter(Boolean))]
-    .filter((code) => AML_HIGH_RISK_COUNTRY_CODES.has(code) || AML_BLACKLIST_COUNTRY_CODES.has(code));
+  // A stored value may be a country name of an older row.
+  const countries = [...new Set(values.map((value) => countryCodeFromStoredValue(value)).filter(Boolean))]
+    .filter((code) => isRiskCountry(code, lists));
   if (countries.length === 0) return null;
   return {
-    tier: countries.some((code) => AML_BLACKLIST_COUNTRY_CODES.has(code)) ? "blacklist" : "high_risk",
+    tier: countries.some((code) => isBlacklistCountry(code, lists)) ? "blacklist" : "high_risk",
     countries,
   };
 }
@@ -630,13 +574,14 @@ function amlRiskForCountries(...values: Array<string | null | undefined>): {
  * Drittstaat mit hohem Risiko" — the payer is not the contract partner.
  */
 function amlCountryBoxes(
+  lists: RiskCountryLists,
   country: string | null | undefined,
   citizenships: readonly string[],
   payerCountries: readonly string[],
 ): { resident: boolean; transaction: boolean } {
   return {
-    resident: amlRiskForCountries(country) !== null,
-    transaction: amlRiskForCountries(...citizenships, ...payerCountries) !== null,
+    resident: amlRiskForCountries(lists, country) !== null,
+    transaction: amlRiskForCountries(lists, ...citizenships, ...payerCountries) !== null,
   };
 }
 
@@ -1181,7 +1126,9 @@ function autosavePayload(
       framework_contract_id: draft.frameworkContractId || null,
       contract_valid_from: draft.contractValidFrom,
       cost_threshold: draft.costThreshold,
-      registration_country: draft.citizenships[0] ?? "",
+      // `citizenships` is the one source; the legacy key of older leads is
+      // dropped (undefined is left out of the JSON body).
+      registration_country: undefined,
       passport_expiry: draft.passportExpiry,
       aml_enhanced_due_diligence: draft.amlEnhancedDueDiligence,
       selected_specialization_work_type_ids:
@@ -3229,6 +3176,7 @@ export function LeadWizard({
   const enhancedCheckVersion = useMemo(() => [lead, payer.data], [lead, payer.data]);
   const enhancedCheckState = useLeadEnhancedCheck(open ? leadId : null, enhancedCheckVersion);
   const enhancedCheck = enhancedCheckState.check;
+  const riskCountryLists = useRiskCountryLists(open);
   const reloadEnhancedCheck = enhancedCheckState.reload;
   const retentionDays = daysUntilRetentionDeadline(lead?.retention_deadline_at);
   // A repeat intake (lead opened for an existing patient) keeps its patient
@@ -4471,8 +4419,8 @@ export function LeadWizard({
   // residence, the citizenships and the payer's countries: facts for the
   // forms and an amber hint. A PEP is a hint too.
   const amlRisk = useMemo(
-    () => draft ? amlRiskForCountries(draft.country, ...draft.citizenships, ...payerCountries) : null,
-    [draft?.country, draft?.citizenships, payerCountries],
+    () => draft ? amlRiskForCountries(riskCountryLists, draft.country, ...draft.citizenships, ...payerCountries) : null,
+    [riskCountryLists, draft?.country, draft?.citizenships, payerCountries],
   );
   // Step-1 fields that hold a value: no "the patient fills it in" hint over them.
   const step1FilledDraftKeys = useMemo(() => {
@@ -4492,15 +4440,15 @@ export function LeadWizard({
   // Owner rule 2026-10-07: only the server's check requires the enhanced
   // check — or a black-list country shown here before it is saved.
   const amlBlacklistCountries = useMemo(
-    () => amlRisk?.countries.filter((code) => AML_BLACKLIST_COUNTRY_CODES.has(code)) ?? [],
-    [amlRisk],
+    () => amlRisk?.countries.filter((code) => isBlacklistCountry(code, riskCountryLists)) ?? [],
+    [amlRisk, riskCountryLists],
   );
   const amlRequired = enhancedCheckRequired(enhancedCheck, amlBlacklistCountries);
   const amlRequiredText = amlEnhancedCheckRequiredText(enhancedCheck, amlBlacklistCountries, tx, lang);
   const amlHints = amlEnhancedCheckHints({
     check: enhancedCheck,
     required: amlRequired,
-    highRiskCountries: amlRisk?.countries.filter((code) => !AML_BLACKLIST_COUNTRY_CODES.has(code)) ?? [],
+    highRiskCountries: amlRisk?.countries.filter((code) => !isBlacklistCountry(code, riskCountryLists)) ?? [],
     pep: amlPepTriggered,
     tx,
     lang,
@@ -5312,13 +5260,14 @@ export function LeadWizard({
     const citizenships = change.citizenships ?? draft?.citizenships ?? [];
     const nextPayerCountries = change.payerCountries ?? payerCountries;
     const nextRisk = amlRiskForCountries(
+      riskCountryLists,
       country,
       ...citizenships,
       ...nextPayerCountries,
     );
-    const boxes = amlCountryBoxes(country, citizenships, nextPayerCountries);
+    const boxes = amlCountryBoxes(riskCountryLists, country, citizenships, nextPayerCountries);
     const newBlacklistCountry = nextRisk?.countries.some((code) => (
-      AML_BLACKLIST_COUNTRY_CODES.has(code) && !amlRisk?.countries.includes(code)
+      isBlacklistCountry(code, riskCountryLists) && !amlRisk?.countries.includes(code)
     )) ?? false;
     const affectedThirdCountry = nextRisk?.countries
       .map((code) => countryLabel(code, "de"))
@@ -5406,7 +5355,7 @@ export function LeadWizard({
     setDraft((current) => {
       if (!current) return current;
       // Residence only for the patient's own country (QA 2026-10-10 B4).
-      const boxes = amlCountryBoxes(current.country, current.citizenships, payerCountries);
+      const boxes = amlCountryBoxes(riskCountryLists, current.country, current.citizenships, payerCountries);
       return {
         ...current,
         amlEnhancedDueDiligence: {

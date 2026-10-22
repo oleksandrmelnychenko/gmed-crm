@@ -194,12 +194,17 @@ impl Default for RiskConfig {
         }
         RiskConfig {
             version: 1,
-            // The wizard's AML_HIGH_RISK_COUNTRY_CODES without MM.
+            // The longer list of high-risk third countries (an amber hint
+            // in the staff wizard, which reads both lists from
+            // `GET /compliance/risk-countries`). Myanmar is on the black
+            // list (list 2), never in both.
             list_1: codes(&[
                 "AF", "AO", "BO", "CD", "CI", "CM", "DZ", "HT", "KE", "LA", "LB", "MC", "NA", "NP",
                 "RU", "SS", "SY", "TT", "VE", "VG", "VN", "VU", "YE",
             ]),
-            // The black list (`lead_enhanced_check::BLACK_LIST_COUNTRY_CODES`).
+            // The black list: it also decides the enhanced check
+            // (`lead_enhanced_check::enhanced_check_triggers`); sorted
+            // `BLACK_LIST_COUNTRY_CODES` (a test there keeps both equal).
             list_2: codes(&["IR", "KP", "MM"]),
             points,
             knockout: codes(&["T14", "T15", "T16"]),
@@ -313,7 +318,8 @@ impl RiskConfig {
 }
 
 /// The ISO code of a stored country value: an ISO code, or a country name of
-/// an older row (as `lead_enhanced_check::black_list_code`).
+/// an older row; the enhanced check reads it too
+/// (`lead_enhanced_check::black_list_code_in`).
 pub fn country_value_code(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {

@@ -631,7 +631,11 @@ async fn payer_and_citizenship_countries_count_for_the_aml_risk() {
     assert_eq!(status, StatusCode::OK, "{updated}");
     let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert_eq!(lead["citizenships"], json!(["DE", "IR"]));
-    assert_eq!(lead["wizard_state"]["registration_country"], "DE");
+    // `citizenships` is the one source: no legacy registration country.
+    assert!(
+        lead["wizard_state"].get("registration_country").is_none(),
+        "{lead}"
+    );
     assert!(!edd_passed(&lead), "{lead}");
     assert_eq!(
         enhanced_check(&app, lead_id).await,
@@ -756,7 +760,10 @@ async fn new_lead_and_patient_card_keep_several_citizenships() {
     let lead_id = created["id"].as_str().unwrap().to_string();
     let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert_eq!(lead["citizenships"], json!(["UA", "PL"]));
-    assert_eq!(lead["wizard_state"]["registration_country"], "UA");
+    assert!(
+        lead["wizard_state"].get("registration_country").is_none(),
+        "{lead}"
+    );
     let (status, list) = json_request(&app, "GET", "/api/v1/leads", &pm, None).await;
     assert_eq!(status, StatusCode::OK);
     let listed = list

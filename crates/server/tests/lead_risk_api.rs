@@ -629,6 +629,22 @@ async fn the_gate_never_holds_the_consent_or_the_identity_document() {
 }
 
 #[tokio::test]
+async fn the_wizard_reads_the_configured_country_lists() {
+    let Some(app) = test_app().await else { return };
+    let (status, config) = request(&app, "GET", "/compliance/risk-config", &app.ceo(), None).await;
+    assert_eq!(status, StatusCode::OK, "{config}");
+    // The staff who edit leads read only the two lists, not the configuration.
+    for auth in [app.pm(), app.sales()] {
+        let (status, lists) = request(&app, "GET", "/compliance/risk-countries", &auth, None).await;
+        assert_eq!(status, StatusCode::OK, "{lists}");
+        assert_eq!(lists["high_risk"], config["list_1"], "{lists}");
+        assert_eq!(lists["blacklist"], config["list_2"], "{lists}");
+        assert!(lists.get("reviewers").is_none(), "{lists}");
+        assert!(lists.get("points").is_none(), "{lists}");
+    }
+}
+
+#[tokio::test]
 async fn level_three_needs_two_different_reviewers() {
     let Some(app) = test_app().await else { return };
     // The CEO names the patient manager a deputy reviewer; Sales cannot be one.

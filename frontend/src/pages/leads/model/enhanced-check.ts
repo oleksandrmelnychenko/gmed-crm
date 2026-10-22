@@ -9,10 +9,39 @@
 import type { Tx } from "./lead-payer";
 
 /**
- * The black list (FATF call for action): mirror of `BLACK_LIST_COUNTRY_CODES`
- * on the server; `enhanced-check.test.ts` keeps both equal.
+ * The country lists of the risk configuration, the one source of the
+ * wizard's country hints (`GET /compliance/risk-countries`): `blacklist` is
+ * list 2 — it requires the enhanced check (FATF call for action by default);
+ * `highRisk` is list 1, an amber hint. The CEO edits both on the risk
+ * settings page; the frontend hardcodes no country code.
  */
-export const ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES = ["KP", "IR", "MM"] as const;
+export type RiskCountryLists = {
+  highRisk: string[];
+  blacklist: string[];
+};
+
+/** Until the lists load (or when they cannot): no country hint at all. */
+export const EMPTY_RISK_COUNTRY_LISTS: RiskCountryLists = { highRisk: [], blacklist: [] };
+
+function countryCodes(value: unknown): string[] {
+  const codes: string[] = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    if (typeof item !== "string") continue;
+    const code = item.trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(code) && !codes.includes(code)) codes.push(code);
+  }
+  return codes;
+}
+
+/** The server's answer; null for anything that is not one (an older server, a catch-all mock). */
+export function normalizeRiskCountryLists(value: unknown): RiskCountryLists | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.blacklist) || !Array.isArray(raw.high_risk)) return null;
+  const blacklist = countryCodes(raw.blacklist);
+  // A code on both lists counts as black list only (as the server's engine).
+  return { blacklist, highRisk: countryCodes(raw.high_risk).filter((code) => !blacklist.includes(code)) };
+}
 
 /** The keys that make the check required, in the server's order. */
 export const ENHANCED_CHECK_TRIGGER_REASONS = [
@@ -58,19 +87,26 @@ export function normalizeLeadEnhancedCheck(value: unknown): LeadEnhancedCheck | 
   };
 }
 
-const BLACKLIST = new Set<string>(ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES);
+/** Whether an ISO code is on the configured black list. */
+export function isBlacklistCountry(code: string | null | undefined, lists: RiskCountryLists): boolean {
+  return lists.blacklist.includes((code ?? "").trim().toUpperCase());
+}
 
-/** Whether an ISO code is on the black list. */
-export function isBlacklistCountry(code: string | null | undefined): boolean {
-  return BLACKLIST.has((code ?? "").trim().toUpperCase());
+/** Whether an ISO code is on either configured list. */
+export function isRiskCountry(code: string | null | undefined, lists: RiskCountryLists): boolean {
+  const normalized = (code ?? "").trim().toUpperCase();
+  return lists.blacklist.includes(normalized) || lists.highRisk.includes(normalized);
 }
 
 /** The black-list codes among ISO codes, once each, in their order. */
-export function blacklistCountries(codes: Iterable<string | null | undefined>): string[] {
+export function blacklistCountries(
+  codes: Iterable<string | null | undefined>,
+  lists: RiskCountryLists,
+): string[] {
   const found: string[] = [];
   for (const code of codes) {
     const normalized = (code ?? "").trim().toUpperCase();
-    if (BLACKLIST.has(normalized) && !found.includes(normalized)) found.push(normalized);
+    if (lists.blacklist.includes(normalized) && !found.includes(normalized)) found.push(normalized);
   }
   return found;
 }

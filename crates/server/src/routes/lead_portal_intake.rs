@@ -3048,13 +3048,11 @@ async fn update_my_personal_data(
                insurance_provider = $18,
                insurance_number = $19,
                insurance_covers_germany = $20,
-               -- The wizard and older readers still use the single
-               -- registration country: the first citizenship.
+               -- `citizenships` is the one source: the legacy single
+               -- registration country goes once the list is written.
                wizard_state = CASE
-                   WHEN NOT $14 THEN wizard_state
-                   WHEN cardinality($7::text[]) > 0
-                       THEN jsonb_set(wizard_state, '{registration_country}', to_jsonb(($7::text[])[1]))
-                   ELSE wizard_state - 'registration_country'
+                   WHEN $14 THEN wizard_state - 'registration_country'
+                   ELSE wizard_state
                END,
                portal_field_updates = portal_field_updates || $15::jsonb,
                updated_at = now()

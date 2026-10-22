@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES,
+  EMPTY_RISK_COUNTRY_LISTS,
   ENHANCED_CHECK_TRIGGER_REASONS,
   RISK_ASSESSMENT_REASON,
   SANCTIONS_REVIEW_PENDING,
@@ -15,8 +15,10 @@ import {
   enhancedCheckTitle,
   enhancedCheckTriggers,
   isBlacklistCountry,
+  isRiskCountry,
   highRiskCountryHint,
   normalizeLeadEnhancedCheck,
+  normalizeRiskCountryLists,
   pepEnhancedCheckHint,
 } from "./enhanced-check";
 
@@ -27,25 +29,50 @@ const serverSource = () =>
   readFileSync(new URL("../../../../../crates/server/src/routes/lead_enhanced_check.rs", import.meta.url), "utf8");
 
 describe("the enhanced check of the owner's rule (2026-10-07)", () => {
-  it("mirrors the server's black list and reason keys", () => {
+  it("knows the server's reason keys", () => {
     const source = serverSource();
-    const list = source.match(/pub const BLACK_LIST_COUNTRY_CODES: &\[&str\] = &\[([^\]]*)\];/);
-    expect(list).not.toBeNull();
-    const codes = [...(list?.[1] ?? "").matchAll(/"([A-Z]{2})"/g)].map((match) => match[1]);
-    expect(codes).toEqual([...ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES]);
     for (const reason of [...ENHANCED_CHECK_TRIGGER_REASONS, SANCTIONS_REVIEW_PENDING]) {
       expect(source).toContain(`"${reason}"`);
     }
   });
 
-  it("is North Korea, Iran and Myanmar — not Russia or the longer high-risk list", () => {
-    expect(ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES).toEqual(["KP", "IR", "MM"]);
-    expect(isBlacklistCountry("ir")).toBe(true);
-    expect(isBlacklistCountry(" MM ")).toBe(true);
-    for (const code of ["RU", "SY", "VE", "AF", "DE", "", null, undefined]) {
-      expect(isBlacklistCountry(code)).toBe(false);
+  it("hardcodes no country list: the server's configured lists decide", () => {
+    const wizard = readFileSync(new URL("../ui/lead-wizard.tsx", import.meta.url), "utf8");
+    const model = readFileSync(new URL("./enhanced-check.ts", import.meta.url), "utf8");
+    for (const source of [wizard, model]) {
+      expect(source).not.toMatch(/\[\s*"KP",\s*"IR"/);
+      expect(source).not.toContain("AML_HIGH_RISK_COUNTRY_CODES");
     }
-    expect(blacklistCountries(["DE", "ir", "RU", "IR", "kp", null])).toEqual(["IR", "KP"]);
+    expect(EMPTY_RISK_COUNTRY_LISTS).toEqual({ highRisk: [], blacklist: [] });
+    expect(isBlacklistCountry("IR", EMPTY_RISK_COUNTRY_LISTS)).toBe(false);
+  });
+
+  it("reads the configured lists of `GET /compliance/risk-countries`", () => {
+    expect(normalizeRiskCountryLists({
+      version: 3,
+      high_risk: ["ru", "SY", "MM", 7, "Russia", "SY"],
+      blacklist: ["KP", " ir ", "MM"],
+    })).toEqual({ highRisk: ["RU", "SY"], blacklist: ["KP", "IR", "MM"] });
+    for (const value of [[], {}, null, "lists", { blacklist: ["IR"] }]) {
+      expect(normalizeRiskCountryLists(value)).toBeNull();
+    }
+  });
+
+  it("follows the configured black list — Russia stays on the longer list", () => {
+    const lists = normalizeRiskCountryLists({ high_risk: ["RU", "SY", "VE", "AF"], blacklist: ["KP", "IR", "MM"] })!;
+    expect(isBlacklistCountry("ir", lists)).toBe(true);
+    expect(isBlacklistCountry(" MM ", lists)).toBe(true);
+    for (const code of ["RU", "SY", "VE", "AF", "DE", "", null, undefined]) {
+      expect(isBlacklistCountry(code, lists)).toBe(false);
+    }
+    expect(isRiskCountry("ru", lists)).toBe(true);
+    expect(isRiskCountry("DE", lists)).toBe(false);
+    expect(blacklistCountries(["DE", "ir", "RU", "IR", "kp", null], lists)).toEqual(["IR", "KP"]);
+    // The CEO moved Syria onto the black list.
+    const moved = normalizeRiskCountryLists({ high_risk: ["RU", "SY"], blacklist: ["SY", "KP"] })!;
+    expect(moved.highRisk).toEqual(["RU"]);
+    expect(isBlacklistCountry("SY", moved)).toBe(true);
+    expect(isBlacklistCountry("IR", moved)).toBe(false);
   });
 
   it("reads the server's answer and nothing else", () => {

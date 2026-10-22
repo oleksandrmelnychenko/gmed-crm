@@ -21,9 +21,10 @@
 //!   (`recipient_sanctioned`, the payer's side; owner decisions 2026-10-11,
 //!   its own key since QA 2026-10-11 N-08 so staff are not told "payer").
 //!
-//! The black list is [`BLACK_LIST_COUNTRY_CODES`], the FATF "call for
-//! action" countries — not the longer list of high-risk third countries and
-//! not the blocked countries of the sanctions policy. A possible match that
+//! The black list is list 2 of the risk configuration (default
+//! [`BLACK_LIST_COUNTRY_CODES`], the FATF "call for action" countries), the
+//! same list the risk engine scores as list 2 — not the longer list of
+//! high-risk third countries (list 1) and not the blocked countries of the sanctions policy. A possible match that
 //! nobody has reviewed yet is no trigger: it is reported as
 //! `sanctions_review_pending` and leaves the check optional. A PEP, a country
 //! of the longer high-risk list and the payment method are no input of this
@@ -55,14 +56,13 @@ use gmed_domain::access::capabilities::{Capability, STAFF_ROLES};
 
 use crate::auth::middleware::AuthUser;
 use crate::routes::lead_payer;
-use crate::sanctions::normalize::country_code;
 use crate::state::AppState;
 
-/// The black list of the owner's rule: the FATF high-risk jurisdictions
-/// subject to a call for action (North Korea, Iran, Myanmar). The staff
-/// wizard mirrors it in `ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES`
-/// (`frontend/src/pages/leads/model/enhanced-check.ts`; a test there keeps
-/// both equal).
+/// The default black list of the owner's rule: the FATF high-risk
+/// jurisdictions subject to a call for action (North Korea, Iran, Myanmar).
+/// It is only the default of list 2 of the risk configuration
+/// ([`crate::risk::RiskConfig`]); the rule and the staff wizard
+/// (`GET /compliance/risk-countries`) read the configured list 2.
 pub const BLACK_LIST_COUNTRY_CODES: &[&str] = &["KP", "IR", "MM"];
 
 pub const REASON_PATIENT_RESIDENCE_BLACKLIST: &str = "patient_residence_blacklist";
@@ -201,43 +201,49 @@ pub(crate) struct Subjects {
     pub review_pending: bool,
 }
 
-/// The black-list code of a stored country value (an ISO code or a name),
-/// if it is on the black list.
-pub(crate) fn black_list_code(value: &str) -> Option<&'static str> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let code = country_code(trimmed).or_else(|| {
-        match trimmed.to_lowercase().as_str() {
-            "birma" | "myanmar/birma" => Some("MM"),
-            "demokratische volksrepublik korea" => Some("KP"),
-            "islamische republik iran" => Some("IR"),
-            _ => None,
-        }
-        .map(str::to_string)
-    })?;
-    BLACK_LIST_COUNTRY_CODES
-        .iter()
-        .copied()
-        .find(|listed| *listed == code)
+/// The code of a stored country value (an ISO code or a name) if it is on
+/// `black_list` (ISO codes, list 2 of the risk configuration).
+pub(crate) fn black_list_code_in(value: &str, black_list: &[String]) -> Option<String> {
+    let code = crate::risk::country_value_code(value)?;
+    black_list.contains(&code).then_some(code)
 }
 
-/// The rule itself (pure).
+/// The code of a stored country value on the default black list.
+#[cfg(test)]
+pub(crate) fn black_list_code(value: &str) -> Option<String> {
+    black_list_code_in(value, &default_black_list())
+}
+
+/// [`BLACK_LIST_COUNTRY_CODES`] as owned codes.
+#[cfg(test)]
+pub(crate) fn default_black_list() -> Vec<String> {
+    BLACK_LIST_COUNTRY_CODES
+        .iter()
+        .map(|code| code.to_string())
+        .collect()
+}
+
+/// The rule itself (pure) with the default black list.
+#[cfg(test)]
 pub(crate) fn evaluate(subjects: &Subjects) -> EnhancedCheck {
+    evaluate_with(subjects, &default_black_list())
+}
+
+/// The rule itself (pure) with the configured black list (list 2).
+pub(crate) fn evaluate_with(subjects: &Subjects, black_list: &[String]) -> EnhancedCheck {
     let mut check = EnhancedCheck::default();
     let mut black_listed = |values: &[String], reason: &'static str| {
-        let codes: Vec<&'static str> = values
+        let codes: Vec<String> = values
             .iter()
-            .filter_map(|value| black_list_code(value))
+            .filter_map(|value| black_list_code_in(value, black_list))
             .collect();
         if codes.is_empty() {
             return;
         }
         check.reasons.push(reason);
         for code in codes {
-            if !check.countries.iter().any(|known| known == code) {
-                check.countries.push(code.to_string());
+            if !check.countries.contains(&code) {
+                check.countries.push(code);
             }
         }
     };
@@ -401,10 +407,14 @@ pub(crate) async fn load_subjects(
         &mut subjects.patient_residence,
         text("habitual_residence_country"),
     );
-    push_all(&mut subjects.patient_citizenships, list("citizenships"));
-    push_text(
+    // `leads.citizenships` is the one source; the legacy registration
+    // country only while the list is empty.
+    push_all(
         &mut subjects.patient_citizenships,
-        text("registration_country"),
+        crate::services::citizenships::lead_citizenships(
+            &list("citizenships"),
+            text("registration_country").as_deref(),
+        ),
     );
     // Only a third party is a payer of its own; a self-payer is the patient.
     if text("payer_kind").as_deref() == Some(lead_payer::PAYER_KIND_THIRD_PARTY) {
@@ -437,14 +447,15 @@ pub(crate) async fn enhanced_check_triggers(
     let Some(subjects) = load_subjects(conn, lead_id).await? else {
         return Ok(EnhancedCheck::default());
     };
-    let check = evaluate(&subjects);
+    // One list for the rule and the risk engine: list 2 of the configuration.
+    let config = crate::risk::store::load_config(conn).await?;
+    let check = evaluate_with(&subjects, &config.list_2);
     let assessment = crate::risk::store::load(conn, lead_id)
         .await?
         .filter(crate::risk::store::Assessment::started);
     let level = if let Some(assessment) = assessment {
         // A representative answers their own block R. Their risk must not
         // silently turn the child's legacy extra form into a questionnaire.
-        let config = crate::risk::store::load_config(conn).await?;
         let own_triggers = assessment
             .triggers
             .iter()
@@ -751,5 +762,30 @@ mod tests {
         for value in ["", "RU", "DE", "Syria", "Atlantis"] {
             assert!(black_list_code(value).is_none(), "{value}");
         }
+    }
+
+    #[test]
+    fn the_default_black_list_is_list_two_of_the_risk_configuration() {
+        let mut configured = crate::risk::RiskConfig::default().list_2;
+        configured.sort();
+        let mut default = default_black_list();
+        default.sort();
+        assert_eq!(configured, default);
+    }
+
+    #[test]
+    fn the_rule_follows_the_configured_black_list() {
+        let subjects = Subjects {
+            patient_citizenships: codes(&["SY"]),
+            payer_residence: codes(&["Iran"]),
+            ..Subjects::default()
+        };
+        // The CEO moved Syria onto list 2 and Iran off it.
+        let configured = codes(&["KP", "SY"]);
+        let check = evaluate_with(&subjects, &configured);
+        assert!(check.required);
+        assert_eq!(check.reasons, vec![REASON_PATIENT_CITIZENSHIP_BLACKLIST]);
+        assert_eq!(check.countries, ["SY"]);
+        assert!(!evaluate_with(&subjects, &[]).required);
     }
 }

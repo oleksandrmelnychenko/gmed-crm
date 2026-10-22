@@ -579,7 +579,8 @@ async fn a_patient_edits_only_the_own_step_one_fields() {
         .await
         .unwrap();
     assert_eq!(citizenships, vec!["UA".to_string(), "DE".to_string()]);
-    assert_eq!(registration_country.as_deref(), Some("UA"));
+    // `citizenships` is the one source: the legacy key is not written.
+    assert_eq!(registration_country, None);
     assert_eq!(legal_sex.as_deref(), Some("female"));
     assert_eq!(
         audit_count(pool, "lead_portal_update_personal_data", lead_a).await,

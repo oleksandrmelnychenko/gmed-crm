@@ -2753,9 +2753,10 @@ async fn patient_first_conversion_activates_the_prospect_and_keeps_case_provenan
     .unwrap();
     assert!(assignment_count >= 1);
 
+    // The citizenships win over a stale legacy registration country.
     sqlx::query(
         r#"UPDATE leads
-           SET wizard_state = wizard_state || '{"registration_country":"AT","passport_expiry":"2035-06-30"}'::jsonb,
+           SET wizard_state = wizard_state || '{"registration_country":"PL","passport_expiry":"2035-06-30"}'::jsonb,
                citizenships = '{AT,UA}'::text[]
            WHERE id = $1"#,
     )

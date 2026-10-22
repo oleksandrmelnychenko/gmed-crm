@@ -11,6 +11,9 @@
 //! * Staff enter the identity document data the lead only uploads
 //!   (`PUT …/identity-document-data`, also per representative).
 //! * The configuration (`GET` reviewers, `PUT` CEO) and the review queue.
+//! * `GET /compliance/risk-countries` (the staff who read leads): only the
+//!   two configured country lists, so the wizard's hints follow the engine
+//!   and the frontend hardcodes no country code.
 //!
 //! The lead and the payer never reach any of this (P2).
 
@@ -78,6 +81,7 @@ pub fn router() -> Router<AppState> {
                 .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
         )
         .route("/compliance/risk-config", get(get_config).put(put_config))
+        .route("/compliance/risk-countries", get(get_country_lists))
         .route("/compliance/risk-reviews", get(review_queue))
         .merge(cabinet::router())
 }
@@ -1232,6 +1236,38 @@ async fn get_config(
     match result {
         Ok(value) => Json(value).into_response(),
         Err(error) => database(error, "load config"),
+    }
+}
+
+/// The country lists of a configuration as the staff wizard reads them:
+/// `high_risk` is list 1 (an amber hint, points in the assessment),
+/// `blacklist` is list 2 (the black list that requires the enhanced check,
+/// `lead_enhanced_check::enhanced_check_triggers`).
+pub(crate) fn country_lists_json(config: &RiskConfig) -> Value {
+    json!({
+        "version": config.version,
+        "high_risk": config.list_1,
+        "blacklist": config.list_2,
+    })
+}
+
+/// `GET /compliance/risk-countries` (`leads.edit` or the CEO Assistant): the
+/// configured country lists, the one source of the wizard's country hints.
+async fn get_country_lists(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> Response {
+    if !lead_payer::may_view(&auth) {
+        return forbidden();
+    }
+    let result = async {
+        let mut conn = state.db.acquire().await?;
+        store::load_config(&mut conn).await
+    }
+    .await;
+    match result {
+        Ok(config) => Json(country_lists_json(&config)).into_response(),
+        Err(error) => database(error, "load country lists"),
     }
 }
 

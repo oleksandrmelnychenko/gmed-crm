@@ -4013,13 +4013,14 @@ async fn load_gwg_identification_sheet(
         }
         risk_countries.extend(lead_country);
         risk_countries.extend(statements.habitual_residence_country.clone());
-        risk_countries.extend(lead_citizenships);
-        risk_countries.extend(
+        // `leads.citizenships` is the one source; the legacy registration
+        // country only while the list is empty.
+        risk_countries.extend(crate::services::citizenships::lead_citizenships(
+            &lead_citizenships,
             wizard_state
                 .get("registration_country")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-        );
+                .and_then(Value::as_str),
+        ));
     }
     // Identification by qualified electronic signature and the payment from
     // the person's own account, on the days they happened in Germany. A

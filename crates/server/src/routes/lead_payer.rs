@@ -2059,8 +2059,9 @@ pub(crate) async fn carry_over_to_patient(
     Ok(())
 }
 
-/// Sets the lead's citizenships and keeps `wizard_state.registration_country`
-/// on the first one for older readers. Returns the previous value.
+/// Sets the lead's citizenships — the one source — and removes the legacy
+/// `wizard_state.registration_country`, so an emptied list never brings an
+/// old value back as a fallback. Returns the previous value.
 pub(crate) async fn set_lead_citizenships(
     tx: &mut PgConnection,
     lead_id: Uuid,
@@ -2075,11 +2076,7 @@ pub(crate) async fn set_lead_citizenships(
     sqlx::query(
         r#"UPDATE leads
            SET citizenships = $2,
-               wizard_state = jsonb_set(
-                   COALESCE(wizard_state, '{}'::jsonb),
-                   '{registration_country}',
-                   to_jsonb(COALESCE($2[1], '')),
-                   true),
+               wizard_state = COALESCE(wizard_state, '{}'::jsonb) - 'registration_country',
                updated_at = now()
            WHERE id = $1"#,
     )

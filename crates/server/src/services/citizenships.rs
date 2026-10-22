@@ -4,9 +4,12 @@
 //! patients and third-party payers store them as upper-case alpha-2 codes
 //! (`leads.citizenships`, `patients.citizenships`,
 //! `lead_payer_declarations.citizenships`), so sanctions screening and the AML
-//! country risk compare codes instead of free text. The old single value
-//! (`patients.nationality`, the wizard's `registration_country`) keeps the
-//! first citizenship for readers that still expect one country.
+//! country risk compare codes instead of free text. `leads.citizenships` is
+//! the one source of a lead's citizenships; the wizard's old
+//! `registration_country` is no longer written and is read only as a
+//! fallback while the list is empty ([`lead_citizenships`]).
+//! `patients.nationality` keeps the first citizenship for readers that still
+//! expect one country.
 
 use crate::routes::patients::ISO_3166_ALPHA_2_COUNTRY_CODES;
 
@@ -54,6 +57,30 @@ pub fn normalize_country_code(value: Option<&str>) -> Result<Option<String>, &'s
     }
 }
 
+/// The patient's citizenships of a lead: `leads.citizenships` is the one
+/// source. The wizard's legacy `registration_country` (a code or, in rows
+/// before 2026-10-03, a name) only stands in while the list is empty — rows
+/// the backfill could not map; nothing writes it any more.
+pub fn lead_citizenships(
+    stored: &[String],
+    legacy_registration_country: Option<&str>,
+) -> Vec<String> {
+    let stored: Vec<String> = stored
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect();
+    if !stored.is_empty() {
+        return stored;
+    }
+    legacy_registration_country
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| vec![value.to_string()])
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +104,21 @@ mod tests {
             Err(INVALID_CITIZENSHIP)
         );
         assert!(normalize_citizenships(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_stored_citizenships_win_over_the_legacy_registration_country() {
+        assert_eq!(
+            lead_citizenships(&strings(&["DE", "UA"]), Some("IR")),
+            strings(&["DE", "UA"])
+        );
+        assert_eq!(lead_citizenships(&[], Some(" Iran ")), strings(&["Iran"]));
+        assert_eq!(
+            lead_citizenships(&strings(&[" "]), Some("UA")),
+            strings(&["UA"])
+        );
+        assert!(lead_citizenships(&[], Some("  ")).is_empty());
+        assert!(lead_citizenships(&[], None).is_empty());
     }
 
     #[test]
