@@ -874,6 +874,36 @@ export function representativeMissingText(missing: unknown, tx: Tx): string | nu
   return `${tx("Не хватает:", "Es fehlt:")} ${parts.join("; ")}.`;
 }
 
+/**
+ * Whether the missing keys name the identity document (data or scan) or the
+ * proof of authority: staff enter those in the documents step, in the
+ * person's card under the identity document — not under «Данные клиента»
+ * (DEV 2026-10-22: the message sent staff to a step without these fields).
+ */
+export function representativeDocumentFieldsMissing(missing: unknown): boolean {
+  if (!Array.isArray(missing)) return false;
+  return missing.some((key) => typeof key === "string" && /_(id_[a-z_]+|authority_upload)$/.test(key));
+}
+
+/**
+ * The place (`rep1`, `rep2`, `agent`, `guardian`) of the first person whose
+ * document data a refusal (`representative_details_incomplete`) names, so the
+ * wizard can open that person's document form; `null` otherwise.
+ */
+export function representativeDocumentSlot(error: unknown): string | null {
+  if (!(error instanceof ApiRequestError)) return null;
+  const code = error.body?.code ?? error.body?.error ?? error.code;
+  if (code !== "representative_details_incomplete") return null;
+  const missing: unknown = error.body?.missing;
+  if (!Array.isArray(missing)) return null;
+  for (const key of missing) {
+    if (typeof key !== "string" || !representativeDocumentFieldsMissing([key])) continue;
+    const slot = Object.keys(REPRESENTATIVE_SLOT_LABELS).find((candidate) => key.startsWith(`${candidate}_`));
+    if (slot) return slot;
+  }
+  return null;
+}
+
 /** 409 `risk_review_required` of the gated staff actions (qualify, convert, signatures …). */
 export function riskGateErrorText(error: unknown, tx: Tx): string | null {
   if (!(error instanceof ApiRequestError)) return null;
@@ -888,7 +918,11 @@ export function riskGateErrorText(error: unknown, tx: Tx): string | null {
       "Bitte vervollständigen Sie vor Vertrag und Unterschrift die Daten der Eltern bzw. gesetzlichen Vertreter unter „Personendaten“. Im Portal können Sie den Block „Vertretung“ anfordern.",
     );
     const missing = representativeMissingText(error.body?.missing, tx);
-    return missing ? `${base} ${missing}` : base;
+    const hint = representativeDocumentFieldsMissing(error.body?.missing) ? tx(
+      "Данные документа и сканы вносятся в шаге «Документы», блок «Документ, удостоверяющий личность», в карточке этого лица (сохраняются при выходе из формы).",
+      "Ausweisdaten und Scans werden im Schritt „Unterlagen“, Block „Ausweisdokument“, in der Karte dieser Person erfasst (gespeichert beim Verlassen des Formulars).",
+    ) : "";
+    return [base, missing, hint].filter(Boolean).join(" ");
   }
   if (code !== "risk_review_required") return null;
   if (error.body?.rejected === true) {

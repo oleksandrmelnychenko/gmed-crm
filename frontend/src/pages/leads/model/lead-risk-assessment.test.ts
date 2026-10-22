@@ -16,6 +16,8 @@ import {
   riskDisplayedScore,
   riskEventLabel,
   riskGateErrorText,
+  representativeDocumentFieldsMissing,
+  representativeDocumentSlot,
   representativeMissingText,
   riskLevelTone,
   riskMissingLabel,
@@ -377,5 +379,34 @@ describe("the contract gate names the missing parent details (staff report 2026-
     expect(text).toContain("данные этого лица");
     expect(text).not.toContain("Перед договором");
     expect(text).toContain("Не хватает: второй родитель — телефон.");
+    // A phone is no document field: no hint to the documents step.
+    expect(text).not.toContain("шаге «Документы»");
+  });
+
+  it("sends staff to the documents step for missing document data (DEV 2026-10-22)", () => {
+    const error = new ApiRequestError("x", {
+      status: 422,
+      code: "representative_details_incomplete",
+      body: {
+        code: "representative_details_incomplete",
+        scope: "person",
+        missing: ["rep1_id_document_type", "rep1_id_document_number", "rep1_id_valid_until"],
+      },
+    });
+    const text = riskGateErrorText(error, ru) ?? "";
+    expect(text).toContain("Не хватает: первый родитель / представитель — вид документа, номер документа, срок действия документа.");
+    expect(text).toContain("шаге «Документы», блок «Документ, удостоверяющий личность»");
+    expect(riskGateErrorText(error, de)).toContain("Schritt „Unterlagen“");
+    expect(representativeDocumentFieldsMissing(["rep2_authority_upload"])).toBe(true);
+    expect(representativeDocumentFieldsMissing(["rep1_street", "rep1_citizenships"])).toBe(false);
+    expect(representativeDocumentFieldsMissing(null)).toBe(false);
+    expect(representativeDocumentSlot(error)).toBe("rep1");
+    const phoneOnly = new ApiRequestError("x", {
+      status: 422,
+      code: "representative_details_incomplete",
+      body: { code: "representative_details_incomplete", missing: ["rep2_phone", "rep2_id_upload"] },
+    });
+    expect(representativeDocumentSlot(phoneOnly)).toBe("rep2");
+    expect(representativeDocumentSlot(new Error("x"))).toBeNull();
   });
 });

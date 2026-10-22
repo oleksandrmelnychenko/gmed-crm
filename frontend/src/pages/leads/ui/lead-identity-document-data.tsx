@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import { Check, LoaderCircle } from "lucide-react";
 
 import { checkboxClass, inputClass, selectClass, tokens } from "@/components/ui-shell";
@@ -78,6 +78,7 @@ export function LeadIdentityDocumentDataForm({
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
   const lastSavedRef = useRef(saved);
+  const busyRef = useRef(false);
 
   // A fresh server state replaces the form, unless staff are typing over the previous one.
   useEffect(() => {
@@ -96,6 +97,8 @@ export function LeadIdentityDocumentDataForm({
   const entered = identityDocumentEnteredLine(source, tx);
 
   const submit = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError("");
     try {
@@ -104,12 +107,24 @@ export function LeadIdentityDocumentDataForm({
     } catch (saveError) {
       setError(saveError instanceof Error && saveError.message ? saveError.message : tx("Не удалось сохранить", "Speichern fehlgeschlagen"));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
+  // The data are stored as soon as staff leave the form (DEV 2026-10-22,
+  // Linda Testova: a parent's document data were typed in, the separate
+  // button was never pressed, and the GwG sheet kept asking for them while
+  // the form looked filled). The button stays for an explicit save.
+  const saveOnLeave = (event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    if (disabled || busy || !changed || datesInvalid) return;
+    void submit();
+  };
+
   return (
-    <div className="space-y-2.5" data-testid={testId}>
+    <div className="space-y-2.5" data-testid={testId} onBlur={saveOnLeave}>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <FormField label={tx("Вид документа", "Art des Dokuments")}>
           <NativeComboboxSelect
@@ -211,6 +226,11 @@ export function LeadIdentityDocumentDataForm({
           {entered}
         </span>
         <div className="flex items-center gap-2">
+          {changed && !busy ? (
+            <span className={cn("text-xs font-medium", WARNING_TEXT)} role="status" data-testid={`${testId}-unsaved`}>
+              {tx("Не сохранено", "Nicht gespeichert")}
+            </span>
+          ) : null}
           {done && !changed ? (
             <span className="inline-flex items-center gap-1 text-xs text-emerald-700" role="status">
               <Check aria-hidden className="size-3.5" />

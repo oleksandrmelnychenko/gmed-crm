@@ -1218,3 +1218,90 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     assert_eq!(request_object["follow_up"]["required"], false);
     assert_eq!(request_object["follow_up"]["blocks"], json!([]));
 }
+
+/// A parent staff named in the wizard has no representative row until
+/// somebody stores one: the document data staff enter for that parent create
+/// the row instead of answering 404 (Linda Testova, DEV 2026-10-22: the
+/// parent's GwG sheet kept asking for the document data).
+#[tokio::test]
+async fn staff_store_the_document_data_of_a_parent_without_a_row() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let parent_id = Uuid::new_v4();
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, date_of_birth, citizenships, country,
+                              email, created_by, trusted_contacts)
+           VALUES ('Mia', 'Muster', '2014-03-05', '{UA}', 'UA', $1, $2, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("lead-{}@example.com", Uuid::new_v4().simple()))
+    .bind(app.pm_id)
+    .bind(json!([{
+        "id": parent_id,
+        "name": "Anna Muster",
+        "relation": "parent",
+        "email": format!("parent-{}@example.com", Uuid::new_v4().simple()),
+        "birth_date": "1980-04-02"
+    }]))
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    let rows_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM lead_representatives WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(rows_before, 0);
+
+    let (status, data) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{lead_id}/representatives/{parent_id}/identity-document-data"),
+        &app.pm(),
+        Some(json!({
+            "id_document_type": "passport",
+            "id_document_number": "FX123456",
+            "id_issuing_authority": "Passamt 8031",
+            "id_issuing_country": "UA",
+            "id_valid_until": "2099-01-31"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    let stored: (String, String, String, String, String) = sqlx::query_as(
+        r#"SELECT role, id_document_type, id_document_number, id_issuing_country,
+                  to_char(id_valid_until, 'YYYY-MM-DD')
+           FROM lead_representatives WHERE lead_id = $1 AND contact_id = $2"#,
+    )
+    .bind(lead_id)
+    .bind(parent_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        stored,
+        (
+            "legal_representative".to_string(),
+            "passport".to_string(),
+            "FX123456".to_string(),
+            "UA".to_string(),
+            "2099-01-31".to_string()
+        )
+    );
+
+    // Somebody who does not act for the lead stays unknown.
+    let (status, _) = request(
+        &app,
+        "PUT",
+        &format!(
+            "/leads/{lead_id}/representatives/{}/identity-document-data",
+            Uuid::new_v4()
+        ),
+        &app.pm(),
+        Some(json!({ "id_document_number": "XX1" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

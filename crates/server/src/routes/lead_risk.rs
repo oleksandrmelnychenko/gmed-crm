@@ -1001,6 +1001,20 @@ async fn put_representative_identity_data(
         if !lock_identity_lead(&mut tx, lead_id).await? {
             return Ok(None);
         }
+        // A parent staff named in the wizard (or one taken over from a
+        // linked patient) has no row until somebody stores one: the form
+        // showed the person, so the document data get a row of their own
+        // instead of a silent 404 (Linda Testova, DEV 2026-10-22).
+        if !crate::routes::lead_representatives::ensure_row_for_upload(
+            &mut tx,
+            lead_id,
+            representative_id,
+            auth.user_id,
+        )
+        .await?
+        {
+            return Ok(None);
+        }
         let updated = sqlx::query(
             r#"UPDATE lead_representatives SET
                    id_document_type = CASE WHEN $3 THEN $4 ELSE id_document_type END,

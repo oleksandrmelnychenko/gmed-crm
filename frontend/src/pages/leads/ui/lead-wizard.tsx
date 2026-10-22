@@ -289,7 +289,7 @@ import { LeadIdentityDocumentData } from "./lead-identity-document-data";
 import { LeadRepresentativeUploads, representativeFileOrigin } from "./lead-representative-uploads";
 import { LeadPatientConcern } from "./lead-patient-concern";
 import { useLeadRiskAssessment } from "../model/use-lead-risk-assessment";
-import { riskGateErrorText } from "../model/lead-risk-assessment";
+import { representativeDocumentSlot, riskGateErrorText } from "../model/lead-risk-assessment";
 import { LeadIdentificationStatus } from "./lead-identification-status";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
@@ -3341,6 +3341,9 @@ export function LeadWizard({
   const amlRiskFindingTouchedRef = useRef(false);
   const [documentPreview, setDocumentPreview] = useState<WizardDocumentPreview | null>(null);
   const [documentPreviewError, setDocumentPreviewError] = useState("");
+  // The person whose document data a refused signature names: the banner
+  // leads straight to that person's document form (DEV 2026-10-22).
+  const [documentPreviewJump, setDocumentPreviewJump] = useState<string | null>(null);
   const [touchedMasterFields, setTouchedMasterFields] = useState<Set<MasterFieldKey>>(
     () => new Set(),
   );
@@ -3715,6 +3718,7 @@ export function LeadWizard({
     documentPreviewUrlRef.current = nextPreview?.url ?? null;
     setDocumentPreview(nextPreview);
     setDocumentPreviewError("");
+    setDocumentPreviewJump(null);
   }, []);
 
   useEffect(() => () => {
@@ -5935,8 +5939,13 @@ export function LeadWizard({
     } catch (nextError) {
       // A lead gate names its reason (risk assessment, sanctions, blocked country).
       const gate = signatureGateErrorText(nextError, tx);
-      if (fromPreview) setDocumentPreviewError(gate ?? errorText(nextError, tx));
-      else if (gate || leadErrorBlockingReasons(nextError).length === 0) {
+      if (fromPreview) {
+        setDocumentPreviewError(gate ?? errorText(nextError, tx));
+        const slot = representativeDocumentSlot(nextError);
+        setDocumentPreviewJump(
+          slot ? step1Portal.intake?.representation?.representatives.find((person) => person.slot === slot)?.id ?? null : null,
+        );
+      } else if (gate || leadErrorBlockingReasons(nextError).length === 0) {
         // Next to the pressed button, not at the bottom of the step (DEV 2026-10-19).
         setValidationContext(null);
         setDocumentRowError({ documentId: id, text: gate ?? errorText(nextError, tx) });
@@ -11082,9 +11091,32 @@ ${serviceCommentLines.join("\n")}`
             ) : null}
           </div>
           {documentPreviewError ? (
-            <p role="alert" className="shrink-0 border-t border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive sm:px-5">
-              {documentPreviewError}
-            </p>
+            <div role="alert" className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive sm:px-5">
+              <span className="min-w-0 flex-1">{documentPreviewError}</span>
+              {documentPreviewJump ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  data-testid="lead-document-preview-jump"
+                  onClick={() => {
+                    const target = documentPreviewJump;
+                    replaceDocumentPreview(null);
+                    setStep("documents");
+                    // The person's card is a <details>: open it, then go to its first field.
+                    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+                      const form = document.querySelector<HTMLElement>(`[data-testid="lead-representative-id-data-${target}"]`);
+                      const card = form?.closest("details");
+                      if (card) card.open = true;
+                      form?.scrollIntoView({ block: "center" });
+                      form?.querySelector<HTMLElement>("select, input")?.focus();
+                    }));
+                  }}
+                >
+                  {tx("Перейти к данным документа", "Zu den Ausweisdaten")}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 sm:px-5">
             {previewComplianceKind ? (

@@ -338,6 +338,15 @@ test("level 2: staff see points and level, request more and release with a reaso
   expect(calls.find((call) => call.path === `/leads/${leadId}/identity-document-data`)?.method).toBe("PUT");
   await page.screenshot({ path: testInfo.outputPath("lead-id-data.png"), animations: "disabled" });
 
+  // Typed data are stored when staff leave the form, without the button
+  // (DEV 2026-10-22: a parent's data looked filled but were never sent).
+  const idSaves = () => calls.filter((call) => call.path === `/leads/${leadId}/identity-document-data`);
+  await idForm.locator('input[name="id_issuing_authority"]').fill("Passamt 8031");
+  await expect(idForm.getByTestId("lead-id-data-unsaved")).toBeVisible();
+  await idForm.locator('input[name="id_issuing_authority"]').blur();
+  await expect.poll(() => idSaves().length).toBe(2);
+  expect(idSaves().at(-1)?.body).toMatchObject({ id_issuing_authority: "Passamt 8031", id_document_number: "FA1234567" });
+
   // On a phone the panel must not widen the wizard.
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await wizard.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
