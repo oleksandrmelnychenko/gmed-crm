@@ -1227,6 +1227,10 @@ pub(crate) struct PayerState {
     /// party, so no separate cost assumption declaration is asked of them
     /// (staff report and owner decision 2026-10-19).
     pub paying_parent: bool,
+    /// A "patient pays himself" stored before the rule of 2026-10-19 for a
+    /// lead who is a minor: no answer any more (a parent, a guardian or a
+    /// third party pays), so the conversion waits for the paying parent.
+    pub minor_self: bool,
     /// No trigger of the enhanced check: the source of funds is not asked
     /// and not required (2026-10-19). Loaded only while it is not stated.
     pub funds_optional: bool,
@@ -1333,7 +1337,7 @@ impl PayerState {
         }
         // The representative named as payer is no longer one of the minor's
         // (removed, or the patient came of age): somebody else must be named.
-        if declaration.is_representative() && !self.paying_parent {
+        if (declaration.is_representative() && !self.paying_parent) || self.minor_self {
             reasons.push(PayerReason::PayerRepresentativeMissing);
         }
         if declaration.is_third_party() && !self.paying_parent {
@@ -1498,8 +1502,10 @@ pub(crate) async fn load_payer_state(
         // A parent of the minor who pays is no separate cost bearer: named as
         // such (kind `representative`), or a third-party row of before that
         // names one of the representatives.
+        // A minor's "patient pays himself" of before is no answer either.
         if state.declaration.as_ref().is_some_and(|declaration| {
             declaration.is_representative()
+                || declaration.payer_kind == PAYER_KIND_SELF
                 || (declaration.is_third_party() && !declaration.is_organisation())
         }) && let Some(loaded) = lead_representatives::load(&mut *conn, lead_id).await?
         {
@@ -1508,6 +1514,11 @@ pub(crate) async fn load_payer_state(
                 state.declaration.as_ref(),
             )
             .is_some();
+            state.minor_self = loaded.representation.minor
+                && state
+                    .declaration
+                    .as_ref()
+                    .is_some_and(|declaration| declaration.payer_kind == PAYER_KIND_SELF);
         }
         // Without a trigger the source of funds is not asked (2026-10-19).
         if state
@@ -4499,6 +4510,30 @@ mod tests {
         assert_eq!(
             gone.readiness().reasons,
             [PayerReason::PayerRepresentativeMissing]
+        );
+
+        // A minor's "patient pays himself" of before: the paying parent (or a
+        // third party) must be named before the conversion.
+        let minor_self = PayerState {
+            declaration: Some(from_input(&input("self")).unwrap()),
+            minor_self: true,
+            ..PayerState::default()
+        };
+        assert!(
+            minor_self
+                .readiness()
+                .reasons
+                .contains(&PayerReason::PayerRepresentativeMissing)
+        );
+        let adult_self = PayerState {
+            minor_self: false,
+            ..minor_self.clone()
+        };
+        assert!(
+            !adult_self
+                .readiness()
+                .reasons
+                .contains(&PayerReason::PayerRepresentativeMissing)
         );
     }
 

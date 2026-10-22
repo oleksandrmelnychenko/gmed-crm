@@ -353,6 +353,22 @@ export function isRepresentativePayer(declaration: PatientPayerDeclaration | nul
   return declaration?.payer_kind === "representative";
 }
 
+/**
+ * A third-party row of before that names one of the minor's legal
+ * representatives (same e-mail, else same name): that parent is the
+ * contracting party, not a third party (owner decision 2026-10-19), so the
+ * card shows it as a paying parent, without a third party's consents.
+ */
+export function legacyPayingParent(summary: Pick<PatientPayerSummary, "patient_is_minor" | "declaration" | "contracting_party">): boolean {
+  const declaration = summary.declaration;
+  if (!summary.patient_is_minor || !isThirdPartyPayer(declaration) || declaration.payer_type !== "person") return false;
+  const key = (value: string | null | undefined) => (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  const email = key(declaration.email);
+  const name = key(payerDisplayName(declaration));
+  return (summary.contracting_party?.representatives ?? []).some((person) =>
+    (email !== "" && key(person.email) === email) || (name !== "" && name !== "—" && key(person.name) === name));
+}
+
 /** Line 1 of the card: "Patient selbst", "Dritte/r — Privatperson", a paying parent, or that nothing was declared. */
 export function whoPaysLabel(declaration: PatientPayerDeclaration | null, tx: Tx): string {
   if (!declaration) {
@@ -477,8 +493,13 @@ export function contractingPartyIsRepresentatives(party: PatientContractingParty
  */
 export function contractingPartyLabel(party: PatientContractingParty, tx: Tx): string {
   if (!contractingPartyIsRepresentatives(party)) return tx("Пациент", "Patient");
+  // The server's debtor name joins the names with a German "und"; the card
+  // joins them in the UI language.
+  const named = party.representatives.map((person) => person.name).filter(Boolean);
   const names = party.representatives.length > 0
-    ? party.debtor_name ?? "—"
+    ? (named.length > 1
+        ? `${named.slice(0, -1).join(", ")}${tx(" и ", " und ")}${named[named.length - 1]}`
+        : named[0] ?? party.debtor_name ?? "—")
     : tx("не указаны", "nicht erfasst");
   return `${tx("Законные представители: ", "Gesetzliche Vertreter: ")}${names}`;
 }

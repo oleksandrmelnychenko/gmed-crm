@@ -27,7 +27,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryLabel } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { ApiRequestError } from "@/lib/api";
-import { isValidEmailAddress } from "@/lib/contact-validation";
+import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
 import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { useAuth } from "@/lib/auth";
@@ -89,7 +89,11 @@ const payerEmailFormatInvalid = (form: PayerDeclarationForm) =>
 
 /** A typed third-party e-mail the server would reject (format, or a domain known to receive no mail): kept in the form, never autosaved. */
 const payerEmailInvalid = (form: PayerDeclarationForm) =>
-  payerEmailFormatInvalid(form) || (form.kind === "third_party" && isKnownNoMailEmail(form.email));
+  payerEmailFormatInvalid(form) || (form.kind === "third_party" && isKnownNoMailEmail(form.email)) || payerPhoneInvalid(form);
+
+/** A typed third-party phone with fewer than six digits: kept in the form, never autosaved. */
+const payerPhoneInvalid = (form: PayerDeclarationForm) =>
+  form.kind === "third_party" && Boolean(form.phone.trim()) && !isValidPhoneNumber(form.phone);
 
 function PayerField({
   label,
@@ -384,7 +388,9 @@ export function LeadPayerDeclarationSection({
   // A third-party row of before that names one of the minor's parents: the
   // contracting party, not a third party (2026-10-19).
   const payingParent = form.kind === "third_party" && data?.status.paying_parent === true;
-  const missing = payerFormMissing(form, data?.status.source_of_funds_required !== false, payingParent);
+  const missing = payerFormMissing(form, data?.status.source_of_funds_required !== false, payingParent, minor)
+    // Without any parent on file the banner above says what to do first.
+    .filter((code) => !(code === "payer_representative_missing" && form.kind === "representative" && representatives.length === 0));
   // Own interest and source of funds are edited in the AML form only: while it
   // is closed, their hints say where to fill them in.
   const amlPartElsewhere = amlPartHidden && !amlSlot;
@@ -395,6 +401,7 @@ export function LeadPayerDeclarationSection({
       : label;
   };
   const emailInvalid = payerEmailFormatInvalid(form);
+  const phoneInvalid = payerPhoneInvalid(form);
   const statusBadge = payerStatusBadge(data?.status, tx);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
   const contactConsentAt = data?.declaration?.contact_consent_at ?? null;
@@ -408,13 +415,20 @@ export function LeadPayerDeclarationSection({
   const organisationMask = cabinet?.payer_organisation ?? null;
   const invoiceTo = cabinetBilling ? portalInvoiceTo(cabinetBilling) : data?.declaration?.invoice_to;
   const invoiceToKnown = invoiceTo !== undefined;
-  const invoiceTaxShown = invoiceTaxFieldsShown(form);
   const recipientBilling = cabinetHidden
     ? null
     : cabinetBilling ?? (data?.declaration && invoiceToKnown ? normalizeLeadPortalBilling(data.declaration) : null);
-  const recipientStatements = recipientBilling
-    ? billingStatements(recipientBilling, tx, lang).invoice.filter((row) => row.key !== "invoice_to" && row.key !== "invoice_tax")
+  // "Счёт направляется" repeats step 3's recipient rows; without those (an
+  // answer of before step 3) it is the only line that says where the invoice goes.
+  const recipientRows = recipientBilling ? billingStatements(recipientBilling, tx, lang, false, minor).invoice : [];
+  const stepThreeAnswered = recipientRows.some((row) => row.key === "invoice_recipient");
+  const recipientStatements = recipientBilling && invoiceTo
+    ? recipientRows.filter((row) => row.key !== "invoice_tax" && !(stepThreeAnswered && row.key === "invoice_to"))
     : [];
+  // The tax fields belong to a recipient the lead named; before that only stored values are shown.
+  const invoiceTaxEditable = invoiceTaxFieldsShown(form)
+    && (recipientStatements.length > 0
+      || Boolean(data?.declaration?.invoice_vat_id?.trim() || data?.declaration?.invoice_tax_number?.trim()));
   // The self-paying lead's own source of funds (read-only): shown while the
   // stored declaration says the patient pays and the server knows the answer.
   const storedSource = data?.declaration?.self_funds_source?.trim();
@@ -790,6 +804,27 @@ export function LeadPayerDeclarationSection({
               "Платит один из родителей — законный представитель ребёнка. Он подписывает заказ сам, отдельное заявление о принятии расходов (Kostenübernahmeerklärung) не нужно.",
               "Es zahlt ein Elternteil als gesetzlicher Vertreter des Kindes. Er unterschreibt den Auftrag selbst; eine gesonderte Kostenübernahmeerklärung ist nicht nötig.",
             )}
+            {/* A third-party row of before that names a parent: one click names the parent as such (2026-10-19). */}
+            {canEdit && minor && data?.status.payer_representative ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="ml-2 mt-1 bg-card"
+                disabled={readOnly}
+                data-testid="lead-payer-paying-parent-convert"
+                onClick={() => {
+                  const parentId = data.status.payer_representative?.id ?? "";
+                  patch("kind", "representative");
+                  patch("representativeId", parentId);
+                }}
+              >
+                {tx(
+                  `Записать как «Платит родитель»: ${data.status.payer_representative.name}`,
+                  `Als „Elternteil zahlt“ übernehmen: ${data.status.payer_representative.name}`,
+                )}
+              </Button>
+            ) : null}
           </p>
         ) : null}
 
@@ -890,7 +925,12 @@ export function LeadPayerDeclarationSection({
                 <EmailDomainWarning email={form.email} lang={lang} enabled={form.kind === "third_party" && !emailInvalid} />
               </PayerField>
               <PayerField label={tx("Телефон", "Telefon")}>
-                <Input className={inputClass} type="tel" value={form.phone} disabled={readOnly} onChange={(event) => patch("phone", event.target.value)} />
+                <Input className={inputClass} type="tel" value={form.phone} disabled={readOnly} aria-invalid={phoneInvalid || undefined} onChange={(event) => patch("phone", event.target.value)} />
+                {phoneInvalid ? (
+                  <span role="alert" className="block text-xs text-destructive" data-testid="lead-payer-phone-error">
+                    {tx("Телефон указан неверно, изменения не сохраняются. Пример: +49 30 1234567.", "Die Telefonnummer ist ungültig, Änderungen werden nicht gespeichert. Beispiel: +49 30 1234567.")}
+                  </span>
+                ) : null}
               </PayerField>
               {form.messengerSupport !== "unsupported" ? (
                 canEdit ? (
@@ -1016,7 +1056,7 @@ export function LeadPayerDeclarationSection({
           </div>
         ) : null}
 
-        {recipientStatements.length > 0 || invoiceTaxShown ? (
+        {recipientStatements.length > 0 || invoiceTaxEditable ? (
           <div className="space-y-3 border-t border-border/60 pt-3" data-testid="lead-payer-invoice-recipient">
             <AdminSectionTitle>
               {tx("Получатель счёта (из кабинета)", "Rechnungsempfänger (aus dem Portal)")}
@@ -1033,7 +1073,7 @@ export function LeadPayerDeclarationSection({
                 ))}
               </dl>
             ) : null}
-            {invoiceTaxShown ? (
+            {invoiceTaxEditable ? (
               <div className="grid gap-4 sm:grid-cols-2">
                 <PayerField label={tx("USt-IdNr. получателя счёта", "USt-IdNr. des Rechnungsempfängers")}>
                   <Input

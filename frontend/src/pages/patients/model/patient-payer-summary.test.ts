@@ -14,6 +14,7 @@ import {
   invoiceToStatement,
   isThirdPartyPayer,
   leadPath,
+  legacyPayingParent,
   minorWithoutPayerWarning,
   missingAddressWarning,
   normalizePatientPayerSummary,
@@ -535,14 +536,33 @@ describe("label helpers", () => {
 
   it("names the contracting party", () => {
     const minor = normalizePatientPayerSummary(minorExample())!.contracting_party!;
-    expect(contractingPartyLabel(minor, ru)).toBe("Законные представители: Anna Muster und Ben Muster");
+    expect(contractingPartyLabel(minor, ru)).toBe("Законные представители: Anna Muster и Ben Muster");
     expect(contractingPartyLabel(minor, de)).toBe("Gesetzliche Vertreter: Anna Muster und Ben Muster");
     expect(contractingPartyLabel({ ...minor, kind: "patient" }, ru)).toBe("Пациент");
     expect(contractingPartyLabel({ ...minor, kind: "patient" }, de)).toBe("Patient");
-    expect(contractingPartyLabel({ ...minor, debtor_name: null }, de)).toBe("Gesetzliche Vertreter: —");
+    // The names come from the representatives; the debtor name only stands in for nameless ones.
+    expect(contractingPartyLabel({ ...minor, debtor_name: null }, de)).toBe("Gesetzliche Vertreter: Anna Muster und Ben Muster");
+    const nameless = minor.representatives.map((person) => ({ ...person, name: "" }));
+    expect(contractingPartyLabel({ ...minor, debtor_name: null, representatives: nameless }, de)).toBe("Gesetzliche Vertreter: —");
+    const three = [...minor.representatives, { ...minor.representatives[1], name: "Olga Muster" }];
+    expect(contractingPartyLabel({ ...minor, representatives: three }, ru)).toBe("Законные представители: Anna Muster, Ben Muster и Olga Muster");
     // Without a parent on file the server's debtor name is the child's own; the line says none is recorded instead.
     expect(contractingPartyLabel({ ...minor, debtor_name: "Mia Muster", representatives: [] }, ru)).toBe("Законные представители: не указаны");
     expect(contractingPartyLabel({ ...minor, debtor_name: "Mia Muster", representatives: [] }, de)).toBe("Gesetzliche Vertreter: nicht erfasst");
+  });
+
+  it("reads a third-party row of before that names a minor's parent as the paying parent", () => {
+    const summary = normalizePatientPayerSummary(minorExample())!;
+    expect(summary.declaration?.payer_kind).toBe("third_party");
+    // Matched by the e-mail, else by the name.
+    const anna = { ...summary, declaration: { ...summary.declaration!, name: "Anna Muster", first_name: "Anna", last_name: "Muster", email: null } };
+    expect(legacyPayingParent(anna)).toBe(true);
+    expect(legacyPayingParent({ ...anna, declaration: { ...anna.declaration, name: "A. M.", email: "ANNA.muster@example.com " } })).toBe(true);
+    // An organisation is never a parent.
+    expect(legacyPayingParent({ ...anna, declaration: { ...anna.declaration, payer_type: "company" } })).toBe(false);
+    const grandmother = { ...summary, declaration: { ...summary.declaration!, name: "Olga Muster", first_name: "Olga", email: "olga@example.com" } };
+    expect(legacyPayingParent(grandmother)).toBe(false);
+    expect(legacyPayingParent({ ...summary, patient_is_minor: false })).toBe(false);
   });
 
   it("notes where the invoice recipient comes from", () => {

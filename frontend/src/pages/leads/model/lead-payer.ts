@@ -880,6 +880,10 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
       "Выберите, кто из родителей / законных представителей платит",
       "Zahlenden Elternteil / gesetzlichen Vertreter auswählen",
     ),
+    payer_self_minor: tx(
+      "Ребёнок не платит сам: выберите родителя / законного представителя или третье лицо",
+      "Ein Kind zahlt nicht selbst: Elternteil / gesetzlichen Vertreter oder einen Dritten wählen",
+    ),
     payer_not_informed: tx("Подтвердите, что плательщик проинформирован об обработке его данных", "Bestätigen, dass der Kostenübernehmer über die Verarbeitung seiner Daten informiert wurde"),
     cost_assumption_missing: tx("Создайте заявление о принятии расходов (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung erstellen"),
     cost_assumption_outdated: tx("Плательщик изменён — создайте новое заявление о принятии расходов", "Kostenübernehmer geändert – neue Kostenübernahmeerklärung erstellen"),
@@ -910,7 +914,7 @@ export function payerStatusBadge(
     return { tone: "info", label: tx("ждёт подписи плательщика", "wartet auf Unterschrift des Zahlers") };
   }
   if (status && status.missing.length > 0 && status.missing.every((code) => code === "cost_assumption_missing")) {
-    return { tone: "info", label: tx("ждёт Kostenübernahmeerklärung", "wartet auf Kostenübernahmeerklärung") };
+    return { tone: "info", label: tx("ждёт заявления о принятии расходов", "wartet auf Kostenübernahmeerklärung") };
   }
   return { tone: "warning", label: tx("Не заполнено", "Unvollständig") };
 }
@@ -1038,9 +1042,16 @@ export function payerSignatureSequence(status: PayerDeclarationStatus | null | u
  * of the minor's parents (the server's `status.paying_parent`), the
  * contracting party, of whom no third party's information is asked.
  */
-export function payerFormMissing(form: PayerDeclarationForm, fundsRequired = true, payingParent = false): string[] {
+export function payerFormMissing(
+  form: PayerDeclarationForm,
+  fundsRequired = true,
+  payingParent = false,
+  /** The patient is a minor: a stored "patient pays himself" of before is no answer (2026-10-19). */
+  minor = false,
+): string[] {
   const missing: string[] = [];
   if (!form.kind) return ["payer_declaration_missing"];
+  if (minor && form.kind === "self") missing.push("payer_self_minor");
   if (form.actsOnOwnAccount === false && !form.beneficialOwnerName.trim()) {
     missing.push("payer_beneficial_owner_missing");
   }

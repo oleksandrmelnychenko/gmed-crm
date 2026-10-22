@@ -23,6 +23,7 @@ import {
   invoiceToStatement,
   isRepresentativePayer,
   isThirdPartyPayer,
+  legacyPayingParent,
   leadPath,
   minorWithoutPayerWarning,
   missingAddressWarning,
@@ -161,9 +162,11 @@ function LoadedCard({
 }) {
   const tx: Tx = (ru, de) => (lang === "de" ? de : ru);
   const { declaration, contracting_party: party, invoice_recipient: recipient, identification, source, open_request: openRequest } = summary;
-  const thirdParty = isThirdPartyPayer(declaration) ? declaration : null;
+  // A third-party row of before that names one of the minor's parents reads as a paying parent.
+  const parentOfBefore = legacyPayingParent(summary);
+  const thirdParty = isThirdPartyPayer(declaration) && !parentOfBefore ? declaration : null;
   // A paying parent: name, address and contact, none of a third party's consents.
-  const representative = declaration && isRepresentativePayer(declaration) ? declaration : null;
+  const representative = declaration && (isRepresentativePayer(declaration) || parentOfBefore) ? declaration : null;
   const addressWarning = recipient ? missingAddressWarning(recipient, tx) : null;
   const identificationRows = identification ? identificationLines(identification, tx) : [];
   const invoiceTo = invoiceToStatement(declaration, tx, lang);
@@ -173,7 +176,7 @@ function LoadedCard({
     <SummaryCard title={tx("Плательщик", "Zahler")} state="loaded">
       <SummaryLine
         label={tx("Кто платит", "Wer zahlt")}
-        value={whoPaysLabel(declaration, tx)}
+        value={whoPaysLabel(parentOfBefore && declaration ? { ...declaration, payer_kind: "representative" } : declaration, tx)}
         testId={`${TEST_ID}-who-pays`}
       />
       {invoiceTo ? (

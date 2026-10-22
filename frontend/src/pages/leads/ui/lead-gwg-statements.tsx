@@ -425,9 +425,12 @@ function BillingGroup({
   tx,
   lang,
   card = false,
+  minor = false,
 }: {
   billing: LeadPortalBilling;
   updatedAt: string | null;
+  /** A minor's request: "the patient himself" as recipient is the answering parent. */
+  minor?: boolean;
   /** The payer link in short: whether and when the payer stated section 8; null on an older server. */
   payerLink: LeadPortalPayerLink | null;
   tx: Tx;
@@ -435,7 +438,7 @@ function BillingGroup({
   card?: boolean;
 }) {
   const payerAnswered = Boolean(payerLink?.submitted_at);
-  const statements = billingStatements(billing, tx, lang, payerAnswered);
+  const statements = billingStatements(billing, tx, lang, payerAnswered, minor);
   return (
     <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "md:col-span-2")} data-testid="lead-gwg-billing">
       <div className="flex flex-wrap items-center gap-2">
@@ -909,7 +912,7 @@ export function LeadGwgStatements({
     <PayerOrganisationGroup card={cards} mask={intake.payer_organisation} marker={intake.patient_payer} tx={tx} />
   ) : null;
   const billingGroup = intake.billing ? (
-    <BillingGroup card={cards} billing={intake.billing} updatedAt={intake.billing_updated_at} payerLink={intake.payer_link} tx={tx} lang={lang} />
+    <BillingGroup card={cards} billing={intake.billing} updatedAt={intake.billing_updated_at} payerLink={intake.payer_link} minor={intake.minor === true} tx={tx} lang={lang} />
   ) : null;
 
   if (!identification || !hasGwgStatements(intake)) {

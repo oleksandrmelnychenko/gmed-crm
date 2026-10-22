@@ -399,7 +399,9 @@ test("the lead's choice of another address is named, in German", async ({ page }
 test("a lead who has not chosen where the invoice goes yet", async ({ page }) => {
   const { section } = await mount(page, "de", { ...billedCompany, invoice_to: null });
   await expect(section.getByTestId("lead-payer-invoice-to")).toHaveCount(0);
-  await expect(section.getByLabel(/^USt-IdNr\. des Rechnungsempfängers/)).toHaveValue("");
+  // No recipient named yet: no recipient block and no tax inputs for nobody.
+  await expect(section.getByTestId("lead-payer-invoice-recipient")).toHaveCount(0);
+  await expect(section.getByLabel(/^USt-IdNr\. des Rechnungsempfängers/)).toHaveCount(0);
 });
 
 test("an older backend keeps the form of a private person and gets none of the new keys", async ({ page }) => {

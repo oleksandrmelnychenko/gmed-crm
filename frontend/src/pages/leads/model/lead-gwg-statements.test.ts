@@ -698,7 +698,10 @@ describe("sections 7–8 as the group shows them", () => {
       invoice_to: "other", invoice_name: "Old recipient", invoice_street: "Old address", invoice_email: "old@example.com",
     })!;
     const invoice = billingStatements(value, ru, "ru").invoice;
-    expect(invoice.find((row) => row.key === "invoice_name")?.value).toBe("");
+    // The recipient's name is the step-3 row; no second "name on the invoice".
+    expect(invoice.find((row) => row.key === "invoice_name")).toBeUndefined();
+    expect(invoice.find((row) => row.key === "invoice_recipient")?.value).toBe("Физическое лицо");
+    expect(invoice.map((row) => row.value).join(" ")).not.toContain("Old recipient");
     expect(invoice.find((row) => row.key === "invoice_address")?.value).toBe("");
     expect(invoice.find((row) => row.key === "invoice_email")?.value).toBe("");
     expect(portalInvoiceTo({ ...value, invoice_recipient_is_payer: null, invoice_to: "payer" })).toBeNull();
@@ -729,7 +732,8 @@ describe("sections 7–8 as the group shows them", () => {
     })!;
     expect(portalInvoiceTo(value)).toBe("other");
     const invoice = billingStatements(value, de, "de").invoice;
-    expect(invoice.find((row) => row.key === "invoice_name")?.value).toBe("Mia Muster");
+    expect(invoice.find((row) => row.key === "invoice_recipient")?.value).toBe("Privatperson: Mia Muster");
+    expect(invoice.find((row) => row.key === "invoice_name")).toBeUndefined();
     expect(invoice.find((row) => row.key === "invoice_address")?.value).toContain("Musterweg 4");
     expect(invoice.find((row) => row.key === "invoice_address")?.value).toContain("Deutschland");
     expect(invoice.find((row) => row.key === "invoice_email")?.value).toBe("mia@example.com");

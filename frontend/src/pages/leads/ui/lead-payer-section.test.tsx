@@ -294,12 +294,19 @@ describe("LeadPayerDeclarationSection: invoice recipient (section 7)", () => {
     expect(block).not.toMatch(/<(select|input[^>]*type="radio")/);
   });
 
-  it("keeps the other recipient's name without the routing sentence or unanswered placeholder", () => {
+  it("says where the invoice goes when only the answer of before step 3 is stored; nothing while unanswered", () => {
+    // Without the cabinet's step-3 rows, "Счёт направляется" is the only line naming the recipient.
     const other = renderSection({ ...selfPayer, invoice_to: "other", invoice_name: "Beispiel GmbH" });
     expect(recipientBlock(other)).toContain("Beispiel GmbH");
-    expect(recipientBlock(other)).not.toContain("Счёт направляется");
-    const open = renderSection({ ...selfPayer, invoice_to: null });
-    expect(recipientBlock(open)).not.toContain("выбирает пациент в кабинете");
+    expect(recipientBlock(other)).toContain("Счёт направляется");
+    expect(recipientBlock(other)).toContain("по другому адресу");
+    // Unanswered: no block with an empty e-mail row, no tax inputs for a recipient nobody named.
+    const open = renderSection({ ...selfPayer, invoice_to: null, invoice_vat_id: null });
+    expect(open).not.toContain("lead-payer-invoice-recipient");
+    expect(open).not.toContain("выбирает пациент в кабинете");
+    // Stored tax numbers stay editable even then.
+    const taxed = renderSection({ ...selfPayer, invoice_to: null, invoice_vat_id: "DE123456789" });
+    expect(recipientBlock(taxed)).toContain("USt-IdNr. получателя счёта");
   });
 
   it("offers neither the line nor the inputs on an older server", () => {
@@ -310,11 +317,10 @@ describe("LeadPayerDeclarationSection: invoice recipient (section 7)", () => {
     expect(html).not.toContain("USt-IdNr.");
   });
 
-  it("offers the inputs, without the line, while no declaration exists yet", () => {
+  it("shows no recipient block while no declaration exists yet", () => {
     const html = renderSection(null);
-    const block = recipientBlock(html);
-    expect(block).toContain("USt-IdNr. получателя счёта");
-    expect(block).not.toContain("Счёт направляется");
+    expect(html).not.toContain("lead-payer-invoice-recipient");
+    expect(html).not.toContain("USt-IdNr. получателя счёта");
   });
 
   it("speaks German", () => {
@@ -363,7 +369,7 @@ describe("LeadPayerDeclarationSection: badge and contact consent", () => {
       return html.slice(start, html.indexOf("</span></span>", start));
     };
     const waiting = renderSection(payingParent, tx, { complete: false, missing: ["cost_assumption_missing"] });
-    expect(badge(waiting)).toContain("ждёт Kostenübernahmeerklärung");
+    expect(badge(waiting)).toContain("ждёт заявления о принятии расходов");
     expect(badge(renderSection(payingParent, de, { complete: false, missing: ["cost_assumption_missing"] }))).toContain(
       "wartet auf Kostenübernahmeerklärung",
     );
@@ -627,6 +633,49 @@ describe("LeadPayerDeclarationSection: a minor's parent or legal representative 
     expect(html).not.toContain('data-testid="lead-payer-contact-consent"');
     expect(payerFormMissing(payerDeclarationToForm(parentRow), true, true)).not.toContain("payer_not_informed");
     expect(payerFormMissing(payerDeclarationToForm(parentRow), true, false)).toContain("payer_not_informed");
+    // The matched parent is offered as "the parent pays" in one click.
+    const matched = renderSection(parentRow, tx, { minor: true, paying_parent: true, representatives: [anna, ben], payer_representative: anna, cost_assumption: { required: false, document_id: null, current: false, signed: false, signed_at: null } });
+    expect(matched).toContain('data-testid="lead-payer-paying-parent-convert"');
+    expect(matched).toContain("Записать как «Платит родитель»: Anna Muster");
+    expect(html).not.toContain('data-testid="lead-payer-paying-parent-convert"');
+  });
+
+  it("a minor's 'patient pays himself' of before asks for the paying parent", () => {
+    const html = renderSection(selfPayer, tx, minorStatus);
+    expect(html).toContain("Ребёнок не платит сам: выберите родителя / законного представителя или третье лицо");
+    expect(payerFormMissing(payerDeclarationToForm(selfPayer), false, false, true)).toContain("payer_self_minor");
+    expect(payerFormMissing(payerDeclarationToForm(selfPayer), false, false, false)).not.toContain("payer_self_minor");
+    expect(payerReasonLabel("payer_self_minor", de)).toContain("Ein Kind zahlt nicht selbst");
+  });
+
+  it("without any parent on file only the banner says what to do first", () => {
+    const html = renderSection({ ...representativePays, payer_representative_id: null }, tx, { ...minorStatus, representatives: [], payer_representative: null });
+    expect(html).toContain("Сначала укажите родителей / законных представителей ребёнка");
+    expect(html).not.toContain("Выберите, кто из родителей / законных представителей платит");
+  });
+
+  it("a minor's own cabinet answer 'invoice to me' names the answering parent, not the child", () => {
+    const portal = { billing: { invoice_recipient: "self", invoice_recipient_is_payer: true, recipient: null, invoice_to: "self", invoice_email: "anna@example.com", payment_route_by: "patient", payment_method: "bank_transfer", compliance_flags: [] } } as unknown as LeadPortalIntake;
+    const html = renderSection(representativePays, tx, minorStatus, { ...portal, identification_hidden: false } as LeadPortalIntake);
+    expect(recipientBlock(html)).toContain("Родитель / законный представитель, заполнявший кабинет");
+    expect(recipientBlock(html)).not.toContain("Пациент (сам");
+  });
+});
+
+describe("LeadPayerDeclarationSection: the third party's phone", () => {
+  const thirdParty: PayerDeclaration = {
+    ...selfPayer,
+    payer_kind: "third_party",
+    payer_type: "person",
+    first_name: "Viktor",
+    last_name: "Zahler",
+  };
+
+  it("marks a phone with fewer than six digits and keeps a valid one quiet", () => {
+    expect(renderSection({ ...thirdParty, phone: "12-34" })).toContain('data-testid="lead-payer-phone-error"');
+    expect(renderSection({ ...thirdParty, phone: "12-34" })).toContain("Телефон указан неверно, изменения не сохраняются");
+    expect(renderSection({ ...thirdParty, phone: "+43 1 234567" })).not.toContain('data-testid="lead-payer-phone-error"');
+    expect(renderSection({ ...thirdParty, phone: null })).not.toContain('data-testid="lead-payer-phone-error"');
   });
 });
 

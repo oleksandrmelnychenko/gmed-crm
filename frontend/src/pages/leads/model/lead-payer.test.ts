@@ -520,7 +520,7 @@ describe("payer AML and signing order", () => {
     expect(payerStatusBadge(status({ complete: true, missing: [] }), tx)).toEqual({ tone: "success", label: "Заполнено" });
     expect(payerStatusBadge(status({ complete: false, missing: ["cost_assumption_missing"] }), tx)).toEqual({
       tone: "info",
-      label: "ждёт Kostenübernahmeerklärung",
+      label: "ждёт заявления о принятии расходов",
     });
     expect(payerStatusBadge(status({ complete: false, missing: ["cost_assumption_missing"] }), de).label).toBe(
       "wartet auf Kostenübernahmeerklärung",
@@ -592,7 +592,7 @@ describe("payer AML and signing order", () => {
     ).toBe("wartet auf Unterschrift des Zahlers");
     // Something else missing, or the package not out: as before.
     expect(out("pending", ["payer_not_informed", "cost_assumption_unsigned"]).label).toBe("Не заполнено");
-    expect(out("prepared", ["cost_assumption_missing"]).label).toBe("ждёт Kostenübernahmeerklärung");
+    expect(out("prepared", ["cost_assumption_missing"]).label).toBe("ждёт заявления о принятии расходов");
     expect(out("declined", ["cost_assumption_unsigned"]).label).toBe("Не заполнено");
   });
 

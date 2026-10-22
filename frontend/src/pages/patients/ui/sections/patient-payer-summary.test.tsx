@@ -81,6 +81,21 @@ function minorExample(): PatientPayerSummary {
   })!;
 }
 
+/** The same minor, paid by the grandmother: a third party, not one of the parents. */
+function grandmotherPays(): PatientPayerSummary {
+  const summary = minorExample();
+  return {
+    ...summary,
+    declaration: {
+      ...summary.declaration!,
+      name: "Olga Muster",
+      first_name: "Olga",
+      relationship_kind: "grandparent",
+      email: "olga.muster@example.com",
+    },
+  };
+}
+
 function render(
   state: PatientPayerSummaryState,
   options: { lang?: "ru" | "de"; canOpenLead?: boolean } = {},
@@ -128,18 +143,19 @@ describe("PatientPayerSummaryCardView", () => {
   });
 
   it("Billing: the projection without identification, in order, no lead link without leads.view", () => {
-    const summary = { ...minorExample(), identification: null };
+    const summary = { ...grandmotherPays(), identification: null };
     const html = render({ status: "loaded", summary }, { canOpenLead: false });
     expect(html).toContain('data-state="loaded"');
     expect(html).toContain("Плательщик");
     expect(block(html, "who-pays")).toContain("Третье лицо — Частное лицо");
-    expect(block(html, "name")).toContain("Anna Muster");
-    expect(block(html, "relationship")).toContain("Родитель");
+    expect(block(html, "name")).toContain("Olga Muster");
+    expect(block(html, "relationship")).toContain("Бабушка / дедушка");
     expect(block(html, "address")).toContain("Musterweg 1, 10115 Berlin, Германия");
-    expect(block(html, "contact")).toContain("anna.muster@example.com · +49 30 000000");
+    expect(block(html, "contact")).toContain("olga.muster@example.com · +49 30 000000");
     expect(block(html, "contact-consent")).toContain("дано 05.10.2026");
     expect(block(html, "informed")).toContain("да, 05.10.2026");
-    expect(block(html, "contracting-party", "</span></span></div>")).toContain("Законные представители: Anna Muster und Ben Muster");
+    // The names are joined in the language of the card, not with the server's German "und".
+    expect(block(html, "contracting-party", "</span></span></div>")).toContain("Законные представители: Anna Muster и Ben Muster");
     const recipient = block(html, "recipient", "</span></div>");
     expect(recipient).toContain("Anna Muster");
     expect(recipient).toContain("Musterweg 1, 10115 Berlin, Германия");
@@ -160,8 +176,14 @@ describe("PatientPayerSummaryCardView", () => {
 
   it("minor with two representatives: each on a sub-line with the address, the paying parent badged, both identified", () => {
     const html = render({ status: "loaded", summary: minorExample() });
+    // Anna stands in the declaration as a third party of before: she is the
+    // paying parent and the contracting party, no third party's consents.
+    expect(block(html, "who-pays")).toContain("Родитель / законный представитель");
+    expect(block(html, "name")).toContain("Anna Muster");
+    expect(html).not.toContain('data-testid="patient-payer-summary-contact-consent"');
+    expect(html).not.toContain('data-testid="patient-payer-summary-informed"');
     const party = block(html, "contracting-party", "</span></span></div>");
-    expect(party).toContain("Законные представители: Anna Muster und Ben Muster");
+    expect(party).toContain("Законные представители: Anna Muster и Ben Muster");
     expect(party.match(/data-testid="patient-payer-summary-representative"/g)).toHaveLength(2);
     expect(party).toContain("Musterweg 1, 10115 Berlin, DE");
     expect(party.match(/data-testid="patient-payer-summary-default-payer"/g)).toHaveLength(1);
@@ -198,13 +220,13 @@ describe("PatientPayerSummaryCardView", () => {
   });
 
   it("speaks German", () => {
-    const html = render({ status: "loaded", summary: minorExample() }, { lang: "de" });
+    const html = render({ status: "loaded", summary: grandmotherPays() }, { lang: "de" });
     expect(html).toContain("Zahler");
     expect(block(html, "who-pays")).toContain("Wer zahlt");
     expect(block(html, "who-pays")).toContain("Dritte/r — Privatperson");
     expect(block(html, "name")).toContain("Name / Organisation");
     expect(block(html, "relationship")).toContain("Verhältnis zum Patienten");
-    expect(block(html, "relationship")).toContain("Elternteil");
+    expect(block(html, "relationship")).toContain("Großmutter / Großvater");
     expect(block(html, "address")).toContain("Musterweg 1, 10115 Berlin, Deutschland");
     expect(block(html, "contact-consent")).toContain("Einwilligung zur Kontaktaufnahme");
     expect(block(html, "contact-consent")).toContain("erteilt am 05.10.2026");

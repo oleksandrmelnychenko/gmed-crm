@@ -22,20 +22,20 @@ const CONFIRMED = { confirmed_at: "2026-10-06T08:00:00Z", confirmed_by_name: "Ol
 
 const source = { lead_id: leadId, converted_at: "2026-10-06T09:12:00Z", declared_at: "2026-10-05T16:40:00Z" };
 
-const annaDeclaration = {
+const olgaDeclaration = {
   payer_kind: "third_party",
   payer_type: "person",
-  name: "Anna Muster",
+  name: "Olga Muster",
   organisation_name: null,
-  first_name: "Anna",
+  first_name: "Olga",
   last_name: "Muster",
-  relationship_kind: "parent",
+  relationship_kind: "grandparent",
   relationship: null,
   street: "Musterweg 1",
   zip: "10115",
   city: "Berlin",
   country: "DE",
-  email: "anna.muster@example.com",
+  email: "olga.muster@example.com",
   phone: "+49 30 000000",
   contact_consent_at: "2026-10-05T16:40:00Z",
   payer_informed_at: "2026-10-05T17:00:00Z",
@@ -80,12 +80,12 @@ const minorIdentification = {
   ],
 };
 
-/** The full example: minor Mia Muster, the parent Anna pays, is the default payer and is identified. */
+/** The full example: minor Mia Muster, the grandmother Olga pays (a third party), the parent Anna is the default payer and is identified. */
 const minorSummary = {
   patient_id: patientId,
   patient_is_minor: true,
   source,
-  declaration: annaDeclaration,
+  declaration: olgaDeclaration,
   contracting_party: minorParty,
   invoice_recipient: annaRecipient,
   identification: minorIdentification,
@@ -240,7 +240,7 @@ const words = {
     noDeclaration: "Декларация плательщика отсутствует (пациент создан без обращения)",
     name: "Имя / организация",
     relationship: "Отношение к пациенту",
-    parent: "Родитель",
+    parent: "Бабушка / дедушка",
     address: "Адрес",
     addressLine: "Musterweg 1, 10115 Berlin, Германия",
     contact: "Контакт",
@@ -249,7 +249,7 @@ const words = {
     informed: "Плательщик проинформирован (Art. 14 DSGVO)",
     informedYes: "да, 05.10.2026",
     party: "Сторона договора",
-    representatives: "Законные представители: Anna Muster und Ben Muster",
+    representatives: "Законные представители: Anna Muster и Ben Muster",
     noRepresentatives: "Законные представители: не указаны",
     patient: "Пациент",
     defaultPayer: "плательщик по умолчанию",
@@ -285,7 +285,7 @@ const words = {
     noDeclaration: "Keine Zahlererklärung (Patient ohne Anfrage angelegt)",
     name: "Name / Organisation",
     relationship: "Verhältnis zum Patienten",
-    parent: "Elternteil",
+    parent: "Großmutter / Großvater",
     address: "Adresse",
     addressLine: "Musterweg 1, 10115 Berlin, Deutschland",
     contact: "Kontakt",
@@ -339,10 +339,10 @@ for (const lang of ["ru", "de"] as const) {
       await expect(line("who-pays")).toContainText(w.thirdParty);
       // 2. The third party.
       await expect(line("name")).toContainText(w.name);
-      await expect(line("name")).toContainText("Anna Muster");
+      await expect(line("name")).toContainText("Olga Muster");
       await expect(line("relationship")).toContainText(w.parent);
       await expect(line("address")).toContainText(w.addressLine);
-      await expect(line("contact")).toContainText("anna.muster@example.com · +49 30 000000");
+      await expect(line("contact")).toContainText("olga.muster@example.com · +49 30 000000");
       await expect(line("contact-consent")).toContainText(w.consentGiven);
       await expect(line("informed")).toContainText(w.informedYes);
       // 3. The contracting party: both parents, the paying one badged.
@@ -406,7 +406,7 @@ for (const lang of ["ru", "de"] as const) {
       const { card, line, errors } = await mount(page, mock);
       await expect(card).toHaveAttribute("data-state", "loaded");
       await expect(line("who-pays")).toContainText(w.thirdParty);
-      await expect(line("name")).toContainText("Anna Muster");
+      await expect(line("name")).toContainText("Olga Muster");
       await expect(line("address")).toContainText(w.addressLine);
       await expect(line("contact-consent")).toContainText(w.consentGiven);
       await expect(line("informed")).toContainText(w.informedYes);

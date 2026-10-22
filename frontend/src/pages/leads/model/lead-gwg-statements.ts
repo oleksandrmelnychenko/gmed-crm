@@ -601,6 +601,12 @@ export function billingStatements(
    * payer's answer then and is shown as such (phase 3a).
    */
   payerAnswered = false,
+  /**
+   * The patient is a minor: "the patient himself" as recipient is the parent
+   * who answered in the cabinet (owner decision: "Ich" is the logged-in
+   * parent), never the child.
+   */
+  minor = false,
 ): BillingStatements {
   const country = (code: string | null) => countryNameForDisplay(code, lang);
   const statement = (
@@ -628,7 +634,9 @@ export function billingStatements(
     const organisation = party?.type === "organisation";
     const who =
       billing.invoice_recipient === "self"
-        ? tx("Пациент (сам / законные представители)", "Patient/in (selbst / gesetzliche Vertretung)")
+        ? minor
+          ? tx("Родитель / законный представитель, заполнявший кабинет", "Elternteil / gesetzliche Vertretung, die das Portal ausgefüllt hat")
+          : tx("Пациент (сам / законные представители)", "Patient/in (selbst / gesetzliche Vertretung)")
         : third
           ? [
               organisation
@@ -674,7 +682,8 @@ export function billingStatements(
   invoice.push(statement("invoice_to", tx("Счёт направляется", "Rechnung geht an"), invoiceToLabel(invoiceTo, tx)));
   if (invoiceTo === "other") {
     invoice.push(
-      statement("invoice_name", tx("Имя на счёте", "Name auf der Rechnung"), party ? party.name : billing.invoice_name),
+      // The recipient's name stands in "Получатель счёта" already.
+      ...(party ? [] : [statement("invoice_name", tx("Имя на счёте", "Name auf der Rechnung"), billing.invoice_name)]),
       statement(
         "invoice_address",
         tx("Адрес для счёта", "Rechnungsanschrift"),
