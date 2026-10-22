@@ -175,16 +175,16 @@ pub(crate) fn problems(
         return vec!["id_document_unreadable"];
     }
     let filled = |value: Option<&str>| value.is_some_and(|value| !value.trim().is_empty());
-    let mut problems: Vec<&'static str> = [
-        ("id_document_type", filled(document.kind)),
-        ("id_document_number", filled(document.number)),
-        ("id_issuing_authority", filled(document.authority)),
-        ("id_issuing_country", filled(document.country)),
-        ("id_valid_until", document.valid_until.is_some()),
-    ]
-    .into_iter()
-    .filter_map(|(field, filled)| (!filled).then_some(field))
-    .collect();
+    let mut problems: Vec<&'static str> = REQUIRED_FIELDS
+        .into_iter()
+        .filter(|field| match *field {
+            "id_document_type" => !filled(document.kind),
+            "id_document_number" => !filled(document.number),
+            "id_issuing_authority" => !filled(document.authority),
+            "id_issuing_country" => !filled(document.country),
+            _ => document.valid_until.is_none(),
+        })
+        .collect();
     if document
         .number
         .is_some_and(|number| !number.trim().is_empty() && !document_number_valid(number))
