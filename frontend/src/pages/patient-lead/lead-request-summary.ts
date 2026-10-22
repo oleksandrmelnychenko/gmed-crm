@@ -3,7 +3,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
-import { personScope, storedTrustedPersons } from "./lead-trusted-persons-model";
+import { disclosureDefaultsToNo, personScope, storedTrustedPersons } from "./lead-trusted-persons-model";
 import { REPRESENTATIVE_COUNTRY_FIELDS } from "./lead-request-representative-questions-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
@@ -578,6 +578,14 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         id: `disclosure-person-${index}`, title: person.name,
         rows: entered([[wording.relation, relations[person.relation]], [wording.contact, person.contact], [wording.scope, personScope(person, lang)]]),
       })) : [],
+    });
+  } else if (disclosureDefaultsToNo(request)) {
+    // Not answered counts as "no" (owner decision 2026-10-22): no information to third parties.
+    const wording = trustedPersonsText(lang);
+    groups.push({
+      id: "disclosure", title: wording.title, empty: text.summaryEmpty,
+      rows: entered([[wording.question, yesNo(false)]]),
+      parts: [],
     });
   }
 

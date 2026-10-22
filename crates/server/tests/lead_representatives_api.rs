@@ -572,6 +572,7 @@ async fn an_adult_names_the_person_who_acts_for_him() {
             "custody_stated": false,
             "document_stage": false,
             "phase": "documents",
+            "custody_set_by_staff": false,
             "representatives": [],
         }),
         "{body}"
@@ -1670,6 +1671,36 @@ async fn one_parent_alone_or_a_guardian_represents_a_minor() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{error}");
     assert_eq!(error["code"], "representative_limit", "{error}");
+
+    // Staff's custody is read-only in the cabinet (owner decision
+    // 2026-10-22): the parent's change is refused, the same value is none.
+    assert_eq!(
+        body["representation"]["custody_set_by_staff"], true,
+        "{body}"
+    );
+    let (status, error) = json_request(
+        router,
+        "POST",
+        &format!("{request}/representation"),
+        &parent,
+        custody(json!("joint")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{error}");
+    assert_eq!(error["code"], "custody_set_by_staff", "{error}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/representation"),
+        &parent,
+        custody(json!("sole_parent")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Staff take their statement back: the parent may state it again.
+    let (status, taken_back) =
+        json_request(router, "POST", &staff_path, &pm, custody(Value::Null)).await;
+    assert_eq!(status, StatusCode::OK, "{taken_back}");
 
     // The mother says that both parents represent the child, and names the
     // father; the last statement stands.

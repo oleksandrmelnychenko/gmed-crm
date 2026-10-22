@@ -195,12 +195,13 @@ export function stepMissingCount(
 
 /** Whether a step is complete: nothing missing, and for "send" sent and unchanged since. */
 export function stepDone(
-  request: Pick<LeadRequest, "progress" | "follow_up" | "consents" | "submitted_at" | "changed_since_submit" | "documents" | "disclosure">,
+  request: Pick<LeadRequest, "progress" | "follow_up" | "consents" | "submitted_at" | "changed_since_submit" | "documents" | "disclosure" | "consent_form">,
   step: StepId,
   missing: Record<StepId, string[]> = missingByStep(request),
 ): boolean {
   if (step === "send") return Boolean(request.submitted_at) && !changedSinceSubmit(request);
-  if (step === "disclosure") return Boolean(request.disclosure) && disclosureProblem(disclosureDraft(request)) === null;
+  // Not answered counts as "no" (owner decision 2026-10-22): done unless an older choice asks for it.
+  if (step === "disclosure") return disclosureProblem(disclosureDraft(request)) === null;
   if (step === "follow_up") return followUpBeforeSubmit(request) ? followUpMissingAll(request).length === 0 : followUpAnswered(request);
   return stepMissingCount(request, step, missing) === 0;
 }

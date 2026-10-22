@@ -78,6 +78,8 @@ export type LeadRequestText = {
   invalidField: string;
   /** An e-mail address that is not name@domain.tld. */
   invalidEmail: string;
+  /** A phone number with fewer than six digits or other characters than + ( ) - / and spaces. */
+  invalidPhone: string;
   dobStaffOnly: string;
   healthConsentRequired: string;
   furtherDetails: string;
@@ -374,6 +376,8 @@ export type LeadRequestText = {
   parentDocumentDetails: string;
   parentShortFormIntro: string;
   custodyQuestion: string;
+  /** Under the custody GMED staff stated (read-only, owner 2026-10-22). */
+  custodySetByStaffHint: string;
   custodyOptions: Record<Custody, string>;
   /** A person of the block: the heading of the form, and the prefix in the list of what is still missing. */
   representativeCaptions: Record<RepresentativeSlot, string>;
@@ -959,6 +963,7 @@ const de: LeadRequestText = {
   notSaved: "Nicht gespeichert",
   invalidField: "Bitte prüfen Sie diese Angabe.",
   invalidEmail: "Bitte geben Sie eine gültige E-Mail-Adresse ein, z. B. name@example.de.",
+  invalidPhone: "Bitte geben Sie eine gültige Telefonnummer ein: mindestens 6 Ziffern, erlaubt sind nur +, Leerzeichen, ( ) - /.",
   dobStaffOnly: "Bitte wenden Sie sich an GMED, um das Geburtsdatum zu korrigieren.",
   healthConsentRequired: "Bitte stimmen Sie zuerst der Verarbeitung der Gesundheitsdaten zu.",
   furtherDetails: "Weitere Angaben",
@@ -1293,6 +1298,7 @@ const de: LeadRequestText = {
   parentDocumentDetails: "Angaben für den Vertrag anzeigen",
   parentShortFormIntro: "Für die erste Anfrage genügen die Namen, Kontaktdaten, das Wohnsitzland und die Staatsangehörigkeiten der vertretenden Eltern. Weitere Angaben und Nachweise werden vor Vertrag und Unterschrift benötigt. Bereits gespeicherte Daten bleiben erhalten.",
   custodyQuestion: "Wer vertritt das Kind?",
+  custodySetByStaffHint: "Von GMED angegeben; falls das nicht stimmt, schreiben Sie uns bitte.",
   custodyOptions: {
     joint: "Beide Eltern gemeinsam",
     sole_parent: "Ein Elternteil allein (alleiniges Sorgerecht)",
@@ -1373,19 +1379,23 @@ const de: LeadRequestText = {
   paymentRouteByPayerShort: "gibt die zahlende Person an",
   sectionLegal: "Weitere Fragen",
   legalIntro: "Bitte beantworten Sie jede Frage mit Ja oder Nein.",
-  legalShort: "Gesetzliche Fragen",
+  // lawyer review pending (2026-10-22)
+  legalShort: "Weitere Fragen",
   summaryEmpty: "Noch keine Angaben",
   declarationTitle: "Erklärung",
+  // lawyer review pending (2026-10-22)
   declarationLabel:
-    "Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe und dass sie richtig und vollständig sind. Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen. Mir ist bekannt, dass ein Verdacht auf Geldwäsche eine Meldepflicht auslösen kann und dass das Unternehmen berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden.",
+    "Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe und dass sie richtig und vollständig sind. Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen.",
   declarationRequired: "Bitte bestätigen Sie Ihre Angaben, bevor Sie die Anfrage senden.",
   declarationGivenAt: (dateTime) => `Bestätigt am ${dateTime}`,
   payerQuestionnaireTitle: "Angaben als zahlende Person",
+  // lawyer review pending (2026-10-22)
   payerQuestionnaireIntro: (section) =>
-    `Sie zahlen die Leistungen von GMED. Das Geldwäschegesetz verlangt dazu einige Angaben von Ihnen als zahlender Person. Name, Anschrift und Ausweis geben Sie im Abschnitt „${section}“ an.`,
+    `Sie zahlen die Leistungen von GMED. Nach ihren eigenen Compliance-Regeln prüft GMED freiwillig die Identität der zahlenden Person und die Herkunft der Zahlung; dazu bitten wir Sie um einige Angaben. Name, Anschrift und Ausweis geben Sie im Abschnitt „${section}“ an.`,
   payerNoticeTitle: "Datenschutzhinweis für die zahlende Person",
+  // lawyer review pending (2026-10-22)
   payerNotice:
-    "Verantwortlich für die Verarbeitung ist GMED. Ihre Angaben als zahlende Person erhalten wir von Ihnen und aus der Anfrage der Patientin / des Patienten. Wir verarbeiten sie, um Sie nach dem Geldwäschegesetz zu identifizieren (§§ 10–12 GwG), um die Zahlung abzuwickeln und um Rechnungen zu stellen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und c DSGVO. Wir speichern die Angaben fünf Jahre nach dem Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG). Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht, sich bei einer Datenschutzaufsichtsbehörde zu beschweren.",
+    "Verantwortlich für die Verarbeitung ist GMED. Ihre Angaben als zahlende Person erhalten wir von Ihnen und aus der Anfrage der Patientin / des Patienten. Wir verarbeiten sie, um die Zahlung abzuwickeln, um Rechnungen zu stellen und um Ihre Identität und die Herkunft der Zahlung zu prüfen; diese Prüfung nimmt GMED freiwillig nach ihren eigenen Compliance-Regeln vor. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und f DSGVO. Wir speichern die Angaben nach den Regeln von GMED fünf Jahre nach dem Ende der Geschäftsbeziehung. Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht, sich bei einer Datenschutzaufsichtsbehörde zu beschweren.",
   payerNoticeAck: "Ich habe die Datenschutzhinweise gelesen.",
   payerNoticeAckAt: (dateTime) => `Bestätigt am ${dateTime}`,
   payerNoticeFirst: "Bitte bestätigen Sie zuerst den Datenschutzhinweis. Danach können Sie Ihre Angaben als zahlende Person machen.",
@@ -1507,6 +1517,7 @@ const ru: LeadRequestText = {
   notSaved: "Не сохранено",
   invalidField: "Пожалуйста, проверьте это поле.",
   invalidEmail: "Введите корректный адрес электронной почты, например name@example.de.",
+  invalidPhone: "Введите корректный номер телефона: не менее 6 цифр, допустимы только +, пробелы, ( ) - /.",
   dobStaffOnly: "Чтобы исправить дату рождения, обратитесь в GMED.",
   healthConsentRequired: "Сначала дайте согласие на обработку данных о здоровье.",
   furtherDetails: "Дополнительные сведения",
@@ -1833,6 +1844,7 @@ const ru: LeadRequestText = {
   parentDocumentDetails: "Показать данные для договора",
   parentShortFormIntro: "Для первого обращения достаточно имён, контактов, страны проживания и гражданства родителей, представляющих ребёнка. Остальные сведения и документы понадобятся перед договором и подписью. Уже сохранённые данные сохраняются.",
   custodyQuestion: "Кто представляет ребёнка?",
+  custodySetByStaffHint: "Указано сотрудником GMED; если неверно — напишите нам.",
   custodyOptions: {
     joint: "Оба родителя вместе",
     sole_parent: "Один из родителей (единоличное право опеки)",
@@ -1915,18 +1927,22 @@ const ru: LeadRequestText = {
   sectionLegal: "Дополнительные вопросы",
   legalIntro:
     "Пожалуйста, ответьте на каждый вопрос «да» или «нет».",
-  legalShort: "Вопросы по закону",
+  // lawyer review pending (2026-10-22)
+  legalShort: "Дополнительные вопросы",
   summaryEmpty: "Пока ничего не указано",
   declarationTitle: "Заявление",
-  declarationLabel: "Я заверяю, что указал(а) приведённые выше сведения добросовестно и в меру своих знаний и что они верны и полны. Я подтверждаю, что средства, используемые для оплаты, не получены преступным путём. Мне известно, что подозрение в отмывании денег может повлечь обязанность сообщить о нём и что компания вправе отказаться от сотрудничества или прекратить его, если сведения не предоставлены или предоставлены не в полном объёме.",
+  // lawyer review pending (2026-10-22)
+  declarationLabel: "Я заверяю, что указал(а) приведённые выше сведения добросовестно и в меру своих знаний и что они верны и полны. Я подтверждаю, что средства, используемые для оплаты, не получены преступным путём.",
   declarationRequired: "Пожалуйста, подтвердите свои данные перед отправкой заявки.",
   declarationGivenAt: (dateTime) => `Подтверждено ${dateTime}`,
   payerQuestionnaireTitle: "Ваши данные как плательщика",
+  // lawyer review pending (2026-10-22)
   payerQuestionnaireIntro: (section) =>
-    `Вы оплачиваете услуги GMED. Закон о противодействии отмыванию денег требует для этого некоторых данных о вас как о плательщике. Имя, адрес и документ, удостоверяющий личность, вы указываете в разделе «${section}».`,
+    `Вы оплачиваете услуги GMED. По собственным правилам комплаенса GMED добровольно проверяет личность плательщика и происхождение оплаты; для этого мы просим вас указать некоторые данные. Имя, адрес и документ, удостоверяющий личность, вы указываете в разделе «${section}».`,
   payerNoticeTitle: "Уведомление о защите данных для плательщика",
+  // lawyer review pending (2026-10-22)
   payerNotice:
-    "Ответственный за обработку — GMED. Ваши данные как плательщика мы получаем от вас и из заявки пациента. Мы обрабатываем их, чтобы идентифицировать вас по Закону Германии о противодействии отмыванию денег (§§ 10–12 GwG), провести оплату и выставлять счета. Правовое основание — ст. 6 ч. 1 п. b и c DSGVO (GDPR). Мы храним данные пять лет после окончания деловых отношений (§ 8 абз. 4 GwG). Вы вправе получить информацию о своих данных, потребовать их исправления, удаления или ограничения обработки, возразить против обработки, а также подать жалобу в надзорный орган по защите данных.",
+    "Ответственный за обработку — GMED. Ваши данные как плательщика мы получаем от вас и из заявки пациента. Мы обрабатываем их, чтобы провести оплату, выставлять счета и проверить вашу личность и происхождение оплаты; эту проверку GMED проводит добровольно по собственным правилам комплаенса. Правовое основание — ст. 6 ч. 1 п. b и f DSGVO (GDPR). По правилам GMED мы храним данные пять лет после окончания деловых отношений. Вы вправе получить информацию о своих данных, потребовать их исправления, удаления или ограничения обработки, возразить против обработки, а также подать жалобу в надзорный орган по защите данных.",
   payerNoticeAck: "Я ознакомился(-ась) с информацией о защите данных.",
   payerNoticeAckAt: (dateTime) => `Подтверждено ${dateTime}`,
   payerNoticeFirst: "Сначала подтвердите, пожалуйста, уведомление о защите данных. После этого вы сможете указать данные плательщика.",
@@ -2048,6 +2064,7 @@ const uk: LeadRequestText = {
   notSaved: "Не збережено",
   invalidField: "Будь ласка, перевірте це поле.",
   invalidEmail: "Введіть коректну адресу електронної пошти, наприклад name@example.de.",
+  invalidPhone: "Введіть коректний номер телефону: щонайменше 6 цифр, допустимі лише +, пробіли, ( ) - /.",
   dobStaffOnly: "Щоб виправити дату народження, зверніться до GMED.",
   healthConsentRequired: "Спочатку дайте згоду на обробку даних про здоров’я.",
   furtherDetails: "Додаткові відомості",
@@ -2374,6 +2391,7 @@ const uk: LeadRequestText = {
   parentDocumentDetails: "Показати дані для договору",
   parentShortFormIntro: "Для першого звернення достатньо імен, контактів, країни проживання та громадянства батьків, які представляють дитину. Решта відомостей і документів знадобиться перед договором і підписом. Уже збережені дані залишаються.",
   custodyQuestion: "Хто представляє дитину?",
+  custodySetByStaffHint: "Вказано співробітником GMED; якщо неправильно — напишіть нам.",
   custodyOptions: {
     joint: "Обоє батьків разом",
     sole_parent: "Один із батьків (одноосібне право опіки)",
@@ -2456,18 +2474,22 @@ const uk: LeadRequestText = {
   sectionLegal: "Додаткові запитання",
   legalIntro:
     "Будь ласка, дайте на кожне запитання відповідь «так» або «ні».",
-  legalShort: "Запитання за законом",
+  // lawyer review pending (2026-10-22)
+  legalShort: "Додаткові запитання",
   summaryEmpty: "Ще нічого не вказано",
   declarationTitle: "Заява",
-  declarationLabel: "Я запевняю, що вказав(-ла) наведені вище відомості сумлінно та наскільки мені відомо і що вони правильні й повні. Я підтверджую, що кошти, використані для оплати, не отримані злочинним шляхом. Мені відомо, що підозра у відмиванні грошей може спричинити обов'язок повідомити про неї і що компанія має право відмовитися від співпраці або припинити її, якщо відомості не надано або надано не в повному обсязі.",
+  // lawyer review pending (2026-10-22)
+  declarationLabel: "Я запевняю, що вказав(-ла) наведені вище відомості сумлінно та наскільки мені відомо і що вони правильні й повні. Я підтверджую, що кошти, використані для оплати, не отримані злочинним шляхом.",
   declarationRequired: "Будь ласка, підтвердьте свої дані перед надсиланням заявки.",
   declarationGivenAt: (dateTime) => `Підтверджено ${dateTime}`,
   payerQuestionnaireTitle: "Ваші дані як платника",
+  // lawyer review pending (2026-10-22)
   payerQuestionnaireIntro: (section) =>
-    `Ви оплачуєте послуги GMED. Закон про протидію відмиванню грошей вимагає для цього деяких даних про вас як про платника. Ім'я, адресу та документ, що посвідчує особу, ви вказуєте в розділі «${section}».`,
+    `Ви оплачуєте послуги GMED. За власними правилами комплаєнсу GMED добровільно перевіряє особу платника та походження оплати; для цього ми просимо вас вказати деякі дані. Ім'я, адресу та документ, що посвідчує особу, ви вказуєте в розділі «${section}».`,
   payerNoticeTitle: "Повідомлення про захист даних для платника",
+  // lawyer review pending (2026-10-22)
   payerNotice:
-    "Відповідальним за обробку є GMED. Ваші дані як платника ми отримуємо від вас і із запиту пацієнта. Ми обробляємо їх, щоб ідентифікувати вас відповідно до Закону Німеччини про протидію відмиванню грошей (§§ 10–12 GwG), провести оплату й виставляти рахунки. Правова підстава — ст. 6 ч. 1 п. b і c DSGVO (GDPR). Ми зберігаємо дані п'ять років після завершення ділових відносин (§ 8 абз. 4 GwG). Ви маєте право на доступ до своїх даних, їх виправлення, видалення або обмеження обробки, право заперечити проти обробки, а також право подати скаргу до наглядового органу із захисту даних.",
+    "Відповідальним за обробку є GMED. Ваші дані як платника ми отримуємо від вас і із запиту пацієнта. Ми обробляємо їх, щоб провести оплату, виставляти рахунки та перевірити вашу особу й походження оплати; цю перевірку GMED проводить добровільно за власними правилами комплаєнсу. Правова підстава — ст. 6 ч. 1 п. b і f DSGVO (GDPR). За правилами GMED ми зберігаємо дані п'ять років після завершення ділових відносин. Ви маєте право на доступ до своїх даних, їх виправлення, видалення або обмеження обробки, право заперечити проти обробки, а також право подати скаргу до наглядового органу із захисту даних.",
   payerNoticeAck: "Я ознайомився(-лася) з інформацією про захист даних.",
   payerNoticeAckAt: (dateTime) => `Підтверджено ${dateTime}`,
   payerNoticeFirst: "Спочатку підтвердьте, будь ласка, повідомлення про захист даних. Після цього ви зможете вказати дані платника.",
@@ -2589,6 +2611,7 @@ const en: LeadRequestText = {
   notSaved: "Not saved",
   invalidField: "Please check this entry.",
   invalidEmail: "Please enter a valid e-mail address, e.g. name@example.com.",
+  invalidPhone: "Please enter a valid phone number: at least 6 digits; only +, spaces, ( ) - / are allowed.",
   dobStaffOnly: "Please contact GMED to correct the date of birth.",
   healthConsentRequired: "Please consent to health data processing first.",
   furtherDetails: "Further information",
@@ -2909,6 +2932,7 @@ const en: LeadRequestText = {
   parentDocumentDetails: "Show details for the contract",
   parentShortFormIntro: "For the initial inquiry, we only need the names, contact details, country of residence and citizenships of the parents representing the child. Further details and documents will be needed before the contract and signature. Previously saved data is retained.",
   custodyQuestion: "Who represents the child?",
+  custodySetByStaffHint: "Stated by GMED staff; if this is wrong, please write to us.",
   custodyOptions: {
     joint: "Both parents together",
     sole_parent: "One parent alone (sole custody)",
@@ -2988,18 +3012,22 @@ const en: LeadRequestText = {
   paymentRouteByPayerShort: "stated by the paying person",
   sectionLegal: "Further questions",
   legalIntro: "Please answer each question with yes or no.",
-  legalShort: "Legal questions",
+  // lawyer review pending (2026-10-22)
+  legalShort: "Further questions",
   summaryEmpty: "Nothing entered yet",
   declarationTitle: "Declaration",
-  declarationLabel: "I declare that I have given the above information to the best of my knowledge and belief and that it is correct and complete. I confirm that the funds used for payment do not originate from criminal acts. I am aware that a suspicion of money laundering may trigger a reporting obligation and that the company is entitled to refuse or end the cooperation if the information is not provided or is provided only insufficiently.",
+  // lawyer review pending (2026-10-22)
+  declarationLabel: "I declare that I have given the above information to the best of my knowledge and belief and that it is correct and complete. I confirm that the funds used for payment do not originate from criminal acts.",
   declarationRequired: "Please confirm your details before you send the request.",
   declarationGivenAt: (dateTime) => `Confirmed on ${dateTime}`,
   payerQuestionnaireTitle: "Your details as the paying person",
+  // lawyer review pending (2026-10-22)
   payerQuestionnaireIntro: (section) =>
-    `You pay for GMED's services. German anti-money laundering law requires some details from you as the paying person. You enter your name, address and identity document in the section "${section}".`,
+    `You pay for GMED's services. Under its own compliance rules, GMED voluntarily checks the identity of the paying person and the origin of the payment; for this we ask you for some details. You enter your name, address and identity document in the section "${section}".`,
   payerNoticeTitle: "Privacy notice for the paying person",
+  // lawyer review pending (2026-10-22)
   payerNotice:
-    "GMED is the controller. We receive your details as the paying person from you and from the patient's request. We process them to identify you under the German Anti-Money Laundering Act (sections 10–12 GwG), to handle the payment and to issue invoices. The legal basis is Art. 6(1)(b) and (c) GDPR. We keep the details for five years after the end of the business relationship (section 8(4) GwG). You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a data protection supervisory authority.",
+    "GMED is the controller. We receive your details as the paying person from you and from the patient's request. We process them to handle the payment, to issue invoices and to check your identity and the origin of the payment; GMED carries out this check voluntarily under its own compliance rules. The legal basis is Art. 6(1)(b) and (f) GDPR. Under GMED's rules we keep the details for five years after the end of the business relationship. You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a data protection supervisory authority.",
   payerNoticeAck: "I have read the privacy information.",
   payerNoticeAckAt: (dateTime) => `Confirmed on ${dateTime}`,
   payerNoticeFirst: "Please confirm the privacy notice first. Then you can enter your details as the paying person.",

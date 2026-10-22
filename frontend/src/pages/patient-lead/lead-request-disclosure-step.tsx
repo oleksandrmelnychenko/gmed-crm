@@ -13,7 +13,7 @@ import { AutosaveFlushContext, CabinetSection, StepFooter, errorBody } from "./l
 import type { StepProps } from "./lead-request-step-forms";
 import { asLeadCabinetLang } from "./lead-request-text";
 import { TrustedPersonsEditor } from "./lead-trusted-persons-editor";
-import { disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, type DisclosureDraft } from "./lead-trusted-persons-model";
+import { disclosureChanged, disclosureDefaultsToNo, disclosureDraft, disclosureProblem, disclosureToSend, type DisclosureDraft } from "./lead-trusted-persons-model";
 import { disclosureConsentText, disclosureSubject, trustedPersonsText } from "./lead-trusted-persons-text";
 
 export function DisclosureStep({ request, text: common, lang, enqueue, onChange, nav }: StepProps) {
@@ -103,9 +103,11 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
 
   if (ownMinor) return <p className="text-sm text-muted-foreground" data-testid="lead-request-guardian-only">{common.guardianOnly}</p>;
 
-  const state = <StatusChip tone={changed ? "warning" : request.disclosure ? "success" : "neutral"} role="status" data-testid="trusted-persons-save-state">
-    {!changed && request.disclosure ? <Check aria-hidden="true" /> : null}
-    {busy ? common.saving : changed ? text.unsaved : request.disclosure ? text.saved : text.unanswered}
+  // Not answered counts as "no" (owner decision 2026-10-22): no information to third parties.
+  const defaultNo = disclosureDefaultsToNo(request);
+  const state = <StatusChip tone={changed ? "warning" : request.disclosure || defaultNo ? "success" : "neutral"} role="status" data-testid="trusted-persons-save-state">
+    {!changed && (request.disclosure || defaultNo) ? <Check aria-hidden="true" /> : null}
+    {busy ? common.saving : changed ? text.unsaved : request.disclosure ? text.saved : defaultNo ? text.denied : text.unanswered}
   </StatusChip>;
 
   return <section className="space-y-4" data-testid="lead-request-disclosure-step">

@@ -548,6 +548,10 @@ pub(crate) struct Loaded {
     pub document_stage: bool,
     /// The uploads on file of the lead's representatives, oldest first.
     pub uploads: Vec<Upload>,
+    /// The custody was stated by staff (`lead_gwg_declarations.
+    /// custody_set_by_staff`, owner decision 2026-10-22): the cabinet shows it
+    /// read-only and may not change it.
+    pub custody_set_by_staff: bool,
     /// The elements of `leads.trusted_contacts` as stored.
     contacts: Vec<Value>,
     rows: HashMap<Uuid, Extras>,
@@ -626,6 +630,7 @@ pub(crate) async fn load_on(
     let Some(lead) = sqlx::query(
         r#"SELECT l.date_of_birth, l.trusted_contacts,
                   g.has_representative, g.under_guardianship, g.custody,
+                  COALESCE(g.custody_set_by_staff, false) AS custody_set_by_staff,
                   (l.converted_patient_id IS NOT NULL
                    OR EXISTS (SELECT 1 FROM lead_risk_assessments ra WHERE ra.lead_id=l.id AND 'G'=ANY(ra.requested_blocks))
                    OR EXISTS (SELECT 1 FROM framework_contracts fc WHERE fc.lead_id=l.id)
@@ -771,6 +776,9 @@ pub(crate) async fn load_on(
     }
     Ok(Some(Loaded {
         document_stage: lead.try_get("document_stage").unwrap_or(false),
+        // Only a stated custody can be staff's.
+        custody_set_by_staff: answers.custody.is_some()
+            && lead.try_get("custody_set_by_staff").unwrap_or(false),
         representation: Representation {
             minor,
             answers,
@@ -1358,6 +1366,11 @@ pub(crate) fn portal_payload(loaded: &Loaded, user_id: Uuid) -> Value {
         } else {
             "documents"
         }),
+    );
+    // Staff stated the custody: the cabinet shows it as text (owner 2026-10-22).
+    payload.insert(
+        "custody_set_by_staff".into(),
+        json!(loaded.representation.minor && loaded.custody_set_by_staff),
     );
     payload.insert("representatives".into(), Value::Array(representatives));
     Value::Object(payload)
@@ -2312,6 +2325,9 @@ async fn store_answers(
                has_representative = EXCLUDED.has_representative,
                under_guardianship = EXCLUDED.under_guardianship,
                custody = EXCLUDED.custody,
+               -- A custody the cabinet states is the cabinet's.
+               custody_set_by_staff = lead_gwg_declarations.custody_set_by_staff
+                   AND lead_gwg_declarations.custody IS NOT DISTINCT FROM EXCLUDED.custody,
                updated_by = EXCLUDED.updated_by,
                updated_at = now()"#,
     )
@@ -2358,6 +2374,19 @@ pub(crate) async fn update_my_representation(
         Ok(patch) => patch,
         Err(response) => return response,
     };
+    // A custody staff stated is read-only in the cabinet (owner decision
+    // 2026-10-22): the parent writes to GMED instead. The same value is no
+    // change.
+    if patch.custody.as_ref().is_some_and(|custody| {
+        loaded.custody_set_by_staff && *custody != representation.answers.custody
+    }) {
+        return intake::coded(
+            StatusCode::CONFLICT,
+            "custody_set_by_staff",
+            "GMED staff stated the custody; it is changed by GMED only",
+            json!({ "field": "custody" }),
+        );
+    }
     let mut next = representation.answers.clone();
     // The persons that go with the change.
     let mut removed: Vec<Uuid> = Vec::new();
@@ -3467,15 +3496,20 @@ pub(crate) async fn set_lead_custody(
         );
     }
     let previous = loaded.representation.answers.custody.clone();
+    let confirmed = previous == custody && custody.is_some() && !loaded.custody_set_by_staff;
     let mut invalidated = Vec::new();
     if previous != custody {
         let written = async {
             // The statements row belongs to the lead: its change time and
-            // author stay what the lead's last change made them.
+            // author stay what the lead's last change made them. A custody
+            // staff state is read-only in the cabinet (owner 2026-10-22);
+            // taken back, the cabinet may state it again.
             sqlx::query(
-                r#"INSERT INTO lead_gwg_declarations (lead_id, custody)
-                   VALUES ($1, $2)
-                   ON CONFLICT (lead_id) DO UPDATE SET custody = EXCLUDED.custody"#,
+                r#"INSERT INTO lead_gwg_declarations (lead_id, custody, custody_set_by_staff)
+                   VALUES ($1, $2, $2 IS NOT NULL)
+                   ON CONFLICT (lead_id) DO UPDATE SET
+                       custody = EXCLUDED.custody,
+                       custody_set_by_staff = EXCLUDED.custody_set_by_staff"#,
             )
             .bind(lead_id)
             .bind(&custody)
@@ -3512,6 +3546,32 @@ pub(crate) async fn set_lead_custody(
         if let Err(error) = written {
             return intake::internal(error, "store custody");
         }
+    } else if confirmed {
+        // Staff confirm the custody the cabinet stated: from now on it is
+        // staff's and read-only in the cabinet.
+        let written = async {
+            sqlx::query(
+                "UPDATE lead_gwg_declarations SET custody_set_by_staff = true WHERE lead_id = $1",
+            )
+            .bind(lead_id)
+            .execute(&mut *tx)
+            .await?;
+            audit::write_in_transaction(
+                &mut tx,
+                &audit::domain_event(
+                    "set_lead_custody",
+                    Some(auth.user_id),
+                    "lead",
+                    Some(lead_id),
+                    json!({ "custody": custody, "previous": previous, "confirmed": true }),
+                ),
+            )
+            .await
+        }
+        .await;
+        if let Err(error) = written {
+            return intake::internal(error, "confirm custody");
+        }
     }
     let loaded = match load(&mut tx, lead_id).await {
         Ok(Some(loaded)) => loaded,
@@ -3522,7 +3582,7 @@ pub(crate) async fn set_lead_custody(
         return intake::internal(error, "commit custody");
     }
     crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
-    if previous != custody {
+    if previous != custody || confirmed {
         publish_staff_change(&state, lead_id, auth.user_id).await;
     }
     Json(json!({ "representation": staff_payload(&loaded) })).into_response()

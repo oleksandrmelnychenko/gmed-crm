@@ -881,7 +881,9 @@ test.describe("payer link", () => {
     await page.getByTestId("payer-link-next").click();
     await expect(page.getByTestId("payer-link-notice")).toHaveText("Bitte bestätigen Sie zuerst die Datenschutzhinweise.");
     await expect(page.getByTestId("payer-link-step-privacy")).toBeVisible();
-    await expect(page.getByTestId("payer-link-privacy-notice")).toContainText("§§ 10–12 GwG");
+    // A voluntary check under GMED's own rules, no legal AML duty (owner 2026-10-22).
+    await expect(page.getByTestId("payer-link-privacy-notice")).toContainText("freiwillig");
+    await expect(page.getByTestId("payer-link-privacy-notice")).not.toContainText("GwG");
     await expect(page.getByRole("link", { name: "Vollständige Datenschutzhinweise" })).toHaveAttribute("href", "/legal?notice=form&lang=de#privacy");
 
     // A reload keeps the session of this tab: no new code.

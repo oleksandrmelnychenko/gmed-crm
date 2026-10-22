@@ -425,6 +425,11 @@ export type LeadRequestRepresentation = {
   under_guardianship: boolean | null;
   custody: Custody | null;
   custody_stated: boolean;
+  /**
+   * GMED staff stated the minor's custody (owner decision 2026-10-22): the
+   * cabinet shows it as text and may not change it. Absent on an older server.
+   */
+  custody_set_by_staff?: boolean;
   representatives: LeadRequestRepresentative[];
 };
 

@@ -41,9 +41,13 @@ const followUp = (overrides: Partial<LeadRequestFollowUp>): LeadRequestFollowUp 
 });
 
 describe("lead cabinet steps", () => {
-  it("marks disclosure complete only after a current valid explicit decision", () => {
+  it("marks disclosure complete with a valid decision, an unanswered step counting as no", () => {
     const current = { ...request(), disclosure: { allow_disclosure: false, consent_given: false, version: "2026-10-14", language: "de", chosen_at: "2026-10-15T08:00:00Z", chosen_by: "viewer", access_kind: "self", company_name: "GMED" } } as LeadRequest;
-    expect(stepDone(request(), "disclosure")).toBe(false);
+    // Not answered is "no" (owner decision 2026-10-22) ...
+    expect(stepDone(request(), "disclosure")).toBe(true);
+    // ... unless an older choice named recipients without a disclosure decision.
+    const legacy = { ...request(), consent_form: { version: "1", choices: { named_recipients: true }, chosen_at: null } } as unknown as LeadRequest;
+    expect(stepDone(legacy, "disclosure")).toBe(false);
     expect(stepDone(current, "disclosure")).toBe(true);
     expect(stepDone({ ...current, disclosure: { ...current.disclosure!, allow_disclosure: true } }, "disclosure")).toBe(false);
   });

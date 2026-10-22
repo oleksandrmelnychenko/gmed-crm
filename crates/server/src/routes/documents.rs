@@ -26412,18 +26412,31 @@ fn append_third_party_disclosure_pdf(
     choice: Option<&crate::consent_choices::OwnConsentChoice>,
     minor: bool,
 ) {
-    let Some(choice) = choice else {
-        return;
+    // No answer in the cabinet counts as "Nein, nur ich selbst." (owner
+    // decision 2026-10-22). An older named-recipient choice without a
+    // disclosure decision is printed by the caller with its own wording.
+    let default_no;
+    let disclosure = match choice.and_then(|choice| choice.disclosure.as_ref()) {
+        Some(disclosure) => disclosure,
+        None if choice.is_some_and(|choice| choice.choices.named_recipients) => return,
+        None => {
+            default_no = crate::consent_choices::DisclosureDecision::default_no(
+                choice
+                    .and_then(|choice| choice.access_kind.as_deref())
+                    .unwrap_or(if minor { "guardian" } else { "self" }),
+            );
+            &default_no
+        }
     };
-    let Some(disclosure) = &choice.disclosure else {
-        return;
-    };
+    let recipients = choice
+        .filter(|_| disclosure.allow_disclosure)
+        .map(crate::consent_choices::OwnConsentChoice::recipient_lines)
+        .unwrap_or_default();
     let intro = "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
     let guardian_intro = "Die folgenden Angaben und die Einwilligung erklärt die vertretende Person für die oben bezeichnete Person.";
     let question = "Soll eine weitere Person Auskunft erhalten dürfen?";
     let no = "Nein, nur ich selbst.";
     let yes = "Ja, folgende Person(en) dürfen Auskunft erhalten:";
-    let recipients = choice.recipient_lines();
     let checkbox_height = |text: &str| {
         wrap_text_to_width_precise(&format!("[x]  {text}"), 10.5, layout.available_width(4.0)).len()
             as f32
@@ -37679,6 +37692,19 @@ mod tests {
         assert!(text.contains("[x] Nein, nur ich selbst."), "{text}");
         assert!(!text.contains("Max Named"), "{text}");
         assert!(!text.contains("Olga Named"), "{text}");
+        // Not answered counts as "Nein" (owner decision 2026-10-22), with or
+        // without a stored choice of the other options.
+        data.consent_choice.as_mut().unwrap().disclosure = None;
+        let unanswered =
+            super::build_lead_self_disclosure_pdf(&data, &agency, None, "FORM-UNANSWERED").unwrap();
+        let text = normalized_pdf_text(&unanswered);
+        assert!(text.contains("[x] Nein, nur ich selbst."), "{text}");
+        assert!(text.contains("[ ] Ja, folgende Person(en)"), "{text}");
+        data.consent_choice = None;
+        let without_choice =
+            super::build_lead_self_disclosure_pdf(&data, &agency, None, "FORM-NONE").unwrap();
+        let text = normalized_pdf_text(&without_choice);
+        assert!(text.contains("[x] Nein, nur ich selbst."), "{text}");
     }
 
     #[test]

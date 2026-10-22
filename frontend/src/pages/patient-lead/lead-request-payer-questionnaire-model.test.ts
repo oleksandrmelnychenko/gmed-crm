@@ -270,10 +270,10 @@ describe("paying parent's questionnaire: what is missing, and where", () => {
     expect(payerQuestionnaireFieldLabel(de, "id_document_upload")).toBe("Ihr Ausweisdokument (Elternteil / gesetzlicher Vertreter)");
     expect(payerQuestionnaireFieldLabel(leadRequestText("ru"), "id_document_upload")).toBe("Ваш документ (родитель / законный представитель)");
     // The paying parent's own legal questions keep their details (the lead's are yes/no since the trigger flow).
-    expect(payerQuestionnaireFieldLabel(de, "pep_self")).toBe("Gesetzliche Fragen: Öffentliches Amt");
-    expect(payerQuestionnaireFieldLabel(de, "pep_self_details")).toBe("Gesetzliche Fragen: Amt, Land und Zeitraum");
+    expect(payerQuestionnaireFieldLabel(de, "pep_self")).toBe("Weitere Fragen: Öffentliches Amt");
+    expect(payerQuestionnaireFieldLabel(de, "pep_self_details")).toBe("Weitere Fragen: Amt, Land und Zeitraum");
     expect(payerQuestionnaireFieldLabel(de, "sanctions_links_details")).toBe(
-      "Gesetzliche Fragen: Zu wem besteht die Verbindung und welcher Art ist sie?",
+      "Weitere Fragen: Zu wem besteht die Verbindung und welcher Art ist sie?",
     );
     expect(payerQuestionnaireFieldLabel(de, "payment_method")).toBe("Welche Zahlungsart für Rechnungen bevorzugen Sie?");
     expect(payerQuestionnaireFieldLabel(de, "relationship")).toBe("Beziehung zur Patientin / zum Patienten – In welcher Beziehung genau?");

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { payerPhoneAcceptable } from "@/lib/payer-phone";
 import { MAX_UPLOAD_BYTES } from "@/pages/patient-lead/lead-request-model";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "@/pages/patient-lead/lead-request-autosave";
 
@@ -46,6 +47,9 @@ import { missingLabel, stepTitle, type PayerLinkText } from "./payer-link-text";
 // "send". What the link or the session cannot do any more goes to the page.
 
 type RefusedValues = { values: RejectedFields; codes: Partial<Record<PayerField, string>> };
+
+/** The server's code for a phone that is no phone number; the form uses it for its own check too. */
+const PAYER_PHONE_INVALID = "payer_phone_invalid";
 
 /** Problems the page handles: a lost session (back to the code) or a link that no longer works. */
 export type LinkProblem = Extract<PayerErrorKind, "session" | "link_incomplete" | "link_invalid" | "link_revoked" | "link_expired" | "link_locked">;
@@ -119,6 +123,15 @@ function useAnswersForm({
           const patch = scopedDraftPatch(answersPatch(savedRef.current, snapshot, contextRef.current, rejected), fields);
           const keys = Object.keys(patch);
           if (keys.length === 0) break;
+          // A new phone that is no phone number is not sent: the field says so at once (owner 2026-10-22).
+          if (typeof patch.phone === "string" && !payerPhoneAcceptable(patch.phone, savedRef.current.phone)) {
+            const next = withRejectedField(rejected, "phone", snapshot);
+            if (next) {
+              rejected = next;
+              codes.phone = PAYER_PHONE_INVALID;
+              continue;
+            }
+          }
           onSaveState("saving");
           try {
             const next = await client.saveAnswers(patch);
@@ -170,6 +183,7 @@ function useAnswersForm({
       if (value === undefined || value !== fieldValue(field, draft)) return undefined;
       const code = refused.codes[field];
       if (code === "id_document_expired") return text.idDocumentExpired;
+      if (code === PAYER_PHONE_INVALID) return text.invalidPhone;
       return (code ? text.idDocumentRules[code] : undefined) ?? text.invalidField;
     },
     flush: () => save(draftRef.current),

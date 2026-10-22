@@ -79,9 +79,18 @@ export function requestForLead(requests: readonly LeadRequest[], selected: strin
   return requests.find((request) => request.lead_id === selected) ?? requests[0] ?? null;
 }
 
+/**
+ * "Auskunft an Dritte" not answered counts as "no" (owner decision 2026-10-22): no information to
+ * third parties, as the server prints it. Only an older choice that named recipients without a
+ * disclosure decision still asks for the answer.
+ */
+export function disclosureDefaultsToNo(request: Pick<LeadRequest, "disclosure" | "consent_form">): boolean {
+  return !request.disclosure && request.consent_form?.choices?.named_recipients !== true;
+}
+
 export function disclosureDraft(request: Pick<LeadRequest, "disclosure" | "disclosure_company_name" | "trusted_persons" | "consent_form">, viewerId?: string): DisclosureDraft {
   return {
-    allowDisclosure: request.disclosure?.allow_disclosure ?? null,
+    allowDisclosure: request.disclosure?.allow_disclosure ?? (disclosureDefaultsToNo(request) ? false : null),
     consentGiven: request.disclosure?.allow_disclosure === true && request.disclosure.consent_given === true && request.disclosure.version === DISCLOSURE_VERSION &&
       (!viewerId || request.disclosure.chosen_by === viewerId) && (!request.disclosure_company_name || request.disclosure_company_name === request.disclosure.company_name),
     persons: recipientDrafts(storedTrustedPersons(request)),

@@ -1961,8 +1961,10 @@ test.describe("lead cabinet", () => {
     // Nothing is missing, yet nothing is sent without the confirmation.
     await expect(page.getByTestId("lead-request-missing")).toHaveCount(0);
     await expect(declaration).toContainText(
-      "Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe und dass sie richtig und vollständig sind. Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen. Mir ist bekannt, dass ein Verdacht auf Geldwäsche eine Meldepflicht auslösen kann und dass das Unternehmen berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden.",
+      "Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe und dass sie richtig und vollständig sind. Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen.",
     );
+    // No reporting duty is mentioned any more (owner 2026-10-22).
+    await expect(declaration).not.toContainText("Meldepflicht");
     await expect(send).toBeDisabled();
     await declaration.getByRole("checkbox").check();
     await expect(send).toBeEnabled();

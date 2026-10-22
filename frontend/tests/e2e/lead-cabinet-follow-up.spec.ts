@@ -605,11 +605,12 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(page.getByTestId("lead-request-step-badge")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-legal")).toHaveCount(0);
     // After "Weiter" the step's badge counts what it misses (the server's `missing_by_step`, the contact
-    // keys in the first step); the other steps stay without one.
+    // keys in the first step); since 2026-10-22 (owner) every other step that misses something shows
+    // its count too, so step 1 already tells that the identity document is still to come.
     await page.getByTestId("lead-request-step-person").getByRole("button", { name: "Weiter" }).click();
     await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "person");
     await expect(tab(page, "person").getByTestId("lead-request-step-badge")).toHaveText("4");
-    await expect(tab(page, "identity").getByTestId("lead-request-step-badge")).toHaveCount(0);
+    await expect(tab(page, "identity").getByTestId("lead-request-step-badge")).toHaveText("1");
     await expect(tab(page, "documents").getByTestId("lead-request-step-badge")).toHaveCount(0);
 
     // Free navigation: straight to the identity document, then back with the step bar.

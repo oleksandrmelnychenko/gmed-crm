@@ -16,6 +16,7 @@ import { ApiRequestError } from "@/lib/api";
 import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { isKnownNoMailEmail } from "@/lib/email-domain-check";
+import { payerPhoneAcceptable } from "@/lib/payer-phone";
 
 import {
   NO_THIRD_PARTY_PAYER,
@@ -137,6 +138,13 @@ export function usePayerAutosave({
         if (input.email && !isValidEmailAddress(input.email)) {
           rejectedRef.current = key;
           setFieldError("payer_email");
+          onSaveState("error");
+          return false;
+        }
+        // So is a new phone that is no phone number (owner decision 2026-10-22); a stored one may stay.
+        if (!payerPhoneAcceptable(input.phone, savedRef.current.phone)) {
+          rejectedRef.current = key;
+          setFieldError("payer_phone");
           onSaveState("error");
           return false;
         }
@@ -311,7 +319,13 @@ export function PayerSection({
   const orgMask = typed && knowsOrganisationMask(request);
   const consentAt = request.payer?.contact_consent_at ?? null;
   const errorFor = (field: PayerField) =>
-    fieldError === field ? (field === "payer_email" ? text.invalidEmail : text.invalidField) : undefined;
+    fieldError === field
+      ? field === "payer_email"
+        ? text.invalidEmail
+        : field === "payer_phone"
+          ? text.invalidPhone
+          : text.invalidField
+      : undefined;
   const fieldProps = (field: PayerField) => ({
     id: `lead-request-${field}`,
     "aria-invalid": Boolean(errorFor(field)) || undefined,

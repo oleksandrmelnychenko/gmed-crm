@@ -2793,8 +2793,10 @@ async fn prefill_minor_repeat_representation(
     }
     if let Some(custody) = &custody {
         sqlx::query(
-            r#"INSERT INTO lead_gwg_declarations (lead_id, custody, updated_by)
-               VALUES ($1, $2, $3)
+            // Taken over from the patient file: staff's, read-only in the
+            // cabinet (owner decision 2026-10-22).
+            r#"INSERT INTO lead_gwg_declarations (lead_id, custody, updated_by, custody_set_by_staff)
+               VALUES ($1, $2, $3, true)
                ON CONFLICT (lead_id) DO NOTHING"#,
         )
         .bind(lead_id)

@@ -100,6 +100,8 @@ export type PayerLinkText = {
   autosaveNote: string;
   choose: string;
   invalidField: string;
+  /** A phone with fewer than six digits or other characters than + ( ) - / and spaces. */
+  invalidPhone: string;
   idDocumentExpired: string;
   /** Refusals of the identity document rules, by the server's code (owner 2026-10-22). */
   idDocumentRules: Record<string, string>;
@@ -264,6 +266,7 @@ const de: PayerLinkText = {
   autosaveNote: "Ihre Angaben werden automatisch gespeichert.",
   choose: "Auswählen",
   invalidField: "Bitte prüfen Sie diese Angabe.",
+  invalidPhone: "Bitte geben Sie eine gültige Telefonnummer ein: mindestens 6 Ziffern, erlaubt sind nur +, Leerzeichen, ( ) - /.",
   idDocumentExpired: "Das Dokument ist abgelaufen. Bitte geben Sie ein gültiges Dokument an.",
   idDocumentRules: {
     id_document_number_invalid: "Nur lateinische Buchstaben A–Z, Ziffern, Leerzeichen, „-“ und „<“.",
@@ -278,8 +281,10 @@ const de: PayerLinkText = {
     organisation
       ? `${patient} hat Ihre Organisation als zahlende Partei benannt und uns dafür ihren Namen und ihre Kontaktdaten mitgeteilt.`
       : `${patient} hat Sie als zahlende Person benannt und uns dafür Ihren Namen und Ihre Kontaktdaten mitgeteilt.`,
-    "Verantwortlich für die Verarbeitung Ihrer Daten ist GMED. Wir verarbeiten Ihre Angaben, um Sie nach dem Geldwäschegesetz zu identifizieren (§§ 10–12 GwG), die Kostenübernahme zu klären und Rechnungen zu stellen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und c DSGVO.",
-    "Wir speichern die Angaben fünf Jahre nach dem Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG). Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht, sich bei einer Datenschutz-Aufsichtsbehörde zu beschweren.",
+    // lawyer review pending (2026-10-22)
+    "Verantwortlich für die Verarbeitung Ihrer Daten ist GMED. Wir verarbeiten Ihre Angaben, um die Kostenübernahme zu klären, um Rechnungen zu stellen und um Ihre Identität und die Herkunft der Zahlung zu prüfen; diese Prüfung nimmt GMED freiwillig nach ihren eigenen Compliance-Regeln vor. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und f DSGVO.",
+    // lawyer review pending (2026-10-22)
+    "Wir speichern die Angaben nach den Regeln von GMED fünf Jahre nach dem Ende der Geschäftsbeziehung. Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht, sich bei einer Datenschutz-Aufsichtsbehörde zu beschweren.",
   ],
   privacyLink: "Vollständige Datenschutzhinweise",
   privacyAck: "Ich habe die Datenschutzhinweise gelesen.",
@@ -466,7 +471,8 @@ const de: PayerLinkText = {
   complete: "Alle erforderlichen Angaben sind vorhanden.",
   goToStep: "Ergänzen",
   edit: "Ändern",
-  confirmLabel: "Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe und dass sie richtig und vollständig sind. Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen. Mir ist bekannt, dass ein Verdacht auf Geldwäsche eine Meldepflicht auslösen kann und dass das Unternehmen berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden.",
+  // lawyer review pending (2026-10-22)
+  confirmLabel: "Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe und dass sie richtig und vollständig sind. Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen.",
   submit: "Absenden",
   submitting: "Wird gesendet…",
   submitNeedsConfirm: "Bitte bestätigen Sie, dass Ihre Angaben vollständig und richtig sind.",
@@ -558,6 +564,7 @@ const en: PayerLinkText = {
   autosaveNote: "Your details are saved automatically.",
   choose: "Select",
   invalidField: "Please check this entry.",
+  invalidPhone: "Please enter a valid phone number: at least 6 digits; only +, spaces, ( ) - / are allowed.",
   idDocumentExpired: "The document has expired. Please enter a valid document.",
   idDocumentRules: {
     id_document_number_invalid: "Only Latin letters A–Z, digits, spaces, “-” and “<”.",
@@ -572,8 +579,10 @@ const en: PayerLinkText = {
     organisation
       ? `${patient} has named your organisation as the paying party and gave us its name and contact details for this purpose.`
       : `${patient} has named you as the paying person and gave us your name and contact details for this purpose.`,
-    "GMED is responsible for processing your data. We process your details to identify you under the German Money Laundering Act (Sections 10–12 GwG), to arrange the covering of the costs and to issue invoices. The legal basis is Art. 6(1)(b) and (c) GDPR.",
-    "We keep the details for five years after the end of the business relationship (Section 8(4) GwG). You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a data protection supervisory authority.",
+    // lawyer review pending (2026-10-22)
+    "GMED is responsible for processing your data. We process your details to arrange the covering of the costs, to issue invoices and to check your identity and the origin of the payment; GMED carries out this check voluntarily under its own compliance rules. The legal basis is Art. 6(1)(b) and (f) GDPR.",
+    // lawyer review pending (2026-10-22)
+    "Under GMED's rules we keep the details for five years after the end of the business relationship. You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a data protection supervisory authority.",
   ],
   privacyLink: "Full privacy information",
   privacyAck: "I have read the privacy information.",
@@ -760,7 +769,8 @@ const en: PayerLinkText = {
   complete: "All required details are there.",
   goToStep: "Complete",
   edit: "Edit",
-  confirmLabel: "I declare that I have given the above information to the best of my knowledge and belief and that it is correct and complete. I confirm that the funds used for payment do not originate from criminal acts. I am aware that a suspicion of money laundering may trigger a reporting obligation and that the company is entitled to refuse or end the cooperation if the information is not provided or is provided only insufficiently.",
+  // lawyer review pending (2026-10-22)
+  confirmLabel: "I declare that I have given the above information to the best of my knowledge and belief and that it is correct and complete. I confirm that the funds used for payment do not originate from criminal acts.",
   submit: "Send",
   submitting: "Sending…",
   submitNeedsConfirm: "Please confirm that your details are complete and correct.",
@@ -850,6 +860,7 @@ const uk: PayerLinkText = {
   autosaveNote: "Ваші дані зберігаються автоматично.",
   choose: "Виберіть",
   invalidField: "Будь ласка, перевірте це поле.",
+  invalidPhone: "Введіть коректний номер телефону: щонайменше 6 цифр, допустимі лише +, пробіли, ( ) - /.",
   idDocumentExpired: "Термін дії документа минув. Будь ласка, вкажіть дійсний документ.",
   idDocumentRules: {
     id_document_number_invalid: "Лише латинські літери A–Z, цифри, пробіл, «-» і «<».",
@@ -864,8 +875,10 @@ const uk: PayerLinkText = {
     organisation
       ? `${patient} вказав(ла) вашу організацію як платника і для цього повідомив(ла) нам її назву та контактні дані.`
       : `${patient} вказав(ла) вас платником і для цього повідомив(ла) нам ваше ім'я та контактні дані.`,
-    "Відповідальна за обробку ваших даних — GMED. Ми обробляємо ваші дані, щоб ідентифікувати вас відповідно до німецького закону про запобігання відмиванню коштів (§§ 10–12 GwG), узгодити оплату витрат і виставляти рахунки. Правова підстава — ст. 6 абз. 1 літ. b і c GDPR (DSGVO).",
-    "Ми зберігаємо дані п'ять років після завершення ділових відносин (§ 8 абз. 4 GwG). Ви маєте право на доступ до даних, їх виправлення, видалення, обмеження обробки та заперечення, а також право подати скаргу до наглядового органу із захисту даних.",
+    // lawyer review pending (2026-10-22)
+    "Відповідальна за обробку ваших даних — GMED. Ми обробляємо ваші дані, щоб узгодити оплату витрат, виставляти рахунки та перевірити вашу особу й походження оплати; цю перевірку GMED проводить добровільно за власними правилами комплаєнсу. Правова підстава — ст. 6 абз. 1 літ. b і f GDPR (DSGVO).",
+    // lawyer review pending (2026-10-22)
+    "За правилами GMED ми зберігаємо дані п'ять років після завершення ділових відносин. Ви маєте право на доступ до даних, їх виправлення, видалення, обмеження обробки та заперечення, а також право подати скаргу до наглядового органу із захисту даних.",
   ],
   privacyLink: "Повна інформація про захист даних",
   privacyAck: "Я прочитав(ла) інформацію про захист даних.",
@@ -1056,7 +1069,8 @@ const uk: PayerLinkText = {
   complete: "Усі обов'язкові дані вказано.",
   goToStep: "Доповнити",
   edit: "Змінити",
-  confirmLabel: "Я запевняю, що вказав(-ла) наведені вище відомості сумлінно та наскільки мені відомо і що вони правильні й повні. Я підтверджую, що кошти, використані для оплати, не отримані злочинним шляхом. Мені відомо, що підозра у відмиванні грошей може спричинити обов'язок повідомити про неї і що компанія має право відмовитися від співпраці або припинити її, якщо відомості не надано або надано не в повному обсязі.",
+  // lawyer review pending (2026-10-22)
+  confirmLabel: "Я запевняю, що вказав(-ла) наведені вище відомості сумлінно та наскільки мені відомо і що вони правильні й повні. Я підтверджую, що кошти, використані для оплати, не отримані злочинним шляхом.",
   submit: "Надіслати",
   submitting: "Надсилається…",
   submitNeedsConfirm: "Будь ласка, підтвердьте, що ваші дані повні й правильні.",
@@ -1146,6 +1160,7 @@ const ru: PayerLinkText = {
   autosaveNote: "Ваши данные сохраняются автоматически.",
   choose: "Выберите",
   invalidField: "Пожалуйста, проверьте это поле.",
+  invalidPhone: "Введите корректный номер телефона: не менее 6 цифр, допустимы только +, пробелы, ( ) - /.",
   idDocumentExpired: "Срок действия документа истёк. Пожалуйста, укажите действующий документ.",
   idDocumentRules: {
     id_document_number_invalid: "Только латинские буквы A–Z, цифры, пробел, «-» и «<».",
@@ -1160,8 +1175,10 @@ const ru: PayerLinkText = {
     organisation
       ? `${patient} указал(а) вашу организацию как плательщика и для этого сообщил(а) нам её название и контактные данные.`
       : `${patient} указал(а) вас плательщиком и для этого сообщил(а) нам ваше имя и контактные данные.`,
-    "Ответственная за обработку ваших данных — GMED. Мы обрабатываем ваши данные, чтобы идентифицировать вас по немецкому закону о противодействии отмыванию денег (§§ 10–12 GwG), согласовать оплату расходов и выставлять счета. Правовое основание — ст. 6 абз. 1 лит. b и c GDPR (DSGVO).",
-    "Мы храним данные пять лет после окончания деловых отношений (§ 8 абз. 4 GwG). Вы имеете право на доступ к данным, их исправление, удаление, ограничение обработки и возражение, а также право подать жалобу в надзорный орган по защите данных.",
+    // lawyer review pending (2026-10-22)
+    "Ответственная за обработку ваших данных — GMED. Мы обрабатываем ваши данные, чтобы согласовать оплату расходов, выставлять счета и проверить вашу личность и происхождение оплаты; эту проверку GMED проводит добровольно по собственным правилам комплаенса. Правовое основание — ст. 6 абз. 1 лит. b и f GDPR (DSGVO).",
+    // lawyer review pending (2026-10-22)
+    "По правилам GMED мы храним данные пять лет после окончания деловых отношений. Вы имеете право на доступ к данным, их исправление, удаление, ограничение обработки и возражение, а также право подать жалобу в надзорный орган по защите данных.",
   ],
   privacyLink: "Полная информация о защите данных",
   privacyAck: "Я прочитал(а) информацию о защите данных.",
@@ -1352,7 +1369,8 @@ const ru: PayerLinkText = {
   complete: "Все обязательные данные указаны.",
   goToStep: "Дополнить",
   edit: "Изменить",
-  confirmLabel: "Я заверяю, что указал(а) приведённые выше сведения добросовестно и в меру своих знаний и что они верны и полны. Я подтверждаю, что средства, используемые для оплаты, не получены преступным путём. Мне известно, что подозрение в отмывании денег может повлечь обязанность сообщить о нём и что компания вправе отказаться от сотрудничества или прекратить его, если сведения не предоставлены или предоставлены не в полном объёме.",
+  // lawyer review pending (2026-10-22)
+  confirmLabel: "Я заверяю, что указал(а) приведённые выше сведения добросовестно и в меру своих знаний и что они верны и полны. Я подтверждаю, что средства, используемые для оплаты, не получены преступным путём.",
   submit: "Отправить",
   submitting: "Отправляется…",
   submitNeedsConfirm: "Пожалуйста, подтвердите, что ваши данные полные и верные.",

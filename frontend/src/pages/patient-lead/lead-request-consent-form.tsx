@@ -21,7 +21,7 @@ import { consentFormText } from "./lead-request-consent-form-text";
 import { CabinetGoToContext, CabinetSection as Section, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
 import type { SaveState } from "./lead-request-model";
 
-import { storedTrustedPersons, trustedPersonsPath } from "./lead-trusted-persons-model";
+import { disclosureDefaultsToNo, storedTrustedPersons, trustedPersonsPath } from "./lead-trusted-persons-model";
 import { TrustedPersonsList } from "./lead-trusted-persons-editor";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 
@@ -160,8 +160,9 @@ export function ConsentFormChoicesSection({
       <legend className="px-1 text-sm font-medium">{personsText.title}</legend>
       <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs", request.disclosure?.allow_disclosure && request.disclosure.consent_given ? "border-emerald-200 bg-emerald-50 text-emerald-800"
         // "No" is a valid, optional answer: neutral, never a warning.
-        : request.disclosure?.allow_disclosure === false ? "border-border bg-muted/40 text-muted-foreground" : "border-amber-200 bg-amber-50 text-amber-800")} data-testid="disclosure-saved-status">
-        {!request.disclosure ? personsText.unanswered : savedDisclosureAllowed(request) ? personsText.allowed : personsText.denied}
+        // Not answered counts as "no" (owner decision 2026-10-22).
+        : request.disclosure?.allow_disclosure === false || disclosureDefaultsToNo(request) ? "border-border bg-muted/40 text-muted-foreground" : "border-amber-200 bg-amber-50 text-amber-800")} data-testid="disclosure-saved-status">
+        {!request.disclosure && !disclosureDefaultsToNo(request) ? personsText.unanswered : savedDisclosureAllowed(request) ? personsText.allowed : personsText.denied}
       </span>
       {recipients.length > 0 ? <TrustedPersonsList persons={recipients} lang={lang} /> : null}
       {!request.disclosure && form.choices?.named_recipients ? <p className="text-xs text-muted-foreground">{personsText.legacy}</p> : null}

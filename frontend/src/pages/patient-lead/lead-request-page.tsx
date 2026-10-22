@@ -379,6 +379,9 @@ function LeadRequestView({
   // questions expose their pending count as soon as the server opens them.
   const [missingShownSteps, setMissingShownSteps] = useState<ReadonlySet<StepId>>(() => new Set());
   const [sendOpened, setSendOpened] = useState(() => initialStep(request) === "send");
+  // The first "next" on any step shows the badges of every step (owner decision 2026-10-22):
+  // on step 1 the lead already sees that step 2 still needs its documents.
+  const [nextPressed, setNextPressed] = useState(false);
   const showMissingOf = useCallback((id: StepId) => {
     setMissingShownSteps((current) => (current.has(id) ? current : new Set(current).add(id)));
   }, []);
@@ -386,10 +389,10 @@ function LeadRequestView({
     // A request sent once was checked as a whole: its base-step badges show.
     // Staff follow-up is sent separately; live country questions show their pending count immediately.
     (id: StepId) =>
-      id === "follow_up"
-        ? request.follow_up?.before_submit === true || missingShownSteps.has(id)
-        : sendOpened || Boolean(request.submitted_at) || missingShownSteps.has(id),
-    [missingShownSteps, request.submitted_at, request.follow_up?.before_submit, sendOpened],
+      nextPressed || missingShownSteps.has(id) || (id === "follow_up"
+        ? request.follow_up?.before_submit === true
+        : sendOpened || Boolean(request.submitted_at)),
+    [missingShownSteps, nextPressed, request.submitted_at, request.follow_up?.before_submit, sendOpened],
   );
 
   // The section or field a link points to (a box of another step, a missing item, the summary):
@@ -414,6 +417,7 @@ function LeadRequestView({
   }, [pendingTarget]);
 
   const go = useCallback((next: StepId, validateCurrent = false, target?: CabinetTarget) => {
+    if (validateCurrent) setNextPressed(true);
     // A link into the step on screen needs no saving and no step change: it only shows the field.
     if (next === step && target) {
       setPendingTarget({ ...target });

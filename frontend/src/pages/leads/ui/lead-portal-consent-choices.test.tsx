@@ -147,9 +147,20 @@ describe("portal consent facts in the staff wizard", () => {
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain(">Nein – nicht erlaubt</span>");
   });
 
+  it("counts an unanswered disclosure as no unless an older choice named recipients (owner 2026-10-22)", () => {
+    const html = renderToStaticMarkup(<PortalConsentChoiceView intake={state({ consent_form: savedForm })} tx={tx} />);
+    const receiptHtml = html.split('data-testid="portal-consent-choices"')[0];
+    expect(receiptHtml).toContain(">Нет — не отвечено, по умолчанию</span>");
+    expect(receiptHtml).not.toContain("border-amber-200");
+    expect(receiptHtml).not.toContain("portal-disclosure-consent");
+    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={state({ consent_form: savedForm })} tx={de} />))
+      .toContain(">Nein – nicht beantwortet, Standard</span>");
+  });
+
   it("does not invent a disclosure receipt or scope for historic recipients", () => {
     const html = renderToStaticMarkup(<PortalConsentChoiceView intake={state({
-      consent_form: savedForm, trusted_persons: [{ name: "Historic Person", relation: "friend", contact: null }],
+      consent_form: { ...savedForm, choices: { ...savedForm.choices!, named_recipients: true } },
+      trusted_persons: [{ name: "Historic Person", relation: "friend", contact: null }],
     })} tx={tx} />);
     const receiptHtml = html.split('data-testid="portal-consent-choices"')[0];
     expect(receiptHtml).toContain(">Не отвечено</span>");

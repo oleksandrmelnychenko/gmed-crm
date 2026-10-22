@@ -176,6 +176,8 @@ describe("lead request summary", () => {
       "insurance",
       "payer",
       "legal",
+      // Not answered counts as "no" (owner 2026-10-22).
+      "disclosure",
       "documents",
     ]);
     expect(groups.map((group) => group.title)).toEqual([
@@ -186,8 +188,10 @@ describe("lead request summary", () => {
       "Versicherung",
       "Zahler",
       "Weitere Fragen",
+      "Auskunft an Dritte",
       "Ihre Unterlagen",
     ]);
+    expect(rows(groups, "disclosure")).toEqual({ "Soll eine weitere Person Auskunft erhalten dürfen?": "Nein" });
 
     // Codes are shown as the person chose them: names, dates as DD.MM.YYYY.
     expect(rows(groups, "person")).toEqual({
@@ -602,7 +606,7 @@ describe("lead request summary", () => {
       },
     });
     const groups = requestSummary(followUp, de, "de");
-    expect(groups.map((group) => group.id).slice(-3)).toEqual(["follow_up", "request", "documents"]);
+    expect(groups.map((group) => group.id).slice(-4)).toEqual(["follow_up", "disclosure", "request", "documents"]);
     expect(groups.find((group) => group.id === "follow_up")?.title).toBe("Ergänzende Angaben");
     // Only the blocks the server opened (D is the payer link's); never why.
     expect(rows(groups, "follow_up")).toEqual({
@@ -917,6 +921,7 @@ describe("lead request summary", () => {
       "address",
       "contact",
       "insurance",
+      "disclosure",
       "documents",
     ]);
   });

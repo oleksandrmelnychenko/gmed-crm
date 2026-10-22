@@ -97,6 +97,8 @@ import {
 
 /** The save state of the answers; a person's form reports under its slot. */
 const ANSWERS = "answers";
+/** The server's refusal of a custody GMED staff stated (owner decision 2026-10-22). */
+const CUSTODY_SET_BY_STAFF = "custody_set_by_staff";
 
 /**
  * The persons of whom the missing keys name more than the first step's names
@@ -809,7 +811,8 @@ export function RepresentationSection({
   const refusedRef = useRef<string | null>(null);
   const failedRef = useRef(false);
   // "in_use": the server keeps a person, so the answer went back. "failed": the answers are not saved.
-  const [problem, setProblem] = useState<"in_use" | "failed" | null>(null);
+  // "by_staff": GMED staff stated the custody, the cabinet may not change it (owner 2026-10-22).
+  const [problem, setProblem] = useState<"in_use" | "failed" | "by_staff" | null>(null);
   // A person removed with "remove" leaves an empty form in its place.
   const [generations, setGenerations] = useState<Partial<Record<RepresentativeSlot, number>>>({});
   const [states, setStates] = useState<Record<string, SaveState>>({});
@@ -895,6 +898,10 @@ export function RepresentationSection({
               under_guardianship: "under_guardianship" in patch ? stored.under_guardianship : current.under_guardianship,
               custody: "custody" in patch ? stored.custody : current.custody,
             }));
+          } else if (errorBody(cause)?.code === CUSTODY_SET_BY_STAFF) {
+            // GMED staff stated the custody meanwhile: it is not repeated; the parent writes to GMED.
+            refusedRef.current = key;
+            setProblem("by_staff");
           } else {
             // The refused answers are not repeated until they are changed.
             refusedRef.current = cause instanceof ApiRequestError && cause.status === 422 ? key : null;
@@ -910,6 +917,8 @@ export function RepresentationSection({
   useAutosave(draft, save);
 
   if (!representation) return null;
+  // The custody GMED staff stated is shown as text (owner decision 2026-10-22).
+  const custodyByStaff = minor && representation.custody_set_by_staff === true;
 
   /** Takes over new answers; asks first when they take a person away. */
   const change = (next: RepresentationDraft) => {
@@ -957,7 +966,7 @@ export function RepresentationSection({
   const problems =
     problem === null ? null : (
       <p role="alert" className="text-xs text-destructive" data-testid="lead-request-representation-problem">
-        {problem === "in_use" ? text.representativeInUse : text.notSaved}
+        {problem === "in_use" ? text.representativeInUse : problem === "by_staff" ? text.custodySetByStaffHint : text.notSaved}
       </p>
     );
 
@@ -980,7 +989,17 @@ export function RepresentationSection({
       ) : undefined}>
         <div className="space-y-4" data-testid="lead-request-representation">
           {representation.document_stage === false && !showDocumentDetails ? <p className="text-sm leading-relaxed text-muted-foreground">{text.parentShortFormIntro}</p> : null}
-          {/* The server lists `custody` as missing until it is stated. */}
+          {/* The server lists `custody` as missing until it is stated. Staff's statement is read-only
+              here (owner decision 2026-10-22): the parent writes to GMED instead. */}
+          {custodyByStaff ? (
+            <div className="space-y-1" data-testid="lead-request-custody-by-staff">
+              <p className="text-sm font-medium text-foreground">{text.custodyQuestion}</p>
+              <p className="text-sm text-foreground" data-testid="lead-request-custody-value">
+                {text.custodyOptions[representation.custody ?? "joint"]}
+              </p>
+              <p className="text-xs text-muted-foreground">{text.custodySetByStaffHint}</p>
+            </div>
+          ) : (
           <LabeledField id="lead-request-custody" label={text.custodyQuestion} required>
             <NativeComboboxSelect
               id="lead-request-custody"
@@ -999,6 +1018,7 @@ export function RepresentationSection({
               ))}
             </NativeComboboxSelect>
           </LabeledField>
+          )}
           {problems}
           {/* Somebody with custody whom staff entered and the form does not ask for. */}
           {representativesOnFile(representation).map((person) => (

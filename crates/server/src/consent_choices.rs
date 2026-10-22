@@ -189,6 +189,27 @@ pub struct DisclosureDecision {
     pub consent_text: String,
 }
 
+impl DisclosureDecision {
+    /// What an unanswered "Auskunft an Dritte" counts as (owner decision
+    /// 2026-10-22): no information to third parties. Not a recorded
+    /// decision — nobody chose, so no time, chooser or consent text — and
+    /// never stored as one; summaries and forms print "Nein" from it.
+    pub fn default_no(access_kind: &str) -> Self {
+        Self {
+            allow_disclosure: false,
+            consent_given: false,
+            version: DISCLOSURE_VERSION.to_string(),
+            language: "de".to_string(),
+            chosen_at: DateTime::<Utc>::default(),
+            chosen_by: Uuid::nil(),
+            chosen_by_name: None,
+            access_kind: access_kind.to_string(),
+            company_name: String::new(),
+            consent_text: String::new(),
+        }
+    }
+}
+
 /// Whose data the disclosure consent is about: the person's own, a minor's
 /// (a parent or the guardian declares, like the child's Anlage 1), or an
 /// adult's represented by a legal representative.

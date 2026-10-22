@@ -1500,6 +1500,27 @@ fn owners_of(value: &Value, today: NaiveDate) -> Result<Vec<Owner>, FieldError> 
     Ok(owners)
 }
 
+/// The payer's phone (owner decision 2026-10-22): a new or changed number
+/// follows the payer declaration's rule
+/// ([`super::lead_payer::is_valid_payer_phone`]); the stored number (an older
+/// one may not) stays acceptable as it is.
+fn payer_phone(value: &str, stored: Option<&str>) -> Result<Option<String>, FieldError> {
+    let phone = intake::clean_text(value, "phone", 200)?;
+    match &phone {
+        Some(phone)
+            if stored != Some(phone.as_str())
+                && !super::lead_payer::is_valid_payer_phone(phone) =>
+        {
+            Err(FieldError {
+                code: "payer_phone_invalid",
+                field: "phone",
+                message: "Invalid phone number",
+            })
+        }
+        _ => Ok(phone),
+    }
+}
+
 /// Applies the sent answer keys to the stored answers; the result is what
 /// gets stored. Details belong to a "yes", "nobody over 25 %" clears the
 /// list; the sources of funds are those of the payer type
@@ -1539,7 +1560,7 @@ fn apply_answers_patch(
             "habitual_residence_country" => {
                 next.habitual_residence_country = country_of(text_of(value, key)?, key)?;
             }
-            "phone" => next.phone = intake::clean_text(text_of(value, key)?, key, 200)?,
+            "phone" => next.phone = payer_phone(text_of(value, key)?, current.phone.as_deref())?,
             "language" => next.language = intake::one_of(text_of(value, key)?, key, &LANGUAGES)?,
             "id_document_type" => {
                 next.id_document_type =
@@ -5640,6 +5661,37 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(expired.code, "id_document_expired");
+    }
+
+    /// A new phone needs six digits, the payer declaration's rule (owner decision
+    /// 2026-10-22); the stored number may stay, empty clears it.
+    #[test]
+    fn a_new_payer_phone_follows_the_phone_rule() {
+        let stored = Answers::default();
+        for phone in ["call me", "12345", "+43 1 2345"] {
+            let error =
+                apply_answers_patch(&stored, &patch(json!({ "phone": phone })), false, today())
+                    .unwrap_err();
+            assert_eq!((error.code, error.field), ("payer_phone_invalid", "phone"));
+        }
+        let next = apply_answers_patch(
+            &stored,
+            &patch(json!({ "phone": "+43 (1) 234-567" })),
+            false,
+            today(),
+        )
+        .unwrap();
+        assert_eq!(next.phone.as_deref(), Some("+43 (1) 234-567"));
+        let older = Answers {
+            phone: Some("12345".into()),
+            ..Answers::default()
+        };
+        let kept = apply_answers_patch(&older, &patch(json!({ "phone": "12345" })), false, today())
+            .unwrap();
+        assert_eq!(kept.phone.as_deref(), Some("12345"));
+        let cleared =
+            apply_answers_patch(&older, &patch(json!({ "phone": "" })), false, today()).unwrap();
+        assert_eq!(cleared.phone, None);
     }
 
     /// An organisation chooses from its own sources of funds; the person's

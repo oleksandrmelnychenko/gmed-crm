@@ -162,10 +162,10 @@ describe("lead cabinet languages", () => {
       "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)",
     );
     // The legal questions are long: the list names their topic.
-    expect(submitFieldLabel(de, "pep_self")).toBe("Gesetzliche Fragen: Öffentliches Amt");
-    expect(submitFieldLabel(de, "sanctions_links")).toBe("Gesetzliche Fragen: Sanktionen");
+    expect(submitFieldLabel(de, "pep_self")).toBe("Weitere Fragen: Öffentliches Amt");
+    expect(submitFieldLabel(de, "sanctions_links")).toBe("Weitere Fragen: Sanktionen");
     expect(submitFieldLabel(leadRequestText("uk"), "pep_related")).toBe(
-      "Запитання за законом: Політично значуща близька особа",
+      "Додаткові запитання: Політично значуща близька особа",
     );
     expect(submitFieldLabel(leadRequestText("en"), "id_document_upload")).toBe(
       "Identity document: Photo or scan of an identity document",

@@ -638,7 +638,8 @@ fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
             link_hint: "Falls die Schaltfläche nicht funktioniert, öffnen Sie diese Adresse:",
             code_hint: "Beim Öffnen senden wir einen Bestätigungscode an diese Adresse.",
             privacy_heading: "Datenschutzhinweis (Art. 14 DSGVO)",
-            privacy: "Verantwortlich für die Verarbeitung Ihrer Daten ist {controller}. Ihren Namen und Ihre Kontaktdaten haben wir von {patient} erhalten. Wir verarbeiten sie, um Sie nach §§ 10–12 GwG zu identifizieren, die Kostenübernahme zu klären und Rechnungen zu stellen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und c DSGVO. Wir speichern die Angaben fünf Jahre nach dem Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG). Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie auf Beschwerde bei einer Aufsichtsbehörde. Vollständige Datenschutzhinweise: {url}",
+            // lawyer review pending (2026-10-22)
+            privacy: "Verantwortlich für die Verarbeitung Ihrer Daten ist {controller}. Ihren Namen und Ihre Kontaktdaten haben wir von {patient} erhalten. Wir verarbeiten sie, um die Kostenübernahme zu klären, um Rechnungen zu stellen und um Ihre Identität und die Herkunft der Zahlung zu prüfen; diese Prüfung nimmt GMED freiwillig nach ihren eigenen Compliance-Regeln vor. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und f DSGVO. Wir speichern die Angaben nach den Regeln von GMED fünf Jahre nach dem Ende der Geschäftsbeziehung. Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie auf Beschwerde bei einer Aufsichtsbehörde. Vollständige Datenschutzhinweise: {url}",
             not_you: "Sind Sie nicht gemeint, können Sie diese E-Mail ignorieren; der Link verfällt dann von selbst.",
             automatic: "Diese E-Mail wurde automatisch versendet.",
         },
@@ -655,7 +656,8 @@ fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
             link_hint: "If the button does not work, open this address:",
             code_hint: "When you open the link, we send a confirmation code to this address.",
             privacy_heading: "Privacy notice (Art. 14 GDPR)",
-            privacy: "The controller of your data is {controller}. We received your name and contact details from {patient}. We process them to identify you under Sections 10–12 of the German Money Laundering Act (GwG), to settle the cost coverage and to issue invoices. The legal basis is Art. 6(1)(b) and (c) GDPR. We keep the data for five years after the end of the business relationship (Section 8(4) GwG). You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a supervisory authority. Full privacy notice: {url}",
+            // lawyer review pending (2026-10-22)
+            privacy: "The controller of your data is {controller}. We received your name and contact details from {patient}. We process them to settle the cost coverage, to issue invoices and to check your identity and the origin of the payment; GMED carries out this check voluntarily under its own compliance rules. The legal basis is Art. 6(1)(b) and (f) GDPR. Under GMED's rules we keep the data for five years after the end of the business relationship. You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a supervisory authority. Full privacy notice: {url}",
             not_you: "If you are not the person meant, you can ignore this e-mail; the link then expires by itself.",
             automatic: "This e-mail was sent automatically.",
         },
@@ -672,7 +674,8 @@ fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
             link_hint: "Если кнопка не работает, откройте этот адрес:",
             code_hint: "При открытии ссылки мы отправим код подтверждения на этот адрес.",
             privacy_heading: "Информация о защите данных (ст. 14 DSGVO)",
-            privacy: "Ответственный за обработку ваших данных — {controller}. Ваше имя и контактные данные мы получили от {patient}. Мы обрабатываем их, чтобы идентифицировать вас согласно §§ 10–12 GwG (закон Германии о противодействии отмыванию денег), урегулировать оплату расходов и выставлять счета. Правовое основание — ст. 6 п. 1 лит. b и c DSGVO. Мы храним данные пять лет после окончания деловых отношений (§ 8 абз. 4 GwG). Вы имеете право на информацию, исправление, удаление, ограничение обработки и возражение, а также право подать жалобу в надзорный орган. Полная информация о защите данных: {url}",
+            // lawyer review pending (2026-10-22)
+            privacy: "Ответственный за обработку ваших данных — {controller}. Ваше имя и контактные данные мы получили от {patient}. Мы обрабатываем их, чтобы урегулировать оплату расходов, выставлять счета и проверить вашу личность и происхождение оплаты; эту проверку GMED проводит добровольно по собственным правилам комплаенса. Правовое основание — ст. 6 п. 1 лит. b и f DSGVO. По правилам GMED мы храним данные пять лет после окончания деловых отношений. Вы имеете право на информацию, исправление, удаление, ограничение обработки и возражение, а также право подать жалобу в надзорный орган. Полная информация о защите данных: {url}",
             not_you: "Если письмо адресовано не вам, просто не обращайте на него внимания — ссылка перестанет действовать сама.",
             automatic: "Это письмо отправлено автоматически.",
         },
@@ -689,7 +692,8 @@ fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
             link_hint: "Якщо кнопка не працює, відкрийте цю адресу:",
             code_hint: "Під час відкриття посилання ми надішлемо код підтвердження на цю адресу.",
             privacy_heading: "Інформація про захист даних (ст. 14 DSGVO)",
-            privacy: "Відповідальний за обробку ваших даних — {controller}. Ваше ім'я та контактні дані ми отримали від {patient}. Ми обробляємо їх, щоб ідентифікувати вас відповідно до §§ 10–12 GwG (закон Німеччини про запобігання відмиванню грошей), урегулювати оплату витрат і виставляти рахунки. Правова підстава — ст. 6 п. 1 літ. b і c DSGVO. Ми зберігаємо дані п'ять років після завершення ділових відносин (§ 8 абз. 4 GwG). Ви маєте право на доступ, виправлення, видалення, обмеження обробки та заперечення, а також право подати скаргу до наглядового органу. Повна інформація про захист даних: {url}",
+            // lawyer review pending (2026-10-22)
+            privacy: "Відповідальний за обробку ваших даних — {controller}. Ваше ім'я та контактні дані ми отримали від {patient}. Ми обробляємо їх, щоб урегулювати оплату витрат, виставляти рахунки та перевірити вашу особу й походження оплати; цю перевірку GMED проводить добровільно за власними правилами комплаєнсу. Правова підстава — ст. 6 п. 1 літ. b і f DSGVO. За правилами GMED ми зберігаємо дані п'ять років після завершення ділових відносин. Ви маєте право на доступ, виправлення, видалення, обмеження обробки та заперечення, а також право подати скаргу до наглядового органу. Повна інформація про захист даних: {url}",
             not_you: "Якщо лист адресовано не вам, просто не зважайте на нього — посилання перестане діяти саме.",
             automatic: "Цей лист надіслано автоматично.",
         },
@@ -1146,7 +1150,8 @@ mod tests {
                 assert!(part.contains("05.11.2026"), "{language:?}");
                 assert!(part.contains("https://console.gmed-health.com/payer#abc123"));
                 assert!(part.contains("https://console.gmed-health.com/legal#privacy"));
-                assert!(part.contains("GwG"), "{language:?}");
+                // No legal AML duty is claimed (owner 2026-10-22).
+                assert!(!part.contains("GwG"), "{language:?}");
                 assert!(part.contains("80331 München"));
             }
             // The agency named in the settings is the controller.
@@ -1237,7 +1242,8 @@ mod tests {
                 assert!(!part.contains(person_wording), "{language:?}");
                 assert!(part.contains("05.11.2026"), "{language:?}");
                 assert!(part.contains("https://console.gmed-health.com/payer#abc123"));
-                assert!(part.contains("GwG"), "{language:?}");
+                // No legal AML duty is claimed (owner 2026-10-22).
+                assert!(!part.contains("GwG"), "{language:?}");
             }
             assert!(email.text.contains(intro), "{language:?}");
         }

@@ -548,7 +548,10 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     const notice = section.getByTestId("lead-request-payer-notice");
     await expect(notice).toContainText("Datenschutzhinweis für die zahlende Person");
     await expect(notice).toContainText("Verantwortlich für die Verarbeitung ist GMED.");
-    await expect(notice).toContainText("§ 8 Abs. 4 GwG");
+    // A voluntary check under GMED's own rules, no legal AML duty (owner 2026-10-22).
+    await expect(notice).toContainText("Art. 6 Abs. 1 lit. b und f DSGVO");
+    await expect(notice).not.toContainText("GwG");
+    await expect(section).not.toContainText("Geldwäschegesetz");
     await expect(notice.getByRole("link", { name: "Datenschutzhinweise" })).toHaveAttribute("href", "/legal?notice=form&lang=de#privacy");
     // Why the fields wait only after a press (QA 2026-10-10: no hint before "Weiter").
     await expect(section.getByTestId("lead-request-payer-notice-first")).toHaveCount(0);

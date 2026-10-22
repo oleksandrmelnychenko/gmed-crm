@@ -108,7 +108,12 @@ describe("payer page texts", () => {
     expect(`${de.thanksTitle} ${de.thanksBody}`).toBe("Vielen Dank. Ihre Angaben sind bei GMED eingegangen.");
     expect(de.steps.funds).toBe("Beziehung und Herkunft der Mittel");
     expect(de.organisationSteps.identity).toBe("Ausweisdokument der vertretungsberechtigten Person");
-    expect(de.privacyNotice("Mia Muster").join(" ")).toMatch(/§§ 10–12 GwG.*Art\. 6 Abs\. 1 lit\. b und c DSGVO.*§ 8 Abs\. 4 GwG/);
+    // A voluntary check under GMED's own rules, no legal AML duty (owner 2026-10-22).
+    expect(de.privacyNotice("Mia Muster").join(" ")).toMatch(/freiwillig.*Art\. 6 Abs\. 1 lit\. b und f DSGVO.*nach den Regeln von GMED fünf Jahre/);
+    for (const lang of ["de", "en", "uk", "ru"] as const) {
+      const text = payerLinkText(lang);
+      expect(`${text.privacyNotice("Mia Muster").join(" ")} ${text.confirmLabel}`).not.toMatch(/GwG|Geldwäsche|laundering|відмив|отмыв|lit\. c|\(c\) GDPR|Meldepflicht/i);
+    }
   });
 
   it("says where the documents for signing stand in the contract's German and in every language", () => {
