@@ -603,7 +603,7 @@ test("the enhanced check follows the server's rule: a black-list citizenship req
   );
   const section = wizard.getByTestId("lead-wizard-enhanced-check-section");
   await expect(section).toHaveAttribute("data-required", "true");
-  await expect(section.getByTestId("lead-wizard-enhanced-check-status").getByText("Erforderlich", { exact: true })).toBeVisible();
+  await expect(section.getByTestId("lead-wizard-enhanced-check-status").getByText("Nach GMED-Regel erforderlich", { exact: true })).toBeVisible();
   await expect(section).toContainText("Staatsangehörigkeit des Zahlers auf der Blacklist (Iran)");
   const hints = section.getByTestId("lead-wizard-enhanced-check-hint");
   await expect(hints).toHaveText([
@@ -617,7 +617,8 @@ test("the enhanced check follows the server's rule: a black-list citizenship req
   // The sheet opens from the section and says why.
   await section.getByRole("button", { name: "Prüfung ausfüllen" }).click();
   const sheet = page.getByTestId("lead-aml-sheet-requirement");
-  await expect(sheet).toContainText("Verstärkte Prüfung erforderlich");
+  await expect(sheet).toContainText("Nach GMED-Regel erforderlich");
+  await expect(page.getByRole("dialog").filter({ has: sheet })).toContainText("Verstärkte AML-Prüfung (Orientierung § 15 GwG)");
   await expect(sheet).toContainText("Staatsangehörigkeit des Zahlers auf der Blacklist (Iran)");
 });
 

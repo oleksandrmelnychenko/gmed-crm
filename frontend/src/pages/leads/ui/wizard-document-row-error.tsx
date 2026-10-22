@@ -1,7 +1,17 @@
 import { createContext, useContext, type ReactNode } from "react";
 
-/** A refused signature action ("Подтвердить подпись") of one document row. */
-export type WizardDocumentRowErrorState = { documentId: string; text: string } | null;
+import { Button } from "@/components/ui/button";
+
+/**
+ * A refused signature action ("Подтвердить подпись") of one document row and,
+ * when the refusal names a place to fix it (the risk assessment, a person's
+ * identity document data), the way there.
+ */
+export type WizardDocumentRowErrorState = {
+  documentId: string;
+  text: string;
+  action?: { label: string; onClick: () => void } | null;
+} | null;
 
 const WizardDocumentRowErrorContext = createContext<WizardDocumentRowErrorState>(null);
 
@@ -25,12 +35,17 @@ export function WizardDocumentRowError({ documentId }: { documentId: string }) {
   const error = useContext(WizardDocumentRowErrorContext);
   if (!error || error.documentId !== documentId) return null;
   return (
-    <p
+    <div
       role="alert"
       data-document-row-error={documentId}
-      className="mt-1.5 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-5 text-destructive"
+      className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-5 text-destructive"
     >
-      {error.text}
-    </p>
+      <span className="min-w-0 flex-1" data-document-row-error-text>{error.text}</span>
+      {error.action ? (
+        <Button type="button" variant="outline" size="xs" data-document-row-error-action onClick={error.action.onClick}>
+          {error.action.label}
+        </Button>
+      ) : null}
+    </div>
   );
 }

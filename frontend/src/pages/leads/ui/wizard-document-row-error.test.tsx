@@ -31,4 +31,20 @@ describe("WizardDocumentRowError", () => {
   it("shows nothing without a refusal", () => {
     expect(rows(null)).not.toContain('role="alert"');
   });
+
+  it("offers the way to the place that blocks the signature", () => {
+    const html = renderToStaticMarkup(
+      <WizardDocumentRowErrorProvider
+        value={{ documentId: "gwg-ioann", text: "Подпись недоступна", action: { label: "К оценке риска", onClick: () => undefined } }}
+      >
+        <WizardDocumentRowError documentId="gwg-ioann" />
+      </WizardDocumentRowErrorProvider>,
+    );
+    expect(html).toContain("data-document-row-error-action");
+    expect(html).toContain("К оценке риска");
+  });
+
+  it("has no button when the refusal names no place", () => {
+    expect(rows({ documentId: "gwg-ioann", text: "Ошибка" })).not.toContain("data-document-row-error-action");
+  });
 });

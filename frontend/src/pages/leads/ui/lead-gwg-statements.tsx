@@ -631,7 +631,7 @@ function EnhancedDetailsGroup({ details, tx, card = false }: { details: LeadPort
         ) : null}
         {details.check_required ? (
           <span className="text-[11px] text-muted-foreground" data-testid="lead-gwg-enhanced-details-check">
-            {tx("усиленная проверка обязательна", "verstärkte Prüfung erforderlich")}
+            {tx("усиленная проверка требуется по правилу GMED", "verstärkte Prüfung nach GMED-Regel erforderlich")}
           </span>
         ) : null}
       </div>

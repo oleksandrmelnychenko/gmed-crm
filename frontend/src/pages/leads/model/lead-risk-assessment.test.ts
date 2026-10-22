@@ -86,7 +86,7 @@ describe("the risk assessment of a lead (staff)", () => {
     expect(assessment.blocks.map((block) => block.key)).toEqual(["A", "D", "F"]);
     expect(assessment.blocks[1]).toMatchObject({ party: "payer_link", open: false });
     expect(assessment.history[0]).toMatchObject({ kind: "started", cause: "cabinet" });
-    expect(riskPointsLine(assessment, ru)).toBe("4 (пациент 4 · плательщик 3)");
+    expect(riskPointsLine(assessment, ru)).toBe("4 (большее из: пациент 4 · плательщик 3)");
   });
 
   it("is nothing for an answer that is not one", () => {
@@ -260,6 +260,9 @@ describe("the risk assessment of a lead (staff)", () => {
     const error = (code: string, status = 409) => new ApiRequestError(code, { status, code, body: { error: code } });
     expect(riskDecisionErrorText(error("four_eyes_same_user"), de)).toContain("Vier-Augen-Prinzip");
     expect(riskDecisionErrorText(error("assessment_changed"), ru)).toContain("Оценка изменилась");
+    expect(riskDecisionErrorText(error("sanctions_confirmed"), ru)).toBe(
+      "Подтверждено совпадение с санкционным списком: разрешение невозможно. Обновите страницу.",
+    );
     expect(riskDecisionErrorText(error("reason_required", 422), ru)).toContain("минимум 10 символов");
     expect(riskDecisionErrorText(error("forbidden", 403), de)).toContain("CEO");
     expect(riskDecisionErrorText(error("something_else", 500), de)).toBeNull();

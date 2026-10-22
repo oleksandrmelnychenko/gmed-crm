@@ -228,7 +228,7 @@ test("without a qualified signature the labels say so, and only the patient is l
   await expect(patient.line.getByRole("button")).toHaveText("Подтвердить платёж");
   await expect(row("payer").line).toHaveCount(0);
   await expect(block).toContainText(
-    "§ 12 Abs. 1 GwG: к квалифицированной подписи нужен платёж со счёта на имя этого человека. Это не блокирует работу.",
+    "По правилу GMED (ориентир § 12 Abs. 1 GwG) к квалифицированной подписи нужен платёж со счёта на имя этого человека. Это не блокирует работу.",
   );
   // Nothing is blocked: the sheet can be created as before.
   await expect(wizard.getByTestId("gwg-identification-actions").getByRole("button")).toBeEnabled();
@@ -245,6 +245,8 @@ test("staff confirm the payment from the own account and take it back", async ({
   await expect(patient.qes).toHaveAttribute("data-tone", "success");
   await expect(patient.payment).toHaveText("Ожидается платёж с собственного счёта");
   await expect(patient.payment).toHaveAttribute("data-tone", "warning");
+  // Signed, payment awaited: the rule is a reminder.
+  await expect(block.getByTestId("lead-identification-rule")).toHaveAttribute("data-pending", "true");
 
   // Above the lead's own statements, inside the section of the sheet.
   const statements = wizard.getByTestId("lead-gwg-statements");
@@ -256,6 +258,8 @@ test("staff confirm the payment from the own account and take it back", async ({
   await expect(patient.payment).toHaveText("Платёж с собственного счёта подтверждён · 05.10.2026 · Intake QA");
   await expect(patient.payment).toHaveAttribute("data-tone", "success");
   await expect(patient.line.getByRole("button", { name: "Подтвердить платёж" })).toHaveCount(0);
+  // Nothing awaited any more: no amber reminder next to the confirmed payment.
+  await expect(block.getByTestId("lead-identification-rule")).toHaveAttribute("data-pending", "false");
   await block.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-identification-confirmed-ru-desktop.png"), animations: "disabled" });
   // On a phone the long label wraps and does not widen the wizard.

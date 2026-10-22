@@ -472,6 +472,11 @@ fn decision_error(refusal: DecisionError) -> Response {
             "assessment_changed",
             "The assessment changed since the proposal; propose again",
         ),
+        DecisionError::SanctionsConfirmed => error(
+            StatusCode::CONFLICT,
+            "sanctions_confirmed",
+            "A confirmed sanctions match cannot be released",
+        ),
         DecisionError::Database(failure) => database(failure, "decide"),
     }
 }

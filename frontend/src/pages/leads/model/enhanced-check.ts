@@ -138,6 +138,22 @@ export function enhancedCheckReasonsText(reasons: readonly string[], tx: Tx): st
 }
 
 /**
+ * The one name of the check on every staff surface (wizard step 1, the
+ * documents step, the form): GMED is no obliged entity under § 2 GwG, so
+ * § 15 GwG is only the orientation of GMED's own rule (owner 2026-10-22).
+ */
+export function enhancedCheckTitle(tx: Tx): string {
+  return tx("Усиленная AML-проверка (ориентир § 15 GwG)", "Verstärkte AML-Prüfung (Orientierung § 15 GwG)");
+}
+
+/** Whether GMED's rule requires the check or staff carry it out voluntarily; never "by law". */
+export function enhancedCheckRequirementLabel(required: boolean, tx: Tx): string {
+  return required
+    ? tx("Требуется по правилу GMED", "Nach GMED-Regel erforderlich")
+    : tx("Добровольная проверка", "Freiwillige Prüfung");
+}
+
+/**
  * The hint for a PEP answer: GMED's own rule (§ 15 GwG as orientation only,
  * GMED is not obliged under § 2 GwG) usually asks for the check, staff decide.
  */

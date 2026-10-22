@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import {
   identificationLacksRepresentative,
   identificationPersons,
+  identificationRuleText,
   noOwnAccountPaymentHint,
   ownAccountHintSubjects,
   ownAccountPaymentLabel,
@@ -71,6 +72,11 @@ export function LeadIdentificationStatusView({
   const hinted = ownAccountHintSubjects(status, paymentRoute);
   // A line captioned by a person's name needs more room than a role.
   const namedLines = status.minor || status.acting_persons.length > 0;
+  const persons = identificationPersons(status, tx);
+  // Somebody signed with a QES and the payment from the own account is still awaited.
+  const paymentPending = persons.some(({ subject, person, paymentExpected }) => (
+    person.qes !== null && !person.own_account_payment && paymentExpected && !hinted.has(subject)
+  ));
   return (
     <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3.5" data-testid="lead-identification-status">
       <div className="text-xs font-semibold text-foreground">
@@ -98,7 +104,7 @@ export function LeadIdentificationStatusView({
         </p>
       ) : null}
       <ul className="space-y-2">
-        {identificationPersons(status, tx).map(({ subject, role, detail, person, canConfirm, paymentExpected, wide, note }) => {
+        {persons.map(({ subject, role, detail, person, canConfirm, paymentExpected, wide, note }) => {
           const confirmed = Boolean(person.own_account_payment);
           // Cash or a payment through a third party, or a parent who does not
           // pay (only signs): no own-account payment to confirm.
@@ -156,16 +162,19 @@ export function LeadIdentificationStatusView({
       {errorMessage ? (
         <p role="alert" className="text-xs text-destructive" data-testid="lead-identification-error">{errorMessage}</p>
       ) : null}
-      <p>
-        <StatusChip tone="warning" className="items-start whitespace-normal text-left">
-          <CircleAlert aria-hidden="true" className="mt-0.5" />
-          <span>
-            {tx(
-              "§ 12 Abs. 1 GwG: к квалифицированной подписи нужен платёж со счёта на имя этого человека. Это не блокирует работу.",
-              "§ 12 Abs. 1 GwG: Zur qualifizierten Signatur gehört eine Zahlung von einem Konto auf den Namen dieser Person. Das blockiert die Arbeit nicht.",
-            )}
-          </span>
-        </StatusChip>
+      {/* A reminder while a signed person's payment is still awaited; once
+          nothing is awaited it is a plain note (DEV QA 2026-10-22: the amber
+          reminder stood next to a confirmed payment). GMED applies § 12 GwG
+          voluntarily (owner 2026-10-22: no obliged entity under § 2 GwG). */}
+      <p data-testid="lead-identification-rule" data-pending={paymentPending ? "true" : "false"}>
+        {paymentPending ? (
+          <StatusChip tone="warning" className="items-start whitespace-normal text-left">
+            <CircleAlert aria-hidden="true" className="mt-0.5" />
+            <span>{identificationRuleText(tx)}</span>
+          </StatusChip>
+        ) : (
+          <span className="text-xs leading-5 text-muted-foreground">{identificationRuleText(tx)}</span>
+        )}
       </p>
     </div>
   );

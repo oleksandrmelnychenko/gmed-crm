@@ -298,7 +298,7 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
         return {
           subject: representative.subject,
           role: representative.name || tx("Законный представитель", "Gesetzliche/r Vertreter/in"),
-          detail: payingParent && pays ? `${relation} · ${tx("плательщик", "Zahler")}` : relation,
+          detail: payingParent && pays ? `${relation} · ${tx("плательщик", "Zahler/in")}` : relation,
           person: { qes: representative.qes, own_account_payment: representative.own_account_payment },
           canConfirm: true,
           paymentExpected: pays,
@@ -389,8 +389,20 @@ export function ownAccountHintSubjects(
 /** The hint below such a line. */
 export function noOwnAccountPaymentHint(tx: Tx): string {
   return tx(
-    "Оплата не с собственного счёта (наличные / через третье лицо) — подтверждение по § 12 GwG не ожидается",
-    "Keine Zahlung vom eigenen Konto angegeben (bar / über Dritte) – Bestätigung nach § 12 GwG nicht zu erwarten",
+    "Оплата не с собственного счёта (наличные / через третье лицо) — подтверждение платежа не ожидается",
+    "Keine Zahlung vom eigenen Konto angegeben (bar / über Dritte) – keine Zahlungsbestätigung zu erwarten",
+  );
+}
+
+/**
+ * The rule under the block: GMED applies the identification by qualified
+ * signature voluntarily, § 12 Abs. 1 GwG is the orientation (owner
+ * 2026-10-22: GMED is no obliged entity under § 2 GwG). Information only.
+ */
+export function identificationRuleText(tx: Tx): string {
+  return tx(
+    "По правилу GMED (ориентир § 12 Abs. 1 GwG) к квалифицированной подписи нужен платёж со счёта на имя этого человека. Это не блокирует работу.",
+    "Nach GMED-Regel (Orientierung § 12 Abs. 1 GwG) gehört zur qualifizierten Signatur eine Zahlung von einem Konto auf den Namen dieser Person. Das blockiert die Arbeit nicht.",
   );
 }
 

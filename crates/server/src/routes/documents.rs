@@ -1554,8 +1554,8 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "enhanced_due_diligence",
-        label: "Verstärkte Sorgfaltspflichten (§ 15 GwG)",
-        description: "Interner Dokumentationsbogen für verstärkte Sorgfaltspflichten bei erhöhtem Geldwäscherisiko.",
+        label: "Verstärkte AML-Prüfung (Orientierung § 15 GwG)",
+        description: "Interner Dokumentationsbogen der verstärkten Prüfung bei erhöhtem Geldwäscherisiko (freiwillige Anwendung, GMED ist kein Verpflichteter nach § 2 GwG).",
         art: "enhanced_due_diligence",
         category: "compliance_aml",
         default_auto_name: "Durchführung verstärkter Sorgfaltspflichten",

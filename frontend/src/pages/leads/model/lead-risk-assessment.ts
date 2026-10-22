@@ -548,7 +548,7 @@ export function riskTriggerStateLabel(
 export function riskSubjectLabel(subject: string, tx: Tx, variant: RiskTrigger["variant"] = null): string {
   if (subject === "payer" && variant === "recipient") return tx("получатель счёта", "Rechnungsempfänger");
   if (subject === "patient") return tx("пациент", "Patient");
-  if (subject === "payer") return tx("плательщик", "Zahler");
+  if (subject === "payer") return tx("плательщик", "Zahler/in");
   if (subject === "representative") return tx("представитель", "Vertreter");
   return subject;
 }
@@ -584,7 +584,8 @@ export function riskBlockLabel(key: string, tx: Tx): string {
     case "K":
       return tx("Данные о рождении", "Geburtsangaben");
     case "L":
-      return tx("Вопросы по закону (PEP, санкции)", "Fragen nach GwG (PEP, Sanktionen)");
+      // GMED asks them by its own rule, not "by law" (owner 2026-10-22).
+      return tx("Вопросы о PEP и санкциях", "Fragen zu PEP und Sanktionen");
     case "R":
       return tx("Дополнительные сведения представителей", "Ergänzende Angaben der Vertreter");
     default:
@@ -748,11 +749,13 @@ export function riskCauseLabel(cause: string | null, tx: Tx): string {
   }
 }
 
-/** "5 (пациент 4 · плательщик 1)": the points that count and both subjects. */
+/** "5 (большее из: пациент 4 · плательщик 1)": the points that count and both subjects. */
 export function riskPointsLine(score: RiskScore, tx: Tx): string {
   const patientSide = score.triggers.some((trigger) => trigger.subject === "representative")
     ? tx("пациент и представители", "Patient und Vertreter") : tx("пациент", "Patient");
-  return `${score.points} (${patientSide} ${score.patient_points} · ${tx("плательщик", "Zahler")} ${score.payer_points})`;
+  // The level follows the higher side, not the sum (`crate::risk`: max of
+  // both): "4 (пациент 4 · плательщик 3)" read like a wrong sum (QA 2026-10-22).
+  return `${score.points} (${tx("большее из", "höherer Wert von")}: ${patientSide} ${score.patient_points} · ${tx("плательщик", "Zahler/in")} ${score.payer_points})`;
 }
 
 /** The open blocks in letter order. */
@@ -808,6 +811,12 @@ export function riskDecisionErrorText(error: unknown, tx: Tx): string | null {
       return tx("Отозвать предложение может только его автор.", "Nur die vorschlagende Person kann den Vorschlag zurücknehmen.");
     case "assessment_not_started":
       return tx("Оценка риска ещё не начата.", "Die Risikobewertung hat noch nicht begonnen.");
+    case "sanctions_confirmed":
+      // A tab that still offered "release" after the CEO confirmed a match.
+      return tx(
+        "Подтверждено совпадение с санкционным списком: разрешение невозможно. Обновите страницу.",
+        "Bestätigter Sanktionstreffer: keine Freigabe möglich. Bitte die Seite aktualisieren.",
+      );
     default:
       if (error.status === 403) {
         return tx(

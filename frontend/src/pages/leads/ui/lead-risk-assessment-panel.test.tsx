@@ -63,7 +63,7 @@ describe("LeadRiskAssessmentPanel", () => {
     expect(html).toContain('data-level="2"');
     expect(html).toContain("Уровень 2");
     expect(html).toContain("Нужно решение");
-    expect(html).toContain("5 (пациент 4 · плательщик 5)");
+    expect(html).toContain("5 (большее из: пациент 4 · плательщик 5)");
     expect(html).toContain("Гражданство пациента в списке стран");
     expect(html).toContain("список 1");
     // A fired trigger stays after the data changed (sticky).

@@ -88,7 +88,9 @@ import {
   ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES,
   enhancedCheckReasonsText,
   enhancedCheckRequired,
+  enhancedCheckRequirementLabel,
   enhancedCheckRiskTier,
+  enhancedCheckTitle,
   enhancedCheckTriggers,
   highRiskCountryHint,
   pepEnhancedCheckHint,
@@ -800,6 +802,7 @@ const LeadMedicalIntakeForm = lazy(() =>
 );
 const SERVICE_CONCERN_ID = "lead-wizard-concern";
 const RISK_ASSESSMENT_SECTION_ID = "lead-wizard-risk-assessment";
+const ENHANCED_CHECK_SECTION_ID = "lead-wizard-enhanced-check";
 const SERVICE_SPECIALTIES_ID = "lead-wizard-specialties";
 const MEDICAL_ANAMNESE_ID = "lead-wizard-anamnese";
 const ORDER_DATE_FROM_ID = "lead-wizard-program-date-from";
@@ -2374,6 +2377,12 @@ function readinessStepLabel(key: string, tx: Tx, repeatIntake = false) {
   return labels[key] ?? tx("Проверка данных", "Datenprüfung");
 }
 
+/** The signature was refused by the risk assessment (it waits for a decision or rejected the lead). */
+function riskGateRefusal(error: unknown): boolean {
+  if (!(error instanceof ApiRequestError)) return false;
+  return (error.body?.error ?? error.body?.code ?? error.code) === "risk_review_required";
+}
+
 /** "Identity document is not verified" for a minor: the contracting parents or the guardian are identified, not the child. */
 function minorIdentityReasonLabel(tx: Tx) {
   return tx(
@@ -2517,6 +2526,9 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Signed DSGVO document is missing": PRIVACY_DOCUMENT_ID,
     "Compliance is not signed yet": PRIVACY_DOCUMENT_ID,
     "Signed confidentiality release is missing": CONFIDENTIALITY_RELEASE_ID,
+    "Enhanced due diligence document is missing": ENHANCED_CHECK_SECTION_ID,
+    "Enhanced due diligence document is not signed": ENHANCED_CHECK_SECTION_ID,
+    "Risk assessment waits for a staff decision": RISK_ASSESSMENT_SECTION_ID,
     "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,
     "Framework contract was terminated; create a new contract": FRAMEWORK_DOCUMENT_ID,
     "Framework contract document is missing": FRAMEWORK_DOCUMENT_ID,
@@ -2728,6 +2740,8 @@ function documentsValidationIssues(
           : "Enhanced due diligence document is missing",
         tx,
       ),
+      // The list item leads to the section with the form and its document (QA 2026-10-22: it led nowhere).
+      fieldId: ENHANCED_CHECK_SECTION_ID,
     });
   }
   return issues;
@@ -5939,16 +5953,39 @@ export function LeadWizard({
     } catch (nextError) {
       // A lead gate names its reason (risk assessment, sanctions, blocked country).
       const gate = signatureGateErrorText(nextError, tx);
+      const slot = representativeDocumentSlot(nextError);
+      const representativeId = slot
+        ? step1Portal.intake?.representation?.representatives.find((person) => person.slot === slot)?.id ?? null
+        : null;
       if (fromPreview) {
         setDocumentPreviewError(gate ?? errorText(nextError, tx));
-        const slot = representativeDocumentSlot(nextError);
-        setDocumentPreviewJump(
-          slot ? step1Portal.intake?.representation?.representatives.find((person) => person.slot === slot)?.id ?? null : null,
-        );
+        setDocumentPreviewJump(representativeId);
       } else if (gate || leadErrorBlockingReasons(nextError).length === 0) {
-        // Next to the pressed button, not at the bottom of the step (DEV 2026-10-19).
+        // Next to the pressed button, not at the bottom of the step (DEV 2026-10-19),
+        // with the way to what blocks it (QA 2026-10-22: the text named the
+        // risk assessment, but staff had to find the section themselves).
         setValidationContext(null);
-        setDocumentRowError({ documentId: id, text: gate ?? errorText(nextError, tx) });
+        setDocumentRowError({
+          documentId: id,
+          text: gate ?? errorText(nextError, tx),
+          action: riskGateRefusal(nextError)
+            ? {
+                label: tx("Перейти к оценке риска", "Zur Risikobewertung"),
+                onClick: () => {
+                  setDocumentRowError(null);
+                  openValidationIssue({ key: "risk-assessment", step: "documents", message: "", fieldId: RISK_ASSESSMENT_SECTION_ID });
+                },
+              }
+            : representativeId
+              ? {
+                  label: tx("Перейти к данным документа", "Zu den Ausweisdaten"),
+                  onClick: () => {
+                    setDocumentRowError(null);
+                    openRepresentativeIdData(representativeId);
+                  },
+                }
+              : null,
+        });
       } else showWizardError(nextError);
     } finally {
       setBusy(null);
@@ -6971,6 +7008,19 @@ ${serviceCommentLines.join("\n")}`
     window.requestAnimationFrame(focusField);
   }
 
+  /** The identity document data of a person who acts for the lead, in the documents step. */
+  function openRepresentativeIdData(representativeId: string) {
+    setStep("documents");
+    // The person's card is a <details>: open it, then go to its first field.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const form = document.querySelector<HTMLElement>(`[data-testid="lead-representative-id-data-${representativeId}"]`);
+      const card = form?.closest("details");
+      if (card) card.open = true;
+      form?.scrollIntoView({ block: "center" });
+      form?.querySelector<HTMLElement>("select, input")?.focus();
+    }));
+  }
+
   function openReadinessReason(reason: string) {
     if (reason === "Lead must be qualified before conversion") {
       void finishIntake("release");
@@ -7953,7 +8003,7 @@ ${serviceCommentLines.join("\n")}`
                             ? tx("Усиленная AML-проверка (ориентир § 15 GwG): требуется по правилу GMED", "Verstärkte AML-Prüfung (Orientierung § 15 GwG): nach GMED-Regel erforderlich")
                             : amlCheckSettled(enhancedCheck)
                               ? tx("Усиленная AML-проверка (ориентир § 15 GwG): добровольная", "Verstärkte AML-Prüfung (Orientierung § 15 GwG): freiwillig")
-                              : tx("Усиленная AML-проверка (§ 15 GwG)", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
+                              : enhancedCheckTitle(tx)}
                         </StatusChip>
                         {amlRequired && amlRequiredText ? (
                           <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-aml-enhanced-check-reasons">
@@ -8569,15 +8619,21 @@ ${serviceCommentLines.join("\n")}`
                 </div>
               ) : null}
               {/* Always here: required by the owner's rule (2026-10-07) or carried out voluntarily. */}
-              <div data-testid="lead-wizard-enhanced-check-section" data-required={amlRequired ? "true" : "false"}>
+              <div
+                id={ENHANCED_CHECK_SECTION_ID}
+                tabIndex={-1}
+                className="focus:outline-none"
+                data-testid="lead-wizard-enhanced-check-section"
+                data-required={amlRequired ? "true" : "false"}
+              >
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={(
                     // One row: the check and whether it is required (owner 2026-10-19: more compact).
                     <span className="flex flex-wrap items-center gap-2" data-testid="lead-wizard-enhanced-check-status">
-                      <StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>{tx("Усиленная AML-проверка (§ 15 GwG)", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}</StatusChip>
+                      <StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>{enhancedCheckTitle(tx)}</StatusChip>
                       <span className={cn("text-xs font-medium", amlRequired ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground")}>
-                        {amlRequired ? tx("Обязательна", "Erforderlich") : tx("Добровольная проверка", "Freiwillige Prüfung")}
+                        {enhancedCheckRequirementLabel(amlRequired, tx)}
                       </span>
                     </span>
                   )}
@@ -10281,7 +10337,7 @@ ${serviceCommentLines.join("\n")}`
           {draft ? (
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={submitAmlEnhancedDueDiligence}>
               <AdminSheetScaffold
-                title={tx("Усиленная AML-проверка (§ 15 GwG)", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
+                title={enhancedCheckTitle(tx)}
                 footer={(
                   <SheetFormFooter
                     cancelLabel={tx("Отмена", "Abbrechen")}
@@ -10303,9 +10359,7 @@ ${serviceCommentLines.join("\n")}`
                 >
                   <StatusChip tone={amlRequired ? "error" : "neutral"}>
                     <ShieldCheck aria-hidden="true" />
-                    {amlRequired
-                      ? tx("Требуется усиленная проверка", "Verstärkte Prüfung erforderlich")
-                      : tx("Добровольная проверка", "Freiwillige Prüfung")}
+                    {enhancedCheckRequirementLabel(amlRequired, tx)}
                   </StatusChip>
                   {amlRequiredText ? (
                     <p className="text-xs leading-5 text-muted-foreground">{amlRequiredText}</p>
@@ -11102,15 +11156,7 @@ ${serviceCommentLines.join("\n")}`
                   onClick={() => {
                     const target = documentPreviewJump;
                     replaceDocumentPreview(null);
-                    setStep("documents");
-                    // The person's card is a <details>: open it, then go to its first field.
-                    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-                      const form = document.querySelector<HTMLElement>(`[data-testid="lead-representative-id-data-${target}"]`);
-                      const card = form?.closest("details");
-                      if (card) card.open = true;
-                      form?.scrollIntoView({ block: "center" });
-                      form?.querySelector<HTMLElement>("select, input")?.focus();
-                    }));
+                    openRepresentativeIdData(target);
                   }}
                 >
                   {tx("Перейти к данным документа", "Zu den Ausweisdaten")}

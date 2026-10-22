@@ -10,7 +10,9 @@ import {
   enhancedCheckReasonLabel,
   enhancedCheckReasonsText,
   enhancedCheckRequired,
+  enhancedCheckRequirementLabel,
   enhancedCheckRiskTier,
+  enhancedCheckTitle,
   enhancedCheckTriggers,
   isBlacklistCountry,
   highRiskCountryHint,
@@ -112,5 +114,14 @@ describe("the enhanced check of the owner's rule (2026-10-07)", () => {
     expect(highRiskCountryHint("Russland", de)).toContain("ergänzenden Fragen");
     expect(highRiskCountryHint("Россия", ru, false)).toContain("учитывается в оценке риска");
     expect(enhancedCheckRequired({ required: false, reasons: [], countries: [] })).toBe(false);
+  });
+
+  it("names the check as GMED's own rule, never as a legal duty (owner 2026-10-22)", () => {
+    expect(enhancedCheckTitle(ru)).toBe("Усиленная AML-проверка (ориентир § 15 GwG)");
+    expect(enhancedCheckTitle(de)).toBe("Verstärkte AML-Prüfung (Orientierung § 15 GwG)");
+    expect(enhancedCheckRequirementLabel(true, ru)).toBe("Требуется по правилу GMED");
+    expect(enhancedCheckRequirementLabel(true, de)).toBe("Nach GMED-Regel erforderlich");
+    expect(enhancedCheckRequirementLabel(false, ru)).toBe("Добровольная проверка");
+    expect(enhancedCheckRequirementLabel(false, de)).toBe("Freiwillige Prüfung");
   });
 });

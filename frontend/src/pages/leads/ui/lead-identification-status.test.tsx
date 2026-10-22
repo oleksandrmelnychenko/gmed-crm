@@ -125,6 +125,13 @@ describe("LeadIdentificationStatusView", () => {
     expect(payer).toContain("Квалифицированной подписи ещё нет");
     expect(payer).toContain('data-tone="neutral"');
     expect(payer).toContain("Подтвердить платёж");
+    // Nobody signed and waits for a payment: the rule is a plain note.
+    expect(html).toContain('data-pending="false"');
+    expect(html).toContain("По правилу GMED (ориентир § 12 Abs. 1 GwG)");
+  });
+
+  it("reminds of the rule while a signed person's payment is awaited", () => {
+    expect(render(AWAITING)).toContain('data-pending="true"');
   });
 
   it("only informs a role that may not edit", () => {
@@ -229,7 +236,7 @@ describe("LeadIdentificationStatusView", () => {
   });
 
   it("says on the paying person's line when cash, crypto or a third party is declared, without a confirmation", () => {
-    const HINT = "Оплата не с собственного счёта (наличные / через третье лицо) — подтверждение по § 12 GwG не ожидается";
+    const HINT = "Оплата не с собственного счёта (наличные / через третье лицо) — подтверждение платежа не ожидается";
     const route = (patch: Partial<DeclaredPaymentRoute>): DeclaredPaymentRoute => ({
       payment_route_by: "patient",
       payment_method: "bank_transfer",
@@ -246,7 +253,7 @@ describe("LeadIdentificationStatusView", () => {
     }
     const german = render(AWAITING, { paymentRoute: route({ payment_method: "cash" }), lang: "de" });
     expect(german).toContain(
-      "Keine Zahlung vom eigenen Konto angegeben (bar / über Dritte) – Bestätigung nach § 12 GwG nicht zu erwarten",
+      "Keine Zahlung vom eigenen Konto angegeben (bar / über Dritte) – keine Zahlungsbestätigung zu erwarten",
     );
     expect(german).toContain("Keine Zahlung vom eigenen Konto zu erwarten");
     // Without the route the payment is awaited and can be confirmed.

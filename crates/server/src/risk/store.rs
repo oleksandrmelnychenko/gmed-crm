@@ -110,6 +110,15 @@ impl Assessment {
                     .any(|trigger| super::country_follow_up(&trigger.key, &trigger.subject)))
     }
 
+    /// A confirmed sanctions match (T16) is final: a reviewer may not release
+    /// such a lead, as a release would leave "released" next to the sanctions
+    /// block that it does not lift (QA 2026-10-11 N-09 hid the button only;
+    /// QA 2026-10-22: the server refuses it too). A false-positive decision
+    /// withdraws T16, so a stored T16 is a confirmed match.
+    pub fn sanctions_confirmed(&self) -> bool {
+        self.triggers.iter().any(|trigger| trigger.key == "T16")
+    }
+
     /// Whether the payer's link waits: a rejected lead, or level 3 that
     /// nobody released and for which staff did not request block D.
     pub fn holds_payer_link(&self) -> bool {
@@ -1330,6 +1339,8 @@ pub enum DecisionError {
     SameUser,
     NotProposer,
     AssessmentChanged,
+    /// A release of a lead with a confirmed sanctions match.
+    SanctionsConfirmed,
     Database(sqlx::Error),
 }
 
@@ -1506,6 +1517,9 @@ pub async fn decide(
     if !assessment.started() {
         return Err(DecisionError::NotStarted);
     }
+    if decision == "release" && assessment.sanctions_confirmed() {
+        return Err(DecisionError::SanctionsConfirmed);
+    }
     let mut blocks: Vec<String> = blocks
         .iter()
         .map(|block| block.trim().to_uppercase())
@@ -1626,6 +1640,9 @@ pub async fn confirm(
     }
     if print != assessment.fingerprint {
         return Err(DecisionError::AssessmentChanged);
+    }
+    if decision == "release" && assessment.sanctions_confirmed() {
+        return Err(DecisionError::SanctionsConfirmed);
     }
     let reason = reason
         .map(str::trim)
@@ -1796,6 +1813,47 @@ mod tests {
 
     fn blocks(keys: &[&str]) -> Vec<String> {
         keys.iter().map(|key| key.to_string()).collect()
+    }
+
+    #[test]
+    fn a_stored_confirmed_sanctions_match_cannot_be_released() {
+        let now = Utc::now();
+        let sticky = |key: &str, active: bool| Sticky {
+            key: key.into(),
+            subject: super::super::SUBJECT_PATIENT.into(),
+            variant: None,
+            points: 0,
+            knockout: key == "T16" || key == "T14",
+            first_fired_at: now,
+            last_fired_at: now,
+            active,
+            inactive_since: None,
+        };
+        let mut assessment = Assessment {
+            lead_id: Uuid::nil(),
+            started_at: Some(now),
+            config_version: 1,
+            score: Score {
+                level: 3,
+                ..Default::default()
+            },
+            triggers: vec![sticky("T14", true)],
+            fingerprint: String::new(),
+            requested_blocks: Vec::new(),
+            follow_up_answered_at: None,
+            status: STATUS_REVIEW.into(),
+            released_fingerprint: None,
+            representative_country_ids: Vec::new(),
+        };
+        assert!(
+            !assessment.sanctions_confirmed(),
+            "a PEP alone may be released"
+        );
+        assessment.triggers.push(sticky("T16", true));
+        assert!(assessment.sanctions_confirmed());
+        // A confirmation is final: T16 stays although it no longer fires.
+        assessment.triggers[1].active = false;
+        assert!(assessment.sanctions_confirmed());
     }
 
     #[test]

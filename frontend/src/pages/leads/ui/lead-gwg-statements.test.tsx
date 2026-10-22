@@ -927,7 +927,7 @@ describe("LeadGwgStatements: the extra step «Дополнительные св�
     expect(statement(html, "lead-gwg-self-funds-proof")).toContain("Nachweis der Mittelherkunft · erforderlich");
     // One warning line only, in the wizard's enhanced-check section; here the row is amber.
     expect(html).not.toContain("lead-self-funds-proof-missing");
-    expect(html).toContain("verstärkte Prüfung erforderlich");
+    expect(html).toContain("verstärkte Prüfung nach GMED-Regel erforderlich");
     expect(statement(html, "lead-gwg-self-funds-sources")).toContain("Einkommen");
   });
 

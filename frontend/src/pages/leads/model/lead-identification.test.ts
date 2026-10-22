@@ -421,7 +421,7 @@ describe("identificationPersons", () => {
     expect(persons[0]).toMatchObject({ detail: "родитель · плательщик", canConfirm: true, paymentExpected: true });
     // The other parent only signs.
     expect(persons[1]).toMatchObject({ detail: "родитель", paymentExpected: false });
-    expect(identificationPersons(minor, de)[0].detail).toBe("Elternteil · Zahler");
+    expect(identificationPersons(minor, de)[0].detail).toBe("Elternteil · Zahler/in");
   });
 
   it("keeps the own line of a payer who is somebody else; the parents then only sign", () => {
