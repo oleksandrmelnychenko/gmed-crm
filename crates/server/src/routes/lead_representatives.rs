@@ -2470,6 +2470,37 @@ pub(crate) async fn update_my_representation(
                     .map(|person| person.id),
             );
         }
+        // A contact marked as guardian (Vormund) that stays needs the custody
+        // "guardian": the same refusal as staff's custody endpoint (owner
+        // 2026-10-22); the contact's relation is changed by GMED.
+        if next.custody != representation.answers.custody
+            && next.custody.as_deref() != Some(CUSTODY_GUARDIAN)
+            && let Some((index, person)) =
+                representation
+                    .representatives
+                    .iter()
+                    .enumerate()
+                    .find(|(_, person)| {
+                        !removed.contains(&person.id)
+                            && crate::routes::leads::is_legal_guardian_relation(
+                                person.relation.as_deref(),
+                            )
+                    })
+        {
+            return intake::coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                crate::routes::leads::RELATION_GUARDIAN_NEEDS_CUSTODY,
+                "A contact is marked as guardian (Vormund); GMED changes its relation first",
+                json!({
+                    "error": crate::routes::leads::RELATION_GUARDIAN_NEEDS_CUSTODY,
+                    "field": "custody",
+                    "contact_index": index,
+                    "contact_id": person.id,
+                    "contact_name": person.name(),
+                    "contact_field": "relation",
+                }),
+            );
+        }
     }
     let fields = [
         (

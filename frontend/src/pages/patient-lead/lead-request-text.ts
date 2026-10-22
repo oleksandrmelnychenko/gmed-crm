@@ -378,6 +378,8 @@ export type LeadRequestText = {
   custodyQuestion: string;
   /** Under the custody GMED staff stated (read-only, owner 2026-10-22). */
   custodySetByStaffHint: string;
+  /** A contact GMED marked as guardian (Vormund) keeps the custody "guardian" (owner 2026-10-22). */
+  custodyGuardianContact: string;
   custodyOptions: Record<Custody, string>;
   /** A person of the block: the heading of the form, and the prefix in the list of what is still missing. */
   representativeCaptions: Record<RepresentativeSlot, string>;
@@ -1299,6 +1301,7 @@ const de: LeadRequestText = {
   parentShortFormIntro: "Für die erste Anfrage genügen die Namen, Kontaktdaten, das Wohnsitzland und die Staatsangehörigkeiten der vertretenden Eltern. Weitere Angaben und Nachweise werden vor Vertrag und Unterschrift benötigt. Bereits gespeicherte Daten bleiben erhalten.",
   custodyQuestion: "Wer vertritt das Kind?",
   custodySetByStaffHint: "Von GMED angegeben; falls das nicht stimmt, schreiben Sie uns bitte.",
+  custodyGuardianContact: "Bei GMED ist eine Person als Vormund eingetragen, daher bleibt die Vormundschaft angegeben. Falls das nicht stimmt, schreiben Sie uns bitte.",
   custodyOptions: {
     joint: "Beide Eltern gemeinsam",
     sole_parent: "Ein Elternteil allein (alleiniges Sorgerecht)",
@@ -1845,6 +1848,7 @@ const ru: LeadRequestText = {
   parentShortFormIntro: "Для первого обращения достаточно имён, контактов, страны проживания и гражданства родителей, представляющих ребёнка. Остальные сведения и документы понадобятся перед договором и подписью. Уже сохранённые данные сохраняются.",
   custodyQuestion: "Кто представляет ребёнка?",
   custodySetByStaffHint: "Указано сотрудником GMED; если неверно — напишите нам.",
+  custodyGuardianContact: "В GMED один из контактов указан как опекун, поэтому опека остаётся. Если это неверно — напишите нам.",
   custodyOptions: {
     joint: "Оба родителя вместе",
     sole_parent: "Один из родителей (единоличное право опеки)",
@@ -2392,6 +2396,7 @@ const uk: LeadRequestText = {
   parentShortFormIntro: "Для першого звернення достатньо імен, контактів, країни проживання та громадянства батьків, які представляють дитину. Решта відомостей і документів знадобиться перед договором і підписом. Уже збережені дані залишаються.",
   custodyQuestion: "Хто представляє дитину?",
   custodySetByStaffHint: "Вказано співробітником GMED; якщо неправильно — напишіть нам.",
+  custodyGuardianContact: "У GMED один із контактів указано як опікуна, тому опіка залишається. Якщо це неправильно — напишіть нам.",
   custodyOptions: {
     joint: "Обоє батьків разом",
     sole_parent: "Один із батьків (одноосібне право опіки)",
@@ -2933,6 +2938,7 @@ const en: LeadRequestText = {
   parentShortFormIntro: "For the initial inquiry, we only need the names, contact details, country of residence and citizenships of the parents representing the child. Further details and documents will be needed before the contract and signature. Previously saved data is retained.",
   custodyQuestion: "Who represents the child?",
   custodySetByStaffHint: "Stated by GMED staff; if this is wrong, please write to us.",
+  custodyGuardianContact: "GMED has a contact on file as the guardian, so the guardianship stays. If this is wrong, please write to us.",
   custodyOptions: {
     joint: "Both parents together",
     sole_parent: "One parent alone (sole custody)",

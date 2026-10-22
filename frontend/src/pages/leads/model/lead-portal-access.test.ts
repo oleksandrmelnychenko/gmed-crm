@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canIssueLeadPortalPassword,
+  leadPortalMinor,
   leadPortalStatus,
   loginEmailDelivery,
   loginEmailErrorMessage,
@@ -163,5 +164,25 @@ describe("loginEmailErrorMessage", () => {
     expect(loginEmailErrorMessage(failure("something_else"), "ru")).toBeNull();
     expect(loginEmailErrorMessage(new Error("boom"), "ru")).toBeNull();
     expect(loginEmailErrorMessage(null, "de")).toBeNull();
+  });
+});
+
+describe("leadPortalMinor", () => {
+  // 22.10.2026 23:30 UTC is already 23.10.2026 in Berlin.
+  const today = new Date("2026-10-22T23:30:00Z");
+
+  it("takes the portal intake when it loaded", () => {
+    expect(leadPortalMinor(false, "2015-06-01", today)).toBe(false);
+    expect(leadPortalMinor(true, "1980-01-01", today)).toBe(true);
+  });
+
+  it("falls back to the date of birth on the Berlin date when the intake did not load", () => {
+    expect(leadPortalMinor(null, "2015-06-01", today)).toBe(true);
+    expect(leadPortalMinor(undefined, "2015-06-01", today)).toBe(true);
+    // Turns 18 on 23.10.2026 (Berlin): an adult already, a minor the day before.
+    expect(leadPortalMinor(null, "2008-10-23", today)).toBe(null);
+    expect(leadPortalMinor(null, "2008-10-24", today)).toBe(true);
+    expect(leadPortalMinor(null, "1980-01-01", today)).toBe(null);
+    expect(leadPortalMinor(undefined, null, today)).toBe(undefined);
   });
 });

@@ -33,6 +33,7 @@ import {
   type LeadPortalAccountIssued,
 } from "../data/leads-api";
 import {
+  leadPortalMinor,
   leadPortalStatus,
   leadPortalStatusLabel,
   leadPortalStatusTone,
@@ -156,7 +157,9 @@ export function LeadPortalAccessDetail({
   const intake = lead.portal_intake ?? null;
   // Whether the lead is a minor, from the portal state the parents' block
   // loads: `undefined` while loading, `null` when it is not known.
-  const [minor, setMinor] = useState<boolean | null | undefined>(undefined);
+  const [intakeMinor, setMinor] = useState<boolean | null | undefined>(undefined);
+  // A minor by the date of birth when the intake did not load (yet).
+  const minor = leadPortalMinor(intakeMinor, lead.date_of_birth);
   // The child's own login while the parents have access (QA 2026-10-12, A3-01).
   const [ownLoginClosed, setOwnLoginClosed] = useState(false);
   const onPortalIntake = useCallback((intake: LeadPortalIntake | null) => {

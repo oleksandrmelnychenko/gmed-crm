@@ -1,5 +1,7 @@
 import type { LeadPortalAccountSummary, LoginEmailDeliveryStatus } from "@/lib/api/types";
 
+import { isMinor } from "./lead-wizard.model";
+
 /**
  * State of the patient login created with a lead (owner decision 2026-10-03):
  * - `none`: the lead has no login (older leads, or created without e-mail)
@@ -302,4 +304,20 @@ export function portalCredentialsMessage(input: {
         `Passwort: ${password}`,
       ].join("\n");
   }
+}
+
+/**
+ * Whether the lead of the portal row is a minor. The portal intake decides
+ * (`undefined` while it loads, `null` when it could not be read); without
+ * it a date of birth under 18 on the Berlin date of `today` still makes the
+ * row a minor's, so it shows the parents' wording and never the adult
+ * "no e-mail, no access" text.
+ */
+export function leadPortalMinor(
+  intakeMinor: boolean | null | undefined,
+  dateOfBirth: string | null | undefined,
+  today: Date = new Date(),
+): boolean | null | undefined {
+  if (typeof intakeMinor === "boolean") return intakeMinor;
+  return dateOfBirth && isMinor(dateOfBirth, today) ? true : intakeMinor;
 }

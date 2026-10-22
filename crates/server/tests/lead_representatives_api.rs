@@ -1574,6 +1574,87 @@ async fn both_parents_of_a_minor_are_asked_for_by_default() {
     assert_eq!((rows, uploads), (1, 1));
 }
 
+/// A contact marked as guardian (Vormund) keeps the custody "guardian" in the
+/// cabinet too: the parent's change is refused with the staff endpoint's
+/// code (owner 2026-10-22); GMED changes the relation first.
+#[tokio::test]
+async fn the_cabinet_keeps_guardian_custody_while_a_contact_is_a_guardian() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+    let guardian = Uuid::new_v4();
+    let lead_id = minor_lead(
+        &app,
+        json!([
+            { "id": guardian, "name": "Greta Vormund", "relation": "mother",
+              "email": address("greta.vormund") },
+        ]),
+    )
+    .await;
+    let (_, login) = guardian_login(&app, lead_id, guardian).await;
+    let path = format!("/api/v1/me/lead-requests/{lead_id}/representation");
+    let custody = |value: Value| Some(json!({ "custody": value }));
+    let set_relation = |relation: &'static str| {
+        let pm = pm.clone();
+        async move {
+            let (_, lead) = json_request(
+                router,
+                "GET",
+                &format!("/api/v1/leads/{lead_id}"),
+                &pm,
+                None,
+            )
+            .await;
+            let mut contacts = lead["trusted_contacts"].as_array().unwrap().clone();
+            contacts[0]["relation"] = json!(relation);
+            let (status, saved) = json_request(
+                router,
+                "POST",
+                &format!("/api/v1/leads/{lead_id}/update"),
+                &pm,
+                Some(json!({ "trusted_contacts": contacts })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{saved}");
+        }
+    };
+
+    // The parent states a guardianship; staff then mark the contact as the
+    // guardian (allowed under the custody "guardian").
+    let (status, body) =
+        json_request(router, "POST", &path, &login, custody(json!("guardian"))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["representation"]["custody"], "guardian", "{body}");
+    set_relation("guardian").await;
+    for other in ["joint", "sole_parent"] {
+        let (status, error) =
+            json_request(router, "POST", &path, &login, custody(json!(other))).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+        assert_eq!(error["code"], "relation_guardian_needs_custody", "{error}");
+        assert_eq!(error["field"], "custody", "{error}");
+        assert_eq!(error["contact_id"], json!(guardian), "{error}");
+    }
+    // Taking the statement back is no other custody either.
+    let (status, error) = json_request(router, "POST", &path, &login, custody(Value::Null)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    let (_, body) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead_id}"),
+        &login,
+        None,
+    )
+    .await;
+    assert_eq!(body["representation"]["custody"], "guardian", "{body}");
+
+    // Once staff call the contact a mother again, the parent may change it.
+    set_relation("mother").await;
+    let (status, body) =
+        json_request(router, "POST", &path, &login, custody(json!("sole_parent"))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["representation"]["custody"], "sole_parent", "{body}");
+}
+
 #[tokio::test]
 async fn one_parent_alone_or_a_guardian_represents_a_minor() {
     let Some(app) = test_app().await else { return };

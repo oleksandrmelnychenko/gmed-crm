@@ -807,6 +807,7 @@ async fn list_leads(
 
     match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, source, country, citizenships,
+                  date_of_birth,
                   intake_source, flow, qualification_status, compliance_status,
                   submitted_at, created_at, console_promoted_at, console_promoted_by,
                   failed_outcome_status, failed_reason, failed_processed_at, status_changed_at,
@@ -944,6 +945,8 @@ async fn list_leads(
                     "source": r.try_get::<Option<String>, _>("source").unwrap_or_default(),
                     "country": r.try_get::<Option<String>, _>("country").unwrap_or_default(),
                     "citizenships": r.try_get::<Vec<String>, _>("citizenships").unwrap_or_default(),
+                    // A minor's row says so even when the portal state is not loaded.
+                    "date_of_birth": r.try_get::<Option<chrono::NaiveDate>, _>("date_of_birth").unwrap_or_default(),
                     "intake_source": r.try_get::<Option<String>, _>("intake_source").unwrap_or_default(),
                     "flow": r.try_get::<Option<String>, _>("flow").unwrap_or_default(),
                     "lead_type": lead_type_from_origin(

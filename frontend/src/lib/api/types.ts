@@ -29,6 +29,8 @@ export interface Lead {
   country: string | null;
   /** Citizenships as ISO 3166-1 alpha-2 codes (several possible). */
   citizenships?: string[];
+  /** YYYY-MM-DD; tells a minor's row apart when the portal state is not loaded. */
+  date_of_birth?: string | null;
   intake_source: string | null;
   flow: string | null;
   lead_type?: string | null;
