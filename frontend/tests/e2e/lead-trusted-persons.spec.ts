@@ -115,7 +115,8 @@ test("an incomplete choice is not discarded when another step is selected", asyn
 
 test("automatic save keeps failed drafts; Next retries and reload restores decision, scope and receipt", async ({ page }) => {
   const { calls } = await setup(page, { failSave: true });
-  await expect(page.getByTestId("disclosure-no")).not.toBeChecked();
+  // Unanswered counts as "No" (owner 2026-10-22).
+  await expect(page.getByTestId("disclosure-no")).toBeChecked();
   await expect(page.getByTestId("disclosure-yes")).not.toBeChecked();
   await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await addFriend(page);
