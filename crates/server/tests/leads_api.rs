@@ -1069,6 +1069,70 @@ async fn sales_sees_leads_without_their_medical_content() {
 }
 
 #[tokio::test]
+async fn staff_lead_personal_data_is_refused_at_the_field() {
+    // QA 2026-10-22: the wizard shows a refusal at its field, so a 422 names it.
+    let Some(app) = test_app().await else { return };
+    let sales = app.auth_header("sales");
+    for (body, field, message) in [
+        (
+            json!({ "first_name": "Future", "last_name": "Born", "date_of_birth": "2999-01-01", "email": "future.born@example.com" }),
+            "date_of_birth",
+            "date_of_birth cannot be in the future",
+        ),
+        (
+            json!({ "first_name": "Too", "last_name": "Early", "date_of_birth": "1850-01-01", "email": "too.early@example.com" }),
+            "date_of_birth",
+            "date_of_birth is too early",
+        ),
+        (
+            json!({ "first_name": "Bad", "last_name": "Phone", "date_of_birth": "1990-01-01", "email": "bad.phone@example.com", "phone": "12" }),
+            "phone",
+            "Invalid phone",
+        ),
+    ] {
+        let (status, response) =
+            json_request(&app, "POST", "/api/v1/leads", &sales, Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{response}");
+        assert_eq!(response["field"], field, "{response}");
+        assert_eq!(response["message"], message, "{response}");
+    }
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &sales,
+        Some(json!({ "first_name": "Valid", "last_name": "Person", "date_of_birth": "1990-01-01", "email": "valid.person.fields@example.com" })),
+    )
+    .await;
+    assert!(status.is_success(), "{created}");
+    let update = format!("/api/v1/leads/{}/update", created["id"].as_str().unwrap());
+    for (body, field) in [
+        (json!({ "date_of_birth": "2999-01-01" }), "date_of_birth"),
+        (json!({ "email": "not-an-address" }), "email"),
+        (json!({ "phone": "abc" }), "phone"),
+        (json!({ "first_name": " " }), "first_name"),
+    ] {
+        let (status, response) = json_request(&app, "POST", &update, &sales, Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{response}");
+        assert_eq!(response["field"], field, "{response}");
+    }
+    let (status, response) = json_request(
+        &app,
+        "POST",
+        &update,
+        &sales,
+        Some(json!({ "trusted_contacts": [{ "name": "Anna Muster", "relation": "mother", "birth_date": "2999-01-01" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{response}");
+    assert_eq!(
+        response["message"],
+        "Trusted contact birth_date is not plausible"
+    );
+}
+
+#[tokio::test]
 async fn lead_contacts_are_unique_except_for_a_minor_and_linked_guardian() {
     let Some(app) = test_app().await else { return };
     let sales = app.auth_header("sales");

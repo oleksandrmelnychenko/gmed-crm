@@ -822,11 +822,11 @@ test("staff explicitly choose the parent's role and linking a patient preserves 
   await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect(editor).toContainText("Укажите, кто представляет ребёнка: мать, отец или опекун");
   expect(calls.updates).toEqual([]);
-  await editor.getByLabel("Кем приходится клиенту").click();
-  await page.getByRole("option", { name: "Мать", exact: true }).click();
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Мать (родитель)", exact: true }).click();
   await editor.getByLabel("Выбрать из пациентов или лидов").click();
   await page.getByRole("option", { name: /Existing Mother/ }).click();
-  await expect(editor.getByLabel("Кем приходится клиенту")).toContainText("Мать");
+  await expect(editor.getByLabel("Кем приходится ребёнку")).toContainText("Мать");
   await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect.poll(() => (calls.updates.at(-1)?.trusted_contacts as Json[] | undefined)?.find((contact) => contact.id === ANNA_ID)?.relation).toBe("mother");
   const written = (calls.updates.at(-1)?.trusted_contacts as Json[]).find((contact) => contact.id === ANNA_ID)!;
@@ -840,10 +840,11 @@ test("a new parent's role has no default and an explicit father stays in the par
   await wizard.getByRole("button", { name: "Добавить", exact: true }).click();
   const editor = page.locator("form").filter({ hasText: "Добавить родителя или законного представителя" });
   await editor.getByLabel("Имя и фамилия").fill("New Father");
+  await editor.getByLabel("Телефон").fill("+49 30 100004");
   await editor.getByRole("button", { name: "Добавить", exact: true }).click();
   await expect(editor).toContainText("Укажите, кто представляет ребёнка: мать, отец или опекун");
-  await editor.getByLabel("Кем приходится клиенту").click();
-  await page.getByRole("option", { name: "Отец", exact: true }).click();
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Отец (родитель)", exact: true }).click();
   await editor.getByRole("button", { name: "Добавить", exact: true }).click();
   await expect.poll(() => (calls.updates.at(-1)?.trusted_contacts as Json[] | undefined)?.find((contact) => contact.name === "New Father")?.relation).toBe("father");
   await expect(parents.getByRole("listitem").filter({ hasText: "New Father" })).toContainText("Отец");
@@ -918,8 +919,8 @@ test("a second parent added in the cabinet appears in the open wizard and surviv
   // Opened from the parents' block: the editor is titled for a parent (QA 2026-10-10).
   const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
   await editor.getByLabel("E-Mail").fill("ben.muster@example.com");
-  await editor.getByLabel("Кем приходится клиенту").click();
-  await page.getByRole("option", { name: "Отец", exact: true }).click();
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Отец (родитель)", exact: true }).click();
   await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect.poll(() => calls.updates.length).toBeGreaterThan(savesBefore);
   const sent = calls.updates.at(-1)?.trusted_contacts as Json[];
@@ -967,8 +968,8 @@ test("staff reuse a mother who is still a lead without creating a patient link",
   const parents = wizard.locator("#lead-wizard-guardian");
   await parents.getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
   const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
-  await editor.getByLabel("Кем приходится клиенту").click();
-  await page.getByRole("option", { name: "Мать", exact: true }).click();
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Мать (родитель)", exact: true }).click();
   await editor.getByLabel("Выбрать из пациентов или лидов").click();
   await page.getByRole("option", { name: /Existing Leadmother/ }).click();
   await expect(editor.getByLabel("E-Mail", { exact: true })).toHaveValue("existing.leadmother@example.test");

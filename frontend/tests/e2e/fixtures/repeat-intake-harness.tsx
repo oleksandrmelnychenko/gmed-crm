@@ -29,6 +29,7 @@ function Harness() {
   return <>
     <button onClick={() => { setPicker(true); }}>Repeat intake</button>
     <button onClick={() => { setRepeat(false); setLeadId("00000000-0000-0000-0000-000000000222"); setOpen(true); }}>Lead intake</button>
+    <button onClick={() => { setRepeat(false); setLeadId(null); setCreationKey(undefined); setOpen(true); }}>New lead</button>
     {picker && <RepeatIntakePicker patientId={patient.id} lang={localStorage.getItem("gmed_lang") ?? "ru"} onPick={pick} onClose={() => setPicker(false)} />}
     {open && <LeadWizard creationKey={creationKey} open entryPoint={repeat ? "repeat-patient" : "lead"} createMode={!leadId} leadId={leadId} existingPatient={repeat ? patient : undefined}
       onCreated={setLeadId} onOpenChange={setOpen} />}

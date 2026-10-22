@@ -287,6 +287,31 @@ fn normalized_contact_text(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
+/// A date of birth staff may store: not in the future and not before 1900
+/// (the same bar as the lead cabinet, `lead_portal_intake::apply_personal_data_patch`).
+fn plausible_birth_date(date: NaiveDate, today: NaiveDate) -> Result<NaiveDate, &'static str> {
+    if date > today {
+        return Err("date_of_birth cannot be in the future");
+    }
+    if NaiveDate::from_ymd_opt(1900, 1, 1).is_some_and(|earliest| date < earliest) {
+        return Err("date_of_birth is too early");
+    }
+    Ok(date)
+}
+
+/// A 422 that names the field it refuses, so the wizard shows it at the field.
+fn field_err(field: &str, message: &str) -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({
+            "error": StatusCode::UNPROCESSABLE_ENTITY.canonical_reason().unwrap_or("error"),
+            "message": message,
+            "field": field,
+        })),
+    )
+        .into_response()
+}
+
 fn normalize_trusted_contacts(contacts: &[TrustedContactRequest]) -> Result<Value, &'static str> {
     if contacts.len() > 50 {
         return Err("Too many trusted contacts");
@@ -306,12 +331,14 @@ fn normalize_trusted_contacts(contacts: &[TrustedContactRequest]) -> Result<Valu
         }
 
         let birth_date = match normalized_contact_text(contact.birth_date.as_deref()) {
-            Some(value) => Some(
-                NaiveDate::parse_from_str(&value, "%Y-%m-%d")
-                    .map_err(|_| "Invalid trusted contact birth_date (YYYY-MM-DD)")?
-                    .format("%Y-%m-%d")
-                    .to_string(),
-            ),
+            Some(value) => {
+                let date = NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+                    .map_err(|_| "Invalid trusted contact birth_date (YYYY-MM-DD)")?;
+                if plausible_birth_date(date, crate::app_time::today()).is_err() {
+                    return Err("Trusted contact birth_date is not plausible");
+                }
+                Some(date.format("%Y-%m-%d").to_string())
+            }
             None => None,
         };
 
@@ -1355,8 +1382,8 @@ async fn validate_lead_contact_identity(
                 continue;
             }
 
-            return Err(err(
-                StatusCode::UNPROCESSABLE_ENTITY,
+            return Err(field_err(
+                kind,
                 if kind == "email" {
                     "Email is already used by another person"
                 } else {
@@ -1449,6 +1476,9 @@ struct LeadConversionReadinessInput {
     /// released, or rejected; `crate::risk`). Level 1, released and
     /// grandfathered leads pass.
     risk_assessment_held: bool,
+    /// A parent or guardian contact with an e-mail or phone; for a minor it
+    /// stands in for the child's own contact.
+    guardian_contact_present: bool,
 }
 
 fn evaluate_lead_conversion_readiness(
@@ -1465,7 +1495,11 @@ fn evaluate_lead_conversion_readiness(
         || input
             .phone
             .as_deref()
-            .is_some_and(|value| !value.trim().is_empty());
+            .is_some_and(|value| !value.trim().is_empty())
+        // A minor is reached through a parent or guardian (the wizard keeps
+        // the child's own e-mail and phone optional).
+        || (input.guardian_contact_present
+            && is_minor_on(input.date_of_birth, crate::app_time::today()));
     let address_present = [&input.street_address, &input.city, &input.zip_code]
         .into_iter()
         .all(|value| {
@@ -1915,7 +1949,30 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         package_covered: false,
         payer: Default::default(),
         risk_assessment_held: false,
+        guardian_contact_present: guardian_contact_present(
+            &row.try_get::<Value, _>("trusted_contacts")
+                .unwrap_or_else(|_| json!([])),
+        ),
     }
+}
+
+/// A parent or guardian among the trusted contacts with an e-mail or phone:
+/// a minor is reached through them, the child's own address is optional
+/// (QA 2026-10-06, B1-a; QA 2026-10-22).
+fn guardian_contact_present(contacts: &Value) -> bool {
+    let has = |contact: &Value, key: &str| {
+        contact
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    };
+    contacts.as_array().is_some_and(|contacts| {
+        contacts.iter().any(|contact| {
+            is_parent_or_guardian_relation(contact.get("relation").and_then(Value::as_str))
+                && has(contact, "name")
+                && (has(contact, "email") || has(contact, "phone"))
+        })
+    })
 }
 
 async fn load_lead_conversion_readiness(
@@ -1930,6 +1987,7 @@ async fn load_lead_conversion_readiness(
                   legal_sex,
                   email,
                   phone,
+                  trusted_contacts,
                   street_address,
                   city,
                   zip_code,
@@ -2918,12 +2976,12 @@ async fn create_lead(
     let date_of_birth = match body.date_of_birth.as_deref() {
         Some(value) if !value.trim().is_empty() => {
             match NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d") {
-                Ok(value) => Some(value),
+                Ok(value) => match plausible_birth_date(value, crate::app_time::today()) {
+                    Ok(value) => Some(value),
+                    Err(message) => return field_err("date_of_birth", message),
+                },
                 Err(_) => {
-                    return err(
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        "Invalid date_of_birth (YYYY-MM-DD)",
-                    );
+                    return field_err("date_of_birth", "Invalid date_of_birth (YYYY-MM-DD)");
                 }
             }
         }
@@ -2942,10 +3000,12 @@ async fn create_lead(
     let portal_email =
         crate::routes::lead_portal_account::normalize_portal_email(body.email.as_deref());
     if portal_email.is_none() && (email_given || !minor) {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "A valid email is required",
-        );
+        return field_err("email", "A valid email is required");
+    }
+    if body.phone.as_deref().map(str::trim).is_some_and(|phone| {
+        !phone.is_empty() && !crate::routes::patients::is_valid_contact_phone(phone)
+    }) {
+        return field_err("phone", "Invalid phone");
     }
     // The address of the patient login: an adult's own.
     let account_email = portal_email.clone().filter(|_| !minor);
@@ -4123,18 +4183,18 @@ async fn update_lead(
     if let Some(ref value) = legal_sex
         && !is_valid_legal_sex(value)
     {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid legal_sex");
+        return field_err("legal_sex", "Invalid legal_sex");
     }
 
     let date_of_birth = match body.date_of_birth.as_deref() {
         Some(value) if !value.trim().is_empty() => {
             match NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d") {
-                Ok(value) => Some(value),
+                Ok(value) => match plausible_birth_date(value, crate::app_time::today()) {
+                    Ok(value) => Some(value),
+                    Err(message) => return field_err("date_of_birth", message),
+                },
                 Err(_) => {
-                    return err(
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        "Invalid date_of_birth (YYYY-MM-DD)",
-                    );
+                    return field_err("date_of_birth", "Invalid date_of_birth (YYYY-MM-DD)");
                 }
             }
         }
@@ -4207,20 +4267,14 @@ async fn update_lead(
 
     let first_name = match body.first_name.as_deref() {
         Some(value) if value.trim().is_empty() => {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "first_name cannot be empty",
-            );
+            return field_err("first_name", "first_name cannot be empty");
         }
         Some(value) => Some(value.trim().to_string()),
         None => None,
     };
     let last_name = match body.last_name.as_deref() {
         Some(value) if value.trim().is_empty() => {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "last_name cannot be empty",
-            );
+            return field_err("last_name", "last_name cannot be empty");
         }
         Some(value) => Some(value.trim().to_string()),
         None => None,
@@ -4389,6 +4443,24 @@ async fn update_lead(
         normalized_identity_phone(Some(phone))
             != normalized_identity_phone(current_phone.as_deref())
     });
+    // A changed address or number must be usable (the wizard checks the same);
+    // an older stored value does not block unrelated edits.
+    if changed_email
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|email| !email.is_empty() && !crate::email_address::is_valid_email(email))
+    {
+        return field_err("email", "Invalid email");
+    }
+    if changed_phone
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|phone| {
+            !phone.is_empty() && !crate::routes::patients::is_valid_contact_phone(phone)
+        })
+    {
+        return field_err("phone", "Invalid phone");
+    }
     let effective_birth_date = date_of_birth.or_else(|| {
         current_identity
             .try_get::<Option<NaiveDate>, _>("date_of_birth")
@@ -10591,7 +10663,94 @@ mod lead_conversion_readiness_tests {
             package_covered: false,
             payer: crate::routes::lead_payer::PayerReadiness::ready(),
             risk_assessment_held: false,
+            guardian_contact_present: false,
         }
+    }
+
+    #[test]
+    fn a_minor_is_reached_through_a_parent_contact() {
+        // QA 2026-10-22: the wizard keeps a child's own e-mail and phone
+        // optional; the readiness must not ask for them when a parent has one.
+        let mut input = ready_input();
+        input.date_of_birth = Some(crate::app_time::today() - chrono::Duration::days(365 * 9));
+        input.email = None;
+        input.phone = None;
+        let reasons = evaluate_lead_conversion_readiness(&input).conversion_reasons;
+        assert!(
+            reasons
+                .iter()
+                .any(|reason| reason == "Email or phone is required"),
+            "{reasons:?}"
+        );
+
+        input.guardian_contact_present = true;
+        let reasons = evaluate_lead_conversion_readiness(&input).conversion_reasons;
+        assert!(
+            !reasons
+                .iter()
+                .any(|reason| reason == "Email or phone is required"),
+            "{reasons:?}"
+        );
+
+        // An adult still needs an own contact.
+        input.date_of_birth = NaiveDate::from_ymd_opt(1990, 1, 1);
+        let reasons = evaluate_lead_conversion_readiness(&input).conversion_reasons;
+        assert!(
+            reasons
+                .iter()
+                .any(|reason| reason == "Email or phone is required"),
+            "{reasons:?}"
+        );
+    }
+
+    #[test]
+    fn a_birth_date_must_be_plausible() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 22).expect("date");
+        assert!(plausible_birth_date(today, today).is_ok());
+        assert!(
+            plausible_birth_date(NaiveDate::from_ymd_opt(1900, 1, 1).expect("date"), today).is_ok()
+        );
+        assert_eq!(
+            plausible_birth_date(NaiveDate::from_ymd_opt(2026, 10, 23).expect("date"), today),
+            Err("date_of_birth cannot be in the future")
+        );
+        assert_eq!(
+            plausible_birth_date(NaiveDate::from_ymd_opt(1899, 12, 31).expect("date"), today),
+            Err("date_of_birth is too early")
+        );
+    }
+
+    #[test]
+    fn a_trusted_contact_born_in_the_future_is_refused() {
+        let contact = |birth_date: &str| TrustedContactRequest {
+            id: None,
+            related_patient_id: None,
+            name: "Anna Muster".to_string(),
+            phone: None,
+            email: None,
+            relation: Some("mother".to_string()),
+            birth_date: Some(birth_date.to_string()),
+            address: None,
+        };
+        assert!(normalize_trusted_contacts(&[contact("1985-03-02")]).is_ok());
+        assert_eq!(
+            normalize_trusted_contacts(&[contact("2999-01-01")]),
+            Err("Trusted contact birth_date is not plausible")
+        );
+    }
+
+    #[test]
+    fn guardian_contact_needs_a_parent_relation_and_a_channel() {
+        assert!(guardian_contact_present(&json!([
+            { "name": "Anna Muster", "relation": "mother", "email": null, "phone": "+49 30 1" }
+        ])));
+        assert!(!guardian_contact_present(&json!([
+            { "name": "Anna Muster", "relation": "mother", "email": " ", "phone": null }
+        ])));
+        assert!(!guardian_contact_present(&json!([
+            { "name": "Eva Friend", "relation": "other", "email": "eva@example.com" }
+        ])));
+        assert!(!guardian_contact_present(&json!(null)));
     }
 
     #[test]

@@ -123,6 +123,7 @@ import {
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
   storedTrustedContactDrafts,
+  guardianRelationOptionLabel,
   trustedContactRelationLabel,
   trustedContactsPayload,
   type TrustedContactPayload,
@@ -273,6 +274,7 @@ import {
   leadIntakeTypeFromLead,
   leadErrorBlockingReasons,
   leadErrorMessage,
+  leadServerFieldError,
   normalizeLeadServiceSelection,
   normalizeLeadServiceValue,
   updateLeadServiceSelection,
@@ -864,8 +866,8 @@ const MASTER_FIELD_ORDER: MasterFieldKey[] = [
   "email",
   "phone",
   "street",
-  "city",
   "zip",
+  "city",
   "insuranceType",
   "insuranceProvider",
   "insuranceNumber",
@@ -886,6 +888,16 @@ const MASTER_FIELD_IDS: Record<MasterFieldKey, string> = {
   insuranceType: "lead-wizard-insurance-type",
   insuranceProvider: "lead-wizard-insurance-provider",
   insuranceNumber: "lead-wizard-insurance-number",
+};
+
+/** Lead columns a refusal of the server names (`field` of a 422), by wizard field. */
+const SERVER_MASTER_FIELDS: Record<string, MasterFieldKey> = {
+  first_name: "firstName",
+  last_name: "lastName",
+  date_of_birth: "birthDate",
+  legal_sex: "legalSex",
+  email: "email",
+  phone: "phone",
 };
 
 /** Ids of the other step-1 controls, for their `<label for>` (QA 2026-10-11, N-01). */
@@ -2753,6 +2765,9 @@ function documentsValidationIssues(
  * A minor's own e-mail is optional: a minor gets no patient login, the
  * parents get their own access (the server accepts a minor without one).
  */
+/** The earliest date of birth staff may store (the lead cabinet's bar too). */
+const EARLIEST_BIRTH_DATE = "1900-01-01";
+
 function minorEmailOptional(draft: Pick<Draft, "birthDate">): boolean {
   return isMinor(draft.birthDate, new Date());
 }
@@ -2781,6 +2796,12 @@ function validateMasterDraft(
     errors.birthDate = tx(
       "Дата рождения не может быть в будущем",
       "Das Geburtsdatum darf nicht in der Zukunft liegen",
+    );
+  } else if (draft.birthDate < EARLIEST_BIRTH_DATE) {
+    // The server refuses it too (`plausible_birth_date` in leads.rs).
+    errors.birthDate = tx(
+      "Дата рождения не может быть раньше 01.01.1900",
+      "Das Geburtsdatum darf nicht vor dem 01.01.1900 liegen",
     );
   }
   if (isMinor(draft.birthDate, new Date())) {
@@ -3332,6 +3353,8 @@ export function LeadWizard({
   const [trustedContactEditorError, setTrustedContactEditorError] = useState("");
   const [trustedContactRelationError, setTrustedContactRelationError] = useState("");
   const [trustedContactEmailError, setTrustedContactEmailError] = useState("");
+  const [trustedContactPhoneError, setTrustedContactPhoneError] = useState("");
+  const [trustedContactBirthDateError, setTrustedContactBirthDateError] = useState("");
   // Whether the editor was opened from the minor's parent / legal representative block.
   const [trustedContactEditorGuardian, setTrustedContactEditorGuardian] = useState(false);
   // The trusted contacts as the server stores them, as far as this wizard
@@ -3364,6 +3387,10 @@ export function LeadWizard({
     () => new Set(),
   );
   const [masterValidationAttempted, setMasterValidationAttempted] = useState(false);
+  // A field the server refused on the last save (422 with `field`), shown at the field.
+  const [serverMasterError, setServerMasterError] = useState<{ field: MasterFieldKey; message: string } | null>(null);
+  // Why the birth-date picker did not take what was typed (see `onPickerValidation`).
+  const [birthDateEntryError, setBirthDateEntryError] = useState<string | null>(null);
   const [orderValidationAttempted, setOrderValidationAttempted] = useState(false);
   const [validationContext, setValidationContext] = useState<ValidationContext | null>(null);
   const hydrated = useRef<string | null>(null);
@@ -3918,6 +3945,8 @@ export function LeadWizard({
         setStep(nextStep);
         setTouchedMasterFields(new Set());
         setMasterValidationAttempted(false);
+        setServerMasterError(null);
+        setBirthDateEntryError(null);
         setOrderValidationAttempted(false);
             setValidationContext(null);
       }
@@ -4185,6 +4214,8 @@ export function LeadWizard({
     setAutosaveStatus("idle");
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
+    setServerMasterError(null);
+    setBirthDateEntryError(null);
     setOrderValidationAttempted(false);
     setValidationContext(null);
     wizardStateBaseRef.current = {};
@@ -4268,6 +4299,8 @@ export function LeadWizard({
     replaceDocumentPreview(null);
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
+    setServerMasterError(null);
+    setBirthDateEntryError(null);
     setOrderValidationAttempted(false);
     setValidationContext(null);
     currentAutosaveSignatureRef.current = "";
@@ -4321,19 +4354,27 @@ export function LeadWizard({
       // showed two highlighted steps while the pill slid (QA B-17).
       stepTabs.dataset.pillReady = "true";
 
+      centerActiveStep(reduceMotion ? "auto" : "smooth");
+    });
+    // On a phone the bar scrolls: the active step stays in view also after
+    // the window changes size (rotation) or a tab changes width (QA 2026-10-22).
+    function centerActiveStep(behavior: ScrollBehavior) {
       const active = activeStep();
-      if (!active) return;
+      if (!active || !stepNav) return;
       const navRect = stepNav.getBoundingClientRect();
       const activeRect = active.getBoundingClientRect();
       stepNav.scrollTo({
-        behavior: reduceMotion ? "auto" : "smooth",
+        behavior,
         left: stepNav.scrollLeft
           + activeRect.left
           - navRect.left
           - (stepNav.clientWidth - activeRect.width) / 2,
       });
-    });
-    const handleResize = () => movePill(false);
+    }
+    const handleResize = () => {
+      movePill(false);
+      centerActiveStep("auto");
+    };
     window.addEventListener("resize", handleResize);
     // A tab changes width without a window resize (a step turns done and its
     // number becomes a check mark): keep the pill on the active tab.
@@ -4347,7 +4388,10 @@ export function LeadWizard({
             initialSizesReported = true;
             return;
           }
-          if (stepPillReadyRef.current) movePill(false);
+          if (stepPillReadyRef.current) {
+            movePill(false);
+            centerActiveStep("auto");
+          }
         });
     tabsObserver?.observe(stepTabs);
     for (const tab of stepTabs.querySelectorAll<HTMLElement>("[data-step]")) {
@@ -5112,6 +5156,7 @@ export function LeadWizard({
           setLead(fresh);
         }
         lastSavedAutosaveSignatureRef.current = signature;
+        setServerMasterError(null);
         if (currentAutosaveSignatureRef.current === signature) {
           if (savedDraft !== snapshot.draft) {
             const savedSignature = autosaveSnapshotSignature({ ...snapshot, draft: savedDraft });
@@ -5136,6 +5181,8 @@ export function LeadWizard({
           currentAutosaveSignatureRef.current === signature
         ) {
           setExistingParentPatientId(existingParentPatientFromError(nextError)?.patientId ?? null);
+          const refusedField = SERVER_MASTER_FIELDS[leadServerFieldError(nextError) ?? ""];
+          setServerMasterError(refusedField ? { field: refusedField, message: errorText(nextError, tx) } : null);
           setAutosaveError(errorText(nextError, tx));
           setAutosaveErrorDetail(autosaveErrorDetailText(stage, nextError));
           setAutosaveStatus("error");
@@ -5183,6 +5230,7 @@ export function LeadWizard({
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setError("");
     clearServerValidation();
+    setServerMasterError((current) => current?.field === key ? null : current);
     setDraft((current) => current ? { ...current, [key]: value } : current);
   };
 
@@ -5466,6 +5514,8 @@ export function LeadWizard({
     setTrustedContactEditorError("");
     setTrustedContactRelationError("");
     setTrustedContactEmailError("");
+    setTrustedContactPhoneError("");
+    setTrustedContactBirthDateError("");
     setGuardianSearch("");
     setTrustedContactEditorGuardian(guardian);
     setTrustedContactEditor(emptyTrustedContact());
@@ -5475,6 +5525,8 @@ export function LeadWizard({
     setTrustedContactEditorError("");
     setTrustedContactRelationError("");
     setTrustedContactEmailError("");
+    setTrustedContactPhoneError("");
+    setTrustedContactBirthDateError("");
     setGuardianSearch("");
     setTrustedContactEditorGuardian(guardian);
     setTrustedContactEditor({ ...contact });
@@ -5485,6 +5537,8 @@ export function LeadWizard({
     setTrustedContactEditorError("");
     setTrustedContactRelationError("");
     setTrustedContactEmailError("");
+    setTrustedContactPhoneError("");
+    setTrustedContactBirthDateError("");
   };
 
   const patchTrustedContactEditor = <K extends keyof TrustedContactDraft>(
@@ -5494,6 +5548,8 @@ export function LeadWizard({
     if (key === "name" && trustedContactEditorError) setTrustedContactEditorError("");
     if (key === "relation") setTrustedContactRelationError("");
     if (key === "email") setTrustedContactEmailError("");
+    if (key === "phone" || key === "email") setTrustedContactPhoneError("");
+    if (key === "birthDate") setTrustedContactBirthDateError("");
     setTrustedContactEditor((current) => current ? { ...current, [key]: value } : current);
   };
 
@@ -5539,6 +5595,24 @@ export function LeadWizard({
     const trustedContactNoMail = knownNoMailEmailError(trustedContactEditor.email, lang);
     if (trustedContactNoMail) {
       setTrustedContactEmailError(trustedContactNoMail);
+      return;
+    }
+    const contactPhone = trustedContactEditor.phone.trim();
+    if (contactPhone && !isValidPhoneNumber(contactPhone)) {
+      setTrustedContactPhoneError(tx("Введите корректный номер телефона (не менее 6 цифр)", "Gültige Telefonnummer eingeben (mindestens 6 Ziffern)"));
+      return;
+    }
+    // A parent is reached and gets the access through these (the minor's check asks for one).
+    if (trustedContactEditorGuardian && !contactPhone && !trustedContactEditor.email.trim()) {
+      setTrustedContactPhoneError(tx("Укажите e-mail или телефон представителя", "E-Mail oder Telefonnummer der Vertretung angeben"));
+      return;
+    }
+    const contactBirthDate = trustedContactEditor.birthDate;
+    if (contactBirthDate && (contactBirthDate > appDateKey() || contactBirthDate < EARLIEST_BIRTH_DATE)) {
+      setTrustedContactBirthDateError(tx(
+        "Дата рождения не может быть в будущем или раньше 01.01.1900",
+        "Das Geburtsdatum darf nicht in der Zukunft oder vor dem 01.01.1900 liegen",
+      ));
       return;
     }
 
@@ -5677,9 +5751,18 @@ export function LeadWizard({
   };
 
   const visibleMasterError = (field: MasterFieldKey) =>
-    masterValidationAttempted || touchedMasterFields.has(field)
-      ? masterErrors[field]
-      : undefined;
+    (masterValidationAttempted || touchedMasterFields.has(field) ? masterErrors[field] : undefined)
+    // What the server refused stays at the field until it is changed.
+    ?? (serverMasterError?.field === field ? serverMasterError.message : undefined);
+  // A typed date the picker does not take keeps the stored one: say why at the field.
+  const birthDateEntryText = !birthDateEntryError || !touchedMasterFields.has("birthDate")
+    ? undefined
+    : birthDateEntryError === "maxDate" || birthDateEntryError === "disableFuture"
+      ? tx("Дата рождения не может быть в будущем", "Das Geburtsdatum darf nicht in der Zukunft liegen")
+      : birthDateEntryError === "minDate"
+        ? tx("Дата рождения не может быть раньше 01.01.1900", "Das Geburtsdatum darf nicht vor dem 01.01.1900 liegen")
+        : tx("Введите дату полностью: ДД.ММ.ГГГГ", "Datum vollständig eingeben: TT.MM.JJJJ");
+  const birthDateError = birthDateEntryText ?? visibleMasterError("birthDate");
 
   const ensureMasterDataReady = () => {
     const firstInvalid = MASTER_FIELD_ORDER.find((field) => masterErrors[field]);
@@ -7623,7 +7706,8 @@ ${serviceCommentLines.join("\n")}`
               {isRepeatIntake ? null : <Step1PortalSummary intake={step1Portal.intake} mode={step1Portal.mode} tx={tx} />}
               <div className="grid gap-4 md:grid-cols-2">
                 {intakeAsksDiscoverySource(isRepeatIntake) ? (
-                <div className="space-y-4">
+                // A row of its own: the person's fields below pair up (first | last name, street | postal code).
+                <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
                   <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")} htmlFor={STEP1_CONTROL_IDS.discoverySource}>
                     <NativeComboboxSelect
                       id={STEP1_CONTROL_IDS.discoverySource}
@@ -7727,16 +7811,6 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("firstName", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Отчество / второе имя", "Zweiter Vorname")} portalField="middle_name" htmlFor={STEP1_CONTROL_IDS.middleName}>
-                  <Input
-                    id={STEP1_CONTROL_IDS.middleName}
-                    className={inputClass}
-                    name="middle_name"
-                    autoComplete="additional-name"
-                    value={draft.middleName}
-                    onChange={(event) => patch("middleName", event.target.value)}
-                  />
-                </Field>
                 <Field
                   label={tx("Фамилия", "Nachname")}
                   required
@@ -7755,6 +7829,16 @@ ${serviceCommentLines.join("\n")}`
                     value={draft.lastName}
                     onBlur={() => touchMasterField("lastName")}
                     onChange={(event) => patch("lastName", event.target.value)}
+                  />
+                </Field>
+                <Field label={tx("Отчество / второе имя", "Zweiter Vorname")} portalField="middle_name" htmlFor={STEP1_CONTROL_IDS.middleName}>
+                  <Input
+                    id={STEP1_CONTROL_IDS.middleName}
+                    className={inputClass}
+                    name="middle_name"
+                    autoComplete="additional-name"
+                    value={draft.middleName}
+                    onChange={(event) => patch("middleName", event.target.value)}
                   />
                 </Field>
                 <Field label={tx("Дополнение к имени", "Namenszusatz")} htmlFor={STEP1_CONTROL_IDS.suffix}>
@@ -7782,7 +7866,7 @@ ${serviceCommentLines.join("\n")}`
                 <Field
                   label={tx("Дата рождения", "Geburtsdatum")}
                   required
-                  error={visibleMasterError("birthDate")}
+                  error={birthDateError}
                   errorId={`${MASTER_FIELD_IDS.birthDate}-error`}
                   htmlFor={MASTER_FIELD_IDS.birthDate}
                 >
@@ -7791,10 +7875,12 @@ ${serviceCommentLines.join("\n")}`
                     name="birth_date"
                     autoComplete="bday"
                     type="date"
+                    min={EARLIEST_BIRTH_DATE}
                     max={appDateKey()}
+                    onPickerValidation={setBirthDateEntryError}
                     required
-                    aria-invalid={Boolean(visibleMasterError("birthDate"))}
-                    aria-describedby={visibleMasterError("birthDate") ? `${MASTER_FIELD_IDS.birthDate}-error` : undefined}
+                    aria-invalid={Boolean(birthDateError)}
+                    aria-describedby={birthDateError ? `${MASTER_FIELD_IDS.birthDate}-error` : undefined}
                     className={inputClass}
                     value={draft.birthDate}
                     onBlur={() => touchMasterField("birthDate")}
@@ -7868,7 +7954,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Телефон", "Telefon")}
-                  required={!draft.email.trim()}
+                  required={isRepeatIntake && !draft.email.trim()}
                   error={visibleMasterError("phone")}
                   errorId={`${MASTER_FIELD_IDS.phone}-error`}
                   htmlFor={MASTER_FIELD_IDS.phone}
@@ -7878,7 +7964,7 @@ ${serviceCommentLines.join("\n")}`
                     name="phone"
                     autoComplete="tel"
                     type="tel"
-                    aria-required={!draft.email.trim()}
+                    aria-required={isRepeatIntake && !draft.email.trim()}
                     aria-invalid={Boolean(visibleMasterError("phone"))}
                     aria-describedby={visibleMasterError("phone") ? `${MASTER_FIELD_IDS.phone}-error` : undefined}
                     className={inputClass}
@@ -7927,6 +8013,26 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </Field>
                 <Field
+                  label={tx("Почтовый индекс", "Postleitzahl")}
+                  required={draft.healthcareConsent || cabinetConsents.healthcare}
+                  error={visibleMasterError("zip")}
+                  errorId={`${MASTER_FIELD_IDS.zip}-error`}
+                  htmlFor={MASTER_FIELD_IDS.zip}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.zip}
+                    name="postal_code"
+                    autoComplete="postal-code"
+                    required={draft.healthcareConsent || cabinetConsents.healthcare}
+                    aria-invalid={Boolean(visibleMasterError("zip"))}
+                    aria-describedby={visibleMasterError("zip") ? `${MASTER_FIELD_IDS.zip}-error` : undefined}
+                    className={inputClass}
+                    value={draft.zip}
+                    onBlur={() => touchMasterField("zip")}
+                    onChange={(event) => patch("zip", event.target.value)}
+                  />
+                </Field>
+                <Field
                   label={tx("Город", "Ort")}
                   required={draft.healthcareConsent || cabinetConsents.healthcare}
                   error={visibleMasterError("city")}
@@ -7954,26 +8060,6 @@ ${serviceCommentLines.join("\n")}`
                     autoComplete="address-level1"
                     value={draft.state}
                     onChange={(event) => patch("state", event.target.value)}
-                  />
-                </Field>
-                <Field
-                  label={tx("Почтовый индекс", "Postleitzahl")}
-                  required={draft.healthcareConsent || cabinetConsents.healthcare}
-                  error={visibleMasterError("zip")}
-                  errorId={`${MASTER_FIELD_IDS.zip}-error`}
-                  htmlFor={MASTER_FIELD_IDS.zip}
-                >
-                  <Input
-                    id={MASTER_FIELD_IDS.zip}
-                    name="postal_code"
-                    autoComplete="postal-code"
-                    required={draft.healthcareConsent || cabinetConsents.healthcare}
-                    aria-invalid={Boolean(visibleMasterError("zip"))}
-                    aria-describedby={visibleMasterError("zip") ? `${MASTER_FIELD_IDS.zip}-error` : undefined}
-                    className={inputClass}
-                    value={draft.zip}
-                    onBlur={() => touchMasterField("zip")}
-                    onChange={(event) => patch("zip", event.target.value)}
                   />
                 </Field>
                 <Field label={tx("Страна проживания", "Wohnsitzland")} portalField="country">
@@ -8071,7 +8157,7 @@ ${serviceCommentLines.join("\n")}`
                 <Section
                   title={tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
                   accessory={(
-                    <Button type="button" size="sm" onClick={() => openNewTrustedContact(true)}>
+                    <Button type="button" size="sm" variant={draft.trustedContacts.some((contact) => isParentOrGuardianRelation(contact.relation)) ? "outline" : "default"} onClick={() => openNewTrustedContact(true)}>
                       <Plus aria-hidden="true" className="size-3.5" />
                       {tx("Добавить", "Hinzufügen")}
                     </Button>
@@ -8701,7 +8787,7 @@ ${serviceCommentLines.join("\n")}`
                     accessory={(
                       <Button
                         type="button"
-                        variant="default"
+                        variant={wizardDocuments.lead_self_disclosure.length > 0 ? "outline" : "default"}
                         size="sm"
                         className="h-8 rounded-lg"
                         disabled={isBusy || !leadRequestSent}
@@ -8747,7 +8833,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
                   accessory={isMinor(draft.birthDate, new Date()) ? undefined : (
-                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
+                    <Button type="button" variant={wizardDocuments.confidentiality_release.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
                       {busy === "generate-confidentiality_release" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {wizardDocuments.confidentiality_release.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                     </Button>
@@ -8793,7 +8879,7 @@ ${serviceCommentLines.join("\n")}`
                     )
                     : tx("Согласие на использование и передачу персональных и медицинских данных", "Einverständniserklärung zur Datenübermittlung")}
                   accessory={(
-                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
+                    <Button type="button" variant={wizardDocuments.privacy_consents.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
                       {busy === "generate-privacy_consents" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {wizardDocuments.privacy_consents.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                     </Button>
@@ -8844,7 +8930,7 @@ ${serviceCommentLines.join("\n")}`
                         <CountBadge>{draft.trustedContacts.length}</CountBadge>
                       </div>
                     </div>
-                    <Button type="button" size="sm" onClick={() => openNewTrustedContact()}>
+                    <Button type="button" variant="outline" size="sm" onClick={() => openNewTrustedContact()}>
                       <Plus aria-hidden="true" className="size-3.5" />
                       {tx("Добавить контакт", "Kontakt hinzufügen")}
                     </Button>
@@ -8943,7 +9029,7 @@ ${serviceCommentLines.join("\n")}`
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Информационный лист о защите персональных данных", "Informationsblatt zum Datenschutz")}
                 accessory={(
-                  <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
+                  <Button type="button" variant={wizardDocuments.privacy_information.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
                     {busy === "generate-privacy_information" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                     {wizardDocuments.privacy_information.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                   </Button>
@@ -8986,7 +9072,7 @@ ${serviceCommentLines.join("\n")}`
                     <label
                       htmlFor="lead-file-identity"
                       className={cn(
-                        buttonVariants({ variant: "default", size: "sm" }),
+                        buttonVariants({ variant: wizardDocuments.identity.length > 0 ? "outline" : "default", size: "sm" }),
                         "h-8 rounded-lg peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
                         isBusy && "pointer-events-none opacity-50",
                       )}
@@ -10685,15 +10771,20 @@ ${serviceCommentLines.join("\n")}`
                     />
                     {trustedContactEmailError ? null : <EmailDomainWarning email={trustedContactEditor.email} lang={lang} />}
                   </Field>
-                  <Field label={tx("Телефон", "Telefon")}>
+                  <Field label={tx("Телефон", "Telefon")} error={trustedContactPhoneError || undefined} errorId="trusted-contact-phone-error">
                     <Input
                       className={inputClass}
                       type="tel"
                       value={trustedContactEditor.phone}
+                      aria-invalid={Boolean(trustedContactPhoneError)}
+                      aria-describedby={trustedContactPhoneError ? "trusted-contact-phone-error" : undefined}
                       onChange={(event) => patchTrustedContactEditor("phone", event.target.value)}
                     />
                   </Field>
-                  <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")} required={trustedContactEditorGuardian} error={trustedContactRelationError || undefined} errorId="trusted-contact-relation-error">
+                  <Field
+                    className={trustedContactEditorGuardian ? "sm:col-span-2" : undefined}
+                    label={trustedContactEditorGuardian ? tx("Кем приходится ребёнку", "Beziehung zum Kind") : tx("Кем приходится клиенту", "Beziehung zur Person")}
+                    required={trustedContactEditorGuardian} error={trustedContactRelationError || undefined} errorId="trusted-contact-relation-error">
                     <NativeComboboxSelect
                       className={selectClass}
                       value={trustedContactEditor.relation}
@@ -10714,16 +10805,38 @@ ${serviceCommentLines.join("\n")}`
                         || relation === trustedContactEditor.relation
                       )).map((relation) => (
                         <option key={relation} value={relation}>
-                          {trustedContactRelationLabel(relation, tx)}
+                          {guardianRelationOptionLabel(relation, tx, trustedContactEditorGuardian || isMinor(draft?.birthDate ?? "", new Date()))}
                         </option>
                       ))}
                     </NativeComboboxSelect>
+                    {trustedContactEditorGuardian ? (
+                      // The Linda case (2026-10-22): a father entered as "Опекун" was printed as Vormund.
+                      <p className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground" data-testid="trusted-contact-relation-hint">
+                        {tx(
+                          "Для родителя выберите «Мать» или «Отец» — и тогда, когда ребёнка воспитывает один родитель (это указывается в поле «Кто представляет ребёнка»). «Опекун» — только человек, назначенный судом вместо родителей.",
+                          "Für einen Elternteil „Mutter“ oder „Vater“ wählen – auch wenn ein Elternteil allein sorgeberechtigt ist (das steht im Feld „Wer vertritt das Kind“). „Vormund“ nur für eine vom Gericht bestellte Person anstelle der Eltern.",
+                        )}
+                      </p>
+                    ) : null}
+                    {trustedContactEditorGuardian
+                      && trustedContactEditor.relation === "guardian"
+                      && !(portalRepresentation?.custody_stated && portalRepresentation.custody === "guardian") ? (
+                      <p role="status" className="mt-1.5 text-[11.5px] leading-tight text-amber-700 dark:text-amber-300" data-testid="trusted-contact-guardian-warning">
+                        {tx(
+                          "В поле «Кто представляет ребёнка» не указан опекун — в документах человек будет назван опекуном (Vormund). Если это мать или отец, выберите «Мать» или «Отец».",
+                          "Im Feld „Wer vertritt das Kind“ ist kein Vormund angegeben – in den Unterlagen wird die Person als Vormund bezeichnet. Handelt es sich um Mutter oder Vater, bitte „Mutter“ oder „Vater“ wählen.",
+                        )}
+                      </p>
+                    ) : null}
                   </Field>
-                  <Field label={tx("Дата рождения", "Geburtsdatum")}>
+                  <Field label={tx("Дата рождения", "Geburtsdatum")} error={trustedContactBirthDateError || undefined} errorId="trusted-contact-birth-date-error">
                     <Input
                       className={inputClass}
                       type="date"
+                      min={EARLIEST_BIRTH_DATE}
                       max={appDateKey()}
+                      aria-invalid={Boolean(trustedContactBirthDateError)}
+                      aria-describedby={trustedContactBirthDateError ? "trusted-contact-birth-date-error" : undefined}
                       value={trustedContactEditor.birthDate}
                       onChange={(event) => patchTrustedContactEditor("birthDate", event.target.value)}
                     />

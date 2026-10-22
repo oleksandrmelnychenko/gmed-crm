@@ -110,6 +110,15 @@ const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
   "invalid compliance_status": ["Выберите корректный статус согласий", "Gültigen Einwilligungsstatus auswählen"],
   "invalid legal_sex": ["Выберите пол по документам", "Geschlecht laut Ausweisdokument auswählen"],
   "invalid date_of_birth (yyyy-mm-dd)": ["Укажите корректную дату рождения", "Gültiges Geburtsdatum angeben"],
+  "date_of_birth cannot be in the future": ["Дата рождения не может быть в будущем", "Das Geburtsdatum darf nicht in der Zukunft liegen"],
+  "date_of_birth is too early": ["Дата рождения не может быть раньше 01.01.1900", "Das Geburtsdatum darf nicht vor dem 01.01.1900 liegen"],
+  "invalid email": ["Введите корректный адрес электронной почты", "Gültige E-Mail-Adresse eingeben"],
+  "invalid phone": ["Введите корректный номер телефона (не менее 6 цифр)", "Gültige Telefonnummer eingeben (mindestens 6 Ziffern)"],
+  "invalid trusted contact email": ["Проверьте электронную почту контакта", "E-Mail-Adresse des Kontakts prüfen"],
+  "trusted contact birth_date is not plausible": [
+    "Дата рождения контакта не может быть в будущем или раньше 01.01.1900",
+    "Das Geburtsdatum des Kontakts darf nicht in der Zukunft oder vor dem 01.01.1900 liegen",
+  ],
   "email is already used by another person": ["Этот адрес электронной почты уже используется другим человеком", "Diese E-Mail-Adresse wird bereits von einer anderen Person verwendet"],
   "phone is already used by another person": ["Этот номер телефона уже используется другим человеком", "Diese Telefonnummer wird bereits von einer anderen Person verwendet"],
   "invalid primary_language": ["Выберите язык из списка", "Sprache aus der Liste auswählen"],
@@ -233,6 +242,17 @@ export function leadErrorBlockingReasons(error: unknown) {
     ))));
   }
   return [];
+}
+
+/**
+ * The field a 422 of the lead create/update names (`field` in the body,
+ * `crates/server/src/routes/leads.rs` `field_err`), so the wizard shows the
+ * refusal at that field and not only in the footer (QA 2026-10-22).
+ */
+export function leadServerFieldError(error: unknown): string | null {
+  if (leadErrorStatus(error) !== 422) return null;
+  const field = leadErrorBody(error)?.field;
+  return typeof field === "string" && field.trim() ? field.trim() : null;
 }
 
 export function leadErrorMessage(

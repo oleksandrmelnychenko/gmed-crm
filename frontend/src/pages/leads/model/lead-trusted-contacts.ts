@@ -76,6 +76,33 @@ export function trustedContactRelationLabel(relation: string, tx: (ru: string, d
   }
 }
 
+/**
+ * The option of the relation list in the editor. A parent must not end up as
+ * "Опекун": the documents then call the father a Vormund (Linda, 2026-10-22).
+ * So the guardian option says that a court appointed the person, and in the
+ * block of a minor's parents the parents' options say they are parents.
+ */
+export function guardianRelationOptionLabel(
+  relation: string,
+  tx: (ru: string, de: string) => string,
+  minor = true,
+): string {
+  switch (relation) {
+    case "mother":
+      return minor ? tx("Мать (родитель)", "Mutter (Elternteil)") : tx("Мать", "Mutter");
+    case "father":
+      return minor ? tx("Отец (родитель)", "Vater (Elternteil)") : tx("Отец", "Vater");
+    case "guardian":
+      return minor
+        ? tx("Опекун по решению суда (не родитель)", "Vormund, vom Gericht bestellt (kein Elternteil)")
+        : tx("Опекун / Betreuer по решению суда", "Betreuer/in, vom Gericht bestellt");
+    case "representative":
+      return tx("Уполномоченный по доверенности", "Bevollmächtigte Person (Vollmacht)");
+    default:
+      return trustedContactRelationLabel(relation, tx);
+  }
+}
+
 /** A trusted contact as the wizard edits it. */
 export type TrustedContactDraft = {
   id: string;

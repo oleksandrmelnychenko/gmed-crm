@@ -3174,7 +3174,7 @@ test.describe("lead onboarding wizard", () => {
     }
   });
 
-  for (const [relation, label, width] of [["mother", "Mutter", 1440], ["father", "Vater", 390], ["guardian", "Vormund/Betreuer", 1440]] as const) {
+  for (const [relation, label, width] of [["mother", "Mutter (Elternteil)", 1440], ["father", "Vater (Elternteil)", 390], ["guardian", "Vormund, vom Gericht bestellt (kein Elternteil)", 1440]] as const) {
     test(`a child lead can be created with an explicit ${relation}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
       const creates: Record<string, unknown>[] = [];
@@ -3199,7 +3199,7 @@ test.describe("lead onboarding wizard", () => {
       const editor = page.getByTestId("trusted-contact-editor");
       await editor.getByRole("textbox", { name: "Vor- und Nachname" }).fill("Alex Example");
       await editor.getByRole("textbox", { name: "E-Mail", exact: true }).fill("parent@example.invalid");
-      await chooseComboboxOption(page, editor.getByRole("combobox", { name: "Beziehung zur Person" }), label);
+      await chooseComboboxOption(page, editor.getByRole("combobox", { name: "Beziehung zum Kind" }), label);
       await editor.getByRole("button", { name: "Hinzufügen", exact: true }).click();
       await expect(editor).toBeHidden();
       await medicalStep.click();
@@ -3211,7 +3211,7 @@ test.describe("lead onboarding wizard", () => {
       });
       await expect(page.getByRole("dialog", { name: "Zugang für den Patienten angelegt" })).toHaveCount(0);
       await wizard.locator('[data-step="master_data"]').click();
-      await expect(wizard.locator("#lead-wizard-guardian")).toContainText(label);
+      await expect(wizard.locator("#lead-wizard-guardian")).toContainText({ mother: "Mutter", father: "Vater", guardian: "Vormund/Betreuer" }[relation]);
       await expect(wizard.locator("#lead-wizard-guardian")).toContainText("Alex Example");
       await wizard.locator("#lead-wizard-guardian").scrollIntoViewIfNeeded();
       await page.screenshot({ path: test.info().outputPath(`child-with-${relation}.png`) });

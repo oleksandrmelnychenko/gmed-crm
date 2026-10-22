@@ -1,3 +1,4 @@
+import { appDateKey } from "@/lib/app-time-zone";
 import { existingParentPatientFromError } from "./model/parent-profile-reuse";
 import { toast } from "@/components/ui/toast";
 import { isValidEmailAddress } from "@/lib/contact-validation";
@@ -2493,6 +2494,8 @@ function useLeadsPageContent() {
                           <Input
                             id="lead-gate-date-of-birth"
                             type="date"
+                            min="1900-01-01"
+                            max={appDateKey()}
                             className={shellInputClassName}
                             value={gateForm.dateOfBirth}
                             onChange={(event) =>

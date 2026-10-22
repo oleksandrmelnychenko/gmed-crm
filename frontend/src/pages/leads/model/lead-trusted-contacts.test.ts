@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   TRUSTED_CONTACT_RELATIONS,
+  guardianRelationOptionLabel,
   isParentOrGuardianRelation,
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
@@ -16,6 +17,17 @@ import {
 describe("the relation of a trusted contact", () => {
   const ru = (text: string) => text;
   const de = (_ru: string, text: string) => text;
+
+  it("offers a court-appointed guardian apart from the parents (the Linda case)", () => {
+    expect(guardianRelationOptionLabel("father", ru)).toBe("Отец (родитель)");
+    expect(guardianRelationOptionLabel("mother", de)).toBe("Mutter (Elternteil)");
+    expect(guardianRelationOptionLabel("guardian", ru)).toBe("Опекун по решению суда (не родитель)");
+    expect(guardianRelationOptionLabel("guardian", de)).toBe("Vormund, vom Gericht bestellt (kein Elternteil)");
+    // An adult is represented by a Betreuer, never by the parents.
+    expect(guardianRelationOptionLabel("guardian", de, false)).toBe("Betreuer/in, vom Gericht bestellt");
+    expect(guardianRelationOptionLabel("father", ru, false)).toBe("Отец");
+    expect(guardianRelationOptionLabel("spouse", ru, false)).toBe("Супруг / супруга");
+  });
 
   it("reads as words, never as the stored value", () => {
     expect(trustedContactRelationLabel("guardian", ru)).toBe("Опекун");

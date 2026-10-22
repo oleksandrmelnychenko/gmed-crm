@@ -207,10 +207,17 @@ function Input({
   step,
   "data-readonly": readOnlyExempt,
   pickerLang,
+  onPickerValidation,
   ...props
 }: React.ComponentProps<"input"> & ReadOnlyExemptProps & {
   /** Language of the date picker texts; defaults to the UI language. */
   pickerLang?: PickerLang
+  /**
+   * A date or time picker reports why a typed value is not taken ("minDate",
+   * "maxDate", "invalidDate", …; null once a value is taken or cleared), so a
+   * form can say it at the field instead of keeping the old value silently.
+   */
+  onPickerValidation?: (error: string | null) => void
 }) {
   const readOnlyScope = useReadOnly()
   const disabled =
@@ -269,6 +276,15 @@ function Input({
   }, [applyPickerStep, isPicker, pickerFormat, pickerValue, type])
 
   const handlePickerChange = (nextDate: Dayjs | null, context: { validationError: unknown }) => {
+    onPickerValidation?.(
+      nextDate === null
+        ? null
+        : typeof context.validationError === "string"
+          ? context.validationError
+          : context.validationError || !nextDate.isValid()
+            ? "invalidDate"
+            : null,
+    )
     applyPickerStep(applyPickerChange(pickerDraftRef.current, nextDate, context.validationError, pickerFormat))
   }
 
