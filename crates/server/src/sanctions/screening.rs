@@ -893,7 +893,9 @@ pub fn bank_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
 /// payer — with its seat as residence. A person is screened by first and last
 /// name with the country of the address as residence (the cabinet asks no
 /// birth date or citizenship of a recipient). A row without a type is a
-/// person when it holds a last name, otherwise an organisation by its name.
+/// person when it holds a last name, otherwise an organisation by its name
+/// (or, for a row made from an older request's section 7, by the name as
+/// written there, `legacy_name`).
 /// One subject per lead under [`INVOICE_RECIPIENT_REF`].
 pub fn recipient_subjects(
     lead_id: Uuid,
@@ -951,11 +953,16 @@ pub fn recipient_subjects(
     let last_name = json_text(row, "last_name");
     let organisation = recipient_type == RECIPIENT_TYPE_ORGANISATION
         || (recipient_type != RECIPIENT_TYPE_PERSON && last_name.is_empty());
+    // A row made from an older request's "another address" (migration
+    // 20261023100000) has no type, only the name as written (`legacy_name`).
+    let organisation_name = Some(json_text(row, "organisation_name"))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| json_text(row, "legacy_name"));
     let subject = if organisation {
         Subject {
             first_name: String::new(),
             middle_name: None,
-            last_name: json_text(row, "organisation_name"),
+            last_name: organisation_name,
             date_of_birth: None,
             citizenships: Vec::new(),
             organisation: true,
@@ -2854,6 +2861,17 @@ mod tests {
                 .subject
                 .organisation
         );
+        // A row made from an older request's "another address": the name as
+        // written there.
+        let older = json!({
+            "recipient": "third_party",
+            "recipient_is_payer": false,
+            "legacy_name": "Beispiel GmbH",
+            "from_section_seven": true,
+        });
+        let subjects = recipient_subjects(lead_id, Some(&older), &[]);
+        assert_eq!(subjects.len(), 1);
+        assert_eq!(subjects[0].subject.last_name, "Beispiel GmbH");
     }
 
     #[test]

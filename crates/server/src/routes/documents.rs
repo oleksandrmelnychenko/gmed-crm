@@ -25426,7 +25426,7 @@ async fn load_lead_self_disclosure(
         .await
         .map_err(|error| failed(error, "representation"))?
         .unwrap_or_default();
-    let stored_recipient = super::lead_invoice_recipient::load(&mut conn, lead_id)
+    let stored_recipient = super::lead_invoice_recipient::load_for_lead(&mut conn, lead_id)
         .await
         .map_err(|error| failed(error, "invoice recipient"))?;
     let follow_up_sent_at = sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
@@ -25514,13 +25514,12 @@ async fn load_lead_self_disclosure(
             messenger: declaration.messenger.clone(),
         }
     });
-    // Who receives the invoice (step 3, 2026-10-11), as the lead answered;
-    // an older request's section 7 read the same way.
-    let recipient = super::lead_invoice_recipient::effective(
-        stored_recipient.as_ref(),
-        declaration.as_ref(),
-        paying_representative.is_some(),
-    );
+    // Who receives the invoice (step 3, 2026-10-11), as the lead answered
+    // (`lead_invoice_recipients`, the one source; an older request's section 7
+    // became a row of its own in migration 20261023100000).
+    let recipient = stored_recipient
+        .map(|recipient| recipient.answers)
+        .unwrap_or_default();
     let invoice_recipient = recipient.recipient.is_some().then(|| {
         let organisation = recipient.is_organisation();
         let paying = recipient.is_payer == Some(true);

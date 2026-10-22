@@ -5100,17 +5100,6 @@ async fn update_lead(
         }
     }
     let representative_invites = if representative_changed {
-        if let Err(error) = super::lead_invoice_recipient::sync_section_seven(
-            &mut tx,
-            lead_id,
-            auth.user_id,
-            "staff",
-        )
-        .await
-        {
-            tracing::error!(%error, %lead_id, "derive invoice parent after contact update");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
         match crate::document_signatures::invalidate_representative_identity(
             &mut tx,
             lead_id,
@@ -7510,13 +7499,16 @@ async fn convert_lead(
         &representatives_on_file.representation,
         payer_declaration.as_ref(),
     );
-    // Where the lead wants the invoice (cabinet step 3, `lead_invoice_recipients`):
+    // Where the lead wants the invoice (cabinet step 3, `lead_invoice_recipients`,
+    // the one source of the recipient, read as every other reader reads it):
     // a parent chosen as recipient becomes the default payer — the parent the
     // invoices are addressed to — also when the other parent pays; a third
     // party who receives the invoice without paying is the declaration's
     // "other address" (`invoice_address` in the invoice chain), so the paying
     // parent is not marked then. Otherwise the paying parent, as before.
-    let invoice_recipient = match super::lead_invoice_recipient::load(&mut tx, lead_id).await {
+    let invoice_recipient = match super::lead_invoice_recipient::load_for_lead(&mut tx, lead_id)
+        .await
+    {
         Ok(recipient) => recipient,
         Err(error) => {
             tracing::error!(error = %error, lead_id = %lead_id, "load invoice recipient for conversion");
@@ -7525,14 +7517,21 @@ async fn convert_lead(
     };
     let recipient_parent = invoice_recipient
         .as_ref()
-        .filter(|recipient| {
-            recipient.recipient.as_deref() == Some(super::lead_invoice_recipient::RECIPIENT_SELF)
+        .filter(|recipient| !recipient.parent_removed)
+        .map(|recipient| &recipient.answers)
+        .filter(|answers| {
+            answers.recipient.as_deref() == Some(super::lead_invoice_recipient::RECIPIENT_SELF)
         })
-        .and_then(|recipient| recipient.representative_contact_id)
+        .and_then(|answers| answers.representative_contact_id)
         .filter(|id| representatives_on_file.representation.find(*id).is_some());
-    let invoice_elsewhere = payer_declaration.as_ref().is_some_and(|declaration| {
-        declaration.invoice_to.as_deref() == Some(super::lead_payer::INVOICE_TO_OTHER)
-    });
+    // Section 7 derived from the same recipient: "to another address".
+    let invoice_elsewhere = match (invoice_recipient.as_ref(), payer_declaration.as_ref()) {
+        (Some(recipient), Some(declaration)) => {
+            recipient.section_seven(declaration).invoice_to.as_deref()
+                == Some(super::lead_payer::INVOICE_TO_OTHER)
+        }
+        _ => false,
+    };
     let paying_parent = match recipient_parent {
         Some(parent) => Some(parent),
         None if invoice_elsewhere => None,

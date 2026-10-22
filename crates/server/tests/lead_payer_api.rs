@@ -1274,15 +1274,33 @@ async fn an_organisation_pays_under_its_name_and_staff_keep_what_their_form_leav
 }
 
 /// The lead's answers of sections 7 and 8 as the cabinet stores them: the
-/// invoice to another address, paid by card from a German account through a
-/// payment service.
+/// invoice to another address — an organisation as invoice recipient that
+/// does not pay (`lead_invoice_recipients`, the one source of section 7) —,
+/// paid by card from a German account through a payment service.
 async fn seed_billing_answers(pool: &PgPool, lead_id: Uuid) {
     sqlx::query(
+        r#"INSERT INTO lead_invoice_recipients (
+               lead_id, recipient, recipient_is_payer, recipient_type, organisation_name,
+               street, zip, city, country, email, payment_reason)
+           VALUES ($1, 'third_party', false, 'organisation', 'Beispiel GmbH', 'Ringstr. 9',
+                   '1010', 'Wien', 'AT', 'rechnung@example.com', 'Arbeitgeber')
+           ON CONFLICT (lead_id) DO UPDATE SET
+               recipient = EXCLUDED.recipient,
+               recipient_is_payer = EXCLUDED.recipient_is_payer,
+               recipient_type = EXCLUDED.recipient_type,
+               first_name = NULL, last_name = NULL,
+               organisation_name = EXCLUDED.organisation_name,
+               street = EXCLUDED.street, zip = EXCLUDED.zip, city = EXCLUDED.city,
+               country = EXCLUDED.country, email = EXCLUDED.email,
+               payment_reason = EXCLUDED.payment_reason"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
         r#"UPDATE lead_payer_declarations
-           SET invoice_to = 'other', invoice_name = 'Beispiel GmbH', invoice_street = 'Ringstr. 9',
-               invoice_zip = '1010', invoice_city = 'Wien', invoice_country = 'AT',
-               invoice_email = 'rechnung@example.com',
-               payment_method = 'card', account_country = 'DE', account_holder = 'Erika Zahler',
+           SET payment_method = 'card', account_country = 'DE', account_holder = 'Erika Zahler',
                bank_name = 'Musterbank', via_third_party = true,
                via_third_party_details = 'Zahlungsdienst Beispiel'
            WHERE lead_id = $1"#,
@@ -1429,19 +1447,23 @@ async fn a_staff_save_keeps_the_leads_invoice_recipient_and_payment_route() {
     );
 
     // The patient pays himself: "to the payer" would be no answer; another
-    // address still is.
+    // address still is. The lead named the third party as the recipient who
+    // pays: section 7 reads "to the payer" while that third party pays.
     seed_billing_answers(pool, lead_id).await;
     sqlx::query(
-        r#"UPDATE lead_payer_declarations
-           SET invoice_to = 'payer', invoice_name = NULL, invoice_street = NULL,
-               invoice_zip = NULL, invoice_city = NULL, invoice_country = NULL,
-               invoice_email = NULL
-           WHERE lead_id = $1"#,
+        r#"UPDATE lead_invoice_recipients r
+           SET recipient_is_payer = true, recipient_type = 'person',
+               first_name = d.first_name, last_name = d.last_name,
+               organisation_name = NULL, payment_reason = NULL
+           FROM lead_payer_declarations d
+           WHERE d.lead_id = r.lead_id AND r.lead_id = $1"#,
     )
     .bind(lead_id)
     .execute(pool)
     .await
     .unwrap();
+    let (_, body) = json_request(&app, "GET", &path, &ceo, None).await;
+    assert_eq!(body["declaration"]["invoice_to"], "payer", "{body}");
     let (status, body) = json_request(
         &app,
         "POST",
@@ -1458,6 +1480,8 @@ async fn a_staff_save_keeps_the_leads_invoice_recipient_and_payment_route() {
     let own = billing_keys(&body["declaration"]);
     assert!(own["invoice_to"].is_null(), "{body}");
     assert!(own["payment_method"].is_null(), "{body}");
+    // Section 7 is never written onto the declaration (its columns are
+    // history since 2026-10-23).
     let stored: (Option<String>, Option<String>, Option<bool>) = sqlx::query_as(
         "SELECT invoice_to, payment_method, via_third_party FROM lead_payer_declarations WHERE lead_id = $1",
     )

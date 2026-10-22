@@ -729,14 +729,70 @@ async fn the_declared_third_party_pays_the_invoice_after_the_default_payer_and_b
     assert_eq!(inherited.record.payer_patient_relation_id, Some(own_mother));
 }
 
-/// Section 7 of the lead's form as the cabinet stores it on the declaration:
-/// where the invoice goes and, for `other`, the party at that address.
+/// Section 7 of the lead's form — where the invoice goes and, for `other`,
+/// the party at that address — as the invoice recipient it is read from
+/// (`lead_invoice_recipients`, the one source since 2026-10-23), in the row
+/// shape migration `20261023100000` gives an older request: `self`, the
+/// payer who receives and pays it (`payer`), or a party at another address
+/// that does not pay, its name as written (`other`). `None` removes the row.
 async fn set_invoice_to(
     pool: &PgPool,
     lead_id: Uuid,
     invoice_to: Option<&str>,
     name: Option<&str>,
 ) {
+    sqlx::query("DELETE FROM lead_invoice_recipients WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let Some(invoice_to) = invoice_to else {
+        return;
+    };
+    sqlx::query(
+        r#"INSERT INTO lead_invoice_recipients (
+               lead_id, recipient, recipient_is_payer, recipient_type, first_name, last_name,
+               organisation_name, street, zip, city, country, email, legacy_name,
+               from_section_seven)
+           SELECT d.lead_id,
+                  CASE WHEN $2::text = 'self' THEN 'self' ELSE 'third_party' END,
+                  $2::text <> 'other',
+                  CASE WHEN $2::text <> 'payer' THEN NULL
+                       WHEN d.payer_type IS NOT NULL AND d.payer_type <> 'person'
+                           THEN 'organisation'
+                       ELSE 'person' END,
+                  CASE WHEN $2::text = 'payer' THEN d.first_name END,
+                  CASE WHEN $2::text = 'payer' THEN d.last_name END,
+                  CASE WHEN $2::text = 'payer' THEN d.organisation_name END,
+                  CASE WHEN $2::text = 'other' THEN 'Nebenweg 2' END,
+                  CASE WHEN $2::text = 'other' THEN '10115' END,
+                  CASE WHEN $2::text = 'other' THEN 'Berlin' END,
+                  CASE WHEN $2::text = 'other' THEN 'DE' END,
+                  CASE WHEN $2::text IN ('self', 'other') THEN 'rechnung@example.com' END,
+                  CASE WHEN $2::text = 'other' THEN $3::text END,
+                  true
+           FROM lead_payer_declarations d
+           WHERE d.lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(invoice_to)
+    .bind(name)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+const RECIPIENT_SINGLE_SOURCE: &str =
+    include_str!("../../../migrations/20261023100000_lead_invoice_recipient_single_source.sql");
+
+/// Section 7 as a request sent before 2026-10-11 left it: on the declaration
+/// only, without a row of `lead_invoice_recipients`.
+async fn set_old_section_seven(pool: &PgPool, lead_id: Uuid, invoice_to: &str, name: Option<&str>) {
+    sqlx::query("DELETE FROM lead_invoice_recipients WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query(
         r#"UPDATE lead_payer_declarations
            SET invoice_to = $2,
@@ -754,6 +810,103 @@ async fn set_invoice_to(
     .execute(pool)
     .await
     .unwrap();
+}
+
+/// Migration `20261023100000` makes a row of `lead_invoice_recipients` from
+/// an older request's section 7, and the invoice chain — which reads section
+/// 7 only through that row now — names the same recipient as before:
+/// another address its party, "to me" nobody of the declaration, "to the
+/// payer" the third party. Until the migration runs, the history columns
+/// count for nothing.
+#[tokio::test]
+async fn an_older_requests_section_seven_names_the_same_recipient_after_the_migration() {
+    let Some(fx) = fixture("payer-section-seven-migration").await else {
+        return;
+    };
+    let patient = seed_patient(&fx.pool, fx.admin_id, &fx.tag, "1980-05-05", true).await;
+    let lead = seed_converted_declaration(&fx.pool, patient, "third_party").await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    for (invoice_to, name, source, contact, row) in [
+        (
+            "other",
+            Some("Beispiel GmbH"),
+            "invoice_address",
+            Some("Beispiel GmbH"),
+            ("third_party", false, Some("Beispiel GmbH")),
+        ),
+        ("self", None, "none", None, ("self", false, None)),
+        (
+            "payer",
+            None,
+            "payer_declaration",
+            Some("Viktor Zahler"),
+            ("third_party", true, None),
+        ),
+    ] {
+        set_old_section_seven(&fx.pool, lead, invoice_to, name).await;
+        // Not read before the migration: no recipient answered, so the
+        // declared third party as with "to the payer".
+        let before =
+            gmed_server::routes::invoices::payer::inherited_invoice_payer(&mut conn, None, patient)
+                .await
+                .unwrap();
+        assert_eq!(before.source, "payer_declaration", "{invoice_to}");
+        sqlx::raw_sql(RECIPIENT_SINGLE_SOURCE)
+            .execute(&fx.pool)
+            .await
+            .unwrap();
+        let stored: (String, bool, Option<String>, bool) = sqlx::query_as(
+            r#"SELECT recipient, recipient_is_payer, legacy_name, from_section_seven
+               FROM lead_invoice_recipients WHERE lead_id = $1"#,
+        )
+        .bind(lead)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stored,
+            (row.0.to_string(), row.1, row.2.map(str::to_string), true),
+            "{invoice_to}"
+        );
+        let inherited =
+            gmed_server::routes::invoices::payer::inherited_invoice_payer(&mut conn, None, patient)
+                .await
+                .unwrap();
+        assert_eq!(inherited.source, source, "{invoice_to}");
+        assert_eq!(
+            inherited.record.contact_name.as_deref(),
+            contact,
+            "{invoice_to}"
+        );
+        if invoice_to == "other" {
+            assert_eq!(
+                inherited.record.address_street.as_deref(),
+                Some("Nebenweg 2")
+            );
+            assert_eq!(
+                inherited.record.contact_email.as_deref(),
+                Some("rechnung@example.com")
+            );
+        }
+    }
+    // A request that has a row keeps it: the migration runs again without
+    // touching it.
+    sqlx::query("UPDATE lead_invoice_recipients SET email = 'neu@example.com' WHERE lead_id = $1")
+        .bind(lead)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(RECIPIENT_SINGLE_SOURCE)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let email: Option<String> =
+        sqlx::query_scalar("SELECT email FROM lead_invoice_recipients WHERE lead_id = $1")
+            .bind(lead)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(email.as_deref(), Some("neu@example.com"));
 }
 
 /// The Kostenübernehmer the declaration itself writes on a lead's order
@@ -957,13 +1110,7 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
         assert_eq!(inherited.record.payer_role.as_deref(), Some("cost_bearer"));
     }
     // Another address without a name falls through like "to me".
-    sqlx::query(
-        "UPDATE lead_payer_declarations SET invoice_to = 'other', invoice_name = NULL WHERE lead_id = $1",
-    )
-    .bind(lead)
-    .execute(&fx.pool)
-    .await
-    .unwrap();
+    set_invoice_to(&fx.pool, lead, Some("other"), None).await;
     let inherited =
         gmed_server::routes::invoices::payer::inherited_invoice_payer(&mut conn, None, patient)
             .await
@@ -1255,10 +1402,9 @@ async fn the_declared_invoice_email_and_tax_numbers_reach_the_invoice() {
     let child = seed_patient(&fx.pool, fx.admin_id, &child_tag, "2016-03-04", true).await;
     seed_relation(&fx.pool, child, "Erika Muster", "parent", None, true).await;
     let child_lead = seed_converted_declaration(&fx.pool, child, "self").await;
+    set_invoice_to(&fx.pool, child_lead, Some("self"), None).await;
     sqlx::query(
-        r#"UPDATE lead_payer_declarations
-           SET invoice_to = 'self', invoice_email = 'eltern.rechnung@example.com'
-           WHERE lead_id = $1"#,
+        "UPDATE lead_invoice_recipients SET email = 'eltern.rechnung@example.com' WHERE lead_id = $1",
     )
     .bind(child_lead)
     .execute(&fx.pool)

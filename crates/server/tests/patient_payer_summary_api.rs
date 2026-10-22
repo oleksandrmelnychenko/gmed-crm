@@ -173,8 +173,7 @@ async fn seed_declaration(
                last_name, date_of_birth, street, zip, city, country, citizenships,
                relationship_kind, relationship, email, phone, source_of_funds,
                payer_informed_at, contact_consent_at, identity_changed_at,
-               invoice_to, invoice_name, invoice_street, invoice_zip, invoice_city,
-               invoice_country, invoice_email, invoice_vat_id, invoice_tax_number,
+               invoice_vat_id, invoice_tax_number,
                payment_method, account_country, account_holder, via_third_party)
            SELECT $1, $2, v ->> 'payer_kind', v ->> 'payer_type', v ->> 'organisation_name',
                   v ->> 'first_name', v ->> 'last_name', (v ->> 'date_of_birth')::date,
@@ -184,17 +183,47 @@ async fn seed_declaration(
                   COALESCE(v ->> 'source_of_funds', 'employment'),
                   (v ->> 'payer_informed_at')::timestamptz,
                   (v ->> 'contact_consent_at')::timestamptz, $4,
-                  v ->> 'invoice_to', v ->> 'invoice_name', v ->> 'invoice_street',
-                  v ->> 'invoice_zip', v ->> 'invoice_city', v ->> 'invoice_country',
-                  v ->> 'invoice_email', v ->> 'invoice_vat_id', v ->> 'invoice_tax_number',
+                  v ->> 'invoice_vat_id', v ->> 'invoice_tax_number',
                   v ->> 'payment_method', v ->> 'account_country', v ->> 'account_holder',
                   (v ->> 'via_third_party')::boolean
            FROM (SELECT $3::jsonb AS v) input"#,
     )
     .bind(lead_id)
     .bind(patient_id)
-    .bind(declaration)
+    .bind(&declaration)
     .bind(declared_at)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    // Where the invoice goes (section 7) is the lead's invoice recipient
+    // (`lead_invoice_recipients`, the one source since 2026-10-23), in the row
+    // shape migration 20261023100000 gives an older request's section 7.
+    sqlx::query(
+        r#"INSERT INTO lead_invoice_recipients (
+               lead_id, recipient, recipient_is_payer, recipient_type, first_name, last_name,
+               organisation_name, street, zip, city, country, email, legacy_name,
+               from_section_seven)
+           SELECT $1,
+                  CASE WHEN v ->> 'invoice_to' = 'self' THEN 'self' ELSE 'third_party' END,
+                  v ->> 'invoice_to' <> 'other',
+                  CASE WHEN v ->> 'invoice_to' <> 'payer' THEN NULL
+                       WHEN v ->> 'payer_type' = 'person' THEN 'person'
+                       ELSE 'organisation' END,
+                  CASE WHEN v ->> 'invoice_to' = 'payer' THEN v ->> 'first_name' END,
+                  CASE WHEN v ->> 'invoice_to' = 'payer' THEN v ->> 'last_name' END,
+                  CASE WHEN v ->> 'invoice_to' = 'payer' THEN v ->> 'organisation_name' END,
+                  CASE WHEN v ->> 'invoice_to' = 'other' THEN v ->> 'invoice_street' END,
+                  CASE WHEN v ->> 'invoice_to' = 'other' THEN v ->> 'invoice_zip' END,
+                  CASE WHEN v ->> 'invoice_to' = 'other' THEN v ->> 'invoice_city' END,
+                  CASE WHEN v ->> 'invoice_to' = 'other' THEN v ->> 'invoice_country' END,
+                  CASE WHEN v ->> 'invoice_to' <> 'payer' THEN v ->> 'invoice_email' END,
+                  CASE WHEN v ->> 'invoice_to' = 'other' THEN v ->> 'invoice_name' END,
+                  true
+           FROM (SELECT $2::jsonb AS v) input
+           WHERE v ->> 'invoice_to' IS NOT NULL"#,
+    )
+    .bind(lead_id)
+    .bind(&declaration)
     .execute(app.pool())
     .await
     .unwrap();

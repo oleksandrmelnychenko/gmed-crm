@@ -201,11 +201,11 @@ fn declared() -> Option<Value> {
     Some(json!({ "declared_correct": true }))
 }
 
-/// Where the invoice goes and how the patient pays (sections 7 and 8), as a
-/// self-paying adult answers them.
+/// Who receives the invoice (step 3) and how the patient pays (section 8),
+/// as a self-paying adult answers them.
 fn complete_billing() -> Value {
     json!({
-        "invoice_to": "self",
+        "invoice_recipient": "self",
         "payment_method": "bank_transfer",
         "account_country": "DE",
         "account_holder": "Anna Muster",
@@ -1194,8 +1194,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         json!(["id_document_upload", "invoice_recipient", "payment_method"]),
         "{body}"
     );
-    // Where the invoice goes and how the patient pays (phase 2; the section 7
-    // of an older cabinet still answers the invoice recipient).
+    // Who receives the invoice (step 3) and how the patient pays (phase 2).
     let (status, body) = json_request(
         router,
         "POST",
@@ -3585,7 +3584,7 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         "POST",
         &billing,
         &patient,
-        Some(json!({ "invoice_to": "self" })),
+        Some(json!({ "payment_method": "cash" })),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
@@ -3597,7 +3596,7 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         "POST",
         &billing,
         &manager,
-        Some(json!({ "invoice_to": "self" })),
+        Some(json!({ "payment_method": "cash" })),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -3607,12 +3606,14 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         "POST",
         &format!("/api/v1/me/lead-requests/{other_lead}/billing"),
         &patient,
-        Some(json!({ "invoice_to": "self" })),
+        Some(json!({ "payment_method": "cash" })),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // The patient pays himself: "to the payer" is no answer, the rest is.
+    // The patient pays himself. Section 7 is derived from the invoice
+    // recipient of step 3 (the one source since 2026-10-23): its keys are no
+    // longer the cabinet's to send.
     let (status, body) = json_request(
         router,
         "POST",
@@ -3640,6 +3641,44 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         assert_eq!(refused["code"], "invalid_field", "{refused}");
         assert_eq!(refused["field"], field, "{refused}");
     }
+    // Another address: a third party receives the invoice and does not pay;
+    // section 7 names it at its address.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({
+            "invoice_recipient": "third_party",
+            "invoice_recipient_is_payer": false,
+            "recipient_type": "person",
+            "recipient_first_name": " Anna ",
+            "recipient_last_name": "Muster",
+            "recipient_street": "Musterweg 1",
+            "recipient_zip": "10115",
+            "recipient_city": "Berlin",
+            "recipient_email": "rechnung@example.com",
+            "recipient_relationship_kind": "relative"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let shown = &body["billing"];
+    assert_eq!(shown["invoice_to"], "other", "{body}");
+    assert_eq!(shown["invoice_name"], "Anna Muster", "{body}");
+    assert_eq!(shown["invoice_street"], "Musterweg 1", "{body}");
+    assert_eq!(shown["invoice_email"], "rechnung@example.com", "{body}");
+    assert_eq!(shown["invoice_recipient"], "third_party", "{body}");
+    assert_eq!(shown["invoice_recipient_is_payer"], false, "{body}");
+    assert_eq!(shown["recipient"]["name"], "Anna Muster", "{body}");
+    // Nothing of section 7 is written onto the declaration.
+    let column: Option<String> =
+        sqlx::query_scalar("SELECT invoice_to FROM lead_payer_declarations WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(column, None);
     let before = audit_count(pool, "lead_portal_update_billing", lead_id).await;
     let (status, body) = json_request(
         router,
@@ -3647,12 +3686,6 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         &billing,
         &patient,
         Some(json!({
-            "invoice_to": "other",
-            "invoice_name": " Anna  Muster ",
-            "invoice_street": "Musterweg 1",
-            "invoice_zip": "10115",
-            "invoice_city": "Berlin",
-            "invoice_email": "rechnung@example.com",
             "payment_method": "bank_transfer",
             "account_country": "de",
             "account_holder": "Anna Muster",
@@ -3663,15 +3696,10 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let shown = &body["billing"];
     assert_eq!(shown["invoice_to"], "other", "{body}");
-    assert_eq!(shown["invoice_name"], "Anna Muster", "{body}");
     assert_eq!(shown["account_country"], "DE", "{body}");
     assert_eq!(shown["via_third_party"], true, "{body}");
     assert_eq!(shown["payment_route_by"], "patient", "{body}");
-    // An older cabinet's "another address" reads as a third-party recipient
-    // who does not pay (step 3, 2026-10-11): its address is still missing.
-    assert_eq!(shown["invoice_recipient"], "third_party", "{body}");
-    assert_eq!(shown["invoice_recipient_is_payer"], false, "{body}");
-    assert_eq!(shown["recipient"]["name"], "Anna Muster", "{body}");
+    // The recipient's country is still missing.
     assert_eq!(
         missing_for_the_billing(&body),
         ["recipient_country"],
@@ -3707,7 +3735,7 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         "POST",
         &billing,
         &patient,
-        Some(json!({ "invoice_to": "other", "account_country": "DE" })),
+        Some(json!({ "account_country": "DE" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -3764,14 +3792,17 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert!(status.is_client_error(), "{status} {body}");
 
     // Cash and other methods are flagged; "to me" drops the other address
-    // and keeps the e-mail; `null` clears; "no" drops the description.
+    // and keeps the e-mail named with it; `null` clears; "no" drops the
+    // description.
     let (status, body) = json_request(
         router,
         "POST",
         &billing,
         &patient,
         Some(json!({
-            "invoice_to": "self",
+            "invoice_recipient": "self",
+            "invoice_recipient_is_payer": true,
+            "recipient_email": "rechnung@example.com",
             "payment_method": "other",
             "payment_method_details": "Scheck",
             "via_third_party": false,
@@ -3799,7 +3830,7 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         "POST",
         &billing,
         &patient,
-        Some(json!({ "payment_method": "cash", "invoice_email": null })),
+        Some(json!({ "payment_method": "cash", "recipient_email": null })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -3877,7 +3908,7 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         "POST",
         &billing,
         &patient,
-        Some(json!({ "invoice_to": "payer", "payment_method": "bank_transfer" })),
+        Some(json!({ "payment_method": "bank_transfer" })),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
@@ -3892,7 +3923,20 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         "POST",
         &billing,
         &patient,
-        Some(json!({ "invoice_to": "payer", "invoice_email": "rechnung@example.com" })),
+        // Viktor receives the invoice and pays it: "to the payer".
+        Some(json!({
+            "invoice_recipient": "third_party",
+            "invoice_recipient_is_payer": true,
+            "recipient_type": "person",
+            "recipient_first_name": "Viktor",
+            "recipient_last_name": "Zahler",
+            "recipient_street": "Ringstr. 9",
+            "recipient_zip": "1010",
+            "recipient_city": "Wien",
+            "recipient_country": "AT",
+            "recipient_email": "rechnung@example.com",
+            "recipient_relationship_kind": "friend"
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -3921,9 +3965,9 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert_eq!(
         missing_for_the_billing(&body),
         // The payment route (section 8) is follow-up block C since the trigger
-        // flow (2026-10-07); the base form asks who receives the invoice
-        // (step 3, 2026-10-11) and the bare payment method (owner 2026-10-10).
-        ["invoice_recipient", "payment_method"],
+        // flow (2026-10-07); the recipient named as payer no longer is it
+        // (step 3, 2026-10-11): its confirmation is the open answer.
+        ["invoice_recipient_is_payer"],
         "{body}"
     );
     let stored: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(

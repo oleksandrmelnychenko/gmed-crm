@@ -15,20 +15,25 @@
 //!    or "Zahler ist eine andere Person oder Organisation" with its data; the
 //!    patient side as recipient: only another person or organisation.
 //!
-//! The answers live in `lead_invoice_recipients`; the payer stays the payer
-//! declaration (`lead_payer_declarations`), which the risk triggers, the payer
-//! link, the payer package and the GwG sheets read. Section 7 of the
-//! declaration (`invoice_to` and the other address) is derived from the
-//! answers ([`sync_section_seven`]): `self`, `payer` for a third party who
-//! pays, `other` with the recipient's name and address for a third party who
-//! does not. A request without a row (sent before 2026-10-11) keeps its
-//! section 7; the answers are derived from it ([`derived`]).
+//! The answers live in `lead_invoice_recipients`, the one source of the
+//! invoice recipient (2026-10-23); the payer stays the payer declaration
+//! (`lead_payer_declarations`), which the risk triggers, the payer link, the
+//! payer package and the GwG sheets read. "Section 7" of the declaration
+//! (`invoice_to` and the other address), which the invoice chain, the patient
+//! card and the GwG sheets read, is derived from the answers whenever a
+//! declaration is read ([`load_for_lead`], [`LeadRecipient::section_seven`],
+//! [`fill_section_seven`]): `self`, `payer` for a third party who pays,
+//! `other` with the recipient's name and address for a third party who does
+//! not or for a minor's parent named as recipient. The columns of section 7
+//! on the declaration are history and no longer written. Requests sent before
+//! 2026-10-11 got a row from their section 7 in migration
+//! `20261023100000_lead_invoice_recipient_single_source` (`legacy_name`,
+//! `from_section_seven`).
 
 use serde_json::{Map, Value, json};
 use sqlx::{PgConnection, Row, postgres::PgRow};
 use uuid::Uuid;
 
-use crate::audit;
 use crate::routes::invoices::payer::is_plausible_email;
 use crate::routes::lead_payer::{
     self, Declaration, INVOICE_TO_OTHER, INVOICE_TO_PAYER, INVOICE_TO_SELF, RELATIONSHIP_KINDS,
@@ -98,9 +103,14 @@ pub(crate) struct Recipient {
     pub(crate) relationship: Option<String>,
     /// Why the invoice goes through an organisation that does not pay.
     pub(crate) payment_reason: Option<String>,
-    /// The name of section 7 of a request sent before the recipient flow
-    /// (`invoice_name`, "another address"): shown, never stored here.
+    /// The name section 7 of a request sent before the recipient flow gave
+    /// "another address" (`invoice_name`, person or organisation unsaid),
+    /// kept as written until the lead names the recipient's type.
     pub(crate) legacy_name: Option<String>,
+    /// The row was made from section 7 by the migration and the lead has not
+    /// changed the answers since: a minor's only parent is not named as the
+    /// recipient automatically ([`load_for_lead`]).
+    pub(crate) from_section_seven: bool,
 }
 
 impl Recipient {
@@ -125,7 +135,10 @@ impl Recipient {
             relationship_kind: text("relationship_kind"),
             relationship: text("relationship"),
             payment_reason: text("payment_reason"),
-            legacy_name: None,
+            legacy_name: text("legacy_name"),
+            from_section_seven: row
+                .try_get::<bool, _>("from_section_seven")
+                .unwrap_or(false),
             ..Self::default()
         }
     }
@@ -139,7 +152,7 @@ impl Recipient {
     }
 
     /// The recipient's name: the organisation's, "First Last" of a person, or
-    /// the name section 7 of an older request holds.
+    /// the name section 7 of an older request gave ([`Self::legacy_name`]).
     pub(crate) fn name(&self) -> Option<String> {
         if !self.is_third_party() && self.representative_contact_id.is_none() {
             return None;
@@ -218,78 +231,97 @@ pub(crate) async fn load(
     )
 }
 
-/// The answers of a request sent before the recipient flow, read from its
-/// section 7: `self` (the recipient pays unless a third party other than
-/// the paying parent does), `payer` (a third party who pays) or `other` (a
-/// third party at another address who does not pay).
-pub(crate) fn derived(declaration: Option<&Declaration>, paying_parent: bool) -> Recipient {
-    let Some(declaration) = declaration else {
-        return Recipient::default();
-    };
-    match declaration.invoice_to.as_deref() {
-        Some(INVOICE_TO_SELF) => Recipient {
-            recipient: Some(RECIPIENT_SELF.into()),
-            is_payer: Some(!declaration.is_third_party() || paying_parent),
-            email: declaration.invoice_email.clone(),
-            ..Recipient::default()
-        },
-        Some(INVOICE_TO_PAYER) => {
-            let organisation = declaration.is_organisation();
-            Recipient {
-                recipient: Some(RECIPIENT_THIRD_PARTY.into()),
-                is_payer: Some(true),
-                recipient_type: Some(
-                    if organisation {
-                        RECIPIENT_TYPE_ORGANISATION
-                    } else {
-                        RECIPIENT_TYPE_PERSON
-                    }
-                    .into(),
-                ),
-                first_name: declaration.first_name.clone().filter(|_| !organisation),
-                last_name: declaration.last_name.clone().filter(|_| !organisation),
-                organisation_name: declaration
-                    .organisation_name
-                    .clone()
-                    .filter(|_| organisation),
-                street: declaration.street.clone(),
-                zip: declaration.zip.clone(),
-                city: declaration.city.clone(),
-                country: declaration.country.clone(),
-                email: declaration.email.clone(),
-                phone: declaration.phone.clone(),
-                relationship_kind: declaration
-                    .relationship_kind
-                    .clone()
-                    .filter(|_| !organisation),
-                relationship: declaration.relationship.clone().filter(|_| !organisation),
-                ..Recipient::default()
-            }
+/// The invoice recipient of a lead as the readers outside the cabinet take
+/// it: the stored answers with a minor's parent resolved from the current
+/// representation ([`resolve_parent`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LeadRecipient {
+    pub(crate) answers: Recipient,
+    /// The parent named as recipient is no longer a parent or legal guardian
+    /// of the child: a new invoice is not addressed to that person.
+    pub(crate) parent_removed: bool,
+}
+
+impl LeadRecipient {
+    /// Section 7 of the declaration as the answers say it.
+    pub(crate) fn section_seven(&self, declaration: &Declaration) -> SectionSeven {
+        if self.parent_removed {
+            SectionSeven::default()
+        } else {
+            SectionSeven::of_recipient(&self.answers, declaration)
         }
-        Some(INVOICE_TO_OTHER) => Recipient {
-            recipient: Some(RECIPIENT_THIRD_PARTY.into()),
-            is_payer: Some(false),
-            street: declaration.invoice_street.clone(),
-            zip: declaration.invoice_zip.clone(),
-            city: declaration.invoice_city.clone(),
-            country: declaration.invoice_country.clone(),
-            email: declaration.invoice_email.clone(),
-            legacy_name: declaration.invoice_name.clone(),
-            ..Recipient::default()
-        },
-        _ => Recipient::default(),
     }
 }
 
-/// The answers that count: the stored row, or those of section 7.
-pub(crate) fn effective(
-    stored: Option<&Recipient>,
-    declaration: Option<&Declaration>,
-    paying_parent: bool,
-) -> Recipient {
-    stored
-        .cloned()
-        .unwrap_or_else(|| derived(declaration, paying_parent))
+/// The one reader of the invoice recipient outside the cabinet's own
+/// handlers: the row of `lead_invoice_recipients` (`None` before the lead
+/// answered), with the parent named as recipient — or a minor's only parent
+/// when the patient side receives the invoice — resolved from the
+/// representation. A converted lead is read as of its conversion day, so the
+/// parents of a child who has turned 18 since stay its parents here. A row
+/// made from an older request's section 7 that the lead has not changed
+/// names no parent of its own: "to me" stays the contracting party, as the
+/// invoices read it before.
+pub(crate) async fn load_for_lead(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<LeadRecipient>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT r.*, l.converted_patient_id IS NOT NULL AS lead_converted,
+                  l.status_changed_at AS lead_status_changed_at
+           FROM lead_invoice_recipients r
+           JOIN leads l ON l.id = r.lead_id
+           WHERE r.lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let mut answers = Recipient::from_row(&row);
+    let names_parent = answers.recipient.as_deref() == Some(RECIPIENT_SELF)
+        && !(answers.from_section_seven && answers.representative_contact_id.is_none());
+    if !names_parent {
+        return Ok(Some(LeadRecipient {
+            answers,
+            parent_removed: false,
+        }));
+    }
+    let converted = row.try_get::<bool, _>("lead_converted").unwrap_or(false);
+    let on = row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("lead_status_changed_at")
+        .ok()
+        .flatten()
+        .filter(|_| converted)
+        .map(crate::app_time::date_of)
+        .unwrap_or_else(crate::app_time::today);
+    let representation = super::lead_representatives::load_on(conn, lead_id, on)
+        .await?
+        .unwrap_or_default();
+    let parent_removed = resolve_parent(&mut answers, &representation.representation).is_err();
+    Ok(Some(LeadRecipient {
+        answers,
+        parent_removed,
+    }))
+}
+
+/// Sets section 7 of `declaration` (`invoice_to` and the other address with
+/// the e-mail for invoices) from the lead's invoice recipient; nothing
+/// answered, nothing set. Every load of a declaration calls it
+/// (`lead_payer::load_declaration`, `lead_payer::patient_declaration`), so
+/// no reader sees the history kept in the columns.
+pub(crate) async fn fill_section_seven(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    declaration: &mut Declaration,
+) -> Result<(), sqlx::Error> {
+    let section = match load_for_lead(conn, lead_id).await? {
+        Some(recipient) => recipient.section_seven(declaration),
+        None => SectionSeven::default(),
+    };
+    section.write_to(declaration);
+    Ok(())
 }
 
 fn text_value(value: &Value, field: &'static str) -> Result<String, FieldError> {
@@ -327,7 +359,8 @@ pub(crate) fn apply(
     body: &Map<String, Value>,
 ) -> Result<Recipient, FieldError> {
     let mut next = current.clone();
-    next.legacy_name = None;
+    // The lead answers now: the rules of the cabinet apply from here on.
+    next.from_section_seven = false;
     for (key, value) in body {
         match key.as_str() {
             "invoice_recipient" => {
@@ -512,6 +545,11 @@ pub(crate) fn apply(
     if next.is_payer == Some(true) {
         next.payment_reason = None;
     }
+    // The free name of an older request's "another address" stays only while
+    // the third party has no type, and so no name of its own.
+    if !next.is_third_party() || next.recipient_type.is_some() {
+        next.legacy_name = None;
+    }
     Ok(next)
 }
 
@@ -561,9 +599,10 @@ pub(crate) async fn store(
         r#"INSERT INTO lead_invoice_recipients (
                lead_id, recipient, recipient_is_payer, recipient_type, first_name, last_name,
                organisation_name, legal_form, contact_name, street, zip, city, country, email,
-               phone, relationship_kind, relationship, payment_reason, updated_by, representative_contact_id)
+               phone, relationship_kind, relationship, payment_reason, updated_by, representative_contact_id,
+               legacy_name, from_section_seven)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                   $17, $18, $19, $20)
+                   $17, $18, $19, $20, $21, $22)
            ON CONFLICT (lead_id) DO UPDATE SET
                recipient = EXCLUDED.recipient,
                recipient_is_payer = EXCLUDED.recipient_is_payer,
@@ -584,6 +623,8 @@ pub(crate) async fn store(
                payment_reason = EXCLUDED.payment_reason,
                updated_by = EXCLUDED.updated_by,
                representative_contact_id = EXCLUDED.representative_contact_id,
+               legacy_name = EXCLUDED.legacy_name,
+               from_section_seven = EXCLUDED.from_section_seven,
                updated_at = now()"#,
     )
     .bind(lead_id)
@@ -606,6 +647,8 @@ pub(crate) async fn store(
     .bind(&recipient.payment_reason)
     .bind(actor)
     .bind(recipient.representative_contact_id)
+    .bind(&recipient.legacy_name)
+    .bind(recipient.from_section_seven)
     .execute(conn)
     .await
     .map(|_| ())
@@ -627,6 +670,7 @@ pub(crate) struct SectionSeven {
 }
 
 impl SectionSeven {
+    /// Section 7 as a declaration read through [`fill_section_seven`] holds it.
     pub(crate) fn of_declaration(declaration: &Declaration) -> Self {
         Self {
             invoice_to: declaration.invoice_to.clone(),
@@ -678,78 +722,68 @@ impl SectionSeven {
             _ => Self::default(),
         }
     }
+
+    /// Puts this section 7 on `declaration` (read-only there: never stored).
+    pub(crate) fn write_to(self, declaration: &mut Declaration) {
+        declaration.invoice_to = self.invoice_to;
+        declaration.invoice_name = self.invoice_name;
+        declaration.invoice_street = self.invoice_street;
+        declaration.invoice_zip = self.invoice_zip;
+        declaration.invoice_city = self.invoice_city;
+        declaration.invoice_country = self.invoice_country;
+        declaration.invoice_email = self.invoice_email;
+    }
+
+    /// The keys whose value differs from `other`, in form order.
+    pub(crate) fn changed_keys(&self, other: &Self) -> Vec<&'static str> {
+        [
+            ("invoice_to", self.invoice_to != other.invoice_to),
+            ("invoice_name", self.invoice_name != other.invoice_name),
+            (
+                "invoice_street",
+                self.invoice_street != other.invoice_street,
+            ),
+            ("invoice_zip", self.invoice_zip != other.invoice_zip),
+            ("invoice_city", self.invoice_city != other.invoice_city),
+            (
+                "invoice_country",
+                self.invoice_country != other.invoice_country,
+            ),
+            ("invoice_email", self.invoice_email != other.invoice_email),
+        ]
+        .into_iter()
+        .filter_map(|(key, changed)| changed.then_some(key))
+        .collect()
+    }
 }
 
-/// Writes section 7 of the declaration from the stored answers, in the
-/// caller's transaction, and audits the changed keys
-/// (`lead_portal_update_billing`, names only). Nothing without a row of
-/// answers (an older request keeps its section 7) or without a declaration
-/// (nobody is named as payer yet; the next save of the payer derives it).
-/// Returns the changed keys.
-pub(crate) async fn sync_section_seven(
+/// What a change of the cabinet did to the derived section 7 — the answers
+/// of step 3, or the payer named — and the audit event that names the
+/// changed keys (`lead_portal_update_billing`, `source = invoice_recipient`,
+/// names only), in the caller's transaction. `before` is the declaration as
+/// read before the change (`None`: nobody was named as payer, so section 7
+/// was empty); nothing while nobody is named as payer now (section 7 is read
+/// with the payer). Returns the changed keys.
+pub(crate) async fn audit_section_seven_change(
     conn: &mut PgConnection,
     lead_id: Uuid,
+    before: Option<&Declaration>,
     actor: Uuid,
     access_kind: &str,
 ) -> Result<Vec<&'static str>, sqlx::Error> {
-    let Some(mut recipient) = load(conn, lead_id).await? else {
+    let Some(after) = lead_payer::load_declaration(&mut *conn, lead_id).await? else {
         return Ok(Vec::new());
     };
-    let Some(declaration) = lead_payer::load_declaration(conn, lead_id).await? else {
-        return Ok(Vec::new());
-    };
-    let before = SectionSeven::of_declaration(&declaration);
-    let representation = super::lead_representatives::load(conn, lead_id)
-        .await?
-        .unwrap_or_default();
-    let after = if resolve_parent(&mut recipient, &representation.representation).is_ok() {
-        SectionSeven::of_recipient(&recipient, &declaration)
-    } else {
-        // A removed representative can no longer receive a new invoice.
-        SectionSeven::default()
-    };
-    let changed: Vec<&'static str> = [
-        ("invoice_to", before.invoice_to != after.invoice_to),
-        ("invoice_name", before.invoice_name != after.invoice_name),
-        (
-            "invoice_street",
-            before.invoice_street != after.invoice_street,
-        ),
-        ("invoice_zip", before.invoice_zip != after.invoice_zip),
-        ("invoice_city", before.invoice_city != after.invoice_city),
-        (
-            "invoice_country",
-            before.invoice_country != after.invoice_country,
-        ),
-        ("invoice_email", before.invoice_email != after.invoice_email),
-    ]
-    .into_iter()
-    .filter_map(|(key, changed)| changed.then_some(key))
-    .collect();
+    let changed = before
+        .map(SectionSeven::of_declaration)
+        .unwrap_or_default()
+        .changed_keys(&SectionSeven::of_declaration(&after));
     if changed.is_empty() {
         return Ok(changed);
     }
-    sqlx::query(
-        r#"UPDATE lead_payer_declarations
-           SET invoice_to = $2, invoice_name = $3, invoice_street = $4, invoice_zip = $5,
-               invoice_city = $6, invoice_country = $7, invoice_email = $8,
-               updated_by = $9, updated_at = now()
-           WHERE lead_id = $1"#,
-    )
-    .bind(lead_id)
-    .bind(&after.invoice_to)
-    .bind(&after.invoice_name)
-    .bind(&after.invoice_street)
-    .bind(&after.invoice_zip)
-    .bind(&after.invoice_city)
-    .bind(&after.invoice_country)
-    .bind(&after.invoice_email)
-    .bind(actor)
-    .execute(&mut *conn)
-    .await?;
-    audit::write_in_transaction(
+    crate::audit::write_in_transaction(
         conn,
-        &audit::domain_event(
+        &crate::audit::domain_event(
             "lead_portal_update_billing",
             Some(actor),
             "lead",
@@ -1226,31 +1260,158 @@ mod tests {
         assert_eq!(section.invoice_city.as_deref(), Some("Berlin"));
     }
 
+    /// The rows migration `20261023100000_lead_invoice_recipient_single_source`
+    /// makes of an older request's section 7 read back as the same section 7
+    /// (the invoice chain, the patient card and the GwG sheets see no
+    /// change), and the cabinet reads the same answers it derived before.
     #[test]
-    fn older_requests_are_read_from_section_seven() {
-        let mut own = Declaration {
+    fn rows_made_from_section_seven_read_back_as_before() {
+        let own_payer = Declaration {
             payer_kind: lead_payer::PAYER_KIND_SELF.into(),
-            invoice_to: Some("self".into()),
             ..Declaration::default()
         };
-        let derived_own = derived(Some(&own), false);
-        assert_eq!(derived_own.recipient.as_deref(), Some("self"));
-        assert_eq!(derived_own.is_payer, Some(true));
-        own.invoice_to = Some("other".into());
-        own.invoice_name = Some("Mia Muster".into());
-        let derived_other = derived(Some(&own), false);
-        assert_eq!(derived_other.recipient.as_deref(), Some("third_party"));
-        assert_eq!(derived_other.is_payer, Some(false));
-        assert_eq!(derived_other.name().as_deref(), Some("Mia Muster"));
-        let mut payer = third_party_payer("Viktor", "Zahler");
-        payer.invoice_to = Some("payer".into());
-        let derived_payer = derived(Some(&payer), false);
-        assert_eq!(derived_payer.is_payer, Some(true));
-        assert_eq!(derived_payer.name().as_deref(), Some("Viktor Zahler"));
-        payer.invoice_to = Some("self".into());
-        assert_eq!(derived(Some(&payer), false).is_payer, Some(false));
-        assert_eq!(derived(Some(&payer), true).is_payer, Some(true));
-        assert_eq!(derived(None, false), Recipient::default());
+        // invoice_to = 'self' with the e-mail for invoices.
+        let own = LeadRecipient {
+            answers: Recipient {
+                recipient: Some("self".into()),
+                is_payer: Some(true),
+                email: Some("rechnung@example.com".into()),
+                from_section_seven: true,
+                ..Recipient::default()
+            },
+            parent_removed: false,
+        };
+        assert_eq!(
+            own.section_seven(&own_payer),
+            SectionSeven {
+                invoice_to: Some("self".into()),
+                invoice_email: Some("rechnung@example.com".into()),
+                ..SectionSeven::default()
+            }
+        );
+        assert!(payer_fits(&own.answers, Some(&own_payer), false));
+
+        // invoice_to = 'other': the name as written, the address and e-mail.
+        let other = LeadRecipient {
+            answers: Recipient {
+                recipient: Some("third_party".into()),
+                is_payer: Some(false),
+                street: Some("Nebenweg 2".into()),
+                zip: Some("10115".into()),
+                city: Some("Berlin".into()),
+                country: Some("DE".into()),
+                email: Some("rechnung@example.com".into()),
+                legacy_name: Some("Mia Muster".into()),
+                from_section_seven: true,
+                ..Recipient::default()
+            },
+            parent_removed: false,
+        };
+        assert_eq!(
+            other.section_seven(&own_payer),
+            SectionSeven {
+                invoice_to: Some("other".into()),
+                invoice_name: Some("Mia Muster".into()),
+                invoice_street: Some("Nebenweg 2".into()),
+                invoice_zip: Some("10115".into()),
+                invoice_city: Some("Berlin".into()),
+                invoice_country: Some("DE".into()),
+                invoice_email: Some("rechnung@example.com".into()),
+            }
+        );
+        // The old "another address" asked no type: its name and address count.
+        assert!(missing(&other.answers).is_empty());
+        assert_eq!(other.answers.name().as_deref(), Some("Mia Muster"));
+
+        // invoice_to = 'payer': the payer's own data, so it is the payer.
+        let mut viktor = third_party_payer("Viktor", "Zahler");
+        viktor.street = Some("Zahlerweg 1".into());
+        viktor.email = Some("viktor@example.com".into());
+        let paying = LeadRecipient {
+            answers: Recipient {
+                recipient: Some("third_party".into()),
+                is_payer: Some(true),
+                recipient_type: Some("person".into()),
+                first_name: Some("Viktor".into()),
+                last_name: Some("Zahler".into()),
+                street: Some("Zahlerweg 1".into()),
+                email: Some("viktor@example.com".into()),
+                from_section_seven: true,
+                ..Recipient::default()
+            },
+            parent_removed: false,
+        };
+        assert_eq!(
+            paying.section_seven(&viktor),
+            SectionSeven {
+                invoice_to: Some("payer".into()),
+                ..SectionSeven::default()
+            }
+        );
+        assert!(payer_fits(&paying.answers, Some(&viktor), false));
+
+        // A parent no longer on file receives no new invoice.
+        let removed = LeadRecipient {
+            parent_removed: true,
+            ..own.clone()
+        };
+        assert_eq!(removed.section_seven(&own_payer), SectionSeven::default());
+
+        // The section is written onto the declaration as read.
+        let mut declaration = own_payer.clone();
+        other.section_seven(&own_payer).write_to(&mut declaration);
+        assert_eq!(declaration.invoice_name.as_deref(), Some("Mia Muster"));
+        assert_eq!(
+            SectionSeven::of_declaration(&declaration),
+            other.section_seven(&own_payer)
+        );
+        assert_eq!(
+            SectionSeven::default().changed_keys(&SectionSeven::of_declaration(&declaration)),
+            [
+                "invoice_to",
+                "invoice_name",
+                "invoice_street",
+                "invoice_zip",
+                "invoice_city",
+                "invoice_country",
+                "invoice_email"
+            ]
+        );
+    }
+
+    /// The lead's next answer ends the reading of an older request: the row is
+    /// the cabinet's from then on, and the free name stays only while the
+    /// third party has no type.
+    #[test]
+    fn an_answer_ends_the_reading_of_an_older_request() {
+        let older = Recipient {
+            recipient: Some("third_party".into()),
+            is_payer: Some(false),
+            city: Some("Berlin".into()),
+            legacy_name: Some("Mia Muster".into()),
+            from_section_seven: true,
+            ..Recipient::default()
+        };
+        let email = apply(
+            &older,
+            &body(json!({ "recipient_email": "mia@example.com" })),
+        )
+        .unwrap();
+        assert!(!email.from_section_seven);
+        assert_eq!(email.legacy_name.as_deref(), Some("Mia Muster"));
+        let typed = apply(
+            &older,
+            &body(json!({
+                "recipient_type": "person",
+                "recipient_first_name": "Mia",
+                "recipient_last_name": "Muster",
+            })),
+        )
+        .unwrap();
+        assert_eq!(typed.legacy_name, None);
+        assert_eq!(typed.name().as_deref(), Some("Mia Muster"));
+        let own = apply(&older, &body(json!({ "invoice_recipient": "self" }))).unwrap();
+        assert_eq!(own.legacy_name, None);
     }
 
     #[test]

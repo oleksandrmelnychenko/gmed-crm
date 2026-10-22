@@ -35,12 +35,16 @@
 //! (`invoices/payer.rs::inherited_invoice_payer`). See
 //! `docs/architecture/lead-payer-declaration_ua.md`.
 //!
-//! Sections 7 and 8 of the owner's form (phase 2, 2026-10-06) live on the
-//! same row: where the invoice goes (`invoice_to` and the other address — the
-//! input of the invoice recipient chain, never the Kostenübernehmer of the
-//! order) and how the payer will pay (`payment_method` …, the payer's own
-//! answer; the row is the payer). The cabinet patches them with
-//! [`save_billing_from_portal`]; every other save keeps them
+//! Sections 7 and 8 of the owner's form (phase 2, 2026-10-06): where the
+//! invoice goes (`invoice_to` and the other address — the input of the
+//! invoice recipient chain, never the Kostenübernehmer of the order) and how
+//! the payer will pay (`payment_method` …, the payer's own answer; the row is
+//! the payer). Section 7 is the lead's invoice recipient
+//! (`lead_invoice_recipients`, the one source since 2026-10-23), derived onto
+//! the declaration whenever it is read ([`load_declaration`],
+//! [`patient_declaration`]); its columns on this row are history and never
+//! written. Section 8 lives on the row: the cabinet patches it with
+//! [`save_billing_from_portal`]; every other save keeps it
 //! ([`Declaration::carry_billing`]), staff add only the USt-IdNr. and the
 //! Steuernummer. Cash, crypto, another method or a payment through a third
 //! person are compliance flags for staff ([`Declaration::payment_route_flags`]);
@@ -213,10 +217,8 @@ pub const PAYER_IDENTITY_BINDING_KEY: &str = "_payer_identity_version";
 
 const SHORT_TEXT_MAX: usize = 200;
 const LONG_TEXT_MAX: usize = 2000;
-/// Limits of sections 7 and 8 that differ from the short text (the database
-/// checks the same).
-const ZIP_MAX: usize = 20;
-const EMAIL_MAX: usize = 254;
+/// Limits of the staff fields of section 7 that differ from the short text
+/// (the database checks the same).
 const INVOICE_VAT_ID_MAX: usize = 20;
 const INVOICE_TAX_NUMBER_MAX: usize = 30;
 
@@ -287,7 +289,9 @@ pub(crate) struct Declaration {
     /// another payer.
     pub cost_estimate_consent_at: Option<DateTime<Utc>>,
     /// Section 7 (invoice recipient): where the invoice goes
-    /// ([`INVOICE_TO_VALUES`]); `None` until the lead answered.
+    /// ([`INVOICE_TO_VALUES`]); `None` until the lead answered. Read-only:
+    /// derived from the lead's invoice recipient (`lead_invoice_recipients`)
+    /// when the declaration is read, never stored (2026-10-23).
     pub invoice_to: Option<String>,
     /// The other address (`invoice_to = other` only).
     pub invoice_name: Option<String>,
@@ -342,8 +346,7 @@ const DECLARATION_COLUMNS: &str = "payer_kind, payer_representative_id, acts_on_
      source_of_funds_document_id, payer_type, organisation_name, first_name, last_name, \
      date_of_birth, place_of_birth, street, zip, city, country, citizenships, \
      relationship_kind, relationship, email, phone, messenger, payer_informed_at, \
-     payer_informed_by, contact_consent_at, invoice_to, invoice_name, invoice_street, \
-     invoice_zip, invoice_city, invoice_country, invoice_email, invoice_vat_id, \
+     payer_informed_by, contact_consent_at, invoice_vat_id, \
      invoice_tax_number, payment_method, payment_method_details, account_country, \
      account_holder, bank_name, via_third_party, via_third_party_details, identity_adopted_at, \
      identity_adopted_key, identity_changed_at, cost_estimate_consent_at, self_funds_source, \
@@ -353,8 +356,11 @@ const DECLARATION_COLUMNS: &str = "payer_kind, payer_representative_id, acts_on_
 /// Longest messenger / WhatsApp number (the database checks the same).
 const MESSENGER_MAX: usize = 60;
 
-/// The 14 keys of sections 7 and 8 the cabinet edits (API keys = column
-/// names), in form order; the two tax fields of section 7 are staff's.
+/// The 14 keys of sections 7 and 8 the cabinet shows (API keys = column
+/// names), in form order; the two tax fields of section 7 are staff's. The
+/// first [`SECTION_SEVEN_FIELDS`] are section 7, derived from the invoice
+/// recipient and never patched; the cabinet patches the rest (section 8).
+const SECTION_SEVEN_FIELDS: usize = 7;
 const BILLING_PORTAL_FIELDS: [&str; 14] = [
     "invoice_to",
     "invoice_name",
@@ -473,13 +479,16 @@ impl Declaration {
             payer_informed_by: row.try_get("payer_informed_by").unwrap_or_default(),
             contact_consent_at: row.try_get("contact_consent_at").unwrap_or_default(),
             cost_estimate_consent_at: row.try_get("cost_estimate_consent_at").unwrap_or_default(),
-            invoice_to: row.try_get("invoice_to").unwrap_or_default(),
-            invoice_name: row.try_get("invoice_name").unwrap_or_default(),
-            invoice_street: row.try_get("invoice_street").unwrap_or_default(),
-            invoice_zip: row.try_get("invoice_zip").unwrap_or_default(),
-            invoice_city: row.try_get("invoice_city").unwrap_or_default(),
-            invoice_country: row.try_get("invoice_country").unwrap_or_default(),
-            invoice_email: row.try_get("invoice_email").unwrap_or_default(),
+            // Section 7 is derived from `lead_invoice_recipients`
+            // ([`crate::routes::lead_invoice_recipient::fill_section_seven`]);
+            // its columns on the row are history.
+            invoice_to: None,
+            invoice_name: None,
+            invoice_street: None,
+            invoice_zip: None,
+            invoice_city: None,
+            invoice_country: None,
+            invoice_email: None,
             invoice_vat_id: row.try_get("invoice_vat_id").unwrap_or_default(),
             invoice_tax_number: row.try_get("invoice_tax_number").unwrap_or_default(),
             payment_method: row.try_get("payment_method").unwrap_or_default(),
@@ -2002,8 +2011,14 @@ pub(crate) async fn carry_over_to_patient(
         return Ok(());
     }
     // A paying representative's name is the representative's row, never
-    // copied onto the declaration (owner decision 2026-10-19).
-    let representative_name = match load_declaration(&mut *tx, lead_id).await? {
+    // copied onto the declaration (owner decision 2026-10-19). Where the
+    // invoice goes is the lead's invoice recipient (section 7 as derived
+    // when the declaration is read), never the history in its columns.
+    let declaration = load_declaration(&mut *tx, lead_id).await?;
+    let invoice_to = declaration
+        .as_ref()
+        .and_then(|declaration| declaration.invoice_to.clone());
+    let representative_name = match declaration {
         Some(declaration) if declaration.is_representative() => {
             let representation = lead_representatives::load(&mut *tx, lead_id)
                 .await?
@@ -2020,7 +2035,7 @@ pub(crate) async fn carry_over_to_patient(
                UPDATE lead_payer_declarations
                SET patient_id = $2, updated_at = now()
                WHERE lead_id = $1
-               RETURNING payer_kind, acts_on_own_account, source_of_funds, invoice_to,
+               RETURNING payer_kind, acts_on_own_account, source_of_funds,
                          COALESCE(
                              NULLIF(btrim(organisation_name), ''),
                              NULLIF(btrim(concat_ws(' ', first_name, last_name)), '')
@@ -2036,7 +2051,7 @@ pub(crate) async fn carry_over_to_patient(
                        'acts_on_own_account', linked.acts_on_own_account,
                        'source_of_funds', linked.source_of_funds,
                        'payer_name', COALESCE(linked.payer_name, $3),
-                       'invoice_to', linked.invoice_to,
+                       'invoice_to', $4::text,
                        'cost_assumption_document_id', (
                            SELECT d.id FROM documents d
                            WHERE d.generated_template_id = 'cost_coverage_declaration'
@@ -2054,6 +2069,7 @@ pub(crate) async fn carry_over_to_patient(
     .bind(lead_id)
     .bind(patient_id)
     .bind(representative_name)
+    .bind(invoice_to)
     .execute(&mut *tx)
     .await?;
     Ok(())
@@ -2127,10 +2143,22 @@ async fn get_payer_declaration(
         Ok(false) => return error(StatusCode::NOT_FOUND, "not_found", "Lead not found"),
         Err(error) => return database_error(error, "load payer declaration lead"),
     }
-    let payer = match load_payer_state(&mut conn, lead_id).await {
+    let mut payer = match load_payer_state(&mut conn, lead_id).await {
         Ok(payer) => payer,
         Err(error) => return database_error(error, "load payer declaration"),
     };
+    // Section 7 as the lead's invoice recipient says it (the readiness of the
+    // leads list does not need it, so `load_payer_state` leaves it out).
+    if let Some(declaration) = payer.declaration.as_mut()
+        && let Err(error) = crate::routes::lead_invoice_recipient::fill_section_seven(
+            &mut conn,
+            lead_id,
+            declaration,
+        )
+        .await
+    {
+        return database_error(error, "load invoice recipient");
+    }
     let representation = match lead_representatives::load(&mut conn, lead_id).await {
         Ok(loaded) => loaded.unwrap_or_default().representation,
         Err(error) => return database_error(error, "load payer declaration representatives"),
@@ -2502,16 +2530,6 @@ async fn save_payer_declaration(
     {
         return database_error(error, "sync order payer");
     }
-    if let Err(error) = crate::routes::lead_invoice_recipient::sync_section_seven(
-        &mut tx,
-        lead_id,
-        auth.user_id,
-        "staff",
-    )
-    .await
-    {
-        return database_error(error, "derive invoice recipient");
-    }
     if let Err(error) = tx.commit().await {
         return database_error(error, "commit payer declaration");
     }
@@ -2596,8 +2614,7 @@ async fn store_declaration(
                email, phone, payer_informed_at, payer_informed_by,
                identity_changed_at, created_by, updated_by, own_account_answered,
                payer_type, organisation_name, relationship_kind, contact_consent_at,
-               invoice_to, invoice_name, invoice_street, invoice_zip, invoice_city,
-               invoice_country, invoice_email, invoice_vat_id, invoice_tax_number,
+               invoice_vat_id, invoice_tax_number,
                payment_method, payment_method_details, account_country, account_holder,
                bank_name, via_third_party, via_third_party_details, identity_adopted_at,
                identity_adopted_key, cost_estimate_consent_at, self_funds_source,
@@ -2606,8 +2623,7 @@ async fn store_declaration(
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
                    $16, $17, $18, $19, $20, $23, $24, clock_timestamp(), $21, $21, $25,
                    $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
-                   $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53,
-                   $54)
+                   $40, $41, $42, $43, $44, $45, $46, $47)
            ON CONFLICT (lead_id) DO UPDATE SET
                payer_kind = EXCLUDED.payer_kind,
                payer_representative_id = EXCLUDED.payer_representative_id,
@@ -2637,13 +2653,6 @@ async fn store_declaration(
                phone = EXCLUDED.phone,
                payer_informed_at = EXCLUDED.payer_informed_at,
                payer_informed_by = EXCLUDED.payer_informed_by,
-               invoice_to = EXCLUDED.invoice_to,
-               invoice_name = EXCLUDED.invoice_name,
-               invoice_street = EXCLUDED.invoice_street,
-               invoice_zip = EXCLUDED.invoice_zip,
-               invoice_city = EXCLUDED.invoice_city,
-               invoice_country = EXCLUDED.invoice_country,
-               invoice_email = EXCLUDED.invoice_email,
                invoice_vat_id = EXCLUDED.invoice_vat_id,
                invoice_tax_number = EXCLUDED.invoice_tax_number,
                payment_method = EXCLUDED.payment_method,
@@ -2696,13 +2705,6 @@ async fn store_declaration(
     .bind(&declaration.organisation_name)
     .bind(&declaration.relationship_kind)
     .bind(declaration.contact_consent_at)
-    .bind(&declaration.invoice_to)
-    .bind(&declaration.invoice_name)
-    .bind(&declaration.invoice_street)
-    .bind(&declaration.invoice_zip)
-    .bind(&declaration.invoice_city)
-    .bind(&declaration.invoice_country)
-    .bind(&declaration.invoice_email)
     .bind(&declaration.invoice_vat_id)
     .bind(&declaration.invoice_tax_number)
     .bind(&declaration.payment_method)
@@ -2900,19 +2902,26 @@ impl Declaration {
     }
 }
 
-/// The declaration of a lead without the order and document state.
+/// The declaration of a lead without the order and document state, with
+/// section 7 derived from the lead's invoice recipient
+/// ([`crate::routes::lead_invoice_recipient::fill_section_seven`]).
 pub(crate) async fn load_declaration(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<Option<Declaration>, sqlx::Error> {
-    Ok(sqlx::query(&format!(
+    let Some(mut declaration) = sqlx::query(&format!(
         "SELECT {DECLARATION_COLUMNS} FROM lead_payer_declarations WHERE lead_id = $1"
     ))
     .bind(lead_id)
-    .fetch_optional(conn)
+    .fetch_optional(&mut *conn)
     .await?
     .as_ref()
-    .map(Declaration::from_row))
+    .map(Declaration::from_row) else {
+        return Ok(None);
+    };
+    crate::routes::lead_invoice_recipient::fill_section_seven(conn, lead_id, &mut declaration)
+        .await?;
+    Ok(Some(declaration))
 }
 
 /// The declaration that counts for a patient after conversion, and the lead
@@ -2951,11 +2960,18 @@ pub(crate) async fn patient_declaration(
            LIMIT 1"#
     ))
     .bind(patient_id)
-    .fetch_optional(conn)
+    .fetch_optional(&mut *conn)
     .await?;
-    Ok(row.map(|row| PatientDeclaration {
-        lead_id: row.try_get("lead_id").unwrap_or_default(),
-        declaration: Declaration::from_row(&row),
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let lead_id: Uuid = row.try_get("lead_id").unwrap_or_default();
+    let mut declaration = Declaration::from_row(&row);
+    crate::routes::lead_invoice_recipient::fill_section_seven(conn, lead_id, &mut declaration)
+        .await?;
+    Ok(Some(PatientDeclaration {
+        lead_id,
+        declaration,
         converted_at: row
             .try_get::<DateTime<Utc>, _>("converted_at")
             .unwrap_or_else(|_| Utc::now()),
@@ -3659,27 +3675,15 @@ impl From<sqlx::Error> for PortalBillingError {
     }
 }
 
-/// Partial update of sections 7 and 8 from the cabinet (only the changed
-/// keys). `null` or an empty string clears a text or a choice;
-/// `via_third_party` is `true`, `false` or `null`. Unknown keys — the two
-/// tax fields of staff above all — are rejected.
+/// Partial update of section 8 from the cabinet (only the changed keys).
+/// `null` or an empty string clears a text or a choice; `via_third_party` is
+/// `true`, `false` or `null`. Unknown keys — the two tax fields of staff and
+/// the keys of section 7 above all — are rejected: where the invoice goes is
+/// answered as the invoice recipient of step 3 (`lead_invoice_recipients`,
+/// the one source since 2026-10-23), and section 7 is derived from it.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PortalBillingPatch {
-    #[serde(default, deserialize_with = "sent")]
-    invoice_to: Option<Option<String>>,
-    #[serde(default, deserialize_with = "sent")]
-    invoice_name: Option<Option<String>>,
-    #[serde(default, deserialize_with = "sent")]
-    invoice_street: Option<Option<String>>,
-    #[serde(default, deserialize_with = "sent")]
-    invoice_zip: Option<Option<String>>,
-    #[serde(default, deserialize_with = "sent")]
-    invoice_city: Option<Option<String>>,
-    #[serde(default, deserialize_with = "sent")]
-    invoice_country: Option<Option<String>>,
-    #[serde(default, deserialize_with = "sent")]
-    invoice_email: Option<Option<String>>,
     #[serde(default, deserialize_with = "sent")]
     payment_method: Option<Option<String>>,
     #[serde(default, deserialize_with = "sent")]
@@ -3697,8 +3701,8 @@ pub(crate) struct PortalBillingPatch {
 }
 
 impl PortalBillingPatch {
-    /// Reads the body of the endpoint: only the 14 keys of the cabinet, each
-    /// a text or `null` (`via_third_party` a boolean or `null`). The first
+    /// Reads the body of the endpoint: only the 7 keys of section 8, each a
+    /// text or `null` (`via_third_party` a boolean or `null`). The first
     /// unknown key or value of the wrong type names its field, as the
     /// cabinet shows errors per field.
     pub(crate) fn parse(body: &Value) -> Result<Self, PortalBillingError> {
@@ -3711,7 +3715,7 @@ impl PortalBillingPatch {
         };
         for (key, value) in object {
             let key = key.as_str();
-            if !BILLING_PORTAL_FIELDS.contains(&key) {
+            if !BILLING_PORTAL_FIELDS[SECTION_SEVEN_FIELDS..].contains(&key) {
                 return Err(invalid(key, "Unknown field"));
             }
             let expected = match (key, value) {
@@ -3801,8 +3805,10 @@ fn billing_choice(value: Option<&str>, values: &[&str]) -> Result<Option<String>
 
 impl Declaration {
     /// The answers of sections 7 and 8 survive every save that does not
-    /// touch them (the whole row is written each time): copied from
-    /// `previous`, then the two rules of the spec. "To the payer" needs a
+    /// touch them (the whole row is written each time; section 7 is only the
+    /// derived view of the invoice recipient, carried so that a save shows no
+    /// change of it and never stored): copied from `previous`, then the two
+    /// rules of the spec. "To the payer" needs a
     /// third party and goes when the patient pays himself; section 8 belongs
     /// to the payer named when it was answered and goes when who pays
     /// changes or (third party) another person or organisation is named —
@@ -4074,35 +4080,6 @@ pub(crate) fn apply_billing_patch(
             .map_err(|_| invalid(field, "Use an ISO 3166-1 alpha-2 country code"))
     };
     let mut next = current.clone();
-    if let Some(value) = &patch.invoice_to {
-        next.invoice_to = billing_choice(value.as_deref(), INVOICE_TO_VALUES)
-            .map_err(|message| invalid("invoice_to", message))?;
-    }
-    if let Some(value) = &patch.invoice_name {
-        next.invoice_name = short(value, "invoice_name", SHORT_TEXT_MAX)?;
-    }
-    if let Some(value) = &patch.invoice_street {
-        next.invoice_street = short(value, "invoice_street", SHORT_TEXT_MAX)?;
-    }
-    if let Some(value) = &patch.invoice_zip {
-        next.invoice_zip = short(value, "invoice_zip", ZIP_MAX)?;
-    }
-    if let Some(value) = &patch.invoice_city {
-        next.invoice_city = short(value, "invoice_city", SHORT_TEXT_MAX)?;
-    }
-    if let Some(value) = &patch.invoice_country {
-        next.invoice_country = country(value, "invoice_country")?;
-    }
-    if let Some(value) = &patch.invoice_email {
-        let email = short(value, "invoice_email", EMAIL_MAX)?;
-        if email
-            .as_deref()
-            .is_some_and(|email| !is_plausible_email(email))
-        {
-            return Err(invalid("invoice_email", "Invalid e-mail address"));
-        }
-        next.invoice_email = email;
-    }
     if let Some(value) = &patch.payment_method {
         next.payment_method = billing_choice(value.as_deref(), PAYMENT_METHODS)
             .map_err(|message| invalid("payment_method", message))?;
@@ -4125,13 +4102,6 @@ pub(crate) fn apply_billing_patch(
     if let Some(value) = &patch.via_third_party_details {
         next.via_third_party_details = billing_long_text(value.as_deref(), LONG_TEXT_MAX)
             .map_err(|message| invalid("via_third_party_details", message))?;
-    }
-    // "To the payer" is an answer only while a third party pays.
-    if next.invoice_to.as_deref() == Some(INVOICE_TO_PAYER) && !next.is_third_party() {
-        return Err(invalid(
-            "invoice_to",
-            "The invoice goes to the payer only when a third party pays",
-        ));
     }
     next.clear_dependent_billing();
     Ok(next)
@@ -4189,12 +4159,12 @@ pub(crate) async fn save_billing_from_portal(
     Ok(Some(next))
 }
 
-/// What the cabinet still needs of sections 7 and 8 before the request can
-/// be sent, in form order: where the invoice goes and, for another address,
-/// the whole address; the payment route only while the caller is asked for
-/// it — the method, its details for `other`, the account for a bank transfer
-/// or a card (the bank only for a transfer), whether a third party is
-/// involved and, if so, who. The e-mail for invoices is never missing.
+/// What the cabinet still needs of section 8 before the request can be sent,
+/// in form order, only while the caller is asked for it: the method, its
+/// details for `other`, the account for a bank transfer or a card (the bank
+/// only for a transfer), whether a third party is involved and, if so, who.
+/// Where the invoice goes is the invoice recipient's
+/// (`lead_invoice_recipient::missing`).
 pub(crate) fn portal_missing_billing(
     declaration: Option<&Declaration>,
     payment_route_by: PaymentRouteBy,
@@ -4202,23 +4172,6 @@ pub(crate) fn portal_missing_billing(
     let empty = Declaration::default();
     let declaration = declaration.unwrap_or(&empty);
     let mut missing = Vec::new();
-    match declaration.invoice_to.as_deref() {
-        None => missing.push("invoice_to"),
-        Some(INVOICE_TO_OTHER) => {
-            for (field, filled) in [
-                ("invoice_name", !blank(&declaration.invoice_name)),
-                ("invoice_street", !blank(&declaration.invoice_street)),
-                ("invoice_zip", !blank(&declaration.invoice_zip)),
-                ("invoice_city", !blank(&declaration.invoice_city)),
-                ("invoice_country", declaration.invoice_country.is_some()),
-            ] {
-                if !filled {
-                    missing.push(field);
-                }
-            }
-        }
-        Some(_) => {}
-    }
     if !payment_route_by.asks() {
         return missing;
     }
@@ -5263,69 +5216,39 @@ mod tests {
             }
         }
 
-        // Another address: the whole address is kept with `other` only.
+        // Where the invoice goes is the invoice recipient of step 3, the one
+        // source since 2026-10-23: section 7 is derived, never patched.
+        for key in [
+            "invoice_to",
+            "invoice_name",
+            "invoice_street",
+            "invoice_zip",
+            "invoice_city",
+            "invoice_country",
+            "invoice_email",
+        ] {
+            match PortalBillingPatch::parse(&json!({ key: "self" })) {
+                Err(PortalBillingError::Invalid { field, message }) => {
+                    assert_eq!(field, key);
+                    assert_eq!(message, "Unknown field");
+                }
+                other => panic!("{key} accepted: {other:?}"),
+            }
+        }
         let own = from_input(&input("self")).unwrap();
-        let other = apply_billing_patch(
-            &own,
-            &patch(json!({
-                "invoice_to": "other",
-                "invoice_name": "  Anna   Muster ",
-                "invoice_street": "Musterweg 1",
-                "invoice_zip": "10115",
-                "invoice_city": "Berlin",
-                "invoice_country": "de",
-                "invoice_email": "rechnung@example.com"
-            })),
-        )
-        .unwrap();
-        assert_eq!(other.invoice_to.as_deref(), Some("other"));
-        assert_eq!(other.invoice_name.as_deref(), Some("Anna Muster"));
-        assert_eq!(other.invoice_country.as_deref(), Some("DE"));
-        assert_eq!(other.invoice_email.as_deref(), Some("rechnung@example.com"));
-        let mine = apply_billing_patch(&other, &patch(json!({ "invoice_to": "self" }))).unwrap();
-        assert_eq!(mine.invoice_to.as_deref(), Some("self"));
-        assert_eq!(mine.invoice_name, None);
-        assert_eq!(mine.invoice_street, None);
-        assert_eq!(mine.invoice_country, None);
-        assert_eq!(
-            mine.invoice_email.as_deref(),
-            Some("rechnung@example.com"),
-            "the e-mail stays for the patient"
-        );
-        // `null` or an empty string clears; "to the payer" needs a third party.
-        let cleared = apply_billing_patch(
-            &mine,
-            &patch(json!({ "invoice_to": null, "invoice_email": "" })),
-        )
-        .unwrap();
-        assert_eq!(cleared.invoice_to, None);
-        assert_eq!(cleared.invoice_email, None);
-        assert_eq!(
-            refused_field(apply_billing_patch(
-                &own,
-                &patch(json!({ "invoice_to": "payer" }))
-            )),
-            "invoice_to"
-        );
-        let third_party = informed(from_input(&input("third_party")).unwrap());
-        let to_payer = apply_billing_patch(
-            &third_party,
-            &patch(json!({ "invoice_to": "payer", "invoice_email": "rechnung@example.com" })),
-        )
-        .unwrap();
-        assert_eq!(to_payer.invoice_to.as_deref(), Some("payer"));
-        assert_eq!(
-            to_payer.invoice_email, None,
-            "the payer's own e-mail is used"
-        );
+        // The derived section 7 a save keeps is never changed by the patch.
+        let derived = Declaration {
+            invoice_to: Some("other".into()),
+            invoice_name: Some("Anna Muster".into()),
+            invoice_city: Some("Berlin".into()),
+            ..own.clone()
+        };
+        let kept =
+            apply_billing_patch(&derived, &patch(json!({ "payment_method": "cash" }))).unwrap();
+        assert_eq!(kept.invoice_to.as_deref(), Some("other"));
+        assert_eq!(kept.invoice_name.as_deref(), Some("Anna Muster"));
+        assert_eq!(kept.invoice_city.as_deref(), Some("Berlin"));
         for (body, field) in [
-            (json!({ "invoice_to": "someone" }), "invoice_to"),
-            (json!({ "invoice_country": "Germany" }), "invoice_country"),
-            (json!({ "invoice_email": "no-at-sign" }), "invoice_email"),
-            (
-                json!({ "invoice_zip": "x".repeat(ZIP_MAX + 1) }),
-                "invoice_zip",
-            ),
             (json!({ "payment_method": "cheque" }), "payment_method"),
             (json!({ "account_country": "Austria" }), "account_country"),
             (
@@ -5404,17 +5327,17 @@ mod tests {
         taxed.invoice_vat_id = Some("DE123456789".into());
         assert_eq!(taxed.billing_marker_value(), crypto.billing_marker_value());
         assert_ne!(cash.billing_marker_value(), crypto.billing_marker_value());
-        assert!(!patch(json!({ "invoice_to": "self" })).touches_payment_route());
+        assert!(!patch(json!({})).touches_payment_route());
         assert!(patch(json!({ "bank_name": null })).touches_payment_route());
     }
 
     #[test]
     fn the_billing_sections_survive_every_save_and_follow_the_named_payer() {
-        // The cabinet answered both sections for a third party.
-        let stored = apply_billing_patch(
+        // The cabinet answered both sections for a third party (section 7 as
+        // derived from the invoice recipient when the declaration is read).
+        let mut stored = apply_billing_patch(
             &from_input(&input("third_party")).unwrap(),
             &patch(json!({
-                "invoice_to": "payer",
                 "payment_method": "card",
                 "account_country": "AT",
                 "account_holder": "Erika Muster",
@@ -5422,6 +5345,7 @@ mod tests {
             })),
         )
         .unwrap();
+        stored.invoice_to = Some("payer".into());
 
         // The staff form of an older client knows none of the keys: all stay.
         let kept = declaration_from_input(&input("third_party"), Some(&stored), today()).unwrap();
@@ -5482,11 +5406,11 @@ mod tests {
         assert_eq!(own.invoice_to, None);
         assert_eq!(own.payment_method, None);
         assert_eq!(own.invoice_vat_id.as_deref(), Some("DE123456789"));
-        let other_address = apply_billing_patch(
-            &taxed,
-            &patch(json!({ "invoice_to": "other", "invoice_name": "Beispiel GmbH" })),
-        )
-        .unwrap();
+        let other_address = Declaration {
+            invoice_to: Some("other".into()),
+            invoice_name: Some("Beispiel GmbH".into()),
+            ..taxed.clone()
+        };
         let own = from_portal(Some(&other_address), &portal("self")).unwrap();
         assert_eq!(own.invoice_to.as_deref(), Some("other"));
         assert_eq!(own.invoice_name.as_deref(), Some("Beispiel GmbH"));
@@ -5517,7 +5441,7 @@ mod tests {
         assert!(readdressed.identity_adopted_for_current_payer());
         // The billing patch of the cabinet keeps it as well.
         let billed =
-            apply_billing_patch(&adopted, &patch(json!({ "invoice_to": "payer" }))).unwrap();
+            apply_billing_patch(&adopted, &patch(json!({ "via_third_party": false }))).unwrap();
         assert!(billed.identity_adopted_for_current_payer());
 
         // Another person, another date of birth or another type: gone.
@@ -5551,20 +5475,17 @@ mod tests {
 
     #[test]
     fn the_cabinet_needs_the_invoice_recipient_and_the_route_of_whoever_answers() {
+        // Where the invoice goes is the invoice recipient's
+        // (`lead_invoice_recipient::missing`), never section 7's.
         assert_eq!(
             portal_missing_billing(None, PaymentRouteBy::Patient),
-            ["invoice_to", "payment_method", "via_third_party"]
+            ["payment_method", "via_third_party"]
         );
-        assert_eq!(
-            portal_missing_billing(None, PaymentRouteBy::Payer),
-            ["invoice_to"]
-        );
+        assert!(portal_missing_billing(None, PaymentRouteBy::Payer).is_empty());
         let own = from_input(&input("self")).unwrap();
         let other = apply_billing_patch(
             &own,
             &patch(json!({
-                "invoice_to": "other",
-                "invoice_name": "Anna Muster",
                 "payment_method": "bank_transfer",
                 "via_third_party": true
             })),
@@ -5573,10 +5494,6 @@ mod tests {
         assert_eq!(
             portal_missing_billing(Some(&other), PaymentRouteBy::Guardian),
             [
-                "invoice_street",
-                "invoice_zip",
-                "invoice_city",
-                "invoice_country",
                 "account_country",
                 "account_holder",
                 "bank_name",
@@ -5586,7 +5503,6 @@ mod tests {
         let card = apply_billing_patch(
             &other,
             &patch(json!({
-                "invoice_to": "self",
                 "payment_method": "card",
                 "account_country": "DE",
                 "via_third_party": false

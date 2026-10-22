@@ -2645,8 +2645,7 @@ pub(crate) async fn request_payload(
     let paying_parent =
         lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
             .is_some();
-    let mut recipient =
-        lead_invoice_recipient::effective(stored_recipient.as_ref(), payer.as_ref(), paying_parent);
+    let mut recipient = stored_recipient.unwrap_or_default();
     let _ = lead_invoice_recipient::resolve_parent(&mut recipient, &representation.representation);
     let mut missing = with_invoice_recipient(
         missing_for_submit(
@@ -3242,11 +3241,12 @@ async fn update_my_payer(
     {
         return internal(error, "audit organisation");
     }
-    // Section 7 follows the invoice recipient of step 3: the payer named now
-    // may make "to the payer" an answer, or take it back.
-    let synced = match lead_invoice_recipient::sync_section_seven(
+    // Section 7 is derived from the invoice recipient of step 3: the payer
+    // named now may make "to the payer" an answer, or take it back.
+    let synced = match lead_invoice_recipient::audit_section_seven_change(
         &mut tx,
         lead_id,
+        declared.as_ref(),
         auth.user_id,
         kind.as_str(),
     )
@@ -3380,10 +3380,10 @@ async fn billing_marker(
     })))
 }
 
-/// `POST /me/lead-requests/{lead_id}/billing`: autosave of where the invoice
-/// goes (section 7) and how the payer will pay (section 8), only the changed
-/// keys. Both land in the payer declaration; the payer of the lead's orders
-/// (the Kostenübernehmer) is not touched. A key of section 8 from a login
+/// `POST /me/lead-requests/{lead_id}/billing`: autosave of who receives the
+/// invoice (step 3) and how the payer will pay (section 8), only the changed
+/// keys. Section 8 lands in the payer declaration; the payer of the lead's
+/// orders (the Kostenübernehmer) is not touched. A key of section 8 from a login
 /// that is not asked for it — the third party answers itself — is refused
 /// as a whole (409 `payment_route_by_payer`); without an answer who pays
 /// there is nothing to patch (409 `payer_not_declared`). The audit event
@@ -3391,9 +3391,10 @@ async fn billing_marker(
 ///
 /// Step 3 (owner spec 2026-10-11) sends the invoice recipient here as well
 /// (`invoice_recipient`, `invoice_recipient_is_payer`, `recipient_*`): kept
-/// in `lead_invoice_recipients`, answered before anybody is named as payer,
-/// and section 7 of the declaration is derived from them
-/// ([`lead_invoice_recipient::sync_section_seven`]).
+/// in `lead_invoice_recipients` (the one source of the recipient), answered
+/// before anybody is named as payer; section 7 of the declaration is derived
+/// from them when it is read, and its keys are no longer accepted here
+/// ([`lead_invoice_recipient::fill_section_seven`]).
 async fn update_my_billing(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3519,19 +3520,14 @@ async fn update_my_billing(
     {
         return internal(error, "audit payment route");
     }
-    // The invoice recipient: applied to the stored answers, or to those an
-    // older request's section 7 says.
+    // The invoice recipient: applied to the stored answers.
     let mut recipient_marker = None;
     if !recipient_body.is_empty() {
         let stored = match lead_invoice_recipient::load(&mut tx, lead_id).await {
             Ok(stored) => stored,
             Err(error) => return internal(error, "load invoice recipient"),
         };
-        let paying_parent =
-            lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
-                .is_some();
-        let mut current =
-            lead_invoice_recipient::effective(stored.as_ref(), payer.as_ref(), paying_parent);
+        let mut current = stored.clone().unwrap_or_default();
         let _ =
             lead_invoice_recipient::resolve_parent(&mut current, &representation.representation);
         let mut next = match lead_invoice_recipient::apply(&current, &recipient_body) {
@@ -3570,11 +3566,11 @@ async fn update_my_billing(
             recipient_marker = Some(next.marker_value());
         }
     }
-    // Section 7 follows the recipient's answers (also after a patch of an
-    // older cabinet that names `invoice_to` itself).
-    let synced = match lead_invoice_recipient::sync_section_seven(
+    // Section 7 is derived from the recipient's answers.
+    let synced = match lead_invoice_recipient::audit_section_seven_change(
         &mut tx,
         lead_id,
+        payer.as_ref(),
         auth.user_id,
         kind.as_str(),
     )
@@ -5742,8 +5738,7 @@ async fn submit_my_lead_request(
         lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
             .is_some();
     let today = crate::app_time::today();
-    let mut recipient =
-        lead_invoice_recipient::effective(stored_recipient.as_ref(), payer.as_ref(), paying_parent);
+    let mut recipient = stored_recipient.unwrap_or_default();
     let _ = lead_invoice_recipient::resolve_parent(&mut recipient, &representation.representation);
     let mut missing = with_invoice_recipient(
         missing_for_submit(
@@ -6410,17 +6405,9 @@ async fn get_lead_portal_intake(
                 crate::risk::cabinet::merge_into(&mut billing, billing_extras);
                 // "Со слов пациента": who receives the invoice and whether
                 // that recipient pays (step 3, 2026-10-11), as the lead
-                // answered; an older request's section 7 read the same way.
-                let paying_parent = lead_representatives::payer_same_person(
-                    &loaded.representation,
-                    declaration.as_ref(),
-                )
-                .is_some();
-                let mut recipient = lead_invoice_recipient::effective(
-                    stored_recipient.as_ref(),
-                    declaration.as_ref(),
-                    paying_parent,
-                );
+                // answered (an older request's section 7 became a row of
+                // its own in migration 20261023100000).
+                let mut recipient = stored_recipient.unwrap_or_default();
                 let _ =
                     lead_invoice_recipient::resolve_parent(&mut recipient, &loaded.representation);
                 crate::risk::cabinet::merge_into(&mut billing, recipient.portal_json());
@@ -7515,12 +7502,13 @@ mod tests {
             // (trigger flow 2026-10-07); the bare payment method is asked
             // (owner 2026-10-10). Birth data, the own interest and the legal
             // questions are follow-up blocks K and L now (owner 2026-10-09).
+            // Where the invoice goes is the invoice recipient's
+            // (`with_invoice_recipient`, 2026-10-23).
             vec![
                 "payer_kind",
                 "id_document_upload",
                 "has_representative",
                 "under_guardianship",
-                "invoice_to",
                 "payment_method"
             ]
         );
@@ -7552,9 +7540,10 @@ mod tests {
             sanctions_links: Some(true),
             ..Default::default()
         };
-        // The third party answers the payment route itself: of the billing
-        // only where the invoice goes is asked here. Its e-mail, phone and
-        // residence follow the payer's other keys (owner request 2026-10-07).
+        // The third party answers the payment route itself: nothing of the
+        // billing is asked here (where the invoice goes is the invoice
+        // recipient's). Its e-mail, phone and residence follow the payer's
+        // other keys (owner request 2026-10-07).
         assert_eq!(
             missing_for_submit(
                 &data,
@@ -7574,8 +7563,7 @@ mod tests {
                 "payer_email",
                 "payer_phone",
                 "payer_country",
-                "payer_city",
-                "invoice_to"
+                "payer_city"
             ]
         );
 

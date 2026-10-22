@@ -72,12 +72,22 @@ eingesetzten Vermögenswerte» сервер при генерації запов
 | `payer_sanctioned` | підтверджений збіг для платника (суб'єкт `lead_payer`) або банку, через який він платить (`lead_bank` / `payer-bank`) |
 | `recipient_sanctioned` | підтверджений збіг одержувача рахунку — третьої особи, яка не платить (`lead_recipient`; рішення власника 2026-10-11; власний ключ з QA 2026-10-11 N-08, раніше `payer_sanctioned`) |
 
-- **Чорний список** — лише країни FATF «call for action»: KP, IR, MM
-  (`BLACK_LIST_COUNTRY_CODES` у [`lead_enhanced_check.rs`](../../crates/server/src/routes/lead_enhanced_check.rs);
-  фронтенд має дзеркало `ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES` у
-  `frontend/src/pages/leads/model/enhanced-check.ts`, тест порівнює обидва).
-  Довгий список країн підвищеного ризику (зокрема RU) і заблоковані країни
-  санкційної політики (`blocked_countries`) перевірку **не** вмикають.
+- **Чорний список** — список 2 (`list_2`) конфігурації ризику
+  (`risk::RiskConfig`, `GET/PUT /compliance/risk-config`); за замовчуванням —
+  країни FATF «call for action»: KP, IR, MM. Константа
+  `BLACK_LIST_COUNTRY_CODES` у [`lead_enhanced_check.rs`](../../crates/server/src/routes/lead_enhanced_check.rs)
+  — лише це значення за замовчуванням; правило читає налаштований список 2
+  (з 2026-10-23). Список 1 (`list_1`) — довгий список країн підвищеного
+  ризику (зокрема RU): бали в оцінці ризику й жовта підказка, перевірку **не**
+  вмикає, як і заблоковані країни санкційної політики (`blocked_countries`).
+  Візард персоналу не має жорстко заданих кодів країн: обидва списки він
+  читає з `GET /compliance/risk-countries` (`leads.edit` або CEO Assistant;
+  відповідь `{ version, high_risk, blacklist }` — `high_risk` = список 1,
+  `blacklist` = список 2).
+- Громадянства пацієнта беруться з `leads.citizenships` — єдиного джерела з
+  2026-10-23; `wizard_state.registration_country` — лише резерв для старого
+  ліда з порожнім списком (міграція
+  `20261023120500_lead_citizenships_single_source.sql` перенесла чинні коди).
 - Відкритий, ще не розглянутий можливий збіг — не тригер: у причинах він стоїть
   як `sanctions_review_pending`, `required` лишається `false`. Він не
   вмикає перевірку й обхідним шляхом: оцінка ризику не рахує його як T16

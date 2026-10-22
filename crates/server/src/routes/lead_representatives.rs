@@ -7,15 +7,21 @@
 //! entry of `leads.trusted_contacts`, and the id of the representative is the
 //! id of that entry. The table `lead_representatives` adds what the entry
 //! cannot hold: the role, the name parts, place of birth, citizenships, the
-//! structured address and the identity document. The guardian logins, the
-//! suggested signers, the privacy consents and the conversion keep reading the
-//! entry and know nothing of the table. The answers that decide who is asked
-//! for (`has_representative`, `under_guardianship`, `custody`) are columns of
-//! `lead_gwg_declarations`.
+//! structured address and the identity document, and the answers of block R
+//! (`country_questions`). The readers of a representative take entry and row
+//! together, most through [`load`]: the guardian logins (their profile,
+//! `services::lead_guardian_identity`), the suggested and contracting signers
+//! (`document_signatures`), the privacy consents (`consent_choices`), the
+//! invoice recipient (`lead_invoice_recipient`), the payer declaration and
+//! the conversion (a parent's structured address goes into the patient
+//! relation, the parent named as invoice recipient or paying becomes the
+//! default payer). The answers that decide who is asked for
+//! (`has_representative`, `under_guardianship`, `custody`,
+//! `custody_set_by_staff`) are columns of `lead_gwg_declarations`.
 //!
 //! [`resolve`] is the one place that says who is a representative; the lead
-//! cabinet, the staff wizard, the identification status and the GwG
-//! identification sheet read it through [`load`]. The sanctions screening
+//! cabinet, the staff wizard, the identification status, the GwG
+//! identification sheet and the readers above read it through [`load`]. The sanctions screening
 //! keeps its own matcher for the relation of a minor's contact (it also
 //! screens contacts without an id) and takes the name parts, citizenships and
 //! residence from the same rows.
@@ -2044,7 +2050,9 @@ async fn finish_cabinet_write(
         store_lead(&mut *tx, lead_id, Some(contacts), &json!({})).await?;
     }
     super::lead_portal_guardians::auto_link_parent_logins_in_tx(tx, lead_id, Some(actor)).await?;
-    super::lead_invoice_recipient::sync_section_seven(tx, lead_id, actor, kind.as_str()).await?;
+    // A parent named as invoice recipient is read from the representation
+    // whenever section 7 is derived (`lead_invoice_recipient::load_for_lead`):
+    // nothing to copy here.
     let state = load(&mut *tx, lead_id).await?.unwrap_or_default();
     let now = intake::portal_update_time(&mut *tx).await?;
     let marker = json!({
@@ -3606,13 +3614,6 @@ pub(crate) async fn set_lead_custody(
             .bind(&custody)
             .execute(&mut *tx)
             .await?;
-            super::lead_invoice_recipient::sync_section_seven(
-                &mut tx,
-                lead_id,
-                auth.user_id,
-                "staff",
-            )
-            .await?;
             audit::write_in_transaction(
                 &mut tx,
                 &audit::domain_event(
@@ -3742,12 +3743,6 @@ pub(crate) async fn remove_lead_representative(
         Ok(false) => return intake::err(StatusCode::NOT_FOUND, "Representative not found"),
         Err(error) => return intake::internal(error, "remove representative"),
     }
-    if let Err(error) =
-        super::lead_invoice_recipient::sync_section_seven(&mut tx, lead_id, auth.user_id, "staff")
-            .await
-    {
-        return intake::internal(error, "derive invoice recipient");
-    }
     let invalidated = match crate::document_signatures::invalidate_representative_identity(
         &mut tx,
         lead_id,
@@ -3822,8 +3817,6 @@ pub(crate) async fn remove_lead_trusted_contact(
         .fetch_all(&mut *tx)
         .await?;
         store_lead(&mut tx, lead_id, Some(&contacts), &json!({})).await?;
-        super::lead_invoice_recipient::sync_section_seven(&mut tx, lead_id, auth.user_id, "staff")
-            .await?;
         audit::write_in_transaction(
             &mut tx,
             &audit::domain_event(

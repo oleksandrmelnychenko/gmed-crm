@@ -7857,6 +7857,82 @@ async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_a
     assert_eq!(summary["invoice_recipient"]["source"], "default_payer");
 }
 
+/// The conversion reads the invoice recipient from `lead_invoice_recipients`
+/// (the one source since 2026-10-23): the father chosen in step 3 as the
+/// parent who receives the invoice becomes the default payer, although the
+/// mother pays; the history columns of section 7 on the declaration count
+/// for nothing.
+#[tokio::test]
+async fn the_conversion_makes_the_parent_named_as_invoice_recipient_the_default_payer() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_email = format!("mia-{}@example.com", Uuid::new_v4().simple());
+    let lead_id = seed_minor_lead_with_parents(&app, &lead_email, anna, ben, None).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    declare_mother_as_payer_and_sign(&app, lead_id, artifacts.order_id).await;
+    sqlx::query(
+        r#"INSERT INTO lead_invoice_recipients (
+               lead_id, recipient, recipient_is_payer, representative_contact_id)
+           VALUES ($1, 'self', false, $2)"#,
+    )
+    .bind(lead_id)
+    .bind(ben)
+    .execute(pool)
+    .await
+    .unwrap();
+    // A stale section 7 on the declaration ("another address") is history.
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET invoice_to = 'other', invoice_name = 'Beispiel GmbH'
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let patient_id = convert_ready_lead(&app, lead_id).await;
+
+    let relations = parent_relations(pool, patient_id).await;
+    assert_eq!(relations.len(), 2, "{relations:?}");
+    let (_, name, _, _, _, _, _, _, default_payer) = relations[0].clone();
+    assert_eq!(name, "Anna Muster");
+    assert!(
+        !default_payer,
+        "the paying mother does not receive the invoice"
+    );
+    let (ben_relation, name, _, _, _, _, _, _, default_payer) = relations[1].clone();
+    assert_eq!(name, "Ben Muster");
+    assert!(
+        default_payer,
+        "the parent named as recipient is the default payer"
+    );
+    let summary: Value = {
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/patients/{patient_id}/payer-summary"),
+            &app.auth_header("ceo"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
+    };
+    // The card shows section 7 as derived from the recipient: Ben at his
+    // address, not the stale "Beispiel GmbH".
+    assert_eq!(summary["declaration"]["invoice_to"], "other", "{summary}");
+    assert_eq!(
+        summary["declaration"]["invoice_name"], "Ben Muster",
+        "{summary}"
+    );
+    assert_eq!(
+        summary["invoice_recipient"]["payer_patient_relation_id"],
+        ben_relation.to_string(),
+        "{summary}"
+    );
+}
+
 /// A repeat intake of a converted minor starts with the parents the patient
 /// record knows (contracting parents first), their birth dates, the address
 /// of a parent without a record of their own and the custody stated at the
