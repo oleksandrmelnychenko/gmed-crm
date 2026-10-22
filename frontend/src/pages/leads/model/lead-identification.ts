@@ -298,7 +298,7 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
         return {
           subject: representative.subject,
           role: representative.name || tx("Законный представитель", "Gesetzliche/r Vertreter/in"),
-          detail: payingParent && pays ? `${relation} · ${tx("плательщик", "Kostenträger/in")}` : relation,
+          detail: payingParent && pays ? `${relation} · ${tx("плательщик", "Zahler")}` : relation,
           person: { qes: representative.qes, own_account_payment: representative.own_account_payment },
           canConfirm: true,
           paymentExpected: pays,

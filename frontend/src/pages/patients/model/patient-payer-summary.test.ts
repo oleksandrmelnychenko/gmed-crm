@@ -683,7 +683,7 @@ describe("label helpers", () => {
       payment: { tone: "neutral", text: "Платёж с собственного счёта не ожидается" },
     });
     const german = identificationLines(status, de);
-    expect(german[0].detail).toBe("Elternteil · Kostenträger/in");
+    expect(german[0].detail).toBe("Elternteil · Zahler");
     expect(german[0].signature.text).toBe("Qualifizierte Signatur · 05.10.2026");
     expect(german[1].payment.text).toBe("Keine Zahlung vom eigenen Konto zu erwarten");
   });

@@ -306,7 +306,7 @@ const words = {
     notSigned: "Noch keine qualifizierte Signatur",
     paid: "Zahlung vom eigenen Konto bestätigt · 06.10.2026 · Olek",
     awaiting: "Zahlung vom eigenen Konto ausstehend",
-    samePerson: "Elternteil · Kostenträger/in",
+    samePerson: "Elternteil · Zahler",
     notExpected: "Keine Zahlung vom eigenen Konto zu erwarten",
     converted: "Bei der Umwandlung der Anfrage am 06.10.2026 festgehalten",
     openLead: "Anfrage öffnen",

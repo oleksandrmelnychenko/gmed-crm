@@ -225,7 +225,7 @@ describe("LeadIdentificationStatusView", () => {
     expect(ben).not.toContain("Подтвердить платёж");
     expect(ben).not.toMatch(/<button\b/);
     expect(render({ ...MINOR, payer: { qes: null, own_account_payment: null, same_person_as: ANNA } }, { lang: "de" }))
-      .toContain("Elternteil · Kostenträger/in");
+      .toContain("Elternteil · Zahler");
   });
 
   it("says on the paying person's line when cash, crypto or a third party is declared, without a confirmation", () => {

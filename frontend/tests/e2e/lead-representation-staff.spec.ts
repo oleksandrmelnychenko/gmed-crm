@@ -584,7 +584,7 @@ test("one GwG sheet per parent, none for the child and none twice for a paying p
 test("a refused sheet says why, in German too", async ({ page }) => {
   const { wizard, sheetActions, row, calls } = await mount(page, { lang: "de", refuseSheet: true });
 
-  await expect(row(ANNA).line).toContainText("Elternteil · Kostenträger/in");
+  await expect(row(ANNA).line).toContainText("Elternteil · Zahler");
   await expect(row("payer").line).toHaveCount(0);
   await expect(row(BEN).line).toContainText("keine E-Mail – die Signatur wird nicht angerechnet");
   await expect(sheetActions.getByTestId("gwg-identification-payer-same-person")).toHaveText(
