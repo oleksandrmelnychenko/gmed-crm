@@ -168,7 +168,7 @@ export function SendStep({
             <p className="font-medium">{text.missingTitle}</p>
             {/* Every item leads straight to its step and field (owner report 2026-10-21). */}
             {!inquiryConsent ? (
-              <ul className="list-inside list-disc">
+              <ul className="list-disc space-y-0.5 pl-5">
                 <li>
                   <MissingItemLink field="inquiry_consent" onClick={() => onEdit("person", { field: "inquiry_consent" })}>
                     {text.inquiryConsentMissing}
@@ -179,7 +179,7 @@ export function SendStep({
             {/* Grouped by step, each with a way there. */}
             {otherMissing.length > 0 ? <div data-testid="lead-request-missing-other">
               <p className="text-xs font-semibold">{text.furtherDetails}</p>
-              <ul className="list-inside list-disc">{otherMissing.map((field) => <li key={field}>
+              <ul className="list-disc space-y-0.5 pl-5">{otherMissing.map((field) => <li key={field}>
                 {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor)}
               </li>)}</ul>
             </div> : null}
@@ -192,7 +192,7 @@ export function SendStep({
                 >
                   {text.steps[step]}
                 </button>
-                <ul className="list-inside list-disc">
+                <ul className="list-disc space-y-0.5 pl-5">
                   {byStep[step].map((field) => (
                     <li key={field} className="break-words">
                       <MissingItemLink field={field} onClick={() => onEdit(step, { field })}>
@@ -204,8 +204,8 @@ export function SendStep({
               </div>
             ))}
             {previewMissing.length > 0 ? <div data-testid="lead-request-missing-follow_up">
-              <button type="button" className="text-xs font-semibold underline underline-offset-2" onClick={() => onEdit("follow_up", { field: `${previewMissing[0].block}:${previewMissing[0].key}` })}>{text.steps.follow_up}</button>
-              <ul className="list-inside list-disc">{previewMissing.map(({ block, key }) => <li key={`${block}:${key}`} className="break-words">
+              <button type="button" className="text-xs font-semibold underline-offset-2 hover:underline" onClick={() => onEdit("follow_up", { field: `${previewMissing[0].block}:${previewMissing[0].key}` })}>{text.steps.follow_up}</button>
+              <ul className="list-disc space-y-0.5 pl-5">{previewMissing.map(({ block, key }) => <li key={`${block}:${key}`} className="break-words">
                 <MissingItemLink field={`${block}:${key}`} onClick={() => onEdit("follow_up", { field: `${block}:${key}` })}>
                   {followUpFieldLabel(text, key, guardian, request.follow_up?.representatives, extraWorkSubject(request))}
                 </MissingItemLink>
@@ -256,6 +256,10 @@ export function SendStep({
               </span>
             </label>
           </div>
+          {/* Everything else is there: say why "send" is still off (the button alone does not). */}
+          {sendable && ready && !confirmed ? (
+            <p className="text-xs text-muted-foreground" data-testid="lead-request-declaration-hint">{text.declarationRequired}</p>
+          ) : null}
         </Section>
       ) : null}
       {error ? <Banner tone="error">{error}</Banner> : null}

@@ -270,7 +270,10 @@ export function FollowUpStep({
 
   return (
     <section className="space-y-6" data-testid="lead-request-follow-up">
-      <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-follow-up-explanation">{beforeSubmit ? text.followUpBeforeSubmitIntro : text.followUpIntro}</p>
+      {/* Answered and unchanged: "please complete and send" would contradict the confirmation below. */}
+      {answered && answeredAt && !beforeSubmit ? null : (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-follow-up-explanation">{beforeSubmit ? text.followUpBeforeSubmitIntro : text.followUpIntro}</p>
+      )}
       {answered && answeredAt ? (
         <p
           role="status"

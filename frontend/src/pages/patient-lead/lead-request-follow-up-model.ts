@@ -128,6 +128,10 @@ export function blockAAsks(request: Pick<LeadRequest, "follow_up" | "payer" | "p
   if (request.payer?.payer_kind === "third_party") {
     return { ...NO_ASKS, occupation: true, sector: true, payer_states_funds: true };
   }
+  // A paying parent / legal representative states the funds (and the own
+  // profession) in the payer questionnaire, never here: the cabinet stores a
+  // source and a proof only for a self-paying patient.
+  if (request.payer?.payer_kind === "representative") return { ...NO_ASKS, sector: true };
   // The own source of funds only with the enhanced check (owner 2026-10-19).
   if (request.follow_up?.funds_asked === false) return { ...NO_ASKS, occupation: true, sector: true };
   return { ...NO_ASKS, funds: true, occupation: true, sector: true, funds_proof: true };

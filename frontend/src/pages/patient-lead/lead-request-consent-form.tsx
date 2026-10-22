@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
@@ -18,7 +18,7 @@ import {
   type LeadRequest,
 } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
-import { CabinetSection as Section, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
+import { CabinetGoToContext, CabinetSection as Section, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
 import type { SaveState } from "./lead-request-model";
 
 import { storedTrustedPersons, trustedPersonsPath } from "./lead-trusted-persons-model";
@@ -83,6 +83,7 @@ export function ConsentFormChoicesSection({
   const [draft, setDraft] = useState<ConsentFormChoices>(form?.choices ?? NO_CONSENT_FORM_CHOICES);
   const recipients = storedTrustedPersons(request);
   const personsText = trustedPersonsText(lang);
+  const goTo = useContext(CabinetGoToContext);
   const [baseline, setBaseline] = useState(form);
   const savedRef = useRef(form);
   useLayoutEffect(() => { savedRef.current = form; }, [form]);
@@ -164,7 +165,19 @@ export function ConsentFormChoicesSection({
       </span>
       {recipients.length > 0 ? <TrustedPersonsList persons={recipients} lang={lang} /> : null}
       {!request.disclosure && form.choices?.named_recipients ? <p className="text-xs text-muted-foreground">{personsText.legacy}</p> : null}
-      <a className="text-sm font-medium text-[var(--brand)] underline underline-offset-4" href={trustedPersonsPath(request.lead_id)}>{personsText.edit}</a>
+      {/* Inside the cabinet the step opens in place (the choices here are saved first), not by a page load. */}
+      <a
+        className="block w-fit text-sm font-medium text-[var(--brand)] underline underline-offset-4"
+        href={trustedPersonsPath(request.lead_id)}
+        data-testid="lead-request-consent-recipients-edit"
+        onClick={(event) => {
+          if (!goTo || event.metaKey || event.ctrlKey || event.shiftKey) return;
+          event.preventDefault();
+          goTo("disclosure");
+        }}
+      >
+        {personsText.edit}
+      </a>
     </fieldset>
   );
 

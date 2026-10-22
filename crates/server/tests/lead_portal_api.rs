@@ -7946,6 +7946,20 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
         { "name": "Max Named", "relation": "friend", "contact": "max@example.test", "scope_codes": ["financial"] },
         { "name": "Olga Named", "relation": "relative", "contact": "+49 151 000000", "scope_codes": ["medical", "organisational"] }
     ]);
+    // The contact is a phone number or an e-mail address, nothing else (QA 2026-10-22).
+    let (status, refused) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(
+            json!([{ "name": "Max Named", "relation": "friend", "contact": "über Tochter", "scope_codes": ["financial"] }]),
+            true,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "consent_recipients_invalid", "{refused}");
+    assert_eq!(refused["field"], "contact", "{refused}");
     let (status, decision) = save_disclosure(
         router,
         lead,

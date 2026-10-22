@@ -141,6 +141,25 @@ pub const RECIPIENT_SCOPES: [&str; 4] = ["all", "medical", "organisational", "fi
 /// names the field `scope_codes` ([`persons_error_field`]).
 pub const RECIPIENT_SCOPE_INVALID: &str = "invalid_field";
 
+/// Whether the optional contact of a trusted person is a phone number (digits
+/// with `+ - ( ) / .` and spaces, at least six digits) or an e-mail address.
+/// The cabinet applies the same rule (`contactValid`). Checked when the lead
+/// saves the persons, not in [`clean_persons`]: a stored older free text
+/// must not block re-saving the consent choice.
+pub fn recipient_contact_valid(contact: &str) -> bool {
+    let value = contact.trim();
+    if value.is_empty() {
+        return true;
+    }
+    if value.contains('@') {
+        return crate::email_address::has_valid_format(value);
+    }
+    value
+        .chars()
+        .all(|ch| ch.is_ascii_digit() || " +-()/.".contains(ch))
+        && value.chars().filter(char::is_ascii_digit).count() >= 6
+}
+
 /// The request field a refusal of [`clean_persons`] concerns: `scope_codes`
 /// for an unknown scope code, otherwise `fallback` (the list itself).
 pub fn persons_error_field(code: &str, fallback: &'static str) -> &'static str {
@@ -831,6 +850,29 @@ pub fn chooser_missing_from_signers<'a>(
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn a_trusted_persons_contact_is_a_phone_number_or_an_email_address() {
+        for good in [
+            "",
+            "  ",
+            "+49 30 1234567",
+            "(030) 123-456",
+            "eva.muster@example.com",
+        ] {
+            assert!(recipient_contact_valid(good), "{good}");
+        }
+        for bad in [
+            "abc",
+            "12345",
+            "über Tochter",
+            "eva@",
+            "eva@example",
+            "+49 30 abc 1234",
+        ] {
+            assert!(!recipient_contact_valid(bad), "{bad}");
+        }
+    }
 
     fn core() -> ConsentChoices {
         ConsentChoices {

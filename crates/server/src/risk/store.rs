@@ -482,8 +482,14 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
     };
     let party = match block {
         "A" => {
-            // A third-party payer states funds on the own payer link.
-            if payer.is_some() && !third_party {
+            // Only a self-paying patient states the own funds here. A
+            // third-party payer states them on the own payer link, a paying
+            // parent / legal representative in the own payer questionnaire
+            // ("Angaben als zahlende Person"): the cabinet can store a source
+            // and a proof only for `self` (`self_funds_payer_check`).
+            let self_payer =
+                payer.is_some_and(|payer| payer.payer_kind == lead_payer::PAYER_KIND_SELF);
+            if self_payer {
                 if payer.is_none_or(|payer| payer.self_funds_source.is_none()) {
                     missing.push("funds_source");
                 }
@@ -498,7 +504,7 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
                 missing.push("sector");
             }
             // The proof is required while A is open (PDF).
-            if payer.is_some() && !third_party && !answers.funds_proof_uploaded {
+            if self_payer && !answers.funds_proof_uploaded {
                 missing.push("funds_proof_upload");
             }
             PARTY_CABINET
@@ -2055,6 +2061,38 @@ mod tests {
             ..parent
         };
         assert_eq!(block_missing("A", &other).1, vec!["occupation"]);
+    }
+
+    #[test]
+    fn a_paying_parent_states_no_funds_in_block_a() {
+        // The paying parent's funds belong to the own payer questionnaire:
+        // the cabinet cannot store a source or a proof for a representative.
+        let parent = BlockAnswers {
+            payer: Some(Declaration {
+                payer_kind: lead_payer::PAYER_KIND_REPRESENTATIVE.into(),
+                ..Declaration::default()
+            }),
+            paying_parent: true,
+            ..Default::default()
+        };
+        assert_eq!(block_missing("A", &parent).1, vec!["sector"]);
+        let own = BlockAnswers {
+            payer: Some(Declaration {
+                payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+                ..Declaration::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            block_missing("A", &own).1,
+            vec![
+                "funds_source",
+                "funds_description",
+                "occupation",
+                "sector",
+                "funds_proof_upload"
+            ]
+        );
     }
 
     #[test]

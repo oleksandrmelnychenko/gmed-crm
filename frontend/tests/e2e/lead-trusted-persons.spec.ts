@@ -156,6 +156,39 @@ test("Yes requires person, scope and checkbox; editing details requires fresh co
   await expect(page.getByLabel("Scope of information", { exact: true })).toContainText("Financial information");
 });
 
+test("Next names each missing entry at its field and a contact must be a phone number or an e-mail address", async ({ page }) => {
+  const { calls } = await setup(page);
+  await page.getByTestId("disclosure-yes").check();
+  await page.getByTestId("trusted-person-add").click();
+  const row = page.getByTestId("trusted-person-editor");
+  // A blank row: what is missing in it, not "add a person".
+  await expect(page.getByText("Add at least one person or select No.")).toHaveCount(0);
+  await row.getByLabel("Phone / email").fill("abc");
+  await row.getByLabel("Last name, first name").click();
+  await expect(row.getByTestId("trusted-person-contact-error")).toHaveText("Please enter a phone number (e.g. +49 30 1234567) or an email address.");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "disclosure");
+  await expect(row.getByTestId("trusted-person-name-error")).toBeVisible();
+  await expect(row.getByTestId("trusted-person-relation-error")).toBeVisible();
+  await expect(row.getByTestId("trusted-person-scope-error")).toBeVisible();
+  await expect(row.getByLabel("Last name, first name")).toHaveAttribute("aria-invalid", "true");
+  await row.getByLabel("Last name, first name").fill("Eva Friend");
+  await row.getByRole("combobox").first().click();
+  await page.getByRole("option", { name: "Friend / acquaintance", exact: true }).click();
+  await toggleScope(page, [MEDICAL], row);
+  await row.getByLabel("Phone / email").fill("+49 151 000000");
+  await expect(row.getByTestId("trusted-person-contact-error")).toHaveCount(0);
+  await page.getByTestId("disclosure-consent").check();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "documents");
+  expect(calls.at(-1)?.persons).toEqual([{ name: "Eva Friend", relation: "friend", contact: "+49 151 000000", scope_codes: ["medical"] }]);
+  // Five people at most: the add button gives way to a note.
+  await page.getByTestId("lead-request-steps").locator('[data-step="disclosure"]').click();
+  for (let count = 1; count < 5; count += 1) await page.getByTestId("trusted-person-add").click();
+  await expect(page.getByTestId("trusted-person-add")).toHaveCount(0);
+  await expect(page.getByTestId("trusted-person-max")).toHaveText("You can name up to 5 people.");
+});
+
 test("All information ticks every option; unticking one keeps the rest", async ({ page }) => {
   const { calls } = await setup(page);
   await addFriend(page);

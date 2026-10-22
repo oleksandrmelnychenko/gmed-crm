@@ -580,7 +580,8 @@ export function MissingItemLink({
   return (
     <button
       type="button"
-      className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      // `align-top`: a wrapped item keeps the list bullet beside its first line.
+      className="text-left align-top underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       data-testid="lead-request-missing-item"
       data-field={field}
       onClick={onClick}

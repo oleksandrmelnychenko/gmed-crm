@@ -1,4 +1,5 @@
 import { cabinetScopeSummary, normalizeScopeCodes, type ConsentRecipientScope } from "@/lib/consent-recipient-scope";
+import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
 import { CONSENT_RECIPIENT_RELATIONS, DISCLOSURE_VERSION, MAX_CONSENT_RECIPIENTS, type ConsentRecipient, type ConsentRecipientRelation, type LeadDisclosureInput, type LeadRequest } from "./lead-request-api";
 
 /** `scope` is the read-only free text of a person named before 2026-10-19; `scopeCodes` the choice. */
@@ -25,13 +26,35 @@ export function recipientsToSend(drafts: readonly RecipientDraft[]): LeadDisclos
   }));
 }
 
+/**
+ * The optional contact: a phone number (digits with + - ( ) / . and spaces,
+ * at least 6 digits) or an e-mail address; empty is fine. Same rule as the
+ * server (`consent_choices::recipient_contact_valid`).
+ */
+export function contactValid(contact: string): boolean {
+  const value = contact.trim();
+  if (!value) return true;
+  if ([...value].length > 120) return false;
+  if (value.includes("@")) return isValidEmailAddress(value);
+  return /^[0-9+\-()/. ]+$/.test(value) && isValidPhoneNumber(value);
+}
+
+export type RecipientField = "name" | "relation" | "contact" | "scope";
+
+/** What one person still lacks, field by field (for the inline messages). */
+export function recipientProblems(person: RecipientDraft): RecipientField[] {
+  const problems: RecipientField[] = [];
+  const name = normalizedName(person.name);
+  if (!name || [...name].length > 120) problems.push("name");
+  if (!CONSENT_RECIPIENT_RELATIONS.includes(person.relation as ConsentRecipientRelation)) problems.push("relation");
+  if (!contactValid(person.contact)) problems.push("contact");
+  if (normalizeScopeCodes(person.scopeCodes).length === 0) problems.push("scope");
+  return problems;
+}
+
 export function trustedPersonsProblem(drafts: readonly RecipientDraft[]): "invalid" | null {
   const people = typedPersons(drafts);
-  return people.length > MAX_CONSENT_RECIPIENTS || people.some((person) =>
-    !normalizedName(person.name) || [...normalizedName(person.name)].length > 120 ||
-    !CONSENT_RECIPIENT_RELATIONS.includes(person.relation as ConsentRecipientRelation) || [...person.contact.trim()].length > 120 ||
-    normalizeScopeCodes(person.scopeCodes).length === 0,
-  ) ? "invalid" : null;
+  return people.length > MAX_CONSENT_RECIPIENTS || people.some((person) => recipientProblems(person).length > 0) ? "invalid" : null;
 }
 
 export function samePersons(left: readonly ConsentRecipient[], right: readonly ConsentRecipient[]): boolean {

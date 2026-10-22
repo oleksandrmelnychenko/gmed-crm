@@ -25,6 +25,15 @@ describe("lead cabinet languages", () => {
     expect(leadRequestText("ru").steps.documents).toBe("Обращение и документы");
   });
 
+  it("names the legal questions neutrally: no money-laundering law in a heading the lead reads", () => {
+    for (const lang of ["de", "en", "uk", "ru"] as const) {
+      const text = leadRequestText(lang);
+      for (const words of [text.followUpBlocks.L, text.sectionLegal, text.legalIntro]) {
+        expect(words).not.toMatch(/geldwäsche|gwg|laundering|отмыван|відмиван|pep|sanktion|sanction|санкц/i);
+      }
+    }
+  });
+
   it("reads stored and preferred language codes", () => {
     expect(asLeadCabinetLang("uk-UA")).toBe("uk");
     expect(asLeadCabinetLang("UA")).toBe("uk");

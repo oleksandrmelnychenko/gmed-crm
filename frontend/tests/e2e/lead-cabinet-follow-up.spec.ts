@@ -780,6 +780,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
 
     await page.getByTestId("lead-request-follow-up-submit").click();
     await expect(page.getByTestId("lead-request-follow-up-answered")).toContainText("Ihre Angaben werden geprüft.");
+    // No "please complete and send" above the confirmation that it was sent.
+    await expect(page.getByTestId("lead-request-follow-up-explanation")).toHaveCount(0);
     expect(calls.followUpSubmits).toBe(2);
     await expect(page.getByTestId("lead-request-follow-up-submit")).toBeDisabled();
 
@@ -794,6 +796,29 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(page.getByTestId("lead-request-summary-follow_up")).toContainText("Einkommen");
     await expect(page.getByTestId("lead-request-summary-request")).toContainText("Zweitmeinung zur Knie-OP");
     expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
+  });
+
+  test("a paying parent answers block A without own funds: they belong to the payer questionnaire", async ({ page }) => {
+    const { calls } = await setup(page, (request) => {
+      sentWithBlocks(["A"])(request);
+      Object.assign(request, { access_kind: "guardian", minor: true });
+      request.personal_data.date_of_birth = "2015-05-01";
+      request.payer = { ...request.payer, payer_kind: "representative" };
+      // The enhanced check asks the source of funds, but not of a paying parent here.
+      Object.assign(request.follow_up, { funds_asked: true });
+      request.follow_up.answers.occupation = "Schülerin";
+    });
+    await page.goto("/");
+    const blockA = page.getByTestId("lead-request-follow-up-A");
+    await expect(blockA).toBeVisible();
+    await expect(page.locator("#lead-request-funds_source")).toHaveCount(0);
+    await expect(page.locator("#lead-request-funds-proof-files")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-follow-up-payer-note")).toHaveCount(0);
+    await blockA.getByRole("textbox").first().fill("Schule");
+    await expect.poll(() => Object.assign({}, ...calls.enhanced)).toEqual({ sector: "Schule" });
+    await page.getByTestId("lead-request-follow-up-submit").click();
+    await expect(page.getByTestId("lead-request-follow-up-answered")).toBeVisible();
+    expect(calls.fundsProofs).toBe(0);
   });
 
   test("third-party block B asks only its required relationship fields and proof", async ({ page }) => {
@@ -881,7 +906,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
 
     // Block L: the three legal questions, yes or no, and the own economic interest (no longer in the payer step).
     const blockL = page.getByTestId("lead-request-follow-up-L");
-    await expect(blockL).toContainText("Fragen nach dem Geldwäschegesetz");
+    await expect(blockL).toContainText("Weitere Fragen");
     await expect(blockL.getByTestId("lead-request-legal").getByRole("combobox")).toHaveCount(3);
     await choose(page, blockL.getByTestId("lead-request-legal-pep_self").getByRole("combobox"), "Nein");
     await expect.poll(() => calls.identification.at(-1)).toEqual({ pep_self: false });

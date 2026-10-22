@@ -4460,6 +4460,20 @@ async fn save_trusted_persons(
             json!({}),
         );
     }
+    // The optional contact is a phone number or an e-mail address (QA 2026-10-22).
+    if persons.iter().any(|person| {
+        person
+            .contact
+            .as_deref()
+            .is_some_and(|contact| !consent_choices::recipient_contact_valid(contact))
+    }) {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            consent_choices::RECIPIENTS_INVALID,
+            "The contact of a person is a phone number or an e-mail address",
+            json!({ "field": "contact" }),
+        );
+    }
     // The scope is chosen from fixed options (owner 2026-10-19); a person
     // with only a legacy free text is asked again.
     if persons.iter().any(|p| p.scope_codes.is_empty()) {

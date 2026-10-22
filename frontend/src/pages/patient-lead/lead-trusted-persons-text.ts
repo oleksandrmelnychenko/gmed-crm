@@ -19,6 +19,8 @@ const texts = {
     decision: "Bitte wählen Sie Ja oder Nein.", required: "Fügen Sie mindestens eine Person hinzu oder wählen Sie Nein.",
     invalid: "Geben Sie für jede Person einen Namen und eine Beziehung an und wählen Sie den Umfang der Auskunft aus. Höchstens 5 Personen; Name und Kontakt bis 120 Zeichen.",
     consentRequired: "Bitte bestätigen Sie die Einwilligung für die oben genannten Personen und den angegebenen Umfang.", outdated: "Die Einwilligung wurde aktualisiert. Laden Sie die Seite neu und bestätigen Sie den aktuellen Text.",
+    nameRequired: "Bitte geben Sie den Namen an.", relationRequired: "Bitte wählen Sie die Beziehung aus.", scopeRequired: "Bitte wählen Sie den Umfang der Auskunft aus.",
+    contactInvalid: "Bitte geben Sie eine Telefonnummer (z. B. +49 30 1234567) oder eine E-Mail-Adresse an.", maxReached: "Sie können höchstens 5 Personen benennen.",
   },
   en: {
     personsHeading: "Named people",
@@ -37,6 +39,8 @@ const texts = {
     unanswered: "Not answered yet", allowed: "Disclosure permitted", denied: "No disclosure to third parties", legacy: "An earlier choice is on record. Please confirm your current decision on the “Information for third parties” page.",
     decision: "Please select Yes or No.", required: "Add at least one person or select No.", invalid: "Enter a name and relationship and choose the scope of information for each person. Add up to 5 people; name and contact up to 120 characters.",
     consentRequired: "Please confirm consent for the people and scope specified above.", outdated: "The consent has been updated. Reload the page and confirm the current text.",
+    nameRequired: "Please enter the name.", relationRequired: "Please choose the relationship.", scopeRequired: "Please choose the scope of information.",
+    contactInvalid: "Please enter a phone number (e.g. +49 30 1234567) or an email address.", maxReached: "You can name up to 5 people.",
   },
   uk: {
     personsHeading: "Зазначені особи",
@@ -55,6 +59,8 @@ const texts = {
     unanswered: "Ще не відповіли", allowed: "Надання інформації дозволено", denied: "Не надавати інформацію третім особам", legacy: "Є попередній вибір. Підтвердьте поточне рішення на сторінці «Надання інформації третім особам».",
     decision: "Виберіть Так або Ні.", required: "Додайте хоча б одну особу або виберіть Ні.", invalid: "Для кожної особи вкажіть ім’я та зв’язок і виберіть обсяг інформації. Не більше 5 осіб; ім’я й контакт до 120 символів.",
     consentRequired: "Підтвердьте згоду для зазначених вище осіб та обсягу інформації.", outdated: "Текст згоди оновлено. Перезавантажте сторінку та підтвердьте поточний текст.",
+    nameRequired: "Вкажіть, будь ласка, ім’я.", relationRequired: "Виберіть, будь ласка, ким доводиться ця особа.", scopeRequired: "Виберіть, будь ласка, обсяг інформації.",
+    contactInvalid: "Вкажіть, будь ласка, номер телефону (напр. +49 30 1234567) або адресу ел. пошти.", maxReached: "Можна вказати не більше 5 осіб.",
   },
   ru: {
     personsHeading: "Указанные лица",
@@ -73,6 +79,8 @@ const texts = {
     unanswered: "Ещё не отвечено", allowed: "Предоставление информации разрешено", denied: "Не предоставлять информацию третьим лицам", legacy: "Есть предыдущий выбор. Подтвердите текущее решение на странице «Предоставление информации третьим лицам».",
     decision: "Выберите Да или Нет.", required: "Добавьте хотя бы одно лицо или выберите Нет.", invalid: "Для каждого лица укажите имя и связь и выберите объём информации. Не более 5 лиц; имя и контакт до 120 символов.",
     consentRequired: "Подтвердите согласие для указанных выше лиц и объёма информации.", outdated: "Текст согласия обновлён. Перезагрузите страницу и подтвердите актуальный текст.",
+    nameRequired: "Укажите, пожалуйста, имя.", relationRequired: "Выберите, пожалуйста, кем приходится это лицо.", scopeRequired: "Выберите, пожалуйста, объём информации.",
+    contactInvalid: "Укажите, пожалуйста, номер телефона (напр. +49 30 1234567) или адрес эл. почты.", maxReached: "Можно указать не более 5 лиц.",
   },
 };
 

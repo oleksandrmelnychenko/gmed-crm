@@ -29,12 +29,20 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   const problem = disclosureProblem(draft);
   const companyName = request.disclosure_company_name?.trim() || request.disclosure?.company_name?.trim() || "GMED";
   const personName = [request.personal_data.first_name, request.personal_data.last_name].filter(Boolean).join(" ");
+  const [attempted, setAttempted] = useState(false);
+  // A blank row is there already: "add a person" would be wrong, what is missing in it is meant.
+  const problemMessage = (current: NonNullable<typeof problem>) =>
+    current === "consent" ? text.consentRequired
+      : current === "required" && draft.persons.length > 0 ? text.invalid
+        : text[current];
 
   const save = useCallback(async (): Promise<boolean> => {
     if (saving.current) return saving.current;
     if (!changed || ownMinor) return true;
     if (problem) {
-      setError(problem === "consent" ? text.consentRequired : text[problem]);
+      // The step stays: every missing entry is marked at its field.
+      setAttempted(true);
+      setError(problemMessage(problem));
       return false;
     }
     setBusy(true);
@@ -126,7 +134,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
 
     {draft.allowDisclosure === true ? <>
       <CabinetSection title={text.personsHeading}>
-        <TrustedPersonsEditor persons={draft.persons} lang={lang} disabled={busy} onChange={(persons) => update({ persons, consentGiven: false })} />
+        <TrustedPersonsEditor persons={draft.persons} lang={lang} disabled={busy} showErrors={attempted} onChange={(persons) => update({ persons, consentGiven: false })} />
       </CabinetSection>
       <CabinetSection title={text.consentHeading}>
         <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/25 p-3.5 text-sm leading-6">
@@ -138,7 +146,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     </> : null}
 
     {error || (changed && problem) ? <StatusChip tone={error ? "error" : "warning"} role={error ? "alert" : "status"} className="rounded-lg px-3 py-2 text-sm">
-      <CircleAlert aria-hidden="true" />{error || (problem === "consent" ? text.consentRequired : text[problem!])}
+      <CircleAlert aria-hidden="true" />{error || problemMessage(problem!)}
     </StatusChip> : null}
     <p className="px-1 text-xs leading-5 text-muted-foreground">{text.footer}</p>
     {request.disclosure ? <p className="px-1 font-mono text-[11px] leading-5 text-muted-foreground" data-testid="disclosure-receipt">{text.saved} · {formatAppDateTime(request.disclosure.chosen_at)}{request.disclosure.chosen_by_name ? ` · ${request.disclosure.chosen_by_name}` : ""}</p> : null}

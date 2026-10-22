@@ -1369,6 +1369,9 @@ test.describe("payer link", () => {
     await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
     await expect(page.getByTestId("payer-link-step-missing")).toContainText("Bitte noch ergänzen:");
     await expect(page.getByTestId("payer-link-step-missing")).toContainText("Nachweis der Herkunft der Mittel");
+    // Each missing item leads to its field: the hidden upload's button gets the focus.
+    await page.getByTestId("payer-link-missing-item").filter({ hasText: "Nachweis der Herkunft der Mittel" }).click();
+    await expect(page.getByTestId("payer-link-funds-upload").locator("button").first()).toBeFocused();
     await next(page);
     await expect(stepTitle(page)).toHaveText("Zahlungsweg");
     await expect(page.getByTestId("payer-link-step-missing")).toHaveCount(0);

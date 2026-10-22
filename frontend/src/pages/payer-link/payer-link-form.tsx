@@ -582,9 +582,17 @@ function DraftForm({
         >
           <p className="font-medium">{text.missingTitle}</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
-            {Array.from(new Set(stepMissing.map((key) => missingLabel(text, key, payerType)))).map((label) => (
+            {/* Each item leads to its field (QA 2026-10-22): a long step no longer has to be searched. */}
+            {Array.from(new Map(stepMissing.map((key) => [missingLabel(text, key, payerType), key] as const))).map(([label, key]) => (
               <li key={label} className="break-words">
-                {label}
+                <button
+                  type="button"
+                  className="text-left align-top underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid="payer-link-missing-item"
+                  onClick={() => revealPayerField(key)}
+                >
+                  {label}
+                </button>
               </li>
             ))}
           </ul>
@@ -613,4 +621,26 @@ function DraftForm({
       <p className="text-xs text-muted-foreground">{text.autosaveNote}</p>
     </fieldset>
   );
+}
+
+/** The element a missing key is answered in: the field, a group's label, or an upload's button. */
+const UPLOAD_IDS: Record<string, string> = {
+  id_document_upload: "payer-link-identity-files",
+  funds_proof_upload: "payer-link-funds-files",
+};
+
+function revealPayerField(key: string) {
+  const id = UPLOAD_IDS[key] ?? `payer-link-${key}`;
+  const label = document.getElementById(`${id}-label`);
+  const target = document.getElementById(id) ?? label;
+  if (!target) return;
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  (label ?? target).scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+  // An upload's input is hidden: its button gets the focus; a group's label its first choice.
+  const focusable = target instanceof HTMLInputElement && target.type === "file"
+    ? target.parentElement?.querySelector<HTMLElement>("button")
+    : target.matches("input, select, textarea, button, [tabindex]")
+      ? target
+      : target.parentElement?.querySelector<HTMLElement>("input, select, textarea, button");
+  focusable?.focus({ preventScroll: true });
 }

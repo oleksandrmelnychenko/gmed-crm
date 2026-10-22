@@ -20,7 +20,7 @@ import {
   openFollowUpBlocks,
 } from "./lead-request-follow-up-model";
 
-const payer = (payer_kind: "self" | "third_party"): LeadRequestPayer => ({
+const payer = (payer_kind: LeadRequestPayer["payer_kind"]): LeadRequestPayer => ({
   payer_kind,
   first_name: null,
   last_name: null,
@@ -89,6 +89,10 @@ describe("follow-up blocks", () => {
     const noFunds = { required: true, blocks: ["A"], missing: { A: ["occupation"] }, answered_at: null, funds_asked: false };
     expect(blockAAsks({ payer: payer("self"), follow_up: noFunds })).toMatchObject({ funds: false, funds_proof: false, occupation: true, sector: true });
     expect(blockAAsks({ payer: payer("self"), follow_up: { ...noFunds, funds_asked: true } })).toMatchObject({ funds: true, funds_proof: true });
+    // A paying parent states the funds in the payer questionnaire, even with the enhanced check.
+    expect(blockAAsks({ payer: payer("representative"), follow_up: { ...noFunds, funds_asked: true } })).toEqual({
+      funds: false, funds_proof: false, payer_funds: false, payer_states_funds: false, occupation: false, sector: true,
+    });
     // Even stale server missing keys never ask the lead for a third party's funds.
     const asked = { required: true, blocks: ["A"], missing: { A: ["payer_funds_source", "sector"] }, answered_at: null };
     expect(blockAAsks({ payer: payer("third_party"), follow_up: asked })).toMatchObject({ payer_funds: false, payer_states_funds: true, funds: false, funds_proof: false });

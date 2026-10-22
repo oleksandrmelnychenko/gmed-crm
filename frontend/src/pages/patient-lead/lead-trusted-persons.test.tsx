@@ -4,7 +4,7 @@ import { CONSENT_RECIPIENT_SCOPES, cabinetScopeSummary, checkedScopeCodes, norma
 import { CONSENT_RECIPIENT_RELATIONS, NO_CONSENT_FORM_CHOICES, type ConsentRecipient, type LeadRequest } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { TrustedPersonsEditor, TrustedPersonsList } from "./lead-trusted-persons-editor";
-import { disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, personScope, recipientDrafts, recipientsToSend, requestForLead, samePersons, storedTrustedPersons, trustedPersonsProblem, type RecipientDraft } from "./lead-trusted-persons-model";
+import { contactValid, disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, personScope, recipientDrafts, recipientProblems, recipientsToSend, requestForLead, samePersons, storedTrustedPersons, trustedPersonsProblem, type RecipientDraft } from "./lead-trusted-persons-model";
 import { disclosureConsentText, disclosureSubject, trustedPersonsText } from "./lead-trusted-persons-text";
 
 const stored = { name: "Eva Muster", relation: "friend", contact: "", scope_codes: ["medical"] } satisfies ConsentRecipient;
@@ -152,8 +152,31 @@ describe("trusted persons independent of consent", () => {
   it("limits adding to five and disables editing during a save", () => {
     const html = renderToStaticMarkup(<TrustedPersonsEditor persons={Array.from({ length: 5 }, () => friend)} lang="en" disabled onChange={() => undefined} />);
     expect(html).not.toContain("trusted-person-add");
+    // The missing button is explained.
+    expect(html).toContain("You can name up to 5 people.");
     expect(html.match(/data-testid="trusted-person-editor"/g)).toHaveLength(5);
     expect(html).toContain('disabled=""');
+  });
+
+  it("accepts a phone number or an e-mail address as the contact, nothing else", () => {
+    for (const good of ["", "+49 30 1234567", "(030) 123-456", "eva.muster@example.com"]) expect(contactValid(good), good).toBe(true);
+    for (const bad of ["abc", "12345", "über Tochter", "eva@", "eva@example", "+49 30 abc 1234"]) expect(contactValid(bad), bad).toBe(false);
+    expect(trustedPersonsProblem([{ ...friend, contact: "abc" }])).toBe("invalid");
+    expect(recipientProblems({ name: "", relation: "", contact: "abc", scope: "", scopeCodes: [] })).toEqual(["name", "relation", "contact", "scope"]);
+    expect(recipientProblems({ ...friend, contact: "+49 151 000000" })).toEqual([]);
+  });
+
+  it("marks every missing entry at its field once the step could not be saved", () => {
+    const blank = { name: "", relation: "", contact: "", scope: "", scopeCodes: [] } satisfies RecipientDraft;
+    const quiet = renderToStaticMarkup(<TrustedPersonsEditor persons={[blank]} lang="de" onChange={() => undefined} />);
+    expect(quiet).not.toContain('aria-invalid="true"');
+    const html = renderToStaticMarkup(<TrustedPersonsEditor persons={[{ ...blank, contact: "abc" }]} lang="de" showErrors onChange={() => undefined} />);
+    const text = trustedPersonsText("de");
+    for (const message of [text.nameRequired, text.relationRequired, text.contactInvalid, text.scopeRequired]) expect(html).toContain(message);
+    expect(html.match(/aria-invalid="true"/g)?.length).toBeGreaterThanOrEqual(3);
+    // An empty extra row beside a complete person is no person: nothing is marked there.
+    const extra = renderToStaticMarkup(<TrustedPersonsEditor persons={[friend, blank]} lang="de" showErrors onChange={() => undefined} />);
+    expect(extra).not.toContain(text.nameRequired);
   });
 });
 
