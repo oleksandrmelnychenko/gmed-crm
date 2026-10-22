@@ -1326,8 +1326,19 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     assert_eq!(adopted["country"], "AT");
     assert_eq!(adopted["relationship_kind"], "other");
     assert_eq!(adopted["relationship"], "Onkel");
-    assert_eq!(adopted["source_of_funds"], "savings");
-    assert_eq!(adopted["source_of_funds_document_id"], proof.to_string());
+    // One source per person (owner decision 2026-10-23): the payer's funds
+    // are the sent statement, never copied onto the declaration.
+    assert!(adopted["source_of_funds"].is_null(), "{declaration}");
+    assert!(adopted["source_of_funds_document_id"].is_null());
+    let funds = &declaration["funds"];
+    assert_eq!(funds["relevant"], "payer", "{declaration}");
+    assert_eq!(funds["payer"]["sources"], json!(["savings"]));
+    assert_eq!(funds["payer"]["entered_by"], "payer");
+    assert_eq!(funds["payer"]["stated"], true);
+    assert_eq!(
+        funds["payer"]["proof_documents"][0]["id"],
+        proof.to_string()
+    );
     assert_eq!(adopted["email"], "viktor.zahler@example.com");
     assert_eq!(
         adopted["payment_method"], "bank_transfer",

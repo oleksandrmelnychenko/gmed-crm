@@ -12,9 +12,11 @@ import {
   payerFormMissing,
   payerKindOptions,
   payerReasonLabel,
+  type LeadFunds,
   type PayerDeclaration,
   type PayerDeclarationStatus,
   type PayerRepresentative,
+  type PersonFunds,
 } from "../model/lead-payer";
 import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
 
@@ -400,16 +402,28 @@ describe("LeadPayerDeclarationSection: the self-payer's source of funds from the
       ...patch,
     })!;
 
+  const personFunds = (patch: Partial<PersonFunds>): PersonFunds => ({
+    person: "patient",
+    sources: [],
+    description: null,
+    entered_by: null,
+    stated: false,
+    text: null,
+    proof_documents: [],
+    ...patch,
+  });
+
   function renderWithDetails(
     declaration: PayerDeclaration,
     enhancedDetails: LeadPortalEnhancedDetails | null,
     translate: (ru: string, de: string) => string = tx,
+    funds?: LeadFunds,
   ) {
     return renderToStaticMarkup(
       <LocalizationProvider dateAdapter={AdapterDayjs}>
         <LeadPayerDeclarationSection
           leadId="lead-1"
-          data={{ declaration, status: status({ complete: true, agency_blocking: [] }) }}
+          data={{ declaration, status: status({ complete: true, agency_blocking: [] }), funds }}
           loading={false}
           loadError={null}
           disabled={false}
@@ -431,39 +445,98 @@ describe("LeadPayerDeclarationSection: the self-payer's source of funds from the
     return html.slice(start, html.indexOf('data-testid="lead-payer-invoice-recipient"', start));
   }
 
-  it("shows the lead's choice, the words and the proof read-only", () => {
-    const html = renderWithDetails(stated, details());
-    const shown = block(html);
-    expect(shown).toContain("Источник средств — указал пациент в кабинете");
-    expect(shown).toContain("Другое");
-    expect(shown).toContain("Stipendium der Stiftung");
+  /** The markup of the patient's own record. */
+  function ownFunds(html: string): string {
+    const start = html.indexOf('data-testid="lead-payer-own-funds"');
+    if (start < 0) return "";
+    return html.slice(start, html.indexOf("lead-payer-self-funds", start) > 0 ? html.indexOf("lead-payer-self-funds", start) : undefined);
+  }
+
+  it("edits the lead's own record, with who entered it (one source per person, 2026-10-23)", () => {
+    const funds: LeadFunds = {
+      payer_pays: false,
+      relevant: "patient",
+      patient: personFunds({ sources: ["other"], description: "Stipendium der Stiftung", entered_by: "lead", stated: true }),
+      payer: null,
+      payer_stated_by_patient: null,
+    };
+    const html = renderWithDetails(stated, details(), tx, funds);
+    const own = ownFunds(html);
+    expect(own).toContain("Указал пациент в кабинете");
+    expect(own).toContain('aria-label="Источник средств пациента"');
+    expect(own).toContain('value="other"');
+    expect(own).toContain(">Другое<");
+    expect(own).toContain("Stipendium der Stiftung");
+    // One field: staff's own choice of the source is not offered for the patient.
+    expect(html).not.toContain('aria-label="Источник средств"');
+    const byStaff = ownFunds(renderWithDetails(
+      { ...stated, self_funds_entered_by: "staff" },
+      details(),
+      de,
+      { ...funds, patient: { ...funds.patient, entered_by: "staff" } },
+    ));
+    expect(byStaff).toContain("Von GMED erfasst");
+    expect(byStaff).toContain("Herkunft der Mittel des Patienten");
+  });
+
+  it("shows the lead's proof read-only beside the record", () => {
+    const shown = block(renderWithDetails(stated, details()));
+    expect(shown).toContain("Подтверждение источника средств — загрузил пациент в кабинете");
     expect(shown).toContain("Подтверждение · необязательно");
     expect(shown).toContain("kontoauszug.pdf · 07.10.2026 · просмотрен");
-    // Nothing of it is an input.
     expect(shown).not.toMatch(/<(input|select|textarea)\b/);
     const german = block(
       renderWithDetails(stated, details({ asks: { funds: true, funds_proof: true }, funds_proof_documents: [] }, { funds_source: "income" }), de),
     );
-    expect(german).toContain("Herkunft der Mittel – Angaben des Patienten im Portal");
-    expect(german).toContain("Einkommen");
+    expect(german).toContain("Nachweis der Herkunft der Mittel – vom Patienten im Portal hochgeladen");
     expect(german).toContain("Nachweis · erforderlich (verstärkte Prüfung)");
     expect(german).toContain("nicht hochgeladen");
   });
 
-  it("does not ask staff for a source of their own once the lead stated it", () => {
+  it("requires the patient's record only while it is not stated", () => {
     const html = renderWithDetails(stated, details());
-    const select = html.slice(0, html.indexOf('aria-label="Источник средств"'));
-    const label = select.slice(select.lastIndexOf("<label"));
-    expect(label).not.toContain("text-destructive");
+    const select = html.slice(0, html.indexOf('aria-label="Источник средств пациента"'));
+    expect(select.slice(select.lastIndexOf("<label"))).not.toContain("payer_source_of_funds_missing");
     const open = renderWithDetails({ ...stated, self_funds_source: null }, details({}, { funds_source: null }));
-    const openSelect = open.slice(0, open.indexOf('aria-label="Источник средств"'));
-    expect(openSelect.slice(openSelect.lastIndexOf("<label"))).toContain("text-destructive");
+    expect(open).toContain("Укажите источник средств");
   });
 
-  it("shows the answers without files while the portal state is not loaded, and nothing for a third party", () => {
+  it("shows the payer's own statement read-only and the patient's words only as context", () => {
+    const viktor: PayerDeclaration = {
+      ...stated,
+      payer_kind: "third_party",
+      payer_type: "person",
+      first_name: "Viktor",
+      last_name: "Zahler",
+      self_funds_source: null,
+      self_funds_description: null,
+      payer_funds_source_stated: "savings",
+      payer_funds_description_stated: "Ersparnisse",
+    };
+    const funds: LeadFunds = {
+      payer_pays: true,
+      relevant: "payer",
+      patient: personFunds({}),
+      payer: personFunds({ person: "payer", sources: ["employment"], description: "Lehrer", entered_by: "payer", stated: true }),
+      payer_stated_by_patient: personFunds({ sources: ["savings"], description: "Ersparnisse", entered_by: "lead", stated: true }),
+    };
+    const html = renderWithDetails(viktor, null, tx, funds);
+    const payer = html.slice(html.indexOf('data-testid="lead-payer-payer-funds"'));
+    expect(payer).toContain("Указал плательщик");
+    expect(payer).toContain("Заработная плата / работа по найму");
+    expect(payer).toContain("Lehrer");
+    expect(html).not.toContain('aria-label="Источник средств"');
+    expect(html).toContain('data-testid="lead-payer-funds-patient-statement"');
+    expect(html).toContain("Со слов пациента");
+    // Until the payer answered, staff's entry stands in.
+    const open = renderWithDetails(viktor, null, tx, { ...funds, payer: personFunds({ person: "payer" }) });
+    expect(open).toContain('aria-label="Источник средств"');
+    expect(open).toContain("пока плательщик не ответил");
+  });
+
+  it("shows no proof block without files while the portal state is not loaded, and nothing for a third party", () => {
     const withoutIntake = block(renderWithDetails(stated, null));
-    expect(withoutIntake).toContain("Другое");
-    expect(withoutIntake).not.toContain("lead-payer-self-funds-proof");
+    expect(withoutIntake).toBe("");
     const thirdParty = renderWithDetails({ ...stated, payer_kind: "third_party", self_funds_source: null }, details());
     expect(thirdParty).not.toContain('data-testid="lead-payer-self-funds"');
     // Nothing stated and no proof asked: no block, no "not stated yet" label (owner 2026-10-19).

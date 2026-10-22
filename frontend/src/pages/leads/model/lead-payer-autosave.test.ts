@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_PAYER_DECLARATION_FORM, payerDeclarationPayload, type PayerDeclarationForm } from "./lead-payer";
 import { createPayerAutosave, createPayerAutosaveRegistry, type PayerAutosaveState } from "./lead-payer-autosave";
 
-const initial: PayerDeclarationForm = { ...EMPTY_PAYER_DECLARATION_FORM, kind: "self", actsOnOwnAccount: true };
+// Staff edit the patient's own record of the funds (one source per person, 2026-10-23).
+const initial: PayerDeclarationForm = { ...EMPTY_PAYER_DECLARATION_FORM, kind: "self", actsOnOwnAccount: true, selfFundsTouched: true };
 const draft = (patch: Partial<PayerDeclarationForm> = {}) => ({ ...initial, ...patch });
 
 function deferred() {
@@ -49,16 +50,16 @@ describe("payer declaration autosave", () => {
     const states: PayerAutosaveState[] = [];
     const queue = createPayerAutosave(initial, (state) => states.push(state));
     queue.setEnabled(true);
-    queue.schedule(draft({ sourceOfFundsDescription: "First" }), save);
+    queue.schedule(draft({ selfFundsDescription: "First" }), save);
     await vi.advanceTimersByTimeAsync(600);
-    queue.schedule(draft({ sourceOfFundsDescription: "Intermediate" }), save);
-    queue.schedule(draft({ sourceOfFundsDescription: "Latest" }), save);
+    queue.schedule(draft({ selfFundsDescription: "Intermediate" }), save);
+    queue.schedule(draft({ selfFundsDescription: "Latest" }), save);
     await vi.advanceTimersByTimeAsync(600);
     expect(save).toHaveBeenCalledOnce();
     first.resolve();
     await vi.advanceTimersByTimeAsync(0);
     expect(save).toHaveBeenCalledTimes(2);
-    expect(save.mock.calls[1][0].sourceOfFundsDescription).toBe("Latest");
+    expect(save.mock.calls[1][0].selfFundsDescription).toBe("Latest");
     expect(states.at(-1)).toEqual({ status: "saving", dirty: true, error: null });
     second.resolve();
     await vi.advanceTimersByTimeAsync(0);
@@ -72,13 +73,13 @@ describe("payer declaration autosave", () => {
     const onState = vi.fn();
     const queue = createPayerAutosave(initial, onState);
     queue.setEnabled(true);
-    queue.schedule(draft({ sourceOfFundsDescription: "Last keystroke" }), oldLeadSave);
+    queue.schedule(draft({ selfFundsDescription: "Last keystroke" }), oldLeadSave);
     const count = onState.mock.calls.length;
     await queue.dispose(true);
     expect(oldLeadSave).toHaveBeenCalledOnce();
-    expect(oldLeadSave.mock.calls[0]).toEqual([expect.objectContaining({ sourceOfFundsDescription: "Last keystroke" })]);
+    expect(oldLeadSave.mock.calls[0]).toEqual([expect.objectContaining({ selfFundsDescription: "Last keystroke" })]);
     expect(onState).toHaveBeenCalledTimes(count);
-    queue.schedule(draft({ sourceOfFundsDescription: "Other lead" }), otherLeadSave);
+    queue.schedule(draft({ selfFundsDescription: "Other lead" }), otherLeadSave);
     await vi.advanceTimersByTimeAsync(1000);
     expect(otherLeadSave).not.toHaveBeenCalled();
   });
@@ -90,15 +91,15 @@ describe("payer declaration autosave", () => {
       .mockResolvedValue(undefined);
     const queue = createPayerAutosave(initial, vi.fn());
     queue.setEnabled(true);
-    queue.schedule(draft({ sourceOfFundsDescription: "First" }), save);
+    queue.schedule(draft({ selfFundsDescription: "First" }), save);
     await vi.advanceTimersByTimeAsync(600);
-    queue.schedule(draft({ sourceOfFundsDescription: "Final" }), save);
+    queue.schedule(draft({ selfFundsDescription: "Final" }), save);
     const finishing = queue.dispose(true);
     expect(save).toHaveBeenCalledOnce();
     first.resolve();
     await finishing;
     expect(save).toHaveBeenCalledTimes(2);
-    expect(save.mock.calls[1][0].sourceOfFundsDescription).toBe("Final");
+    expect(save.mock.calls[1][0].selfFundsDescription).toBe("Final");
   });
 
   it("persists a revert to the original value after an earlier write is already in flight", async () => {
@@ -142,9 +143,9 @@ describe("payer declaration autosave", () => {
     const onState = vi.fn();
     const queue = createPayerAutosave(initial, onState);
     queue.setEnabled(true);
-    queue.schedule(draft({ sourceOfFundsDescription: "First" }), save);
+    queue.schedule(draft({ selfFundsDescription: "First" }), save);
     await vi.advanceTimersByTimeAsync(600);
-    queue.schedule(draft({ sourceOfFundsDescription: "Latest" }), save);
+    queue.schedule(draft({ selfFundsDescription: "Latest" }), save);
     first.reject(error);
     await vi.advanceTimersByTimeAsync(5000);
     expect(save).toHaveBeenCalledOnce();
@@ -152,7 +153,7 @@ describe("payer declaration autosave", () => {
     queue.retry();
     await vi.advanceTimersByTimeAsync(0);
     expect(save).toHaveBeenCalledTimes(2);
-    expect(save.mock.calls[1][0].sourceOfFundsDescription).toBe("Latest");
+    expect(save.mock.calls[1][0].selfFundsDescription).toBe("Latest");
     expect(onState).toHaveBeenLastCalledWith({ status: "saved", dirty: false, error: null });
     await queue.dispose(false);
   });
@@ -202,7 +203,7 @@ describe("payer declaration autosave", () => {
     const queue = createPayerAutosave(initial, vi.fn());
     const unregister = registry.register("lead-1", () => queue.flush());
     queue.setEnabled(true);
-    queue.schedule(draft({ sourceOfFundsDescription: "Before the next step" }), save);
+    queue.schedule(draft({ selfFundsDescription: "Before the next step" }), save);
     // The parent must flush BEFORE busy disables the child, not in its cleanup.
     const transition = (async () => {
       if (!(await registry.flush("lead-1"))) return;
@@ -215,11 +216,11 @@ describe("payer declaration autosave", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(save).toHaveBeenCalledOnce();
     expect(setParentBusy).not.toHaveBeenCalled();
-    queue.schedule(draft({ sourceOfFundsDescription: "Latest while waiting" }), save);
+    queue.schedule(draft({ selfFundsDescription: "Latest while waiting" }), save);
     first.resolve();
     await vi.advanceTimersByTimeAsync(0);
     expect(save).toHaveBeenCalledTimes(2);
-    expect(save.mock.calls[1][0].sourceOfFundsDescription).toBe("Latest while waiting");
+    expect(save.mock.calls[1][0].selfFundsDescription).toBe("Latest while waiting");
     expect(navigate).not.toHaveBeenCalled();
     expect(setParentBusy).not.toHaveBeenCalled();
     last.resolve();

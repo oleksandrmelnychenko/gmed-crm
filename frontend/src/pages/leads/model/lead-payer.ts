@@ -93,14 +93,16 @@ export type PayerDeclaration = {
   source_of_funds_description: string | null;
   source_of_funds_document_id: string | null;
   /**
-   * The self-paying patient's own statement in the cabinet's extra step
-   * (two-stage form 2026-10-07): one choice of the stated sources (income,
-   * savings, asset_sale, inheritance_gift, other) and the description.
-   * Read-only for staff; it counts as the source of funds of the
-   * declaration. Absent on an older server.
+   * The self-paying patient's source of funds — the one record of the
+   * patient's funds (owner decision 2026-10-23): one choice of the stated
+   * sources (income, savings, asset_sale, inheritance_gift, other) and the
+   * description. The lead answers it in the cabinet; staff correct the same
+   * record in the AML form. Absent on an older server.
    */
   self_funds_source?: string | null;
   self_funds_description?: string | null;
+  /** Who wrote the patient's funds last: the lead (cabinet) or staff (AML form). */
+  self_funds_entered_by?: "lead" | "staff" | null;
   /**
    * What the patient knows of a third party's funds ("soweit bekannt"): the
    * patient's statement, never the payer's declaration. Read-only.
@@ -231,10 +233,46 @@ export type PayerDeclarationStatus = {
   payer_package?: PayerPackageSummary | null;
 };
 
+/** Who wrote the funds of a person (server `lead_funds`). */
+export type FundsEnteredBy = "lead" | "staff" | "payer";
+
+/** The effective source of funds of one person (server `lead_funds::PersonFunds`). */
+export type PersonFunds = {
+  person: "patient" | "payer";
+  sources: string[];
+  description: string | null;
+  entered_by: FundsEnteredBy | null;
+  stated: boolean;
+  /** The German line the documents print; null while nothing is stated. */
+  text: string | null;
+  proof_documents: { id: string; file_name: string | null; uploaded_at: string | null }[];
+};
+
+/**
+ * One source of the source of funds per person (owner decision 2026-10-23):
+ * the patient's record, the payer's sent statement (staff's entry until the
+ * payer answers) and what the patient said of the payer's funds (context).
+ */
+export type LeadFunds = {
+  payer_pays: boolean;
+  relevant: "patient" | "payer";
+  patient: PersonFunds;
+  payer: PersonFunds | null;
+  payer_stated_by_patient: PersonFunds | null;
+};
+
 export type PayerDeclarationResponse = {
   declaration: PayerDeclaration | null;
   status: PayerDeclarationStatus;
+  /** Absent on an older server; null without a declaration. */
+  funds?: LeadFunds | null;
 };
+
+/** The funds of the person whose funds are asked (the payer when somebody else pays). */
+export function relevantFunds(funds: LeadFunds | null | undefined): PersonFunds | null {
+  if (!funds) return null;
+  return funds.relevant === "payer" ? funds.payer : funds.patient;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -349,10 +387,18 @@ export type PayerDeclarationForm = {
   sourceOfFundsDescription: string;
   sourceOfFundsDocumentId: string;
   /**
-   * The self-paying lead stated the source of funds in the cabinet (read-only,
-   * never sent): staff need not choose one of their own.
+   * The self-paying patient's funds (one choice of [`STATED_FUNDS_SOURCES`]
+   * and the words): the lead's record, which staff correct in the AML form
+   * (owner decision 2026-10-23).
    */
-  leadSelfFundsStated: boolean;
+  selfFundsSource: string;
+  selfFundsDescription: string;
+  /**
+   * Staff changed the patient's funds in this form: only then are the two
+   * keys sent, so a save of another field never overwrites a newer answer of
+   * the lead.
+   */
+  selfFundsTouched: boolean;
   firstName: string;
   lastName: string;
   birthDate: string;
@@ -411,7 +457,9 @@ export const EMPTY_PAYER_DECLARATION_FORM: PayerDeclarationForm = {
   sourceOfFunds: "",
   sourceOfFundsDescription: "",
   sourceOfFundsDocumentId: "",
-  leadSelfFundsStated: false,
+  selfFundsSource: "",
+  selfFundsDescription: "",
+  selfFundsTouched: false,
   firstName: "",
   lastName: "",
   birthDate: "",
@@ -503,7 +551,9 @@ export function payerDeclarationToForm(
     sourceOfFunds: isSourceOfFunds(declaration.source_of_funds) ? declaration.source_of_funds : "",
     sourceOfFundsDescription: declaration.source_of_funds_description ?? "",
     sourceOfFundsDocumentId: declaration.source_of_funds_document_id ?? "",
-    leadSelfFundsStated: leadSelfFundsStated(declaration),
+    selfFundsSource: declaration.payer_kind === "self" ? declaration.self_funds_source?.trim() ?? "" : "",
+    selfFundsDescription: declaration.payer_kind === "self" ? declaration.self_funds_description ?? "" : "",
+    selfFundsTouched: false,
     firstName: declaration.first_name ?? "",
     lastName: declaration.last_name ?? "",
     birthDate: declaration.date_of_birth ?? "",
@@ -552,14 +602,6 @@ export function patientDeclarationLeadId(
   return patient?.source_lead_id?.trim() || null;
 }
 
-/** The self-payer's own statement in the cabinet, where it names a category of the declaration. */
-const STATED_TO_DECLARED_SOURCE: Partial<Record<string, SourceOfFunds>> = {
-  savings: "savings",
-  asset_sale: "asset_sale",
-  inheritance_gift: "inheritance_gift",
-  other: "other",
-};
-
 /**
  * "Кто платит" of a repeat intake, prefilled from the declaration fixed when
  * the patient's last request was converted (QA B-18, 2026-10-11): who pays,
@@ -586,18 +628,17 @@ export function payerDeclarationPrefillForm(
   if (form.kind === "representative") {
     form.representativeId = matchingRepresentativeId(form.representativeId, representatives.previous, representatives.current ?? []);
   }
-  const stated = declaration.payer_kind === "self" ? declaration.self_funds_source?.trim() ?? "" : "";
-  const statedSource = STATED_TO_DECLARED_SOURCE[stated];
+  // The earlier lead's answer on the patient's own funds is not this lead's:
+  // staff check it, and the first save writes it as entered by staff (one
+  // source per person, 2026-10-23). Staff's own choice of before is history.
+  const ownFunds = form.kind === "self" && Boolean(form.selfFundsSource || form.selfFundsDescription.trim());
   return {
     ...form,
     payerInformed: false,
     sourceOfFundsDocumentId: "",
-    // The earlier lead's cabinet answer is not this lead's: it becomes the
-    // staff answer where it maps onto a category.
-    leadSelfFundsStated: false,
-    sourceOfFunds: form.sourceOfFunds || statedSource || "",
-    sourceOfFundsDescription:
-      form.sourceOfFundsDescription || (statedSource ? declaration.self_funds_description?.trim() ?? "" : ""),
+    sourceOfFunds: form.kind === "self" ? "" : form.sourceOfFunds,
+    sourceOfFundsDescription: form.kind === "self" ? "" : form.sourceOfFundsDescription,
+    selfFundsTouched: ownFunds,
   };
 }
 
@@ -737,15 +778,24 @@ export function payerDeclarationPayload(form: PayerDeclarationForm) {
   const representative: { payer_representative_id?: string | null } = form.kind === "representative"
     ? { payer_representative_id: form.representativeId || null }
     : {};
+  // One source per person (owner decision 2026-10-23): while the patient
+  // pays, staff write the patient's own record (only once changed here);
+  // staff's own choice stands in only for a payer who has not answered.
+  const ownFunds = form.kind === "self" || form.kind === "";
+  const selfFunds: { self_funds_source?: string | null; self_funds_description?: string | null } =
+    ownFunds && form.selfFundsTouched
+      ? { self_funds_source: form.selfFundsSource || null, self_funds_description: text(form.selfFundsDescription) }
+      : {};
   return {
     payer_kind: form.kind || "self",
     ...representative,
     ...ownAccount,
     beneficial_owner_name: namesOwner ? text(form.beneficialOwnerName) : null,
     beneficial_owner_note: namesOwner ? text(form.beneficialOwnerNote) : null,
-    source_of_funds: form.sourceOfFunds || null,
-    source_of_funds_description: text(form.sourceOfFundsDescription),
+    source_of_funds: ownFunds ? null : form.sourceOfFunds || null,
+    source_of_funds_description: ownFunds ? null : text(form.sourceOfFundsDescription),
     source_of_funds_document_id: form.sourceOfFundsDocumentId || null,
+    ...selfFunds,
     first_name: person ? text(form.firstName) : null,
     last_name: person ? text(form.lastName) : null,
     date_of_birth: person ? form.birthDate || null : null,
@@ -772,7 +822,21 @@ export function withPayerDeclarationField<K extends keyof PayerDeclarationForm>(
   field: K,
   value: PayerDeclarationForm[K],
 ): PayerDeclarationForm {
-  const next = { ...form, [field]: value };
+  let next = { ...form, [field]: value };
+  if ((field === "selfFundsSource" || field === "selfFundsDescription") && value !== form[field]) {
+    next.selfFundsTouched = true;
+  }
+  // Another kind of payer: the funds entered for the person before belong
+  // to that person (one source per person, 2026-10-23), never to the next.
+  if (field === "kind" && value !== form.kind) {
+    next = {
+      ...next,
+      sourceOfFunds: "",
+      sourceOfFundsDescription: "",
+      sourceOfFundsDocumentId: "",
+      selfFundsTouched: false,
+    };
+  }
   const identity = (draft: PayerDeclarationForm) => {
     const body = payerDeclarationPayload(draft);
     return JSON.stringify([
@@ -1137,6 +1201,8 @@ export function payerFormMissing(
   payingParent = false,
   /** The patient is a minor: a stored "patient pays himself" of before is no answer (2026-10-19). */
   minor = false,
+  /** The payer sent its own statement of the funds (server `funds.payer.entered_by === "payer"`). */
+  payerAnsweredFunds = false,
 ): string[] {
   const missing: string[] = [];
   if (!form.kind) return ["payer_declaration_missing"];
@@ -1144,10 +1210,14 @@ export function payerFormMissing(
   if (form.actsOnOwnAccount === false && !form.beneficialOwnerName.trim()) {
     missing.push("payer_beneficial_owner_missing");
   }
-  const staffStated = Boolean(form.sourceOfFunds)
-    && (form.sourceOfFunds !== "other" || Boolean(form.sourceOfFundsDescription.trim()));
-  // A self-paying lead who stated the source in the cabinet has stated it.
-  if (fundsRequired && !staffStated && !(form.kind === "self" && form.leadSelfFundsStated)) {
+  // One source per person (2026-10-23): the patient's own record while the
+  // patient pays, else the payer's statement — staff's entry until then.
+  const stated = form.kind === "self"
+    ? Boolean(form.selfFundsSource)
+      && (form.selfFundsSource !== "other" || Boolean(form.selfFundsDescription.trim()))
+    : payerAnsweredFunds || (Boolean(form.sourceOfFunds)
+      && (form.sourceOfFunds !== "other" || Boolean(form.sourceOfFundsDescription.trim())));
+  if (fundsRequired && !stated) {
     missing.push("payer_source_of_funds_missing");
   }
   if (form.kind === "third_party") {

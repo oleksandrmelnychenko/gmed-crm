@@ -1487,11 +1487,22 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         Some(json!({
             "payer_kind": "self",
             "acts_on_own_account": true,
-            "source_of_funds": "savings"
+            "self_funds_source": "savings"
         })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // Staff write the patient's one record of the funds (2026-10-23).
+    assert_eq!(
+        body["declaration"]["self_funds_source"], "savings",
+        "{body}"
+    );
+    assert_eq!(
+        body["declaration"]["self_funds_entered_by"], "staff",
+        "{body}"
+    );
+    assert!(body["declaration"]["source_of_funds"].is_null(), "{body}");
+    assert_eq!(body["funds"]["patient"]["entered_by"], "staff", "{body}");
 
     // Another person's request does not exist for this login.
     let (status, _) = json_request(
@@ -1644,7 +1655,15 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
     assert_eq!(stored["payer_kind"], "third_party", "{declaration}");
     assert_eq!(stored["last_name"], "Zahler", "{declaration}");
     assert_eq!(stored["citizenships"], json!(["UA", "DE"]), "{declaration}");
-    assert_eq!(stored["source_of_funds"], "savings", "{declaration}");
+    // The patient's own funds go with a third party (data minimisation); the
+    // payer states its own (one source per person, 2026-10-23).
+    assert!(stored["self_funds_source"].is_null(), "{declaration}");
+    assert!(stored["source_of_funds"].is_null(), "{declaration}");
+    assert_eq!(declaration["funds"]["relevant"], "payer", "{declaration}");
+    assert_eq!(
+        declaration["funds"]["payer"]["stated"], false,
+        "{declaration}"
+    );
     assert_eq!(stored["acts_on_own_account"], true, "{declaration}");
     // Staff answered the own-account question; the cabinet shows that answer.
     assert_eq!(stored["own_account_answered"], true, "{declaration}");
@@ -1738,9 +1757,12 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         "cost_estimate_consent_required",
         // Server-computed: the payer link locked the organisation details.
         "organisation_details_locked",
-        // The lead's own answers of the extra step: read-only for staff.
+        // The lead's own answers of the extra step; staff write the
+        // patient's funds only from the AML form (2026-10-23), and who
+        // entered them is the server's.
         "self_funds_source",
         "self_funds_description",
+        "self_funds_entered_by",
         "payer_funds_source_stated",
         "payer_funds_description_stated",
     ] {
@@ -1825,8 +1847,8 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         declaration["declaration"]["contact_consent_at"].is_null(),
         "the consent was given for the payer named before: {declaration}"
     );
-    assert_eq!(
-        declaration["declaration"]["source_of_funds"], "savings",
+    assert!(
+        declaration["declaration"]["source_of_funds"].is_null(),
         "{declaration}"
     );
 

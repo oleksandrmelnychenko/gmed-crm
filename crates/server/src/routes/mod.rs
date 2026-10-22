@@ -35,6 +35,7 @@ pub mod invoice_imports;
 pub mod invoices;
 pub mod key_rotation;
 pub mod lead_enhanced_check;
+pub mod lead_funds;
 pub mod lead_identification;
 pub mod lead_invoice_recipient;
 pub mod lead_payer;

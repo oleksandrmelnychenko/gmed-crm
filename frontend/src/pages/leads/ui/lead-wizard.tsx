@@ -76,8 +76,6 @@ import {
   payerReadinessReasonFields,
   payerReadinessReasonLabels,
   payerReadinessReasonSteps,
-  statedFundsSourceLabel,
-  type PayerDeclarationResponse,
 } from "../model/lead-payer";
 import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
 import { useLeadPayerLink } from "../model/use-lead-payer-link";
@@ -600,17 +598,6 @@ function amlCountryBoxes(
     resident: amlRiskForCountries(lists, country) !== null,
     transaction: amlRiskForCountries(lists, ...citizenships, ...payerCountries) !== null,
   };
-}
-
-/** The source of funds as the AML document prints it: the staff choice with its words, else what the self-paying lead stated in the cabinet. */
-function payerFundsTextOf(data: PayerDeclarationResponse | null | undefined): string {
-  const declaration = data?.declaration;
-  if (!declaration) return "";
-  const source = declaration.source_of_funds ?? declaration.self_funds_source ?? null;
-  if (!source) return "";
-  const words = (declaration.source_of_funds ? declaration.source_of_funds_description : declaration.self_funds_description)?.trim();
-  const label = statedFundsSourceLabel(source, (_ru: string, de: string) => de);
-  return words ? `${label}: ${words}` : label;
 }
 
 /**
@@ -3184,12 +3171,6 @@ export function LeadWizard({
   const payerLink = useLeadPayerLink(open ? leadId : null);
   const canEditPayerLink = useCan("leads.edit");
   const payerCountries = useMemo(() => payerAmlCountries(payer.data), [payer.data]);
-  // The source of funds as the AML document prints it: the staff choice with
-  // its words, else what the self-paying lead stated in the cabinet.
-  const payerFundsText = useMemo(() => payerFundsTextOf(payer.data), [payer.data]);
-  // The latest saved text: the AML form saves the payer fields right before its document.
-  const payerFundsTextRef = useRef(payerFundsText);
-  payerFundsTextRef.current = payerFundsText;
   const reloadPayer = payer.reload;
   useEffect(() => {
     if (lead) void reloadPayer();
@@ -5396,8 +5377,6 @@ export function LeadWizard({
               }
             : {}),
           affectedThirdCountry: current.amlEnhancedDueDiligence.affectedThirdCountry || affectedThirdCountry,
-          // The document prints the payer form's source of funds (owner 2026-10-19: one field).
-          assetOrigin: payer.data ? payerFundsText : current.amlEnhancedDueDiligence.assetOrigin,
           ...(amlRisk ? {
             highRiskCountryResident: boxes.resident,
             highRiskCountryTransaction: boxes.transaction || current.amlEnhancedDueDiligence.highRiskCountryTransaction,
@@ -6170,21 +6149,12 @@ export function LeadWizard({
     setBusy(`generate-${templateId}`);
     setError("");
     try {
-      // The AML form edits the payer's source of funds itself (owner 2026-10-19):
-      // save those fields first and print what they now say — also nothing,
-      // never the hidden prefill from the lead's answers the form does not show.
-      let draftOverride: Draft | undefined;
-      if (templateId === "enhanced_due_diligence") {
-        if (!(await flushPayerAutosave())) return false;
-        draftOverride = {
-          ...draft,
-          amlEnhancedDueDiligence: {
-            ...draft.amlEnhancedDueDiligence,
-            assetOrigin: payer.data ? payerFundsTextRef.current : draft.amlEnhancedDueDiligence.assetOrigin,
-          },
-        };
-      }
-      if (!(await save(templateId === "enhanced_due_diligence" ? "master_data" : "documents", false, draftOverride))) {
+      // The AML form edits the one record of the source of funds itself
+      // (owner decision 2026-10-23): save it first; the server prints the
+      // funds of the person who pays from that record, never a copy kept in
+      // the wizard state.
+      if (templateId === "enhanced_due_diligence" && !(await flushPayerAutosave())) return false;
+      if (!(await save(templateId === "enhanced_due_diligence" ? "master_data" : "documents", false))) {
         return false;
       }
       const targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
@@ -7321,7 +7291,6 @@ ${serviceCommentLines.join("\n")}`
       onSave={async (form) => {
         const targetLeadId = leadId;
         const saved = await payer.save(form);
-        payerFundsTextRef.current = payerFundsTextOf(saved);
         if (hydrated.current !== targetLeadId) return;
         handleAmlCountryChange({ payerCountries: payerAmlCountries(saved) });
         // Another payer or e-mail clears the payment route the payer stated:

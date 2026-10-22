@@ -16697,40 +16697,31 @@ async fn generate_document(
     {
         return response;
     }
-    // "Herkunft der eingesetzten Vermögenswerte" left empty by staff: the
-    // lead's own answer of the cabinet's extra step (choice and words).
+    // "Herkunft der eingesetzten Vermögenswerte": one source per person
+    // (owner decision 2026-10-23, `lead_funds`) — the funds of the person who
+    // pays as the lead, staff or the payer stated them. A text typed into the
+    // form counts only where no payer declaration exists (a patient without
+    // a lead).
     if template.id == "enhanced_due_diligence"
         && let Some(aml) = bindings.aml_enhanced_due_diligence.as_mut()
-        && aml
-            .asset_origin
-            .as_deref()
-            .is_none_or(|value| value.trim().is_empty())
     {
-        let declaration = match state.db.acquire().await {
+        let funds = match state.db.acquire().await {
             Ok(mut conn) => match (lead_id, patient_id) {
                 (Some(lead_uuid), _) => {
-                    super::lead_payer::load_declaration(&mut conn, lead_uuid).await
+                    super::lead_funds::load_lead_funds(&mut conn, lead_uuid).await
                 }
                 (None, Some(patient_uuid)) => {
-                    super::lead_payer::patient_declaration(&mut conn, patient_uuid)
-                        .await
-                        .map(|found| found.map(|found| found.declaration))
+                    super::lead_funds::load_patient_funds(&mut conn, patient_uuid).await
                 }
                 (None, None) => Ok(None),
             },
             Err(error) => Err(error),
         };
-        match declaration {
-            Ok(declaration) => {
-                if let Some(origin) = declaration
-                    .as_ref()
-                    .and_then(super::lead_payer::Declaration::stated_asset_origin)
-                {
-                    aml.asset_origin = Some(origin);
-                }
-            }
+        match funds {
+            Ok(Some(funds)) => aml.asset_origin = funds.relevant().text(),
+            Ok(None) => {}
             Err(error) => {
-                tracing::error!(error = %error, ?patient_id, ?lead_id, "load the lead's source of funds");
+                tracing::error!(error = %error, ?patient_id, ?lead_id, "load the source of funds");
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to load the source of funds",
@@ -25704,6 +25695,10 @@ async fn load_lead_self_disclosure(
         .as_str()
         .filter(|_| patient_side_pays)
         .map(fmt_money_de);
+    // The patient's own funds and what the patient said of a third party's
+    // funds, from the one source per person (owner decision 2026-10-23).
+    let funds = super::lead_funds::lead_funds(declaration.as_ref(), None);
+    let patient_about_payer = funds.payer_stated_by_patient.as_ref();
     Ok(LeadSelfDisclosure {
         submitted_at,
         consent_choice,
@@ -25764,18 +25759,10 @@ async fn load_lead_self_disclosure(
         sanctions_link_name: follow_up.sanctions_link_name,
         sanctions_link_kind: follow_up.sanctions_link_kind,
         sanctions_link_since_extent: follow_up.sanctions_link_since_extent,
-        funds_source: declaration
-            .as_ref()
-            .and_then(|declaration| declaration.self_funds_source.clone()),
-        funds_description: declaration
-            .as_ref()
-            .and_then(|declaration| declaration.self_funds_description.clone()),
-        payer_funds_source: declaration
-            .as_ref()
-            .and_then(|declaration| declaration.payer_funds_source_stated.clone()),
-        payer_funds_description: declaration
-            .as_ref()
-            .and_then(|declaration| declaration.payer_funds_description_stated.clone()),
+        funds_source: funds.patient.sources.first().cloned(),
+        funds_description: funds.patient.description.clone(),
+        payer_funds_source: patient_about_payer.and_then(|stated| stated.sources.first().cloned()),
+        payer_funds_description: patient_about_payer.and_then(|stated| stated.description.clone()),
         payer,
         occupation: statements.occupation,
         sector: statements.sector,
@@ -26394,11 +26381,11 @@ fn build_lead_self_disclosure_pdf(
                 data.funds_description.clone().filter(|_| self_pays),
             ),
             (
-                "Herkunft der Mittel der zahlenden Person (soweit bekannt)",
+                "Herkunft der Mittel der zahlenden Person – Angabe des Patienten (soweit bekannt)",
                 funds_label(data.payer_funds_source.as_ref()).filter(|_| third_party_pays),
             ),
             (
-                "Beschreibung der Mittel der zahlenden Person",
+                "Beschreibung der Mittel der zahlenden Person – Angabe des Patienten",
                 data.payer_funds_description
                     .clone()
                     .filter(|_| third_party_pays),

@@ -1,20 +1,19 @@
 /**
  * The § 15 GwG form (verstärkte Sorgfaltspflichten) takes what the lead and the
- * payer already answered (QA 2026-10-10): the source of funds of the cabinet's
- * follow-up block A (or of the payer's own link), the PEP details of block H,
- * the links to sanctioned persons of block J and the uploaded proofs of the
- * funds. It only fills fields staff left empty and never changes what staff
- * typed. The texts are German: they are printed on the German document.
+ * payer already answered (QA 2026-10-10): the profession of the cabinet's
+ * follow-up block A, the PEP details of block H, the links to sanctioned
+ * persons of block J and the uploaded proofs of the funds. It only fills
+ * fields staff left empty and never changes what staff typed. The texts are
+ * German: they are printed on the German document.
+ *
+ * The source of funds itself is no prefill any more (one source per person,
+ * owner decision 2026-10-23): the form edits the record and the server prints
+ * it from there.
  */
 import type { AssetOriginEvidence } from "@/pages/documents/model/asset-origin-evidence";
 
 import type { LeadGwgIdentification, LeadPortalEnhancedDetails } from "../data/lead-portal-intake-api";
 import type { StaffPayerQuestionnaire } from "../data/lead-payer-link-api";
-import { statedFundsSourceLabel } from "./lead-payer";
-import { payerFundsSourceLabel } from "./lead-payer-link";
-
-/** The German side of the bilingual labels. */
-const de = (_ru: string, german: string) => german;
 
 /** What the lead and the payer answered, as the wizard has it. */
 export type AmlLeadAnswers = {
@@ -28,7 +27,6 @@ export type AmlLeadAnswers = {
 
 /** The fields of the form the answers fill. */
 export type AmlPrefillTarget = {
-  assetOrigin: string;
   assetOriginEvidence: AssetOriginEvidence[];
   additionalContractPartnerInfo: string;
   pepContractPartner: boolean;
@@ -39,7 +37,6 @@ export type AmlPrefillTarget = {
 };
 
 export type AmlLeadPrefill = {
-  assetOrigin: string;
   evidence: AssetOriginEvidence[];
   contractPartnerInfo: string;
   /** The lead said "yes" to "are you a PEP yourself". */
@@ -52,11 +49,6 @@ export type AmlLeadPrefill = {
 const clean = (value: string | null | undefined) => value?.trim() ?? "";
 const joined = (parts: readonly (string | null | undefined)[], separator: string) =>
   parts.map(clean).filter(Boolean).join(separator);
-
-/** "Einkommen – Gehalt als Ingenieur": the sources in words, then the description. */
-function fundsLine(sources: readonly string[], description: string | null | undefined, label: (source: string) => string) {
-  return joined([sources.map(label).join(", "), description], " – ");
-}
 
 function sanctionsLinkKindLabel(kind: string | null | undefined): string {
   switch (kind) {
@@ -88,31 +80,6 @@ export function amlPrefillFromLeadAnswers(input: AmlLeadAnswers): AmlLeadPrefill
   const identification = input.identification ?? null;
   const details = input.enhancedDetails ?? null;
   const payer = sentPayer(input.payer);
-  const statedLabel = (source: string) => statedFundsSourceLabel(source, de);
-  const payerLabel = (source: string) => payerFundsSourceLabel(source, de);
-
-  // Block A: the self-payer's own funds, what the patient knows of a payer's
-  // funds, and the payer's own statement through the link.
-  const assetLines: string[] = [];
-  const ownFunds = details ? fundsLine(details.answers.funds_sources, details.answers.funds_description, statedLabel) : "";
-  if (ownFunds) assetLines.push(`Angabe der Patientin/des Patienten: ${ownFunds}`);
-  if (payer) {
-    const answers = payer.answers;
-    const payerFunds = fundsLine(answers.funds_sources, answers.funds_description, payerLabel);
-    const work = joined([
-      answers.occupation ? `Beruf: ${clean(answers.occupation)}` : "",
-      answers.industry ? `Branche: ${clean(answers.industry)}` : "",
-    ], "; ");
-    const statement = joined([payerFunds, work], "; ");
-    if (statement) {
-      const name = payerName(payer);
-      assetLines.push(`Angabe des Kostenübernehmers${name ? ` (${name})` : ""}: ${statement}`);
-    }
-  }
-  const statedForPayer = details
-    ? fundsLine(details.answers.payer_funds_source ? [details.answers.payer_funds_source] : [], details.answers.payer_funds_description, statedLabel)
-    : "";
-  if (statedForPayer) assetLines.push(`Angabe der Patientin/des Patienten zur zahlenden Person: ${statedForPayer}`);
 
   const contractPartnerInfo = details
     ? joined([
@@ -166,7 +133,6 @@ export function amlPrefillFromLeadAnswers(input: AmlLeadAnswers): AmlLeadPrefill
   }
 
   return {
-    assetOrigin: assetLines.join("\n"),
     evidence,
     contractPartnerInfo,
     pepSelf,
@@ -186,7 +152,6 @@ export function applyAmlLeadPrefill<T extends AmlPrefillTarget>(form: T, prefill
   const fill = (current: string, value: string) => (current.trim() ? current : value || current);
   return {
     ...form,
-    assetOrigin: fill(form.assetOrigin, prefill.assetOrigin),
     assetOriginEvidence: form.assetOriginEvidence.length > 0 ? form.assetOriginEvidence : prefill.evidence,
     additionalContractPartnerInfo: fill(form.additionalContractPartnerInfo, prefill.contractPartnerInfo),
     pepOfficeFunction: fill(form.pepOfficeFunction, prefill.pepOfficeFunction),

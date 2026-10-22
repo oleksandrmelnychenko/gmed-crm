@@ -1936,15 +1936,6 @@ impl LeadContext {
             .as_ref()
             .and_then(|statement| statement.submitted_at)
     }
-
-    /// The newest proof of funds, for the declaration's evidence document.
-    fn newest_funds_proof(&self) -> Option<Uuid> {
-        self.uploads
-            .iter()
-            .filter(|upload| upload.kind == UploadKind::PayerFundsProof.as_str())
-            .max_by_key(|upload| upload.uploaded_at)
-            .map(|upload| upload.document_id)
-    }
 }
 
 /// One file in the questionnaire.
@@ -2974,19 +2965,18 @@ async fn register_payer_file(
     .await
 }
 
-/// The payer's own identity adopted into the declaration (D8).
-fn adopted_declaration(
-    current: &Declaration,
-    answers: &Answers,
-    funds_document: Option<Uuid>,
-) -> Declaration {
+/// The payer's own identity adopted into the declaration (D8). The payer's
+/// source of funds is not copied: the sent statement is the payer's funds
+/// itself (one source per person, owner decision 2026-10-23,
+/// [`crate::routes::lead_funds`]).
+fn adopted_declaration(current: &Declaration, answers: &Answers) -> Declaration {
     let mut next = current.clone();
     // A paying representative's identity is the representative's row, never
     // copied onto the declaration (owner decision 2026-10-19).
     if !current.is_representative() {
         adopt_identity(&mut next, answers);
     }
-    adopt_funds(next, answers, funds_document)
+    next
 }
 
 /// The payer's identity, address, phone and relationship of
@@ -3022,68 +3012,6 @@ fn adopt_identity(next: &mut Declaration, answers: &Answers) {
         } else {
             None
         };
-    }
-}
-
-/// The source of funds of [`adopted_declaration`].
-fn adopt_funds(
-    mut next: Declaration,
-    answers: &Answers,
-    funds_document: Option<Uuid>,
-) -> Declaration {
-    // The source of funds only while nobody stated it: one source the
-    // declaration knows is it; several, or one of an organisation without a
-    // match in the declaration's list, are "other" with the payer's words.
-    if next.source_of_funds.is_none() {
-        let matched = match answers.funds_sources.as_slice() {
-            [single] => declaration_source_of_funds(single),
-            _ => None,
-        };
-        match (answers.funds_sources.as_slice(), matched) {
-            ([], _) => {}
-            ([_], Some(source)) => {
-                next.source_of_funds = Some(source.to_string());
-                if next.source_of_funds_description.is_none() {
-                    next.source_of_funds_description = answers.funds_description.clone();
-                }
-            }
-            (several, _) => {
-                next.source_of_funds = Some("other".to_string());
-                if next.source_of_funds_description.is_none() {
-                    let labels = several
-                        .iter()
-                        .map(|source| funds_source_label(source))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let mut description = format!("Angaben des Zahlers: {labels}");
-                    if let Some(text) = &answers.funds_description {
-                        description.push_str(" – ");
-                        description.push_str(text);
-                    }
-                    next.source_of_funds_description =
-                        Some(description.chars().take(STATEMENT_TEXT_MAX).collect());
-                }
-            }
-        }
-    }
-    if next.source_of_funds_document_id.is_none() {
-        next.source_of_funds_document_id = funds_document;
-    }
-    next
-}
-
-/// The declaration's source of funds ([`lead_payer::SOURCE_OF_FUNDS`]) for
-/// one source the payer stated: a person's sources are that list; of an
-/// organisation's ([`ORGANISATION_FUNDS_SOURCES`]) the business revenue is
-/// the declaration's business income and "other" is "other", the rest has no
-/// match.
-fn declaration_source_of_funds(source: &str) -> Option<&'static str> {
-    match source {
-        "business_revenue" => Some("business_income"),
-        source => lead_payer::SOURCE_OF_FUNDS
-            .iter()
-            .copied()
-            .find(|known| *known == source),
     }
 }
 
@@ -3155,7 +3083,7 @@ async fn submit_in_tx(
     .execute(&mut *conn)
     .await
     .map_err(database)?;
-    let adopted = adopted_declaration(&built.route, &built.answers, context.newest_funds_proof());
+    let adopted = adopted_declaration(&built.route, &built.answers);
     lead_payer::adopt_payer_identity(conn, lead_id, &adopted, writer.actor(), writer.link_id())
         .await
         .map_err(database)?;
@@ -6171,7 +6099,7 @@ mod tests {
     }
 
     #[test]
-    fn adoption_takes_the_identity_and_the_source_of_funds_only_while_empty() {
+    fn adoption_takes_the_identity_and_leaves_the_funds_to_the_statement() {
         let declaration = person_payer();
         let answers = Answers {
             first_name: Some("Viktor".into()),
@@ -6184,8 +6112,7 @@ mod tests {
             funds_description: Some("Gehalt und Sparbuch".into()),
             ..Answers::default()
         };
-        let document = Uuid::new_v4();
-        let adopted = adopted_declaration(&declaration, &answers, Some(document));
+        let adopted = adopted_declaration(&declaration, &answers);
         assert_eq!(adopted.place_of_birth.as_deref(), Some("Graz"));
         assert_eq!(adopted.street.as_deref(), Some("Hauptstraße 1"));
         assert_eq!(adopted.relationship.as_deref(), Some("Onkel"));
@@ -6193,78 +6120,37 @@ mod tests {
             adopted.email, declaration.email,
             "the address never changes"
         );
-        assert_eq!(adopted.source_of_funds.as_deref(), Some("other"));
+        // One source per person (owner decision 2026-10-23): the payer's
+        // funds stay the sent statement, never a copy on the declaration.
+        assert_eq!(adopted.source_of_funds, declaration.source_of_funds);
         assert_eq!(
-            adopted.source_of_funds_description.as_deref(),
-            Some(
-                "Angaben des Zahlers: Gehalt / nichtselbständige Arbeit, Ersparnisse – Gehalt und Sparbuch"
-            )
+            adopted.source_of_funds_description,
+            declaration.source_of_funds_description
         );
-        assert_eq!(adopted.source_of_funds_document_id, Some(document));
-        let stated = Declaration {
-            source_of_funds: Some("inheritance_gift".into()),
-            ..declaration
+        assert_eq!(
+            adopted.source_of_funds_document_id,
+            declaration.source_of_funds_document_id
+        );
+        let statement = crate::routes::lead_funds::StatementFunds {
+            sources: answers.funds_sources.clone(),
+            description: answers.funds_description.clone(),
         };
-        let kept = adopted_declaration(&stated, &answers, Some(document));
-        assert_eq!(kept.source_of_funds.as_deref(), Some("inheritance_gift"));
+        let funds = crate::routes::lead_funds::lead_funds(Some(&adopted), Some(&statement));
+        assert_eq!(funds.relevant().entered_by, Some("payer"));
+        assert_eq!(
+            funds.relevant().text().as_deref(),
+            Some("Gehalt / nichtselbständige Arbeit, Ersparnisse: Gehalt und Sparbuch")
+        );
     }
 
-    /// An organisation's sources map to the declaration's list where it has
-    /// a match, else to "other" with the payer's words (QA 2026-10-06).
+    /// Every source the payer page offers has a German label for the
+    /// documents (QA 2026-10-06).
     #[test]
-    fn adoption_maps_the_sources_of_an_organisation() {
-        let company = Declaration {
-            payer_type: Some("company".into()),
-            organisation_name: Some("Beispiel GmbH".into()),
-            first_name: None,
-            last_name: None,
-            date_of_birth: None,
-            citizenships: Vec::new(),
-            ..person_payer()
-        };
-        let adopt = |sources: &[&str], text: Option<&str>| {
-            adopted_declaration(
-                &company,
-                &Answers {
-                    funds_sources: sources.iter().map(|source| source.to_string()).collect(),
-                    funds_description: text.map(str::to_string),
-                    ..Answers::default()
-                },
-                None,
-            )
-        };
-        let revenue = adopt(&["business_revenue"], None);
-        assert_eq!(revenue.source_of_funds.as_deref(), Some("business_income"));
-        assert_eq!(revenue.source_of_funds_description, None);
-        let other = adopt(&["other"], Some("Rücklagen der Stiftung"));
-        assert_eq!(other.source_of_funds.as_deref(), Some("other"));
-        assert_eq!(
-            other.source_of_funds_description.as_deref(),
-            Some("Rücklagen der Stiftung")
-        );
-        let loan = adopt(&["loan"], Some("Kredit der Hausbank"));
-        assert_eq!(loan.source_of_funds.as_deref(), Some("other"));
-        assert_eq!(
-            loan.source_of_funds_description.as_deref(),
-            Some("Angaben des Zahlers: Darlehen / Kredit – Kredit der Hausbank")
-        );
-        let several = adopt(&["business_revenue", "equity"], None);
-        assert_eq!(several.source_of_funds.as_deref(), Some("other"));
-        assert_eq!(
-            several.source_of_funds_description.as_deref(),
-            Some("Angaben des Zahlers: Geschäftstätigkeit / Umsatz, Eigenkapital")
-        );
-        // Every value of either list is one the declaration accepts.
+    fn every_source_of_the_payer_has_a_label() {
         for source in ORGANISATION_FUNDS_SOURCES
             .iter()
             .chain(lead_payer::SOURCE_OF_FUNDS)
         {
-            let adopted = adopt(&[*source], None);
-            assert!(
-                lead_payer::SOURCE_OF_FUNDS
-                    .contains(&adopted.source_of_funds.as_deref().unwrap_or_default()),
-                "{source}"
-            );
             assert_ne!(funds_source_label(source), *source, "{source} has a label");
         }
     }

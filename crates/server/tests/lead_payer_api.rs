@@ -1541,8 +1541,15 @@ async fn the_self_payers_source_of_funds_from_the_cabinet_counts_and_survives_st
         json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &ceo, None).await;
     assert!(!has_reason(&lead, "Source of funds is missing"), "{lead}");
 
-    // A staff save keeps the lead's answer, also with a source of its own;
-    // staff cannot write it.
+    assert_eq!(body["funds"]["patient"]["entered_by"], "lead", "{body}");
+    assert_eq!(
+        body["funds"]["patient"]["text"], "Sonstiges: Stipendium",
+        "{body}"
+    );
+
+    // One source per person (owner decision 2026-10-23): a staff save
+    // without the keys keeps the lead's answer, and staff's own choice of an
+    // older client is no second record (not written).
     let (status, body) = json_request(
         &app,
         "POST",
@@ -1552,12 +1559,54 @@ async fn the_self_payers_source_of_funds_from_the_cabinet_counts_and_survives_st
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["declaration"]["source_of_funds"], "savings", "{body}");
+    assert!(body["declaration"]["source_of_funds"].is_null(), "{body}");
     assert_eq!(body["declaration"]["self_funds_source"], "other", "{body}");
+    assert_eq!(body["funds"]["patient"]["entered_by"], "lead", "{body}");
+    // Staff correct the lead's record itself in the AML form: marked as
+    // entered by staff, audited in the same transaction.
     let mut written = own.clone();
     written["self_funds_source"] = json!("income");
-    let (status, _) = json_request(&app, "POST", &path, &ceo, Some(written)).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    written["self_funds_description"] = json!("Gehalt als Lehrerin");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(written)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["declaration"]["self_funds_source"], "income", "{body}");
+    assert_eq!(
+        body["declaration"]["self_funds_entered_by"], "staff",
+        "{body}"
+    );
+    assert_eq!(body["funds"]["patient"]["entered_by"], "staff", "{body}");
+    assert_eq!(
+        body["funds"]["patient"]["text"], "Einkommen: Gehalt als Lehrerin",
+        "{body}"
+    );
+    let audited: Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'update_lead_payer_declaration' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audited["self_funds_entered_by"], "staff", "{audited}");
+    let changed = audited["changed_fields"].to_string();
+    assert!(changed.contains("self_funds_source"), "{audited}");
+    assert!(
+        !audited.to_string().contains("Lehrerin"),
+        "no values: {audited}"
+    );
+    let mut refused = own.clone();
+    refused["self_funds_source"] = json!("employment");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(refused)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "self_funds_source_invalid", "{body}");
+    sqlx::query(
+        "UPDATE lead_payer_declarations SET self_funds_source = 'other', self_funds_description = 'Stipendium' WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
 
     // Without the words for "other" the lead's answer is incomplete.
     sqlx::query(

@@ -42,6 +42,7 @@ import { normalizeLeadPortalBilling, type LeadPortalEnhancedDetails, type LeadPo
 import { billingStatements, payerOrganisationStatements, portalInvoiceTo } from "../model/lead-gwg-statements";
 import { createPayerAutosave, type PayerAutosave, type PayerAutosaveState } from "../model/lead-payer-autosave";
 import { costCoveragePurpose, standaloneCostAssumptionKept } from "../model/lead-payer-package";
+import { payerFundsSourceLabel } from "../model/lead-payer-link";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
 import { useLeadPayerPackage } from "../model/use-lead-payer-package";
 import { LeadPayerLinkPanel } from "./lead-payer-link-panel";
@@ -54,6 +55,7 @@ import {
   PAYER_SECTION_ID,
   PAYER_TYPES,
   SOURCE_OF_FUNDS,
+  STATED_FUNDS_SOURCES,
   chosenPayerRepresentative,
   costEstimateConsentLine,
   invoiceTaxFieldsShown,
@@ -69,6 +71,7 @@ import {
   payerSignatureSequence,
   payerStatusBadge,
   payerTypeLabel,
+  statedFundsSourceLabel,
   statedFundsSourcesLabel,
   sourceOfFundsLabel,
   taxNumberFormatWarning,
@@ -391,7 +394,13 @@ export function LeadPayerDeclarationSection({
   // A third-party row of before that names one of the minor's parents: the
   // contracting party, not a third party (2026-10-19).
   const payingParent = form.kind === "third_party" && data?.status.paying_parent === true;
-  const missing = payerFormMissing(form, data?.status.source_of_funds_required !== false, payingParent, minor)
+  const missing = payerFormMissing(
+    form,
+    data?.status.source_of_funds_required !== false,
+    payingParent,
+    minor,
+    form.kind !== "self" && data?.declaration?.payer_kind === form.kind && data?.funds?.payer?.entered_by === "payer",
+  )
     // Without any parent on file the banner above says what to do first.
     .filter((code) => !(code === "payer_representative_missing" && form.kind === "representative" && representatives.length === 0));
   // Own interest and source of funds are edited in the AML form only: while it
@@ -439,30 +448,31 @@ export function LeadPayerDeclarationSection({
   const invoiceTaxEditable = invoiceTaxFieldsShown(form)
     && (recipientStatements.length > 0
       || Boolean(data?.declaration?.invoice_vat_id?.trim() || data?.declaration?.invoice_tax_number?.trim()));
-  // The self-paying lead's own source of funds (read-only): shown while the
-  // stored declaration says the patient pays and the server knows the answer.
-  const storedSource = data?.declaration?.self_funds_source?.trim();
-  const leadSelfFunds = data?.declaration?.payer_kind === "self"
-    && (data.declaration.self_funds_source !== undefined || Boolean(enhancedDetails))
+  // The self-paying lead's proofs of the own funds (read-only): shown while
+  // the stored declaration says the patient pays. The source itself is the
+  // one record staff edit below (owner decision 2026-10-23).
+  const leadSelfFunds = data?.declaration?.payer_kind === "self" && enhancedDetails
     ? {
-        sources: enhancedDetails?.answers.funds_sources ?? (storedSource ? [storedSource] : []),
-        description: enhancedDetails?.answers.funds_description ?? data.declaration.self_funds_description ?? null,
-        proofDocuments: enhancedDetails?.funds_proof_documents ?? null,
-        proofRequired: enhancedDetails?.asks.funds_proof ?? false,
-        updatedAt: enhancedDetails?.updated_at ?? null,
+        proofDocuments: enhancedDetails.funds_proof_documents ?? null,
+        proofRequired: enhancedDetails.asks.funds_proof ?? false,
+        updatedAt: enhancedDetails.updated_at ?? null,
       }
     : null;
-  // Nothing stated and no proof asked: no block at all (owner 2026-10-19,
+  // No proof asked and none uploaded: no block at all (owner 2026-10-19,
   // no "not stated yet" label).
-  const selfFundsShown = Boolean(leadSelfFunds && (
-    leadSelfFunds.sources.length > 0
-    || leadSelfFunds.description
-    || (leadSelfFunds.proofDocuments && (leadSelfFunds.proofDocuments.length > 0 || leadSelfFunds.proofRequired))
-  ));
-  // A source the lead stated is the declaration's: staff need not choose one.
+  const selfFundsShown = Boolean(leadSelfFunds?.proofDocuments
+    && (leadSelfFunds.proofDocuments.length > 0 || leadSelfFunds.proofRequired));
+  // One source per person (owner decision 2026-10-23): the patient's record
+  // while the patient pays; the payer's sent statement otherwise, staff's
+  // entry only until the payer answered.
+  const ownFunds = form.kind === "self";
+  const storedOwnFunds = data?.declaration?.payer_kind === "self" ? data.funds?.patient ?? null : null;
+  const ownFundsAuthor = form.selfFundsTouched ? "staff" : storedOwnFunds?.entered_by ?? data?.declaration?.self_funds_entered_by ?? null;
+  const payerFunds = !ownFunds && data?.declaration?.payer_kind === form.kind ? data?.funds?.payer ?? null : null;
+  const payerAnswered = payerFunds?.entered_by === "payer";
+  const patientAboutPayer = form.kind === "third_party" ? data?.funds?.payer_stated_by_patient ?? null : null;
   // Asked only by a trigger of the enhanced check (2026-10-19); an older server requires it.
-  const sourceRequired = data?.status.source_of_funds_required !== false
-    && !(form.kind === "self" && form.leadSelfFundsStated);
+  const sourceRequired = data?.status.source_of_funds_required !== false && !payerAnswered;
   // The proof is required while the enhanced check (block A) asks the lead for
   // it; the lead's own upload counts (QA 2026-10-10: "(необязательно)" here,
   // "обязательно" below).
@@ -597,37 +607,103 @@ export function LeadPayerDeclarationSection({
           </div>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <PayerField
-            label={form.kind === "representative" || payingParent
-              ? tx("Источник средств родителя / представителя", "Herkunft der Mittel des zahlenden Elternteils / Vertreters")
-              : thirdParty
-                ? tx("Источник средств плательщика", "Herkunft der Mittel des Kostenübernehmers")
-                : tx("Источник средств", "Herkunft der Mittel")}
-            required={sourceRequired}
-          >
-            <NativeComboboxSelect
-              value={form.sourceOfFunds}
-              className={selectClass}
-              disabled={readOnly}
-              aria-label={tx("Источник средств", "Herkunft der Mittel")}
-              onChange={(event) => patch("sourceOfFunds", event.target.value as SourceOfFunds | "")}
+        {ownFunds ? (
+          // The patient pays: the lead's own record, corrected here by staff
+          // (owner decision 2026-10-23) — no second field of staff's own.
+          <div className="space-y-2" data-testid="lead-payer-own-funds">
+            {ownFundsAuthor ? (
+              <StatusChip tone="neutral" data-testid="lead-payer-own-funds-author">
+                {ownFundsAuthor === "staff"
+                  ? tx("Внесено сотрудником", "Von GMED erfasst")
+                  : tx("Указал пациент в кабинете", "Angabe des Patienten im Portal")}
+              </StatusChip>
+            ) : null}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <PayerField label={tx("Источник средств пациента", "Herkunft der Mittel des Patienten")} required={sourceRequired}>
+                <NativeComboboxSelect
+                  value={form.selfFundsSource}
+                  className={selectClass}
+                  disabled={readOnly}
+                  aria-label={tx("Источник средств пациента", "Herkunft der Mittel des Patienten")}
+                  onChange={(event) => patch("selfFundsSource", event.target.value)}
+                >
+                  <option value="">{tx("Выберите", "Auswählen")}</option>
+                  {STATED_FUNDS_SOURCES.map((value) => (
+                    <option key={value} value={value}>{statedFundsSourceLabel(value, tx)}</option>
+                  ))}
+                </NativeComboboxSelect>
+              </PayerField>
+              <PayerField label={tx("Описание", "Beschreibung")} required={form.selfFundsSource === "other"}>
+                <textarea
+                  className={textareaClass}
+                  rows={2}
+                  aria-label={tx("Описание источника средств пациента", "Beschreibung der Herkunft der Mittel des Patienten")}
+                  value={form.selfFundsDescription}
+                  disabled={readOnly}
+                  onChange={(event) => patch("selfFundsDescription", event.target.value)}
+                />
+              </PayerField>
+            </div>
+          </div>
+        ) : payerAnswered && payerFunds ? (
+          // The payer answered on the own link or in the parent's section:
+          // the payer's statement is the payer's funds, read-only here.
+          <div className="space-y-1.5 text-xs" data-testid="lead-payer-payer-funds">
+            <StatusChip tone="neutral">{tx("Указал плательщик", "Angabe der zahlenden Person")}</StatusChip>
+            <p>
+              <span className="text-muted-foreground">
+                {form.kind === "representative" || payingParent
+                  ? tx("Источник средств родителя / представителя", "Herkunft der Mittel des zahlenden Elternteils / Vertreters")
+                  : tx("Источник средств плательщика", "Herkunft der Mittel des Kostenübernehmers")}
+                {": "}
+              </span>
+              {payerFunds.sources.map((source) => payerFundsSourceLabel(source, tx)).join(", ") || "—"}
+            </p>
+            {payerFunds.description ? (
+              <p className="whitespace-pre-line">
+                <span className="text-muted-foreground">{tx("Описание", "Beschreibung")}: </span>
+                {payerFunds.description}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <PayerField
+              label={form.kind === "representative" || payingParent
+                ? tx("Источник средств родителя / представителя (пока плательщик не ответил)", "Herkunft der Mittel des zahlenden Elternteils / Vertreters (bis zur eigenen Angabe)")
+                : tx("Источник средств плательщика (пока плательщик не ответил)", "Herkunft der Mittel des Kostenübernehmers (bis zur eigenen Angabe)")}
+              required={sourceRequired}
             >
-              <option value="">{tx("Выберите", "Auswählen")}</option>
-              {SOURCE_OF_FUNDS.map((value) => (
-                <option key={value} value={value}>{sourceOfFundsLabel(value, tx)}</option>
-              ))}
-            </NativeComboboxSelect>
-          </PayerField>
-          <PayerField label={tx("Описание", "Beschreibung")} required={form.sourceOfFunds === "other"}>
-            <Input
-              className={inputClass}
-              value={form.sourceOfFundsDescription}
-              disabled={readOnly}
-              onChange={(event) => patch("sourceOfFundsDescription", event.target.value)}
-            />
-          </PayerField>
-        </div>
+              <NativeComboboxSelect
+                value={form.sourceOfFunds}
+                className={selectClass}
+                disabled={readOnly}
+                aria-label={tx("Источник средств", "Herkunft der Mittel")}
+                onChange={(event) => patch("sourceOfFunds", event.target.value as SourceOfFunds | "")}
+              >
+                <option value="">{tx("Выберите", "Auswählen")}</option>
+                {SOURCE_OF_FUNDS.map((value) => (
+                  <option key={value} value={value}>{sourceOfFundsLabel(value, tx)}</option>
+                ))}
+              </NativeComboboxSelect>
+            </PayerField>
+            <PayerField label={tx("Описание", "Beschreibung")} required={form.sourceOfFunds === "other"}>
+              <Input
+                className={inputClass}
+                value={form.sourceOfFundsDescription}
+                disabled={readOnly}
+                onChange={(event) => patch("sourceOfFundsDescription", event.target.value)}
+              />
+            </PayerField>
+          </div>
+        )}
+        {patientAboutPayer && (patientAboutPayer.sources.length > 0 || patientAboutPayer.description) ? (
+          // What the patient said of the payer's funds: context, never the payer's answer.
+          <p className="text-xs" data-testid="lead-payer-funds-patient-statement">
+            <span className="text-muted-foreground">{tx("Со слов пациента", "Angabe des Patienten")}: </span>
+            {[statedFundsSourcesLabel(patientAboutPayer.sources, tx), patientAboutPayer.description].filter(Boolean).join(" – ")}
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <StatusChip tone={form.sourceOfFundsDocumentId ? "success" : leadSelfFunds?.proofRequired ? "warning" : "neutral"}>
             <FileText aria-hidden="true" />
@@ -665,24 +741,12 @@ export function LeadPayerDeclarationSection({
           <div className="space-y-1.5 border-t border-border/60 pt-3 text-xs" data-testid="lead-payer-self-funds">
             <div className="flex flex-wrap items-center gap-2">
               <AdminSectionTitle>
-                {tx("Источник средств — указал пациент в кабинете", "Herkunft der Mittel – Angaben des Patienten im Portal")}
+                {tx("Подтверждение источника средств — загрузил пациент в кабинете", "Nachweis der Herkunft der Mittel – vom Patienten im Portal hochgeladen")}
               </AdminSectionTitle>
               {leadSelfFunds.updatedAt ? (
                 <PatientFieldBadge marker={{ at: leadSelfFunds.updatedAt, access_kind: null }} tx={tx} />
               ) : null}
             </div>
-            {leadSelfFunds.sources.length > 0 ? (
-              <p data-testid="lead-payer-self-funds-sources">
-                <span className="text-muted-foreground">{tx("Источники", "Quellen")}: </span>
-                {statedFundsSourcesLabel(leadSelfFunds.sources, tx)}
-              </p>
-            ) : null}
-            {leadSelfFunds.description ? (
-              <p className="whitespace-pre-line" data-testid="lead-payer-self-funds-description">
-                <span className="text-muted-foreground">{tx("Описание", "Beschreibung")}: </span>
-                {leadSelfFunds.description}
-              </p>
-            ) : null}
             {leadSelfFunds.proofDocuments ? (
               <div className="flex flex-wrap items-center gap-2" data-testid="lead-payer-self-funds-proof">
                 <StatusChip tone={leadSelfFunds.proofDocuments.length > 0 ? "success" : leadSelfFunds.proofRequired ? "warning" : "neutral"}>

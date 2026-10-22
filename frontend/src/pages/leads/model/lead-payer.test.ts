@@ -33,6 +33,7 @@ import {
   statedFundsSourcesLabel,
   taxNumberFormatWarning,
   vatIdFormatWarning,
+  withPayerDeclarationField,
   type PayerDeclaration,
   type PayerDeclarationStatus,
 } from "./lead-payer";
@@ -146,7 +147,9 @@ describe("payer declaration form", () => {
     expect(payload.first_name).toBeNull();
     expect(payload.citizenships).toEqual([]);
     expect(payload.payer_informed).toBe(false);
-    expect(payload.source_of_funds).toBe("savings");
+    // One source per person (2026-10-23): staff's own choice is not the patient's funds.
+    expect(payload.source_of_funds).toBeNull();
+    expect(payload).not.toHaveProperty("self_funds_source");
   });
 
   it("lists what is missing, like the server", () => {
@@ -666,15 +669,38 @@ describe("the self-payer's source of funds from the cabinet", () => {
     expect(leadSelfFundsStated(null)).toBe(false);
   });
 
-  it("spares staff a source of their own, like the server", () => {
+  it("is the one record staff edit, sent only once changed (owner decision 2026-10-23)", () => {
     const form = payerDeclarationToForm(own);
-    expect(form.leadSelfFundsStated).toBe(true);
+    expect(form.selfFundsSource).toBe("other");
+    expect(form.selfFundsDescription).toBe("Stipendium");
+    expect(form.selfFundsTouched).toBe(false);
     expect(payerFormMissing(form)).toEqual([]);
-    // Never sent: the server refuses keys it does not know.
-    expect(payerDeclarationPayload(form)).not.toHaveProperty("leadSelfFundsStated");
+    // Untouched: never sent, so a save of another field keeps a newer answer of the lead.
     expect(payerDeclarationPayload(form)).not.toHaveProperty("self_funds_source");
+    expect(payerDeclarationPayload(form)).not.toHaveProperty("selfFundsTouched");
+    // Staff correct it: both keys go, staff's own choice never does.
+    const corrected = withPayerDeclarationField(form, "selfFundsSource", "income");
+    expect(corrected.selfFundsTouched).toBe(true);
+    expect(payerDeclarationPayload(corrected)).toMatchObject({
+      self_funds_source: "income",
+      self_funds_description: "Stipendium",
+      source_of_funds: null,
+    });
+    // "Other" without the words is not stated.
+    const words = withPayerDeclarationField(form, "selfFundsDescription", " ");
+    expect(payerFormMissing(words)).toEqual(["payer_source_of_funds_missing"]);
+    expect(payerDeclarationPayload(words).self_funds_description).toBeNull();
+    // Another payer: the patient's funds are not sent for it, and staff's
+    // entry for the payer starts empty.
+    const third = withPayerDeclarationField(corrected, "kind", "third_party");
+    expect(third.selfFundsTouched).toBe(false);
+    expect(third.sourceOfFunds).toBe("");
+    expect(payerDeclarationPayload(third)).not.toHaveProperty("self_funds_source");
     // A third party states its own source; the lead's does not count for it.
     expect(payerFormMissing({ ...form, kind: "third_party" })).toContain("payer_source_of_funds_missing");
+    // The payer's sent statement counts, staff need not enter one.
+    expect(payerFormMissing({ ...form, kind: "third_party" }, true, false, false, true))
+      .not.toContain("payer_source_of_funds_missing");
     expect(payerFormMissing(payerDeclarationToForm({ ...own, self_funds_source: null }))).toEqual([
       "payer_source_of_funds_missing",
     ]);
@@ -744,24 +770,31 @@ describe("a repeat intake starts from the patient's declaration (QA B-18)", () =
     expect(form.sourceOfFundsDocumentId).toBe("");
   });
 
-  it("turns the earlier cabinet statement of a self-payer into the staff answer", () => {
+  it("takes the earlier statement of a self-payer into this lead's record, as staff's", () => {
     const form = payerDeclarationPrefillForm({
       ...thirdParty,
       payer_kind: "self",
-      source_of_funds: null,
+      source_of_funds: "savings",
       self_funds_source: "inheritance_gift",
       self_funds_description: "Erbe der Großmutter",
     });
-    expect(form.leadSelfFundsStated).toBe(false);
-    expect(form.sourceOfFunds).toBe("inheritance_gift");
-    expect(form.sourceOfFundsDescription).toBe("Erbe der Großmutter");
-    // "income" has no single staff category: staff choose it.
+    expect(form.selfFundsSource).toBe("inheritance_gift");
+    expect(form.selfFundsDescription).toBe("Erbe der Großmutter");
+    // Written with the first save (staff checked it), staff's old choice is not.
+    expect(form.selfFundsTouched).toBe(true);
+    expect(form.sourceOfFunds).toBe("");
+    expect(payerDeclarationPayload(form)).toMatchObject({
+      self_funds_source: "inheritance_gift",
+      self_funds_description: "Erbe der Großmutter",
+      source_of_funds: null,
+    });
+    // Nothing stated before: nothing to write.
     expect(payerDeclarationPrefillForm({
       ...thirdParty,
       payer_kind: "self",
       source_of_funds: null,
-      self_funds_source: "income",
-    }).sourceOfFunds).toBe("");
+      self_funds_source: null,
+    }).selfFundsTouched).toBe(false);
   });
 
   it("names the paying parent of the earlier request by this lead's representative id", () => {

@@ -41,7 +41,6 @@ function payer(answers: Record<string, unknown>, submitted = true): StaffPayerQu
 }
 
 const emptyForm: AmlPrefillTarget = {
-  assetOrigin: "",
   assetOriginEvidence: [],
   additionalContractPartnerInfo: "",
   pepContractPartner: false,
@@ -62,7 +61,8 @@ describe("amlPrefillFromLeadAnswers", () => {
       payer: null,
       countryName,
     });
-    expect(prefill.assetOrigin).toBe("Angabe der Patientin/des Patienten: Einkommen – Gehalt als Ingenieur");
+    // The source of funds is the one record the form edits (2026-10-23), no prefill.
+    expect(prefill).not.toHaveProperty("assetOrigin");
     expect(prefill.contractPartnerInfo).toBe("Beruf: Ingenieur; Branche: Maschinenbau");
     expect(prefill.evidence).toEqual([{ documentId: "self-proof", filename: "kontoauszug.pdf" }]);
     expect(prefill.pepSelf).toBe(false);
@@ -85,10 +85,8 @@ describe("amlPrefillFromLeadAnswers", () => {
       }),
       countryName,
     });
-    expect(sent.assetOrigin.split("\n")).toEqual([
-      "Angabe des Kostenübernehmers (Viktor Zahler): Gehalt / nichtselbständige Arbeit – Lehrer; Beruf: Lehrer; Branche: Bildung",
-      "Angabe der Patientin/des Patienten zur zahlenden Person: Ersparnisse – Ersparnisse der Mutter",
-    ]);
+    // The payer's funds are the payer's statement on the server, not a copy in the form.
+    expect(sent).not.toHaveProperty("assetOrigin");
     expect(sent.evidence).toEqual([{ documentId: "payer-proof", filename: "kontoauszug-zahler.pdf" }]);
     expect(sent.sanctionsLinks).toBe("Angabe des Kostenübernehmers (Viktor Zahler): Geschäftspartner Beispiel GmbH");
 
@@ -98,7 +96,7 @@ describe("amlPrefillFromLeadAnswers", () => {
       payer: payer({ funds_sources: ["employment"] }, false),
       countryName,
     });
-    expect(draft.assetOrigin).toBe("");
+    expect(draft).not.toHaveProperty("assetOrigin");
     expect(draft.evidence).toEqual([]);
   });
 
@@ -148,7 +146,6 @@ describe("applyAmlLeadPrefill", () => {
     // staff's conclusion; it never ticks the review box.
     const filled = applyAmlLeadPrefill(emptyForm, prefill);
     expect(filled).toEqual({
-      assetOrigin: "Angabe der Patientin/des Patienten: Ersparnisse",
       assetOriginEvidence: [{ documentId: "self-proof", filename: "auszug.pdf" }],
       additionalContractPartnerInfo: "Beruf: Ärztin",
       pepContractPartner: false,
@@ -161,7 +158,6 @@ describe("applyAmlLeadPrefill", () => {
 
   it("never changes what staff typed or decided", () => {
     const typed: AmlPrefillTarget = {
-      assetOrigin: "Laut Kontoauszug: Gehalt",
       assetOriginEvidence: [{ documentId: "staff-proof", filename: "beleg.pdf" }],
       additionalContractPartnerInfo: "geprüft",
       pepContractPartner: false,
