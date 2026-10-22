@@ -4709,7 +4709,7 @@ export const extractedUiRu = {
   "document_category_official_departmental": "Ведомственный документ",
   "document_category_visa_invitation_letter": "Приглашение для визы",
   "document_category_finance_general": "Финансовый документ",
-  "document_category_finance_cost_coverage": "Гарантия оплаты расходов",
+  "document_category_finance_cost_coverage": "Заявление о принятии расходов",
   "document_category_finance_cost_estimate": "Предварительный расчёт расходов",
   "document_category_finance_order_cost_estimate": "Смета",
   "document_category_finance_payer_cost_estimate": "Смета для плательщика",

@@ -102,7 +102,7 @@ describe("timeline labels", () => {
     const ru: Record<string, string> = {
       patients_patient_visible: "Можно выпустить пациенту",
       document_category_provider_template: "Памятка клиники",
-      document_category_finance_cost_coverage: "Гарантия оплаты расходов",
+      document_category_finance_cost_coverage: "Заявление о принятии расходов",
       document_category_visa_invitation_letter: "Приглашение для визы",
       document_category_administrative_appointment_confirmation: "Подтверждение записи",
       timeline_category_profile: "Профиль",
@@ -110,7 +110,7 @@ describe("timeline labels", () => {
     const lr = (key: string) => ru[key] ?? key;
     expect(localizeTimelineSource("patient_visible", lr)).toBe("Можно выпустить пациенту");
     expect(localizeTimelineCategory("provider_template", lr)).toBe("Памятка клиники");
-    expect(localizeTimelineCategory("finance_cost_coverage", lr)).toBe("Гарантия оплаты расходов");
+    expect(localizeTimelineCategory("finance_cost_coverage", lr)).toBe("Заявление о принятии расходов");
     expect(localizeTimelineCategory("visa_invitation_letter", lr)).toBe("Приглашение для визы");
     expect(localizeTimelineCategory("administrative_appointment_confirmation", lr)).toBe("Подтверждение записи");
     expect(localizeTimelineCategory("profile", lr)).toBe("Профиль");
