@@ -76,7 +76,7 @@ import {
   type RecipientField,
 } from "./lead-request-recipient-model";
 import { payerAnsweredByPayer } from "./lead-request-summary";
-import { asLeadCabinetLang, payerFieldLabel, recipientFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { asLeadCabinetLang, payerFieldLabel, recipientFieldLabel, recipientOptions, type LeadRequestText } from "./lead-request-text";
 
 type Refused = Partial<Record<keyof RecipientDraft, string>>;
 
@@ -278,7 +278,7 @@ export function InvoiceRecipientSection({
     update((current) => ({ ...current, is_payer: answer }));
   };
 
-  const options = guardian ? text.recipient.optionsGuardian : text.recipient.options;
+  const options = recipientOptions(text, request);
   // The data a payer needs are required of the recipient who pays (owner request 2026-10-07): the
   // e-mail also of an organisation, which answers on its own link (QA 2026-10-11 A-35), the phone of a person.
   const emailRequired = third && recipientPays;

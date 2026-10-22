@@ -4,11 +4,14 @@ import { cabinetLocale, formatFileSize, languageName } from "./lead-request-mode
 import {
   LEAD_CABINET_LANGS,
   asLeadCabinetLang,
+  extraFieldLabel,
+  extraWorkSubject,
   followUpFieldLabel,
   identificationFieldLabel,
   invoiceToLabel,
   leadRequestText,
   payerFieldLabel,
+  recipientOptions,
   resolveLeadCabinetLang,
   submitFieldLabel,
 } from "./lead-request-text";
@@ -214,17 +217,24 @@ describe("lead cabinet languages", () => {
       expect(text.nextSteps.join(" "), option.value).not.toContain(text.nextNothingRequired);
       expect(text.nextAfterChange, option.value).not.toContain(text.nextNothingRequired);
     }
-    // The review notice continues the sentence of the sending: one thank-you only (QA 2026-10-10).
+    // One thank-you only (QA 2026-10-10), without the review notice: "what happens next" says it (owner 2026-10-22).
     expect(
       LEAD_CABINET_LANGS.map((option) => {
         const text = leadRequestText(option.value);
-        return `${text.sentTitle} ${text.sentBody("10.10.2026 13:09")} ${text.reviewNotice}`;
+        return `${text.sentTitle} ${text.sentBody("10.10.2026 13:09")}`;
       }),
     ).toEqual([
-      "Vielen Dank! Ihre Angaben wurden am 10.10.2026 13:09 gesendet. Wir prüfen sie und melden uns bei Ihnen.",
-      "Thank you! Your details were sent on 10.10.2026 13:09. We are reviewing them and will get in touch with you.",
-      "Дякуємо! Ваші дані надіслано 10.10.2026 13:09. Ми перевіримо їх і зв'яжемося з вами.",
-      "Спасибо! Ваши данные отправлены 10.10.2026 13:09. Мы проверим их и свяжемся с вами.",
+      "Vielen Dank! Ihre Angaben wurden am 10.10.2026 13:09 gesendet.",
+      "Thank you! Your details were sent on 10.10.2026 13:09.",
+      "Дякуємо! Ваші дані надіслано 10.10.2026 13:09.",
+      "Спасибо! Ваши данные отправлены 10.10.2026 13:09.",
+    ]);
+    // The extra questions before sending: one neutral sentence (owner 2026-10-22).
+    expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).followUpBeforeSubmitIntro)).toEqual([
+      "Für Ihre Anfrage benötigen wir noch einige ergänzende Angaben. Ihre Antworten werden automatisch gespeichert.",
+      "For your request we need a few more details. Your answers are saved automatically.",
+      "Для вашого запиту нам потрібні ще деякі додаткові відомості. Відповіді зберігаються автоматично.",
+      "Для вашего запроса нам нужны ещё некоторые дополнительные сведения. Ответы сохраняются автоматически.",
     ]);
     // No text of the follow-up speaks of points, levels, triggers, risk or a decision (P2).
     const risk = /risiko|risk|punkt|point|stufe|level|trigger|abgelehnt|reject|ризик|риск|бал/i;
@@ -235,7 +245,7 @@ describe("lead cabinet languages", () => {
         text.followUpOpen,
         text.followUpIncomplete,
         text.followUpAnsweredAt("07.10.2026 10:00"),
-        text.reviewNotice,
+        text.followUpBeforeSubmitIntro,
         ...Object.values(text.followUpBlocks),
         ...Object.values(text.steps),
       ];
@@ -260,6 +270,36 @@ describe("lead cabinet languages", () => {
     expect(followUpFieldLabel(de, "agent_last_name")).toBe("Angaben zur vertretenden Person: Nachname");
     expect(followUpFieldLabel(de, "residence_since", true)).toBe("Seit wann wohnt die Patientin / der Patient im Wohnsitzland?");
     expect(followUpFieldLabel(de, "unknown_key")).toBe("unknown_key");
+    // Block A's profession and sector are the patient's statements: a parent's or representative's login names the patient (owner 2026-10-22).
+    expect(followUpFieldLabel(de, "enhanced_occupation")).toBe("Ihr Beruf");
+    expect(followUpFieldLabel(de, "enhanced_occupation", true, [], extraWorkSubject({ access_kind: "guardian", minor: true }))).toBe(
+      "Beruf / Tätigkeit des Kindes (z. B. Schüler/in)",
+    );
+    expect(extraFieldLabel(de, "sector", extraWorkSubject({ access_kind: "guardian", minor: true }))).toBe("Branche / Sektor der Tätigkeit des Kindes");
+    expect(extraFieldLabel(de, "occupation", extraWorkSubject({ access_kind: "guardian", minor: false }))).toBe(
+      "Beruf / Tätigkeit der Patientin / des Patienten",
+    );
+    expect(extraWorkSubject({ access_kind: "self", minor: true })).toBe("self");
+    for (const option of LEAD_CABINET_LANGS) {
+      const text = leadRequestText(option.value);
+      for (const subject of ["child", "patient"] as const) {
+        expect(extraFieldLabel(text, "occupation", subject), option.value).not.toBe(text.extraFields.occupation);
+        expect(extraFieldLabel(text, "sector", subject), option.value).not.toBe(text.extraFields.sector);
+      }
+    }
+  });
+
+  it("names the invoice recipient by login: own, a minor's parent, an adult patient's representative", () => {
+    const options = (lang: string, access_kind: string, minor: boolean) => recipientOptions(leadRequestText(lang), { access_kind, minor }).self;
+    expect(options("de", "self", false)).toBe("Ich");
+    expect(options("de", "guardian", true)).toBe("Ich (als Elternteil / gesetzliche Vertretung)");
+    expect(options("ru", "guardian", true)).toBe("Я (как родитель / законный представитель)");
+    expect(["de", "ru", "uk", "en"].map((lang) => options(lang, "guardian", false))).toEqual([
+      "Die Patientin / der Patient (über mich als Vertretung)",
+      "Пациент (через меня как представителя)",
+      "Пацієнт (через мене як представника)",
+      "The patient (through me as representative)",
+    ]);
   });
 
   it("names the organisation mask of a payer", () => {
@@ -352,13 +392,13 @@ describe("lead cabinet languages", () => {
   it("tells the paying parent where the documents for signing stand, in the owner's words", () => {
     const de = leadRequestText("de");
     expect(de.payerSignatureSent("06.10.2026")).toBe(
-      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
+      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 die Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
     );
     expect(de.payerSignatureSigned("08.10.2026")).toBe(
       "Vielen Dank – die unterschriebenen Unterlagen sind am 08.10.2026 bei GMED eingegangen.",
     );
     // Without a date the sentence still reads.
-    expect(de.payerSignatureSent("")).toContain("Wir haben Ihnen vier Dokumente");
+    expect(de.payerSignatureSent("")).toContain("Wir haben Ihnen die Dokumente");
     expect(de.payerSignatureSigned("")).toBe("Vielen Dank – die unterschriebenen Unterlagen sind bei GMED eingegangen.");
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);

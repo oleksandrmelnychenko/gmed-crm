@@ -14,7 +14,7 @@ import { CabinetSection as Section, MissingItemLink, RequiredMark, StepFooter, e
 import type { CabinetTarget } from "./lead-request-field-target";
 import { hasBaseFormInput, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
 import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
-import { followUpFieldLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { extraWorkSubject, followUpFieldLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 /**
  * Step "send": what will be sent, what is still missing, the confirmation
@@ -106,12 +106,9 @@ export function SendStep({
         <>
           <SuccessBanner>
             <p className="font-semibold">{text.sentTitle}</p>
-            {/* One thank-you (QA 2026-10-10): the review notice continues the sentence of the sending,
-                for every request alike until GMED sends documents for signature (contract 3.1). */}
-            <p data-testid="lead-request-sent">
-              {text.sentBody(formatAppDateTime(request.submitted_at))}
-              {request.review_notice ? <span data-testid="lead-request-review-notice"> {text.reviewNotice}</span> : null}
-            </p>
+            {/* One thank-you (QA 2026-10-10). No review notice (owner 2026-10-22): it repeated the
+                first items of "what happens next" below. */}
+            <p data-testid="lead-request-sent">{text.sentBody(formatAppDateTime(request.submitted_at))}</p>
           </SuccessBanner>
           {followUpOpen ? (
             <div
@@ -210,7 +207,7 @@ export function SendStep({
               <button type="button" className="text-xs font-semibold underline underline-offset-2" onClick={() => onEdit("follow_up", { field: `${previewMissing[0].block}:${previewMissing[0].key}` })}>{text.steps.follow_up}</button>
               <ul className="list-inside list-disc">{previewMissing.map(({ block, key }) => <li key={`${block}:${key}`} className="break-words">
                 <MissingItemLink field={`${block}:${key}`} onClick={() => onEdit("follow_up", { field: `${block}:${key}` })}>
-                  {followUpFieldLabel(text, key, guardian, request.follow_up?.representatives)}
+                  {followUpFieldLabel(text, key, guardian, request.follow_up?.representatives, extraWorkSubject(request))}
                 </MissingItemLink>
               </li>)}</ul>
             </div> : null}

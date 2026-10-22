@@ -365,13 +365,7 @@ export function DeclarationsStep({ context }: { context: StepContext }) {
             {/* The details exist only for a "yes". */}
             {form.draft[question] === "yes" ? (
               <Field context={context} field={details}>
-                {details === "high_risk_country_code" ? (
-                  <div className="sm:max-w-[calc(50%-0.5rem)]">
-                    <CountryInput context={context} field={details} />
-                  </div>
-                ) : (
-                  <TextArea context={context} field={details} />
-                )}
+                <TextArea context={context} field={details} />
               </Field>
             ) : null}
           </div>

@@ -83,11 +83,9 @@ const DECLARATION_KEYS: ReadonlySet<string> = new Set([
   "pep_self",
   "pep_related",
   "sanctions_links",
-  // An older server still names the details and the high-risk question.
+  // An older server still names the details.
   "pep_self_details",
   "pep_related_details",
-  "high_risk_country",
-  "high_risk_country_code",
   "sanctions_links_details",
 ]);
 

@@ -114,7 +114,7 @@ describe("payer page texts", () => {
   it("says where the documents for signing stand in the contract's German and in every language", () => {
     const de = payerLinkText("de");
     expect(de.signatureSent("06.10.2026")).toBe(
-      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
+      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 die Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
     );
     expect(de.signatureSigned("08.10.2026")).toBe("Vielen Dank – die unterschriebenen Unterlagen sind am 08.10.2026 bei GMED eingegangen.");
     for (const lang of LANGS) {
@@ -160,7 +160,7 @@ describe("payer page texts", () => {
       expect(fieldLabel(de, "pep_self", type)).toBe(
         "Üben die vertretungsberechtigten Personen oder wirtschaftlich Berechtigten ein hochrangiges öffentliches Amt aus oder haben sie es in den letzten 12 Monaten ausgeübt?",
       );
-      for (const question of ["pep_self", "pep_related", "high_risk_country", "sanctions_links"] as const) {
+      for (const question of ["pep_self", "pep_related", "sanctions_links"] as const) {
         expect(fieldLabel(de, question, type)).toContain("vertretungsberechtigten Personen oder wirtschaftlich Berechtigten");
         expect(fieldLabel(de, question, type)).not.toMatch(/\b(Sie|Ihnen|Ihre?)\b/);
       }
@@ -168,7 +168,10 @@ describe("payer page texts", () => {
     }
     // A private person is asked as before.
     expect(fieldLabel(de, "pep_self", "person")).toBe(de.fields.pep_self);
-    expect(fieldLabel(de, "high_risk_country", "person")).toMatch(/^Haben Sie/);
+    // No question about a high-risk third country, in no language (owner 2026-10-22): GMED checks the country itself.
+    for (const lang of LANGS) {
+      expect(JSON.stringify(payerLinkText(lang)), lang).not.toMatch(/high_risk|Drittstaat|hohem Risiko|high-risk|высокого риска|високого ризику/i);
+    }
     expect(fieldLabel(de, "payment_method", "person")).toBe("Welche Zahlungsart für Rechnungen bevorzugen Sie?");
     // Every language words the organisation's questions on their own.
     for (const lang of LANGS) {

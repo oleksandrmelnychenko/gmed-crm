@@ -156,8 +156,6 @@ describe("paying parent's questionnaire: what is saved", () => {
       "pep_self_details",
       "pep_related",
       "pep_related_details",
-      "high_risk_country",
-      "high_risk_country_code",
       "sanctions_links",
       "sanctions_links_details",
     ]);
@@ -176,8 +174,6 @@ describe("paying parent's questionnaire: what is saved", () => {
       funds_sources: ["savings", "employment"],
       funds_description: " Gehalt\nund Ersparnisse ",
       pep_self: "no",
-      high_risk_country: "yes",
-      high_risk_country_code: "IR",
     };
     expect(payerQuestionnairePatch(saved, draft)).toEqual({
       salutation: "ms",
@@ -186,10 +182,13 @@ describe("paying parent's questionnaire: what is saved", () => {
       funds_sources: ["employment", "savings"],
       funds_description: "Gehalt\nund Ersparnisse",
       pep_self: false,
-      high_risk_country: true,
-      high_risk_country_code: "IR",
     });
     expect(payerQuestionnairePatch(saved, saved)).toEqual({});
+    // No high-risk country question (owner 2026-10-22): an old stored answer is neither shown nor sent.
+    const old = draftFromPayerQuestionnaire(normalizeLeadPayerQuestionnaire(raw({}, { high_risk_country: true, high_risk_country_code: "IR" })));
+    expect(old).not.toHaveProperty("high_risk_country");
+    expect(old).not.toHaveProperty("high_risk_country_code");
+    expect(payerQuestionnairePatch(old, { ...old, pep_self: "no" })).toEqual({ pep_self: false });
     // An answer taken back is null.
     expect(payerQuestionnairePatch({ ...saved, pep_related: "yes" }, { ...saved, pep_related: "" })).toEqual({ pep_related: null });
   });
@@ -208,8 +207,6 @@ describe("paying parent's questionnaire: what is saved", () => {
     const draft = { ...draftFromPayerQuestionnaire(null), pep_self: "yes", pep_self_details: "Bürgermeister" };
     expect(withPayerLegalAnswer(draft, "pep_self", "no")).toMatchObject({ pep_self: "no", pep_self_details: "" });
     expect(withPayerLegalAnswer(draft, "pep_self", "yes").pep_self_details).toBe("Bürgermeister");
-    const country = { ...draftFromPayerQuestionnaire(null), high_risk_country: "yes", high_risk_country_code: "IR" };
-    expect(withPayerLegalAnswer(country, "high_risk_country", "").high_risk_country_code).toBe("");
   });
 
   it("keeps the sources in the order of the form; 'other' asks for the description", () => {
@@ -275,7 +272,9 @@ describe("paying parent's questionnaire: what is missing, and where", () => {
     // The paying parent's own legal questions keep their details (the lead's are yes/no since the trigger flow).
     expect(payerQuestionnaireFieldLabel(de, "pep_self")).toBe("Gesetzliche Fragen: Öffentliches Amt");
     expect(payerQuestionnaireFieldLabel(de, "pep_self_details")).toBe("Gesetzliche Fragen: Amt, Land und Zeitraum");
-    expect(payerQuestionnaireFieldLabel(de, "high_risk_country_code")).toBe("Gesetzliche Fragen: Welches Land?");
+    expect(payerQuestionnaireFieldLabel(de, "sanctions_links_details")).toBe(
+      "Gesetzliche Fragen: Zu wem besteht die Verbindung und welcher Art ist sie?",
+    );
     expect(payerQuestionnaireFieldLabel(de, "payment_method")).toBe("Welche Zahlungsart für Rechnungen bevorzugen Sie?");
     expect(payerQuestionnaireFieldLabel(de, "relationship")).toBe("Beziehung zur Patientin / zum Patienten – In welcher Beziehung genau?");
     expect(de.payerElsewhere(de.sectionLegalRepresentatives)).toBe("Bitte im Abschnitt „Gesetzliche Vertreter“ ergänzen:");

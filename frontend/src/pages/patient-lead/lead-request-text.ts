@@ -232,7 +232,10 @@ export type LeadRequestText = {
     replacePayerHint: string;
     question: string;
     options: Record<InvoiceRecipient, string>;
+    /** A parent's login of a minor: the parent is the recipient. */
     optionsGuardian: Record<InvoiceRecipient, string>;
+    /** A representative's login of an adult patient: the patient is the recipient, through the representative (owner 2026-10-22). */
+    optionsRepresentative: Record<InvoiceRecipient, string>;
     typeQuestion: string;
     typeOptions: Record<RecipientType, string>;
     dataBlock: string;
@@ -289,8 +292,6 @@ export type LeadRequestText = {
   /** In step "send" while blocks are open: a pointer to the step. */
   followUpOpen: string;
   followUpGo: string;
-  /** The neutral notice after sending, for every request alike (contract 3.1). */
-  reviewNotice: string;
   /** Block A: the source of funds (one source chosen from a list, then the words). */
   extraFields: Record<
     | "payer_funds_source"
@@ -302,6 +303,13 @@ export type LeadRequestText = {
     | "funds_proof",
     string
   >;
+  /**
+   * Block A's profession and sector in a representative's login (owner
+   * 2026-10-22): they are the patient's statements (stored with the
+   * patient's GwG statements and printed on the patient's sheet), so they
+   * name the child, or the adult patient, never "Ihr".
+   */
+  extraWorkFields: Record<"child" | "patient", Record<"occupation" | "sector", string>>;
   extraPayerStatesFunds: string;
   extraChoosePayer: (step: string) => string;
   /** The paying parent states the profession in the own payer section. */
@@ -437,8 +445,6 @@ export type LeadRequestText = {
   payerQuestionnaireFields: Record<"language" | "occupation" | "funds_sources" | "funds_description", string>;
   /** The paying parent's own legal questions with their details (phase 3a, unchanged by the trigger flow). */
   payerLegalFields: Record<PayerLegalQuestion | (typeof PAYER_LEGAL_DETAILS)[PayerLegalQuestion], string>;
-  /** The high-risk question of the paying parent in short, for the list of what is still missing. */
-  payerHighRiskTopic: string;
   fundsSourceOptions: Record<FundsSource, string>;
   /** Block A's single choice of the source of funds. */
   statedFundsSourceOptions: Record<StatedFundsSource, string>;
@@ -508,11 +514,8 @@ export function payerQuestionnaireFieldLabel(text: LeadRequestText, field: strin
     case "relationship":
       return `${text.payerRelationship} – ${text.payerRelationshipOther}`;
     // The paying parent's own legal questions keep their details (phase 3a).
-    case "high_risk_country":
-      return `${text.legalShort}: ${text.payerHighRiskTopic}`;
     case "pep_self_details":
     case "pep_related_details":
-    case "high_risk_country_code":
     case "sanctions_links_details":
       return `${text.legalShort}: ${text.payerLegalFields[field]}`;
     default:
@@ -744,7 +747,44 @@ export function childSectionTitle(text: LeadRequestText, key: keyof LeadRequestT
   return minor ? text.childSections[key] : defaults[key];
 }
 
-export function followUpFieldLabel(text: LeadRequestText, key: string, guardian = false, representatives: readonly RepresentativeCountryQuestions[] = []): string {
+/**
+ * The invoice recipient's options by login: the patient's own, a parent's of
+ * a minor ("Ich (als Elternteil …)"), or a representative's of an adult
+ * patient ("Die Patientin / der Patient (über mich als Vertretung)").
+ */
+export function recipientOptions(
+  text: LeadRequestText,
+  request: { access_kind?: string | null; minor?: boolean | null },
+): Record<InvoiceRecipient, string> {
+  if (request.access_kind !== "guardian") return text.recipient.options;
+  return request.minor ? text.recipient.optionsGuardian : text.recipient.optionsRepresentative;
+}
+
+/** Whose profession and sector block A asks: the signed-in patient's, a minor child's, or an adult patient's (representative's login). */
+export type ExtraWorkSubject = "self" | "child" | "patient";
+
+export function extraWorkSubject(request: { access_kind?: string | null; minor?: boolean | null }): ExtraWorkSubject {
+  if (request.access_kind !== "guardian") return "self";
+  return request.minor ? "child" : "patient";
+}
+
+/** Label of a block A field; profession and sector name the patient in a representative's login. */
+export function extraFieldLabel(
+  text: LeadRequestText,
+  field: keyof LeadRequestText["extraFields"],
+  subject: ExtraWorkSubject = "self",
+): string {
+  if (subject !== "self" && (field === "occupation" || field === "sector")) return text.extraWorkFields[subject][field];
+  return text.extraFields[field];
+}
+
+export function followUpFieldLabel(
+  text: LeadRequestText,
+  key: string,
+  guardian = false,
+  representatives: readonly RepresentativeCountryQuestions[] = [],
+  subject: ExtraWorkSubject = "self",
+): string {
   if (key.startsWith("representative:")) {
     const [, id, field] = key.split(":");
     const name = representatives.find((person) => person.id === id)?.name || text.followUpBlocks.R;
@@ -752,7 +792,7 @@ export function followUpFieldLabel(text: LeadRequestText, key: string, guardian 
   }
   const blockA = blockAKey(key);
   if (blockA === "funds_proof_upload") return text.extraFields.funds_proof;
-  if (blockA in text.extraFields) return text.extraFields[blockA as keyof LeadRequestText["extraFields"]];
+  if (blockA in text.extraFields) return extraFieldLabel(text, blockA as keyof LeadRequestText["extraFields"], subject);
   if (key === "relationship_proof_upload") return text.relationshipProofTitle;
   if (key === "via_third_party_kind" || key === "expected_total_eur") return text.billingExtrasFields[key];
   if (key === "id_document_upload") return text.identityFiles;
@@ -1025,6 +1065,10 @@ const de: LeadRequestText = {
       self: "Ich (als Elternteil / gesetzliche Vertretung)",
       third_party: "Eine andere Person oder Organisation",
     },
+    optionsRepresentative: {
+      self: "Die Patientin / der Patient (über mich als Vertretung)",
+      third_party: "Eine andere Person oder Organisation",
+    },
     typeQuestion: "Rechnungsempfänger ist",
     // List options, written like the payer's list (QA 2026-10-11 N-12).
     typeOptions: { person: "Eine Privatperson", organisation: "Eine Organisation" },
@@ -1058,7 +1102,7 @@ const de: LeadRequestText = {
     payerExtrasBlock: "Weitere Angaben zum Zahler",
     missingPrefix: "Rechnungsempfänger",
   },
-  followUpBeforeSubmitIntro: "Unter bestimmten Umständen müssen wir einige ergänzende Fragen stellen, um gesetzliche Anforderungen zu erfüllen. Bitte beantworten Sie die folgenden Fragen. Sie werden in solchen Fällen allen gestellt und sagen nichts über Ihre Person aus. Ihre Antworten werden automatisch gespeichert.",
+  followUpBeforeSubmitIntro: "Für Ihre Anfrage benötigen wir noch einige ergänzende Angaben. Ihre Antworten werden automatisch gespeichert.",
   followUpIntro:
     "Bitte ergänzen Sie die folgenden Angaben und senden Sie sie anschließend ab. Alles wird automatisch gespeichert.",
   followUpBlocks: {
@@ -1085,7 +1129,6 @@ const de: LeadRequestText = {
   followUpAnsweredAt: (dateTime) => `Ihre ergänzenden Angaben wurden am ${dateTime} gesendet. Ihre Angaben werden geprüft.`,
   followUpOpen: "Bitte ergänzen Sie noch einige Angaben.",
   followUpGo: "Zu den ergänzenden Angaben",
-  reviewNotice: "Wir prüfen sie und melden uns bei Ihnen.",
   extraFields: {
     payer_funds_source: "Woher stammen die Mittel der zahlenden Person? (soweit Ihnen bekannt)",
     payer_funds_description: "Bitte beschreiben Sie die Herkunft der Mittel der zahlenden Person",
@@ -1095,6 +1138,13 @@ const de: LeadRequestText = {
     occupation: "Ihr Beruf",
     sector: "Branche / Sektor Ihrer Tätigkeit",
     funds_proof: "Nachweise zur Herkunft der Mittel",
+  },
+  extraWorkFields: {
+    child: { occupation: "Beruf / Tätigkeit des Kindes (z. B. Schüler/in)", sector: "Branche / Sektor der Tätigkeit des Kindes" },
+    patient: {
+      occupation: "Beruf / Tätigkeit der Patientin / des Patienten",
+      sector: "Branche / Sektor der Tätigkeit der Patientin / des Patienten",
+    },
   },
   extraChoosePayer: (step) => `Wählen Sie bitte zuerst unter „${step}“, wer bezahlt. Danach zeigen wir die passenden Fragen zur Herkunft der Mittel.`,
   extraPayerStatesFunds:
@@ -1307,13 +1357,9 @@ const de: LeadRequestText = {
     pep_self_details: "Amt, Land und Zeitraum",
     pep_related: "Ist ein unmittelbares Familienmitglied oder eine Ihnen nahestehende Person politisch exponiert?",
     pep_related_details: "Name der Person, Beziehung, Amt und Land",
-    high_risk_country:
-      "Haben Sie oder eine beteiligte Person Wohnsitz oder Sitz in einem Land, das die EU-Kommission als Drittstaat mit hohem Risiko führt?",
-    high_risk_country_code: "Welches Land?",
     sanctions_links: "Bestehen Verbindungen zu Personen oder Unternehmen, die Sanktionen unterliegen?",
     sanctions_links_details: "Zu wem besteht die Verbindung und welcher Art ist sie?",
   },
-  payerHighRiskTopic: "Land mit hohem Risiko",
   fundsSourceOptions: {
     employment: "Gehalt / nichtselbständige Arbeit",
     business_income: "Einkünfte aus Unternehmen / selbständiger Tätigkeit",
@@ -1351,7 +1397,7 @@ const de: LeadRequestText = {
   payerQuestionnaireLoadFailed: "Ihre Angaben als zahlende Person konnten nicht geladen werden.",
   payerQuestionnaireLocked: "Ihre Angaben als zahlende Person sind bereits gesendet und können hier nicht mehr geändert werden.",
   payerSignatureSent: (date) =>
-    `Unterlagen zur Unterschrift: Wir haben Ihnen ${date ? `am ${date} ` : ""}vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.`,
+    `Unterlagen zur Unterschrift: Wir haben Ihnen ${date ? `am ${date} ` : ""}die Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.`,
   payerSignatureSigned: (date) =>
     `Vielen Dank – die unterschriebenen Unterlagen sind ${date ? `am ${date} ` : ""}bei GMED eingegangen.`,
 };
@@ -1558,6 +1604,10 @@ const ru: LeadRequestText = {
       self: "Я (как родитель / законный представитель)",
       third_party: "Третье лицо или организация",
     },
+    optionsRepresentative: {
+      self: "Пациент (через меня как представителя)",
+      third_party: "Третье лицо или организация",
+    },
     typeQuestion: "Получателем счёта является",
     typeOptions: { person: "Физическое лицо", organisation: "Организация" },
     dataBlock: "Данные получателя счёта",
@@ -1590,7 +1640,7 @@ const ru: LeadRequestText = {
     payerExtrasBlock: "Дополнительно о плательщике",
     missingPrefix: "Получатель счёта",
   },
-  followUpBeforeSubmitIntro: "При определённых обстоятельствах мы должны задать несколько уточняющих вопросов для выполнения законодательных требований. Ответьте, пожалуйста, на вопросы ниже. В таких случаях их задают всем, и они ничего не говорят о вас лично. Ответы сохраняются автоматически.",
+  followUpBeforeSubmitIntro: "Для вашего запроса нам нужны ещё некоторые дополнительные сведения. Ответы сохраняются автоматически.",
   followUpIntro: "Пожалуйста, дополните следующие сведения и затем отправьте их. Всё сохраняется автоматически.",
   followUpBlocks: {
     R: "Дополнительные сведения родителей или законных представителей",
@@ -1616,7 +1666,6 @@ const ru: LeadRequestText = {
   followUpAnsweredAt: (dateTime) => `Ваши дополнительные сведения отправлены ${dateTime}. Ваши данные проверяются.`,
   followUpOpen: "Пожалуйста, дополните ещё некоторые сведения.",
   followUpGo: "К дополнительным сведениям",
-  reviewNotice: "Мы проверим их и свяжемся с вами.",
   extraFields: {
     payer_funds_source: "Откуда средства у плательщика? (насколько вам известно)",
     payer_funds_description: "Опишите, пожалуйста, происхождение средств плательщика",
@@ -1625,6 +1674,10 @@ const ru: LeadRequestText = {
     occupation: "Ваша профессия",
     sector: "Отрасль / сфера вашей работы",
     funds_proof: "Подтверждения происхождения средств",
+  },
+  extraWorkFields: {
+    child: { occupation: "Профессия / род занятий ребёнка (например, школьник/школьница)", sector: "Отрасль / сфера деятельности ребёнка" },
+    patient: { occupation: "Профессия / род занятий пациента", sector: "Отрасль / сфера деятельности пациента" },
   },
   extraPayerStatesFunds: "Сведения о происхождении средств и подтверждения плательщик даёт по своей собственной ссылке.",
   extraChoosePayer: (step) => `Сначала выберите, кто оплачивает услуги, на шаге «${step}». После этого появятся нужные вопросы о происхождении средств.`,
@@ -1841,13 +1894,9 @@ const ru: LeadRequestText = {
     pep_related:
       "Является ли кто-то из ближайших членов вашей семьи или близкий вам человек политически значимым лицом?",
     pep_related_details: "Имя человека, кем приходится, должность и страна",
-    high_risk_country:
-      "Проживаете ли вы или участвующее лицо в стране (или зарегистрированы в ней), которую Европейская комиссия относит к третьим странам высокого риска?",
-    high_risk_country_code: "Какая страна?",
     sanctions_links: "Есть ли связи с лицами или компаниями, на которые наложены санкции?",
     sanctions_links_details: "С кем есть связь и какая именно?",
   },
-  payerHighRiskTopic: "Страна высокого риска",
   fundsSourceOptions: {
     employment: "Заработная плата / работа по найму",
     business_income: "Доход от предпринимательской деятельности",
@@ -1885,7 +1934,7 @@ const ru: LeadRequestText = {
   payerQuestionnaireLoadFailed: "Не удалось загрузить ваши данные как плательщика.",
   payerQuestionnaireLocked: "Ваши данные как плательщика уже отправлены, изменить их здесь больше нельзя.",
   payerSignatureSent: (date) =>
-    `Документы на подпись: ${date ? `${date} ` : ""}мы отправили вам четыре документа для квалифицированной электронной подписи. Приглашение придёт по электронной почте от нашего партнёра Skribble; там вы также подтвердите свою личность.`,
+    `Документы на подпись: ${date ? `${date} ` : ""}мы отправили вам документы для квалифицированной электронной подписи. Приглашение придёт по электронной почте от нашего партнёра Skribble; там вы также подтвердите свою личность.`,
   payerSignatureSigned: (date) => `Спасибо – подписанные документы поступили в GMED${date ? ` ${date}` : ""}.`,
 };
 
@@ -2091,6 +2140,10 @@ const uk: LeadRequestText = {
       self: "Я (як один із батьків / законний представник)",
       third_party: "Третя особа або організація",
     },
+    optionsRepresentative: {
+      self: "Пацієнт (через мене як представника)",
+      third_party: "Третя особа або організація",
+    },
     typeQuestion: "Отримувачем рахунку є",
     typeOptions: { person: "Фізична особа", organisation: "Організація" },
     dataBlock: "Дані отримувача рахунку",
@@ -2123,7 +2176,7 @@ const uk: LeadRequestText = {
     payerExtrasBlock: "Додатково про платника",
     missingPrefix: "Отримувач рахунку",
   },
-  followUpBeforeSubmitIntro: "За певних обставин ми маємо поставити кілька уточнювальних запитань для виконання законодавчих вимог. Дайте, будь ласка, відповіді на запитання нижче. У таких випадках їх ставлять усім, і вони нічого не кажуть про вас особисто. Відповіді зберігаються автоматично.",
+  followUpBeforeSubmitIntro: "Для вашого запиту нам потрібні ще деякі додаткові відомості. Відповіді зберігаються автоматично.",
   followUpIntro: "Будь ласка, доповніть наведені нижче відомості й потім надішліть їх. Усе зберігається автоматично.",
   followUpBlocks: {
     R: "Додаткові відомості батьків або законних представників",
@@ -2149,7 +2202,6 @@ const uk: LeadRequestText = {
   followUpAnsweredAt: (dateTime) => `Ваші додаткові відомості надіслано ${dateTime}. Ваші дані перевіряються.`,
   followUpOpen: "Будь ласка, доповніть ще деякі відомості.",
   followUpGo: "До додаткових відомостей",
-  reviewNotice: "Ми перевіримо їх і зв'яжемося з вами.",
   extraFields: {
     payer_funds_source: "Звідки кошти в платника? (наскільки вам відомо)",
     payer_funds_description: "Опишіть, будь ласка, походження коштів платника",
@@ -2158,6 +2210,10 @@ const uk: LeadRequestText = {
     occupation: "Ваша професія",
     sector: "Галузь / сфера вашої роботи",
     funds_proof: "Підтвердження походження коштів",
+  },
+  extraWorkFields: {
+    child: { occupation: "Професія / рід занять дитини (наприклад, школяр/школярка)", sector: "Галузь / сфера діяльності дитини" },
+    patient: { occupation: "Професія / рід занять пацієнта", sector: "Галузь / сфера діяльності пацієнта" },
   },
   extraPayerStatesFunds: "Відомості про походження коштів і підтвердження платник надає за своїм власним посиланням.",
   extraChoosePayer: (step) => `Спочатку виберіть, хто оплачує послуги, на кроці «${step}». Після цього з’являться потрібні запитання про походження коштів.`,
@@ -2374,13 +2430,9 @@ const uk: LeadRequestText = {
     pep_related:
       "Чи є хтось із найближчих членів вашої родини або близька вам людина політично значущою особою?",
     pep_related_details: "Ім'я людини, ким доводиться, посада і країна",
-    high_risk_country:
-      "Чи проживаєте ви або залучена особа в країні (або зареєстровані в ній), яку Європейська комісія відносить до третіх країн високого ризику?",
-    high_risk_country_code: "Яка країна?",
     sanctions_links: "Чи є зв'язки з особами або компаніями, на які накладено санкції?",
     sanctions_links_details: "З ким є зв'язок і який саме?",
   },
-  payerHighRiskTopic: "Країна високого ризику",
   fundsSourceOptions: {
     employment: "Заробітна плата / робота за наймом",
     business_income: "Доходи від підприємницької діяльності",
@@ -2418,7 +2470,7 @@ const uk: LeadRequestText = {
   payerQuestionnaireLoadFailed: "Не вдалося завантажити ваші дані як платника.",
   payerQuestionnaireLocked: "Ваші дані як платника вже надіслано, змінити їх тут більше не можна.",
   payerSignatureSent: (date) =>
-    `Документи на підпис: ${date ? `${date} ` : ""}ми надіслали вам чотири документи для кваліфікованого електронного підпису. Запрошення надійде електронною поштою від нашого партнера Skribble; там ви також підтвердите свою особу.`,
+    `Документи на підпис: ${date ? `${date} ` : ""}ми надіслали вам документи для кваліфікованого електронного підпису. Запрошення надійде електронною поштою від нашого партнера Skribble; там ви також підтвердите свою особу.`,
   payerSignatureSigned: (date) => `Дякуємо – підписані документи надійшли до GMED${date ? ` ${date}` : ""}.`,
 };
 
@@ -2624,6 +2676,10 @@ const en: LeadRequestText = {
       self: "Me (as a parent / legal representative)",
       third_party: "Another person or an organisation",
     },
+    optionsRepresentative: {
+      self: "The patient (through me as representative)",
+      third_party: "Another person or an organisation",
+    },
     typeQuestion: "The invoice recipient is",
     typeOptions: { person: "A private person", organisation: "An organisation" },
     dataBlock: "Invoice recipient's details",
@@ -2656,7 +2712,7 @@ const en: LeadRequestText = {
     payerExtrasBlock: "More about the payer",
     missingPrefix: "Invoice recipient",
   },
-  followUpBeforeSubmitIntro: "In some circumstances, we need to ask a few additional questions to meet legal requirements. Please answer the questions below. In such cases they are asked of everyone and say nothing about you personally. Your answers are saved automatically.",
+  followUpBeforeSubmitIntro: "For your request we need a few more details. Your answers are saved automatically.",
   followUpIntro: "Please complete the following details and then send them. Everything is saved automatically.",
   followUpBlocks: {
     R: "Additional details of parents or legal representatives",
@@ -2682,7 +2738,6 @@ const en: LeadRequestText = {
   followUpAnsweredAt: (dateTime) => `Your additional details were sent on ${dateTime}. Your details are being reviewed.`,
   followUpOpen: "Please complete a few more details.",
   followUpGo: "To the additional information",
-  reviewNotice: "We are reviewing them and will get in touch with you.",
   extraFields: {
     payer_funds_source: "Where do the paying person's funds come from? (as far as you know)",
     payer_funds_description: "Please describe the origin of the paying person's funds",
@@ -2691,6 +2746,10 @@ const en: LeadRequestText = {
     occupation: "Your occupation",
     sector: "Industry / sector of your work",
     funds_proof: "Proofs of the source of funds",
+  },
+  extraWorkFields: {
+    child: { occupation: "Child’s occupation (e.g. pupil)", sector: "Industry / sector of the child’s activity" },
+    patient: { occupation: "Patient’s occupation", sector: "Industry / sector of the patient’s work" },
   },
   extraPayerStatesFunds: "The paying person states the source of funds and provides the proofs through their own link.",
   extraChoosePayer: (step) => `Please choose who pays under “${step}” first. We will then show the relevant questions about the source of funds.`,
@@ -2897,13 +2956,9 @@ const en: LeadRequestText = {
     pep_self_details: "Office, country and period",
     pep_related: "Is an immediate family member or a person close to you politically exposed?",
     pep_related_details: "Name of the person, relationship, office and country",
-    high_risk_country:
-      "Do you or a person involved live or have a registered office in a country that the EU Commission lists as a high-risk third country?",
-    high_risk_country_code: "Which country?",
     sanctions_links: "Are there any links to persons or companies that are subject to sanctions?",
     sanctions_links_details: "Who is the link to, and what kind of link is it?",
   },
-  payerHighRiskTopic: "High-risk country",
   fundsSourceOptions: {
     employment: "Salary / employment",
     business_income: "Business or self-employed income",
@@ -2941,7 +2996,7 @@ const en: LeadRequestText = {
   payerQuestionnaireLoadFailed: "Your details as the paying person could not be loaded.",
   payerQuestionnaireLocked: "Your details as the paying person have been sent and can no longer be changed here.",
   payerSignatureSent: (date) =>
-    `Documents for signature: ${date ? `On ${date} we` : "We"} sent you four documents to sign with a qualified electronic signature. The invitation comes by e-mail from our partner Skribble; there you also confirm your identity.`,
+    `Documents for signature: ${date ? `On ${date} we` : "We"} sent you the documents to sign with a qualified electronic signature. The invitation comes by e-mail from our partner Skribble; there you also confirm your identity.`,
   payerSignatureSigned: (date) => `Thank you – GMED received the signed documents${date ? ` on ${date}` : ""}.`,
 };
 

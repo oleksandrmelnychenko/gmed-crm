@@ -96,8 +96,6 @@ export type PayerAnswers = {
   pep_self_details: string | null;
   pep_related: boolean | null;
   pep_related_details: string | null;
-  high_risk_country: boolean | null;
-  high_risk_country_code: string | null;
   sanctions_links: boolean | null;
   sanctions_links_details: string | null;
 };

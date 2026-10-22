@@ -75,7 +75,7 @@ import {
 import { PayerSection } from "./lead-request-payer-section";
 import { RepresentationSection } from "./lead-request-representation";
 import { RepresentativeQuestionsBlock } from "./lead-request-representative-questions";
-import { followUpFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { extraFieldLabel, extraWorkSubject, followUpFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // Step "Ergänzende Angaben" (trigger flow 2026-10-07, contract 3 and 6): the
 // follow-up blocks the server opened, each a sub-section of its own, under
@@ -288,7 +288,7 @@ export function FollowUpStep({
             {showMissing ? (
               <MissingList
                 title={text.stepMissingTitle}
-                labels={followUpMissing(request, block).map((key) => followUpFieldLabel(text, key, guardian, request.follow_up?.representatives))}
+                labels={followUpMissing(request, block).map((key) => followUpFieldLabel(text, key, guardian, request.follow_up?.representatives, extraWorkSubject(request)))}
                 fields={followUpMissing(request, block).map((key) => `${block}:${key}`)}
                 step="follow_up"
                 testId={`lead-request-follow-up-${block}-missing`}
@@ -488,8 +488,9 @@ function FundsBlock({
       />
     </LabeledField>
   );
+  // The patient's profession and sector: in a parent's or representative's login they name the patient (owner 2026-10-22).
   const textField = (field: Extract<ExtraTextField, "occupation" | "sector">) => (
-    <LabeledField id={controlId(field)} label={text.extraFields[field]} error={errorFor(field)} required>
+    <LabeledField id={controlId(field)} label={extraFieldLabel(text, field, extraWorkSubject(request))} error={errorFor(field)} required>
       <Input
         {...control(field)}
         className={inputClass}

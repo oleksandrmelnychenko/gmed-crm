@@ -649,28 +649,15 @@ function PayerQuestionnaireForm({
                   </LabeledField>
                   {draft[question] === "yes" ? (
                     <LabeledField id={fieldId(details)} label={labelOf(details)} error={errorFor(details)} required>
-                      {details === "high_risk_country_code" ? (
-                        <div className="sm:max-w-[calc(50%-0.5rem)]">
-                          <CountrySelect
-                            value={draft.high_risk_country_code || null}
-                            lang={lang}
-                            className={selectClass}
-                            disabled={readOnly}
-                            aria-label={labelOf(details)}
-                            onChange={(code) => set("high_risk_country_code", code ?? "")}
-                          />
-                        </div>
-                      ) : (
-                        <textarea
-                          {...control(details)}
-                          className={cn(textareaClass, "text-base md:text-sm")}
-                          rows={3}
-                          maxLength={2000}
-                          autoComplete="off"
-                          value={draft[details]}
-                          onChange={(event) => set(details, event.target.value)}
-                        />
-                      )}
+                      <textarea
+                        {...control(details)}
+                        className={cn(textareaClass, "text-base md:text-sm")}
+                        rows={3}
+                        maxLength={2000}
+                        autoComplete="off"
+                        value={draft[details]}
+                        onChange={(event) => set(details, event.target.value)}
+                      />
                     </LabeledField>
                   ) : null}
                 </div>

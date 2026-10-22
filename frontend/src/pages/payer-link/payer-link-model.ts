@@ -87,14 +87,13 @@ export function fundsSourceOptions(questionnaire: { funds_source_options?: unkno
   return known.length > 0 ? known : [...FUNDS_SOURCES];
 }
 
-export const LEGAL_QUESTIONS = ["pep_self", "pep_related", "high_risk_country", "sanctions_links"] as const;
+export const LEGAL_QUESTIONS = ["pep_self", "pep_related", "sanctions_links"] as const;
 export type LegalQuestion = (typeof LEGAL_QUESTIONS)[number];
 
 /** The details a "yes" asks for. */
 export const LEGAL_DETAILS = {
   pep_self: "pep_self_details",
   pep_related: "pep_related_details",
-  high_risk_country: "high_risk_country_code",
   sanctions_links: "sanctions_links_details",
 } as const satisfies Record<LegalQuestion, string>;
 
@@ -136,7 +135,6 @@ export const PAYER_TEXT_FIELDS = [
   "funds_description",
   "pep_self_details",
   "pep_related_details",
-  "high_risk_country_code",
   "sanctions_links_details",
 ] as const;
 export type PayerTextField = (typeof PAYER_TEXT_FIELDS)[number];
@@ -197,8 +195,6 @@ export const PAYER_FIELDS: readonly PayerField[] = [
   "pep_self_details",
   "pep_related",
   "pep_related_details",
-  "high_risk_country",
-  "high_risk_country_code",
   "sanctions_links",
   "sanctions_links_details",
   ...PAYMENT_ROUTE_KEYS,
@@ -621,8 +617,6 @@ const DECLARATIONS_MISSING = [
   "pep_self_details",
   "pep_related",
   "pep_related_details",
-  "high_risk_country",
-  "high_risk_country_code",
   "sanctions_links",
   "sanctions_links_details",
 ] as const;

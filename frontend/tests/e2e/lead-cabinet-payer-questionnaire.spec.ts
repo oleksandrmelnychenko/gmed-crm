@@ -30,7 +30,6 @@ const WRITABLE = [
 const LEGAL: Array<[string, string]> = [
   ["pep_self", "pep_self_details"],
   ["pep_related", "pep_related_details"],
-  ["high_risk_country", "high_risk_country_code"],
   ["sanctions_links", "sanctions_links_details"],
 ];
 
@@ -196,7 +195,7 @@ function childRequest(options: { paying: boolean }) {
 /**
  * Like the server (contract 3.5, D4, owner rule 2026-10-07): level 2 — the
  * enhanced check — needs a proof of funds; here a habitual residence on the
- * black list triggers it. A PEP or the high-risk question does not.
+ * black list triggers it. A PEP does not.
  */
 function recompute(value: Questionnaire, representativeMissing: string[]) {
   const answers = value.answers;
@@ -593,10 +592,14 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await expect.poll(() => calls.patches.at(-1)).toEqual({ salutation: "ms" });
     await legal.getByRole("textbox", { name: /Amt, Land und Zeitraum/ }).fill("Stadträtin 2020–2024");
     await expect.poll(() => calls.patches.at(-1)).toEqual({ pep_self_details: "Stadträtin 2020–2024" });
-    for (const question of [/Ist ein unmittelbares Familienmitglied/, /Haben Sie oder eine beteiligte Person Wohnsitz/, /Bestehen Verbindungen zu Personen/]) {
+    for (const question of [/Ist ein unmittelbares Familienmitglied/, /Bestehen Verbindungen zu Personen/]) {
       await choose(page, legal.getByRole("combobox", { name: question }), "Nein");
     }
-    await expect.poll(() => Object.assign({}, ...calls.patches)).toMatchObject({ pep_related: false, high_risk_country: false, sanctions_links: false });
+    await expect.poll(() => Object.assign({}, ...calls.patches)).toMatchObject({ pep_related: false, sanctions_links: false });
+    // No question about a high-risk third country (owner 2026-10-22): GMED checks the country itself.
+    await expect(legal.getByTestId("lead-request-payer-legal-high_risk_country")).toHaveCount(0);
+    await expect(section).not.toContainText(/Drittstaat|hohem Risiko/);
+    expect(calls.patches.some((patch) => "high_risk_country" in patch || "high_risk_country_code" in patch)).toBe(false);
     await expect(proof).not.toHaveAttribute("data-required", "true");
     await expect(proof).toContainText("freiwillig");
     await expect(section.getByTestId("lead-request-payer-missing-own")).toHaveCount(0);
@@ -688,7 +691,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     const status = section.getByTestId("lead-request-payer-signature");
     await expect(status).toHaveAttribute("data-status", "sent");
     await expect(status).toHaveText(
-      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
+      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 die Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
     );
     // The parent pays: no consent to send oneself the cost estimate is asked in "who pays".
     await expect(page.getByTestId("lead-request-payer-cost-estimate-consent")).toHaveCount(0);

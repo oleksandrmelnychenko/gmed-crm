@@ -31,7 +31,6 @@ export type OrganisationQuestionField =
   | "pep_self"
   | "pep_self_details"
   | "pep_related"
-  | "high_risk_country"
   | "sanctions_links"
   | "payment_method";
 
@@ -48,7 +47,6 @@ type MissingLabelKey =
   | "via_third_party_details"
   | "pep_self_details"
   | "pep_related_details"
-  | "high_risk_country_code"
   | "sanctions_links_details"
   | "other";
 
@@ -329,9 +327,6 @@ const de: PayerLinkText = {
     pep_self_details: "Amt, Land und Zeitraum",
     pep_related: "Ist ein unmittelbares Familienmitglied oder eine Ihnen nahestehende Person politisch exponiert?",
     pep_related_details: "Name der Person, Beziehung, Amt und Land",
-    high_risk_country:
-      "Haben Sie oder eine beteiligte Person Wohnsitz oder Sitz in einem Land, das die EU-Kommission als Drittstaat mit hohem Risiko führt?",
-    high_risk_country_code: "Welches Land?",
     sanctions_links: "Bestehen Verbindungen zu Personen oder Unternehmen, die Sanktionen unterliegen?",
     sanctions_links_details: "Zu wem besteht die Verbindung und welcher Art ist sie?",
     payment_method: "Welche Zahlungsart für Rechnungen bevorzugen Sie?",
@@ -348,8 +343,6 @@ const de: PayerLinkText = {
     pep_self_details: "Person, Amt, Land und Zeitraum",
     pep_related:
       "Ist ein unmittelbares Familienmitglied oder eine nahestehende Person der vertretungsberechtigten Personen oder wirtschaftlich Berechtigten politisch exponiert?",
-    high_risk_country:
-      "Haben die Organisation, die vertretungsberechtigten Personen oder wirtschaftlich Berechtigten Sitz oder Wohnsitz in einem Land, das die EU-Kommission als Drittstaat mit hohem Risiko führt?",
     sanctions_links:
       "Bestehen bei der Organisation, den vertretungsberechtigten Personen oder wirtschaftlich Berechtigten Verbindungen zu Personen oder Unternehmen, die Sanktionen unterliegen?",
     payment_method: "Welche Zahlungsart für Rechnungen bevorzugt die Organisation?",
@@ -366,14 +359,12 @@ const de: PayerLinkText = {
     via_third_party_details: "Zahlung über Dritte: Beschreibung",
     pep_self_details: "Öffentliches Amt: Angaben",
     pep_related_details: "Politisch exponierte nahestehende Person: Angaben",
-    high_risk_country_code: "Land mit hohem Risiko: welches Land",
     sanctions_links_details: "Sanktionen: Angaben",
     other: "Weitere Angaben",
   },
   legalTopics: {
     pep_self: "Öffentliches Amt",
     pep_related: "Politisch exponierte nahestehende Person",
-    high_risk_country: "Land mit hohem Risiko",
     sanctions_links: "Sanktionen",
   },
   identityIntroOrganisation:
@@ -476,7 +467,7 @@ const de: PayerLinkText = {
   completionClose: "Sie können diese Seite jetzt schließen.",
   viewSubmitted: "Gesendete Angaben ansehen",
   signatureSent: (date) =>
-    `Unterlagen zur Unterschrift: Wir haben Ihnen ${date ? `am ${date} ` : ""}vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.`,
+    `Unterlagen zur Unterschrift: Wir haben Ihnen ${date ? `am ${date} ` : ""}die Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.`,
   signatureSigned: (date) => `Vielen Dank – die unterschriebenen Unterlagen sind ${date ? `am ${date} ` : ""}bei GMED eingegangen.`,
   summaryTitle: "Ihre Angaben",
   notStated: "Keine Angabe",
@@ -621,9 +612,6 @@ const en: PayerLinkText = {
     pep_self_details: "Office, country and period",
     pep_related: "Is an immediate family member or a person close to you politically exposed?",
     pep_related_details: "Name of the person, relationship, office and country",
-    high_risk_country:
-      "Do you or a person involved live or have a registered office in a country that the EU Commission lists as a high-risk third country?",
-    high_risk_country_code: "Which country?",
     sanctions_links: "Are there any links to persons or companies that are subject to sanctions?",
     sanctions_links_details: "Who is the link to, and what kind of link is it?",
     payment_method: "Which payment method do you prefer for invoices?",
@@ -640,8 +628,6 @@ const en: PayerLinkText = {
     pep_self_details: "Person, office, country and period",
     pep_related:
       "Is an immediate family member or a close associate of the persons authorised to represent the organisation or of its beneficial owners politically exposed?",
-    high_risk_country:
-      "Do the organisation, the persons authorised to represent it or its beneficial owners have their registered office or residence in a country that the EU Commission lists as a high-risk third country?",
     sanctions_links:
       "Do the organisation, the persons authorised to represent it or its beneficial owners have links to persons or companies that are subject to sanctions?",
     payment_method: "Which payment method does the organisation prefer for invoices?",
@@ -658,14 +644,12 @@ const en: PayerLinkText = {
     via_third_party_details: "Payment through third parties: description",
     pep_self_details: "Public office: details",
     pep_related_details: "Politically exposed close person: details",
-    high_risk_country_code: "High-risk country: which country",
     sanctions_links_details: "Sanctions: details",
     other: "Further details",
   },
   legalTopics: {
     pep_self: "Public office",
     pep_related: "Politically exposed close person",
-    high_risk_country: "High-risk country",
     sanctions_links: "Sanctions",
   },
   identityIntroOrganisation:
@@ -768,7 +752,7 @@ const en: PayerLinkText = {
   completionClose: "You can now close this page.",
   viewSubmitted: "View submitted details",
   signatureSent: (date) =>
-    `Documents for signature: ${date ? `On ${date} we` : "We"} sent you four documents to sign with a qualified electronic signature. The invitation comes by e-mail from our partner Skribble; there you also confirm your identity.`,
+    `Documents for signature: ${date ? `On ${date} we` : "We"} sent you the documents to sign with a qualified electronic signature. The invitation comes by e-mail from our partner Skribble; there you also confirm your identity.`,
   signatureSigned: (date) => `Thank you – GMED received the signed documents${date ? ` on ${date}` : ""}.`,
   summaryTitle: "Your details",
   notStated: "Not specified",
@@ -912,9 +896,6 @@ const uk: PayerLinkText = {
     pep_related:
       "Чи є хтось із найближчих членів вашої родини або близька вам людина політично значущою особою?",
     pep_related_details: "Ім'я людини, ким доводиться, посада і країна",
-    high_risk_country:
-      "Чи проживаєте ви або залучена особа в країні (або зареєстровані в ній), яку Європейська комісія відносить до третіх країн високого ризику?",
-    high_risk_country_code: "Яка країна?",
     sanctions_links: "Чи є зв'язки з особами або компаніями, на які накладено санкції?",
     sanctions_links_details: "З ким є зв'язок і який саме?",
     payment_method: "Якому способу оплати рахунків ви надаєте перевагу?",
@@ -931,8 +912,6 @@ const uk: PayerLinkText = {
     pep_self_details: "Особа, посада, країна і період",
     pep_related:
       "Чи є хтось із найближчих членів родини або близьких осіб уповноважених представників організації чи кінцевих бенефіціарів політично значущою особою?",
-    high_risk_country:
-      "Чи зареєстровані організація, її уповноважені представники або кінцеві бенефіціари чи проживають вони в країні, яку Європейська комісія відносить до третіх країн високого ризику?",
     sanctions_links:
       "Чи мають організація, її уповноважені представники або кінцеві бенефіціари зв'язки з особами або компаніями, на які накладено санкції?",
     payment_method: "Якому способу оплати рахунків надає перевагу організація?",
@@ -949,14 +928,12 @@ const uk: PayerLinkText = {
     via_third_party_details: "Оплата через третіх осіб: опис",
     pep_self_details: "Державна посада: подробиці",
     pep_related_details: "Політично значуща близька особа: подробиці",
-    high_risk_country_code: "Країна високого ризику: яка саме",
     sanctions_links_details: "Санкції: подробиці",
     other: "Інші дані",
   },
   legalTopics: {
     pep_self: "Державна посада",
     pep_related: "Політично значуща близька особа",
-    high_risk_country: "Країна високого ризику",
     sanctions_links: "Санкції",
   },
   identityIntroOrganisation:
@@ -1062,7 +1039,7 @@ const uk: PayerLinkText = {
   completionClose: "Тепер цю сторінку можна закрити.",
   viewSubmitted: "Переглянути надіслані дані",
   signatureSent: (date) =>
-    `Документи на підпис: ${date ? `${date} ` : ""}ми надіслали вам чотири документи для кваліфікованого електронного підпису. Запрошення надійде електронною поштою від нашого партнера Skribble; там ви також підтвердите свою особу.`,
+    `Документи на підпис: ${date ? `${date} ` : ""}ми надіслали вам документи для кваліфікованого електронного підпису. Запрошення надійде електронною поштою від нашого партнера Skribble; там ви також підтвердите свою особу.`,
   signatureSigned: (date) => `Дякуємо – підписані документи надійшли до GMED${date ? ` ${date}` : ""}.`,
   summaryTitle: "Ваші дані",
   notStated: "Не вказано",
@@ -1206,9 +1183,6 @@ const ru: PayerLinkText = {
     pep_related:
       "Является ли кто-то из ближайших членов вашей семьи или близкий вам человек политически значимым лицом?",
     pep_related_details: "Имя человека, кем приходится, должность и страна",
-    high_risk_country:
-      "Проживаете ли вы или участвующее лицо в стране (или зарегистрированы в ней), которую Европейская комиссия относит к третьим странам высокого риска?",
-    high_risk_country_code: "Какая страна?",
     sanctions_links: "Есть ли связи с лицами или компаниями, на которые наложены санкции?",
     sanctions_links_details: "С кем есть связь и какая именно?",
     payment_method: "Какой способ оплаты счетов вы предпочитаете?",
@@ -1225,8 +1199,6 @@ const ru: PayerLinkText = {
     pep_self_details: "Лицо, должность, страна и период",
     pep_related:
       "Является ли кто-то из ближайших членов семьи или близких лиц уполномоченных представителей организации или конечных бенефициаров политически значимым лицом?",
-    high_risk_country:
-      "Зарегистрированы ли организация, её уполномоченные представители или конечные бенефициары или проживают ли они в стране, которую Европейская комиссия относит к третьим странам высокого риска?",
     sanctions_links:
       "Есть ли у организации, её уполномоченных представителей или конечных бенефициаров связи с лицами или компаниями, на которые наложены санкции?",
     payment_method: "Какой способ оплаты счетов предпочитает организация?",
@@ -1243,14 +1215,12 @@ const ru: PayerLinkText = {
     via_third_party_details: "Оплата через третьих лиц: описание",
     pep_self_details: "Государственная должность: подробности",
     pep_related_details: "Политически значимое близкое лицо: подробности",
-    high_risk_country_code: "Страна высокого риска: какая именно",
     sanctions_links_details: "Санкции: подробности",
     other: "Другие данные",
   },
   legalTopics: {
     pep_self: "Государственная должность",
     pep_related: "Политически значимое близкое лицо",
-    high_risk_country: "Страна высокого риска",
     sanctions_links: "Санкции",
   },
   identityIntroOrganisation:
@@ -1356,7 +1326,7 @@ const ru: PayerLinkText = {
   completionClose: "Теперь эту страницу можно закрыть.",
   viewSubmitted: "Просмотреть отправленные данные",
   signatureSent: (date) =>
-    `Документы на подпись: ${date ? `${date} ` : ""}мы отправили вам четыре документа для квалифицированной электронной подписи. Приглашение придёт по электронной почте от нашего партнёра Skribble; там вы также подтвердите свою личность.`,
+    `Документы на подпись: ${date ? `${date} ` : ""}мы отправили вам документы для квалифицированной электронной подписи. Приглашение придёт по электронной почте от нашего партнёра Skribble; там вы также подтвердите свою личность.`,
   signatureSigned: (date) => `Спасибо – подписанные документы поступили в GMED${date ? ` ${date}` : ""}.`,
   summaryTitle: "Ваши данные",
   notStated: "Не указано",

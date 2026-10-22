@@ -31,15 +31,18 @@ export type FundsSource = (typeof FUNDS_SOURCES)[number];
 /** The languages the paying person may be addressed in. */
 export const PAYER_LANGUAGES = ["de", "en", "uk", "ru"] as const;
 
-/** The four legal yes/no questions, in form order, with what a "yes" asks for. */
-export const PAYER_LEGAL_QUESTIONS = ["pep_self", "pep_related", "high_risk_country", "sanctions_links"] as const;
+/**
+ * The legal yes/no questions, in form order, with what a "yes" asks for. No
+ * question about a high-risk third country (owner 2026-10-22): GMED checks
+ * the country itself from the address and the citizenships.
+ */
+export const PAYER_LEGAL_QUESTIONS = ["pep_self", "pep_related", "sanctions_links"] as const;
 
 export type PayerLegalQuestion = (typeof PAYER_LEGAL_QUESTIONS)[number];
 
 export const PAYER_LEGAL_DETAILS = {
   pep_self: "pep_self_details",
   pep_related: "pep_related_details",
-  high_risk_country: "high_risk_country_code",
   sanctions_links: "sanctions_links_details",
 } as const satisfies Record<PayerLegalQuestion, keyof LeadPayerAnswers>;
 
@@ -59,8 +62,6 @@ export const PAYER_QUESTIONNAIRE_FIELDS = [
   "pep_self_details",
   "pep_related",
   "pep_related_details",
-  "high_risk_country",
-  "high_risk_country_code",
   "sanctions_links",
   "sanctions_links_details",
 ] as const satisfies readonly (keyof LeadPayerAnswers)[];
@@ -75,7 +76,7 @@ export function payerAdditionalIdentityNeeded(
 ): boolean {
   const answers = questionnaire.answers;
   return questionnaire.funds_proof_required
-    || [answers.pep_self, answers.pep_related, answers.high_risk_country, answers.sanctions_links].some((answer) => answer === true)
+    || [answers.pep_self, answers.pep_related, answers.sanctions_links].some((answer) => answer === true)
     || Boolean(followUp?.blocks.some((block) => ["F", "H", "J", "K", "L"].includes(block)))
     || Boolean(representativeId && followUp?.representatives?.some((person) => person.id === representativeId));
 }
@@ -93,8 +94,6 @@ export type PayerQuestionnaireDraft = {
   pep_self_details: string;
   pep_related: string;
   pep_related_details: string;
-  high_risk_country: string;
-  high_risk_country_code: string;
   sanctions_links: string;
   sanctions_links_details: string;
 };
@@ -166,8 +165,6 @@ export function normalizeLeadPayerQuestionnaire(value: unknown): LeadPayerQuesti
       pep_self_details: textOrNull(answers.pep_self_details),
       pep_related: answerOrNull(answers.pep_related),
       pep_related_details: textOrNull(answers.pep_related_details),
-      high_risk_country: answerOrNull(answers.high_risk_country),
-      high_risk_country_code: textOrNull(answers.high_risk_country_code),
       sanctions_links: answerOrNull(answers.sanctions_links),
       sanctions_links_details: textOrNull(answers.sanctions_links_details),
     },
@@ -251,8 +248,6 @@ export function draftFromPayerQuestionnaire(questionnaire: Pick<LeadPayerQuestio
     pep_self_details: answers?.pep_self_details ?? "",
     pep_related: answerFrom(answers?.pep_related ?? null),
     pep_related_details: answers?.pep_related_details ?? "",
-    high_risk_country: answerFrom(answers?.high_risk_country ?? null),
-    high_risk_country_code: answers?.high_risk_country_code ?? "",
     sanctions_links: answerFrom(answers?.sanctions_links ?? null),
     sanctions_links_details: answers?.sanctions_links_details ?? "",
   };

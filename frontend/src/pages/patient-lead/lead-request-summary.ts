@@ -38,7 +38,10 @@ import {
 import {
   identificationFieldLabel,
   childSectionTitle,
+  extraFieldLabel,
+  extraWorkSubject,
   followUpFieldLabel,
+  recipientOptions,
   invoiceToLabel,
   payerFieldLabel,
   representativeFieldLabel,
@@ -332,7 +335,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     group("billing", text.recipient.section, [
       [
         text.recipient.question,
-        billing.invoice_recipient ? (guardian ? text.recipient.optionsGuardian : text.recipient.options)[billing.invoice_recipient] : "",
+        billing.invoice_recipient ? recipientOptions(text, request)[billing.invoice_recipient] : "",
       ],
       [text.recipient.typeQuestion, third && recipient?.type ? text.recipient.typeOptions[recipient.type] : ""],
       [text.recipient.parentQuestion, invoiceParent ? [invoiceParent.first_name, invoiceParent.last_name].filter(Boolean).join(" ") : ""],
@@ -509,8 +512,9 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         rows.push([text.extraFields.funds_source, source(answers.funds_source)]);
         rows.push([text.extraFields.funds_description, answers.funds_description]);
       }
-      if (asks.occupation) rows.push([text.extraFields.occupation, answers.occupation]);
-      if (asks.sector) rows.push([text.extraFields.sector, answers.sector]);
+      const subject = extraWorkSubject(request);
+      if (asks.occupation) rows.push([extraFieldLabel(text, "occupation", subject), answers.occupation]);
+      if (asks.sector) rows.push([extraFieldLabel(text, "sector", subject), answers.sector]);
       if (asks.funds_proof) rows.push([text.extraFields.funds_proof, fileNames(request.follow_up?.funds_proof_documents)]);
     }
     if (blocks.includes("B")) {

@@ -1269,6 +1269,9 @@ fn missing_for_submit(answers: &Answers, required: &Requirements<'_>) -> Vec<&'s
                 .filter(|key| !key.starts_with("invoice_")),
         );
     }
+    // No question about a high-risk third country (owner 2026-10-22): GMED
+    // checks the country itself from the address and the citizenships. An
+    // old stored answer stays in the row and is never required.
     for (question, answer, details, has_details) in [
         (
             "pep_self",
@@ -1281,12 +1284,6 @@ fn missing_for_submit(answers: &Answers, required: &Requirements<'_>) -> Vec<&'s
             answers.pep_related,
             "pep_related_details",
             filled(&answers.pep_related_details),
-        ),
-        (
-            "high_risk_country",
-            answers.high_risk_country,
-            "high_risk_country_code",
-            answers.high_risk_country_code.is_some(),
         ),
         (
             "sanctions_links",
@@ -6041,6 +6038,12 @@ mod tests {
         assert_eq!((level, reasons), (1, vec![]));
         assert!(!missing_for_submit(&answers, &required(level)).contains(&"funds_proof_upload"));
         assert!(missing_for_submit(&answers, &required(2)).contains(&"funds_proof_upload"));
+        // An old "yes" to the retired high-risk country question without a
+        // country never blocks (owner 2026-10-22).
+        for key in ["high_risk_country", "high_risk_country_code"] {
+            assert!(!missing_for_submit(&answers, &required(2)).contains(&key));
+            assert!(!missing_for_submit(&Answers::default(), &required(1)).contains(&key));
+        }
         // The source of funds is asked only by a trigger (2026-10-19).
         assert!(!missing_for_submit(&answers, &required(1)).contains(&"funds_sources"));
         assert!(missing_for_submit(&answers, &required(2)).contains(&"funds_sources"));
@@ -6097,7 +6100,7 @@ mod tests {
                 "via_third_party",
                 "pep_self",
                 "pep_related",
-                "high_risk_country",
+                // No high-risk country question (owner 2026-10-22).
                 "sanctions_links",
             ]
         );

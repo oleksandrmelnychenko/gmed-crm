@@ -1414,7 +1414,9 @@ impl Identification {
     }
 
     /// The legal questions still open: each needs an answer, and a "yes" its
-    /// details (the country for the high-risk question).
+    /// details. No question about a high-risk third country (owner
+    /// 2026-10-22): GMED checks the country itself from the address and the
+    /// citizenships; an old stored answer stays and is never required.
     fn missing_legal(&self) -> Vec<&'static str> {
         let mut missing = Vec::new();
         for (question, answer, details, has_details) in [
@@ -1429,12 +1431,6 @@ impl Identification {
                 self.pep_related,
                 "pep_related_details",
                 self.pep_related_details.is_some(),
-            ),
-            (
-                "high_risk_country",
-                self.high_risk_country,
-                "high_risk_country_code",
-                self.high_risk_country_code.is_some(),
             ),
             (
                 "sanctions_links",

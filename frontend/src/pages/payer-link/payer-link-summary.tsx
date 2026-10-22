@@ -163,7 +163,7 @@ function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDraft, ste
     const value = draft[details];
     return rows(
       row(question, yesNo(draft[question]), text.legalTopics[question]),
-      row(details, details === "high_risk_country_code" && value ? country(value) : value, text.missing[details]),
+      row(details, value, text.missing[details]),
     );
   });
 

@@ -331,7 +331,7 @@ async function setup(page: Page, options: Options = {}) {
     const organisation = payerType !== "person";
     // Like the server (owner rule 2026-10-07): only the black list and a
     // confirmed sanctions match require the enhanced check and so the proof
-    // of funds; a PEP, the high-risk question, cash or crypto do not.
+    // of funds; a PEP, cash or crypto do not.
     const blacklisted = (code: unknown) => typeof code === "string" && ["KP", "IR", "MM"].includes(code);
     const level2 =
       options.enhancedCheckRequired ||
@@ -372,10 +372,10 @@ async function setup(page: Page, options: Options = {}) {
       if (r.via_third_party === null) missing.push("via_third_party");
       if (r.via_third_party === true && empty(r.via_third_party_details)) missing.push("via_third_party_details");
     }
+    // No high-risk country question (owner 2026-10-22): never missing.
     for (const [question, details] of [
       ["pep_self", "pep_self_details"],
       ["pep_related", "pep_related_details"],
-      ["high_risk_country", "high_risk_country_code"],
       ["sanctions_links", "sanctions_links_details"],
     ]) {
       if (a[question] === null) missing.push(question);
@@ -1151,9 +1151,12 @@ test.describe("payer link", () => {
     // 7 Declarations.
     await expect(stepTitle(page)).toHaveText("Erklärungen");
     const declarations = page.getByTestId("payer-link-step-declarations");
-    for (const question of [/hochrangiges öffentliches Amt/, /politisch exponiert/, /Drittstaat mit hohem Risiko/, /Sanktionen unterliegen/]) {
+    for (const question of [/hochrangiges öffentliches Amt/, /politisch exponiert/, /Sanktionen unterliegen/]) {
       await choose(page, declarations.getByRole("combobox", { name: question }), "Nein");
     }
+    // No question about a high-risk third country (owner 2026-10-22): GMED checks the country itself.
+    await expect(declarations.getByRole("combobox")).toHaveCount(3);
+    await expect(declarations).not.toContainText(/Drittstaat|hohem Risiko/);
     await expect.poll(() => q.missing_for_submit).toEqual([]);
     await next(page);
 
@@ -1297,7 +1300,8 @@ test.describe("payer link", () => {
       }),
     ).toBeVisible();
     await expect(declarations.getByRole("combobox", { name: /politisch exponiert/ })).toBeVisible();
-    await expect(declarations.getByRole("combobox", { name: /Sitz oder Wohnsitz in einem Land/ })).toBeVisible();
+    // No high-risk country question for an organisation either (owner 2026-10-22).
+    await expect(declarations.getByRole("combobox", { name: /Sitz oder Wohnsitz in einem Land/ })).toHaveCount(0);
     await expect(declarations.getByRole("combobox", { name: /Verbindungen zu Personen oder Unternehmen/ })).toBeVisible();
     await expect(declarations.getByText(/Üben Sie|Haben Sie oder|Ihnen nahestehende/)).toHaveCount(0);
     await next(page);
@@ -1425,13 +1429,13 @@ test.describe("payer link", () => {
     await page.getByLabel("Bestätigungscode (6 Ziffern)").fill(CODE);
     await page.getByTestId("payer-link-verify").click();
 
-    // Sent: four documents through Skribble, with the day they went out.
+    // Sent: the documents through Skribble, with the day they went out.
     const thanks = page.getByTestId("payer-link-thanks");
     await expect(thanks).toContainText("Vielen Dank. Ihre Angaben sind bei GMED eingegangen.");
     const status = page.getByTestId("payer-link-signature");
     await expect(status).toHaveAttribute("data-status", "sent");
     await expect(status).toHaveText(
-      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
+      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 die Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
     );
     // Asked for once more with the session after the code; the secrets stay in the headers.
     const infos = calls.payer.filter((call) => call.method === "GET" && call.path === "/public/payer-link");
@@ -1441,10 +1445,10 @@ test.describe("payer link", () => {
     const switcher = page.getByTestId("payer-link-language");
     await switcher.getByRole("radio", { name: "EN" }).click();
     await expect(status).toHaveText(
-      "Documents for signature: On 06.10.2026 we sent you four documents to sign with a qualified electronic signature. The invitation comes by e-mail from our partner Skribble; there you also confirm your identity.",
+      "Documents for signature: On 06.10.2026 we sent you the documents to sign with a qualified electronic signature. The invitation comes by e-mail from our partner Skribble; there you also confirm your identity.",
     );
     await switcher.getByRole("radio", { name: "RU" }).click();
-    await expect(status).toContainText("Документы на подпись: 06.10.2026 мы отправили вам четыре документа");
+    await expect(status).toContainText("Документы на подпись: 06.10.2026 мы отправили вам документы");
     await switcher.getByRole("radio", { name: "DE" }).click();
 
     // Signed and back at GMED: the next visit says so (the session of this tab is kept).
