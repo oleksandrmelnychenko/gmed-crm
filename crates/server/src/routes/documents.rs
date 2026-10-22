@@ -3964,6 +3964,15 @@ async fn load_gwg_identification_sheet(
                 sheet.beneficial_owner_name = owner.name;
                 sheet.beneficial_owner_note = owner.note;
                 sheet.beneficial_owner_measures = Some(owner.measures);
+            } else if sheet.also_payer && representation.minor {
+                // The parent named as payer contracts in the own name for the
+                // child (§ 328 BGB) and pays (owner decision 2026-10-19); the
+                // payer's questions are asked only when the enhanced check is
+                // required (2026-10-21). Without that statement the parent
+                // still acts in the own economic interest — never "on behalf
+                // of the child" (DEV 2026-10-22, Linda Testova).
+                sheet.acts_on_own_account = Some(true);
+                sheet.beneficial_owner_measures = Some(GWG_PAYING_PARENT_MEASURES.to_string());
             } else {
                 let address = gwg_address_line(
                     text("street_address").as_deref(),
@@ -4236,6 +4245,9 @@ fn gwg_represented_beneficial_owner(
 /// Where the payer's statement of section 3 comes from: the third-party
 /// payer's own link.
 const GWG_PAYER_STATEMENT_SOURCE: &str = "Angaben des Kostenübernehmers über den eigenen Zugang";
+/// Section 3 of the sheet of a minor's paying parent who was not asked the
+/// payer's questions (no enhanced check required).
+const GWG_PAYING_PARENT_MEASURES: &str = "Befragung des Vertragspartners: Vertragsschluss im eigenen Namen zugunsten des Kindes (§ 328 BGB), Zahlung als Kostenträger/in (Angaben im Patientenformular)";
 /// The same questions answered by a paying parent (or guardian) of a minor in
 /// the own section of the patient portal.
 const GWG_PARENT_PAYER_STATEMENT_SOURCE: &str =

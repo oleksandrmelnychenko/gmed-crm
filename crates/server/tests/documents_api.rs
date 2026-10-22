@@ -7484,6 +7484,32 @@ async fn gwg_identification_sheets_of_a_minors_parents_name_the_beneficial_owner
         text.contains("Handeln als gesetzliche/r Vertreter/in für das minderjährige Kind"),
         "{text:?}"
     );
+
+    // Without the enhanced check the paying mother is not asked the payer's
+    // questions (2026-10-21): she still contracts in her own name and pays,
+    // so she acts in her own interest, never for the child (DEV 2026-10-22).
+    sqlx::query("DELETE FROM lead_payer_statements WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let text = sheet_text(format!("representative:{sofia}")).await;
+    assert!(
+        text.contains("[X] Der Vertragspartner handelt im eigenen wirtschaftlichen Interesse"),
+        "{text:?}"
+    );
+    assert!(
+        !text.contains("[X] Der Vertragspartner handelt auf Veranlassung"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("im eigenen Namen zugunsten des Kindes"),
+        "{text:?}"
+    );
+    assert!(
+        !text.contains("Handeln als gesetzliche/r Vertreter/in für das minderjährige Kind"),
+        "{text:?}"
+    );
 }
 
 #[tokio::test]
