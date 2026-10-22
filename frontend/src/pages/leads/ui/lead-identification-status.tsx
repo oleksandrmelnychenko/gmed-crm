@@ -88,8 +88,8 @@ export function LeadIdentificationStatusView({
             <CircleAlert aria-hidden="true" className="mt-0.5" />
             <span>
               {tx(
-                "Пациент несовершеннолетний: подписывают законные представители, платёж подтверждается только у того, кто платит; у ребёнка своей строки нет.",
-                "Der Patient ist minderjährig: Es unterschreiben die gesetzlichen Vertreter, die Zahlung wird nur bei der zahlenden Person bestätigt; das Kind hat keine eigene Zeile.",
+                "Пациент несовершеннолетний: подписывают и идентифицируются законные представители, ребёнок — нет; платёж подтверждается только у того, кто платит.",
+                "Der Patient ist minderjährig: Es unterschreiben und werden identifiziert die gesetzlichen Vertreter, nicht das Kind; die Zahlung wird nur bei der zahlenden Person bestätigt.",
               )}
             </span>
           </StatusChip>

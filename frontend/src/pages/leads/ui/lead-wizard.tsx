@@ -803,6 +803,8 @@ const LeadMedicalIntakeForm = lazy(() =>
 const SERVICE_CONCERN_ID = "lead-wizard-concern";
 const RISK_ASSESSMENT_SECTION_ID = "lead-wizard-risk-assessment";
 const ENHANCED_CHECK_SECTION_ID = "lead-wizard-enhanced-check";
+/** The preview's refusal leads to the risk assessment instead of a person's identity data. */
+const PREVIEW_JUMP_RISK = "risk-assessment";
 const SERVICE_SPECIALTIES_ID = "lead-wizard-specialties";
 const MEDICAL_ANAMNESE_ID = "lead-wizard-anamnese";
 const ORDER_DATE_FROM_ID = "lead-wizard-program-date-from";
@@ -5959,7 +5961,7 @@ export function LeadWizard({
         : null;
       if (fromPreview) {
         setDocumentPreviewError(gate ?? errorText(nextError, tx));
-        setDocumentPreviewJump(representativeId);
+        setDocumentPreviewJump(riskGateRefusal(nextError) ? PREVIEW_JUMP_RISK : representativeId);
       } else if (gate || leadErrorBlockingReasons(nextError).length === 0) {
         // Next to the pressed button, not at the bottom of the step (DEV 2026-10-19),
         // with the way to what blocks it (QA 2026-10-22: the text named the
@@ -11156,10 +11158,16 @@ ${serviceCommentLines.join("\n")}`
                   onClick={() => {
                     const target = documentPreviewJump;
                     replaceDocumentPreview(null);
-                    openRepresentativeIdData(target);
+                    if (target === PREVIEW_JUMP_RISK) {
+                      openValidationIssue({ key: "risk-assessment", step: "documents", message: "", fieldId: RISK_ASSESSMENT_SECTION_ID });
+                    } else {
+                      openRepresentativeIdData(target);
+                    }
                   }}
                 >
-                  {tx("Перейти к данным документа", "Zu den Ausweisdaten")}
+                  {documentPreviewJump === PREVIEW_JUMP_RISK
+                    ? tx("Перейти к оценке риска", "Zur Risikobewertung")
+                    : tx("Перейти к данным документа", "Zu den Ausweisdaten")}
                 </Button>
               ) : null}
             </div>

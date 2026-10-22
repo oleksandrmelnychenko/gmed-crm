@@ -336,7 +336,7 @@ test("a minor has no line of his own: without a parent on file the block asks fo
   });
   await expect(block).toContainText("Идентификация по квалифицированной подписи");
   await expect(block.getByTestId("lead-identification-minor")).toContainText(
-    "платёж подтверждается только у того, кто платит; у ребёнка своей строки нет",
+    "ребёнок — нет; платёж подтверждается только у того, кто платит",
   );
   await expect(block.getByTestId("lead-identification-no-representative")).toHaveText(
     "Добавьте родителя или законного представителя",

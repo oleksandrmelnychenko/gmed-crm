@@ -105,6 +105,9 @@ async function mount(page: Page, mock: Mock) {
       response = mock.enhancedCheck;
     } else if (path === "/documents" && url.searchParams.get("lead_id") === leadId) {
       response = mock.documents ?? [];
+    } else if (/^\/documents\/[^/]+\/download$/.test(path)) {
+      await route.fulfill({ contentType: "application/pdf", body: "%PDF-1.4\n%%EOF\n" });
+      return;
     } else if (/^\/documents\/[^/]+\/mark-signed$/.test(path) && mock.markSigned) {
       await route.fulfill({ status: mock.markSigned.status, contentType: "application/json", body: JSON.stringify(mock.markSigned.body) });
       return;
@@ -191,4 +194,23 @@ test("a refused signature confirmation of the GwG sheet is said under its row", 
   // The refusal leads to the risk assessment and is gone once staff follow it.
   await refusal.getByRole("button", { name: "Перейти к оценке риска" }).click();
   await expect(refusal).toHaveCount(0);
+});
+
+test("the document preview names the refusal and leads to the risk assessment, in German", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const sheet = documentRow("gwg-sheet-2", "gwg_identification", "Dokumentationsbogen natürliche Personen – Anna Muster");
+  const { wizard } = await mount(page, {
+    lang: "de",
+    enhancedCheck: { required: false, reasons: [], countries: [] },
+    documents: [sheet],
+    markSigned: { status: 409, body: { error: "risk_review_required", code: "risk_review_required", message: "Risk review required" } },
+  });
+  await wizard.getByRole("button", { name: "Dokumentationsbogen natürliche Personen – Anna Muster.pdf" }).click();
+  const preview = page.getByRole("dialog", { name: "Dokumentationsbogen natürliche Personen – Anna Muster.pdf" });
+  await preview.getByRole("button", { name: "Unterschrift bestätigen" }).click();
+  await expect(preview.getByRole("alert")).toContainText("Unterschrift nicht möglich: Zuerst ist eine Entscheidung zur Risikobewertung nötig");
+  await page.screenshot({ path: testInfo.outputPath("lead-gwg-preview-refused-de.png"), animations: "disabled" });
+  await preview.getByTestId("lead-document-preview-jump").click();
+  await expect(preview).toHaveCount(0);
+  await expect(wizard.getByRole("tab", { name: "Unterlagen", exact: false })).toHaveAttribute("aria-selected", "true");
 });
