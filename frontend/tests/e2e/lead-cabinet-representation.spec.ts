@@ -278,7 +278,12 @@ function answer(request: Request) {
     ...request,
     representation: {
       ...request.representation,
-      representatives: request.representation.representatives.map((item) => ({ ...item, slot: slotOf(request, item) })),
+      representatives: request.representation.representatives.map((item) => ({
+        ...item,
+        slot: slotOf(request, item),
+        // Like the server: another person's name and date of birth, unless this cabinet entered it.
+        identity_locked: !item.mine && !item.can_remove,
+      })),
     },
   };
 }
@@ -434,7 +439,7 @@ async function setup(page: Page, options: { minor: boolean; prepare?: (request: 
         const unknown = Object.keys(fields).find((key) => !(PERSON_FIELDS as readonly string[]).includes(key));
         // The identity document's data are staff's since the trigger flow.
         if (unknown) return refuse(422, unknown.startsWith("id_") ? "staff_only" : "invalid_field", unknown);
-        if (request.minor && known && !known.mine && ["first_name", "last_name", "date_of_birth"].some((key) => key in fields && fields[key] !== known[key as (typeof PERSON_FIELDS)[number]])) {
+        if (request.minor && known && !known.mine && !known.can_remove && ["first_name", "last_name", "date_of_birth"].some((key) => key in fields && fields[key] !== known[key as (typeof PERSON_FIELDS)[number]])) {
           return refuse(422, "representative_not_yours");
         }
         // The two refusals of an e-mail name no field: the code says which one it is.
@@ -876,9 +881,12 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     expect(benId).toMatch(UUID);
     expect(benId).not.toBe(ANNA);
     await expect(second.getByRole("button", { name: "Entfernen" })).toBeVisible();
-    await expect(second.getByRole("textbox", { name: "Vorname" })).toBeDisabled();
-    await expect(second.getByRole("textbox", { name: "Nachname" })).toBeDisabled();
-    await expect(page.locator("#lead-request-rep2_date_of_birth")).toBeDisabled();
+    // The parent who entered the other one completes and corrects his name and date of birth
+    // (QA 2026-10-23: they locked after the first save, the date of birth stayed missing for good).
+    await expect(second.getByRole("textbox", { name: "Vorname" })).toBeEnabled();
+    await expect(second.getByRole("textbox", { name: "Nachname" })).toBeEnabled();
+    await setDatePickerValue(page.locator("#lead-request-rep2_date_of_birth"), "1984-07-09");
+    await expect.poll(() => calls.persons.at(-1)).toEqual({ id: benId, status: 200, body: { date_of_birth: "1984-07-09" } });
     await second.getByRole("textbox", { name: "E-Mail" }).fill("ben.muster@example.com");
     await expect.poll(() => calls.persons.at(-1)).toEqual({ id: benId, status: 200, body: { email: "ben.muster@example.com" } });
     // The parents' identity copies are uploaded on step "Document" (QA 2026-10-22).
@@ -894,7 +902,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     const missing = page.getByTestId("lead-request-missing");
     await expect(missing).not.toContainText("1. Vertreter/in: Geburtsort");
     await expect(missing).toContainText("1. Vertreter/in: Foto oder Scan des Ausweises");
-    await expect(missing).toContainText("2. Vertreter/in: Geburtsdatum");
+    await expect(missing).not.toContainText("2. Vertreter/in: Geburtsdatum");
     await expect(missing).toContainText("2. Vertreter/in: Telefon");
     await expect(missing).not.toContainText("1. Vertreter/in: Straße und Hausnummer");
     await expect(missing).not.toContainText("2. Vertreter/in: E-Mail");

@@ -809,6 +809,26 @@ test.describe("lead cabinet", () => {
     await expect(page.getByText("Diese Anfrage füllen Ihre Eltern bzw. Ihr gesetzlicher Vertreter", { exact: false })).toBeVisible();
   });
 
+  test("a parent whose child came of age during the edit reads that the access ended (QA 2026-10-23)", async ({ page }) => {
+    await setup(page, "lead");
+    let ended = false;
+    await page.route("**/api/v1/me/lead-requests", async (route) => {
+      if (ended) return route.fulfill({ json: { requests: [], own_access_closed: false, guardian_access_ended: true } });
+      await route.fallback();
+    });
+    // The server no longer finds the request for this login: every write answers 404.
+    await page.route("**/api/v1/me/lead-requests/lead-1/personal-data", async (route) => {
+      ended = true;
+      await route.fulfill({ status: 404, json: { error: "Not Found", message: "Request not found" } });
+    });
+    await page.goto("/");
+    await page.locator("#lead-request-middle_name").fill("Maria");
+    await expect(page.getByTestId("lead-request-step-person")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-guardian-access-ended")).toHaveText(
+      "Die Person, für die Sie die Anfrage ausgefüllt haben, ist inzwischen volljährig. Ihr Zugang als Elternteil bzw. gesetzlicher Vertreter ist damit beendet. Bei Fragen wenden Sie sich bitte an GMED.",
+    );
+  });
+
   test("audit: hidden legacy requirements remain visible in the sending summary", async ({ page }) => {
     const { request } = await setup(page, "lead", { prepare: completeRequest });
     request.progress.missing_for_submit = ["pep_self", "birth_place"];

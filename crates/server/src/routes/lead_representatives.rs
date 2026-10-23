@@ -613,6 +613,17 @@ impl Loaded {
                 .iter()
                 .any(|upload| upload.representative_id == person.id && upload.locked)
     }
+
+    /// A parent's login may not change the name or date of birth of another
+    /// person (`representative_not_yours`): one with a login of its own, one
+    /// staff entered or one whose files staff use. The other parent whom this
+    /// cabinet entered and may still remove stays editable, so the parent who
+    /// typed it can finish the date of birth and correct a typo (QA
+    /// 2026-10-23: the second parent locked after the first save, the request
+    /// could not be sent).
+    pub(crate) fn identity_locked(&self, person: &Representative, user_id: Uuid) -> bool {
+        !person.login_user_ids.contains(&user_id) && !self.can_remove(person)
+    }
 }
 
 /// Reads the representation of a lead in the caller's connection or
@@ -1384,6 +1395,10 @@ pub(crate) fn portal_payload(loaded: &Loaded, user_id: Uuid) -> Value {
             );
             value.insert("email_locked".into(), json!(person.has_login()));
             value.insert("can_remove".into(), json!(loaded.can_remove(person)));
+            value.insert(
+                "identity_locked".into(),
+                json!(loaded.identity_locked(person, user_id)),
+            );
             value.insert(
                 "identity_documents".into(),
                 json!(files(person, UPLOAD_IDENTITY)),
@@ -2730,7 +2745,7 @@ pub(crate) async fn upsert_my_representative(
         Err(error) => return error.into_response(),
     };
     if kind == AccessKind::Guardian
-        && known.is_some_and(|person| !person.login_user_ids.contains(&auth.user_id))
+        && known.is_some_and(|person| loaded.identity_locked(person, auth.user_id))
     {
         let protected_field = if next.first_name != current.first_name {
             Some("first_name")

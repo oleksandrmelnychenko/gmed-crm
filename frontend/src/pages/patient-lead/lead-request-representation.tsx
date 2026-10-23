@@ -553,7 +553,9 @@ function RepresentativeBlock({
     const invalid = Boolean(form.errorFor(field));
     return {
       id: fieldId(field),
-      disabled: request.access_kind === "guardian" && Boolean(person) && !person?.mine && ["first_name", "last_name", "date_of_birth"].includes(field),
+      // The other parent this login entered stays editable (QA 2026-10-23: the date of birth locked after the first save).
+      disabled: request.access_kind === "guardian" && Boolean(person) && !person?.mine &&
+        (person?.identity_locked ?? true) && ["first_name", "last_name", "date_of_birth"].includes(field),
       "aria-invalid": invalid || undefined,
       "aria-describedby": invalid ? `${fieldId(field)}-error` : undefined,
     };

@@ -1437,6 +1437,22 @@ async fn both_parents_of_a_minor_are_asked_for_by_default() {
     assert_eq!(other["mine"], false, "{other}");
     assert_eq!(other["email_locked"], false, "{other}");
     assert_eq!(other["can_remove"], true, "{other}");
+    // The mother entered the father and may still correct his name and date
+    // of birth (QA 2026-10-23: they locked after the first save).
+    assert_eq!(other["identity_locked"], false, "{other}");
+    assert_eq!(first["identity_locked"], false, "{first}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &father_path,
+        &parent,
+        Some(json!({ "first_name": "Benjamin", "date_of_birth": "1984-07-10" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let other = representative(&body, father);
+    assert_eq!(other["first_name"], "Benjamin", "{other}");
+    assert_eq!(other["date_of_birth"], "1984-07-10", "{other}");
     assert_eq!(
         missing_representation(&body),
         Vec::<String>::new(),

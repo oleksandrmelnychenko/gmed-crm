@@ -7350,6 +7350,22 @@ async fn guardian_identity_age_and_reactivation_boundaries_are_enforced() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
+    // The child is of age: the parent no longer reads the request either, and
+    // the cabinet learns why (QA 2026-10-23: it still listed the request).
+    let (status, list) =
+        json_request(router, "GET", "/api/v1/me/lead-requests", &parent, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["requests"], json!([]), "{list}");
+    assert_eq!(list["guardian_access_ended"], true, "{list}");
+    let (status, read) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead}"),
+        &parent,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{read}");
     sqlx::query("UPDATE leads SET date_of_birth='2015-01-01' WHERE id=$1")
         .bind(lead)
         .execute(pool)

@@ -2874,6 +2874,10 @@ async fn list_my_lead_requests(
     if own_access_closed {
         notify_parents_access_missing(&state, auth.user_id).await;
     }
+    let guardian_access_ended = match guardian_access_ended(&state.db, auth.user_id).await {
+        Ok(ended) => ended,
+        Err(error) => return internal(error, "check the parents' access"),
+    };
     let mut requests = Vec::with_capacity(leads.len());
     for (lead_id, kind) in leads {
         match request_payload(&state, lead_id, auth.user_id, kind).await {
@@ -2881,7 +2885,34 @@ async fn list_my_lead_requests(
             Err(error) => return internal(error, "load request"),
         }
     }
-    Json(json!({ "requests": requests, "own_access_closed": own_access_closed })).into_response()
+    Json(json!({
+        "requests": requests,
+        "own_access_closed": own_access_closed,
+        "guardian_access_ended": guardian_access_ended,
+    }))
+    .into_response()
+}
+
+/// Whether a parent's access of `user_id` reaches a request no more because
+/// the child is of age now (not a minor by the date of birth on file): the
+/// cabinet then says so instead of "no open request" (QA 2026-10-23). It
+/// names neither the child nor anything of the request.
+async fn guardian_access_ended(db: &gmed_db::DbPool, user_id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(&format!(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM lead_portal_access a
+               JOIN leads l ON l.id = a.lead_id
+               WHERE a.user_id = $1
+                 AND a.kind = 'guardian'
+                 AND a.revoked_at IS NULL
+                 AND l.date_of_birth IS NOT NULL
+                 AND {PORTAL_LEAD_SQL}
+                 AND NOT {OWN_LOGIN_CLOSED_SQL}
+           )"#
+    ))
+    .bind(user_id)
+    .fetch_one(db)
+    .await
 }
 
 /// A minor signed in with the own login before anybody gave the parents

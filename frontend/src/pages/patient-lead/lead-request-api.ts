@@ -9,7 +9,10 @@ async function apiFetch<T>(path: string, options?: Parameters<typeof request>[1]
   try {
     return await request<T>(path, options);
   } catch (error) {
-    if (error instanceof ApiRequestError && (error.code === "lead_request_guardian_only" || error.body?.code === "lead_request_guardian_only")) {
+    // A request that is gone for this login (404: the child came of age, staff
+    // took it over) also reloads the list, instead of failing every save.
+    const gone = error instanceof ApiRequestError && error.status === 404 && /^\/me\/lead-requests\/[^/]+(\/|$)/.test(path);
+    if (gone || (error instanceof ApiRequestError && (error.code === "lead_request_guardian_only" || error.body?.code === "lead_request_guardian_only"))) {
       window.dispatchEvent(new Event(LEAD_REQUEST_ACCESS_CHANGED));
     }
     throw error;
@@ -395,6 +398,12 @@ export type LeadRequestRepresentative = {
   /** The e-mail is a sign-in address: only staff change it. */
   email_locked: boolean;
   can_remove: boolean;
+  /**
+   * Name and date of birth are read-only here: another person's login, one
+   * staff entered or whose files staff use. An older server does not say it:
+   * then everybody but the caller counts as locked.
+   */
+  identity_locked?: boolean;
   first_name: string | null;
   last_name: string | null;
   date_of_birth: string | null;
@@ -867,11 +876,20 @@ export async function fetchMyLeadRequests(): Promise<LeadRequest[]> {
  * (QA 2026-10-12, A3-01): such a login reaches no request; the cabinet then says, neutrally, that
  * the parents or the legal representative fill it in. `ownAccessClosed` is false on an older server.
  */
-export async function fetchMyLeadRequestList(): Promise<{ requests: LeadRequest[]; ownAccessClosed: boolean }> {
-  const result = await apiFetch<{ requests?: LeadRequest[]; own_access_closed?: boolean }>("/me/lead-requests", {
+export async function fetchMyLeadRequestList(): Promise<{
+  requests: LeadRequest[];
+  ownAccessClosed: boolean;
+  /** A parent's access reaches a request no more: the child is of age now (QA 2026-10-23). */
+  guardianAccessEnded: boolean;
+}> {
+  const result = await apiFetch<{ requests?: LeadRequest[]; own_access_closed?: boolean; guardian_access_ended?: boolean }>("/me/lead-requests", {
     forceFresh: true,
   });
-  return { requests: result.requests ?? [], ownAccessClosed: result.own_access_closed === true };
+  return {
+    requests: result.requests ?? [],
+    ownAccessClosed: result.own_access_closed === true,
+    guardianAccessEnded: result.guardian_access_ended === true,
+  };
 }
 
 /** The refusal of every request call of a minor's own login while the parents have access. */

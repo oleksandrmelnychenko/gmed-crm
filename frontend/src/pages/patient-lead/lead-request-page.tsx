@@ -86,6 +86,8 @@ export function LeadRequestPage() {
   const [requests, setRequests] = useState<LeadRequest[] | null>(null);
   // The own login of a minor whose parents have access reaches no request (QA 2026-10-12, A3-01).
   const [ownAccessClosed, setOwnAccessClosed] = useState(false);
+  // A parent's access ended because the child came of age (QA 2026-10-23).
+  const [guardianAccessEnded, setGuardianAccessEnded] = useState(false);
   const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.search).get("lead"));
   const [error, setError] = useState("");
   // Switching requests must not replace a queue whose uploads are still running.
@@ -145,9 +147,10 @@ export function LeadRequestPage() {
   const load = useCallback(async () => {
     setError("");
     try {
-      const { requests: loaded, ownAccessClosed: closed } = await fetchMyLeadRequestList();
+      const { requests: loaded, ownAccessClosed: closed, guardianAccessEnded: ended } = await fetchMyLeadRequestList();
       setRequestLang(asLeadCabinetLang(loaded[0]?.personal_data.primary_language));
       setOwnAccessClosed(closed);
+      setGuardianAccessEnded(ended);
       setRequests(loaded);
       setSelected((current) =>
         current && loaded.some((request) => request.lead_id === current) ? current : loaded[0]?.lead_id ?? null,
@@ -215,8 +218,11 @@ export function LeadRequestPage() {
     return (
       <LeadCabinetFrame lang={lang} onLang={chooseLang}>
         <h1 className="text-xl font-semibold">{text.title}</h1>
-        <p className="text-sm text-muted-foreground" data-testid={ownAccessClosed ? "lead-request-guardian-only" : undefined}>
-          {ownAccessClosed ? text.guardianOnly : text.noRequest}
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid={ownAccessClosed ? "lead-request-guardian-only" : guardianAccessEnded ? "lead-request-guardian-access-ended" : undefined}
+        >
+          {ownAccessClosed ? text.guardianOnly : guardianAccessEnded ? text.guardianAccessEnded : text.noRequest}
         </p>
         {/* The account has the patient portal (the request became a patient record): the way there. */}
         {!ownAccessClosed && !leadMode && user?.role === "patient" ? (
