@@ -7374,7 +7374,11 @@ ${serviceCommentLines.join("\n")}`
     // Nothing in the medical step is required: the reason of the request is
     // optional since 2026-10-19 (owner), as in the server's readiness.
     if (id === "medical") return readiness.get("medical") ?? true;
-    if (id === "order") return Boolean(draft && orderIssues.length === 0);
+    // The server's "service" step means the specialties, which staff choose in
+    // the order step; the service step itself holds only the optional program
+    // period and wishes. Each tab follows what it shows.
+    if (id === "service") return Boolean(draft && !orderIssues.some((issue) => issue.step === "service"));
+    if (id === "order") return Boolean(draft && !orderIssues.some((issue) => issue.step === "order"));
     if (id === "commercial") return commercialReady;
     if (id === "release") return conversionReady;
     return readiness.get(id) ?? false;
@@ -10341,9 +10345,11 @@ ${serviceCommentLines.join("\n")}`
                     : tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}
                 </p>
                 <div>
-                  {lead.readiness.steps.map((item) => {
+                  {/* The wizard's own steps: the server knows no "order" step
+                      and its "service" readiness is the order step's specialties. */}
+                  {(lead.readiness.steps.length > 0 ? STEPS : []).map((target) => {
+                    const item = { key: target.id };
                     const ready = isStepReady(item.key);
-                    const target = STEPS.find((candidate) => candidate.id === item.key);
                     return (
                       <button
                         key={item.key}
