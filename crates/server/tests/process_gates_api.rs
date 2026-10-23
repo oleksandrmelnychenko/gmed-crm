@@ -1169,10 +1169,8 @@ async fn failed_lead_resolution_requires_controlled_flow_and_records_history() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(detail["qualification_status"], "archived");
-    assert_eq!(
-        detail["failed_outcome"]["reason"],
-        "Patient no longer interested"
-    );
+    // Sales sees the reason as a code, not staff's words (2026-10-23).
+    assert_eq!(detail["failed_outcome"]["reason"], "other");
     assert!(
         detail["lifecycle"]["history"]
             .as_array()

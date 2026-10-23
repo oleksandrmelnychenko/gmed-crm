@@ -2315,7 +2315,9 @@ async fn the_pep_review_is_stamped_and_audited_per_person() {
     let mut reviews = serde_json::Map::new();
     reviews.insert(
         parent.clone(),
-        json!({ "checked": true, "isPep": false, "checkedOn": "1999-01-01", "checkedBy": "Forged" }),
+        // A changed decision comes without a day (the form clears it); a
+        // forged reviewer name is not taken over.
+        json!({ "checked": true, "isPep": false, "checkedOn": null, "checkedBy": "Forged" }),
     );
     let (status, body) = json_request(
         &app,
