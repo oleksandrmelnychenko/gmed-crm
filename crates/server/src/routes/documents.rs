@@ -16718,7 +16718,9 @@ async fn generate_document(
             Err(error) => Err(error),
         };
         match funds {
-            Ok(Some(funds)) => aml.asset_origin = funds.relevant().text(),
+            // Before a paying third party or parent answers, staff's words
+            // stand marked "Angabe von GMED" (owner 2026-10-23).
+            Ok(Some(funds)) => aml.asset_origin = funds.asset_origin_line(),
             Ok(None) => {}
             Err(error) => {
                 tracing::error!(error = %error, ?patient_id, ?lead_id, "load the source of funds");

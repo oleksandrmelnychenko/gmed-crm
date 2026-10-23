@@ -259,6 +259,12 @@ export type LeadFunds = {
   patient: PersonFunds;
   payer: PersonFunds | null;
   payer_stated_by_patient: PersonFunds | null;
+  /**
+   * Staff's earlier words on the payer's funds, printed on the enhanced
+   * due-diligence PDF as "Angabe von GMED" until the payer answers; display
+   * only, never the payer's data (owner 2026-10-23).
+   */
+  staff_note_before_payer?: string | null;
 };
 
 export type PayerDeclarationResponse = {

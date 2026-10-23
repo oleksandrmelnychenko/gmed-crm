@@ -150,9 +150,60 @@ pub(crate) struct LeadFunds {
     pub payer: Option<PersonFunds>,
     /// What the patient said of the payer's funds: context only.
     pub payer_stated_by_patient: Option<PersonFunds>,
+    /// Owner decision 2026-10-23: while a paying third party or parent has
+    /// not sent the own-link questionnaire, staff's earlier words on the
+    /// payer's funds — the declaration's `source_of_funds` (+ words) and the
+    /// AML form's free text `wizard_state.aml_enhanced_due_diligence.assetOrigin`
+    /// ([`LeadFunds::add_legacy_asset_origin`]) — are shown on the enhanced
+    /// due-diligence PDF as "Angabe von GMED". Display only: never copied into
+    /// the payer's data; `None` once the payer answered.
+    pub staff_note_before_payer: Option<String>,
 }
 
+/// The mark of [`LeadFunds::staff_note_before_payer`] on the documents.
+pub(crate) const STAFF_NOTE_BEFORE_PAYER_LABEL: &str =
+    "Angabe von GMED (vor Antwort der zahlenden Person)";
+
 impl LeadFunds {
+    /// Whether the paying third party or parent has answered its funds.
+    fn payer_answered(&self) -> bool {
+        self.payer
+            .as_ref()
+            .is_some_and(|payer| payer.entered_by == Some(ENTERED_BY_PAYER))
+    }
+
+    /// Adds staff's free text of the AML form (legacy
+    /// `wizard_state.aml_enhanced_due_diligence.assetOrigin`) to
+    /// [`LeadFunds::staff_note_before_payer`] while somebody else pays and
+    /// has not answered yet.
+    pub(crate) fn add_legacy_asset_origin(&mut self, asset_origin: Option<&str>) {
+        if !self.payer_pays || self.payer_answered() {
+            return;
+        }
+        let Some(words) = present(asset_origin) else {
+            return;
+        };
+        self.staff_note_before_payer = match self.staff_note_before_payer.take() {
+            Some(note) if note.contains(words) => Some(note),
+            Some(note) => Some(format!("{note}; {words}")),
+            None => Some(words.to_string()),
+        };
+    }
+
+    /// The line "Herkunft der eingesetzten Vermögenswerte" of the enhanced
+    /// due-diligence PDF: the payer's own answer once sent; before it staff's
+    /// words marked [`STAFF_NOTE_BEFORE_PAYER_LABEL`]; else the funds of the
+    /// person who pays.
+    pub(crate) fn asset_origin_line(&self) -> Option<String> {
+        if self.payer_pays
+            && !self.payer_answered()
+            && let Some(note) = self.staff_note_before_payer.as_deref()
+        {
+            return Some(format!("{STAFF_NOTE_BEFORE_PAYER_LABEL}: {note}"));
+        }
+        self.relevant().text()
+    }
+
     /// The person whose funds are asked: the payer when somebody else pays,
     /// else the patient.
     pub(crate) fn relevant(&self) -> &PersonFunds {
@@ -169,6 +220,7 @@ impl LeadFunds {
             "patient": self.patient.to_json(),
             "payer": self.payer.as_ref().map(PersonFunds::to_json),
             "payer_stated_by_patient": self.payer_stated_by_patient.as_ref().map(PersonFunds::to_json),
+            "staff_note_before_payer": self.staff_note_before_payer,
         })
     }
 }
@@ -189,6 +241,7 @@ pub(crate) fn lead_funds(
             patient: PersonFunds::empty(PERSON_PATIENT),
             payer: None,
             payer_stated_by_patient: None,
+            staff_note_before_payer: None,
         };
     };
     let payer_pays = declaration.payer_kind != lead_payer::PAYER_KIND_SELF;
@@ -243,11 +296,17 @@ pub(crate) fn lead_funds(
         entered_by: Some(ENTERED_BY_LEAD),
         proofs: Vec::new(),
     });
+    // Staff's stand-in entry is also the note shown before the payer answers.
+    let staff_note_before_payer = payer
+        .as_ref()
+        .filter(|payer| payer.entered_by == Some(ENTERED_BY_STAFF))
+        .and_then(PersonFunds::text);
     LeadFunds {
         payer_pays,
         patient,
         payer,
         payer_stated_by_patient,
+        staff_note_before_payer,
     }
 }
 
@@ -310,6 +369,20 @@ async fn load_for_declaration(
 ) -> Result<LeadFunds, sqlx::Error> {
     let statement = load_statement_funds(&mut *conn, lead_id).await?;
     let mut funds = lead_funds(Some(declaration), statement.as_ref());
+    if funds.payer_pays && !funds.payer_answered() {
+        let asset_origin: Option<String> = sqlx::query_scalar(
+            r#"SELECT CASE
+                   WHEN jsonb_typeof(wizard_state -> 'aml_enhanced_due_diligence') = 'object'
+                   THEN wizard_state -> 'aml_enhanced_due_diligence' ->> 'assetOrigin'
+               END
+               FROM leads WHERE id = $1"#,
+        )
+        .bind(lead_id)
+        .fetch_optional(&mut *conn)
+        .await?
+        .flatten();
+        funds.add_legacy_asset_origin(asset_origin.as_deref());
+    }
     let rows = sqlx::query(
         r#"SELECT u.document_id, u.kind, u.created_at,
                   COALESCE(NULLIF(BTRIM(d.original_filename), ''), d.auto_name) AS file_name
@@ -502,6 +575,76 @@ mod tests {
         assert!(parent.payer_pays);
         assert_eq!(parent.relevant().person, PERSON_PAYER);
         assert_eq!(parent.payer_stated_by_patient, None);
+    }
+
+    #[test]
+    fn staffs_legacy_words_stand_marked_on_the_pdf_until_the_payer_answers() {
+        // Staff's AML free text only: shown marked, never the payer's data.
+        let mut legacy = lead_funds(Some(&third_party()), None);
+        legacy.add_legacy_asset_origin(Some("  Verkauf einer Wohnung in Kyjiw "));
+        assert_eq!(
+            legacy.staff_note_before_payer.as_deref(),
+            Some("Verkauf einer Wohnung in Kyjiw")
+        );
+        assert!(!legacy.relevant().stated(), "not copied into the payer");
+        assert_eq!(legacy.relevant().sources, Vec::<String>::new());
+        assert_eq!(legacy.relevant().description, None);
+        assert_eq!(
+            legacy.asset_origin_line().as_deref(),
+            Some(
+                "Angabe von GMED (vor Antwort der zahlenden Person): Verkauf einer Wohnung in Kyjiw"
+            )
+        );
+        assert_eq!(
+            legacy.to_json()["staff_note_before_payer"],
+            "Verkauf einer Wohnung in Kyjiw"
+        );
+
+        // Staff's choice on the declaration plus the free text.
+        let declaration = Declaration {
+            source_of_funds: Some("savings".into()),
+            ..third_party()
+        };
+        let mut both = lead_funds(Some(&declaration), None);
+        let staff_text = both.relevant().text().unwrap();
+        assert_eq!(
+            both.staff_note_before_payer.as_deref(),
+            Some(staff_text.as_str())
+        );
+        both.add_legacy_asset_origin(Some("Sparbuch"));
+        assert_eq!(
+            both.asset_origin_line(),
+            Some(format!(
+                "{STAFF_NOTE_BEFORE_PAYER_LABEL}: {staff_text}; Sparbuch"
+            ))
+        );
+
+        // Once the payer sent the questionnaire only the payer's answer.
+        let statement = StatementFunds {
+            sources: vec!["employment".into()],
+            description: Some("Gehalt".into()),
+        };
+        let mut answered = lead_funds(Some(&declaration), Some(&statement));
+        answered.add_legacy_asset_origin(Some("Sparbuch"));
+        assert_eq!(answered.staff_note_before_payer, None);
+        assert_eq!(
+            answered.asset_origin_line().as_deref(),
+            Some("Gehalt / nichtselbständige Arbeit: Gehalt")
+        );
+
+        // The patient who pays: staff's legacy text is no note.
+        let mut own_funds = lead_funds(Some(&own(Some("income"), Some("Lohn"), None)), None);
+        own_funds.add_legacy_asset_origin(Some("alt"));
+        assert_eq!(own_funds.staff_note_before_payer, None);
+        assert_eq!(
+            own_funds.asset_origin_line().as_deref(),
+            Some("Einkommen: Lohn")
+        );
+
+        // Nothing from staff: the line stays empty.
+        let mut empty = lead_funds(Some(&third_party()), None);
+        empty.add_legacy_asset_origin(Some("   "));
+        assert_eq!(empty.asset_origin_line(), None);
     }
 
     #[test]
