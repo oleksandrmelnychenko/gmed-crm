@@ -16,6 +16,7 @@ import { FollowUpStep } from "./lead-request-follow-up";
 import { DisclosureStep } from "./lead-request-disclosure-step";
 import {
   AutosaveFlushContext,
+  AutosaveSavedContext,
   CabinetGoToContext,
   createRequestQueue,
   type AutosaveFlush,
@@ -88,9 +89,20 @@ export function LeadRequestPage() {
   const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.search).get("lead"));
   const [error, setError] = useState("");
   // Switching requests must not replace a queue whose uploads are still running.
-  const [sessions] = useState(() => new Map<string, { enqueue: RequestQueue; flushers: Set<AutosaveFlush> }>());
+  const [sessions] = useState(() => new Map<string, { enqueue: RequestQueue; flushers: Set<AutosaveFlush>; saved: () => void }>());
   const [saveBlocked, setSaveBlocked] = useState(false);
+  const saveBlockedRef = useRef(false);
+  saveBlockedRef.current = saveBlocked;
   const leaving = useRef(false);
+  // The corrected entry saved itself: the notice that it could not be saved
+  // goes once every part of the step is saved, without another step change.
+  const savedAfterBlock = useCallback((leadId: string) => {
+    if (!saveBlockedRef.current || leaving.current) return;
+    const flushers = Array.from(sessions.get(leadId)?.flushers ?? []);
+    void Promise.all(flushers.map((flush) => flush.save())).then((results) => {
+      if (results.every(Boolean) && !leaving.current) setSaveBlocked(false);
+    });
+  }, [sessions]);
   const switchAfterSave = useCallback(async (leadId: string, action: () => void, onBlocked?: () => void) => {
     if (leaving.current) return;
     leaving.current = true;
@@ -221,7 +233,8 @@ export function LeadRequestPage() {
 
   let session = sessions.get(request.lead_id);
   if (!session) {
-    session = { enqueue: createRequestQueue(), flushers: new Set() };
+    const leadId = request.lead_id;
+    session = { enqueue: createRequestQueue(), flushers: new Set(), saved: () => savedAfterBlock(leadId) };
     sessions.set(request.lead_id, session);
   }
   return (
@@ -256,7 +269,9 @@ export function LeadRequestPage() {
       ) : null}
       {saveBlocked ? <div role="alert" data-testid="lead-request-save-blocked"><Banner tone="error">{text.saveBeforeLeaving}</Banner></div> : null}
       <AutosaveFlushContext.Provider value={session.flushers}>
-        <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} enqueue={session.enqueue} switchAfterSave={switchAfterSave} onChange={replaceRequest} onAccessLost={load} />
+        <AutosaveSavedContext.Provider value={session.saved}>
+          <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} enqueue={session.enqueue} switchAfterSave={switchAfterSave} onChange={replaceRequest} onAccessLost={load} />
+        </AutosaveSavedContext.Provider>
       </AutosaveFlushContext.Provider>
     </LeadCabinetFrame>
   );

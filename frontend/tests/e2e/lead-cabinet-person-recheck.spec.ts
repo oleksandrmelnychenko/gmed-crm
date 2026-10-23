@@ -272,6 +272,20 @@ for (const status of [503, 422]) {
   });
 }
 
+test('the "could not be saved" banner goes once the corrected entry has saved itself', async ({ page }) => {
+  const failure = { enabled: true, status: 422, endpoint: '/personal-data', field: 'city' };
+  const { calls } = await setup(page, undefined, undefined, undefined, failure);
+  await page.locator('#lead-request-city').fill('Hamburg');
+  await page.locator('[data-step="send"]').click();
+  await expect(page.getByTestId('lead-request-save-blocked')).toBeVisible();
+  failure.enabled = false;
+  await page.locator('#lead-request-city').fill('Bremen');
+  // Saved by the autosave alone, without another step change: the banner would now be untrue.
+  await expect.poll(() => calls.personal.at(-1)).toEqual({ city: 'Bremen' });
+  await expect(page.getByTestId('lead-request-save-blocked')).toHaveCount(0);
+  await expect(page.locator('[data-step="person"]')).toHaveAttribute('aria-current', 'step');
+});
+
 test('failed identification autosave retains channel choices across a refused step change', async ({ page }) => {
   const failure = { enabled: true, status: 503, endpoint: '/identification' };
   const { request } = await setup(page, undefined, undefined, undefined, failure);

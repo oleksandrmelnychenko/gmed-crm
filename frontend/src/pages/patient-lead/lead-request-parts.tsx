@@ -139,6 +139,8 @@ export function useRequestQueue(): RequestQueue {
 
 export type AutosaveFlush = { save: () => Promise<boolean>; version: () => string | undefined };
 export const AutosaveFlushContext = createContext<Set<AutosaveFlush> | null>(null);
+/** Told after an autosave went through: a "could not be saved" notice may be over. */
+export const AutosaveSavedContext = createContext<(() => void) | null>(null);
 
 /** An unchanged form can be left while uploads continue in its request queue. */
 export function runDraftSave<Result>(enqueue: RequestQueue, fields: ReadonlySet<string>, task: () => Promise<Result>) {
@@ -154,6 +156,9 @@ const AUTOSAVE_DELAY_MS = 700;
  */
 export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => Promise<boolean> | boolean) {
   const flushers = useContext(AutosaveFlushContext);
+  const onSaved = useContext(AutosaveSavedContext);
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
   const latest = useRef({ draft, save });
   const flushed = useRef<{ draft: Draft } | null>(null);
   latest.current = { draft, save };
@@ -183,7 +188,11 @@ export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => Prom
   useEffect(() => {
     const timer = window.setTimeout(() => {
       flushed.current = null;
-      void Promise.resolve(track(draft, save(draft))).catch(() => undefined);
+      void Promise.resolve(track(draft, save(draft)))
+        .then((saved) => {
+          if (saved) onSavedRef.current?.();
+        })
+        .catch(() => undefined);
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [draft, save, track]);
