@@ -2581,6 +2581,7 @@ pub(crate) async fn update_my_representation(
     let mut staged = StagedFiles::default();
     let mut contacts = loaded.contacts.clone();
     let mut invalidated = Vec::new();
+    let mut access_ended = false;
     let written = async {
         if !fields.is_empty() {
             store_answers(&mut tx, lead_id, &next, auth.user_id)
@@ -2616,6 +2617,12 @@ pub(crate) async fn update_my_representation(
         .await
         .map_err(|error| intake::internal(error, "invalidate representative invitation"))?
         .1;
+        if fields.contains(&"custody") {
+            access_ended = !revoke_unplaced_parent_access(&mut tx, lead_id, auth.user_id)
+                .await
+                .map_err(|error| intake::internal(error, "end parents' access"))?
+                .is_empty();
+        }
         audit::write_in_transaction(
             &mut tx,
             &audit::domain_event(
@@ -2645,6 +2652,9 @@ pub(crate) async fn update_my_representation(
     }
     staged.finalize().await;
     crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
+    if access_ended {
+        notify_custody_access_ended(&state, lead_id).await;
+    }
     publish_cabinet_change(&state, lead_id, auth.user_id, kind).await;
     request_response(&state, lead_id, auth.user_id, kind, StatusCode::OK).await
 }
@@ -3656,6 +3666,7 @@ pub(crate) async fn set_lead_custody(
     }
     let confirmed = previous == custody && custody.is_some() && !loaded.custody_set_by_staff;
     let mut invalidated = Vec::new();
+    let mut access_ended = false;
     if previous != custody {
         let written = async {
             // The statements row belongs to the lead: its change time and
@@ -3691,6 +3702,9 @@ pub(crate) async fn set_lead_custody(
             )
             .await?
             .1;
+            access_ended = !revoke_unplaced_parent_access(&mut tx, lead_id, auth.user_id)
+                .await?
+                .is_empty();
             Ok::<(), sqlx::Error>(())
         }
         .await;
@@ -3733,10 +3747,91 @@ pub(crate) async fn set_lead_custody(
         return intake::internal(error, "commit custody");
     }
     crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
+    if access_ended {
+        notify_custody_access_ended(&state, lead_id).await;
+    }
     if previous != custody || confirmed {
         publish_staff_change(&state, lead_id, auth.user_id).await;
     }
     Json(json!({ "representation": staff_payload(&loaded) })).into_response()
+}
+
+/// `lead_portal_access.revoked_reason` of a parent's access the custody
+/// ended.
+pub(crate) const ACCESS_REVOKED_CUSTODY_CHANGED: &str = "custody_changed";
+
+/// Owner decision 2026-10-23: a custody change (staff's or the cabinet's)
+/// that leaves a parent without a place in the form (joint → sole parent or
+/// guardian) ends that parent's access to this request, in the transaction of
+/// the change, with an audit row. The login stays (it may serve other
+/// requests or patients; the cabinet says neutrally that the access ended).
+/// Returns the revoked access ids; the caller tells staff after the commit
+/// ([`notify_custody_access_ended`]).
+pub(crate) async fn revoke_unplaced_parent_access(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    actor: Uuid,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let Some(loaded) = load(tx, lead_id).await? else {
+        return Ok(Vec::new());
+    };
+    if !loaded.representation.minor {
+        return Ok(Vec::new());
+    }
+    let unplaced: Vec<Uuid> = loaded
+        .representation
+        .representatives
+        .iter()
+        .filter(|person| person.slot.is_none())
+        .map(|person| person.id)
+        .collect();
+    if unplaced.is_empty() {
+        return Ok(Vec::new());
+    }
+    let revoked: Vec<Uuid> = sqlx::query_scalar(
+        r#"UPDATE lead_portal_access
+           SET revoked_at = now(), revoked_by = $3, revoked_reason = $4
+           WHERE lead_id = $1 AND kind = 'guardian' AND revoked_at IS NULL
+             AND trusted_contact_id = ANY($2)
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .bind(&unplaced)
+    .bind(actor)
+    .bind(ACCESS_REVOKED_CUSTODY_CHANGED)
+    .fetch_all(&mut **tx)
+    .await?;
+    if !revoked.is_empty() {
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "lead_guardian_access_revoked",
+                Some(actor),
+                "lead",
+                Some(lead_id),
+                json!({
+                    "lead_id": lead_id,
+                    "revoked_access_ids": revoked,
+                    "reason": ACCESS_REVOKED_CUSTODY_CHANGED,
+                }),
+            ),
+        )
+        .await?;
+    }
+    Ok(revoked)
+}
+
+/// One notice to the lead's staff that a custody change ended a parent's
+/// access; it names the request only (no personal data).
+pub(crate) async fn notify_custody_access_ended(state: &AppState, lead_id: Uuid) {
+    intake::notify_lead_staff(
+        state,
+        lead_id,
+        "lead_guardian_access_custody_ended",
+        "Parent's access ended",
+        "A custody change ended a parent's access to this request.",
+    )
+    .await;
 }
 
 /// `DELETE /leads/{lead_id}/representatives/{representative_id}`: staff

@@ -138,6 +138,8 @@ export type LeadRequestText = {
   guardianOnly: string;
   /** A parent's login after the child came of age: the access ended (QA 2026-10-23). */
   guardianAccessEnded: string;
+  /** A parent's access ended for another reason (a custody change): neutral, names nothing (owner 2026-10-23). */
+  guardianAccessEndedNeutral: string;
   requestFor: string;
   language: string;
   sectionPerson: string;
@@ -1036,6 +1038,8 @@ const de: LeadRequestText = {
     "Diese Anfrage füllen Ihre Eltern bzw. Ihr gesetzlicher Vertreter mit ihrem eigenen Zugang aus. Bei Fragen wenden Sie sich bitte an GMED.",
   guardianAccessEnded:
     "Die Person, für die Sie die Anfrage ausgefüllt haben, ist inzwischen volljährig. Ihr Zugang als Elternteil bzw. gesetzlicher Vertreter ist damit beendet. Bei Fragen wenden Sie sich bitte an GMED.",
+  guardianAccessEndedNeutral:
+    "Ihr Zugang zu dieser Anfrage ist beendet. Bei Fragen wenden Sie sich bitte an GMED.",
   requestFor: "Anfrage für",
   language: "Sprache",
   sectionPerson: "Persönliche Daten",
@@ -1600,6 +1604,8 @@ const ru: LeadRequestText = {
     "Эту заявку заполняют ваши родители или законный представитель через свой собственный доступ. Если у вас есть вопросы, обратитесь в GMED.",
   guardianAccessEnded:
     "Человек, для которого вы заполняли заявку, стал совершеннолетним. Поэтому ваш доступ как родителя или законного представителя закрыт. Если у вас есть вопросы, обратитесь в GMED.",
+  guardianAccessEndedNeutral:
+    "Ваш доступ к этой заявке закрыт. Если у вас есть вопросы, обратитесь в GMED.",
   requestFor: "Заявка для",
   language: "Язык",
   sectionPerson: "Личные данные",
@@ -2159,6 +2165,8 @@ const uk: LeadRequestText = {
     "Цю заявку заповнюють ваші батьки або законний представник через свій власний доступ. Якщо у вас є запитання, зверніться до GMED.",
   guardianAccessEnded:
     "Людина, для якої ви заповнювали заявку, стала повнолітньою. Тому ваш доступ як батька, матері або законного представника закрито. Якщо у вас є запитання, зверніться до GMED.",
+  guardianAccessEndedNeutral:
+    "Ваш доступ до цієї заявки закрито. Якщо у вас є запитання, зверніться до GMED.",
   requestFor: "Заявка для",
   language: "Мова",
   sectionPerson: "Особисті дані",
@@ -2718,6 +2726,8 @@ const en: LeadRequestText = {
     "Your parents or your legal representative fill in this request with their own access. If you have any questions, please contact GMED.",
   guardianAccessEnded:
     "The person you filled in the request for has come of age. Your access as a parent or legal representative has therefore ended. If you have any questions, please contact GMED.",
+  guardianAccessEndedNeutral:
+    "Your access to this request has ended. If you have any questions, please contact GMED.",
   requestFor: "Request for",
   language: "Language",
   sectionPerson: "Personal details",

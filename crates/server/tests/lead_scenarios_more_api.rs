@@ -1911,7 +1911,7 @@ async fn scenario_joint_then_sole_custody_does_not_keep_the_other_parent_as_paye
     let Some(app) = Scn::new().await else { return };
     let request = fill_joint_custody_request(&app).await;
     let (lead, mother, father) = (request.lead, request.mother, request.father);
-    let (_, ben) = app.guardian_access(lead, father).await;
+    let (father_login, ben) = app.guardian_access(lead, father).await;
     submit(&app, lead, &request.anna).await;
     enter_identity_data(&app, lead, mother, "C01X00T47").await;
     enter_identity_data(&app, lead, father, "C02X00T48").await;
@@ -1967,9 +1967,10 @@ async fn scenario_joint_then_sole_custody_does_not_keep_the_other_parent_as_paye
         format!("representative:{father}"),
         "{status}"
     );
-    // His own cabinet no longer answers the payment route as the payer.
-    let his = app.cabinet(lead, &ben).await;
-    assert_ne!(his["billing"]["payment_route_by"], "guardian", "{his}");
+    // Owner decision 2026-10-23: his access to the request ended with the
+    // custody change (audited, staff told once); his login stays and the
+    // cabinet says neutrally that the access ended.
+    assert_custody_ended_access(&app, lead, father_login, &ben, app.pm_id).await;
     // Staff cannot name him as payer again; they name the mother.
     let (code, refused) = app
         .call(
@@ -2027,4 +2028,121 @@ async fn scenario_joint_then_sole_custody_does_not_keep_the_other_parent_as_paye
             .all(|(_, _, default)| !default),
         "{relations:?}"
     );
+}
+
+/// A custody change ended the parent's access (owner decision 2026-10-23):
+/// revoked as `custody_changed` by `actor`, audited, one staff notice naming
+/// the request only; the login stays active and the cabinet reports the end.
+async fn assert_custody_ended_access(
+    app: &Scn,
+    lead: Uuid,
+    login: Uuid,
+    bearer: &str,
+    actor: Uuid,
+) {
+    let pool = app.pool();
+    let (code, _) = app
+        .call("GET", &format!("/me/lead-requests/{lead}"), bearer, None)
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    let list = app
+        .ok(StatusCode::OK, "GET", "/me/lead-requests", bearer, None)
+        .await;
+    assert_eq!(list["requests"], json!([]), "{list}");
+    assert_eq!(list["guardian_access_ended"], true, "{list}");
+    assert_eq!(
+        list["guardian_access_ended_reason"], "custody_changed",
+        "{list}"
+    );
+    let active: bool = sqlx::query_scalar("SELECT is_active FROM users WHERE id = $1")
+        .bind(login)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(active, "the login stays");
+    let me = app.ok(StatusCode::OK, "GET", "/me", bearer, None).await;
+    assert_eq!(me["portal_mode"], "lead", "{me}");
+    let revoked: Vec<(Option<Uuid>, Option<String>)> = sqlx::query_as(
+        "SELECT revoked_by, revoked_reason FROM lead_portal_access WHERE lead_id = $1 AND user_id = $2",
+    )
+    .bind(lead)
+    .bind(login)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        revoked,
+        vec![(Some(actor), Some("custody_changed".to_string()))]
+    );
+    let audited = app.audit("lead_guardian_access_revoked", lead).await;
+    assert_eq!(audited.len(), 1, "{audited:?}");
+    assert_eq!(audited[0].0, Some(actor));
+    assert_eq!(audited[0].1["reason"], "custody_changed");
+    let notices: Vec<(Uuid, String, Option<String>)> = sqlx::query_as(
+        r#"SELECT user_id, title, body FROM user_notifications
+           WHERE entity_type = 'lead' AND entity_id = $1
+             AND kind = 'lead_guardian_access_custody_ended'"#,
+    )
+    .bind(lead)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(!notices.is_empty(), "staff are told");
+    let mut recipients: Vec<Uuid> = notices.iter().map(|(user, _, _)| *user).collect();
+    recipients.sort();
+    recipients.dedup();
+    assert_eq!(recipients.len(), notices.len(), "one notice per person");
+    for (_, title, body) in &notices {
+        let text = format!("{title} {}", body.clone().unwrap_or_default());
+        assert!(
+            !text.contains("Muster") && !text.contains("Ben") && !text.contains("Mia"),
+            "{text}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 4b: the mother changes the custody in the cabinet herself.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn scenario_cabinet_sole_custody_ends_the_other_parents_access() {
+    let Some(app) = Scn::new().await else { return };
+    let request = fill_joint_custody_request(&app).await;
+    let (lead, mother, father) = (request.lead, request.mother, request.father);
+    let (father_login, ben) = app.guardian_access(lead, father).await;
+    assert_eq!(app.cabinet(lead, &ben).await["minor"], true);
+    let view = app
+        .ok(
+            StatusCode::OK,
+            "POST",
+            &format!("{}/representation", request.base()),
+            &request.anna,
+            Some(json!({ "custody": "sole_parent" })),
+        )
+        .await;
+    assert_eq!(view["representation"]["custody"], "sole_parent", "{view}");
+    assert_eq!(representative(&view, mother)["slot"], "rep1", "{view}");
+    assert_custody_ended_access(&app, lead, father_login, &ben, request.mother_login).await;
+    // Joint custody again does not bring the access back by itself: staff
+    // issue it again, to the same login.
+    app.ok(
+        StatusCode::OK,
+        "POST",
+        &format!("{}/representation", request.base()),
+        &request.anna,
+        Some(json!({ "custody": "joint" })),
+    )
+    .await;
+    let (code, _) = app.call("GET", &request.base(), &ben, None).await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    let (again, ben_again) = app.guardian_access(lead, father).await;
+    assert_eq!(again, father_login, "the same login");
+    assert_eq!(app.cabinet(lead, &ben_again).await["minor"], true);
+    let list = app
+        .ok(StatusCode::OK, "GET", "/me/lead-requests", &ben_again, None)
+        .await;
+    assert_eq!(list["guardian_access_ended"], false, "{list}");
+    // The mother's access is untouched throughout.
+    assert_eq!(app.cabinet(lead, &request.anna).await["minor"], true);
 }

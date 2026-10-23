@@ -549,10 +549,12 @@ pub(crate) async fn is_lead_only_login(
                        SELECT 1 FROM lead_portal_access a
                        JOIN leads l ON l.id = a.lead_id
                        WHERE a.user_id = $1 AND a.kind = 'guardian'
-                         AND {GUARDIAN_ACCESS_OR_CAME_OF_AGE_SQL}
+                         AND ({GUARDIAN_ACCESS_OR_CAME_OF_AGE_SQL}
+                              OR a.revoked_reason = '{custody}')
                          AND {PORTAL_LEAD_SQL}
                    )
-               )"#
+               )"#,
+        custody = crate::routes::lead_representatives::ACCESS_REVOKED_CUSTODY_CHANGED,
     ))
     .bind(user_id)
     .fetch_one(db)
@@ -2917,7 +2919,8 @@ async fn list_my_lead_requests(
     Json(json!({
         "requests": requests,
         "own_access_closed": own_access_closed,
-        "guardian_access_ended": guardian_access_ended,
+        "guardian_access_ended": guardian_access_ended.is_some(),
+        "guardian_access_ended_reason": guardian_access_ended,
     }))
     .into_response()
 }
@@ -2928,18 +2931,42 @@ async fn list_my_lead_requests(
 /// names neither the child nor anything of the request. The daily job
 /// ([`crate::services::coming_of_age`]) revokes such an access on the 18th
 /// birthday; the revoked access still counts here.
-async fn guardian_access_ended(db: &gmed_db::DbPool, user_id: Uuid) -> Result<bool, sqlx::Error> {
+///
+/// Since 2026-10-23 also an access a custody change ended (the parent has no
+/// place in the form any more, `revoked_reason = 'custody_changed'`) while
+/// the login reaches the request in no other way. Returns why: `came_of_age`
+/// or `custody_changed` (the cabinet words a neutral notice for the latter).
+async fn guardian_access_ended(
+    db: &gmed_db::DbPool,
+    user_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar(&format!(
-        r#"SELECT EXISTS (
-               SELECT 1 FROM lead_portal_access a
-               JOIN leads l ON l.id = a.lead_id
-               WHERE a.user_id = $1
-                 AND a.kind = 'guardian'
-                 AND {GUARDIAN_ACCESS_OR_CAME_OF_AGE_SQL}
-                 AND l.date_of_birth IS NOT NULL
-                 AND {PORTAL_LEAD_SQL}
-                 AND NOT {OWN_LOGIN_CLOSED_SQL}
-           )"#
+        r#"SELECT CASE
+               WHEN EXISTS (
+                   SELECT 1 FROM lead_portal_access a
+                   JOIN leads l ON l.id = a.lead_id
+                   WHERE a.user_id = $1
+                     AND a.kind = 'guardian'
+                     AND {GUARDIAN_ACCESS_OR_CAME_OF_AGE_SQL}
+                     AND l.date_of_birth IS NOT NULL
+                     AND {PORTAL_LEAD_SQL}
+                     AND NOT {OWN_LOGIN_CLOSED_SQL}
+               ) THEN 'came_of_age'
+               WHEN EXISTS (
+                   SELECT 1 FROM lead_portal_access a
+                   JOIN leads l ON l.id = a.lead_id
+                   WHERE a.user_id = $1
+                     AND a.kind = 'guardian'
+                     AND a.revoked_reason = '{custody}'
+                     AND {PORTAL_LEAD_SQL}
+                     AND NOT EXISTS (
+                         SELECT 1 FROM lead_portal_access other
+                         WHERE other.user_id = a.user_id AND other.lead_id = a.lead_id
+                           AND other.revoked_at IS NULL
+                     )
+               ) THEN 'custody_changed'
+           END"#,
+        custody = crate::routes::lead_representatives::ACCESS_REVOKED_CUSTODY_CHANGED,
     ))
     .bind(user_id)
     .fetch_one(db)

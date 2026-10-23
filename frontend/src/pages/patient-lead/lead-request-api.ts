@@ -884,14 +884,26 @@ export async function fetchMyLeadRequestList(): Promise<{
   ownAccessClosed: boolean;
   /** A parent's access reaches a request no more: the child is of age now (QA 2026-10-23). */
   guardianAccessEnded: boolean;
+  /**
+   * Why it ended: the child came of age, or a custody change left the parent
+   * without a place in the form (owner 2026-10-23); null on an older server.
+   */
+  guardianAccessEndedReason: "came_of_age" | "custody_changed" | null;
 }> {
-  const result = await apiFetch<{ requests?: LeadRequest[]; own_access_closed?: boolean; guardian_access_ended?: boolean }>("/me/lead-requests", {
+  const result = await apiFetch<{
+    requests?: LeadRequest[];
+    own_access_closed?: boolean;
+    guardian_access_ended?: boolean;
+    guardian_access_ended_reason?: string | null;
+  }>("/me/lead-requests", {
     forceFresh: true,
   });
+  const reason = result.guardian_access_ended_reason;
   return {
     requests: result.requests ?? [],
     ownAccessClosed: result.own_access_closed === true,
     guardianAccessEnded: result.guardian_access_ended === true,
+    guardianAccessEndedReason: reason === "came_of_age" || reason === "custody_changed" ? reason : null,
   };
 }
 
