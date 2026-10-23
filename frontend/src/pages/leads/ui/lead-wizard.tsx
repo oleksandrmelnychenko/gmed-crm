@@ -7396,7 +7396,8 @@ ${serviceCommentLines.join("\n")}`
     // the order step; the service step itself holds only the optional program
     // period and wishes. Each tab follows what it shows.
     if (id === "service") return Boolean(draft && !orderIssues.some((issue) => issue.step === "service"));
-    if (id === "order") return Boolean(draft && !orderIssues.some((issue) => issue.step === "order"));
+    // The program period is entered with the service history but completes the order too.
+    if (id === "order") return Boolean(draft && orderIssues.length === 0);
     if (id === "commercial") return commercialReady;
     if (id === "release") return conversionReady;
     return readiness.get(id) ?? false;

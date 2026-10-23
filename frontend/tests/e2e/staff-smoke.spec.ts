@@ -3195,6 +3195,10 @@ test.describe("lead onboarding wizard", () => {
       await medicalStep.click();
       await expect(wizard.locator("#lead-wizard-guardian")).toContainText("Für Minderjährige");
       expect(creates).toEqual([]);
+      // A guardian (Vormund) is named under the custody "guardian", stated with the new lead.
+      if (relation === "guardian") {
+        await chooseComboboxOption(page, wizard.getByTestId("lead-new-custody").getByRole("combobox"), "Vormund oder Pfleger");
+      }
       await wizard.getByRole("button", { name: "Hinzufügen", exact: true }).click();
       const editor = page.getByTestId("trusted-contact-editor");
       await editor.getByRole("textbox", { name: "Vor- und Nachname" }).fill("Alex Example");
@@ -3208,6 +3212,7 @@ test.describe("lead onboarding wizard", () => {
       expect(creates[0]).toMatchObject({
         first_name: "Mia", last_name: "Example", date_of_birth: "2016-06-15", email: null,
         trusted_contacts: [{ name: "Alex Example", email: "parent@example.invalid", relation }],
+        ...(relation === "guardian" ? { custody: "guardian" } : {}),
       });
       await expect(page.getByRole("dialog", { name: "Zugang für den Patienten angelegt" })).toHaveCount(0);
       await wizard.locator('[data-step="master_data"]').click();
