@@ -1397,6 +1397,29 @@ async fn a_change_makes_the_package_outdated_and_it_is_prepared_again() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_outdated("patient_statement_changed").await;
 
+    // The patient withdraws the consent to pass the cost estimate on: the
+    // prepared package must not go out (Art. 7(3) DSGVO); it cannot be
+    // prepared again until the consent is given again.
+    cost_estimate_consent(&app, lead_id, &ready.patient, false).await;
+    let body = package(&app, lead_id).await;
+    assert!(
+        body["package"]["outdated_reasons"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("cost_estimate_consent_withdrawn")),
+        "{body}"
+    );
+    assert_eq!(body["can_send"], false, "{body}");
+    cost_estimate_consent(&app, lead_id, &ready.patient, true).await;
+    let body = package(&app, lead_id).await;
+    assert!(
+        !body["package"]["outdated_reasons"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("cost_estimate_consent_withdrawn")),
+        "{body}"
+    );
+
     // Staff correct the payer's address: another version of the payer.
     let (_, stored) = with_login(
         &app,

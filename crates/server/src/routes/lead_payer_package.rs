@@ -649,6 +649,16 @@ impl Facts {
         if self.fingerprint.as_deref() != Some(package.patient_statement_fingerprint.as_str()) {
             reasons.push("patient_statement_changed");
         }
+        // The patient withdrew the consent to pass the cost estimate on after
+        // the package was made (Art. 7(3) DSGVO): what was prepared or sent
+        // must not reach the payer; staff withdraw the request.
+        if self.consent_required
+            && self
+                .third_party()
+                .is_some_and(|declaration| declaration.cost_estimate_consent_at.is_none())
+        {
+            reasons.push("cost_estimate_consent_withdrawn");
+        }
         let replaced = package.documents.iter().any(|id| {
             !id.is_some_and(|id| {
                 self.documents

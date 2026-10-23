@@ -198,6 +198,11 @@ export function payerPackageOutdatedReasonText(reason: string, tx: Tx): string {
       return tx("пациент изменил данные о плательщике", "die Angaben der Patientenseite zum Zahler haben sich geändert");
     case "document_replaced":
       return tx("документ пакета заменён или удалён", "ein Dokument des Pakets wurde ersetzt oder gelöscht");
+    case "cost_estimate_consent_withdrawn":
+      return tx(
+        "пациент отозвал согласие на передачу сметы плательщику",
+        "die Patientenseite hat die Einwilligung zur Weitergabe des Kostenvoranschlags widerrufen",
+      );
     default:
       return tx("данные изменились", "die Angaben haben sich geändert");
   }

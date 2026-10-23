@@ -54,6 +54,7 @@ export const PAYER_PACKAGE_OUTDATED_REASONS = [
   "signer_changed",
   "cost_estimate_changed",
   "patient_statement_changed",
+  "cost_estimate_consent_withdrawn",
   "document_replaced",
 ] as const;
 
