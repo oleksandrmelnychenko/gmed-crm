@@ -47,7 +47,7 @@ test("cabinet edits, upload, submission and staff data survive a real API round 
   });
   await post("payer", { payer_kind: "self", acts_on_own_account: true });
   await post("billing", {
-    invoice_to: "self", payment_method: "bank_transfer", account_country: "DE",
+    invoice_recipient: "self", payment_method: "bank_transfer", account_country: "DE",
     account_holder: "Anna Roundtrip", bank_name: "Musterbank", via_third_party: false,
   });
   await post("identification", {
