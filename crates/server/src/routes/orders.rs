@@ -457,8 +457,14 @@ pub struct ExternalInvoiceDeadlineRunSummary {
     pub notifications_created: u64,
 }
 
+/// Order numbers carry the German date (Europe/Berlin, `crate::app_time`),
+/// not the UTC one (owner 2026-10-23).
 pub(crate) fn gen_order_number(seq: i64) -> String {
-    format!("A-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq)
+    order_number_on(crate::app_time::today(), seq)
+}
+
+fn order_number_on(date: chrono::NaiveDate, seq: i64) -> String {
+    format!("A-{}-{:04}", date.format("%Y%m%d"), seq)
 }
 
 fn is_valid_external_invoice_status(value: &str) -> bool {
@@ -13936,6 +13942,19 @@ async fn ensure_order_service_patient_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn order_numbers_carry_the_german_date() {
+        use chrono::TimeZone;
+        // 22:30 UTC on 27.09. is 00:30 on 28.09. in Berlin (summer time).
+        let late_evening_utc = chrono::Utc
+            .with_ymd_and_hms(2026, 9, 27, 22, 30, 0)
+            .unwrap();
+        assert_eq!(
+            order_number_on(crate::app_time::date_of(late_evening_utc), 42),
+            "A-20260928-0042"
+        );
+    }
 
     fn followup_visit(milestone: &str, date: &str, status: &str) -> FollowupVisit {
         FollowupVisit {

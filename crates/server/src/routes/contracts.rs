@@ -524,12 +524,23 @@ fn is_valid_quote_status(value: &str) -> bool {
     )
 }
 
+/// Framework contract and cost estimate numbers carry the German date
+/// (Europe/Berlin, `crate::app_time`), not the UTC one: a contract created at
+/// 00:30 in Berlin belongs to that day (owner 2026-10-23).
 fn gen_contract_number(seq: i64) -> String {
-    format!("FC-{}-{:04}", Utc::now().format("%Y%m%d"), seq)
+    contract_number_on(crate::app_time::today(), seq)
 }
 
 fn gen_quote_number(seq: i64) -> String {
-    format!("KV-{}-{:04}", Utc::now().format("%Y%m%d"), seq)
+    quote_number_on(crate::app_time::today(), seq)
+}
+
+fn contract_number_on(date: NaiveDate, seq: i64) -> String {
+    format!("FC-{}-{:04}", date.format("%Y%m%d"), seq)
+}
+
+fn quote_number_on(date: NaiveDate, seq: i64) -> String {
+    format!("KV-{}-{:04}", date.format("%Y%m%d"), seq)
 }
 
 fn parse_optional_date(value: Option<&str>) -> Result<Option<NaiveDate>, &'static str> {
@@ -4985,10 +4996,24 @@ async fn update_quote_internal_note(
 #[cfg(test)]
 mod tests {
     use super::{
-        QuoteLineItemInput, compute_quote_totals, normalize_custom_line_items,
-        patient_contract_status,
+        QuoteLineItemInput, compute_quote_totals, contract_number_on, normalize_custom_line_items,
+        patient_contract_status, quote_number_on,
     };
+    use chrono::{TimeZone, Utc};
     use rust_decimal::Decimal;
+
+    #[test]
+    fn contract_and_quote_numbers_carry_the_german_date() {
+        // 22:30 UTC on 27.09. is 00:30 on 28.09. in Berlin (summer time).
+        let late_evening_utc = Utc.with_ymd_and_hms(2026, 9, 27, 22, 30, 0).unwrap();
+        let berlin = crate::app_time::date_of(late_evening_utc);
+        assert_eq!(contract_number_on(berlin, 7), "FC-20260928-0007");
+        assert_eq!(quote_number_on(berlin, 12), "KV-20260928-0012");
+        // Winter time: 23:30 UTC on 31.12. is New Year in Berlin.
+        let new_year =
+            crate::app_time::date_of(Utc.with_ymd_and_hms(2026, 12, 31, 23, 30, 0).unwrap());
+        assert_eq!(contract_number_on(new_year, 1), "FC-20270101-0001");
+    }
 
     #[test]
     fn framework_contract_status_maps_to_patient_profile_domain() {
