@@ -697,7 +697,7 @@ test("the patient form waits until the request was sent", async ({ page }) => {
   await expect(section.getByRole("button", { name: "Dokument erstellen", exact: true })).toBeDisabled();
   // It says why the form cannot be made yet: it comes from the cabinet data.
   await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveText(
-    "Das Formular wird aus den Angaben im Kabinett erstellt. Der Patient hat die Anfrage noch nicht gesendet – danach kann das Formular erstellt werden. Erfassen Sie die Angaben selbst, wählen Sie in Schritt 1 „Ich fülle aus“: Das Formular wird dann aus Ihren Angaben erstellt.",
+    "Das Formular wird aus den Angaben im Kundenkabinett erstellt. Der Patient hat die Anfrage noch nicht gesendet – danach kann das Formular erstellt werden. Erfassen Sie die Angaben selbst, wählen Sie in Schritt 1 „Ich fülle aus“: Das Formular wird dann aus Ihren Angaben erstellt.",
   );
   await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveClass(/bg-amber-50/);
   await expect(section).not.toContainText("Dokument wurde noch nicht erstellt");

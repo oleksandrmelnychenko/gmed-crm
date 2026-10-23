@@ -71,7 +71,7 @@ const de: ConsentFormText = {
     "Ihre Auswahl wird automatisch gespeichert, sobald Sie die drei erforderlichen Einwilligungen angekreuzt haben. Möchten Sie sie nicht geben, sprechen Sie bitte mit GMED.",
   coreRequired: "Bitte kreuzen Sie die drei erforderlichen Einwilligungen an.",
   save: "Auswahl speichern",
-  saving: "Wird gespeichert …",
+  saving: "Wird gespeichert…",
   savedAt: (date) =>
     `Ihre Auswahl vom ${date} ist gespeichert. Sie können sie jederzeit ändern; ein schon erstelltes Formular erstellt GMED dann neu.`,
   savedByOtherAt: (date) =>
@@ -137,7 +137,7 @@ const en: ConsentFormText = {
     "Your choice is saved automatically once you tick the three required consents. If you do not wish to give them, please contact GMED.",
   coreRequired: "Please tick the three required consents.",
   save: "Save my choice",
-  saving: "Saving …",
+  saving: "Saving…",
   savedAt: (date) =>
     `Your choice of ${date} is saved. You can change it at any time; GMED staff then prepare a form already made anew.`,
   savedByOtherAt: (date) =>
@@ -201,11 +201,11 @@ const uk: ConsentFormText = {
     "Вибір зберігається автоматично, коли ви позначите три обов'язкові згоди. Якщо ви не хочете їх давати, зв'яжіться з GMED.",
   coreRequired: "Позначте, будь ласка, три обов'язкові згоди.",
   save: "Зберегти вибір",
-  saving: "Зберігаємо …",
+  saving: "Зберігаємо…",
   savedAt: (date) =>
     `Ваш вибір від ${date} збережено. Ви можете змінити його будь-коли; уже створену форму працівник GMED тоді створить заново.`,
   savedByOtherAt: (date) =>
-    `Вибір від ${date} зберіг інший з батьків або представник. Якщо ви збережете власний вибір, діятиме ваш; підписує той, хто обрав останнім.`,
+    `Вибір від ${date} зберіг другий з батьків або представник. Якщо ви збережете власний вибір, діятиме ваш; підписує той, хто обрав останнім.`,
   notSaved: "Вибір ще не збережено.",
   unsaved: "Зміни ще не збережено.",
   byGuardianOnly:
@@ -265,7 +265,7 @@ const ru: ConsentFormText = {
     "Выбор сохраняется автоматически, когда вы отметите три обязательных согласия. Если вы не хотите их давать, свяжитесь с GMED.",
   coreRequired: "Отметьте, пожалуйста, три обязательных согласия.",
   save: "Сохранить выбор",
-  saving: "Сохраняем …",
+  saving: "Сохраняем…",
   savedAt: (date) =>
     `Ваш выбор от ${date} сохранён. Вы можете изменить его в любой момент; уже созданную форму сотрудник GMED тогда создаст заново.`,
   savedByOtherAt: (date) =>

@@ -129,6 +129,8 @@ function leadRequest() {
         texts: {
           de: "Ich bin einverstanden, dass meine Angaben zur Bearbeitung meiner Anfrage verarbeitet werden.",
           ru: "Я согласен(на), что мои данные обрабатываются для рассмотрения моего обращения.",
+          uk: "Я погоджуюся, що мої дані обробляються для розгляду мого звернення.",
+          en: "I agree that my details are processed to handle my request.",
         },
         given_at: null as string | null,
       },
@@ -2504,6 +2506,59 @@ test.describe("lead cabinet", () => {
     // The send button stays reachable below the long summary.
     await expect(page.getByTestId("lead-request-submit")).toBeInViewport();
   });
+
+  // The longer languages on a phone (language QA 2026-10-23): every step of a patient's and of a
+  // parent's request fits 390 px in Ukrainian and English. Only a box that scrolls on its own (the
+  // step tabs) may hold wider content. CABINET_SHOTS_DIR keeps a screenshot of every step.
+  for (const access of ["self", "guardian"] as const) {
+    for (const language of ["UA", "EN"] as const) {
+      test(`every step fits 390 px in ${language} (${access === "self" ? "own request" : "a parent's request"})`, async ({ page }) => {
+        await setup(page, "lead", {
+          prepare: (request) => {
+            completeRequestWithPayer(request);
+            request.access_kind = access;
+            request.submitted_at = "2026-10-03T09:30:00Z";
+            request.follow_up = { required: true, blocks: ["A", "K", "L"], missing: {}, answered_at: null };
+          },
+        });
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.goto("/");
+        await page.getByTestId("lead-cabinet-language").getByRole("radio", { name: language }).click();
+        await expect(page.getByRole("heading", { name: language === "UA" ? /Ваша заявка|Заявка для/ : /Your request|Request for/ }).first()).toBeVisible();
+        const steps = await page.locator("[data-step]").evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("data-step") ?? ""));
+        expect(steps.length).toBeGreaterThan(4);
+        for (const id of steps) {
+          await step(page, id);
+          await expect(page.locator(`[data-step="${id}"]`)).toHaveAttribute("aria-selected", "true");
+          const overhang = await page.evaluate(() => {
+            const width = document.documentElement.clientWidth;
+            const scrollsOnItsOwn = (node: Element) => {
+              for (let parent = node.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+                const { overflowX } = getComputedStyle(parent);
+                if (overflowX === "auto" || overflowX === "scroll" || overflowX === "hidden" || overflowX === "clip") return true;
+              }
+              return false;
+            };
+            return Array.from(document.body.querySelectorAll("*"))
+              .filter((node) => node.getBoundingClientRect().width > 0 && !scrollsOnItsOwn(node))
+              .map((node) => ({ over: node.getBoundingClientRect().right - width, text: (node.textContent ?? "").slice(0, 60) }))
+              .filter((item) => item.over > 1);
+          });
+          expect(overhang, `${language} ${access} step ${id}`).toEqual([]);
+          const shots = process.env.CABINET_SHOTS_DIR;
+          if (shots) {
+            // The form scrolls in its own box: a tall window shows the whole step.
+            await page.setViewportSize({ width: 390, height: 4200 });
+            for (let part = 0; part < 3; part += 1) {
+              const clip = { x: 0, y: part * 1400, width: 390, height: 1400 };
+              await page.screenshot({ path: `${shots}/cabinet-${access}-${language}-${id}-${part}.png`, clip });
+            }
+            await page.setViewportSize({ width: 390, height: 844 });
+          }
+        }
+      });
+    }
+  }
 });
 
 test.describe("patient portal after conversion", () => {

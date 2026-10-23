@@ -663,7 +663,7 @@ export function LeadIdentityDocumentData({
             <li key={file.id} className="flex flex-wrap items-baseline gap-x-2">
               <span className="font-medium text-foreground [overflow-wrap:anywhere]">{file.file_name || "—"}</span>
               {file.uploaded_at ? <span className="text-muted-foreground">{formatAppDate(file.uploaded_at)}</span> : null}
-              <span className="text-muted-foreground">{tx("Из кабинета", "Aus dem Kabinett")}</span>
+              <span className="text-muted-foreground">{tx("Из кабинета", "Aus dem Kundenkabinett")}</span>
             </li>
           ))}
         </ul>

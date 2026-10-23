@@ -24,7 +24,7 @@ export function representativeNeedsAuthority(person: LeadRepresentative, custody
 
 /** Who uploaded a representative's file: the cabinet (the lead or a parent) or staff in the wizard. */
 export function representativeFileOrigin(file: Pick<LeadIdentityDocument, "uploaded_by_staff">, tx: Tx) {
-  return file.uploaded_by_staff ? tx("Загружено сотрудником", "Von GMED hochgeladen") : tx("Из кабинета", "Aus dem Kabinett");
+  return file.uploaded_by_staff ? tx("Загружено сотрудником", "Von GMED hochgeladen") : tx("Из кабинета", "Aus dem Kundenkabinett");
 }
 
 function filesOf(person: LeadRepresentative, kind: RepresentativeUploadKind) {

@@ -250,7 +250,7 @@ export function gwgSheetErrorText(error: unknown, tx: Tx): string | null {
   if (codes.includes("representative_sheet_not_available")) {
     return tx(
       "Для этого человека лист сформировать нельзя: он не числится законным представителем несовершеннолетнего. Представителем или опекуном (Betreuer) взрослого пациента в кабинете он тоже не указан. Обновите страницу и проверьте данные о представителях",
-      "Für diese Person kann kein Bogen erstellt werden: Sie ist nicht als gesetzliche Vertretung eines Minderjährigen erfasst. Als Vertreter/in oder Betreuer/in eines volljährigen Patienten ist sie im Kabinett ebenfalls nicht angegeben. Bitte die Seite aktualisieren und die Angaben zur Vertretung prüfen",
+      "Für diese Person kann kein Bogen erstellt werden: Sie ist nicht als gesetzliche Vertretung eines Minderjährigen erfasst. Als Vertreter/in oder Betreuer/in eines volljährigen Patienten ist sie im Kundenkabinett ebenfalls nicht angegeben. Bitte die Seite aktualisieren und die Angaben zur Vertretung prüfen",
     );
   }
   if (codes.includes("payer_is_representative")) {

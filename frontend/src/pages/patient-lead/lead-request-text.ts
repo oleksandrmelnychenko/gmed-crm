@@ -983,7 +983,7 @@ const de: LeadRequestText = {
   dobStaffOnly: "Bitte wenden Sie sich an GMED, um das Geburtsdatum zu korrigieren.",
   healthConsentRequired: "Bitte stimmen Sie zuerst der Verarbeitung der Gesundheitsdaten zu.",
   furtherDetails: "Weitere Angaben",
-  errors: {"upload_reviewed":"GMED hat dieses Dokument bereits übernommen. Bitte wenden Sie sich für die Entfernung an unser Team.","upload_in_use":"Dieses Dokument wird bereits verwendet. Bitte wenden Sie sich an GMED.","too_many_documents":"Sie können höchstens 30 Dokumente hochladen. Entfernen Sie zuerst eine nicht benötigte Datei.","unsupported_file_type":"Bitte laden Sie eine PDF-, JPG- oder PNG-Datei hoch.","file_too_large":"Die Datei darf höchstens 25 MB groß sein.","personal_data_incomplete":"Bitte ergänzen Sie die markierten Angaben, bevor Sie die Anfrage senden.","request_failed":"Das hat leider nicht geklappt. Bitte versuchen Sie es erneut."},
+  errors: {"upload_reviewed":"GMED hat dieses Dokument bereits übernommen. Bitte wenden Sie sich für die Entfernung an unser Team.","upload_in_use":"Dieses Dokument wird bereits verwendet. Bitte wenden Sie sich an GMED.","too_many_documents":"Sie können höchstens 30 Dokumente hochladen. Entfernen Sie zuerst eine nicht benötigte Datei.","unsupported_file_type":"Bitte laden Sie eine PDF-, JPG- oder PNG-Datei hoch.","file_too_large":"Die Datei darf höchstens 25 MB groß sein.","personal_data_incomplete":"Bitte ergänzen Sie die markierten Angaben, bevor Sie die Anfrage senden.","request_failed":"Das hat leider nicht geklappt. Bitte versuchen Sie es erneut.","consent_version_outdated":"Der Text der Einwilligung wurde inzwischen aktualisiert. Bitte laden Sie die Seite neu und bestätigen Sie den aktuellen Text.","lead_converted":"Ihre Anfrage wird inzwischen im Patientenportal weitergeführt. Bitte laden Sie die Seite neu."},
   minorNeedsGuardian:
     "Für Personen unter 18 Jahren füllen die Eltern oder der gesetzliche Vertreter die Anfrage aus. Wir haben unser GMED-Team informiert und melden uns.",
   next: "Weiter",
@@ -1504,7 +1504,7 @@ const ru: LeadRequestText = {
     billing: "Страховка и счёт",
     declarations: "Заявления",
     follow_up: "Дополнительные сведения",
-    disclosure: "Информация третьим лицам",
+    disclosure: "Предоставление информации третьим лицам",
     documents: "Обращение и документы",
     send: "Проверка и отправка",
   },
@@ -1549,7 +1549,7 @@ const ru: LeadRequestText = {
   dobStaffOnly: "Чтобы исправить дату рождения, обратитесь в GMED.",
   healthConsentRequired: "Сначала дайте согласие на обработку данных о здоровье.",
   furtherDetails: "Дополнительные сведения",
-  errors: {"upload_reviewed":"GMED уже приняла этот документ. Чтобы удалить его, обратитесь к нашей команде.","upload_in_use":"Этот документ уже используется. Для удаления обратитесь в GMED.","too_many_documents":"Можно загрузить до 30 документов. Сначала удалите ненужный файл.","unsupported_file_type":"Загрузите файл PDF, JPG или PNG.","file_too_large":"Размер файла не должен превышать 25 МБ.","personal_data_incomplete":"Заполните отмеченные поля перед отправкой заявки.","request_failed":"Не удалось выполнить действие. Попробуйте ещё раз."},
+  errors: {"upload_reviewed":"GMED уже приняла этот документ. Чтобы удалить его, обратитесь к нашей команде.","upload_in_use":"Этот документ уже используется. Для удаления обратитесь в GMED.","too_many_documents":"Можно загрузить до 30 документов. Сначала удалите ненужный файл.","unsupported_file_type":"Загрузите файл PDF, JPG или PNG.","file_too_large":"Размер файла не должен превышать 25 МБ.","personal_data_incomplete":"Заполните отмеченные поля перед отправкой заявки.","request_failed":"Не удалось выполнить действие. Попробуйте ещё раз.","consent_version_outdated":"Текст согласия тем временем обновлён. Перезагрузите страницу и подтвердите актуальный текст.","lead_converted":"Ваша заявка теперь ведётся в портале пациента. Перезагрузите страницу."},
   minorNeedsGuardian:
     "Для лиц младше 18 лет заявку заполняют родители или законный представитель. Мы сообщили нашей команде GMED и свяжемся с вами.",
   next: "Далее",
@@ -1666,7 +1666,7 @@ const ru: LeadRequestText = {
   payerConsentHint: "Без этого согласия мы не вправе обращаться к плательщику.",
   payerConsentShort: "Согласие на контакт",
   payerCostEstimateConsentLabel:
-    "Я согласен(на), что GMED передаст плательщику смету с ожидаемыми расходами – только виды услуг и суммы, без диагнозов и медицинских подробностей.",
+    "Я согласен(на), что GMED передаст плательщику смету с ожидаемыми расходами — только виды услуг и суммы, без диагнозов и медицинских подробностей.",
   payerCostEstimateConsentShort: "Согласие на передачу сметы",
   payerAnsweredByPayer: "Плательщик сам указал свои данные. Изменения только через GMED.",
   ownAccountQuestion: "Вы действуете в собственных экономических интересах?",
@@ -1872,7 +1872,7 @@ const ru: LeadRequestText = {
   childIdentityUploadButton: "Загрузить документ ребёнка",
   childIdentityUploadHint: "Загрузите читаемый скан или фото документа ребёнка: PDF, JPG или PNG, до 25 МБ на файл.",
   parentDocumentDetails: "Показать данные для договора",
-  parentShortFormIntro: "Для первого обращения достаточно имён, контактов, страны проживания и гражданства родителей, представляющих ребёнка. Остальные сведения и документы понадобятся перед договором и подписью. Уже сохранённые данные сохраняются.",
+  parentShortFormIntro: "Для первого обращения достаточно имён, контактов, страны проживания и гражданства родителей, представляющих ребёнка. Остальные сведения и документы понадобятся перед договором и подписью. Уже сохранённые данные не теряются.",
   custodyQuestion: "Кто представляет ребёнка?",
   custodySetByStaffHint: "Указано сотрудником GMED; если неверно — напишите нам.",
   custodyGuardianContact: "В GMED один из контактов указан как опекун, поэтому опека остаётся. Если это неверно — напишите нам.",
@@ -1990,8 +1990,8 @@ const ru: LeadRequestText = {
   payerQuestionnaireFields: {
     language: "Язык",
     occupation: "Профессия / род занятий",
-    funds_sources: "Источник средств",
-    funds_description: "Описание источника средств",
+    funds_sources: "Происхождение средств",
+    funds_description: "Описание происхождения средств",
   },
   payerLegalFields: {
     pep_self: "Занимаете ли вы высокую государственную должность или занимали её в последние 12 месяцев?",
@@ -2017,7 +2017,7 @@ const ru: LeadRequestText = {
     inheritance_gift: "Наследство / дарение",
     other: "Другое",
   },
-  payerFundsProofTitle: "Подтверждение источника средств",
+  payerFundsProofTitle: "Подтверждение происхождения средств",
   payerFundsProofRequired: "обязательно",
   payerFundsProofOptional: "по желанию",
   payerFundsProofHint: "Например, выписка со счёта, справка о доходах, договор купли-продажи или свидетельство о наследстве. PDF, JPG или PNG, до 25 МБ на файл.",
@@ -2043,7 +2043,7 @@ const ru: LeadRequestText = {
   payerQuestionnaireLocked: "Ваши данные как плательщика уже отправлены, изменить их здесь больше нельзя.",
   payerSignatureSent: (date) =>
     `Документы на подпись: ${date ? `${date} ` : ""}мы отправили вам документы для квалифицированной электронной подписи. Приглашение придёт по электронной почте от нашего партнёра Skribble; там вы также подтвердите свою личность.`,
-  payerSignatureSigned: (date) => `Спасибо – подписанные документы поступили в GMED${date ? ` ${date}` : ""}.`,
+  payerSignatureSigned: (date) => `Спасибо — подписанные документы поступили в GMED${date ? ` ${date}` : ""}.`,
 };
 
 const uk: LeadRequestText = {
@@ -2063,7 +2063,7 @@ const uk: LeadRequestText = {
     billing: "Страхування й рахунок",
     declarations: "Заяви",
     follow_up: "Додаткові відомості",
-    disclosure: "Інформація третім особам",
+    disclosure: "Надання інформації третім особам",
     documents: "Звернення й документи",
     send: "Перевірка й надсилання",
   },
@@ -2108,7 +2108,7 @@ const uk: LeadRequestText = {
   dobStaffOnly: "Щоб виправити дату народження, зверніться до GMED.",
   healthConsentRequired: "Спочатку дайте згоду на обробку даних про здоров’я.",
   furtherDetails: "Додаткові відомості",
-  errors: {"upload_reviewed":"GMED вже прийняла цей документ. Щоб видалити його, зверніться до нашої команди.","upload_in_use":"Цей документ вже використовується. Для видалення зверніться до GMED.","too_many_documents":"Можна завантажити до 30 документів. Спочатку видаліть непотрібний файл.","unsupported_file_type":"Завантажте файл PDF, JPG або PNG.","file_too_large":"Розмір файлу не має перевищувати 25 МБ.","personal_data_incomplete":"Заповніть позначені поля перед надсиланням заявки.","request_failed":"Не вдалося виконати дію. Спробуйте ще раз."},
+  errors: {"upload_reviewed":"GMED уже прийняла цей документ. Щоб видалити його, зверніться до нашої команди.","upload_in_use":"Цей документ уже використовується. Для видалення зверніться до GMED.","too_many_documents":"Можна завантажити до 30 документів. Спочатку видаліть непотрібний файл.","unsupported_file_type":"Завантажте файл PDF, JPG або PNG.","file_too_large":"Розмір файлу не має перевищувати 25 МБ.","personal_data_incomplete":"Заповніть позначені поля перед надсиланням заявки.","request_failed":"Не вдалося виконати дію. Спробуйте ще раз.","consent_version_outdated":"Текст згоди тим часом оновлено. Перезавантажте сторінку та підтвердьте актуальний текст.","lead_converted":"Ваша заявка тепер ведеться в порталі пацієнта. Перезавантажте сторінку."},
   minorNeedsGuardian:
     "Для осіб, молодших 18 років, заявку заповнюють батьки або законний представник. Ми повідомили нашу команду GMED і зв'яжемося з вами.",
   next: "Далі",
@@ -2225,7 +2225,7 @@ const uk: LeadRequestText = {
   payerConsentHint: "Без цієї згоди ми не маємо права звертатися до платника.",
   payerConsentShort: "Згода на контакт",
   payerCostEstimateConsentLabel:
-    "Я погоджуюся, що GMED передасть платнику кошторис з очікуваними витратами – лише види послуг і суми, без діагнозів і медичних подробиць.",
+    "Я погоджуюся, що GMED передасть платнику кошторис з очікуваними витратами — лише види послуг і суми, без діагнозів і медичних подробиць.",
   payerCostEstimateConsentShort: "Згода на передачу кошторису",
   payerAnsweredByPayer: "Платник сам указав свої дані. Зміни лише через GMED.",
   ownAccountQuestion: "Ви дієте у власних економічних інтересах?",
@@ -2472,7 +2472,7 @@ const uk: LeadRequestText = {
   representativeEmailStaff: "Цю адресу внесла GMED; змінює її GMED.",
   representativeOtherParentInvite:
     "Другий з батьків отримає власний доступ, коли GMED запросить його. Для цього вкажіть його адресу електронної пошти.",
-  serverChangedByParent: "Дані змінив інший з батьків — перевірте поле.",
+  serverChangedByParent: "Дані змінив другий з батьків — перевірте поле.",
   serverChangedField: "Ці дані тим часом змінилися — перевірте поле.",
   representativeIdentityLocked: "Ім'я та дату народження цієї людини може змінити лише вона сама або GMED.",
   representativeMinor: "Представник має бути повнолітнім (щонайменше 18 років).",
@@ -2521,8 +2521,8 @@ const uk: LeadRequestText = {
     "Спосіб оплати вказує сам платник (особа або організація, яка платить); GMED звернеться до нього із цього приводу.",
   paymentRouteByPayerShort: "вказує платник",
   paymentRouteByOtherParent:
-    "Спосіб оплати вказує інший з батьків, який платить, у своєму власному доступі. Ви можете надіслати заявку й без цих даних.",
-  paymentRouteByOtherParentShort: "вказує інший з батьків",
+    "Спосіб оплати вказує другий з батьків, який платить, у своєму власному доступі. Ви можете надіслати заявку й без цих даних.",
+  paymentRouteByOtherParentShort: "вказує другий з батьків",
   sectionLegal: "Додаткові запитання",
   legalIntro:
     "Будь ласка, дайте на кожне запитання відповідь «так» або «ні».",
@@ -2602,7 +2602,7 @@ const uk: LeadRequestText = {
   payerQuestionnaireLocked: "Ваші дані як платника вже надіслано, змінити їх тут більше не можна.",
   payerSignatureSent: (date) =>
     `Документи на підпис: ${date ? `${date} ` : ""}ми надіслали вам документи для кваліфікованого електронного підпису. Запрошення надійде електронною поштою від нашого партнера Skribble; там ви також підтвердите свою особу.`,
-  payerSignatureSigned: (date) => `Дякуємо – підписані документи надійшли до GMED${date ? ` ${date}` : ""}.`,
+  payerSignatureSigned: (date) => `Дякуємо — підписані документи надійшли до GMED${date ? ` ${date}` : ""}.`,
 };
 
 const en: LeadRequestText = {
@@ -2635,7 +2635,7 @@ const en: LeadRequestText = {
     middle_name: "Middle name",
     last_name: "Last name",
     date_of_birth: "Date of birth",
-    legal_sex: "Sex as in your ID",
+    legal_sex: "Sex as in the ID document",
     citizenships: "Citizenship(s)",
     street_address: "Street and number",
     zip_code: "Postcode",
@@ -2667,7 +2667,7 @@ const en: LeadRequestText = {
   dobStaffOnly: "Please contact GMED to correct the date of birth.",
   healthConsentRequired: "Please consent to health data processing first.",
   furtherDetails: "Further information",
-  errors: {"upload_reviewed":"GMED has already taken over this document. Please contact our team to remove it.","upload_in_use":"This document is already in use. Please contact GMED to remove it.","too_many_documents":"You can upload up to 30 documents. Remove an unneeded file first.","unsupported_file_type":"Please upload a PDF, JPG or PNG file.","file_too_large":"The file must be no larger than 25 MB.","personal_data_incomplete":"Please complete the highlighted fields before sending the request.","request_failed":"The action could not be completed. Please try again."},
+  errors: {"upload_reviewed":"GMED has already taken over this document. Please contact our team to remove it.","upload_in_use":"This document is already in use. Please contact GMED to remove it.","too_many_documents":"You can upload up to 30 documents. Remove an unneeded file first.","unsupported_file_type":"Please upload a PDF, JPG or PNG file.","file_too_large":"The file must be no larger than 25 MB.","personal_data_incomplete":"Please complete the highlighted fields before sending the request.","request_failed":"The action could not be completed. Please try again.","consent_version_outdated":"The consent text has been updated in the meantime. Please reload the page and confirm the current text.","lead_converted":"Your request now continues in the patient portal. Please reload the page."},
   minorNeedsGuardian:
     "For persons under 18 the parents or the legal guardian fill in the request. We have informed our GMED team and will get in touch.",
   next: "Next",
@@ -3087,7 +3087,7 @@ const en: LeadRequestText = {
   payerQuestionnaireTitle: "Your details as the paying person",
   // lawyer review pending (2026-10-22)
   payerQuestionnaireIntro: (section) =>
-    `You pay for GMED's services. Under its own compliance rules, GMED voluntarily checks the identity of the paying person and the origin of the payment; for this we ask you for some details. You enter your name, address and identity document in the section "${section}".`,
+    `You pay for GMED's services. Under its own compliance rules, GMED voluntarily checks the identity of the paying person and the origin of the payment; for this we ask you for some details. You enter your name, address and identity document in the section “${section}”.`,
   payerNoticeTitle: "Privacy notice for the paying person",
   // lawyer review pending (2026-10-22)
   payerNotice:
@@ -3131,15 +3131,15 @@ const en: LeadRequestText = {
   payerFundsProofHint: "For example a bank statement, a payslip, a sales contract or a certificate of inheritance. PDF, JPG or PNG, up to 25 MB per file.",
   payerFundsProofUpload: "Upload proof",
   noPayerFundsProof: "No proof uploaded yet.",
-  payerElsewhere: (section) => `Please add in the section "${section}":`,
-  goToSection: (section) => `Go to "${section}"`,
+  payerElsewhere: (section) => `Please add in the section “${section}”:`,
+  goToSection: (section) => `Go to “${section}”`,
   childDocumentTitle: "Child’s identity document",
   ownRepresentativeDocumentTitle: "Your identity document (parent / legal representative)",
   ownRepresentativeDocumentHint: "Upload a readable scan or photo of your own identity document.",
-  ownRepresentativeDocumentNeedsPerson: (section) => `To upload your own document, first enter your details in the section "${section}".`,
+  ownRepresentativeDocumentNeedsPerson: (section) => `To upload your own document, first enter your details in the section “${section}”.`,
   otherParentDocumentTitle: (name) => (name ? `Other parent’s identity document (${name})` : "Other parent’s identity document"),
   otherParentDocumentHint: "Upload a readable scan or photo of the other parent’s identity document.",
-  otherParentDocumentNeedsPerson: (section) => `First enter the other parent in the section "${section}"; then you can upload their document here.`,
+  otherParentDocumentNeedsPerson: (section) => `First enter the other parent in the section “${section}”; then you can upload their document here.`,
   payerOwnMissingTitle: "Still missing before sending:",
   payerNoticeMissing: "Confirm the privacy notice",
   payerDeclarationLabel: "I confirm that my details as the paying person are complete and correct.",

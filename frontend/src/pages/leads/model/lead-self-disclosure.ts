@@ -40,7 +40,7 @@ export function leadSelfDisclosureSourceNote(intake: CabinetIntake, tx: Tx): str
   if (leadSelfDisclosureRecordedByGmed(intake)) {
     return tx(
       "Пациент не отправлял заявку через кабинет: анкета создаётся из данных, внесённых сотрудником, с отметкой «Angaben aufgenommen durch GMED». Подписывает пациент или законные представители — на бумаге или КЭП, как другие документы. Если пациент позже отправит заявку через кабинет, создайте анкету заново: она заполнится данными кабинета.",
-      "Der Patient hat keine Anfrage über das Kabinett gesendet: Das Formular wird aus den von GMED erfassten Angaben erstellt, mit dem Vermerk „Angaben aufgenommen durch GMED“. Der Patient oder die gesetzlichen Vertreter unterschreiben – auf Papier oder per QES wie die anderen Dokumente. Sendet der Patient später eine Anfrage über das Kabinett, erstellen Sie das Formular neu aus den Kabinettsdaten.",
+      "Der Patient hat keine Anfrage über das Kundenkabinett gesendet: Das Formular wird aus den von GMED erfassten Angaben erstellt, mit dem Vermerk „Angaben aufgenommen durch GMED“. Der Patient oder die gesetzlichen Vertreter unterschreiben – auf Papier oder per QES wie die anderen Dokumente. Sendet der Patient später eine Anfrage über das Kundenkabinett, erstellen Sie das Formular aus diesen Angaben neu.",
     );
   }
   return tx(
@@ -58,13 +58,13 @@ export function leadSelfDisclosureUnavailableHint(intake: CabinetIntake, tx: Tx)
   if (intake?.changed_since_submit) {
     return tx(
       "Анкета заполняется из данных кабинета. Пациент изменил заявку — анкету можно создать после повторной отправки изменений.",
-      "Das Formular wird aus den Angaben im Kabinett erstellt. Der Patient hat die Anfrage geändert – das Formular kann nach dem erneuten Senden erstellt werden.",
+      "Das Formular wird aus den Angaben im Kundenkabinett erstellt. Der Patient hat die Anfrage geändert – das Formular kann nach dem erneuten Senden erstellt werden.",
     );
   }
   // The patient fills the cabinet ("Заполнит пациент") and has not sent it yet.
   return tx(
     "Анкета заполняется из данных кабинета. Пациент ещё не отправил заявку — после отправки можно создать анкету. Если данные вносите вы сами, выберите «Заполняю сам» на шаге 1: анкета создастся из ваших данных.",
-    "Das Formular wird aus den Angaben im Kabinett erstellt. Der Patient hat die Anfrage noch nicht gesendet – danach kann das Formular erstellt werden. Erfassen Sie die Angaben selbst, wählen Sie in Schritt 1 „Ich fülle aus“: Das Formular wird dann aus Ihren Angaben erstellt.",
+    "Das Formular wird aus den Angaben im Kundenkabinett erstellt. Der Patient hat die Anfrage noch nicht gesendet – danach kann das Formular erstellt werden. Erfassen Sie die Angaben selbst, wählen Sie in Schritt 1 „Ich fülle aus“: Das Formular wird dann aus Ihren Angaben erstellt.",
   );
 }
 
@@ -99,13 +99,13 @@ export function leadSelfDisclosureErrorText(error: unknown, tx: Tx): string | nu
   if (codes.includes("lead_request_changed_since_submit")) {
     return tx(
       "Пациент изменил заявку после отправки. Анкету можно создать после повторной отправки изменений из кабинета.",
-      "Die Anfrage wurde nach dem Senden geändert. Das Patientenformular kann erstellt werden, sobald die Änderungen im Kabinett erneut gesendet wurden.",
+      "Die Anfrage wurde nach dem Senden geändert. Das Patientenformular kann erstellt werden, sobald die Änderungen im Kundenkabinett erneut gesendet wurden.",
     );
   }
   if (codes.includes("lead_request_not_sent")) {
     return tx(
       "Анкету пациента можно создать только после того, как пациент отправил заявку в кабинете (или выберите «Заполняю сам» на шаге 1)",
-      "Das Patientenformular kann erst erstellt werden, wenn der Patient die Anfrage im Kabinett gesendet hat (oder wählen Sie in Schritt 1 „Ich fülle aus“)",
+      "Das Patientenformular kann erst erstellt werden, wenn der Patient die Anfrage im Kundenkabinett gesendet hat (oder wählen Sie in Schritt 1 „Ich fülle aus“)",
     );
   }
   return null;

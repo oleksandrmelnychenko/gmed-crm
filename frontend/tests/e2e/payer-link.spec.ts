@@ -1644,4 +1644,35 @@ test.describe("payer link", () => {
       expect(await overflow(page), `${width}px payment`).toBeLessThanOrEqual(1);
     }
   });
+
+  // The longer languages on a phone (language QA 2026-10-23); CABINET_SHOTS_DIR keeps screenshots.
+  for (const [language, code] of [["uk", "Код підтвердження (6 цифр)"], ["en", "Confirmation code (6 digits)"]] as const) {
+    for (const payerType of ["person", "company"] as const) {
+      test(`every step of a ${payerType} fits 390 px in ${language}`, async ({ page }) => {
+        await setup(page, { language, payerType, acknowledged: true, answers: completeAnswers(payerType), route: completeRoute() });
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.goto(`/payer#${TOKEN}`);
+        await page.getByTestId("payer-link-send-code").click(lazyPageLoad);
+        await page.getByLabel(code).fill(CODE);
+        expect(await widestOverhang(page), `${language} code`).toBeLessThanOrEqual(1);
+        await page.getByTestId("payer-link-verify").click();
+        await expect(page.getByTestId("payer-link-form")).toBeVisible();
+        const shots = process.env.CABINET_SHOTS_DIR;
+        for (let guard = 0; guard < 10; guard += 1) {
+          const title = (await stepTitle(page).textContent()) ?? "";
+          expect(await overflow(page), `${language} ${title}`).toBeLessThanOrEqual(1);
+          expect(await widestOverhang(page), `${language} ${title}`).toBeLessThanOrEqual(1);
+          if (shots) await page.screenshot({ path: `${shots}/payer-${payerType}-${language}-${guard}.png`, fullPage: true });
+          if ((await page.getByTestId("payer-link-next").count()) === 0) break;
+          await next(page);
+          const stepMissing = page.getByTestId("payer-link-step-missing");
+          await expect(stepMissing.or(stepTitle(page).filter({ hasNotText: title }))).toBeVisible();
+          if ((await stepMissing.count()) > 0) {
+            expect(await widestOverhang(page), `${language} ${title} missing`).toBeLessThanOrEqual(1);
+            await next(page);
+          }
+        }
+      });
+    }
+  }
 });

@@ -748,7 +748,7 @@ const en: PayerLinkText = {
     donation: "Donation / grant",
     other: "Other",
   },
-  fundsDescriptionHint: "Please describe with \"Other\"; optional otherwise.",
+  fundsDescriptionHint: "If you choose “Other”, please describe; otherwise optional.",
   fundsProof: "Proof of the source of funds",
   fundsProofRequired: "required",
   fundsProofOptional: "optional",
@@ -810,8 +810,8 @@ const uk: PayerLinkText = {
   alreadySubmitted: "Ваші дані вже надійшли до GMED.",
   namedYou: (patient, organisation) =>
     organisation
-      ? `${patient} вказав(ла) вашу організацію як платника за заявкою в GMED.`
-      : `${patient} вказав(ла) вас платником за заявкою в GMED.`,
+      ? `${patient} вказав(-ла) вашу організацію як платника за заявкою в GMED.`
+      : `${patient} вказав(-ла) вас платником за заявкою в GMED.`,
   codeWillBeSent: (email) => `Ми надішлемо код підтвердження на ${email}.`,
   codeSentTo: (email) => `Ми надіслали код на ${email}. Він дійсний 15 хвилин.`,
   submittedCodeNote: "Ваші дані вже надійшли до GMED. Переглянути їх можна за допомогою коду.",
@@ -873,15 +873,15 @@ const uk: PayerLinkText = {
   },
   privacyNotice: (patient, organisation) => [
     organisation
-      ? `${patient} вказав(ла) вашу організацію як платника і для цього повідомив(ла) нам її назву та контактні дані.`
-      : `${patient} вказав(ла) вас платником і для цього повідомив(ла) нам ваше ім'я та контактні дані.`,
+      ? `${patient} вказав(-ла) вашу організацію як платника і для цього повідомив(-ла) нам її назву та контактні дані.`
+      : `${patient} вказав(-ла) вас платником і для цього повідомив(-ла) нам ваше ім'я та контактні дані.`,
     // lawyer review pending (2026-10-22)
     "Відповідальна за обробку ваших даних — GMED. Ми обробляємо ваші дані, щоб узгодити оплату витрат, виставляти рахунки та перевірити вашу особу й походження оплати; цю перевірку GMED проводить добровільно за власними правилами комплаєнсу. Правова підстава — ст. 6 абз. 1 літ. b і f GDPR (DSGVO).",
     // lawyer review pending (2026-10-22)
     "За правилами GMED ми зберігаємо дані п'ять років після завершення ділових відносин. Ви маєте право на доступ до даних, їх виправлення, видалення, обмеження обробки та заперечення, а також право подати скаргу до наглядового органу із захисту даних.",
   ],
   privacyLink: "Повна інформація про захист даних",
-  privacyAck: "Я прочитав(ла) інформацію про захист даних.",
+  privacyAck: "Я прочитав(-ла) інформацію про захист даних.",
   privacyAckedAt: (dateTime) => `Підтверджено ${dateTime}`,
   contactQuestion: "Як ми можемо з вами зв'язатися?",
   contactChannels: { email: "E-mail", phone: "Телефон", messenger: "Месенджер" },
@@ -1083,7 +1083,7 @@ const uk: PayerLinkText = {
   viewSubmitted: "Переглянути надіслані дані",
   signatureSent: (date) =>
     `Документи на підпис: ${date ? `${date} ` : ""}ми надіслали вам документи для кваліфікованого електронного підпису. Запрошення надійде електронною поштою від нашого партнера Skribble; там ви також підтвердите свою особу.`,
-  signatureSigned: (date) => `Дякуємо – підписані документи надійшли до GMED${date ? ` ${date}` : ""}.`,
+  signatureSigned: (date) => `Дякуємо — підписані документи надійшли до GMED${date ? ` ${date}` : ""}.`,
   summaryTitle: "Ваші дані",
   notStated: "Не вказано",
   noDocuments: "Немає файлу",
@@ -1383,7 +1383,7 @@ const ru: PayerLinkText = {
   viewSubmitted: "Просмотреть отправленные данные",
   signatureSent: (date) =>
     `Документы на подпись: ${date ? `${date} ` : ""}мы отправили вам документы для квалифицированной электронной подписи. Приглашение придёт по электронной почте от нашего партнёра Skribble; там вы также подтвердите свою личность.`,
-  signatureSigned: (date) => `Спасибо – подписанные документы поступили в GMED${date ? ` ${date}` : ""}.`,
+  signatureSigned: (date) => `Спасибо — подписанные документы поступили в GMED${date ? ` ${date}` : ""}.`,
   summaryTitle: "Ваши данные",
   notStated: "Не указано",
   noDocuments: "Нет файла",
