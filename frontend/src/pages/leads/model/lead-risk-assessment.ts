@@ -13,6 +13,7 @@ import type { RepresentativeCountryQuestions } from "@/pages/patient-lead/lead-r
 import { REPRESENTATIVE_COUNTRY_FIELDS } from "@/pages/patient-lead/lead-request-representative-questions-model";
 
 import type { Tx } from "./lead-payer";
+import { gwgPayerSheetHint, gwgPayerSheetMissingLabels } from "./gwg-identification";
 
 export const RISK_TRIGGER_KEYS = [
   "T1",
@@ -934,6 +935,16 @@ export function gwgSheetSignatureNotice(details: unknown, tx: Tx): string | null
     "Лист создан, но подпись на нём пока нельзя будет подтвердить.",
     "Der Bogen wurde erstellt, die Unterschrift kann aber noch nicht bestätigt werden.",
   );
+  // A paying organisation's sheet: the same words as the refusal of its
+  // signature (`payer_details_incomplete`), not the representatives' labels.
+  if ((details as { scope?: unknown }).scope === "payer") {
+    const labels = gwgPayerSheetMissingLabels(missing, tx);
+    return [
+      base,
+      `${tx("Не хватает данных организации-плательщика", "Es fehlen Angaben der zahlenden Organisation")}: ${labels.join(", ")}.`,
+      gwgPayerSheetHint(tx),
+    ].join(" ");
+  }
   return [base, representativeMissingText(missing, tx)].filter(Boolean).join(" ");
 }
 

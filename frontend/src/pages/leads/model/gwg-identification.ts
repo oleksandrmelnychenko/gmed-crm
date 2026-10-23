@@ -301,6 +301,17 @@ const PAYER_SHEET_FIELD_LABELS: Record<string, [string, string]> = {
  * from the keys of the refusal; unknown keys are shown as they are.
  */
 export function gwgPayerSheetMissingText(missing: unknown, tx: Tx): string {
+  const labels = gwgPayerSheetMissingLabels(missing, tx);
+  const base = tx(
+    "Подтвердить подпись нельзя: не хватает данных организации-плательщика",
+    "Die Unterschrift kann nicht bestätigt werden: Es fehlen Angaben der zahlenden Organisation",
+  );
+  const hint = gwgPayerSheetHint(tx);
+  return labels.length > 0 ? `${base}: ${labels.join(", ")}. ${hint}` : `${base}. ${hint}`;
+}
+
+/** The paying organisation's missing data in words (keys of the refusal; unknown keys as they are). */
+export function gwgPayerSheetMissingLabels(missing: unknown, tx: Tx): string[] {
   const labels: string[] = [];
   for (const key of Array.isArray(missing) ? missing : []) {
     if (typeof key !== "string") continue;
@@ -309,15 +320,15 @@ export function gwgPayerSheetMissingText(missing: unknown, tx: Tx): string {
     const label = pair ? tx(...pair) : field.replaceAll("_", " ");
     if (!labels.includes(label)) labels.push(label);
   }
-  const base = tx(
-    "Подтвердить подпись нельзя: не хватает данных организации-плательщика",
-    "Die Unterschrift kann nicht bestätigt werden: Es fehlen Angaben der zahlenden Organisation",
-  );
-  const hint = tx(
+  return labels;
+}
+
+/** Who enters the paying organisation's data, and that the sheet is made again afterwards. */
+export function gwgPayerSheetHint(tx: Tx): string {
+  return tx(
     "Данные вносит плательщик по своей ссылке или сотрудники в разделе «Кто платит»; затем сформируйте лист заново.",
     "Die Angaben macht der Kostenübernehmer über den eigenen Zugang oder das Team unter „Wer zahlt“; danach den Bogen neu erstellen.",
   );
-  return labels.length > 0 ? `${base}: ${labels.join(", ")}. ${hint}` : `${base}. ${hint}`;
 }
 
 /** The refusal names the paying organisation's data: the wizard offers the way to the payer section. */

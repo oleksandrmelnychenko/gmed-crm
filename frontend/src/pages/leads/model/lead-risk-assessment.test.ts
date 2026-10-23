@@ -388,6 +388,15 @@ describe("the contract gate names the missing parent details (staff report 2026-
     expect(gwgSheetSignatureNotice(null, de)).toBeNull();
   });
 
+  it("names a paying organisation's gaps as the signature refusal does, not as representatives", () => {
+    const notice = gwgSheetSignatureNotice({ missing: ["legal_form", "seat_address", "id_upload"], scope: "payer" }, ru);
+    expect(notice).toBe(
+      "Лист создан, но подпись на нём пока нельзя будет подтвердить. Не хватает данных организации-плательщика: правовая форма, юридический адрес, скан документа представителя. "
+      + "Данные вносит плательщик по своей ссылке или сотрудники в разделе «Кто платит»; затем сформируйте лист заново.",
+    );
+    expect(notice).not.toContain("представители —");
+  });
+
   it("adds the list to the contract refusal", () => {
     const error = new ApiRequestError("x", {
       status: 422,
