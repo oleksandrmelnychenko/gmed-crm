@@ -1556,6 +1556,16 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
         reopened["questionnaire"]["answers"]["occupation"],
         "Kaufmann"
     );
+    // The reopen has an audit row of its own, committed with it.
+    let reopens: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM audit_log
+           WHERE action = 'payer_questionnaire_reopened' AND entity_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(reopens, 1);
     let (_, request) = with_login(&app, "GET", &request_path, &patient, None).await;
     assert_eq!(request["payer"]["answered_by_payer"], true, "{request}");
     assert!(request["payer"]["street"].is_null(), "{request}");

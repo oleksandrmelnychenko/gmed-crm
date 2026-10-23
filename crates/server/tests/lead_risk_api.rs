@@ -1406,3 +1406,37 @@ async fn staff_store_the_document_data_of_a_parent_without_a_row() {
     .unwrap();
     assert_eq!(number, "FX 765 4321");
 }
+
+/// A deleted lead was anonymised (its declaration row removed): a wizard left
+/// open on it cannot put the identity document data back (GDPR Art. 17).
+#[tokio::test]
+async fn a_deleted_lead_takes_no_identity_document_data() {
+    let Some(app) = test_app().await else { return };
+    let lead_id = insert_lead(&app, "Geloescht", &["DE"]).await;
+    sqlx::query("UPDATE leads SET qualification_status = 'deleted' WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM lead_gwg_declarations WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let (status, data) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{lead_id}/identity-document-data"),
+        &app.pm(),
+        Some(json!({ "id_document_type": "passport", "id_document_number": "AB123456", "id_valid_until": "2099-01-31" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{data}");
+    let rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM lead_gwg_declarations WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(rows, 0);
+}

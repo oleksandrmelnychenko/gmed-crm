@@ -122,12 +122,22 @@ async fn lead_exists(conn: &mut PgConnection, lead_id: Uuid) -> Result<bool, sql
         .await
 }
 
+/// Locks a lead whose identity document data staff may still write. A
+/// deleted lead was anonymised (GDPR Art. 17 / retention; its declaration row
+/// is gone): it counts as not found, so a wizard left open on it cannot put
+/// the document data back.
 async fn lock_identity_lead(conn: &mut PgConnection, lead_id: Uuid) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar::<_, Uuid>("SELECT id FROM leads WHERE id = $1 FOR UPDATE")
-        .bind(lead_id)
-        .fetch_optional(conn)
-        .await
-        .map(|id| id.is_some())
+    sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id FROM leads
+           WHERE id = $1
+             AND qualification_status <> 'deleted'
+             AND failed_outcome_status <> 'delete_anonymized'
+           FOR UPDATE"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(conn)
+    .await
+    .map(|id| id.is_some())
 }
 
 // ----------------------------------------------------------------------------

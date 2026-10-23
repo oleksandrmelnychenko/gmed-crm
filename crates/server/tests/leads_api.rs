@@ -8756,3 +8756,125 @@ async fn backfill_stores_the_contracting_party_of_an_old_converted_minor_once() 
             .unwrap();
     assert_eq!((custody, stored), (None, Vec::new()));
 }
+
+/// The CEO Assistant reads the lead fully (RBAC matrix: CEO, CEO Assistant
+/// and PM), not the concierge's service grid.
+#[tokio::test]
+async fn ceo_assistant_reads_the_full_lead_not_the_service_grid() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Assistant",
+            "last_name": "Reads",
+            "email": format!("assistant-reads-{tag}@test.local"),
+            "phone": "+49111000003",
+            "source": "Test",
+            "country": "DE",
+            "date_of_birth": "1981-02-03"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap().to_string();
+    let assistant_id = seed_user(&app.suite.pool, &tag, "ceo_assistant").await;
+    let token = jwt::issue_access_token(TEST_SECRET, assistant_id, "ceo_assistant", Uuid::new_v4())
+        .unwrap();
+    let assistant = format!("Bearer {token}");
+    let (status, lead) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert_eq!(lead["date_of_birth"], "1981-02-03", "{lead}");
+    let (status, grid) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}"),
+        &app.auth_header("concierge"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{grid}");
+    assert!(grid["date_of_birth"].is_null(), "{grid}");
+}
+
+/// The audit row and the realtime event of a staff lead update name the
+/// changed identity fields; the values stay out of the append-only log and out
+/// of the event the concierge receives.
+#[tokio::test]
+async fn lead_update_audit_names_identity_fields_without_values() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Audit",
+            "last_name": "Values",
+            "email": format!("audit-values-{tag}@test.local"),
+            "phone": "+49111000002",
+            "source": "Test",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap().to_string();
+    let lead_uuid = Uuid::parse_str(&lead_id).unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({
+            "date_of_birth": "1977-06-05",
+            "legal_sex": "female",
+            "citizenships": ["UA"]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let context: Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'update_lead' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(lead_uuid)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    let text = context.to_string();
+    assert!(!text.contains("1977-06-05"), "{context}");
+    assert!(!text.contains("\"UA\""), "{context}");
+    let fields = context["identity_fields"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    for field in ["date_of_birth", "legal_sex", "citizenships"] {
+        assert!(fields.contains(&json!(field)), "{context}");
+    }
+    let payloads: Vec<Value> = sqlx::query_scalar(
+        r#"SELECT payload FROM realtime_events
+           WHERE event_type = 'lead.updated' AND entity_id = $1"#,
+    )
+    .bind(lead_uuid)
+    .fetch_all(&app.suite.pool)
+    .await
+    .unwrap();
+    for payload in payloads {
+        assert!(!payload.to_string().contains("1977-06-05"), "{payload}");
+    }
+}

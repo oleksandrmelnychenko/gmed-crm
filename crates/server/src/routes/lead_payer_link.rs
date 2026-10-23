@@ -4549,6 +4549,22 @@ async fn staff_send(
         {
             return intake::internal(error, "reopen payer statement");
         }
+        // The reopen commits here, before the e-mail goes out: its audit row
+        // commits with it, whatever the mail later does.
+        if let Err(error) = audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "payer_questionnaire_reopened",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({}),
+            ),
+        )
+        .await
+        {
+            return intake::internal(error, "audit payer statement reopen");
+        }
     }
     if let Err(error) = revoke_active(&mut tx, lead_id, "resent", Some(auth.user_id)).await {
         return intake::internal(error, "revoke payer link");

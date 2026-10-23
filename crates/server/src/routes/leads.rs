@@ -4073,10 +4073,11 @@ async fn get_lead(
 }
 
 /// Whether the caller sees leads only as the service grid: `leads.view`
-/// without `leads.edit` (the concierge). Editors, and roles that may convert,
-/// get the full lead.
+/// without `leads.edit` (the concierge). Editors, roles that may convert and
+/// the CEO Assistant (reads everything, changes nothing; RBAC matrix: CEO,
+/// CEO Assistant and PM see the lead fully) get the full lead.
 fn lead_service_grid_only(auth: &AuthUser) -> bool {
-    auth.can(Capability::LeadsView) && !auth.can(Capability::LeadsEdit)
+    auth.can(Capability::LeadsView) && !super::lead_payer::may_view(auth)
 }
 
 /// Whether the caller may read what a lead says about health: the medical
@@ -5069,11 +5070,24 @@ async fn update_lead(
         None
     };
     // The audit row commits with the change (a compliance change is a status
-    // change of the lead).
+    // change of the lead). Personal data are named, never copied: the
+    // append-only log outlives the lead's anonymisation (audit policy).
+    let mut identity_fields: Vec<&str> = Vec::new();
+    if body.date_of_birth.is_some() {
+        identity_fields.push("date_of_birth");
+    }
+    if body.legal_sex.is_some() {
+        identity_fields.push("legal_sex");
+    }
+    if previous_citizenships
+        .as_ref()
+        .is_some_and(|previous| citizenships.as_ref() != Some(previous))
+    {
+        identity_fields.push("citizenships");
+    }
     let mut audit_context = json!({
         "compliance_status": compliance_status,
-        "date_of_birth": body.date_of_birth,
-        "legal_sex": body.legal_sex,
+        "identity_fields": identity_fields,
         "contact_updated": body.email.is_some() || body.phone.is_some(),
         "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
         "consent_healthcare": body.consent_healthcare,
@@ -5085,12 +5099,6 @@ async fn update_lead(
     }
     if renamed_login.is_some() {
         audit_context["portal_name_synced"] = json!(true);
-    }
-    if let Some(previous) = previous_citizenships
-        && citizenships.as_ref() != Some(&previous)
-    {
-        audit_context["citizenships"] = json!(citizenships);
-        audit_context["previous_citizenships"] = json!(previous);
     }
     if let Err(e) = audit::write_in_transaction(
         &mut tx,
@@ -5214,10 +5222,11 @@ async fn update_lead(
         Some(auth.user_id),
         "lead.updated",
         lead_id,
+        // Concierge receives this event but not the lead's date of birth or
+        // sex (service grid projection): the fields are named only.
         json!({
             "compliance_status": compliance_status,
-            "date_of_birth": body.date_of_birth,
-            "legal_sex": body.legal_sex,
+            "identity_fields": identity_fields,
             "contact_updated": body.email.is_some() || body.phone.is_some(),
             "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
             "consent_healthcare": body.consent_healthcare,
@@ -6020,7 +6029,7 @@ async fn ensure_prospect_case(
     let seq: i64 = sqlx::query_scalar::<_, i64>("SELECT nextval('case_id_seq')")
         .fetch_one(&mut **tx)
         .await?;
-    let code = format!("C-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
+    let code = format!("C-{}-{:04}", crate::app_time::today().format("%Y%m%d"), seq);
     let id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO cases (case_id, patient_id, source_lead_id, manager_id,
                               hauptanfragegrund, zuweiser, retention_until)
@@ -6539,7 +6548,7 @@ async fn create_prospect_patient(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
+    let pid = format!("P-{}-{:04}", crate::app_time::today().format("%Y%m%d"), seq);
 
     let patient_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
@@ -7438,7 +7447,7 @@ async fn convert_lead(
                     return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
                 }
             };
-            let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
+            let pid = format!("P-{}-{:04}", crate::app_time::today().format("%Y%m%d"), seq);
             let inserted = match sqlx::query_scalar::<_, Uuid>(
                 r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
                                          email, phone_primary, phone_secondary, residence_country,

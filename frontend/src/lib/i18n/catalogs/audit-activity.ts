@@ -142,6 +142,7 @@ const ACTIONS: Record<string, Pair> = {
   update_lead_payer_declaration: ["Сведения о плательщике изменены", "Angaben zum Zahler geändert"],
   payer_link_sent: ["Ссылка плательщику отправлена", "Zahlerlink gesendet"],
   payer_link_send_failed: ["Ссылку плательщику не удалось отправить", "Zahlerlink nicht gesendet"],
+  payer_questionnaire_reopened: ["Ответы плательщика открыты для исправления", "Zahlerangaben zur Korrektur geöffnet"],
   payer_link_revoked: ["Ссылка плательщика отозвана", "Zahlerlink widerrufen"],
   payer_link_code_sent: ["Код для ссылки плательщика отправлен", "Code für den Zahlerlink gesendet"],
   payer_link_verified: ["Плательщик подтвердил вход по ссылке", "Zahler hat sich über den Link bestätigt"],
