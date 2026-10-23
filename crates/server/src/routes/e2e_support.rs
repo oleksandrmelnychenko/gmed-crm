@@ -31,7 +31,11 @@ async fn bootstrap_scenario(
         return err(StatusCode::NOT_FOUND, "Not found");
     }
 
-    let Some(secret) = std::env::var("E2E_SUPPORT_SECRET").ok() else {
+    // An empty secret is no secret: a request without the header would match.
+    let Some(secret) = std::env::var("E2E_SUPPORT_SECRET")
+        .ok()
+        .filter(|secret| !secret.trim().is_empty())
+    else {
         return err(StatusCode::NOT_FOUND, "Not found");
     };
 
@@ -40,7 +44,7 @@ async fn bootstrap_scenario(
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
 
-    if provided_secret != secret {
+    if !secret_matches(provided_secret, &secret) {
         return err(StatusCode::UNAUTHORIZED, "Invalid E2E support secret");
     }
 
@@ -51,6 +55,16 @@ async fn bootstrap_scenario(
         },
         _ => err(StatusCode::NOT_FOUND, "Unknown E2E scenario"),
     }
+}
+
+/// Compares the provided secret without stopping at the first difference.
+fn secret_matches(provided: &str, expected: &str) -> bool {
+    provided.len() == expected.len()
+        && provided
+            .bytes()
+            .zip(expected.bytes())
+            .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+            == 0
 }
 
 fn e2e_support_enabled() -> bool {
@@ -1342,6 +1356,17 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_support_secret_must_match_exactly() {
+        assert!(secret_matches("long-e2e-secret", "long-e2e-secret"));
+        assert!(!secret_matches("", "long-e2e-secret"));
+        assert!(!secret_matches("long-e2e-secreT", "long-e2e-secret"));
+        assert!(!secret_matches(
+            "long-e2e-secret-and-more",
+            "long-e2e-secret"
+        ));
+    }
 
     #[test]
     fn seeded_leads_get_distinct_phone_numbers() {

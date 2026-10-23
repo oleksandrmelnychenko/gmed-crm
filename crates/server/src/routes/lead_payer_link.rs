@@ -4032,6 +4032,13 @@ async fn cabinet_get(
     if let Err(response) = intake::require_patient(&auth) {
         return response;
     }
+    // Only a request the login still reaches: a parent's access ends with
+    // the 18th birthday as it does for every other read of the cabinet.
+    match intake::my_lead_access(&state, lead_id, auth.user_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return intake::not_found(),
+        Err(error) => return intake::internal(error, "resolve request"),
+    }
     let found = async {
         let mut conn = state.db.acquire().await?;
         Ok::<_, sqlx::Error>(

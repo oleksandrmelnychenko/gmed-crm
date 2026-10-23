@@ -489,7 +489,11 @@ fn lead_request_path_id(path: &str) -> Option<Uuid> {
 }
 
 /// The requests `user_id` reaches, oldest first. The own login of a minor
-/// reaches nothing ([`OWN_LOGIN_CLOSED_SQL`]).
+/// reaches nothing ([`OWN_LOGIN_CLOSED_SQL`]); a parent's or guardian's
+/// access reaches the request only while the lead is a minor — the rule
+/// [`lock_my_lead`] applies to writes. A lead who turned 18 (or whose date of
+/// birth staff corrected) is no longer readable through the parents' access
+/// (owner decision 2026-10-20: the 18th birthday closes the parents' access).
 pub(crate) async fn accessible_leads<'e, E>(
     executor: E,
     user_id: Uuid,
@@ -509,6 +513,7 @@ where
              AND a.kind = 'guardian'
              AND a.revoked_at IS NULL
              AND {PORTAL_LEAD_SQL}
+             AND {OWN_LOGIN_CLOSED_SQL}
            ORDER BY 3, 1"#
     ))
     .bind(user_id)
@@ -700,7 +705,7 @@ pub(crate) async fn lock_my_lead(
 }
 
 /// Read-only variant of [`lock_my_lead`].
-async fn my_lead_access(
+pub(crate) async fn my_lead_access(
     state: &AppState,
     lead_id: Uuid,
     user_id: Uuid,

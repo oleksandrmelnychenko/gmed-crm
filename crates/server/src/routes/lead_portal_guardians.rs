@@ -173,6 +173,25 @@ pub(crate) async fn auto_link_parent_logins_in_tx(
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        // A person the cabinet itself entered (`contact_origin = portal`) is
+        // never linked by itself: otherwise a parent could name any patient's
+        // name and e-mail as the second parent, and that patient's login
+        // would get the request while the patient's own record filled the
+        // person's address and identity document into the parent's cabinet.
+        // Staff issue such an access after checking the person.
+        let entered_by_cabinet: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM lead_representatives
+                   WHERE lead_id = $1 AND contact_id = $2 AND contact_origin = 'portal'
+               )"#,
+        )
+        .bind(lead_id)
+        .bind(contact_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if entered_by_cabinet {
+            continue;
+        }
         let Some(account) = sqlx::query(
             r#"SELECT u.id, u.name FROM users u
                WHERE lower(btrim(u.email)) = $1 AND u.role = 'patient' AND u.is_active

@@ -9134,3 +9134,160 @@ async fn auto_linked_parent_patient_fills_the_representative_identity() {
     );
     assert_eq!(father.extras["city"], "Berlin");
 }
+
+/// Security sweep 2026-10-23: the parents' access reads a request only while
+/// the lead is a minor, as it writes only then (owner decision 2026-10-20:
+/// the 18th birthday closes the parents' access). Before, a parent kept
+/// reading the request of a lead who turned 18 or whose date of birth staff
+/// corrected: the list, the request and the payer questionnaire.
+#[tokio::test]
+async fn a_parents_access_reads_nothing_once_the_lead_is_of_age() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (child, contact) = minor_lead(&app, "Lina", "lina.of.age@example.com").await;
+    let (status, issued) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{child}/portal-guardians"),
+        &app.staff("patient_manager"),
+        Some(json!({ "trusted_contact_id": contact })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let guardian: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let parent = bearer(guardian, "patient");
+    let (status, body) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{child}"),
+        &parent,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    sqlx::query("UPDATE leads SET date_of_birth = DATE '2000-01-01' WHERE id = $1")
+        .bind(child)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, list) =
+        json_request(router, "GET", "/api/v1/me/lead-requests", &parent, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(
+        list["requests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|request| request["lead_id"] != json!(child)),
+        "{list}"
+    );
+    for path in [
+        format!("/api/v1/me/lead-requests/{child}"),
+        format!("/api/v1/me/lead-requests/{child}/payer-questionnaire"),
+    ] {
+        let (status, body) = json_request(router, "GET", &path, &parent, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}: {body}");
+    }
+}
+
+/// Security sweep 2026-10-23: a person the parent enters in the cabinet is
+/// not linked to an existing patient login by itself. Otherwise a parent
+/// could name any patient's name and e-mail as the second parent and read
+/// that patient's address and birth date from the patient record in the
+/// own cabinet.
+#[tokio::test]
+async fn a_second_parent_entered_in_the_cabinet_is_not_linked_to_a_patient_record() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let email = format!("victim.parent.{}@example.com", Uuid::new_v4().simple());
+    let victim_login: Uuid = sqlx::query_scalar(
+        "INSERT INTO users(email,password_hash,name,role) VALUES($1,'synthetic','Ivan Fremd','patient') RETURNING id",
+    )
+    .bind(&email)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let victim_patient: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients(patient_id,first_name,last_name,birth_date,gender,email,
+                                address_street,address_zip,address_city,address_country,created_by)
+           VALUES($1,'Ivan','Fremd',DATE '1979-05-06','male',$2,'Geheimweg 7','20095','Hamburg','DE',$3)
+           RETURNING id"#,
+    )
+    .bind(format!("P-{}", Uuid::new_v4()))
+    .bind(&email)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$3)")
+        .bind(victim_patient)
+        .bind(victim_login)
+        .bind(app.patient_manager_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let (child, contact) = minor_lead(&app, "Oleh", "oleh.mother@example.com").await;
+    let (status, issued) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{child}/portal-guardians"),
+        &app.staff("patient_manager"),
+        Some(json!({ "trusted_contact_id": contact })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let mother: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let parent = bearer(mother, "patient");
+
+    let second = Uuid::new_v4();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{child}/representatives/{second}"),
+        &parent,
+        Some(json!({
+            "role": "legal_representative",
+            "first_name": "Ivan",
+            "last_name": "Fremd",
+            "email": email,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(
+        active_guardian_links(pool, child)
+            .await
+            .iter()
+            .all(|(user, _)| *user != victim_login),
+        "the named login gets no access by itself"
+    );
+    let contacts: Value = sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id=$1")
+        .bind(child)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(
+        contacts
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["related_patient_id"] != json!(victim_patient)),
+        "{contacts}"
+    );
+    let (status, body) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{child}"),
+        &parent,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let text = body.to_string();
+    assert!(!text.contains("Geheimweg"), "{text}");
+    assert!(!text.contains("1979-05-06"), "{text}");
+}
