@@ -287,4 +287,6 @@ export interface CreateLeadBody {
   source?: string | null;
   country?: string | null;
   notes?: string | null;
+  /** A minor's custody stated by staff with the new lead (a guardian can be named only under "guardian"). */
+  custody?: "joint" | "sole_parent" | "guardian";
 }

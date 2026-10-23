@@ -1590,6 +1590,78 @@ async fn both_parents_of_a_minor_are_asked_for_by_default() {
     assert_eq!((rows, uploads), (1, 1));
 }
 
+/// A child under guardianship has no parent to name first: staff state the
+/// custody "guardian" with the new lead and name the guardian (Vormund) as
+/// its contact (QA 2026-10-23). Without that custody the guardian relation
+/// stays refused, and an adult states no custody.
+#[tokio::test]
+async fn a_new_minors_lead_names_its_guardian_with_the_custody_guardian() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+    let guardian = Uuid::new_v4();
+    let lead = |date_of_birth: &str, custody: Option<&str>| {
+        let mut body = json!({
+            "first_name": "Mia",
+            "last_name": "Muster",
+            "date_of_birth": date_of_birth,
+            "email": address("mia.muster"),
+            "trusted_contacts": [
+                { "id": guardian, "name": "Greta Vormund", "relation": "guardian",
+                  "email": address("greta.vormund") },
+            ],
+        });
+        if let Some(custody) = custody {
+            body["custody"] = json!(custody);
+        }
+        Some(body)
+    };
+
+    let (status, error) = json_request(
+        router,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        lead("2016-04-05", None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["code"], "relation_guardian_needs_custody", "{error}");
+
+    let (status, error) = json_request(
+        router,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        lead("1980-04-05", Some("guardian")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["field"], "custody", "{error}");
+
+    let (status, created) = json_request(
+        router,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        lead("2016-04-05", Some("guardian")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap();
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(intake["representation"]["custody"], "guardian", "{intake}");
+    assert_eq!(intake["representation"]["custody_stated"], true, "{intake}");
+}
+
 /// A contact marked as guardian (Vormund) keeps the custody "guardian" in the
 /// cabinet too: the parent's change is refused with the staff endpoint's
 /// code (owner 2026-10-22); GMED changes the relation first.

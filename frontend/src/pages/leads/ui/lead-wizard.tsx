@@ -80,7 +80,7 @@ import {
 import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
 import { useLeadPayerLink } from "../model/use-lead-payer-link";
 import { amlPrefillFromLeadAnswers, applyAmlLeadPrefill } from "../model/enhanced-check-prefill";
-import { fetchLeadPortalIntake, type LeadRepresentative } from "../data/lead-portal-intake-api";
+import { fetchLeadPortalIntake, LEAD_CUSTODY_VALUES, type LeadCustody, type LeadRepresentative } from "../data/lead-portal-intake-api";
 import type { RepresentativeUploadKind } from "../data/lead-risk-api";
 import { useLeadEnhancedCheck } from "../model/use-lead-enhanced-check";
 import { useRiskCountryLists } from "../model/use-risk-country-lists";
@@ -122,7 +122,7 @@ import {
   leadSelfDisclosureRequirementLabel,
   leadSelfDisclosureUnavailableHint,
 } from "../model/lead-self-disclosure";
-import { representativeName } from "../model/lead-gwg-statements";
+import { custodyLabel, representativeName } from "../model/lead-gwg-statements";
 import {
   TRUSTED_CONTACT_RELATIONS,
   isLegalGuardianRelation,
@@ -3329,6 +3329,9 @@ export function LeadWizard({
   const [trustedContactEditor, setTrustedContactEditor] = useState<TrustedContactDraft | null>(null);
   const [trustedContactEditorError, setTrustedContactEditorError] = useState("");
   const [trustedContactRelationError, setTrustedContactRelationError] = useState("");
+  // A new minor's custody, stated before the lead exists and sent with its
+  // creation: a guardian (Vormund) can be named only under "guardian".
+  const [newLeadCustody, setNewLeadCustody] = useState<LeadCustody | "">("");
   const [trustedContactEmailError, setTrustedContactEmailError] = useState("");
   const [trustedContactPhoneError, setTrustedContactPhoneError] = useState("");
   const [trustedContactBirthDateError, setTrustedContactBirthDateError] = useState("");
@@ -4162,6 +4165,7 @@ export function LeadWizard({
     setLead(null);
     setDraft(nextDraft);
     setTrustedContactsBase([]);
+    setNewLeadCustody("");
     lastSentTrustedContactsRef.current = null;
     savedMinorRef.current = false;
     setStep("master_data");
@@ -5038,6 +5042,7 @@ export function LeadWizard({
             })),
             source: "manual",
             country: snapshot.draft.country.trim() || null,
+            ...(newLeadCustody && isMinor(snapshot.draft.birthDate, new Date()) ? { custody: newLeadCustody } : {}),
             notes: snapshot.draft.serviceNotes.trim() || null,
           });
           targetLeadId = created.id;
@@ -5191,7 +5196,7 @@ export function LeadWizard({
       () => undefined,
     );
     return queued;
-  }, [existingPatient?.id, hydrateClinicalDraft, lead?.prospect_patient_id, leadId, loadPatientClinical, onCreated, trustedContactsBase, tx]);
+  }, [existingPatient?.id, hydrateClinicalDraft, lead?.prospect_patient_id, leadId, loadPatientClinical, newLeadCustody, onCreated, trustedContactsBase, tx]);
 
   useEffect(() => {
     if (!open || !autosaveSnapshot || loading) return;
@@ -5638,7 +5643,7 @@ export function LeadWizard({
       && isMinor(draft.birthDate, new Date())
       && isLegalGuardianRelation(trustedContactEditor.relation)
       && !isLegalGuardianRelation(storedContact?.relation ?? "")
-      && step1Portal.intake?.representation?.custody !== "guardian"
+      && (leadId ? step1Portal.intake?.representation?.custody : newLeadCustody) !== "guardian"
     ) {
       setTrustedContactRelationError(tx(
         "Опекун возможен только при опеке по решению суда; для родителя выберите Мать или Отец",
@@ -8288,6 +8293,24 @@ ${serviceCommentLines.join("\n")}`
                         beforeSave={step1Portal.intake?.minor ? undefined : () => save(step, false)}
                         onSaved={step1Portal.applyRepresentation}
                       />
+                    ) : !leadId ? (
+                      // Before the lead exists: sent with its creation, so a
+                      // child under guardianship can name the guardian at once.
+                      <label className="block max-w-md space-y-1.5" data-testid="lead-new-custody">
+                        <span className="block text-xs font-medium text-muted-foreground">{tx("Кто представляет ребёнка", "Wer vertritt das Kind")}</span>
+                        <NativeComboboxSelect
+                          value={newLeadCustody}
+                          className={selectClass}
+                          disabled={isBusy}
+                          aria-label={tx("Кто представляет ребёнка", "Wer vertritt das Kind")}
+                          onChange={(event) => setNewLeadCustody(LEAD_CUSTODY_VALUES.find((item) => item === event.target.value) ?? "")}
+                        >
+                          <option value="">{tx("Не указано — оба родителя", "Nicht angegeben – beide Eltern")}</option>
+                          {LEAD_CUSTODY_VALUES.map((item) => (
+                            <option key={item} value={item}>{custodyLabel(item, tx)}</option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </label>
                     ) : null}
                     {draft.trustedContacts.filter((contact) => isParentOrGuardianRelation(contact.relation)).length === 0 ? (
                       <EmptyCell>{tx("Представитель не указан", "Kein Vertreter angegeben")}</EmptyCell>
@@ -10937,7 +10960,9 @@ ${serviceCommentLines.join("\n")}`
                     ) : null}
                     {trustedContactEditorGuardian
                       && trustedContactEditor.relation === "guardian"
-                      && !(portalRepresentation?.custody_stated && portalRepresentation.custody === "guardian") ? (
+                      && !(leadId
+                        ? portalRepresentation?.custody_stated && portalRepresentation.custody === "guardian"
+                        : newLeadCustody === "guardian") ? (
                       <p role="status" className="mt-1.5 text-[11.5px] leading-tight text-amber-700 dark:text-amber-300" data-testid="trusted-contact-guardian-warning">
                         {tx(
                           "В поле «Кто представляет ребёнка» не указан опекун — в документах человек будет назван опекуном (Vormund). Если это мать или отец, выберите «Мать» или «Отец».",

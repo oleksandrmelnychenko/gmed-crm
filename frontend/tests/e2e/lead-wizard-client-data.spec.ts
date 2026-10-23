@@ -1,5 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+import { chooseComboboxOption } from "./helpers";
+
 // The client part of the staff lead wizard («Данные клиента»): personal data,
 // address, contact, citizenships, the parents of a minor and the trusted
 // contacts. Mocked API, synthetic data.
@@ -419,6 +421,36 @@ test("a guardian (Vormund) of a minor needs the custody «guardian»", async ({ 
     "Опекун возможен только при опеке по решению суда; для родителя выберите Мать или Отец",
   );
   expect(calls.updates.length).toBe(before);
+});
+
+test("a new minor under guardianship names the guardian (Vormund) with the custody «guardian»", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { calls } = await mount(page, { lang: "ru", create: true });
+  await page.locator("#lead-wizard-first-name").fill("Mia");
+  await page.locator("#lead-wizard-last-name").fill("Muster");
+  await page.getByRole("group", { name: "Дата рождения" }).getByRole("spinbutton").first().click();
+  await page.keyboard.type("01062015");
+  await chooseComboboxOption(page, page.locator("#lead-wizard-legal-sex"), "Женский");
+  // No lead yet: the custody is chosen here and sent with the new lead.
+  const custody = page.getByTestId("lead-new-custody");
+  await expect(custody).toContainText("Кто представляет ребёнка");
+  await chooseComboboxOption(page, custody.getByRole("combobox"), "Опекун или попечитель");
+  await page.getByRole("button", { name: "Добавить", exact: true }).click();
+  const editor = page.getByTestId("trusted-contact-editor");
+  await editor.getByLabel("Имя и фамилия").fill("Lena Vormund");
+  await editor.getByRole("combobox").nth(1).click();
+  await page.getByRole("option", { name: "Опекун по решению суда (не родитель)", exact: true }).click();
+  await expect(editor.getByTestId("trusted-contact-guardian-warning")).toHaveCount(0);
+  await editor.getByLabel("Телефон").fill("+49 30 100004");
+  await editor.getByRole("button", { name: "Добавить", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await page.getByRole("button", { name: "Далее", exact: true }).click();
+  await expect.poll(() => calls.creates.length).toBe(1);
+  expect(calls.creates[0]).toMatchObject({
+    date_of_birth: "2015-06-01",
+    custody: "guardian",
+    trusted_contacts: [expect.objectContaining({ name: "Lena Vormund", relation: "guardian", phone: "+49 30 100004" })],
+  });
 });
 
 test("a contact the server refuses shows its message at that contact", async ({ page }) => {

@@ -195,6 +195,11 @@ struct CreateLeadRequest {
     notes: Option<String>,
     /// ISO 3166-1 alpha-2 codes; a person may hold several.
     citizenships: Option<Vec<String>>,
+    /// Who represents a minor (`joint`, `sole_parent`, `guardian`), stated
+    /// by staff with the new lead: a guardian (Vormund) can only be named as
+    /// contact under the custody "guardian", which needs the lead to exist.
+    #[serde(default)]
+    custody: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -487,6 +492,25 @@ fn trusted_contact_issue_response(issue: &TrustedContactIssue) -> axum::response
 /// while the custody is not "guardian" (owner 2026-10-22).
 pub(crate) const RELATION_GUARDIAN_NEEDS_CUSTODY: &str = "relation_guardian_needs_custody";
 
+/// The custody stated with a new lead: `None` when none is stated, an error
+/// for an unknown value or for an adult (a custody belongs to a minor).
+fn new_lead_custody(value: Option<&str>, minor: bool) -> Result<Option<String>, ()> {
+    use crate::routes::lead_representatives::{
+        CUSTODY_GUARDIAN, CUSTODY_JOINT, CUSTODY_SOLE_PARENT,
+    };
+    let Some(value) = value.map(|value| value.trim().to_lowercase()) else {
+        return Ok(None);
+    };
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if minor && [CUSTODY_JOINT, CUSTODY_SOLE_PARENT, CUSTODY_GUARDIAN].contains(&value.as_str()) {
+        Ok(Some(value))
+    } else {
+        Err(())
+    }
+}
+
 /// Refuses what [`changed_trusted_contact_issue`] finds; a guardian relation
 /// passes when the lead's stated custody is "guardian" (none stated for a new
 /// lead).
@@ -535,6 +559,46 @@ mod changed_trusted_contact_tests {
 
     fn contact(id: &str, name: &str, phone: &str, relation: &str) -> Value {
         json!({ "id": id, "name": name, "phone": phone, "relation": relation })
+    }
+
+    #[test]
+    fn a_new_minors_lead_may_state_the_custody_an_adults_may_not() {
+        assert_eq!(new_lead_custody(None, true), Ok(None));
+        assert_eq!(new_lead_custody(Some("  "), true), Ok(None));
+        assert_eq!(
+            new_lead_custody(Some(" Guardian "), true),
+            Ok(Some("guardian".into()))
+        );
+        assert_eq!(
+            new_lead_custody(Some("joint"), true),
+            Ok(Some("joint".into()))
+        );
+        assert_eq!(
+            new_lead_custody(Some("sole_parent"), true),
+            Ok(Some("sole_parent".into()))
+        );
+        assert_eq!(new_lead_custody(Some("guardian"), false), Err(()));
+        assert_eq!(new_lead_custody(Some("both"), true), Err(()));
+    }
+
+    #[test]
+    fn a_guardian_named_with_the_custody_guardian_passes_the_new_lead_check() {
+        // Under the custody "guardian" the new lead's contacts are checked
+        // without the minor's guardian rule; the phone rule stays.
+        let guardian = json!([contact(ID, "Vera Vormund", "+49 170 1234567", "guardian")]);
+        assert!(matches!(
+            changed_trusted_contact_issue(&guardian, &json!([]), true),
+            Some(TrustedContactIssue::GuardianRelation { .. })
+        ));
+        assert_eq!(
+            changed_trusted_contact_issue(&guardian, &json!([]), false),
+            None
+        );
+        let bad_phone = json!([contact(ID, "Vera Vormund", "12", "guardian")]);
+        assert!(matches!(
+            changed_trusted_contact_issue(&bad_phone, &json!([]), false),
+            Some(TrustedContactIssue::InvalidPhone { .. })
+        ));
     }
 
     #[test]
@@ -3503,10 +3567,29 @@ async fn create_lead(
         },
         None => json!([]),
     };
-    // Every contact of a new lead is new; no custody is stated yet.
-    if let Err(response) =
-        check_changed_trusted_contacts(&state, None, &trusted_contacts, &json!([]), minor).await
-    {
+    // Staff may state a minor's custody with the new lead (QA 2026-10-23):
+    // a child under guardianship has no parent to name first.
+    let custody = match new_lead_custody(body.custody.as_deref(), minor) {
+        Ok(custody) => custody,
+        Err(()) => {
+            return field_err(
+                "custody",
+                "joint, sole_parent or guardian is stated for a minor only",
+            );
+        }
+    };
+    // Every contact of a new lead is new. A guardian relation passes only
+    // under the custody "guardian" stated with it.
+    let contacts_checked =
+        if custody.as_deref() == Some(crate::routes::lead_representatives::CUSTODY_GUARDIAN) {
+            match changed_trusted_contact_issue(&trusted_contacts, &json!([]), false) {
+                Some(issue) => Err(trusted_contact_issue_response(&issue)),
+                None => Ok(()),
+            }
+        } else {
+            check_changed_trusted_contacts(&state, None, &trusted_contacts, &json!([]), minor).await
+        };
+    if let Err(response) = contacts_checked {
         return response;
     }
     let citizenships = match crate::services::citizenships::normalize_citizenships(
@@ -3647,6 +3730,39 @@ async fn create_lead(
     {
         tracing::error!(%error, lead = %id, "store lead citizenships");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+    }
+    if let Some(custody) = custody.as_deref() {
+        let stored = async {
+            // Staff's statement, read-only in the cabinet (owner 2026-10-22),
+            // as `POST /leads/{id}/representation` stores it.
+            sqlx::query(
+                r#"INSERT INTO lead_gwg_declarations (lead_id, custody, custody_set_by_staff)
+                   VALUES ($1, $2, true)
+                   ON CONFLICT (lead_id) DO UPDATE SET
+                       custody = EXCLUDED.custody,
+                       custody_set_by_staff = true"#,
+            )
+            .bind(id)
+            .bind(custody)
+            .execute(&mut *tx)
+            .await?;
+            audit::write_in_transaction(
+                &mut tx,
+                &audit::domain_event(
+                    "set_lead_custody",
+                    Some(auth.user_id),
+                    "lead",
+                    Some(id),
+                    json!({ "custody": custody, "previous": null, "with_new_lead": true }),
+                ),
+            )
+            .await
+        }
+        .await;
+        if let Err(error) = stored {
+            tracing::error!(%error, lead = %id, "store the custody of a new lead");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+        }
     }
     if let Err(error) =
         super::lead_portal_guardians::auto_link_parent_logins_in_tx(&mut tx, id, Some(auth.user_id))
