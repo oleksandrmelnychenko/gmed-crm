@@ -13020,7 +13020,7 @@ fn dunning_letter_response(
 ) -> axum::response::Response {
     invoice_pdf_response(
         bytes,
-        crate::content_disposition::inline(&file_name),
+        crate::content_disposition::inline(file_name),
         source,
     )
 }

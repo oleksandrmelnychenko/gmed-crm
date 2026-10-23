@@ -830,7 +830,7 @@ async fn reports_export(
     match csv_result {
         Ok(csv) => {
             let content_disposition =
-                HeaderValue::from_str(&crate::content_disposition::attachment(&filename))
+                HeaderValue::from_str(&crate::content_disposition::attachment(filename))
                     .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
             (
                 [

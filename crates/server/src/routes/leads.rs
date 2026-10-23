@@ -8089,7 +8089,7 @@ async fn convert_lead(
     // contact entry or a linked patient's): the relation keeps them, so a
     // repeat request does not ask the parents again (owner decision 2026-10-23).
     let contact_citizenships = match crate::services::lead_guardian_identity::load(
-        &mut *tx, lead_id,
+        &mut tx, lead_id,
     )
     .await
     {
