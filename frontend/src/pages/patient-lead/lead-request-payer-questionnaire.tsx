@@ -213,6 +213,9 @@ function PayerQuestionnaireForm({
   // Nothing is writable before the notice nor after the questionnaire was sent (403 / 409 on the server).
   const writableRef = useRef(acknowledged && !submitted);
   writableRef.current = acknowledged && !submitted;
+  // What the server last answered, also before the next render: "send" checks it after the last save.
+  const questionnaireRef = useRef(questionnaire);
+  questionnaireRef.current = questionnaire;
   const [channels, setChannels] = useState<string[]>(() => questionnaire.privacy.contact_channels);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -256,7 +259,10 @@ function PayerQuestionnaireForm({
             savedRef.current = stored;
             queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, stored, baseline, Object.keys(patch), fields);
             setDraft((current) => mergeSavedDraft(current, snapshot, stored, baseline, Object.keys(patch), fields));
-            if (next) apply(next);
+            if (next) {
+              questionnaireRef.current = next;
+              apply(next);
+            }
             saved = true;
             break;
           } catch (cause) {
@@ -371,9 +377,8 @@ function PayerQuestionnaireForm({
   async function submit() {
     if (submitting || uploading) return;
     setShowMissing(true);
-    // Something is still missing: the press shows what (QA 2026-10-10: a disabled
-    // button left the parent without a hint).
-    if (questionnaire.missing_for_submit.length > 0) return;
+    // Nothing can be saved yet (the notice first): what is missing is all there is to show.
+    if (!writableRef.current && questionnaireRef.current.missing_for_submit.length > 0) return;
     setSubmitting(true);
     setErrors([]);
     try {
@@ -382,6 +387,10 @@ function PayerQuestionnaireForm({
         setErrors([text.notSaved]);
         return;
       }
+      // Something is still missing after that save: the press shows what (QA 2026-10-10: a
+      // disabled button left the parent without a hint). The server's list from before the
+      // save would still name the answer typed just before the press.
+      if (questionnaireRef.current.missing_for_submit.length > 0) return;
       const next = normalizeLeadPayerQuestionnaire(await enqueue(() => submitLeadPayerQuestionnaire(leadId)));
       if (next) apply(next);
       else await reload();

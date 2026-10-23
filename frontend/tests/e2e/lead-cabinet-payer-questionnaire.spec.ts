@@ -452,6 +452,24 @@ test("paying-parent recheck: sending locks editing until the pending save has fi
   expect(state.questionnaire.answers.occupation).toBe("Neue Tätigkeit");
 });
 
+test("paying-parent recheck: the last answer typed just before sending goes with it", async ({ page }) => {
+  const { state, calls } = await setup(page, { ready: true });
+  // Only the profession is still missing when the page loads.
+  state.questionnaire.answers.occupation = null;
+  recompute(state.questionnaire, []);
+  expect(state.questionnaire.missing_for_submit).toEqual(["occupation"]);
+  await page.goto("/");
+  await step(page, "billing");
+  const section = page.getByTestId("lead-request-payer-questionnaire");
+  await section.getByTestId("lead-request-payer-declaration").getByRole("checkbox").check();
+  await section.getByRole("textbox", { name: /Beruf \/ Tätigkeit/ }).fill("Ingenieurin");
+  // At once, before the autosave delay ran out: one press sends.
+  await section.getByTestId("lead-request-payer-submit").click();
+  await expect(section.getByTestId("lead-request-payer-sent")).toBeVisible();
+  expect(calls.patches).toEqual([{ occupation: "Ingenieurin" }]);
+  expect(calls.submits).toHaveLength(1);
+});
+
 test("paying-parent recheck: sending waits for the entire proof upload batch", async ({ page }) => {
   let releaseFirst = () => {};
   let releaseLast = () => {};
