@@ -228,7 +228,7 @@ function PayerQuestionnaireForm({
       if (code === "payer_submitted") return text.payerQuestionnaireLocked;
       if (code === "declaration_required") return text.payerDeclarationRequired;
       if (code === "inquiry_consent_required") return text.identityUploadNeedsConsent;
-      return errorMessage(cause);
+      return errorMessage(cause, text);
     },
     [text],
   );

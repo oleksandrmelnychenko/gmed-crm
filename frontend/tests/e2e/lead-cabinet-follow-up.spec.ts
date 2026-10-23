@@ -883,6 +883,19 @@ test.describe("lead cabinet stepper and follow-up", () => {
     expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
   });
 
+  test("a failed send of the follow-up speaks the cabinet language, not the server's", async ({ page }) => {
+    await setup(page, sentWithBlocks(["A"]), { lang: "uk" });
+    // Registered after the general mock: it answers first.
+    await page.route("**/api/v1/me/lead-requests/*/follow-up/submit", (route) =>
+      route.fulfill({ status: 500, json: { error: "internal_error", message: "Internal Server Error" } }));
+    await page.goto("/");
+    const followUp = page.getByTestId("lead-request-follow-up");
+    await expect(followUp).toBeVisible();
+    await page.getByTestId("lead-request-follow-up-submit").click();
+    await expect(followUp).toContainText("Не вдалося виконати дію. Спробуйте ще раз.");
+    await expect(followUp).not.toContainText("Internal Server Error");
+  });
+
   test("blocks K and L first: the birth data, the legal questions and the own economic interest", async ({ page }) => {
     const { calls } = await setup(page, (request) => {
       sentWithBlocks(["A", "L", "K"])(request);

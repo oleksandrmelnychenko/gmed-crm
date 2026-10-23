@@ -180,7 +180,7 @@ export function FollowUpStep({
         onChange({ ...request, follow_up: { ...request.follow_up, missing } });
         setError(text.followUpIncomplete);
       } else {
-        setError(errorMessage(cause));
+        setError(errorMessage(cause, text));
       }
     } finally {
       setSending(false);

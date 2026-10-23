@@ -18,6 +18,7 @@ import {
   type LeadRequest,
 } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
+import { leadRequestText } from "./lead-request-text";
 import { CabinetGoToContext, CabinetSection as Section, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
 import type { SaveState } from "./lead-request-model";
 
@@ -131,7 +132,7 @@ export function ConsentFormChoicesSection({
           : code === CONSENT_CHOICE_BY_GUARDIAN ? text.byGuardianOnly
           : code === CONSENT_RECIPIENTS_REQUIRED ? text.recipientsRequired
           : code === CONSENT_RECIPIENTS_INVALID ? text.recipientsInvalid
-          : errorMessage(cause));
+          : errorMessage(cause, leadRequestText(lang)));
         onSaveState?.("error");
         return false;
       } finally {
