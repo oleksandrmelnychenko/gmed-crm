@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, CircleCheck, LoaderCircle, Send } from "lucide-react";
 
 import { Banner } from "@/components/ui-shell";
@@ -60,6 +60,7 @@ import { SANCTIONS_LINK_KINDS, STAY_REASONS, combinedSaveState, consentGiven, ty
 import {
   CabinetSection as Section,
   SECTION_ANCHORS,
+  AutosaveFlushContext,
   FileUploadField,
   LabeledField,
   MissingList,
@@ -165,19 +166,31 @@ export function FollowUpStep({
   const beforeSubmit = followUpBeforeSubmit(request);
   const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);
 
+  const flushers = useContext(AutosaveFlushContext);
+  // The send waits for the last saves; a refusal amends what they stored, not the request the click saw.
+  const latestRequest = useRef(request);
+  latestRequest.current = request;
+
   async function send() {
     // A send also shows what is still missing.
     onShowMissing();
     setSending(true);
     setError("");
     try {
+      // The answer typed just before "send" belongs to it: saved first, not after the delay.
+      const saved = await Promise.all(Array.from(flushers ?? [], (flush) => flush.save()));
+      if (!saved.every(Boolean)) {
+        setError(text.notSaved);
+        return;
+      }
       onChange(await enqueue(() => submitLeadFollowUp(request.lead_id)));
     } catch (cause) {
       const body = errorBody(cause);
       const missing = body?.code === FOLLOW_UP_INCOMPLETE ? missingOfRefusal(body) : null;
-      if (missing && request.follow_up) {
+      const current = latestRequest.current;
+      if (missing && current.follow_up) {
         // The server names what is still open: each block shows it.
-        onChange({ ...request, follow_up: { ...request.follow_up, missing } });
+        onChange({ ...current, follow_up: { ...current.follow_up, missing } });
         setError(text.followUpIncomplete);
       } else {
         setError(errorMessage(cause, text));

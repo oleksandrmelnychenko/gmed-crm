@@ -883,6 +883,22 @@ test.describe("lead cabinet stepper and follow-up", () => {
     expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
   });
 
+  test("the answer typed just before 'send' is saved first and goes with the follow-up", async ({ page }) => {
+    const { calls } = await setup(page, (request) => {
+      sentWithBlocks(["K"])(request);
+      Object.assign(request.identification, { birth_place: null, birth_country: "UA" });
+    });
+    await page.goto("/");
+    const blockK = page.getByTestId("lead-request-follow-up-K");
+    await expect(blockK).toBeVisible();
+    await blockK.getByRole("textbox", { name: "Geburtsort" }).fill("Kyiv");
+    // At once, before the autosave delay ran out.
+    await page.getByTestId("lead-request-follow-up-submit").click();
+    await expect(page.getByTestId("lead-request-follow-up-answered")).toBeVisible();
+    expect(calls.identification).toEqual([{ birth_place: "Kyiv" }]);
+    expect(calls.followUpSubmits).toBe(1);
+  });
+
   test("a failed send of the follow-up speaks the cabinet language, not the server's", async ({ page }) => {
     await setup(page, sentWithBlocks(["A"]), { lang: "uk" });
     // Registered after the general mock: it answers first.
