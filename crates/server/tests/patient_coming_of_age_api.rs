@@ -665,7 +665,7 @@ async fn parents_lose_the_access_to_an_open_request_on_the_eighteenth_birthday()
     .unwrap();
     assert_eq!(
         reasons,
-        vec![(Some(REVOKE_REASON.to_string()), None); 2],
+        vec![(Some(REVOKE_REASON.to_string()), None::<Uuid>); 2],
         "ended by the system"
     );
     assert_eq!(
