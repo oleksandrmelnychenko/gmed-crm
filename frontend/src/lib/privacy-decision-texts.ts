@@ -34,11 +34,13 @@ export function patientTextLanguageName(language: PatientTextLanguage, uiLang: s
   return uiLang === "de" ? names[language].de : names[language].ru;
 }
 
+// lawyer review pending (2026-10-22): one form of legal reference per language, as in the lead
+// cabinet and the payer link ("Art. 17 Abs. 3 lit. b DSGVO", "ст. 17 абз. 3 лит./літ. b DSGVO", "Art. 17(3)(b) GDPR").
 const RETENTION_HOLD_REASON: Record<PatientTextLanguage, string> = {
   de: "Ihre ärztliche Dokumentation müssen wir bis zum {date} aufbewahren (§ 630f Abs. 3 BGB). Bis dahin ist eine Löschung ausgeschlossen (Art. 17 Abs. 3 lit. b DSGVO). Statt der Löschung haben wir die Verarbeitung Ihrer Daten eingeschränkt (Art. 18 DSGVO, § 35 Abs. 3 BDSG). Nach Ablauf der Frist prüfen wir Ihren Löschantrag erneut.",
-  en: "We are required to keep your medical records until {date} (Section 630f (3) of the German Civil Code, BGB). Until then, erasure is excluded (Art. 17 (3)(b) GDPR). Instead of erasing your data, we have restricted its processing (Art. 18 GDPR, Section 35 (3) BDSG). Once this period has ended, we will review your erasure request again.",
-  ru: "Вашу медицинскую документацию мы обязаны хранить до {date} (§ 630f абз. 3 BGB). До этой даты удаление исключено (ст. 17 абз. 3 п. b DSGVO). Вместо удаления мы ограничили обработку ваших данных (ст. 18 DSGVO, § 35 абз. 3 BDSG). После окончания срока мы повторно рассмотрим ваш запрос на удаление.",
-  uk: "Вашу медичну документацію ми зобов’язані зберігати до {date} (§ 630f абз. 3 BGB). До цієї дати видалення виключене (ст. 17 абз. 3 п. b DSGVO). Замість видалення ми обмежили обробку ваших даних (ст. 18 DSGVO, § 35 абз. 3 BDSG). Після закінчення строку ми повторно розглянемо ваш запит на видалення.",
+  en: "We are required to keep your medical records until {date} (Section 630f (3) of the German Civil Code, BGB). Until then, erasure is excluded (Art. 17(3)(b) GDPR). Instead of erasing your data, we have restricted its processing (Art. 18 GDPR, Section 35(3) BDSG). Once this period has ended, we will review your erasure request again.",
+  ru: "Вашу медицинскую документацию мы обязаны хранить до {date} (§ 630f абз. 3 BGB). До этой даты удаление исключено (ст. 17 абз. 3 лит. b DSGVO). Вместо удаления мы ограничили обработку ваших данных (ст. 18 DSGVO, § 35 абз. 3 BDSG). После окончания срока мы повторно рассмотрим ваш запрос на удаление.",
+  uk: "Вашу медичну документацію ми зобов’язані зберігати до {date} (§ 630f абз. 3 BGB). До цієї дати видалення виключене (ст. 17 абз. 3 літ. b DSGVO). Замість видалення ми обмежили обробку ваших даних (ст. 18 DSGVO, § 35 абз. 3 BDSG). Після закінчення строку ми повторно розглянемо ваш запит на видалення.",
 };
 
 const OPEN_BUSINESS_HOLD_REASON: Record<PatientTextLanguage, string> = {

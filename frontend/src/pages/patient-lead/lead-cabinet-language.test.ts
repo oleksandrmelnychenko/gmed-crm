@@ -99,6 +99,18 @@ describe("lead cabinet and payer link: language", () => {
     expect(offenders(["ru"], (text) => /[іїєґІЇЄҐ]/.test(text))).toEqual([]);
   });
 
+  it("writes the Ukrainian apostrophe as ’ and the DSGVO reference in one form per language", () => {
+    expect(offenders(["uk"], (text) => /\p{L}'\p{L}/u.test(text))).toEqual([]);
+    const reference: Record<CabinetLang, RegExp> = {
+      de: /Art\. 6 Abs\. 1 lit\. b und f DSGVO/,
+      en: /Art\. 6\(1\)\(b\) and \(f\) GDPR/,
+      uk: /ст\. 6 абз\. 1 літ\. b і f DSGVO \(GDPR\)/,
+      ru: /ст\. 6 абз\. 1 лит\. b и f DSGVO \(GDPR\)/,
+    };
+    expect(offenders(LANGS, (text, _path, lang) => /(Art\.|ст\.) 6\b/.test(text) && !reference[lang].test(text))).toEqual([]);
+    expect(offenders(["ru"], (text) => /Ответственн(ый|ая) за обработку/.test(text))).toEqual([]);
+  });
+
   it("names the other parent one way in Ukrainian: «другий з батьків», as the captions say", () => {
     expect(offenders(["uk"], (text) => /інш\S* з(і)? батьків/i.test(text))).toEqual([]);
   });

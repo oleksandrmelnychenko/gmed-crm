@@ -3181,6 +3181,10 @@ export function LeadWizard({
   // documents step and the signing order of the commercial step. It follows
   // every lead refresh (order signatures, documents, readiness).
   const payer = useLeadPayerDeclaration(open ? leadId : null);
+  // "Kostenübernehmer" only for a real third party; a paying parent or patient is the paying person (owner 2026-10-22).
+  const goToPayerLabel = payer.data?.declaration?.payer_kind === "third_party"
+    ? tx("Перейти к плательщику", "Zum Kostenübernehmer")
+    : tx("Перейти к плательщику", "Zur zahlenden Person");
   const [payerAutosaveRegistry] = useState(createPayerAutosaveRegistry);
   const registerPayerAutosave = useCallback(
     (flush: () => Promise<boolean>) => payerAutosaveRegistry.register(leadId, flush),
@@ -6111,7 +6115,7 @@ export function LeadWizard({
               }
             : payerSheet
               ? {
-                  label: tx("Перейти к плательщику", "Zum Kostenübernehmer"),
+                  label: goToPayerLabel,
                   onClick: () => {
                     setDocumentRowError(null);
                     openValidationIssue({ key: "payer-declaration", step: "documents", message: "", fieldId: PAYER_SECTION_ID });
@@ -11442,7 +11446,7 @@ ${serviceCommentLines.join("\n")}`
                   {documentPreviewJump === PREVIEW_JUMP_RISK
                     ? tx("Перейти к оценке риска", "Zur Risikobewertung")
                     : documentPreviewJump === PREVIEW_JUMP_PAYER
-                      ? tx("Перейти к плательщику", "Zum Kostenübernehmer")
+                      ? goToPayerLabel
                       : tx("Перейти к данным документа", "Zu den Ausweisdaten")}
                 </Button>
               ) : null}
