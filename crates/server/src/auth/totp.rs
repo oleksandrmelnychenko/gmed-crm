@@ -1,7 +1,7 @@
 //! RFC 6238 time-based one-time passwords with the parameters every
 //! authenticator app assumes: HMAC-SHA1, 30-second steps, six digits.
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use rand::RngExt;
 use sha1::Sha1;
 

@@ -1,16 +1,12 @@
-use argon2::{
-    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
-    password_hash::{SaltString, rand_core::OsRng},
-};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 
 /// Hash a password with Argon2id (OWASP 2025 recommended).
 ///
 /// Params: Argon2id, m=19456 KiB (19 MiB), t=2 iterations, p=1 parallelism.
 /// These match the OWASP minimum recommendation and balance security vs latency.
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default(); // Argon2id with safe defaults
-    let hash = argon2.hash_password(password.as_bytes(), &salt)?;
+    // Argon2id with safe defaults; the salt comes from the OS random source.
+    let hash: PasswordHash = Argon2::default().hash_password(password.as_bytes())?;
     Ok(hash.to_string())
 }
 

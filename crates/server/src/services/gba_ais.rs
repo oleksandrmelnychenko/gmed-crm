@@ -469,8 +469,8 @@ pub fn parse_gba_ais_xml(bytes: &[u8]) -> Result<ParsedGbaAisDelivery, GbaAisCon
             return Err(invalid("XML has too many nodes"));
         }
         match reader.read_event() {
-            Ok(Event::Start(event)) => handle_open(&reader, &mut state, &event, false)?,
-            Ok(Event::Empty(event)) => handle_open(&reader, &mut state, &event, true)?,
+            Ok(Event::Start(event)) => handle_open(&mut state, &event, false)?,
+            Ok(Event::Empty(event)) => handle_open(&mut state, &event, true)?,
             Ok(Event::End(event)) => {
                 let name = xml_name(event.name().as_ref())?;
                 let opened = state
@@ -483,10 +483,7 @@ pub fn parse_gba_ais_xml(bytes: &[u8]) -> Result<ParsedGbaAisDelivery, GbaAisCon
                 finalize_element(&mut state, &name)?;
             }
             Ok(Event::Text(text)) => {
-                let decoded = text
-                    .xml10_content()
-                    .map_err(|error| invalid(&format!("invalid XML text: {error}")))?;
-                handle_text(&mut state, decoded.as_ref())?;
+                handle_text(&mut state, &text.xml10_content())?;
             }
             Ok(Event::GeneralRef(reference)) => {
                 handle_general_reference(&mut state, &reference)?;
@@ -528,7 +525,6 @@ pub fn parse_gba_ais_xml(bytes: &[u8]) -> Result<ParsedGbaAisDelivery, GbaAisCon
 }
 
 fn handle_open(
-    reader: &Reader<&[u8]>,
     state: &mut ParseState,
     event: &BytesStart<'_>,
     empty: bool,
@@ -543,7 +539,7 @@ fn handle_open(
     if state.stack.len() >= MAX_XML_DEPTH {
         return Err(invalid("XML nesting is too deep"));
     }
-    let attributes = xml_attributes(reader, event)?;
+    let attributes = xml_attributes(event)?;
     validate_attributes(&name, &attributes)?;
 
     match name.as_str() {
@@ -731,9 +727,6 @@ fn handle_general_reference(
     state: &mut ParseState,
     reference: &BytesRef<'_>,
 ) -> Result<(), GbaAisConnectorError> {
-    let decoded = reference
-        .decode()
-        .map_err(|error| invalid(&format!("invalid XML reference: {error}")))?;
     let resolved = if reference.is_char_ref() {
         let character = reference
             .resolve_char_ref()
@@ -744,7 +737,7 @@ fn handle_general_reference(
         }
         character.to_string()
     } else {
-        resolve_xml_entity(decoded.as_ref())
+        resolve_xml_entity(reference)
             .ok_or_else(|| invalid("custom XML entity references are forbidden"))?
             .to_string()
     };
@@ -983,17 +976,14 @@ fn valid_atc(value: &str) -> bool {
 }
 
 fn xml_attributes(
-    reader: &Reader<&[u8]>,
     event: &BytesStart<'_>,
 ) -> Result<BTreeMap<String, String>, GbaAisConnectorError> {
     let mut attributes = BTreeMap::new();
     for attribute in event.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid(&error.to_string()))?;
-        let name = std::str::from_utf8(attribute.key.as_ref())
-            .map_err(|_| invalid("attribute name is not UTF-8"))?
-            .to_string();
+        let name = attribute.key.as_ref().to_string();
         let value = attribute
-            .decoded_and_normalized_value(XmlVersion::Implicit1_0, reader.decoder())
+            .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|error| invalid(&error.to_string()))?
             .into_owned();
         if value.len() > 20_000 {
@@ -1033,8 +1023,7 @@ fn validate_attributes(
     Ok(())
 }
 
-fn xml_name(bytes: &[u8]) -> Result<String, GbaAisConnectorError> {
-    let value = std::str::from_utf8(bytes).map_err(|_| invalid("element name is not UTF-8"))?;
+fn xml_name(value: &str) -> Result<String, GbaAisConnectorError> {
     if value.is_empty()
         || value.len() > 64
         || !value

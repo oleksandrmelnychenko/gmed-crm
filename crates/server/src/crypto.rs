@@ -27,7 +27,7 @@ use std::collections::HashMap;
 
 use aes_gcm::{
     Aes256Gcm, Nonce,
-    aead::{Aead, KeyInit, OsRng, rand_core::RngCore},
+    aead::{Aead, Generate, KeyInit},
 };
 
 pub const NONCE_LEN: usize = 12;
@@ -183,13 +183,11 @@ impl KeyRegistry {
     /// Encrypts plaintext with the active key. Returns `(ciphertext, nonce, key_id)`.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>, String), CryptoError> {
         let cipher = self.get(&self.active)?;
-        let mut nonce_bytes = [0u8; NONCE_LEN];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = Nonce::generate();
         let ct = cipher
-            .encrypt(nonce, plaintext)
+            .encrypt(&nonce, plaintext)
             .map_err(|_| CryptoError::Encrypt)?;
-        Ok((ct, nonce_bytes.to_vec(), self.active.clone()))
+        Ok((ct, nonce.to_vec(), self.active.clone()))
     }
 
     pub fn encrypt_str(&self, plaintext: &str) -> Result<(Vec<u8>, Vec<u8>, String), CryptoError> {
@@ -207,9 +205,9 @@ impl KeyRegistry {
             return Err(CryptoError::BadNonce);
         }
         let cipher = self.get(key_id)?;
-        let nonce = Nonce::from_slice(nonce);
+        let nonce = Nonce::try_from(nonce).map_err(|_| CryptoError::BadNonce)?;
         cipher
-            .decrypt(nonce, ciphertext)
+            .decrypt(&nonce, ciphertext)
             .map_err(|_| CryptoError::Decrypt)
     }
 

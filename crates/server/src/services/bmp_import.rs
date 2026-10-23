@@ -374,17 +374,14 @@ fn parse_carrier_xml(carrier_xml: &str) -> Result<ParsedBmp, BmpImportError> {
             ));
         }
         match reader.read_event() {
-            Ok(Event::Start(event)) => handle_open(&reader, &mut state, &event, false)?,
-            Ok(Event::Empty(event)) => handle_open(&reader, &mut state, &event, true)?,
+            Ok(Event::Start(event)) => handle_open(&mut state, &event, false)?,
+            Ok(Event::Empty(event)) => handle_open(&mut state, &event, true)?,
             Ok(Event::End(event)) => {
                 let name = xml_name(event.name().as_ref())?;
                 handle_end(&mut state, &name)?;
             }
             Ok(Event::Text(text)) => {
-                let value = text
-                    .decode()
-                    .map_err(|error| BmpImportError::InvalidCarrier(error.to_string()))?;
-                if !value.trim().is_empty() {
+                if !text.trim().is_empty() {
                     return Err(BmpImportError::InvalidCarrier(
                         "BMP elements may not contain text nodes".to_string(),
                     ));
@@ -445,13 +442,12 @@ fn parse_carrier_xml(carrier_xml: &str) -> Result<ParsedBmp, BmpImportError> {
 }
 
 fn handle_open(
-    reader: &Reader<&[u8]>,
     state: &mut ParserState,
     event: &BytesStart<'_>,
     empty: bool,
 ) -> Result<(), BmpImportError> {
     let name = xml_name(event.name().as_ref())?;
-    let attrs = xml_attributes(reader, event)?;
+    let attrs = xml_attributes(event)?;
     if state.root_closed {
         return Err(BmpImportError::InvalidCarrier(
             "content after MP root is not allowed".to_string(),
@@ -1128,9 +1124,7 @@ fn finalize_section(state: &mut ParserState) -> Result<(), BmpImportError> {
     Ok(())
 }
 
-fn xml_name(raw: &[u8]) -> Result<String, BmpImportError> {
-    let name = str::from_utf8(raw)
-        .map_err(|_| BmpImportError::InvalidCarrier("non-UTF-8 element name".to_string()))?;
+fn xml_name(name: &str) -> Result<String, BmpImportError> {
     if name.contains(':') || name.is_empty() {
         return Err(BmpImportError::InvalidCarrier(
             "namespaced or empty element names are not accepted".to_string(),
@@ -1139,17 +1133,14 @@ fn xml_name(raw: &[u8]) -> Result<String, BmpImportError> {
     Ok(name.to_string())
 }
 
-fn xml_attributes(
-    reader: &Reader<&[u8]>,
-    event: &BytesStart<'_>,
-) -> Result<BTreeMap<String, String>, BmpImportError> {
+fn xml_attributes(event: &BytesStart<'_>) -> Result<BTreeMap<String, String>, BmpImportError> {
     let mut result = BTreeMap::new();
     for attribute in event.attributes().with_checks(true) {
         let attribute =
             attribute.map_err(|error| BmpImportError::InvalidCarrier(error.to_string()))?;
         let key = xml_name(attribute.key.as_ref())?;
         let value = attribute
-            .decoded_and_normalized_value(XmlVersion::default(), reader.decoder())
+            .normalized_value(XmlVersion::default())
             .map_err(|error| BmpImportError::InvalidCarrier(error.to_string()))?
             .into_owned();
         if value.chars().count() > 256 {

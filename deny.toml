@@ -14,14 +14,6 @@ no-default-features = false
 version = 2
 yanked = "deny"
 ignore = [
-    # hickory-proto 0.26.x — NSEC3 closest-encloser proof validation can loop
-    # on cross-zone responses. Only reachable through DNSSEC validation
-    # (DnssecDnsHandle); gmed-server uses hickory-resolver without the
-    # `dnssec-*` features for the e-mail domain check (email_domain.rs), so
-    # the path is never executed. No fixed release exists yet.
-    # Re-evaluate: on the next hickory release.
-    "RUSTSEC-2026-0118",
-
     # rsa 0.9.x — Marvin Attack timing sidechannel on RSA decryption.
     # Pulled in transitively by sqlx-macros-core -> sqlx-mysql, which is a
     # compile-time dependency of the sqlx macros (they must be able to parse
@@ -32,34 +24,10 @@ ignore = [
     # (https://github.com/RustCrypto/RSA/issues/19).
     "RUSTSEC-2023-0071",
 
-    # proc-macro-error 1.x — unmaintained.
-    # Pulled in transitively by printpdf -> allsorts -> ouroboros ->
-    # ouroboros_macro. This is a compile-time-only proc macro crate with zero
-    # runtime surface. An unmaintained proc macro does not expose the final
-    # binary to any known vulnerability.
-    # Re-evaluate: when printpdf upgrades its transitive graph, or when we
-    # replace printpdf with an alternative PDF generator.
-    "RUSTSEC-2024-0370",
-
-    # lopdf <0.42 — deeply nested input can overflow the parser stack.
-    # Uploaded PDFs are parsed through pdf-extract 0.12 / lopdf >=0.42. The
-    # remaining old lopdf is private to printpdf, which we only use to generate
-    # documents and never to parse external input.
-    # Re-evaluate: when printpdf upgrades its lopdf dependency to >=0.42.
-    "RUSTSEC-2026-0187",
-
     # ttf-parser 0.25 — unmaintained, with no reported vulnerability.
     # It remains transitive through printpdf's generation-only lopdf path.
     # Re-evaluate: when printpdf removes or replaces this dependency.
     "RUSTSEC-2026-0192",
-
-    # rand 0.8.5 / 0.9.2 — unsound with a custom global logger replacing
-    # `rand::rng()`. We do not replace the global rand logger anywhere in
-    # our code or in any dependency we audit. This advisory is a soundness
-    # issue that surfaces only under a very specific misuse pattern.
-    # Re-evaluate: when `rand` ships a fixed release that can be pinned by
-    # sqlx / tungstenite / lopdf / printpdf.
-    "RUSTSEC-2026-0097",
 ]
 
 [bans]

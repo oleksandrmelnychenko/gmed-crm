@@ -189,23 +189,20 @@ pub fn parse_fsf_xml(bytes: &[u8]) -> Result<ParsedList, FsfParseError> {
             return Err(invalid("too many XML nodes"));
         }
         match reader.read_event() {
-            Ok(Event::Start(event)) => open_element(&reader, &mut state, &event, false)?,
-            Ok(Event::Empty(event)) => open_element(&reader, &mut state, &event, true)?,
+            Ok(Event::Start(event)) => open_element(&mut state, &event, false)?,
+            Ok(Event::Empty(event)) => open_element(&mut state, &event, true)?,
             Ok(Event::End(event)) => {
                 let name = local_name(event.local_name().as_ref())?;
                 close_element(&mut state, &name)?;
             }
             Ok(Event::Text(text)) => {
                 if let Some(buffer) = state.text.as_mut() {
-                    let decoded = text
-                        .xml10_content()
-                        .map_err(|error| invalid(format!("invalid text: {error}")))?;
-                    buffer.push_str(decoded.as_ref());
+                    buffer.push_str(&text.xml10_content());
                 }
             }
             Ok(Event::CData(data)) => {
                 if let Some(buffer) = state.text.as_mut() {
-                    buffer.push_str(&String::from_utf8_lossy(data.as_ref()));
+                    buffer.push_str(&data);
                 }
             }
             Ok(Event::GeneralRef(reference)) => {
@@ -215,10 +212,7 @@ pub fn parse_fsf_xml(bytes: &[u8]) -> Result<ParsedList, FsfParseError> {
                             buffer.push(character);
                         }
                     } else {
-                        let decoded = reference
-                            .decode()
-                            .map_err(|error| invalid(format!("invalid reference: {error}")))?;
-                        let resolved = resolve_xml_entity(decoded.as_ref())
+                        let resolved = resolve_xml_entity(&reference)
                             .ok_or_else(|| invalid("custom XML entities are not allowed"))?;
                         buffer.push_str(resolved);
                     }
@@ -244,22 +238,17 @@ pub fn parse_fsf_xml(bytes: &[u8]) -> Result<ParsedList, FsfParseError> {
     })
 }
 
-fn local_name(raw: &[u8]) -> Result<String, FsfParseError> {
-    std::str::from_utf8(raw)
-        .map(str::to_string)
-        .map_err(|_| invalid("element name is not UTF-8"))
+fn local_name(raw: &str) -> Result<String, FsfParseError> {
+    Ok(raw.to_string())
 }
 
-fn attributes(
-    reader: &Reader<&[u8]>,
-    event: &BytesStart<'_>,
-) -> Result<Vec<(String, String)>, FsfParseError> {
+fn attributes(event: &BytesStart<'_>) -> Result<Vec<(String, String)>, FsfParseError> {
     let mut values = Vec::new();
     for attribute in event.attributes().with_checks(true) {
         let attribute = attribute.map_err(|error| invalid(error.to_string()))?;
         let name = local_name(attribute.key.local_name().as_ref())?;
         let value = attribute
-            .decoded_and_normalized_value(XmlVersion::Implicit1_0, reader.decoder())
+            .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|error| invalid(error.to_string()))?
             .into_owned();
         if value.len() > MAX_ATTRIBUTE_BYTES {
@@ -298,7 +287,6 @@ fn country_attr(attributes: &[(String, String)]) -> Option<String> {
 }
 
 fn open_element(
-    reader: &Reader<&[u8]>,
     state: &mut ParseState,
     event: &BytesStart<'_>,
     empty: bool,
@@ -317,7 +305,7 @@ fn open_element(
                 return Err(invalid("more than one root element"));
             }
             state.root_seen = true;
-            let values = attributes(reader, event)?;
+            let values = attributes(event)?;
             state.generated_at = attr(&values, "generationDate").and_then(|value| {
                 DateTime::parse_from_rfc3339(value)
                     .map(|date| date.with_timezone(&Utc))
@@ -332,7 +320,7 @@ fn open_element(
         }
         (None, other) => return Err(invalid(format!("unexpected root element {other}"))),
         (Some("export"), "sanctionEntity") => {
-            let values = attributes(reader, event)?;
+            let values = attributes(event)?;
             let eu_reference = attr_string(&values, "euReferenceNumber");
             let logical_id = attr_string(&values, "logicalId")
                 .or_else(|| eu_reference.clone())
@@ -346,7 +334,7 @@ fn open_element(
             });
         }
         (Some("sanctionEntity"), element) => {
-            let values = attributes(reader, event)?;
+            let values = attributes(event)?;
             let entry = state
                 .current
                 .as_mut()

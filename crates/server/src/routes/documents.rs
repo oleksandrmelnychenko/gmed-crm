@@ -36648,8 +36648,8 @@ mod tests {
         let bytes = build_patient_sticker_pdf(&context).unwrap();
         let raw_pdf = String::from_utf8_lossy(&bytes);
 
-        assert!(raw_pdf.contains("/F5"));
-        assert!(raw_pdf.contains("/F6"));
+        assert!(raw_pdf.contains("/BaseFont/Arial/"));
+        assert!(raw_pdf.contains("/BaseFont/Arial#20Bold/"));
         assert!(!raw_pdf.contains("[] TJ"));
 
         let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
@@ -36773,8 +36773,8 @@ mod tests {
         .unwrap();
 
         let raw_pdf = String::from_utf8_lossy(&bytes);
-        assert!(raw_pdf.contains("/F5"));
-        assert!(raw_pdf.contains("/F6"));
+        assert!(raw_pdf.contains("/BaseFont/Arial/"));
+        assert!(raw_pdf.contains("/BaseFont/Arial#20Bold/"));
 
         let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
         assert!(extracted_text.contains("Dokument-Nr."));

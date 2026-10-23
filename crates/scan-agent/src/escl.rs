@@ -270,17 +270,15 @@ fn walk_xml(xml: &str, mut visit: impl FnMut(&[String], &str)) -> Result<()> {
             .context("malformed XML from the scanner")?
         {
             Event::Start(element) => {
-                stack.push(String::from_utf8_lossy(element.local_name().as_ref()).into_owned());
+                stack.push(element.local_name().as_ref().to_owned());
                 text.clear();
             }
-            Event::Text(chunk) => text.push_str(&chunk.decode().context("malformed XML text")?),
-            Event::CData(chunk) => text.push_str(&String::from_utf8_lossy(&chunk)),
+            Event::Text(chunk) => text.push_str(&chunk),
+            Event::CData(chunk) => text.push_str(&chunk),
             Event::GeneralRef(reference) => {
                 if let Ok(Some(character)) = reference.resolve_char_ref() {
                     text.push(character);
-                } else if let Ok(name) = reference.decode()
-                    && let Some(resolved) = resolve_xml_entity(&name)
-                {
+                } else if let Some(resolved) = resolve_xml_entity(&reference) {
                     text.push_str(resolved);
                 }
             }
