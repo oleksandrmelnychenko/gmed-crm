@@ -9,6 +9,14 @@ use uuid::Uuid;
 /// The document template of the patient form.
 pub(crate) const TEMPLATE: &str = "lead_self_disclosure";
 
+/// The binding key (`documents.generated_bindings`) of a patient form made
+/// from the lead's data as GMED recorded them, without a cabinet submission
+/// (owner decision 2026-10-23, "Angaben aufgenommen durch GMED"). Once the
+/// lead sends the request through the cabinet, such a form no longer counts
+/// as the signed patient form ([`status`]): staff make it anew from the
+/// cabinet's data.
+pub(crate) const RECORDED_BY_GMED_KEY: &str = "_recorded_by_gmed";
+
 /// The rule itself: a lead that is not converted yet and is no repeat request
 /// of an existing patient (`leads.repeat_patient_id`) is a new patient's first
 /// onboarding, which needs the signed patient form.
@@ -37,11 +45,16 @@ pub(crate) async fn status(db: &gmed_db::DbPool, lead_id: Uuid) -> Result<Status
                          AND d.generated_template_id = $2
                          AND d.status = 'active'
                          AND d.file_deleted_at IS NULL
-                         AND d.signed_at IS NOT NULL)
+                         AND d.signed_at IS NOT NULL
+                         -- A form GMED recorded counts until the lead sends
+                         -- the request through the cabinet.
+                         AND NOT (l.portal_submitted_at IS NOT NULL
+                                  AND COALESCE((d.generated_bindings ->> $3)::boolean, false)))
          FROM leads l WHERE l.id = $1",
     )
     .bind(lead_id)
     .bind(TEMPLATE)
+    .bind(RECORDED_BY_GMED_KEY)
     .fetch_optional(db)
     .await?;
     Ok(

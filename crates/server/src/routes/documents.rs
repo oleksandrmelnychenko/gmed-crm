@@ -18418,6 +18418,12 @@ async fn generate_document(
             };
             generated_bindings_snapshot.get_or_insert_with(|| json!({}))
                 [crate::consent_choices::PATIENT_FORM_DISCLOSURE_KEY] = json!(true);
+            // Made from the lead's data as GMED recorded them: superseded
+            // once the lead sends the request through the cabinet.
+            if disclosure.submitted_at.is_none() {
+                generated_bindings_snapshot.get_or_insert_with(|| json!({}))
+                    [crate::lead_self_disclosure::RECORDED_BY_GMED_KEY] = json!(true);
+            }
             if let Some(choice) = &disclosure.consent_choice {
                 generated_bindings_snapshot.get_or_insert_with(|| json!({}))
                     [crate::consent_choices::BINDING_KEY] = choice.binding();
@@ -25421,7 +25427,11 @@ struct LeadDisclosureRecipient {
 /// never the cost estimate — none of it is read.
 #[derive(Clone, Debug, Default)]
 struct LeadSelfDisclosure {
-    submitted_at: chrono::DateTime<chrono::Utc>,
+    /// When the lead sent the request through the cabinet; `None` when staff
+    /// recorded the data themselves ("Ich fülle aus", no cabinet submission,
+    /// owner decision 2026-10-23): the form says "Angaben aufgenommen durch
+    /// GMED" instead.
+    submitted_at: Option<chrono::DateTime<chrono::Utc>>,
     /// The same immutable decision and recipients as the consent document.
     consent_choice: Option<crate::consent_choices::OwnConsentChoice>,
     /// When the follow-up answers were sent, if after the request: the form
@@ -25523,8 +25533,22 @@ impl LeadSelfDisclosure {
     }
 }
 
-/// 409 `lead_request_not_sent`: the patient form exists only once the lead
-/// sent the request.
+/// The header of a patient form made from the lead's data as GMED recorded
+/// them (no cabinet submission, owner decision 2026-10-23).
+const GMED_RECORDED_LINE: &str =
+    "Angaben aufgenommen durch GMED; sie werden mit der Unterschrift geprüft und bestätigt.";
+
+/// Whether the patient form can be made: from the request the lead sent
+/// through the cabinet, or — nothing sent and staff fill the data in
+/// themselves ("Ich fülle aus", the wizard's default fill mode) — from the
+/// lead's data as GMED recorded them (owner decision 2026-10-23). Not while
+/// the patient fills the cabinet and has not sent it yet.
+fn self_disclosure_source_ready(submitted: bool, fill_mode: Option<&str>) -> bool {
+    submitted || fill_mode.map(str::trim) != Some("patient")
+}
+
+/// 409 `lead_request_not_sent`: while the patient fills the cabinet, the
+/// patient form exists only once the lead sent the request.
 fn lead_request_not_sent() -> axum::response::Response {
     (
         StatusCode::CONFLICT,
@@ -25538,8 +25562,12 @@ fn lead_request_not_sent() -> axum::response::Response {
 }
 
 /// Reads the lead's own answers for the patient form; 409
-/// `lead_request_not_sent` until the request was sent. The reason of the
-/// request on the same row is never copied.
+/// `lead_request_not_sent` while the patient fills the cabinet ("Patient
+/// füllt aus") and has not sent the request yet. A lead whose data staff
+/// enter themselves ("Ich fülle aus", the wizard's default) and that sent
+/// nothing through the cabinet gets the form from the lead's data, marked
+/// "Angaben aufgenommen durch GMED" (owner decision 2026-10-23). The reason
+/// of the request on the same row is never copied.
 async fn load_lead_self_disclosure(
     state: &AppState,
     lead_id: Uuid,
@@ -25565,7 +25593,8 @@ async fn load_lead_self_disclosure(
     let row = sqlx::query(&format!(
         r#"SELECT first_name, middle_name, last_name, date_of_birth, citizenships,
                   street_address, zip_code, city, country, email, phone, portal_submitted_at,
-                  ({}) AS changed_since_submit
+                  ({}) AS changed_since_submit,
+                  wizard_state->>'step1_fill_mode' AS fill_mode
            FROM leads l
            WHERE id = $1"#,
         super::lead_portal_intake::CHANGED_SINCE_SUBMIT_SQL,
@@ -25575,16 +25604,18 @@ async fn load_lead_self_disclosure(
     .await
     .map_err(|error| failed(error, "lead"))?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Lead not found"))?;
-    let Some(submitted_at) = row
+    let submitted_at = row
         .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_submitted_at")
         .ok()
-        .flatten()
-    else {
+        .flatten();
+    let fill_mode = row.try_get::<Option<String>, _>("fill_mode").ok().flatten();
+    if !self_disclosure_source_ready(submitted_at.is_some(), fill_mode.as_deref()) {
         return Err(lead_request_not_sent());
-    };
-    if row
-        .try_get::<bool, _>("changed_since_submit")
-        .map_err(|error| failed(error, "submission state"))?
+    }
+    if submitted_at.is_some()
+        && row
+            .try_get::<bool, _>("changed_since_submit")
+            .map_err(|error| failed(error, "submission state"))?
     {
         return Err((StatusCode::CONFLICT, Json(json!({
             "error": "lead_request_changed_since_submit",
@@ -25627,7 +25658,7 @@ async fn load_lead_self_disclosure(
     .await
     .map_err(|error| failed(error, "follow-up answers"))?
     .flatten()
-    .filter(|answered_at| *answered_at > submitted_at);
+    .filter(|answered_at| submitted_at.is_some_and(|submitted_at| *answered_at > submitted_at));
     let consent_choice = crate::consent_choices::current_for(&mut *conn, Some(lead_id), None)
         .await
         .map_err(|error| failed(error, "third-party disclosure"))?;
@@ -25918,7 +25949,8 @@ fn build_lead_self_disclosure_pdf(
     let yes_no =
         |answer: Option<bool>, details: Option<&str>| answer.map(|_| payer_yes_no(answer, details));
     let patient_name = data.full_name();
-    let (sent_on, sent_at) = payer_date_time(data.submitted_at);
+    // `None`: GMED recorded the data, nothing was sent through the cabinet.
+    let sent = data.submitted_at.map(payer_date_time);
     let minor = data.minor;
 
     layout.text_block_centered(
@@ -25940,13 +25972,15 @@ fn build_lead_self_disclosure_pdf(
     // The follow-up answers sent later are part of the form: the header names
     // their time too, not only the request's (QA 2026-10-12, round 3).
     let follow_up_sent = data.follow_up_sent_at.map(payer_date_time);
-    let sent_line = match &follow_up_sent {
-        Some((follow_up_on, follow_up_at)) => format!(
+    let sent_line = match (&sent, &follow_up_sent) {
+        (Some((sent_on, sent_at)), Some((follow_up_on, follow_up_at))) => format!(
             "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal; ergänzende Angaben übermittelt am {follow_up_on} um {follow_up_at}."
         ),
-        None => format!(
+        (Some((sent_on, sent_at)), None) => format!(
             "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal."
         ),
+        // Staff entered the data (owner decision 2026-10-23).
+        (None, _) => GMED_RECORDED_LINE.to_string(),
     };
     admin_block(
         &mut layout,
@@ -25978,7 +26012,12 @@ fn build_lead_self_disclosure_pdf(
     {
         meta.push(("Auftrags-Nr.", order_number.to_string()));
     }
-    meta.push(("Anfrage gesendet", format!("{sent_on} {sent_at}")));
+    match &sent {
+        Some((sent_on, sent_at)) => {
+            meta.push(("Anfrage gesendet", format!("{sent_on} {sent_at}")));
+        }
+        None => meta.push(("Angaben aufgenommen", "durch GMED".to_string())),
+    }
     if let Some((follow_up_on, follow_up_at)) = &follow_up_sent {
         meta.push((
             "Ergänzende Angaben gesendet",
@@ -37806,7 +37845,7 @@ mod tests {
 
     fn anna_lead_disclosure() -> super::LeadSelfDisclosure {
         super::LeadSelfDisclosure {
-            submitted_at: Utc.with_ymd_and_hms(2026, 10, 7, 8, 30, 0).unwrap(),
+            submitted_at: Some(Utc.with_ymd_and_hms(2026, 10, 7, 8, 30, 0).unwrap()),
             salutation: Some("ms".to_string()),
             first_name: "Anna".to_string(),
             middle_name: Some("Maria".to_string()),
@@ -38196,7 +38235,7 @@ mod tests {
     #[test]
     fn the_lead_self_disclosure_prints_only_sections_with_content() {
         let minimal = super::LeadSelfDisclosure {
-            submitted_at: Utc.with_ymd_and_hms(2026, 10, 7, 8, 30, 0).unwrap(),
+            submitted_at: Some(Utc.with_ymd_and_hms(2026, 10, 7, 8, 30, 0).unwrap()),
             first_name: "Anna".to_string(),
             last_name: "Muster".to_string(),
             ..Default::default()
@@ -38228,6 +38267,38 @@ mod tests {
             // No order yet: no "Auftrags-Nr. —" (QA 2026-10-10 B5).
             "Auftrags-Nr.",
         ] {
+            assert!(!text.contains(absent), "{absent} in {text}");
+        }
+    }
+
+    /// Owner decision 2026-10-23: a lead whose data staff enter themselves
+    /// gets the patient form without a cabinet submission, marked as
+    /// recorded by GMED instead of the portal's time; a patient who fills the
+    /// cabinet still has to send it first.
+    #[test]
+    fn a_patient_form_recorded_by_gmed_says_so_instead_of_the_portal_time() {
+        assert!(super::self_disclosure_source_ready(true, Some("patient")));
+        assert!(super::self_disclosure_source_ready(false, None));
+        assert!(super::self_disclosure_source_ready(false, Some("staff")));
+        assert!(!super::self_disclosure_source_ready(false, Some("patient")));
+
+        let recorded = super::LeadSelfDisclosure {
+            submitted_at: None,
+            ..anna_lead_disclosure()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &recorded,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-GMED",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&generated);
+        assert!(
+            text.contains("Angaben aufgenommen durch GMED"),
+            "missing GMED line in {text}"
+        );
+        for absent in ["über das Patientenportal", "Anfrage gesendet"] {
             assert!(!text.contains(absent), "{absent} in {text}");
         }
     }

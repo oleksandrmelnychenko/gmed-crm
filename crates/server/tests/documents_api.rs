@@ -12481,6 +12481,15 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
     .execute(&pool)
     .await
     .unwrap();
+    // The patient fills the cabinet ("Patient füllt aus"): nothing before
+    // the request is sent.
+    sqlx::query(
+        "UPDATE leads SET wizard_state = jsonb_set(COALESCE(wizard_state, '{}'::jsonb), '{step1_fill_mode}', '\"patient\"') WHERE id = $1",
+    )
+    .bind(lead_id)
+    .execute(&pool)
+    .await
+    .unwrap();
     let (status, body) = json_request(
         &app,
         "POST",
@@ -12639,4 +12648,104 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
     let fresh_text = extract_pdf_text(&bytes);
     assert!(fresh_text.contains("10115 Hamburg"), "{fresh_text}");
     assert!(!fresh_text.contains("10115 Berlin"), "{fresh_text}");
+}
+
+/// Owner decision 2026-10-23: staff who fill the lead's data in themselves
+/// ("Ich fülle aus", no cabinet submission) make the patient form from the
+/// lead's data; it says "Angaben aufgenommen durch GMED" instead of the
+/// portal's time and carries the marker that a later cabinet submission
+/// supersedes it.
+#[tokio::test]
+async fn staff_make_the_patient_form_from_the_data_they_recorded() {
+    let Some((app, pool, _admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("lead-form-gmed");
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, phone, date_of_birth, citizenships,
+                              street_address, zip_code, city, country, qualification_status,
+                              compliance_status, intake_source)
+           VALUES ('Bruno', 'Beispiel', $1, '+49 30 100002', DATE '1979-02-03', ARRAY['DE'],
+                   'Beispielweg 2', '10115', 'Berlin', 'DE', 'qualified', 'pending',
+                   'staff_wizard')
+           RETURNING id"#,
+    )
+    .bind(format!("{tag}@example.com"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "lead_self_disclosure",
+            "language": "de",
+            "status": "active",
+            "lead_id": lead_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+    let bindings: Value =
+        sqlx::query_scalar("SELECT generated_bindings FROM documents WHERE id = $1")
+            .bind(document_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(bindings["_recorded_by_gmed"], true, "{bindings}");
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = extract_pdf_text(&bytes);
+    assert!(text.contains("Bruno Beispiel"), "{text}");
+    assert!(text.contains("Angaben aufgenommen durch GMED"), "{text}");
+    assert!(!text.contains("über das Patientenportal"), "{text}");
+
+    // Signed, it is the patient form of the conversion — until the lead sends
+    // the request through the cabinet: then it is made anew from that data.
+    sqlx::query("UPDATE documents SET signed_at = now() WHERE id = $1")
+        .bind(document_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let readiness = |app: axum::Router, bearer: String| async move {
+        let (status, detail) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/leads/{lead_id}"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        detail["readiness"]["checks"]
+            .as_array()
+            .and_then(|checks| {
+                checks
+                    .iter()
+                    .find(|check| check["key"] == "self_disclosure_signed")
+            })
+            .and_then(|check| check["passed"].as_bool())
+    };
+    assert_eq!(
+        readiness(app.clone(), admin_bearer.clone()).await,
+        Some(true)
+    );
+    sqlx::query("UPDATE leads SET portal_submitted_at = now() WHERE id = $1")
+        .bind(lead_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        readiness(app.clone(), admin_bearer.clone()).await,
+        Some(false)
+    );
 }

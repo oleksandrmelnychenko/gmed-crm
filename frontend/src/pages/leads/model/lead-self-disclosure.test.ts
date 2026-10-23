@@ -7,7 +7,9 @@ import {
   leadSelfDisclosureAvailable,
   leadSelfDisclosureErrorText,
   leadSelfDisclosureRequirement,
+  leadSelfDisclosureRecordedByGmed,
   leadSelfDisclosureRequirementLabel,
+  leadSelfDisclosureSourceNote,
   leadSelfDisclosureUnavailableHint,
 } from "./lead-self-disclosure";
 
@@ -19,9 +21,20 @@ describe("the lead's patient form", () => {
     expect(LEAD_SELF_DISCLOSURE_TEMPLATE).toBe("lead_self_disclosure");
   });
 
-  it("can be generated only once the lead sent the request", () => {
+  it("can be generated once the lead sent the request, or from the data staff recorded (owner decision 2026-10-23)", () => {
     expect(leadSelfDisclosureAvailable({ submitted_at: "2026-10-07T08:30:00Z" })).toBe(true);
-    expect(leadSelfDisclosureAvailable({ submitted_at: null })).toBe(false);
+    expect(leadSelfDisclosureAvailable({ submitted_at: "2026-10-07T08:30:00Z", fill_mode: "patient" })).toBe(true);
+    // The patient fills the cabinet: only after sending.
+    expect(leadSelfDisclosureAvailable({ submitted_at: null, fill_mode: "patient" })).toBe(false);
+    // Staff fill the data in ("Заполняю сам", the default): from the lead's data.
+    expect(leadSelfDisclosureAvailable({ submitted_at: null, fill_mode: "staff" })).toBe(true);
+    expect(leadSelfDisclosureAvailable({ submitted_at: null })).toBe(true);
+    expect(leadSelfDisclosureRecordedByGmed({ submitted_at: null, fill_mode: "staff" })).toBe(true);
+    expect(leadSelfDisclosureRecordedByGmed({ submitted_at: "2026-10-07T08:30:00Z", fill_mode: "staff" })).toBe(false);
+    expect(leadSelfDisclosureRecordedByGmed(null)).toBe(false);
+    expect(leadSelfDisclosureSourceNote({ submitted_at: null, fill_mode: "staff" }, de)).toContain("Angaben aufgenommen durch GMED");
+    expect(leadSelfDisclosureSourceNote({ submitted_at: null, fill_mode: "staff" }, ru)).toContain("создайте анкету заново");
+    expect(leadSelfDisclosureSourceNote({ submitted_at: "2026-10-07T08:30:00Z" }, de)).toContain("Angaben aus dem Portal");
     expect(leadSelfDisclosureAvailable(null)).toBe(false);
     expect(leadSelfDisclosureAvailable(undefined)).toBe(false);
     expect(leadSelfDisclosureAvailable({ submitted_at: "2026-10-07T08:30:00Z", changed_since_submit: true })).toBe(false);
@@ -49,7 +62,9 @@ describe("the lead's patient form", () => {
   it("says why it cannot be generated yet: it comes from the cabinet data", () => {
     expect(leadSelfDisclosureUnavailableHint({ submitted_at: "2026-10-07T08:30:00Z" }, ru)).toBeNull();
     expect(leadSelfDisclosureUnavailableHint(null, ru)).toContain("из данных кабинета");
-    expect(leadSelfDisclosureUnavailableHint({ submitted_at: null }, de)).toContain("noch nicht gesendet");
+    expect(leadSelfDisclosureUnavailableHint({ submitted_at: null, fill_mode: "patient" }, de)).toContain("noch nicht gesendet");
+    expect(leadSelfDisclosureUnavailableHint({ submitted_at: null, fill_mode: "patient" }, ru)).toContain("«Заполняю сам»");
+    expect(leadSelfDisclosureUnavailableHint({ submitted_at: null, fill_mode: "staff" }, de)).toBeNull();
     expect(
       leadSelfDisclosureUnavailableHint({ submitted_at: "2026-10-07T08:30:00Z", changed_since_submit: true }, de),
     ).toContain("erneuten Senden");

@@ -207,6 +207,8 @@ type Mock = {
   /** When the lead (here: a parent) sent the request in the cabinet; not sent by default. */
   requestSentAt?: string;
   requestChanged?: boolean;
+  /** Wizard step 1: who fills the data in; the patient by default here. */
+  fillMode?: "staff" | "patient";
   /** The server's rule for the patient form (owner decision 2026-10-23): required for a new patient, optional for a repeat order. */
   selfDisclosureRequired?: boolean;
   refuseContactRemoval?: boolean;
@@ -357,7 +359,7 @@ async function mount(page: Page, mock: Mock) {
       }
       response = {
         lead_id: leadId,
-        fill_mode: "patient",
+        fill_mode: mock.fillMode ?? "patient",
         patient_fields: {},
         patient_payer: null,
         progress: { filled: 9, total: 12, documents: 0, submitted_at: mock.requestSentAt ?? null },
@@ -695,11 +697,27 @@ test("the patient form waits until the request was sent", async ({ page }) => {
   await expect(section.getByRole("button", { name: "Dokument erstellen", exact: true })).toBeDisabled();
   // It says why the form cannot be made yet: it comes from the cabinet data.
   await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveText(
-    "Das Formular wird aus den Angaben im Kabinett erstellt. Der Patient hat die Anfrage noch nicht gesendet – danach kann das Formular erstellt werden.",
+    "Das Formular wird aus den Angaben im Kabinett erstellt. Der Patient hat die Anfrage noch nicht gesendet – danach kann das Formular erstellt werden. Erfassen Sie die Angaben selbst, wählen Sie in Schritt 1 „Ich fülle aus“: Das Formular wird dann aus Ihren Angaben erstellt.",
   );
   await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveClass(/bg-amber-50/);
   await expect(section).not.toContainText("Dokument wurde noch nicht erstellt");
   expect(calls.generated).toHaveLength(0);
+});
+
+test("staff who fill the data in create the patient form from the data they recorded (owner decision 2026-10-23)", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", fillMode: "staff", selfDisclosureRequired: true });
+
+  const section = wizard.getByTestId("lead-wizard-self-disclosure-section");
+  await expect(section).toHaveAttribute("data-available", "true");
+  // The readiness rule stays: a new patient's first onboarding needs it.
+  await expect(section).toHaveAttribute("data-requirement", "required");
+  await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveCount(0);
+  await expect(section).not.toContainText("Пациент ещё не отправил заявку");
+  await expect(section.getByTestId("lead-wizard-self-disclosure-source")).toContainText("«Angaben aufgenommen durch GMED»");
+  await expect(section.getByTestId("lead-wizard-self-disclosure-source")).toContainText("на бумаге или КЭП");
+  await section.getByRole("button", { name: "Создать документ", exact: true }).click();
+  await expect.poll(() => calls.generated.length).toBe(1);
+  expect(calls.generated[0]).toMatchObject({ template_id: "lead_self_disclosure", lead_id: leadId });
 });
 
 test("after the request was sent staff create the patient form from the server's data", async ({ page }) => {

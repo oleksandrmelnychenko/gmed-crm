@@ -120,6 +120,7 @@ import {
   leadSelfDisclosureErrorText,
   leadSelfDisclosureRequirement,
   leadSelfDisclosureRequirementLabel,
+  leadSelfDisclosureSourceNote,
   leadSelfDisclosureUnavailableHint,
 } from "../model/lead-self-disclosure";
 import { custodyLabel, representativeName } from "../model/lead-gwg-statements";
@@ -4075,9 +4076,12 @@ export function LeadWizard({
     if (previous && riskEnhancedCheckKey && previous !== riskEnhancedCheckKey) void reloadEnhancedCheck();
   }, [riskEnhancedCheckKey, reloadEnhancedCheck]);
   const canReviewPortalUploads = Boolean(step1Portal.intake?.can_review_uploads);
-  // The patient form is filled from the sent request: nothing to generate before.
-  const leadRequestSent = leadSelfDisclosureAvailable(step1Portal.intake);
-  const leadFormUnavailableHint = leadSelfDisclosureUnavailableHint(step1Portal.intake, tx);
+  // The patient form is filled from the sent request, or — staff enter the data
+  // themselves and nothing was sent — from the data GMED recorded (owner decision 2026-10-23).
+  const selfDisclosureIntake = step1Portal.intake ? { ...step1Portal.intake, fill_mode: step1Portal.mode } : step1Portal.intake;
+  const leadRequestSent = leadSelfDisclosureAvailable(selfDisclosureIntake);
+  const leadFormUnavailableHint = leadSelfDisclosureUnavailableHint(selfDisclosureIntake, tx);
+  const leadFormSourceNote = leadSelfDisclosureSourceNote(selfDisclosureIntake, tx);
   // Owner decision 2026-10-23, decided by the server: required in a new
   // patient's first onboarding, optional for a repeat order.
   const selfDisclosureRequirement = leadSelfDisclosureRequirement(lead?.readiness.checks);
@@ -8942,11 +8946,8 @@ ${serviceCommentLines.join("\n")}`
                         {leadSelfDisclosureRequirementLabel(selfDisclosureRequirement, tx)}
                       </StatusChip>
                     ) : null}
-                    <p className="text-xs leading-5 text-muted-foreground">
-                      {tx(
-                        "Ответы из кабинета. Подписывает пациент или законные представители вместе с договором, заказом и согласиями.",
-                        "Angaben aus dem Portal. Der Patient oder die gesetzlichen Vertreter unterschreiben zusammen mit Vertrag, Auftrag und Einwilligungen.",
-                      )}
+                    <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-wizard-self-disclosure-source">
+                      {leadFormSourceNote}
                     </p>
                     {leadFormUnavailableHint ? (
                       <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-wizard-self-disclosure-hint">
