@@ -164,6 +164,8 @@ function refusalText(text: LeadRequestText, code: string | undefined): string {
       return text.representativeIdentityLocked;
     case "representative_email_is_login":
       return text.representativeEmailLocked;
+    case "representative_email_staff":
+      return text.representativeEmailStaff;
     case "representative_email_duplicate":
       return text.representativeEmailDuplicate;
     case "email_invalid":
@@ -549,6 +551,11 @@ function RepresentativeBlock({
   const pickerLang = asLeadCabinetLang(lang) ?? undefined;
   const heading = representativeHeading(text, slot, Boolean(person?.mine), custody);
   const locked = Boolean(person?.email_locked);
+  // GMED entered the other parent's address: GMED changes it (owner 2026-10-23).
+  const staffEmail = person?.email_locked_reason === "staff";
+  const otherHasLogin = locked && !staffEmail;
+  // The other parent gets an own access only when GMED invites them; nothing is linked by itself.
+  const inviteHint = minor && custody !== "guardian" && request.access_kind === "guardian" && !person?.mine && !otherHasLogin;
   const proof = authorityProofOf(slot, custody);
   const fieldId = (field: RepresentativeField) => `lead-request-${slot}_${field}`;
   // The other parent this login entered stays editable (QA 2026-10-23: the date of birth locked after the first save).
@@ -738,6 +745,16 @@ function RepresentativeBlock({
               onChange={(event) => form.set("email", event.target.value)}
             />
             {form.errorFor("email") ? null : <EmailDomainWarning email={form.draft.email} lang={lang} enabled={!locked} />}
+            {staffEmail && !form.errorFor("email") ? (
+              <p className="text-xs text-muted-foreground" data-testid={`lead-request-${slot}-email-staff`}>
+                {text.representativeEmailStaff}
+              </p>
+            ) : null}
+            {inviteHint ? (
+              <p className="text-xs text-muted-foreground" data-testid={`lead-request-${slot}-invite-hint`}>
+                {text.representativeOtherParentInvite}
+              </p>
+            ) : null}
           </LabeledField>
         ) : null}
         {asked("phone") ? <LabeledField {...labeled("phone")}>{textInput("phone", 50, "tel")}</LabeledField> : null}

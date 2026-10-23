@@ -397,6 +397,8 @@ export type LeadRequestRepresentative = {
   mine: boolean;
   /** The e-mail is a sign-in address: only staff change it. */
   email_locked: boolean;
+  /** Why: the sign-in address of a login, or the address GMED entered for a parent without a login (2026-10-23). */
+  email_locked_reason?: "login" | "staff" | null;
   can_remove: boolean;
   /**
    * Name and date of birth are read-only here: another person's login, one
@@ -463,6 +465,7 @@ export type RepresentativePatch = Partial<
       | "relation"
       | "mine"
       | "email_locked"
+      | "email_locked_reason"
       | "can_remove"
       | "citizenships"
       | "identity_documents"

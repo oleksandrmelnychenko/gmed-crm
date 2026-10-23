@@ -1295,6 +1295,74 @@ async fn an_adult_under_guardianship_names_the_guardian_and_a_no_removes_the_per
     assert_eq!(missing_representation(&body), Vec::<String>::new());
 }
 
+/// Owner decision 2026-10-23: the address of a second parent staff entered
+/// decides the automatic link of an existing login, so the other parent's
+/// cabinet cannot change it while that parent has no login.
+#[tokio::test]
+async fn a_parent_cannot_change_the_address_staff_entered_for_the_other_parent() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let mother = Uuid::new_v4();
+    let father = Uuid::new_v4();
+    let father_email = address("ben.staff");
+    let lead_id = minor_lead(
+        &app,
+        json!([
+            { "id": mother, "name": "Anna Muster", "relation": "mother",
+              "email": address("anna.staff") },
+            { "id": father, "name": "Ben Muster", "relation": "father",
+              "email": father_email }
+        ]),
+    )
+    .await;
+    let (_, parent) = guardian_login(&app, lead_id, mother).await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let father_path = format!("{request}/representatives/{father}");
+
+    let (status, body) = json_request(router, "GET", &request, &parent, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let mine = representative(&body, mother);
+    assert_eq!(mine["email_locked"], true, "{mine}");
+    assert_eq!(mine["email_locked_reason"], "login", "{mine}");
+    let other = representative(&body, father);
+    assert_eq!(other["email_locked"], true, "{other}");
+    assert_eq!(other["email_locked_reason"], "staff", "{other}");
+
+    let (status, error) = json_request(
+        router,
+        "POST",
+        &father_path,
+        &parent,
+        Some(json!({ "email": address("someone.else") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["code"], "representative_email_staff", "{error}");
+    assert_eq!(error["field"], "email", "{error}");
+    let (status, error) = json_request(
+        router,
+        "POST",
+        &father_path,
+        &parent,
+        Some(json!({ "email": null })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["code"], "representative_email_staff", "{error}");
+
+    // The same address and the other fields still save.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &father_path,
+        &parent,
+        Some(json!({ "email": father_email, "city": "Berlin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(representative(&body, father)["email"], json!(father_email));
+}
+
 #[tokio::test]
 async fn both_parents_of_a_minor_are_asked_for_by_default() {
     let Some(app) = test_app().await else { return };

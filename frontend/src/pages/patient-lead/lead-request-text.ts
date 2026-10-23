@@ -407,6 +407,10 @@ export type LeadRequestText = {
   representativeInUse: string;
   representativeLimit: string;
   representativeEmailLocked: string;
+  /** The address of the other parent GMED entered: read-only in the cabinet (owner 2026-10-23). */
+  representativeEmailStaff: string;
+  /** Under the other parent without a login: GMED invites that parent; nothing happens by itself (owner 2026-10-23). */
+  representativeOtherParentInvite: string;
   /** Name and date of birth of another person with a login or entered by GMED (representative_not_yours). */
   representativeIdentityLocked: string;
   representativeEmailDuplicate: string;
@@ -1342,6 +1346,9 @@ const de: LeadRequestText = {
   representativeInUse: "Diese Person kann hier nicht entfernt werden. Bitte sprechen Sie uns an.",
   representativeLimit: "Für diese Anfrage kann keine weitere Person angegeben werden.",
   representativeEmailLocked: "Diese Adresse ist eine Anmeldeadresse und kann hier nicht geändert werden.",
+  representativeEmailStaff: "Diese Adresse hat GMED eingetragen; Änderungen nimmt GMED vor.",
+  representativeOtherParentInvite:
+    "Der andere Elternteil erhält einen eigenen Zugang, sobald GMED ihn dazu einlädt. Bitte geben Sie dafür seine E-Mail-Adresse an.",
   representativeIdentityLocked: "Name und Geburtsdatum dieser Person ändert nur sie selbst oder GMED.",
   representativeMinor: "Die vertretende Person muss volljährig sein (mindestens 18 Jahre).",
   representativeEmailDuplicate:
@@ -1892,6 +1899,9 @@ const ru: LeadRequestText = {
   representativeInUse: "Этого человека нельзя удалить здесь. Пожалуйста, свяжитесь с нами.",
   representativeLimit: "В этой заявке больше нельзя указать ни одного человека.",
   representativeEmailLocked: "Это адрес для входа, изменить его здесь нельзя.",
+  representativeEmailStaff: "Этот адрес внесла GMED; изменяет его GMED.",
+  representativeOtherParentInvite:
+    "Второй родитель получит собственный доступ, когда GMED пригласит его. Для этого укажите его адрес электронной почты.",
   representativeIdentityLocked: "Имя и дату рождения этого человека может изменить только он сам или GMED.",
   representativeMinor: "Представитель должен быть совершеннолетним (не младше 18 лет).",
   representativeEmailDuplicate:
@@ -2443,6 +2453,9 @@ const uk: LeadRequestText = {
   representativeInUse: "Цю людину не можна видалити тут. Будь ласка, зв'яжіться з нами.",
   representativeLimit: "У цій заявці більше не можна вказати жодної людини.",
   representativeEmailLocked: "Це адреса для входу, змінити її тут не можна.",
+  representativeEmailStaff: "Цю адресу внесла GMED; змінює її GMED.",
+  representativeOtherParentInvite:
+    "Другий з батьків отримає власний доступ, коли GMED запросить його. Для цього вкажіть його адресу електронної пошти.",
   representativeIdentityLocked: "Ім'я та дату народження цієї людини може змінити лише вона сама або GMED.",
   representativeMinor: "Представник має бути повнолітнім (щонайменше 18 років).",
   representativeEmailDuplicate:
@@ -2987,6 +3000,9 @@ const en: LeadRequestText = {
   representativeInUse: "This person cannot be removed here. Please contact us.",
   representativeLimit: "No further person can be named for this request.",
   representativeEmailLocked: "This is a sign-in address and cannot be changed here.",
+  representativeEmailStaff: "GMED entered this address; GMED changes it.",
+  representativeOtherParentInvite:
+    "The other parent gets their own access once GMED invites them. Please enter their e-mail address for this.",
   representativeIdentityLocked: "Only this person or GMED can change their name and date of birth.",
   representativeMinor: "The representative must be of full age (at least 18).",
   representativeEmailDuplicate:

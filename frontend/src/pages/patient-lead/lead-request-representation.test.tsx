@@ -110,3 +110,43 @@ describe("a minor's parent in the cabinet", () => {
     expect(html).toContain("lead-request-other-parent-document-needs-person");
   });
 });
+
+describe("the other parent's address (owner 2026-10-23)", () => {
+  function renderWith(representatives: LeadRequestRepresentative[]) {
+    const base = request(false);
+    return renderToStaticMarkup(
+      <RepresentationSection
+        request={{ ...base, representation: { ...base.representation!, representatives } }}
+        childAddress={{ street_address: "", zip_code: "", city: "", country: "" }}
+        text={leadRequestText("ru")}
+        lang="ru"
+        enqueue={(task) => task()}
+        onChange={() => undefined}
+        onSaveState={() => undefined}
+        mode="base"
+      />,
+    );
+  }
+
+  it("tells the parent that GMED invites the other parent", () => {
+    const html = renderWith([mother, father]);
+    expect(html).toContain("lead-request-rep2-invite-hint");
+    expect(html).toContain("когда GMED пригласит его");
+    expect(html).not.toContain("lead-request-rep1-invite-hint");
+    expect(html).not.toContain("lead-request-rep2-email-staff");
+  });
+
+  it("shows the address GMED entered read-only with who changes it", () => {
+    const html = renderWith([mother, { ...father, email: "ben@example.com", email_locked: true, email_locked_reason: "staff" }]);
+    expect(html).toContain("lead-request-rep2-email-staff");
+    expect(html).toContain("изменяет его GMED");
+    expect(html).toMatch(/<input[^>]*id="lead-request-rep2_email"[^>]*readOnly/i);
+    expect(html).toContain("lead-request-rep2-invite-hint");
+  });
+
+  it("drops the invitation once the other parent has an own login", () => {
+    const html = renderWith([mother, { ...father, email_locked: true, email_locked_reason: "login" }]);
+    expect(html).not.toContain("lead-request-rep2-invite-hint");
+    expect(html).not.toContain("lead-request-rep2-email-staff");
+  });
+});

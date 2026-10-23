@@ -329,6 +329,21 @@ impl Representative {
         !self.login_user_ids.is_empty()
     }
 
+    /// Staff entered the trusted contact with an address (the cabinet did not
+    /// create it) and it has no login yet. The address decides which patient
+    /// login the automatic parent link attaches to the request, so the
+    /// cabinet of a minor does not change it: GMED does (owner decision
+    /// 2026-10-23). An address staff left empty the cabinet may still add,
+    /// otherwise the request could not be sent.
+    pub(crate) fn email_set_by_staff(&self) -> bool {
+        !self.has_login()
+            && self.extras.contact_origin != ORIGIN_PORTAL
+            && self
+                .email
+                .as_deref()
+                .is_some_and(|email| !email.trim().is_empty())
+    }
+
     /// A guardian (Vormund, Pfleger) of a minor rather than a parent: the
     /// custody says so, or the relation of the contact does.
     pub(crate) fn is_guardian_of_minor(&self, custody: &str) -> bool {
@@ -1393,7 +1408,21 @@ pub(crate) fn portal_payload(loaded: &Loaded, user_id: Uuid) -> Value {
                 "mine".into(),
                 json!(person.login_user_ids.contains(&user_id)),
             );
-            value.insert("email_locked".into(), json!(person.has_login()));
+            let staff_email = loaded.representation.minor && person.email_set_by_staff();
+            value.insert(
+                "email_locked".into(),
+                json!(person.has_login() || staff_email),
+            );
+            value.insert(
+                "email_locked_reason".into(),
+                json!(if person.has_login() {
+                    Some("login")
+                } else if staff_email {
+                    Some("staff")
+                } else {
+                    None
+                }),
+            );
             value.insert("can_remove".into(), json!(loaded.can_remove(person)));
             value.insert(
                 "identity_locked".into(),
@@ -2772,6 +2801,16 @@ pub(crate) async fn upsert_my_representative(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "representative_email_is_login",
                 "This address is the login; GMED changes it on request",
+                json!({ "field": "email" }),
+            );
+        }
+        // The address of a parent staff entered decides the automatic link
+        // of an existing login: the cabinet cannot redirect it.
+        if representation.minor && known.is_some_and(Representative::email_set_by_staff) {
+            return intake::coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "representative_email_staff",
+                "GMED entered this address; GMED changes it on request",
                 json!({ "field": "email" }),
             );
         }
