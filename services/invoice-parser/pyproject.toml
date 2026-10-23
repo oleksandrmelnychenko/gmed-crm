@@ -5,22 +5,22 @@ description = "Local invoice OCR and review drafts for GMED"
 requires-python = ">=3.12"
 dependencies = [
   "invoice2data==1.0.1",
-  "fastapi>=0.115,<1",
-  "uvicorn>=0.34,<1",
-  "pydantic>=2.10,<3",
-  "psutil>=7,<8",
-  "pypdf==6.19.0",
-  "pypdfium2>=4.30,<5",
+  "fastapi>=0.161,<1",
+  "uvicorn>=0.54,<1",
+  "pydantic>=2.14,<3",
+  "psutil>=7.2,<8",
+  "pypdf==6.21.2",
+  "pypdfium2>=5.14,<6",
   "pytesseract>=0.3.13,<1",
   "Pillow>=13,<14",
   "defusedxml==0.7.1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10", "httpx>=0.28,<1"]
+dev = ["pytest>=9.1,<10", "httpx>=0.28,<1"]
 
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=84"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]

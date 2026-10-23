@@ -7,10 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HF_HUB_DISABLE_TELEMETRY=1
 
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.14.0 \
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 \
     && pip install --no-cache-dir \
        transformers==4.57.6 sentencepiece==0.2.2 sacremoses==0.2.0 \
-       huggingface_hub==0.36.2 ctranslate2==4.8.2
+       huggingface_hub==0.36.2 ctranslate2==4.8.3
 
 WORKDIR /build
 COPY app/mt_models.py app/build_mt_models.py ./app/
