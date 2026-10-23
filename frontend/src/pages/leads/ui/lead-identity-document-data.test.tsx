@@ -16,6 +16,7 @@ import {
   identityDocumentFieldErrors,
   identityDocumentInput,
   identityDocumentMissing,
+  identityDocumentSavableDraft,
   identityDocumentSourceIsStale,
   identityDocumentStatus,
   identityDocumentStatusText,
@@ -151,6 +152,20 @@ describe("identity document data entered by staff", () => {
     expect(at({ ...draft, validUntil: "2026-10-07" }).kind).toBe("complete");
     expect(at({ ...draft, number: "AB" }).kind).toBe("invalid");
     expect(identityDocumentStatusText(at(draft, null), de)).toBe("Daten vollständig · gültig bis 31.01.2031");
+  });
+
+  it("sends the good fields and keeps the stored value of a wrong one", () => {
+    const rules = { today: "2026-10-07", birthDate: "1990-05-01" };
+    const storedDraft = identityDocumentDraft({ ...stored, id_document_number: null, id_issuing_authority: null });
+    const typed = { ...storedDraft, number: "АБ123456", authority: "Bürgeramt Mitte", country: "DE" };
+    expect(identityDocumentSavableDraft(typed, storedDraft, rules)).toEqual({ ...typed, number: "" });
+    // Nothing wrong: the typed values themselves.
+    const good = { ...typed, number: "AB123456" };
+    expect(identityDocumentSavableDraft(good, storedDraft, rules)).toBe(good);
+    // A wrong issue date goes back to the stored one; the expiry still fits it.
+    expect(identityDocumentSavableDraft({ ...good, issuedOn: "2027-01-01" }, storedDraft, rules)?.issuedOn).toBe("2015-05-01");
+    // Expiry before the stored issue date: the expiry keeps its stored value.
+    expect(identityDocumentSavableDraft({ ...good, validUntil: "2014-01-01" }, storedDraft, rules)?.validUntil).toBe(storedDraft.validUntil);
   });
 
   it("knows a reload older than the last save", () => {

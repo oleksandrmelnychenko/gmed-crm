@@ -14,6 +14,7 @@ import {
   saveLeadIdentityDocumentData,
   saveRepresentativeIdentityDocumentData,
   type IdentityDocumentDataInput,
+  type IdentityDocumentSaveOptions,
   type RepresentativeUploadKind,
 } from "../data/lead-risk-api";
 import type { LeadCustody, LeadPortalIntake, LeadRepresentative } from "../data/lead-portal-intake-api";
@@ -24,6 +25,7 @@ import {
   identityDocumentEnteredLine,
   identityDocumentFieldErrors,
   identityDocumentInput,
+  identityDocumentSavableDraft,
   identityDocumentServerError,
   identityDocumentSourceIsStale,
   identityDocumentStatus,
@@ -51,6 +53,9 @@ const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
 const POPUP_SELECTOR = '[data-overlay-interaction-root], .MuiPopper-root, .MuiPickersPopper-root, .MuiDialog-root, [role="listbox"]';
 
 type SaveState = "idle" | "saving" | "saved" | "error";
+
+/** How long after the last edit the form stores by itself. */
+export const IDENTITY_AUTOSAVE_DELAY_MS = 800;
 
 const STATUS_TONE: Record<IdentityDocumentStatus["kind"], StatusChipTone> = {
   no_scan: "warning",
@@ -118,12 +123,17 @@ function FormField({
  * The identity document data of one person, entered by staff from the scan:
  * type, number, authority, country, issued, valid until and "Ausweis
  * unleserlich". One status line says where the document stands and what is
- * next; each field says what breaks a rule. The data are stored when staff
- * leave the form (opening a list or a calendar is no leaving) or with
- * "Сохранить" while something is unsaved. A save in progress never locks the
- * fields, a second save waits for the first, and a late reload of an older
- * state never replaces what staff typed or what the last save stored
- * (DEV 2026-10-22: number, authority and country were lost).
+ * next; each field says what breaks a rule.
+ *
+ * Every edit is stored by itself shortly after the last keystroke, list
+ * choice or calendar pick, and at once when staff leave the form, fold the
+ * card, switch the step, close the wizard or leave the page (DEV 2026-10-22:
+ * only the type reached the server, every later edit was lost while staff
+ * stayed in the form or left it through a list, a calendar or the wizard).
+ * Saves run one at a time, always with the latest typed values; a field that
+ * breaks a rule keeps its error and its stored value while the other fields
+ * are sent; a save never locks the fields; and neither a save's answer nor a
+ * late reload of an older state replaces what staff typed since.
  */
 export function LeadIdentityDocumentDataForm({
   source,
@@ -141,7 +151,7 @@ export function LeadIdentityDocumentDataForm({
   /** The wizard's old "passport valid until", read only while nothing is stored in the new place. */
   fallbackValidUntil?: string;
   /** Stores the data; resolves with the stored document (the server's answer). */
-  save: (input: IdentityDocumentDataInput) => Promise<unknown>;
+  save: (input: IdentityDocumentDataInput, options?: IdentityDocumentSaveOptions) => Promise<unknown>;
   tx: Tx;
   lang: string;
   disabled?: boolean;
@@ -156,20 +166,40 @@ export function LeadIdentityDocumentDataForm({
   const savedKey = JSON.stringify(identityDocumentDraft(source, fallbackValidUntil));
   const saved = useMemo(() => JSON.parse(savedKey) as IdentityDocumentDraft, [savedKey]);
   const sourceAt = source?.id_data_entered_at ?? null;
-  const [draft, setDraft] = useState<IdentityDocumentDraft>(saved);
+  const [draft, setDraftState] = useState<IdentityDocumentDraft>(saved);
   const [baseline, setBaseline] = useState<IdentityDocumentDraft>(saved);
   const [marks, setMarks] = useState<LeadStaffIdDataMarks | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState("");
-  const [serverErrors, setServerErrors] = useState<IdentityDocumentErrors>({});
+  const [serverErrors, setServerErrorsState] = useState<IdentityDocumentErrors>({});
   const [touched, setTouched] = useState<ReadonlySet<IdentityDocumentField>>(() => new Set());
   const [showAll, setShowAll] = useState(false);
+  // The refs are what a save reads: a timer, an unmount or a page leave may
+  // run after the render that scheduled it.
   const draftRef = useRef(draft);
   const baselineRef = useRef(saved);
   const baselineAtRef = useRef<string | null>(sourceAt);
+  const serverErrorsRef = useRef<IdentityDocumentErrors>({});
+  const rulesRef = useRef({ today, birthDate });
+  rulesRef.current = { today, birthDate };
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const txRef = useRef(tx);
+  txRef.current = tx;
   const inFlightRef = useRef(false);
   const pendingRef = useRef(false);
-  draftRef.current = draft;
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  const flushRef = useRef<(options?: IdentityDocumentSaveOptions) => void>(() => undefined);
+
+  const setDraft = (next: IdentityDocumentDraft) => {
+    draftRef.current = next;
+    setDraftState(next);
+  };
+  const setServerErrors = (next: IdentityDocumentErrors) => {
+    serverErrorsRef.current = next;
+    setServerErrorsState(next);
+  };
 
   // A newer server state replaces the form unless staff typed over the last
   // known one; an older one (a reload that overtook a later save) is ignored.
@@ -180,11 +210,118 @@ export function LeadIdentityDocumentDataForm({
     baselineAtRef.current = sourceAt ?? baselineAtRef.current;
     setBaseline(saved);
     setMarks(null);
-    setDraft((current) => (identityDocumentDraftChanged(current, previous) ? current : saved));
+    const current = draftRef.current;
+    const next = identityDocumentDraftChanged(current, previous) ? current : saved;
+    draftRef.current = next;
+    setDraftState(next);
   }, [saved, sourceAt]);
+
+  const clearTimer = () => {
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = null;
+  };
+
+  /**
+   * Stores what is unsaved now, one save at a time: a call during a save
+   * runs once that save is answered, with the values typed by then. Runs
+   * after the form is gone too (unmount, page leave).
+   */
+  const flush = useCallback((options: IdentityDocumentSaveOptions & { reveal?: boolean } = {}) => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (inFlightRef.current) {
+      pendingRef.current = true;
+      return;
+    }
+    const current = draftRef.current;
+    const stored = baselineRef.current;
+    if (!identityDocumentDraftChanged(current, stored)) return;
+    // A field the server refused keeps its stored value until it is edited.
+    const refused = Object.keys(serverErrorsRef.current) as IdentityDocumentField[];
+    const typed = refused.reduce<IdentityDocumentDraft>((next, field) => ({ ...next, [field]: stored[field] }), current);
+    const sendable = identityDocumentSavableDraft(typed, stored, rulesRef.current);
+    if (options.reveal && sendable !== current && mountedRef.current) setShowAll(true);
+    if (!sendable || !identityDocumentDraftChanged(sendable, stored)) return;
+    const input = identityDocumentInput(sendable);
+    const sent = draftOfInput(input);
+    inFlightRef.current = true;
+    if (mountedRef.current) {
+      setSaveState("saving");
+      setError("");
+    }
+    const keepalive = options.keepalive ? { keepalive: true } : undefined;
+    void saveRef.current(input, keepalive)
+      .then((response) => {
+        const answer = isSource(response) ? identityDocumentDraft(response) : sent;
+        baselineRef.current = answer;
+        if (isSource(response) && response.id_data_entered_at) baselineAtRef.current = response.id_data_entered_at;
+        // What was sent is shown as stored ("fa 12" → "FA 12"); later typing stays.
+        if (!identityDocumentDraftChanged(draftRef.current, sent)) draftRef.current = answer;
+        if (!mountedRef.current) return;
+        setBaseline(answer);
+        if (isSource(response)) setMarks(response);
+        setDraftState(draftRef.current);
+        // A field the server refused before stays marked: it was not sent.
+        setSaveState("saved");
+      })
+      .catch((saveError: unknown) => {
+        const field = identityDocumentServerError(saveError);
+        if (field?.field) {
+          serverErrorsRef.current = { ...serverErrorsRef.current, [field.field]: field.code } as IdentityDocumentErrors;
+        }
+        if (!mountedRef.current) return;
+        if (field?.field) {
+          setServerErrorsState(serverErrorsRef.current);
+          setError("");
+        } else {
+          setError(saveError instanceof Error && saveError.message ? saveError.message : txRef.current("Не удалось сохранить", "Speichern fehlgeschlagen"));
+        }
+        setSaveState("error");
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        if (pendingRef.current) {
+          pendingRef.current = false;
+          flushRef.current({ keepalive: options.keepalive });
+        }
+      });
+  }, []);
+  flushRef.current = flush;
+
+  /** Stores the edits a moment after the last one (typing, a list choice, a calendar pick). */
+  const schedule = () => {
+    clearTimer();
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      flush();
+    }, IDENTITY_AUTOSAVE_DELAY_MS);
+  };
+
+  // Folding the card keeps the form; leaving the step, closing the wizard or
+  // the page stores what is still unsaved, without waiting for the timer.
+  useEffect(() => {
+    mountedRef.current = true;
+    const leavePage = () => flush({ keepalive: true });
+    const hidePage = () => {
+      if (document.visibilityState === "hidden") flush({ keepalive: true });
+    };
+    window.addEventListener("pagehide", leavePage);
+    window.addEventListener("beforeunload", leavePage);
+    document.addEventListener("visibilitychange", hidePage);
+    return () => {
+      window.removeEventListener("pagehide", leavePage);
+      window.removeEventListener("beforeunload", leavePage);
+      document.removeEventListener("visibilitychange", hidePage);
+      mountedRef.current = false;
+      flush();
+    };
+  }, [flush]);
 
   const clientErrors = identityDocumentFieldErrors(draft, { today, birthDate });
   const changed = identityDocumentDraftChanged(draft, baseline);
+  const blocked = Object.keys(clientErrors).length > 0 || Object.keys(serverErrors).length > 0;
   const fieldError = (field: IdentityDocumentField) => {
     const server = serverErrors[field];
     if (server) return identityFieldErrorText(server, tx);
@@ -195,79 +332,20 @@ export function LeadIdentityDocumentDataForm({
     setTouched((current) => (current.has(field) ? current : new Set(current).add(field)));
   const patch = (next: Partial<IdentityDocumentDraft>) => {
     setSaveState((state) => (state === "saved" ? "idle" : state));
-    setServerErrors((current) => {
-      const keys = Object.keys(next) as IdentityDocumentField[];
-      if (!keys.some((key) => key in current)) return current;
-      const rest = { ...current };
+    const keys = Object.keys(next) as IdentityDocumentField[];
+    if (keys.some((key) => key in serverErrorsRef.current)) {
+      const rest = { ...serverErrorsRef.current };
       for (const key of keys) delete rest[key];
-      return rest;
-    });
-    setDraft((current) => ({ ...current, ...next }));
+      setServerErrors(rest);
+    }
+    setDraft({ ...draftRef.current, ...next });
+    schedule();
   };
-
-  const saveRef = useRef(save);
-  saveRef.current = save;
-  const submit = useCallback(async () => {
-    if (disabled) return;
-    if (inFlightRef.current) {
-      pendingRef.current = true;
-      return;
-    }
-    const current = draftRef.current;
-    if (!identityDocumentDraftChanged(current, baselineRef.current)) return;
-    if (Object.keys(identityDocumentFieldErrors(current, { today, birthDate })).length > 0) {
-      setShowAll(true);
-      return;
-    }
-    const input = identityDocumentInput(current);
-    const sent = draftOfInput(input);
-    inFlightRef.current = true;
-    setSaveState("saving");
-    setError("");
-    try {
-      const response = await saveRef.current(input);
-      const stored = isSource(response) ? identityDocumentDraft(response) : sent;
-      baselineRef.current = stored;
-      if (isSource(response) && response.id_data_entered_at) baselineAtRef.current = response.id_data_entered_at;
-      setBaseline(stored);
-      if (isSource(response)) setMarks(response);
-      // What was sent is shown as stored ("fa 12" → "FA 12"); later typing stays.
-      setDraft((latest) => (identityDocumentDraftChanged(latest, sent) ? latest : stored));
-      setServerErrors({});
-      setSaveState("saved");
-    } catch (saveError) {
-      const field = identityDocumentServerError(saveError);
-      if (field?.field) {
-        setServerErrors({ [field.field]: field.code } as IdentityDocumentErrors);
-        setError("");
-      } else {
-        setError(saveError instanceof Error && saveError.message ? saveError.message : tx("Не удалось сохранить", "Speichern fehlgeschlagen"));
-      }
-      setSaveState("error");
-      pendingRef.current = false;
-    } finally {
-      inFlightRef.current = false;
-      if (pendingRef.current) {
-        pendingRef.current = false;
-        void submitRef.current();
-      }
-    }
-  }, [birthDate, disabled, today, tx]);
-  const submitRef = useRef(submit);
-  submitRef.current = submit;
-
-  // Leaving the step or closing the card stores what is still unsaved.
-  useEffect(
-    () => () => {
-      if (identityDocumentDraftChanged(draftRef.current, baselineRef.current)) void submitRef.current();
-    },
-    [],
-  );
 
   const saveOnLeave = (event: FocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget;
     if (next instanceof Element && (event.currentTarget.contains(next) || next.closest(POPUP_SELECTOR))) return;
-    void submit();
+    flush({ reveal: true });
   };
 
   const status = identityDocumentStatus(draft, { today, scans: scanCount, errors: { ...clientErrors, ...serverErrors } });
@@ -395,7 +473,9 @@ export function LeadIdentityDocumentDataForm({
           ) : changed ? (
             <>
               <span className={cn("text-xs font-medium", WARNING_TEXT)} role="status" data-testid={`${testId}-unsaved`}>
-                {tx("Не сохранено · сохранится при выходе из формы", "Nicht gespeichert · wird beim Verlassen gespeichert")}
+                {blocked
+                  ? tx("Не сохранено · исправьте поля, отмеченные красным", "Nicht gespeichert · rot markierte Felder korrigieren")
+                  : tx("Не сохранено · сохранится автоматически", "Nicht gespeichert · wird automatisch gespeichert")}
               </span>
               <Button
                 type="button"
@@ -405,7 +485,7 @@ export function LeadIdentityDocumentDataForm({
                 disabled={disabled}
                 onClick={() => {
                   setShowAll(true);
-                  void submit();
+                  flush({ reveal: true });
                 }}
                 data-testid={`${testId}-save`}
               >
@@ -505,8 +585,8 @@ function RepresentativeForm({
           birthDate={person.date_of_birth}
           scanCount={person.identity_documents.length}
           testId={`lead-representative-id-data-${person.id}`}
-          save={async (input) => {
-            const stored = await saveRepresentativeIdentityDocumentData(leadId, person.id, input);
+          save={async (input, options) => {
+            const stored = await saveRepresentativeIdentityDocumentData(leadId, person.id, input, options);
             onSaved();
             return stored;
           }}
@@ -598,8 +678,8 @@ export function LeadIdentityDocumentData({
         birthDate={patientBirthDate}
         scanCount={patientScanCount}
         testId="lead-id-data"
-        save={async (input) => {
-          const stored = await saveLeadIdentityDocumentData(leadId, input);
+        save={async (input, options) => {
+          const stored = await saveLeadIdentityDocumentData(leadId, input, options);
           onSaved();
           return stored;
         }}

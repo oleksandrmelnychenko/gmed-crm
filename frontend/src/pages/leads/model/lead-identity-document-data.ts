@@ -156,6 +156,30 @@ export function identityDocumentFieldErrors(
   return errors;
 }
 
+/**
+ * What a save may send: the typed values, except a field that breaks a rule,
+ * which keeps its stored value (it stays typed in the form with its error).
+ * One wrong field never holds back the others (DEV 2026-10-22: the number,
+ * the authority and the country never reached the server). `null` when even
+ * the stored values do not fit together with the typed ones.
+ */
+export function identityDocumentSavableDraft(
+  draft: IdentityDocumentDraft,
+  stored: IdentityDocumentDraft,
+  rules: { today: string; birthDate?: string | null },
+): IdentityDocumentDraft | null {
+  let candidate = draft;
+  // A replaced date can make the other date wrong: a few rounds settle it.
+  for (let round = 0; round < 3; round += 1) {
+    const fields = Object.keys(identityDocumentFieldErrors(candidate, rules)) as IdentityDocumentField[];
+    if (fields.length === 0) return candidate;
+    const next = { ...candidate };
+    for (const field of fields) next[field] = stored[field];
+    candidate = next;
+  }
+  return Object.keys(identityDocumentFieldErrors(candidate, rules)).length === 0 ? candidate : null;
+}
+
 /** The required fields still empty, in form order. */
 export function identityDocumentMissing(draft: IdentityDocumentDraft): IdentityDocumentField[] {
   return ID_DOCUMENT_REQUIRED.filter((field) => !draft[field].trim());

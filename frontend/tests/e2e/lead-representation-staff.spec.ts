@@ -216,6 +216,8 @@ type Mock = {
   idSaveDelayMs?: number;
   /** The portal state asked right after the first document save answers this late. */
   staleIntakeMs?: number;
+  /** The patient's stored document data (the portal state's identification). */
+  patientId?: Json;
 };
 
 async function mount(page: Page, mock: Mock) {
@@ -279,7 +281,10 @@ async function mount(page: Page, mock: Mock) {
     removedContacts: [] as string[],
     /** Bodies of the document data saves of a representative. */
     idSaves: [] as Array<{ id: string; body: Json }>,
+    /** Bodies of the document data saves of the patient. */
+    patientIdSaves: [] as Json[],
   };
+  let patientIdentification: Json = { birth_place: "Berlin", birth_country: "DE", contact_channels: ["email"], ...mock.patientId };
   let lateIntakeSent = false;
   await page.addInitScript((value) => {
     localStorage.setItem("gmed_lang", value);
@@ -295,6 +300,14 @@ async function mount(page: Page, mock: Mock) {
     const contactRemoval = path.match(/^\/leads\/[^/]+\/trusted-contacts\/([^/]+)$/);
     const idData = path.match(/^\/leads\/[^/]+\/representatives\/([^/]+)\/identity-document-data$/);
     let response: unknown = [];
+    if (path === `/leads/${leadId}/identity-document-data` && method === "PUT") {
+      const body = request.postDataJSON() as Json;
+      calls.patientIdSaves.push(body);
+      if (mock.idSaveDelayMs) await new Promise((resolve) => setTimeout(resolve, mock.idSaveDelayMs));
+      patientIdentification = { ...patientIdentification, ...body, id_data_entered_by_name: "Intake QA", id_data_entered_at: new Date().toISOString() };
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(patientIdentification) });
+      return;
+    }
     if (idData && method === "PUT") {
       const body = request.postDataJSON() as Json;
       calls.idSaves.push({ id: idData[1], body });
@@ -358,7 +371,7 @@ async function mount(page: Page, mock: Mock) {
         minor: true,
         can_issue: true,
         can_review_uploads: true,
-        identification: { birth_place: "Berlin", birth_country: "DE", contact_channels: ["email"] },
+        identification: patientIdentification,
         identification_updated_at: "2026-10-05T09:20:00Z",
         identity_documents: [],
         representation,
@@ -1027,11 +1040,10 @@ test("a parent's typed document data are saved whole and stay in the form", asyn
   await outside.click();
   await expect.poll(() => calls.idSaves.length).toBe(1);
   expect(calls.idSaves[0].body).toMatchObject({ id_document_number: "C01X00T47", id_issuing_country: null });
-  // Opening the country list is no leaving: nothing half-typed is sent.
+  // The authority and the country from the list are stored by themselves.
   await form.locator('input[name="id_issuing_authority"]').fill("Bürgeramt Mitte");
   await chooseComboboxOption(page, form.getByRole("combobox", { name: "Страна выдачи" }), /^Германия$/);
-  expect(calls.idSaves).toHaveLength(1);
-  await form.getByTestId(`lead-representative-id-data-${BEN_ID}-save`).click();
+  await expect.poll(() => calls.idSaves.at(-1)?.body.id_issuing_country).toBe("DE");
   await expect(form.getByTestId(`lead-representative-id-data-${BEN_ID}-saved`)).toBeVisible();
   // The late reload of the first save (only the number) must not reset the form.
   await page.waitForTimeout(3000);
@@ -1067,4 +1079,172 @@ test("a parent's typed document data are saved whole and stay in the form", asyn
   await expect(form.getByTestId(`lead-representative-id-data-${BEN_ID}-unsaved`)).toBeVisible();
   await page.waitForTimeout(500);
   expect(calls.idSaves).toHaveLength(saves);
+});
+
+// DEV 2026-10-22 (lead "Linda Testova"): the type was stored alone and every
+// later edit of the patient's and the parent's document data never reached
+// the server. Staff fill the form as people do — the type from the list, the
+// number and the authority typed key by key, the country from the list, the
+// dates from the calendar and typed as DD.MM.YYYY — and then leave in one of
+// the usual ways. Whatever was typed last is what the server keeps.
+const FULL_DOCUMENT = {
+  id_document_type: "id_card",
+  id_document_number: "C01X00T47",
+  id_issuing_authority: "Bürgeramt Mitte",
+  id_issuing_country: "DE",
+  id_issued_on: "2021-10-01",
+  id_valid_until: "2031-10-31",
+  id_document_unreadable: false,
+};
+
+async function typeDate(page: Page, group: ReturnType<Page["getByRole"]>, value: string) {
+  await group.getByRole("spinbutton", { name: /^(День|Tag)$/ }).focus();
+  await page.keyboard.type(value.replaceAll(".", ""), { delay: 15 });
+}
+
+async function fillLikeStaff(page: Page, form: ReturnType<Page["getByTestId"]>) {
+  await chooseComboboxOption(page, form.getByRole("combobox", { name: "Вид документа" }), /^Удостоверение личности$/);
+  const number = form.locator('input[name="id_document_number"]');
+  await number.click();
+  await number.pressSequentially("c01x00t47", { delay: 15 });
+  await chooseComboboxOption(page, form.getByRole("combobox", { name: "Страна выдачи" }), /^Германия$/);
+  const authority = form.locator('input[name="id_issuing_authority"]');
+  await authority.click();
+  await authority.pressSequentially("Bürgeramt Mitte", { delay: 15 });
+  await typeDate(page, form.getByRole("group", { name: "Дата выдачи" }), "01.10.2021");
+  // "Valid until" first from the calendar, then corrected by typing.
+  const validUntil = form.getByRole("group", { name: "Действителен до" });
+  await validUntil.locator("..").getByRole("button").click();
+  await page.getByRole("grid").last().getByRole("gridcell", { name: "20", exact: true }).first().click();
+  await expect(validUntil).toContainText("20");
+  await typeDate(page, validUntil, "31.10.2031");
+  await expect(validUntil).toContainText("31.10.2031");
+}
+
+async function expectFormShows(form: ReturnType<Page["getByTestId"]>) {
+  await expect(form.getByRole("combobox", { name: "Вид документа" })).toContainText("Удостоверение личности");
+  await expect(form.locator('input[name="id_document_number"]')).toHaveValue("C01X00T47");
+  await expect(form.locator('input[name="id_issuing_authority"]')).toHaveValue("Bürgeramt Mitte");
+  await expect(form.getByRole("combobox", { name: "Страна выдачи" })).toContainText("Германия");
+  await expect(form.getByRole("group", { name: "Дата выдачи" })).toContainText("01.10.2021");
+  await expect(form.getByRole("group", { name: "Действителен до" })).toContainText("31.10.2031");
+}
+
+const ID_FORMS = {
+  patient: { testId: "lead-id-data", saves: (calls: { patientIdSaves: Json[] }) => calls.patientIdSaves },
+  parent: {
+    testId: `lead-representative-id-data-${BEN_ID}`,
+    saves: (calls: { idSaves: Array<{ id: string; body: Json }> }) => calls.idSaves.filter((call) => call.id === BEN_ID).map((call) => call.body),
+  },
+} as const;
+
+type IdExit = "stay" | "outside" | "collapse" | "step" | "close";
+const ID_EXITS: Array<[keyof typeof ID_FORMS, IdExit]> = [
+  ["patient", "stay"],
+  ["patient", "outside"],
+  ["patient", "step"],
+  ["patient", "close"],
+  ["parent", "stay"],
+  ["parent", "outside"],
+  ["parent", "collapse"],
+  ["parent", "step"],
+  ["parent", "close"],
+];
+
+for (const [who, exit] of ID_EXITS) {
+  test(`the ${who}'s document data typed like staff do reach the server (${exit})`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    const { wizard, calls, openDocuments } = await mount(page, {
+      lang: "ru",
+      idSaveDelayMs: 250,
+      // As on DEV: Ben's passport with the dates only.
+      benPartialId: true,
+    });
+    const target = ID_FORMS[who];
+    const saves = () => target.saves(calls);
+    const formOf = () => wizard.getByTestId(target.testId);
+    const form = formOf();
+    if (who === "parent") {
+      const card = form.locator("xpath=ancestor::details[1]");
+      if (!(await card.evaluate((node) => (node as HTMLDetailsElement).open))) await card.locator("summary").click();
+    }
+    await expect(form).toBeVisible();
+    await fillLikeStaff(page, form);
+    const status = (suffix: string) => form.getByTestId(`${target.testId}-${suffix}`);
+
+    if (exit === "stay") {
+      // Nobody leaves: the form stores the edits by itself after a pause.
+      await expect.poll(saves, { timeout: 5_000 }).toContainEqual(FULL_DOCUMENT);
+      await expect(status("saved")).toBeVisible();
+      await expect(status("unsaved")).toHaveCount(0);
+    } else if (exit === "outside") {
+      await wizard.getByTestId("lead-identity-document-data").locator("h4").first().click();
+      await expect(status("saved")).toBeVisible();
+      await expect(status("unsaved")).toHaveCount(0);
+    } else if (exit === "collapse") {
+      await form.locator("xpath=ancestor::details[1]").locator("summary").click();
+      await expect(form).toBeHidden();
+    } else if (exit === "step") {
+      await wizard.locator('[role="tab"][data-step="master_data"]').click();
+      await expect(wizard.locator('[role="tab"][data-step="master_data"]')).toHaveAttribute("aria-selected", "true");
+    } else {
+      await wizard.getByRole("button", { name: /^(Закрыть|Schließen|Close)$/ }).first().click();
+      await expect(wizard).toBeHidden();
+    }
+    await expect.poll(() => saves().at(-1), { timeout: 5_000 }).toEqual(FULL_DOCUMENT);
+    // Nothing older is sent after the full document.
+    await page.waitForTimeout(1_200);
+    expect(saves().at(-1)).toEqual(FULL_DOCUMENT);
+
+    // Back in the form, the stored values are shown.
+    if (exit === "close") {
+      await page.getByRole("button", { name: "Lead intake", exact: true }).click();
+      await openDocuments();
+    } else if (exit === "step") {
+      await openDocuments();
+    }
+    const again = formOf();
+    if (who === "parent") {
+      const card = again.locator("xpath=ancestor::details[1]");
+      if (!(await card.evaluate((node) => (node as HTMLDetailsElement).open))) await card.locator("summary").click();
+    }
+    await expectFormShows(again);
+    await expect(again.getByTestId(`${target.testId}-unsaved`)).toHaveCount(0);
+  });
+}
+
+test("one wrong field never holds back the other document data", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard, calls } = await mount(page, { lang: "ru", benPartialId: true });
+  const testId = `lead-representative-id-data-${BEN_ID}`;
+  const form = wizard.getByTestId(testId);
+  const card = form.locator("xpath=ancestor::details[1]");
+  if (!(await card.evaluate((node) => (node as HTMLDetailsElement).open))) await card.locator("summary").click();
+  const saves = () => calls.idSaves.filter((call) => call.id === BEN_ID).map((call) => call.body);
+  // A Cyrillic number (typed in the wrong keyboard layout) next to good data.
+  const number = form.locator('input[name="id_document_number"]');
+  await number.click();
+  await number.pressSequentially("АВ123456", { delay: 15 });
+  const authority = form.locator('input[name="id_issuing_authority"]');
+  await authority.click();
+  await authority.pressSequentially("Bürgeramt Mitte", { delay: 15 });
+  await chooseComboboxOption(page, form.getByRole("combobox", { name: "Страна выдачи" }), /^Германия$/);
+  await wizard.getByTestId("lead-identity-document-data").locator("h4").first().click();
+  // The good fields are stored; the wrong number is not sent, stays typed and says why.
+  await expect.poll(() => saves().at(-1)).toMatchObject({
+    id_document_number: null,
+    id_issuing_authority: "Bürgeramt Mitte",
+    id_issuing_country: "DE",
+  });
+  expect(saves().every((body) => body.id_document_number === null)).toBe(true);
+  await expect(number).toHaveValue("АВ123456");
+  await expect(form.getByText("Только латинские буквы A–Z, цифры, пробел, «-» и «<»")).toBeVisible();
+  await expect(form.getByTestId(`${testId}-unsaved`)).toContainText("исправьте поля");
+  await expect(form.getByTestId(`${testId}-saved`)).toHaveCount(0);
+  // Corrected, it is stored by itself.
+  await number.fill("");
+  await number.pressSequentially("AB123456", { delay: 15 });
+  await expect.poll(() => saves().at(-1)?.id_document_number).toBe("AB123456");
+  await expect(form.getByTestId(`${testId}-saved`)).toBeVisible();
+  await expect(form.getByTestId(`${testId}-unsaved`)).toHaveCount(0);
 });

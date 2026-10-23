@@ -325,8 +325,7 @@ test("level 2: staff see points and level, request more and release with a reaso
   await idForm.scrollIntoViewIfNeeded();
   await idForm.locator('input[name="id_document_number"]').fill("FA1234567");
   await idForm.getByLabel("Документ нечитаем (запросить новый скан)").check();
-  await idForm.getByTestId("lead-id-data-save").click();
-  await expect.poll(() => calls.find((call) => call.path === `/leads/${leadId}/identity-document-data`)?.body).toEqual({
+  await expect.poll(() => calls.filter((call) => call.path === `/leads/${leadId}/identity-document-data`).at(-1)?.body).toEqual({
     id_document_type: "passport",
     id_document_number: "FA1234567",
     id_issuing_authority: null,
@@ -338,14 +337,13 @@ test("level 2: staff see points and level, request more and release with a reaso
   expect(calls.find((call) => call.path === `/leads/${leadId}/identity-document-data`)?.method).toBe("PUT");
   await page.screenshot({ path: testInfo.outputPath("lead-id-data.png"), animations: "disabled" });
 
-  // Typed data are stored when staff leave the form, without the button
+  // Typed data are stored by themselves, without the button
   // (DEV 2026-10-22: a parent's data looked filled but were never sent).
   const idSaves = () => calls.filter((call) => call.path === `/leads/${leadId}/identity-document-data`);
   await idForm.locator('input[name="id_issuing_authority"]').fill("Passamt 8031");
   await expect(idForm.getByTestId("lead-id-data-unsaved")).toBeVisible();
-  await idForm.locator('input[name="id_issuing_authority"]').blur();
-  await expect.poll(() => idSaves().length).toBe(2);
-  expect(idSaves().at(-1)?.body).toMatchObject({ id_issuing_authority: "Passamt 8031", id_document_number: "FA1234567" });
+  await expect.poll(() => idSaves().at(-1)?.body).toMatchObject({ id_issuing_authority: "Passamt 8031", id_document_number: "FA1234567" });
+  await expect(idForm.getByTestId("lead-id-data-saved")).toBeVisible();
 
   // On a phone the panel must not widen the wizard.
   await page.setViewportSize({ width: 390, height: 844 });

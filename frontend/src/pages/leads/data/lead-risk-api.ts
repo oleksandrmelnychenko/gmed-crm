@@ -68,9 +68,16 @@ export type IdentityDocumentDataInput = {
   id_document_unreadable: boolean;
 };
 
+/** `keepalive`: the save of a page being left still reaches the server. */
+export type IdentityDocumentSaveOptions = { keepalive?: boolean };
+
 /** `PUT /leads/{id}/identity-document-data` (the patient's document). */
-export async function saveLeadIdentityDocumentData(leadId: string, input: IdentityDocumentDataInput) {
-  return apiFetch<unknown>(`${base(leadId)}/identity-document-data`, send("PUT", input));
+export async function saveLeadIdentityDocumentData(
+  leadId: string,
+  input: IdentityDocumentDataInput,
+  options: IdentityDocumentSaveOptions = {},
+) {
+  return apiFetch<unknown>(`${base(leadId)}/identity-document-data`, { ...send("PUT", input), ...options });
 }
 
 /** `PUT /leads/{id}/representatives/{rid}/identity-document-data` (a representative's document). */
@@ -78,10 +85,11 @@ export async function saveRepresentativeIdentityDocumentData(
   leadId: string,
   representativeId: string,
   input: IdentityDocumentDataInput,
+  options: IdentityDocumentSaveOptions = {},
 ) {
   return apiFetch<unknown>(
     `${base(leadId)}/representatives/${encodeURIComponent(representativeId)}/identity-document-data`,
-    send("PUT", input),
+    { ...send("PUT", input), ...options },
   );
 }
 
