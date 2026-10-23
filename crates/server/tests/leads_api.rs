@@ -2351,6 +2351,44 @@ async fn the_pep_review_is_stamped_and_audited_per_person() {
     assert_eq!(rows[0].1["subject"], parent.as_str());
     assert_eq!(rows[0].1["pep_status_checked"], true);
     assert_eq!(rows[0].1["is_pep"], false);
+
+    // Staff conclude the patient is a PEP: its own event, no personal data
+    // (owner 2026-10-23).
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &pm,
+        Some(json!({ "wizard_state": { "aml_enhanced_due_diligence": {
+            "pepStatusChecked": true,
+            "pepContractPartner": true,
+        } } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows = sqlx::query_as::<_, (String, Value)>(
+        r#"SELECT action, context FROM audit_log
+           WHERE entity_id = $1 AND action = 'lead_patient_pep_review_changed'"#,
+    )
+    .bind(lead_uuid)
+    .fetch_all(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].1["subject"], "patient");
+    assert_eq!(rows[0].1["pep_status_checked"], true);
+    assert_eq!(rows[0].1["is_pep"], true);
+    assert!(rows[0].1.get("name").is_none(), "{:?}", rows[0].1);
+    // The parent's review left out stays and is not audited again.
+    let parent_rows: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM audit_log
+           WHERE entity_id = $1 AND action = 'lead_pep_review_changed'"#,
+    )
+    .bind(lead_uuid)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(parent_rows, 1);
 }
 
 #[tokio::test]

@@ -66,6 +66,10 @@ const ACTIONS: Record<string, Pair> = {
     "Изменена проверка PEP-статуса лица",
     "PEP-Prüfung einer Person geändert",
   ],
+  lead_patient_pep_review_changed: [
+    "Изменён вывод о PEP-статусе пациента",
+    "PEP-Ergebnis des Patienten geändert",
+  ],
   lead_identity_document_data_updated: [
     "Данные документа личности лида изменены",
     "Ausweisdaten des Leads geändert",

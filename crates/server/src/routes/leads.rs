@@ -5371,12 +5371,13 @@ async fn update_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
-    // A representative's or the payer's PEP review, audited per subject.
+    // A representative's or the payer's PEP review, audited per subject; the
+    // patient's PEP conclusion as its own event (owner 2026-10-23).
     for change in &changed_pep_reviews {
         if let Err(e) = audit::write_in_transaction(
             &mut tx,
             &audit::domain_event(
-                "lead_pep_review_changed",
+                change.audit_action(),
                 Some(auth.user_id),
                 "lead",
                 Some(lead_id),

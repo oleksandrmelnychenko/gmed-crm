@@ -128,7 +128,10 @@ eingesetzten Vermögenswerte» сервер при генерації запов
   `lead_pep_status_unchecked` (хто й коли; контекст — лише `lead_id`, без
   персональних даних) поруч зі звичайним `update_lead`. З 2026-10-23
   перевірка PEP ведеться по кожній особі (пацієнт, кожен представник,
-  платник) у `pepReviews`, з днем і перевіряючим від сервера; див.
+  платник) у `pepReviews`, з днем і перевіряючим від сервера. Зміна висновку
+  щодо пацієнта (PEP чи ні) пише окремий аудит `lead_patient_pep_review_changed`,
+  представника чи платника — `lead_pep_review_changed` (контекст: `subject`,
+  `pep_status_checked`, `is_pep`, без персональних даних); див.
   [PEP по особах](gwg-identification-sheet_ua.md#pep-по-особах-рішення-власника-2026-10-23).
 - Рівень ризику в PDF (`riskTier`): `blacklist`, `sanctions` («Bestätigter
   Treffer auf einer Sanktionsliste»), `high_risk`, `pep` або `individual`

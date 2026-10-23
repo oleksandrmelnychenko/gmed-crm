@@ -265,12 +265,31 @@ pub struct ChangedReview {
     pub is_pep: bool,
 }
 
+/// Audit action of a changed review of a representative or the payer.
+pub const PEP_REVIEW_CHANGED_ACTION: &str = "lead_pep_review_changed";
+/// Audit action of a changed PEP conclusion of the patient (owner 2026-10-23);
+/// the patient's "PEP status checked" box keeps `lead_pep_status_checked` /
+/// `lead_pep_status_unchecked`.
+pub const PATIENT_PEP_REVIEW_CHANGED_ACTION: &str = "lead_patient_pep_review_changed";
+
+impl ChangedReview {
+    /// The audit action of this change.
+    pub fn audit_action(&self) -> &'static str {
+        if self.subject == SUBJECT_PATIENT {
+            PATIENT_PEP_REVIEW_CHANGED_ACTION
+        } else {
+            PEP_REVIEW_CHANGED_ACTION
+        }
+    }
+}
+
 /// Sets `checkedOn` / `checkedBy` of every review in `next` (the
 /// `aml_enhanced_due_diligence` object about to be stored): today and the
 /// reviewer for a review staff changed, the stored stamps for an unchanged
 /// one, none for a review that is cleared. Entries of unknown subjects are
 /// dropped. Returns the reviews of representatives and the payer that
-/// changed (the patient's own change is audited as before).
+/// changed, and the patient's review when staff's conclusion (PEP or not)
+/// changed; the patient's box alone is audited as before.
 pub fn stamp_reviews(
     previous: &Value,
     next: &mut Value,
@@ -335,7 +354,12 @@ pub fn stamp_reviews(
                 Some(reviewer.trim().to_string()).filter(|name| !name.is_empty()),
             )
         };
-        if before.decision() != after.decision() && subject != SUBJECT_PATIENT {
+        let audited = if subject == SUBJECT_PATIENT {
+            before.is_pep != after.is_pep
+        } else {
+            before.decision() != after.decision()
+        };
+        if audited {
             changed.push(ChangedReview {
                 subject: subject.clone(),
                 checked: after.checked,
@@ -530,6 +554,41 @@ mod tests {
             cleared["pepReviews"][parent.as_str()]["checkedOn"],
             "2026-10-23"
         );
+    }
+
+    #[test]
+    fn the_patients_changed_conclusion_is_its_own_audit_event() {
+        let previous = json!({ "pepStatusChecked": true });
+        // The box alone stays the old event (lead_pep_status_checked).
+        let mut ticked = json!({ "pepStatusChecked": true });
+        assert!(stamp_reviews(&json!({}), &mut ticked, day("2026-10-23"), "Prüferin").is_empty());
+        // Staff conclude "PEP".
+        let mut pep = json!({ "pepStatusChecked": true, "pepBeneficialOwner": true });
+        let changed = stamp_reviews(&previous, &mut pep, day("2026-10-23"), "Prüferin");
+        assert_eq!(
+            changed,
+            vec![ChangedReview {
+                subject: SUBJECT_PATIENT.to_string(),
+                checked: true,
+                is_pep: true,
+            }]
+        );
+        assert_eq!(changed[0].audit_action(), "lead_patient_pep_review_changed");
+        // An unchanged conclusion is not audited again; back to "no PEP" is.
+        let stored = pep.clone();
+        let mut same = json!({ "pepStatusChecked": true, "pepBeneficialOwner": true });
+        assert!(stamp_reviews(&stored, &mut same, day("2026-10-24"), "Prüferin").is_empty());
+        let mut back = json!({ "pepStatusChecked": true });
+        let changed = stamp_reviews(&stored, &mut back, day("2026-10-24"), "Prüferin");
+        assert_eq!(changed.len(), 1);
+        assert!(!changed[0].is_pep);
+        // A representative's review keeps its action.
+        let payer = ChangedReview {
+            subject: SUBJECT_PAYER.to_string(),
+            checked: true,
+            is_pep: false,
+        };
+        assert_eq!(payer.audit_action(), "lead_pep_review_changed");
     }
 
     #[test]
