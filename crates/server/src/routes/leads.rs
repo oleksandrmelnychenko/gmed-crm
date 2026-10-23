@@ -3347,8 +3347,10 @@ async fn create_repeat_intake(
     .flatten();
     let country = lead_country_code(stored_country.as_deref());
     let id: Option<Uuid> = sqlx::query_scalar(
-        "INSERT INTO leads(first_name,last_name,email,phone,source,country,primary_language,date_of_birth,legal_sex,street_address,city,zip_code,created_by,intake_source,intake_model,creation_key,repeat_patient_id,prospect_patient_id)
-         SELECT first_name,last_name,email,phone_primary,'manual',$4::text,languages[1],birth_date,gender,address_street,address_city,address_zip,$2,'staff_wizard','patient_first',$3,id,id
+        // The citizenships the conversion carried to the record come back
+        // (scenario test 2026-10-23: the repeat request asked them again).
+        "INSERT INTO leads(first_name,last_name,email,phone,source,country,primary_language,date_of_birth,legal_sex,street_address,city,zip_code,created_by,intake_source,intake_model,creation_key,repeat_patient_id,prospect_patient_id,citizenships)
+         SELECT first_name,last_name,email,phone_primary,'manual',$4::text,languages[1],birth_date,gender,address_street,address_city,address_zip,$2,'staff_wizard','patient_first',$3,id,id,citizenships
          FROM patients WHERE id=$1 AND lifecycle_status IN ('active','inactive') RETURNING id")
         .bind(patient).bind(auth.user_id).bind(key).bind(country).fetch_optional(&mut *tx).await.map_err(failed)?;
     let id = id.ok_or_else(|| {

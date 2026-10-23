@@ -1034,6 +1034,19 @@ fn effective_answers(
         }
         answers.relationship_kind = declaration.relationship_kind.clone();
         answers.relationship = declaration.relationship.clone();
+        // A paying representative (2026-10-19) keeps no relationship on the
+        // declaration, and the cabinet section may not state one: it is the
+        // representative's own relation to the child — a parent, or a
+        // guardian described in words. Without it the section could never be
+        // sent (scenario test 2026-10-23).
+        if answers.relationship_kind.is_none() {
+            if crate::routes::leads::is_legal_guardian_relation(parent.relation.as_deref()) {
+                answers.relationship_kind = Some("other".to_string());
+                answers.relationship = Some("Vormund".to_string());
+            } else {
+                answers.relationship_kind = Some("parent".to_string());
+            }
+        }
         // A parent is a person: nothing of an organisation.
         answers.organisation_name = None;
         answers.register_court = None;

@@ -309,6 +309,8 @@ pub(crate) async fn load_subjects(
                   s.country AS statement_country,
                   s.habitual_residence_country AS statement_habitual_residence_country,
                   s.citizenships AS statement_citizenships,
+                  pr.country AS representative_payer_country,
+                  pr.citizenships AS representative_payer_citizenships,
                   hits.patient_confirmed,
                   hits.patient_open,
                   hits.payer_confirmed,
@@ -319,6 +321,12 @@ pub(crate) async fn load_subjects(
            LEFT JOIN lead_gwg_declarations g ON g.lead_id = l.id
            LEFT JOIN lead_payer_declarations d ON d.lead_id = l.id
            LEFT JOIN lead_payer_statements s ON s.lead_id = l.id
+           -- A paying parent (2026-10-19) keeps the identity on the
+           -- representative row, never on the declaration.
+           LEFT JOIN lead_representatives pr
+                  ON d.payer_kind = 'representative'
+                 AND pr.lead_id = l.id
+                 AND pr.contact_id = d.payer_representative_id
            LEFT JOIN LATERAL (
                SELECT COUNT(*) FILTER (
                           WHERE h.subject_kind IN ('lead_patient', 'patient', 'lead_bank')
@@ -434,6 +442,20 @@ pub(crate) async fn load_subjects(
                 list("statement_citizenships"),
             );
         }
+    } else if text("payer_kind").as_deref() == Some(lead_payer::PAYER_KIND_REPRESENTATIVE) {
+        // The parent who pays is the payer of the rule (owner 2026-10-07):
+        // a black-list residence or citizenship of that parent requires the
+        // check as it did while a paying parent was stored as a third party
+        // (scenario test 2026-10-23). The risk score keeps the parent's own
+        // block R: its payer triggers stay a third party's.
+        push_text(
+            &mut subjects.payer_residence,
+            text("representative_payer_country"),
+        );
+        push_all(
+            &mut subjects.payer_citizenships,
+            list("representative_payer_citizenships"),
+        );
     }
     Ok(Some(subjects))
 }

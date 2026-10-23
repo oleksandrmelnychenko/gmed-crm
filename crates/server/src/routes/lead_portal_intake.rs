@@ -2632,7 +2632,29 @@ pub(crate) async fn request_payload(
         &representation.representation,
         Some(user_id),
     );
+    // A minor holds no account of its own: when the parent who fills the
+    // cabinet answers for a paying parent without a login, the suggestion is
+    // that parent, else the caller's own parent row — never the child
+    // (scenario test 2026-10-23).
+    let minor_holder = representation
+        .representation
+        .minor
+        .then(|| {
+            lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
+                .and_then(|id| representation.representation.find(id))
+                .or_else(|| {
+                    representation
+                        .representation
+                        .representatives
+                        .iter()
+                        .find(|person| person.login_user_ids.contains(&user_id))
+                })
+                .map(lead_representatives::Representative::name)
+                .filter(|name| !name.is_empty())
+        })
+        .flatten();
     let account_holder_suggestion = match route_by {
+        PaymentRouteBy::Patient if representation.representation.minor => minor_holder,
         PaymentRouteBy::Patient => Some(
             [data.first_name.trim(), data.last_name.trim()]
                 .into_iter()
