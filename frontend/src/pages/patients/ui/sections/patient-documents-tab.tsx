@@ -287,7 +287,7 @@ export function PatientDocumentsTab({
   async function openTranslationEditor(doc: DocumentItem) {
     const sourceId = doc.translation_source_document_id;
     if (!sourceId) return;
-    let initialText = "";
+    let initialText: string;
     try {
       const detail = await apiFetch<{ generated_manual_text?: string | null; mime_type?: string | null }>(
         `/documents/${doc.id}`,

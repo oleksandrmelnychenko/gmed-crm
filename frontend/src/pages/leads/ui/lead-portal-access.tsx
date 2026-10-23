@@ -867,7 +867,7 @@ export function LeadGuardianAccess({
 
   const load = useCallback(async () => {
     const generation = ++intakeLoadGeneration.current;
-    let next: LeadPortalIntake | null = null;
+    let next: LeadPortalIntake | null;
     try {
       next = await fetchLeadPortalIntake(lead.id);
     } catch {

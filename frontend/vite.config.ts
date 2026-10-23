@@ -14,7 +14,7 @@ export default defineConfig(({ mode, command }) => {
   if (!buildNumber) {
     try {
       const revision = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], {
-        cwd: __dirname,
+        cwd: import.meta.dirname,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
       }).trim()
@@ -39,7 +39,7 @@ export default defineConfig(({ mode, command }) => {
       {
         name: 'pdf-preview-resources',
         generateBundle() {
-          const root = path.resolve(__dirname, 'node_modules/pdfjs-dist')
+          const root = path.resolve(import.meta.dirname, 'node_modules/pdfjs-dist')
           const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
           // Keep fonts, character maps and image decoders local, alongside the
           // matching PDF.js worker. No document data goes to a public viewer.
@@ -75,7 +75,7 @@ export default defineConfig(({ mode, command }) => {
     },
     resolve: {
       alias: {
-        "@": path.resolve(__dirname, "./src"),
+        "@": path.resolve(import.meta.dirname, "./src"),
       },
     },
   }

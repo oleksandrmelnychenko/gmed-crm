@@ -593,7 +593,7 @@ function interpreterWorkNotificationCopy(
 ): Pick<Notification, "title" | "body"> | null {
   const titles = INTERPRETER_WORK_TITLES[item.kind];
   if (!titles) return null;
-  let data: InterpreterWorkNotificationBody = {};
+  let data: InterpreterWorkNotificationBody;
   try {
     data = JSON.parse(item.body ?? "{}") ?? {};
   } catch {

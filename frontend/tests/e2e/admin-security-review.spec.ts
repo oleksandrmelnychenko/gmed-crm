@@ -30,7 +30,7 @@ async function setup(page: Page, role: string, handler: Handler) {
         },
       });
     }
-    let body: unknown = null;
+    let body: unknown;
     try {
       body = request.postDataJSON();
     } catch {

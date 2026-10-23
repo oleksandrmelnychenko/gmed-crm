@@ -236,7 +236,7 @@ export function LeadRiskAssessmentPanel({
     try {
       await action();
     } catch (error) {
-      throw new Error(riskDecisionErrorText(error, tx) ?? (error instanceof Error && error.message ? error.message : tx("Ошибка", "Fehler")));
+      throw new Error(riskDecisionErrorText(error, tx) ?? (error instanceof Error && error.message ? error.message : tx("Ошибка", "Fehler")), { cause: error });
     }
   };
 

@@ -2283,7 +2283,7 @@ function useStaffInvoicesPageContent() {
         { line_index: lineIndex, comment: comment || null },
       ]);
     } catch (error) {
-      throw new Error(localizeInvoiceError(error, lang, t.common_error));
+      throw new Error(localizeInvoiceError(error, lang, t.common_error), { cause: error });
     }
     clearApiCache();
     setReloadToken((current) => current + 1);

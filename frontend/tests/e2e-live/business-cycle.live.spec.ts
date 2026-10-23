@@ -83,7 +83,7 @@ class Actor {
     const headers = response.headers();
     const contentType = headers["content-type"] ?? "";
     let body: any = null;
-    let text = "";
+    let text: string;
     let bytes: Buffer | undefined;
     if (contentType.includes("json")) {
       text = await response.text();

@@ -4790,7 +4790,7 @@ export function LeadWizard({
       throw new Error(tx(
         `Не удалось безопасно загрузить медицинскую карту пациента: ${errorText(nextError, tx)}`,
         `Die Patientenakte konnte nicht sicher geladen werden: ${errorText(nextError, tx)}`,
-      ));
+      ), { cause: nextError });
     }
     const hydrated = hydrateClinicalDraft(fallbackDraft, clinical, caseId);
     setDraft((current) => current
@@ -4943,7 +4943,7 @@ export function LeadWizard({
         if (cause instanceof ApiRequestError && cause.status === 409) {
           pendingClinicalEditsRef.current.delete(requestKey);
           clinicalBaselineRef.current = null;
-          throw new Error(tx("Медицинская карта изменена другим пользователем. Обновите обращение и проверьте изменения перед сохранением.", "Die Patientenakte wurde zwischenzeitlich geändert. Aktualisieren Sie die Anfrage und prüfen Sie die Änderungen vor dem Speichern."));
+          throw new Error(tx("Медицинская карта изменена другим пользователем. Обновите обращение и проверьте изменения перед сохранением.", "Die Patientenakte wurde zwischenzeitlich geändert. Aktualisieren Sie die Anfrage und prüfen Sie die Änderungen vor dem Speichern."), { cause });
         }
         throw cause;
       }
@@ -5333,7 +5333,7 @@ export function LeadWizard({
   async function prefillAmlFromLeadAnswers() {
     const targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
     if (!targetLeadId) return;
-    let intake: Awaited<ReturnType<typeof fetchLeadPortalIntake>> = null;
+    let intake: Awaited<ReturnType<typeof fetchLeadPortalIntake>>;
     try {
       intake = await fetchLeadPortalIntake(targetLeadId);
     } catch {
