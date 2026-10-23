@@ -234,6 +234,16 @@ struct TrustedContactRequest {
     address: Option<String>,
 }
 
+/// A key that is present in the body, also with `null`; an absent key stays
+/// `None`.
+fn sent<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
 #[derive(Deserialize)]
 struct UpdateLeadRequest {
     email: Option<String>,
@@ -262,11 +272,17 @@ struct UpdateLeadRequest {
     additional_concerns: Option<String>,
     selected_program: Option<String>,
     services: Option<Vec<String>>,
-    has_insurance: Option<bool>,
+    /// Sent as `null`, the stored answer is cleared (owner decision
+    /// 2026-10-23: clearing "Есть страховка" in the wizard persists); left
+    /// out, it stays.
+    #[serde(default, deserialize_with = "sent")]
+    has_insurance: Option<Option<bool>>,
     insurance_covers_germany: Option<String>,
     insurance_provider: Option<String>,
     insurance_number: Option<String>,
-    insurance_type: Option<String>,
+    /// Sent as `null` or `""`, the stored type is cleared; left out, it stays.
+    #[serde(default, deserialize_with = "sent")]
+    insurance_type: Option<Option<String>>,
     trusted_contact_name: Option<String>,
     trusted_contact_phone: Option<String>,
     trusted_contact_email: Option<String>,
@@ -4860,9 +4876,11 @@ async fn update_lead(
         None => None,
     };
 
+    let insurance_type_supplied = body.insurance_type.is_some();
     let insurance_type = body
         .insurance_type
-        .as_deref()
+        .as_ref()
+        .and_then(|value| value.as_deref())
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_lowercase);
@@ -5303,7 +5321,7 @@ async fn update_lead(
                whatsapp_number = COALESCE($27, whatsapp_number),
                insurance_provider = COALESCE($28, insurance_provider),
                insurance_number = COALESCE($29, insurance_number),
-               insurance_type = COALESCE($30, insurance_type),
+               insurance_type = CASE WHEN $46 THEN $30 ELSE insurance_type END,
                trusted_contact_name = CASE
                    WHEN $41::jsonb IS NOT NULL THEN NULLIF($41::jsonb #>> '{0,name}', '')
                    ELSE COALESCE($31, trusted_contact_name)
@@ -5329,7 +5347,7 @@ async fn update_lead(
                    WHEN $41::jsonb IS NOT NULL THEN NULLIF($41::jsonb #>> '{0,email}', '')
                    ELSE COALESCE($37, trusted_contact_email)
                END,
-               has_insurance = COALESCE($38, has_insurance),
+               has_insurance = CASE WHEN $45 THEN $38 ELSE has_insurance END,
                insurance_covers_germany = CASE
                    WHEN $39 THEN $40
                    ELSE insurance_covers_germany
@@ -5383,13 +5401,15 @@ async fn update_lead(
     .bind(trusted_contact_birth_date)
     .bind(body.trusted_contact_address.as_deref().map(str::trim))
     .bind(body.trusted_contact_email.as_deref().map(str::trim))
-    .bind(body.has_insurance)
+    .bind(body.has_insurance.flatten())
     .bind(insurance_covers_germany_supplied)
     .bind(insurance_covers_germany.as_deref())
     .bind(trusted_contacts.as_ref().map(Value::to_string))
     .bind(referrer_patient_id_supplied)
     .bind(referrer_patient_id)
     .bind(body.has_medical_records.as_deref())
+    .bind(body.has_insurance.is_some())
+    .bind(insurance_type_supplied)
     .execute(&mut *tx)
     .await;
     match update_result {

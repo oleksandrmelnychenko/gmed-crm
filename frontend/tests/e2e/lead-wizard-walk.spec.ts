@@ -162,6 +162,30 @@ test("switching to self-pay clears the stored insurance coverage on the server",
   });
 });
 
+test("clearing the insurance answers persists them as cleared (owner decision 2026-10-23)", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const lead = adultLead({
+    has_insurance: true,
+    insurance_type: "private",
+    insurance_covers_germany: "yes",
+  });
+  const { wizard, calls } = await mount(page, lead);
+  await chooseComboboxOption(page, wizard.locator("#lead-wizard-has-insurance"), "Не указано");
+  await chooseComboboxOption(page, wizard.locator("#lead-wizard-insurance-type"), "Выберите");
+  await chooseComboboxOption(page, wizard.locator("#lead-wizard-insurance-covers-germany"), "Не указано");
+  await expect
+    .poll(() => calls.filter((call) => call.path === `/leads/${leadId}/update`).at(-1)?.body, { timeout: 15_000 })
+    .toMatchObject({
+      // Sent as cleared, so the server drops what it holds; left out, it stayed.
+      has_insurance: null,
+      insurance_type: null,
+      insurance_covers_germany: "",
+    });
+  // The required date of birth and sex keep being sent as they are.
+  const update = calls.filter((call) => call.path === `/leads/${leadId}/update`).at(-1)!.body!;
+  expect(update).toMatchObject({ date_of_birth: "1980-02-03", legal_sex: "female" });
+});
+
 test("an autosave sends back every stored field as it was loaded", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const stored = adultLead({

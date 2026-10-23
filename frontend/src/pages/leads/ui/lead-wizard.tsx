@@ -1085,10 +1085,12 @@ function autosavePayload(
     middle_name: draft.middleName.trim(),
     suffix: draft.suffix.trim(),
     whatsapp_number: draft.whatsappNumber.trim(),
-    has_insurance: draft.hasInsurance ? draft.hasInsurance === "yes" : undefined,
+    // Cleared answers persist (owner decision 2026-10-23): `null` / empty clears the stored
+    // value; left out, it stayed. The required date of birth and sex above stay left out when empty.
+    has_insurance: draft.hasInsurance ? draft.hasInsurance === "yes" : null,
     // Empty clears the stored answer (self-pay resets it); left out, it stayed.
     insurance_covers_germany: draft.insuranceCoversGermany,
-    insurance_type: draft.insuranceType || undefined,
+    insurance_type: draft.insuranceType || null,
     insurance_provider: draft.insuranceProvider.trim(),
     insurance_number: draft.insuranceNumber.trim(),
     trusted_contacts: draft.trustedContacts.map((contact) => ({

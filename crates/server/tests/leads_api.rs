@@ -5840,6 +5840,45 @@ async fn wizard_lead_fields_round_trip_through_update() {
     assert!(cleared_lead["trusted_contact_name"].is_null());
     assert!(cleared_lead["trusted_contact_birth_date"].is_null());
     assert_eq!(cleared_lead["trusted_contacts"], json!([]));
+    // Left out, "Есть страховка" and the type stay (owner decision 2026-10-23).
+    assert_eq!(cleared_lead["has_insurance"], true);
+    assert_eq!(cleared_lead["insurance_type"], "private");
+
+    // Sent as cleared, the wizard's answers clear: `null` for the yes/no
+    // answer, `null` or "" for the type.
+    for cleared_type in [json!(null), json!("")] {
+        let (status, _) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/leads/{lead_id}/update"),
+            &pm,
+            Some(json!({ "has_insurance": true, "insurance_type": "public" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/leads/{lead_id}/update"),
+            &pm,
+            Some(json!({ "has_insurance": null, "insurance_type": cleared_type })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, insurance_cleared) =
+            json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            insurance_cleared["has_insurance"].is_null(),
+            "{insurance_cleared}"
+        );
+        assert!(
+            insurance_cleared["insurance_type"].is_null(),
+            "{insurance_cleared}"
+        );
+        // The insurer's name is no answer of these two fields: it stays.
+        assert_eq!(insurance_cleared["insurance_provider"], "Test Versicherung");
+    }
 
     let (status, _) = json_request(
         &app,
