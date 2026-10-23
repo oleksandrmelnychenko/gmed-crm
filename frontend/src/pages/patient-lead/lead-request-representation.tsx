@@ -160,6 +160,8 @@ function refusalText(text: LeadRequestText, code: string | undefined): string {
   switch (code) {
     case "id_document_expired":
       return text.idDocumentExpired;
+    case "representative_not_yours":
+      return text.representativeIdentityLocked;
     case "representative_email_is_login":
       return text.representativeEmailLocked;
     case "representative_email_duplicate":
@@ -549,13 +551,13 @@ function RepresentativeBlock({
   const locked = Boolean(person?.email_locked);
   const proof = authorityProofOf(slot, custody);
   const fieldId = (field: RepresentativeField) => `lead-request-${slot}_${field}`;
+  // The other parent this login entered stays editable (QA 2026-10-23: the date of birth locked after the first save).
+  const identityLocked = request.access_kind === "guardian" && Boolean(person) && !person?.mine && (person?.identity_locked ?? true);
   const control = (field: RepresentativeField) => {
     const invalid = Boolean(form.errorFor(field));
     return {
       id: fieldId(field),
-      // The other parent this login entered stays editable (QA 2026-10-23: the date of birth locked after the first save).
-      disabled: request.access_kind === "guardian" && Boolean(person) && !person?.mine &&
-        (person?.identity_locked ?? true) && ["first_name", "last_name", "date_of_birth"].includes(field),
+      disabled: identityLocked && ["first_name", "last_name", "date_of_birth"].includes(field),
       "aria-invalid": invalid || undefined,
       "aria-describedby": invalid ? `${fieldId(field)}-error` : undefined,
     };
@@ -659,6 +661,11 @@ function RepresentativeBlock({
       </div>
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="sm:col-span-2 lg:col-span-3">
+          {identityLocked ? (
+            <p className="mb-2 text-xs text-muted-foreground" data-testid={`lead-request-${slot}-identity-locked`}>
+              {text.representativeIdentityLocked}
+            </p>
+          ) : null}
           <StatusChip tone="warning" className="items-start whitespace-normal rounded-lg px-2.5 py-1.5">
             <CircleAlert aria-hidden="true" className="mt-[3px]" />
             <span>{text.namePassportHint}</span>

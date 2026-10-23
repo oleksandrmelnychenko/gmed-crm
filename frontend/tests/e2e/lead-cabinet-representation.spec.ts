@@ -1061,6 +1061,13 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(second.getByRole("textbox", { name: "Vorname" })).toHaveValue("Ben");
     await expect(second.getByRole("textbox", { name: "E-Mail" })).toHaveValue("ben.muster@example.com");
     await expect(second.getByRole("button", { name: "Entfernen" })).toHaveCount(0);
+    // GMED entered that person: name and date of birth are read-only here, and the form says why.
+    await expect(second.getByRole("textbox", { name: "Vorname" })).toBeDisabled();
+    await expect(page.locator("#lead-request-rep2_date_of_birth")).toBeDisabled();
+    await expect(page.getByTestId("lead-request-rep2-identity-locked")).toHaveText(
+      "Name und Geburtsdatum dieser Person ändert nur sie selbst oder GMED.",
+    );
+    await expect(page.getByTestId("lead-request-rep1-identity-locked")).toHaveCount(0);
     await expect(note).toHaveCount(0);
     expect(calls.answers).toEqual([{ custody: "joint" }]);
 
