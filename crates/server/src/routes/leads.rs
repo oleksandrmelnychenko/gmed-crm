@@ -8088,10 +8088,8 @@ async fn convert_lead(
     // The effective citizenships of each contact (the representative row, the
     // contact entry or a linked patient's): the relation keeps them, so a
     // repeat request does not ask the parents again (owner decision 2026-10-23).
-    let contact_citizenships = match crate::services::lead_guardian_identity::load(
-        &mut tx, lead_id,
-    )
-    .await
+    let contact_citizenships = match crate::services::lead_guardian_identity::load(&mut tx, lead_id)
+        .await
     {
         Ok(identities) => relation_citizenships_by_contact(identities),
         Err(error) => {

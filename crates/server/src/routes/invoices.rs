@@ -13018,11 +13018,7 @@ fn dunning_letter_response(
     file_name: &str,
     source: &'static str,
 ) -> axum::response::Response {
-    invoice_pdf_response(
-        bytes,
-        crate::content_disposition::inline(file_name),
-        source,
-    )
+    invoice_pdf_response(bytes, crate::content_disposition::inline(file_name), source)
 }
 
 async fn download_dunning_letter(
