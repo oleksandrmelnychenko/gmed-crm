@@ -876,6 +876,25 @@ test("staff explicitly choose the parent's role and linking a patient preserves 
   await expect(parents.getByRole("listitem").filter({ hasText: "Existing Mother" })).toContainText("Мать");
 });
 
+test("Sales links a patient seen by name and number only and keeps the contact data typed", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", step: "master" });
+  const linkedId = "55555555-5555-4555-8555-555555555555";
+  // Owner 2026-10-23: without patients.view the server sends name + number only.
+  await page.route("**/api/v1/leads/guardian-candidates**", (route) => route.fulfill({ json: [{ id: linkedId, source: "patient", patient_record_id: linkedId, display_id: "P-HIDDEN", first_name: "Hidden", last_name: "Mother", birth_date: null, email: null, phone: null, address: null, contact_hidden: true }] }));
+  const parents = wizard.locator("#lead-wizard-guardian");
+  await parents.getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
+  const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Мать (родитель)", exact: true }).click();
+  await editor.getByLabel("Выбрать из пациентов или лидов").click();
+  await page.getByRole("option", { name: /P-HIDDEN · Hidden Mother/ }).click();
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect.poll(() => (calls.updates.at(-1)?.trusted_contacts as Json[] | undefined)?.find((contact) => contact.id === ANNA_ID)?.related_patient_id).toBe(linkedId);
+  const written = (calls.updates.at(-1)?.trusted_contacts as Json[]).find((contact) => contact.id === ANNA_ID)!;
+  expect(written.name).toBe("Hidden Mother");
+  expect(written.email).toBe("anna.muster@example.com");
+});
+
 test("a new parent's role has no default and an explicit father stays in the parents list", async ({ page }) => {
   const { wizard, calls } = await mount(page, { lang: "ru", step: "master", motherOnly: true });
   const parents = wizard.locator("#lead-wizard-guardian");

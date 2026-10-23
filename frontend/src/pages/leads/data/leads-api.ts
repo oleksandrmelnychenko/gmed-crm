@@ -44,9 +44,10 @@ export type LeadReferrerPatientOption = {
   title: string | null;
   first_name: string;
   last_name: string;
-  birth_date: string;
-  email: string | null;
-  phone: string | null;
+  /** Absent for roles without `patients.view` (Sales): name and number only. */
+  birth_date?: string;
+  email?: string | null;
+  phone?: string | null;
 };
 
 export function fetchLeadReferrerPatients(search = "") {
@@ -67,7 +68,12 @@ export type LeadGuardianCandidate = {
   birth_date: string | null;
   email: string | null;
   phone: string | null;
-  address: string;
+  address: string | null;
+  /**
+   * True for a patient row a role without `patients.view` (Sales) sees: only
+   * the name and patient number come, the contact data stays hidden.
+   */
+  contact_hidden?: boolean;
 };
 
 export function fetchLeadGuardianCandidates(search = "", excludeLeadId?: string | null) {

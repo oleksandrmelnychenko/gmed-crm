@@ -5561,10 +5561,14 @@ export function LeadWizard({
       relatedPatientLabel: selected ? guardianCandidateLabel(selected) : "",
       ...(selected ? {
         name: [selected.first_name, selected.last_name].filter(Boolean).join(" "),
+      } : {}),
+      // Without `patients.view` (Sales) a patient row carries only the name and
+      // number (owner 2026-10-23): what staff typed for the contact stays.
+      ...(selected && !selected.contact_hidden ? {
         email: selected.email ?? "",
         phone: selected.phone ?? "",
         birthDate: selected.birth_date ?? "",
-        address: selected.address,
+        address: selected.address ?? "",
       } : {}),
     } : current);
   };

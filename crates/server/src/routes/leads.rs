@@ -663,24 +663,189 @@ async fn list_guardian_candidates(
         tracing::error!(%error, "list guardian candidates");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load guardian candidates")
     })?;
+    let full_patient_contact = auth.can(Capability::PatientsView);
     Ok(Json(Value::Array(
         rows.into_iter()
             .map(|row| {
-                json!({
-                    "id": row.get::<Uuid, _>("id"),
-                    "source": row.get::<String, _>("source"),
-                    "patient_record_id": row.get::<Option<Uuid>, _>("patient_record_id"),
-                    "display_id": row.get::<Option<String>, _>("display_id"),
-                    "first_name": row.get::<String, _>("first_name"),
-                    "last_name": row.get::<String, _>("last_name"),
-                    "birth_date": row.get::<Option<NaiveDate>, _>("birth_date"),
-                    "email": row.get::<Option<String>, _>("email"),
-                    "phone": row.get::<Option<String>, _>("phone"),
-                    "address": row.get::<String, _>("address"),
-                })
+                guardian_candidate_value(
+                    GuardianCandidate {
+                        id: row.get("id"),
+                        source: row.get("source"),
+                        patient_record_id: row.get("patient_record_id"),
+                        display_id: row.get("display_id"),
+                        first_name: row.get("first_name"),
+                        last_name: row.get("last_name"),
+                        birth_date: row.get("birth_date"),
+                        email: row.get("email"),
+                        phone: row.get("phone"),
+                        address: row.get("address"),
+                    },
+                    full_patient_contact,
+                )
             })
             .collect(),
     )))
+}
+
+struct GuardianCandidate {
+    id: Uuid,
+    source: String,
+    patient_record_id: Option<Uuid>,
+    display_id: Option<String>,
+    first_name: String,
+    last_name: String,
+    birth_date: Option<NaiveDate>,
+    email: Option<String>,
+    phone: Option<String>,
+    address: String,
+}
+
+/// Owner 2026-10-23: a role without `patients.view` (Sales) sees only a
+/// patient's name and number in the lead pickers, never the patient's birth
+/// date or contact data. Lead rows stay complete: those roles see leads anyway.
+fn guardian_candidate_value(candidate: GuardianCandidate, full_patient_contact: bool) -> Value {
+    if candidate.source == "patient" && !full_patient_contact {
+        return json!({
+            "id": candidate.id,
+            "source": candidate.source,
+            "patient_record_id": candidate.patient_record_id,
+            "display_id": candidate.display_id,
+            "first_name": candidate.first_name,
+            "last_name": candidate.last_name,
+            "birth_date": Value::Null,
+            "email": Value::Null,
+            "phone": Value::Null,
+            "address": Value::Null,
+            "contact_hidden": true,
+        });
+    }
+    json!({
+        "id": candidate.id,
+        "source": candidate.source,
+        "patient_record_id": candidate.patient_record_id,
+        "display_id": candidate.display_id,
+        "first_name": candidate.first_name,
+        "last_name": candidate.last_name,
+        "birth_date": candidate.birth_date,
+        "email": candidate.email,
+        "phone": candidate.phone,
+        "address": candidate.address,
+        "contact_hidden": false,
+    })
+}
+
+struct ReferrerPatient {
+    id: Uuid,
+    patient_id: String,
+    title: Option<String>,
+    first_name: String,
+    last_name: String,
+    birth_date: Option<NaiveDate>,
+    email: Option<String>,
+    phone: Option<String>,
+}
+
+/// The referring-patient picker: name and number for every `leads.edit`
+/// role; birth date and contact data only with `patients.view`.
+fn referrer_patient_value(patient: ReferrerPatient, full_patient_contact: bool) -> Value {
+    if !full_patient_contact {
+        return json!({
+            "id": patient.id,
+            "patient_id": patient.patient_id,
+            "title": patient.title,
+            "first_name": patient.first_name,
+            "last_name": patient.last_name,
+        });
+    }
+    json!({
+        "id": patient.id,
+        "patient_id": patient.patient_id,
+        "title": patient.title,
+        "first_name": patient.first_name,
+        "last_name": patient.last_name,
+        "birth_date": patient.birth_date.map(|value| value.to_string()).unwrap_or_default(),
+        "email": patient.email,
+        "phone": patient.phone,
+    })
+}
+
+#[cfg(test)]
+mod lead_picker_contact_tests {
+    use super::*;
+
+    fn patient_candidate() -> GuardianCandidate {
+        GuardianCandidate {
+            id: Uuid::nil(),
+            source: "patient".into(),
+            patient_record_id: Some(Uuid::nil()),
+            display_id: Some("P-2026-0001".into()),
+            first_name: "Anna".into(),
+            last_name: "Muster".into(),
+            birth_date: NaiveDate::from_ymd_opt(1980, 1, 2),
+            email: Some("anna@example.test".into()),
+            phone: Some("+49 170 1234567".into()),
+            address: "Hauptstr. 1, 10115, Berlin, DE".into(),
+        }
+    }
+
+    fn referrer() -> ReferrerPatient {
+        ReferrerPatient {
+            id: Uuid::nil(),
+            patient_id: "P-2026-0001".into(),
+            title: None,
+            first_name: "Anna".into(),
+            last_name: "Muster".into(),
+            birth_date: NaiveDate::from_ymd_opt(1980, 1, 2),
+            email: Some("anna@example.test".into()),
+            phone: Some("+49 170 1234567".into()),
+        }
+    }
+
+    #[test]
+    fn sales_sees_only_name_and_number_of_a_patient() {
+        assert!(Role::Sales.can(Capability::LeadsEdit));
+        assert!(!Role::Sales.can(Capability::PatientsView));
+        let value = guardian_candidate_value(
+            patient_candidate(),
+            Role::Sales.can(Capability::PatientsView),
+        );
+        assert_eq!(value["display_id"], "P-2026-0001");
+        assert_eq!(value["last_name"], "Muster");
+        for key in ["birth_date", "email", "phone", "address"] {
+            assert!(value[key].is_null(), "{key} must be hidden");
+        }
+        assert_eq!(value["contact_hidden"], true);
+
+        let value = referrer_patient_value(referrer(), false);
+        assert_eq!(value["patient_id"], "P-2026-0001");
+        assert_eq!(value["first_name"], "Anna");
+        for key in ["birth_date", "email", "phone"] {
+            assert!(value.get(key).is_none(), "{key} must be absent");
+        }
+    }
+
+    #[test]
+    fn a_role_with_patients_view_keeps_the_contact_data() {
+        assert!(Role::Ceo.can(Capability::PatientsView));
+        let value = guardian_candidate_value(patient_candidate(), true);
+        assert_eq!(value["email"], "anna@example.test");
+        assert_eq!(value["birth_date"], "1980-01-02");
+        assert_eq!(value["contact_hidden"], false);
+        let value = referrer_patient_value(referrer(), true);
+        assert_eq!(value["phone"], "+49 170 1234567");
+        assert_eq!(value["birth_date"], "1980-01-02");
+    }
+
+    #[test]
+    fn a_lead_candidate_stays_complete_for_sales() {
+        let mut candidate = patient_candidate();
+        candidate.source = "lead".into();
+        candidate.patient_record_id = None;
+        candidate.display_id = None;
+        let value = guardian_candidate_value(candidate, false);
+        assert_eq!(value["email"], "anna@example.test");
+        assert_eq!(value["contact_hidden"], false);
+    }
 }
 
 async fn list_lead_referrer_patients(
@@ -692,6 +857,7 @@ async fn list_lead_referrer_patients(
         return e;
     }
 
+    let full_patient_contact = auth.can(Capability::PatientsView);
     let search_pattern = format!("%{}%", query.search.unwrap_or_default().trim());
     match sqlx::query(
         r#"SELECT id, patient_id, title, first_name, last_name,
@@ -714,16 +880,25 @@ async fn list_lead_referrer_patients(
         Ok(rows) => Json(Value::Array(
             rows.into_iter()
                 .map(|row| {
-                    json!({
-                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-                        "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
-                        "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
-                        "first_name": row.try_get::<String, _>("first_name").unwrap_or_default(),
-                        "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),
-                        "birth_date": row.try_get::<NaiveDate, _>("birth_date").map(|value| value.to_string()).unwrap_or_default(),
-                        "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
-                        "phone": row.try_get::<Option<String>, _>("phone_primary").unwrap_or_default(),
-                    })
+                    referrer_patient_value(
+                        ReferrerPatient {
+                            id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                            patient_id: row.try_get::<String, _>("patient_id").unwrap_or_default(),
+                            title: row
+                                .try_get::<Option<String>, _>("title")
+                                .unwrap_or_default(),
+                            first_name: row.try_get::<String, _>("first_name").unwrap_or_default(),
+                            last_name: row.try_get::<String, _>("last_name").unwrap_or_default(),
+                            birth_date: row.try_get::<NaiveDate, _>("birth_date").ok(),
+                            email: row
+                                .try_get::<Option<String>, _>("email")
+                                .unwrap_or_default(),
+                            phone: row
+                                .try_get::<Option<String>, _>("phone_primary")
+                                .unwrap_or_default(),
+                        },
+                        full_patient_contact,
+                    )
                 })
                 .collect(),
         ))
