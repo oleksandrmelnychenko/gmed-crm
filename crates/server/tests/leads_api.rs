@@ -8074,6 +8074,19 @@ async fn a_minor_patients_repeat_intake_starts_with_the_parents_on_record() {
             .unwrap();
     let relations = parent_relations(pool, patient_id).await;
     let anna_relation = relations[0].0;
+    // The conversion keeps the parents' citizenships on their relations
+    // (owner decision 2026-10-23).
+    let relation_citizenships: Vec<Vec<String>> = sqlx::query_scalar(
+        "SELECT citizenships FROM patient_relations WHERE patient_id=$1 AND relation_type IN ('mother','father','parent') ORDER BY related_name",
+    )
+    .bind(patient_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        relation_citizenships,
+        vec![vec!["DE".to_string()], vec!["DE".to_string()]]
+    );
 
     let (status, created) = json_request(
         &app,
@@ -8127,6 +8140,16 @@ async fn a_minor_patients_repeat_intake_starts_with_the_parents_on_record() {
             Some("Musterweg 1".into())
         )
     );
+    // The repeat request does not ask the parents' citizenships again.
+    let repeat_citizenships: Vec<String> = sqlx::query_scalar(
+        "SELECT citizenships FROM lead_representatives WHERE lead_id=$1 AND contact_id=$2",
+    )
+    .bind(repeat)
+    .bind(anna_relation)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(repeat_citizenships, vec!["DE".to_string()]);
     let repeat_custody: Option<String> =
         sqlx::query_scalar("SELECT custody FROM lead_gwg_declarations WHERE lead_id=$1")
             .bind(repeat)

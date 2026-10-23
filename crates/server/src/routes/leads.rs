@@ -3201,7 +3201,8 @@ async fn prefill_minor_repeat_representation(
                   NULLIF(btrim(r.address_street), '') AS street,
                   NULLIF(btrim(r.address_zip), '') AS zip,
                   NULLIF(btrim(r.address_city), '') AS city,
-                  NULLIF(btrim(r.address_country), '') AS country
+                  NULLIF(btrim(r.address_country), '') AS country,
+                  r.citizenships
            FROM patient_relations r
            JOIN patients child ON child.id = r.patient_id
            LEFT JOIN patients person ON person.id = r.related_patient_id
@@ -3258,11 +3259,16 @@ async fn prefill_minor_repeat_representation(
         if related_patient_id.is_none() {
             let (first_name, last_name) =
                 super::lead_representatives::name_parts(&name, None, None);
+            // The citizenships the conversion kept on the relation: the
+            // parents are not asked them again (owner decision 2026-10-23).
+            let citizenships = repeat_representative_citizenships(
+                relation.try_get::<Vec<String>, _>("citizenships")?,
+            );
             sqlx::query(
                 r#"INSERT INTO lead_representatives (
                        lead_id, contact_id, role, contact_origin, first_name, last_name,
-                       street, zip, city, country, updated_by)
-                   VALUES ($1, $2, 'legal_representative', 'staff', $3, $4, $5, $6, $7, $8, $9)
+                       street, zip, city, country, updated_by, citizenships)
+                   VALUES ($1, $2, 'legal_representative', 'staff', $3, $4, $5, $6, $7, $8, $9, $10)
                    ON CONFLICT (lead_id, contact_id) DO NOTHING"#,
             )
             .bind(lead_id)
@@ -3274,6 +3280,7 @@ async fn prefill_minor_repeat_representation(
             .bind(city)
             .bind(country)
             .bind(actor)
+            .bind(&citizenships)
             .execute(&mut **tx)
             .await?;
         }
@@ -3334,6 +3341,20 @@ async fn prefill_minor_repeat_representation(
         ),
     )
     .await
+}
+
+/// The citizenships a repeat request's representative row takes from the
+/// patient relation: valid ISO codes, upper-cased, each once, in order (the
+/// row's check refuses anything else).
+fn repeat_representative_citizenships(stored: Vec<String>) -> Vec<String> {
+    let mut codes: Vec<String> = Vec::new();
+    for code in stored {
+        let code = code.trim().to_ascii_uppercase();
+        if crate::services::citizenships::is_country_code(&code) && !codes.contains(&code) {
+            codes.push(code);
+        }
+    }
+    codes
 }
 
 async fn create_repeat_intake(
@@ -7166,6 +7187,26 @@ fn matching_relation(
     }
 }
 
+/// The citizenships the conversion stores on each contact's relation: the
+/// effective identity's ISO codes by contact id. A contact without an id or
+/// without citizenships is left out (the relation keeps what it has).
+fn relation_citizenships_by_contact(
+    identities: Vec<crate::services::lead_guardian_identity::CanonicalGuardianIdentity>,
+) -> std::collections::HashMap<Uuid, Vec<String>> {
+    identities
+        .into_iter()
+        .filter_map(|identity| {
+            let contact_id = identity.contact_id?;
+            let codes = identity
+                .citizenships
+                .into_iter()
+                .filter(|code| crate::services::citizenships::is_country_code(code))
+                .collect::<Vec<_>>();
+            (!codes.is_empty()).then_some((contact_id, codes))
+        })
+        .collect()
+}
+
 async fn convert_lead(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -8024,6 +8065,20 @@ async fn convert_lead(
         }
     };
     let mut taken_relations: Vec<Uuid> = Vec::new();
+    // The effective citizenships of each contact (the representative row, the
+    // contact entry or a linked patient's): the relation keeps them, so a
+    // repeat request does not ask the parents again (owner decision 2026-10-23).
+    let contact_citizenships = match crate::services::lead_guardian_identity::load(
+        &mut *tx, lead_id,
+    )
+    .await
+    {
+        Ok(identities) => relation_citizenships_by_contact(identities),
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "load contact citizenships for conversion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
 
     for trusted_contact in trusted_contacts.as_array().into_iter().flatten() {
         let Some(contact) = trusted_contact.as_object() else {
@@ -8112,6 +8167,9 @@ async fn convert_lead(
             .map(str::trim)
             .filter(|value| !value.is_empty());
         let notes = (!notes.is_empty()).then_some(notes.as_str());
+        let citizenships: Vec<String> = contact_id
+            .and_then(|id| contact_citizenships.get(&id).cloned())
+            .unwrap_or_default();
         let stored = match matched {
             Some(existing_id) => {
                 sqlx::query_scalar::<_, Uuid>(
@@ -8134,7 +8192,10 @@ async fn convert_lead(
                            is_emergency_contact = is_emergency_contact OR $12,
                            source_contact_id = COALESCE(source_contact_id, $13),
                            -- A repeat conversion completes a date the relation lacks.
-                           birth_date = COALESCE(birth_date, $15)
+                           birth_date = COALESCE(birth_date, $15),
+                           -- The lead's current citizenships; none keeps the stored ones.
+                           citizenships = CASE WHEN cardinality($16::text[]) > 0
+                               THEN $16::text[] ELSE citizenships END
                        WHERE id = $14 AND patient_id = $1
                        RETURNING id"#,
                 )
@@ -8153,6 +8214,7 @@ async fn convert_lead(
                 .bind(contact_id)
                 .bind(existing_id)
                 .bind(birth_date)
+                .bind(&citizenships)
                 .fetch_optional(&mut *tx)
                 .await
             }
@@ -8162,9 +8224,9 @@ async fn convert_lead(
                             patient_id, related_patient_id, related_name, relation_type,
                             is_emergency_contact, phone, notes, email,
                             address_street, address_zip, address_city, address_country,
-                            source_contact_id, birth_date
+                            source_contact_id, birth_date, citizenships
                        )
-                       VALUES ($1, $2, $3, $4, $12, $5, $6, $7, $8, $9, $10, $11, $13, $14)
+                       VALUES ($1, $2, $3, $4, $12, $5, $6, $7, $8, $9, $10, $11, $13, $14, $15)
                        RETURNING id"#,
                 )
                 .bind(patient_id)
@@ -8181,6 +8243,7 @@ async fn convert_lead(
                 .bind(emergency_contact)
                 .bind(contact_id)
                 .bind(birth_date)
+                .bind(&citizenships)
                 .fetch_optional(&mut *tx)
                 .await
             }
@@ -12195,6 +12258,54 @@ mod auto_purge_tests {
 #[cfg(test)]
 mod repeat_conversion_relation_tests {
     use super::*;
+
+    fn identity(
+        contact_id: Option<Uuid>,
+        citizenships: &[&str],
+    ) -> crate::services::lead_guardian_identity::CanonicalGuardianIdentity {
+        crate::services::lead_guardian_identity::CanonicalGuardianIdentity {
+            contact_id,
+            related_patient_id: None,
+            position: 0,
+            name: "Anna Muster".into(),
+            citizenships: citizenships.iter().map(|code| code.to_string()).collect(),
+            residences: Vec::new(),
+            role: "legal_representative".into(),
+            contact: json!({}),
+            extras: json!({}),
+        }
+    }
+
+    /// Owner decision 2026-10-23: the relation keeps the parent's
+    /// citizenships; a contact without an id or without codes keeps the
+    /// relation's stored ones.
+    #[test]
+    fn the_conversion_keeps_each_contacts_citizenships_on_its_relation() {
+        let anna = Uuid::from_bytes([1; 16]);
+        let ben = Uuid::from_bytes([2; 16]);
+        let kept = relation_citizenships_by_contact(vec![
+            identity(Some(anna), &["DE", "UA"]),
+            identity(Some(ben), &[]),
+            identity(None, &["PL"]),
+        ]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[&anna], vec!["DE".to_string(), "UA".to_string()]);
+    }
+
+    #[test]
+    fn a_repeat_request_takes_the_relations_valid_citizenships() {
+        assert_eq!(
+            repeat_representative_citizenships(vec![
+                "de".into(),
+                " UA ".into(),
+                "DE".into(),
+                "Ukraine".into(),
+                "XX".into(),
+            ]),
+            vec!["DE".to_string(), "UA".to_string()]
+        );
+        assert!(repeat_representative_citizenships(Vec::new()).is_empty());
+    }
 
     fn relation(n: u8, name: &str, relation_type: &str) -> ExistingRelation {
         ExistingRelation {
