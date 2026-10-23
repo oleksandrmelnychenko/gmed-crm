@@ -91,6 +91,51 @@ for path in "$REPO_DIR/.git" "$AGE_KEY_FILE" "$REPO_DIR/$IMAGE_PINS_PATH"; do
   fi
 done
 
+# Disk space before anything writes (2026-10-23: a full disk kept every
+# backend version from starting, while each upgrade added another full
+# pg_dump under /var/backups/gmed/releases). Prints what fills the disk and,
+# below the threshold, frees only what can be rebuilt or is superseded:
+# build cache, unused images, oversized container logs, the journal and
+# release backups beyond the newest ones. Volumes (database, uploads) are
+# never touched.
+MIN_FREE_GB="${MIN_FREE_GB:-20}"
+ABORT_FREE_GB="${ABORT_FREE_GB:-5}"
+KEEP_RELEASE_BACKUPS="${KEEP_RELEASE_BACKUPS:-10}"
+RELEASE_BACKUP_ROOT="/var/backups/gmed/releases"
+free_gb() { df -BG --output=avail / | tail -1 | tr -dc '0-9'; }
+disk_report() {
+  echo "Disk: $(df -h --output=used,size,pcent / | tail -1)"
+  du -xsh /var/lib/docker/volumes /var/lib/docker/overlay2 /var/lib/docker/containers \
+    /var/lib/containerd "$RELEASE_BACKUP_ROOT" /var/log 2>/dev/null || true
+  if [[ -d "$RELEASE_BACKUP_ROOT" ]]; then
+    echo "Release backups: $(find "$RELEASE_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+  fi
+  docker system df 2>/dev/null || true
+}
+echo "Free space on /: $(free_gb) GB"
+if (( $(free_gb) < MIN_FREE_GB )); then
+  echo "Less than ${MIN_FREE_GB} GB free: freeing rebuildable and superseded files."
+  disk_report
+  docker builder prune -af || true
+  docker image prune -af --filter "until=24h" || true
+  find /var/lib/docker/containers -name '*-json.log' -size +100M -print -exec truncate -s 0 {} \; 2>/dev/null || true
+  journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+  if [[ -d "$RELEASE_BACKUP_ROOT" ]]; then
+    # Directory names start with the UTC timestamp: newest last.
+    mapfile -t old_backups < <(find "$RELEASE_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
+      | sort | head -n "-${KEEP_RELEASE_BACKUPS}")
+    for name in "${old_backups[@]}"; do
+      echo "Removing release backup $name (keeping the newest ${KEEP_RELEASE_BACKUPS})"
+      rm -rf -- "${RELEASE_BACKUP_ROOT:?}/$name"
+    done
+  fi
+  disk_report
+fi
+if (( $(free_gb) < ABORT_FREE_GB )); then
+  echo "ERROR: only $(free_gb) GB free on / after the cleanup; not deploying. See the disk report above." >&2
+  exit 1
+fi
+
 if [[ "$UPGRADE_ONLY" == "true" ]]; then
   upgrade_backup_dir="/var/backups/gmed/releases/$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
   install -d -m 700 "$upgrade_backup_dir"
