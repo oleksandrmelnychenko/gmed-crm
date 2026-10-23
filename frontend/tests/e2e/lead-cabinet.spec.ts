@@ -2285,6 +2285,45 @@ test.describe("lead cabinet", () => {
     expect(calls.identification).toHaveLength(1);
   });
 
+  test("a hidden page saves the last entry at once, and closing the tab before it is saved asks first", async ({ page }) => {
+    const { calls } = await setup(page, "lead");
+    await page.clock.install();
+    await page.goto("/");
+    const middleName = page.locator("#lead-request-middle_name");
+    await expect(middleName).toBeVisible();
+    // The clock stands still: the autosave delay never runs out by itself.
+    await page.clock.pauseAt(Date.now() + 1000);
+    await middleName.pressSequentially("Maria");
+    // The phone puts the browser away (another app): the entry is saved without the delay.
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect.poll(() => calls.personalData).toEqual([{ middle_name: "Maria" }]);
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    });
+
+    // A new entry still waiting for the delay: closing the tab asks first.
+    await middleName.press("End");
+    await middleName.pressSequentially("nne");
+    const dialogs: string[] = [];
+    page.on("dialog", (dialog) => {
+      dialogs.push(dialog.type());
+      void dialog.dismiss();
+    });
+    await page.close({ runBeforeUnload: true });
+    await expect.poll(() => dialogs).toEqual(["beforeunload"]);
+    expect(page.isClosed()).toBe(false);
+
+    // Saved: the tab closes without a question.
+    await page.clock.runFor(1000);
+    await expect.poll(() => calls.personalData).toEqual([{ middle_name: "Maria" }, { middle_name: "Marianne" }]);
+    await page.close({ runBeforeUnload: true });
+    await expect.poll(() => page.isClosed()).toBe(true);
+    expect(dialogs).toEqual(["beforeunload"]);
+  });
+
   test("the lead cabinet fits a phone screen, one step at a time", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     // The legal questions are follow-up block L since 2026-10-09: a sent request with that block open.

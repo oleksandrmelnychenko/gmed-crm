@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { selectClass, tokens } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDateTime } from "@/lib/app-time-zone";
+import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import { cn } from "@/lib/utils";
 import { formatFileSize } from "@/pages/patient-lead/lead-request-model";
 
@@ -36,14 +37,16 @@ const AUTOSAVE_DELAY_MS = 700;
  * `save` runs once the draft has rested for 700 ms, and at once when the form
  * goes away, so the last entry is not lost. `save` itself sends only what changed.
  */
-export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => unknown) {
+export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => unknown, writable = true) {
   const latest = useRef({ draft, save });
   latest.current = { draft, save };
+  // A closed tab or a phone dropping the page must not lose the last entry silently.
+  const track = useUnsavedGuard(draft, save, writable);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void save(draft), AUTOSAVE_DELAY_MS);
+    const timer = window.setTimeout(() => void track(draft, save(draft)), AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [draft, save]);
+  }, [draft, save, track]);
 
   useEffect(() => () => void latest.current.save(latest.current.draft), []);
 }

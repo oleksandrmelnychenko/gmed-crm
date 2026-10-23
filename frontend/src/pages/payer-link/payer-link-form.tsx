@@ -171,7 +171,7 @@ function useAnswersForm({
     [client, closed, enqueue, onFailure, onQuestionnaire, onSaveState],
   );
 
-  useAutosave(draft, save);
+  useAutosave(draft, save, writable && !closed.current);
 
   return {
     draft,

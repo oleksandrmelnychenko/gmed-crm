@@ -6,6 +6,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { checkboxClass, selectClass, tokens } from "@/components/record-workspace/primitives/design-tokens";
 import { ApiRequestError } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
+import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import { cn } from "@/lib/utils";
 
 import {
@@ -156,6 +157,9 @@ export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => Prom
   const latest = useRef({ draft, save });
   const flushed = useRef<{ draft: Draft } | null>(null);
   latest.current = { draft, save };
+  // The entry is lost when the tab is closed or the phone drops the page
+  // before the delay ran out, a save answered or a refused one was corrected.
+  const track = useUnsavedGuard(draft, save);
 
   useEffect(() => {
     const saveLatest = async () => {
@@ -163,7 +167,7 @@ export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => Prom
       for (;;) {
         const current = latest.current;
         try {
-          if (!(await current.save(current.draft))) return false;
+          if (!(await track(current.draft, current.save(current.draft)))) return false;
           flushed.current = { draft: current.draft };
         } catch {
           return false;
@@ -174,15 +178,15 @@ export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => Prom
     const flush: AutosaveFlush = { save: saveLatest, version: () => JSON.stringify(latest.current.draft) };
     flushers?.add(flush);
     return () => { flushers?.delete(flush); };
-  }, [flushers]);
+  }, [flushers, track]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       flushed.current = null;
-      void Promise.resolve(save(draft)).catch(() => undefined);
+      void Promise.resolve(track(draft, save(draft))).catch(() => undefined);
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [draft, save]);
+  }, [draft, save, track]);
 
   useEffect(() => () => {
     // Navigation already saved this snapshot. React may batch the server's

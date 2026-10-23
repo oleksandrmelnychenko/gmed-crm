@@ -1078,6 +1078,27 @@ test.describe("payer link", () => {
     expect(calls.others).toEqual([]);
   });
 
+  test("closing the tab before the last entry is saved asks first; once saved it closes", async ({ page }) => {
+    const { calls } = await setup(page);
+    await signIn(page);
+    await acknowledge(page);
+    const details = page.getByTestId("payer-link-step-details");
+    await details.getByRole("textbox", { name: "Geburtsort" }).pressSequentially("Wien");
+    const dialogs: string[] = [];
+    page.on("dialog", (dialog) => {
+      dialogs.push(dialog.type());
+      void dialog.dismiss();
+    });
+    // Still within the autosave delay.
+    await page.close({ runBeforeUnload: true });
+    await expect.poll(() => dialogs).toEqual(["beforeunload"]);
+    await expect.poll(() => merged(calls.patches)).toEqual({ birth_place: "Wien" });
+    await expect(page.getByTestId("payer-link-save-state")).toHaveText("Gespeichert");
+    await page.close({ runBeforeUnload: true });
+    await expect.poll(() => page.isClosed()).toBe(true);
+    expect(dialogs).toEqual(["beforeunload"]);
+  });
+
   test("a private person answers every step and sends the details", async ({ page }) => {
     const { q, calls } = await setup(page);
     await signIn(page);
