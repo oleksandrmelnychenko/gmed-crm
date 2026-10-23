@@ -1091,10 +1091,8 @@ pub(crate) async fn export_patient_data_response(
         PatientExportFormat::Zip => {
             let documents = load_patient_export_files(state, patient_id).await?;
             let zip_bytes = build_patient_export_zip(&payload, &documents)?;
-            let disposition = format!(
-                "attachment; filename=\"{}\"",
-                patient_export_archive_name(&payload).replace('"', "")
-            );
+            let disposition =
+                crate::content_disposition::attachment(&patient_export_archive_name(&payload));
             axum::response::Response::builder()
                 .header("content-type", "application/zip")
                 .header("content-disposition", disposition)

@@ -1142,7 +1142,7 @@ fn pdf_response(bytes: Vec<u8>, file_name: &str, source: &'static str) -> axum::
         .header("content-type", "application/pdf")
         .header(
             "content-disposition",
-            format!("inline; filename=\"{}\"", file_name.replace('"', "")),
+            crate::content_disposition::inline(&file_name),
         )
         .header(INVOICE_DOCUMENT_SOURCE_HEADER, source)
         .body(Body::from(bytes))

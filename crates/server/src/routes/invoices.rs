@@ -12087,7 +12087,7 @@ async fn download_invoice_pdf(
         }),
     ));
 
-    let disposition = format!("inline; filename=\"{}\"", file_name.replace('"', ""));
+    let disposition = crate::content_disposition::inline(&file_name);
 
     invoice_pdf_response(pdf_bytes, disposition, source)
 }
@@ -12141,7 +12141,7 @@ async fn download_my_invoice_pdf(
         }),
     ));
 
-    let disposition = format!("inline; filename=\"{}\"", file_name.replace('"', ""));
+    let disposition = crate::content_disposition::inline(&file_name);
 
     invoice_pdf_response(pdf_bytes, disposition, source)
 }
@@ -13020,7 +13020,7 @@ fn dunning_letter_response(
 ) -> axum::response::Response {
     invoice_pdf_response(
         bytes,
-        format!("inline; filename=\"{}\"", file_name.replace('"', "")),
+        crate::content_disposition::inline(&file_name),
         source,
     )
 }

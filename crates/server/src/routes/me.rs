@@ -700,7 +700,7 @@ async fn download_my_document(
         Err(_) => return err(StatusCode::NOT_FOUND, "Document file not found on disk"),
     };
 
-    let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
+    let disposition = crate::content_disposition::attachment(&filename);
 
     match axum::response::Response::builder()
         .header("content-type", mime_type)

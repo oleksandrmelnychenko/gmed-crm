@@ -461,7 +461,7 @@ pub(crate) async fn export_archive(
             (header::CONTENT_TYPE, "application/zip".to_string()),
             (
                 header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{file_name}\""),
+                crate::content_disposition::attachment(&file_name),
             ),
             (header::CACHE_CONTROL, "no-store".to_string()),
         ],

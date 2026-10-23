@@ -374,7 +374,7 @@ fn code_hash(link_id: Uuid, code: &str) -> String {
 }
 
 /// Compares two hashes without stopping at the first difference.
-fn same_hash(left: &str, right: &str) -> bool {
+pub(crate) fn same_hash(left: &str, right: &str) -> bool {
     left.len() == right.len()
         && left
             .bytes()

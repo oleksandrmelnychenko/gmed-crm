@@ -3281,7 +3281,7 @@ async fn download_file(
     };
 
     let body = Body::from(decrypted);
-    let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
+    let disposition = crate::content_disposition::attachment(&filename);
     write_message_peer_audit(
         &state,
         auth.user_id,

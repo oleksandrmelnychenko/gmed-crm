@@ -17210,7 +17210,7 @@ async fn get_patient_clinical_pdf(
             ),
             (
                 axum::http::header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{filename}\""),
+                crate::content_disposition::attachment(&filename),
             ),
         ],
         bytes,
@@ -17465,7 +17465,7 @@ async fn get_patient_lab_results_pdf(
             (axum::http::header::CONTENT_TYPE, "application/pdf".into()),
             (
                 axum::http::header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{filename}\""),
+                crate::content_disposition::attachment(&filename),
             ),
         ],
         bytes,
@@ -17702,7 +17702,7 @@ async fn get_patient_medikationsplan_pdf(
             ),
             (
                 axum::http::header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{filename}\""),
+                crate::content_disposition::attachment(&filename),
             ),
         ],
         bytes,

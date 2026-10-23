@@ -759,7 +759,7 @@ async fn download_attachment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decrypt file");
         }
     };
-    let disposition = format!("attachment; filename=\"{}\"", file_name.replace('"', ""));
+    let disposition = crate::content_disposition::attachment(&file_name);
     axum::response::Response::builder()
         .header("content-type", mime_type)
         .header("content-disposition", disposition)

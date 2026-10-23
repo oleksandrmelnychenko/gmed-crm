@@ -2361,7 +2361,7 @@ async fn download_receipt_for_scope(
         Ok(value) => value,
         Err(_) => return err(StatusCode::NOT_FOUND, "Receipt file not found on disk"),
     };
-    let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
+    let disposition = crate::content_disposition::attachment(&filename);
     (
         [
             (header::CONTENT_TYPE, mime_type),

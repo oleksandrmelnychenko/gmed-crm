@@ -810,8 +810,7 @@ async fn download_interpreter_profile_document(
     };
 
     let safe_mime_type = sanitize_download_header_value(&mime_type, "application/octet-stream");
-    let safe_filename = sanitize_download_filename(&filename);
-    let disposition = format!("attachment; filename=\"{safe_filename}\"");
+    let disposition = crate::content_disposition::attachment(&filename);
     match axum::response::Response::builder()
         .header("content-type", safe_mime_type)
         .header("content-disposition", disposition)
@@ -2823,24 +2822,6 @@ fn sanitize_download_header_value(value: &str, fallback: &str) -> String {
         .to_string();
     if sanitized.is_empty() {
         fallback.to_string()
-    } else {
-        sanitized
-    }
-}
-
-fn sanitize_download_filename(value: &str) -> String {
-    let sanitized = value
-        .chars()
-        .map(|ch| match ch {
-            '"' | '\\' => '_',
-            _ if ch.is_control() => '_',
-            _ => ch,
-        })
-        .collect::<String>()
-        .trim()
-        .to_string();
-    if sanitized.is_empty() {
-        "document".to_string()
     } else {
         sanitized
     }

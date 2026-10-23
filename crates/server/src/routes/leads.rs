@@ -9082,7 +9082,7 @@ async fn download_attachment(
             let data: Vec<u8> = row.try_get("data").unwrap_or_default();
 
             let mime = content_type.unwrap_or_else(|| "application/octet-stream".to_string());
-            let disposition = format!("attachment; filename=\"{}\"", file_name.replace('"', "'"));
+            let disposition = crate::content_disposition::attachment(&file_name);
 
             match axum::response::Response::builder()
                 .header("content-type", mime)
@@ -9132,7 +9132,12 @@ fn check_shared_token(headers: &HeaderMap) -> Result<(), axum::response::Respons
         .get("x-intake-token")
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    if provided != expected.as_str() {
+    // Both sides are hashed first so the comparison runs over equal-length
+    // digests and does not stop at the first differing byte.
+    if !crate::routes::lead_payer_link::same_hash(
+        &crate::auth::tokens::hash_token(provided),
+        &crate::auth::tokens::hash_token(expected.as_str()),
+    ) {
         return Err(err(StatusCode::UNAUTHORIZED, "Invalid intake token"));
     }
     Ok(())

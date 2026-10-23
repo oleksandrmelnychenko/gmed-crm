@@ -31805,7 +31805,7 @@ async fn download_document(
         Err(_) => return err(StatusCode::NOT_FOUND, "Document file not found on disk"),
     };
 
-    let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
+    let disposition = crate::content_disposition::attachment(&filename);
 
     // Who took a copy of a patient file is part of the disclosure record, so it
     // is a domain event (kept a year) rather than a short-lived request row.
@@ -31972,7 +31972,7 @@ async fn download_my_uploaded_document(
         Err(_) => return err(StatusCode::NOT_FOUND, "Document file not found on disk"),
     };
 
-    let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
+    let disposition = crate::content_disposition::attachment(&filename);
 
     // Who took a copy of a patient file is part of the disclosure record, so it
     // is a domain event (kept a year) rather than a short-lived request row.
