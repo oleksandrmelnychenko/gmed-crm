@@ -98,6 +98,25 @@ async function mount(page: Page, lead: Json, handlers: Record<string, Handler> =
   return { wizard, calls };
 }
 
+test("each commercial blocker of the release list leads to its own field", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const reasons: [string, string, string][] = [
+    ["Order needs at least one valid service", "Добавьте в заказ хотя бы одну услугу", "lead-wizard-order-service-select"],
+    ["Customer order signature is missing", "Получите подпись клиента на заказе", "lead-wizard-order-signatures"],
+    ["Agency order signature is missing", "Подтвердите заказ со стороны агентства", "lead-wizard-order-signatures"],
+    ["Quote is not accepted", "Подтвердите смету", "lead-wizard-quote"],
+  ];
+  const lead = adultLead({ requested_specialties: ["cardiology"] });
+  (lead.readiness as { blocking_reasons: string[] }).blocking_reasons = reasons.map(([reason]) => reason);
+  const { wizard } = await mount(page, lead);
+  for (const [, label, fieldId] of reasons) {
+    await wizard.getByRole("tab", { name: /Создание пациента/ }).click();
+    await wizard.getByTestId("completion-blockers").getByRole("button", { name: label, exact: true }).click();
+    await expect(wizard.getByRole("tab", { name: /Договор и смета/ })).toHaveAttribute("aria-selected", "true");
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe(fieldId);
+  }
+});
+
 test("the service and order tabs and the release checklist follow what each step shows", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const { wizard } = await mount(page, adultLead());

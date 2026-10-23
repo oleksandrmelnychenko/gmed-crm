@@ -782,6 +782,8 @@ const FRAMEWORK_DOCUMENT_ID = "lead-wizard-framework-document";
 const COST_THRESHOLD_ID = "lead-wizard-cost-threshold";
 const ORDER_DOCUMENT_ID = "lead-wizard-order-document";
 const ORDER_COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-order-cost-estimate-document";
+const ORDER_SIGNATURES_ID = "lead-wizard-order-signatures";
+const QUOTE_SECTION_ID = "lead-wizard-quote";
 const COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-cost-estimate-document";
 const COST_ESTIMATE_WORK_TYPES_ID = "lead-wizard-cost-estimate-work-types";
 /** Server readiness reason (crates/server/src/routes/leads.rs): the VKS lists medical work types only. */
@@ -2516,8 +2518,14 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,
     "Framework contract was terminated; create a new contract": FRAMEWORK_DOCUMENT_ID,
     "Framework contract document is missing": FRAMEWORK_DOCUMENT_ID,
+    "Onboarding order is missing": ORDER_SERVICE_SELECT_ID,
+    "Order needs at least one valid service": ORDER_SERVICE_SELECT_ID,
     "Order document is missing": ORDER_DOCUMENT_ID,
     "Order cost estimate document is missing": ORDER_COST_ESTIMATE_DOCUMENT_ID,
+    "Customer order signature is missing": ORDER_SIGNATURES_ID,
+    "Agency order signature is missing": ORDER_SIGNATURES_ID,
+    "Quote is not accepted": QUOTE_SECTION_ID,
+    "Required prepayment is not complete": QUOTE_SECTION_ID,
     "Cost estimate document is missing": COST_ESTIMATE_DOCUMENT_ID,
     "Preliminary cost calculation document is missing": COST_ESTIMATE_DOCUMENT_ID,
     ...payerReadinessReasonFields(),
@@ -9829,6 +9837,7 @@ ${serviceCommentLines.join("\n")}`
                 </Section>
               </div>
               {renderPayerSignatureFlow(true)}
+              <div id={ORDER_SIGNATURES_ID} tabIndex={-1} className="focus:outline-none">
               <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Подписи", "Unterschriften")}>
                 <div>
                 {/* Owner decision 2026-10-12 (QA C2-14): the client's signature of the
@@ -9929,6 +9938,8 @@ ${serviceCommentLines.join("\n")}`
                 />}
                 </div>
               </Section>
+              </div>
+              <div id={QUOTE_SECTION_ID} tabIndex={-1} className="focus:outline-none">
               <Section
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Смета и предоплата", "Kostenvoranschlag und Vorauszahlung")}
@@ -10233,6 +10244,7 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 ) : null}
               </Section>
+              </div>
               <div id={ORDER_COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
@@ -10402,7 +10414,7 @@ ${serviceCommentLines.join("\n")}`
                             ))}
                             {quoteMissing ? (
                               <li>
-                                <button type="button" className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={isBusy} onClick={() => navigateToStep("commercial")}>
+                                <button type="button" className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={isBusy} onClick={() => openReadinessReason("Quote is not accepted")}>
                                   {quoteStateLabel}
                                 </button>
                               </li>
