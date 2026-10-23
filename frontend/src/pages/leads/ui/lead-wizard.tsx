@@ -2374,7 +2374,9 @@ function minorIdentityReasonLabel(tx: Tx) {
   );
 }
 
-function readinessReasonLabel(reason: string, tx: Tx) {
+function readinessReasonLabel(reason: string, tx: Tx, minor = false) {
+  // A minor is identified through the parents or the guardian, never the child.
+  if (minor && reason === "Identity document is not verified") return minorIdentityReasonLabel(tx);
   const labels: Record<string, string> = {
     "Lead must be qualified before conversion": tx("Подтвердите данные обращения", "Angaben zum Anliegen bestätigen"),
     // Both mean the same fact: the signed DSGVO package (the generated consent
@@ -4725,7 +4727,7 @@ export function LeadWizard({
     return validationContext.reasons.map((reason) => ({
       key: reason,
       step: readinessReasonStep(reason),
-      message: readinessReasonLabel(reason, tx),
+      message: readinessReasonLabel(reason, tx, Boolean(draft && isMinor(draft.birthDate, new Date()))),
       fieldId: readinessReasonFieldId(reason, draft),
     }));
   }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents]);
@@ -7154,6 +7156,8 @@ ${serviceCommentLines.join("\n")}`
     }));
   }
 
+  const draftIsMinor = Boolean(draft && isMinor(draft.birthDate, new Date()));
+
   function openReadinessReason(reason: string) {
     if (reason === "Lead must be qualified before conversion") {
       void finishIntake("release");
@@ -7162,7 +7166,7 @@ ${serviceCommentLines.join("\n")}`
     openValidationIssue({
       key: reason,
       step: readinessReasonStep(reason),
-      message: readinessReasonLabel(reason, tx),
+      message: readinessReasonLabel(reason, tx, draftIsMinor),
       fieldId: readinessReasonFieldId(reason, draft),
     });
   }
@@ -7257,7 +7261,7 @@ ${serviceCommentLines.join("\n")}`
         key: `request:${reason}`,
         label: tx("В этом обращении", "In dieser Anfrage"),
         ready: false,
-        status: readinessReasonLabel(reason, tx),
+        status: readinessReasonLabel(reason, tx, draftIsMinor),
         detail: "—",
         action: { label: tx("Исправить", "Beheben"), onClick: () => openReadinessReason(reason) },
       })),
@@ -10408,7 +10412,7 @@ ${serviceCommentLines.join("\n")}`
                                   disabled={isBusy}
                                   onClick={() => openReadinessReason(reason)}
                                 >
-                                  {readinessReasonLabel(reason, tx)}
+                                  {readinessReasonLabel(reason, tx, draftIsMinor)}
                                 </button>
                               </li>
                             ))}

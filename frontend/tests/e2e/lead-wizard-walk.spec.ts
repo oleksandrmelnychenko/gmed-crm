@@ -117,6 +117,23 @@ test("each commercial blocker of the release list leads to its own field", async
   }
 });
 
+test("a minor's release list asks for the parents' or guardian's identity documents", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  const lead = adultLead({
+    first_name: "Mia",
+    date_of_birth: "2015-06-01",
+    email: null,
+    phone: null,
+    trusted_contacts: [{ id: "11111111-1111-4111-8111-111111111111", related_patient_id: null, name: "Anna Muster", phone: "+49 30 100001", email: "anna@example.com", relation: "parent", birth_date: null, address: null }],
+  });
+  (lead.readiness as { blocking_reasons: string[] }).blocking_reasons = ["Identity document is not verified"];
+  const { wizard } = await mount(page, lead);
+  await wizard.getByRole("tab", { name: /Создание пациента/ }).click();
+  const blockers = wizard.getByTestId("completion-blockers");
+  await expect(blockers.getByRole("button", { name: "Подтвердите документы, удостоверяющие личность родителей или опекуна", exact: true })).toBeVisible();
+  await expect(blockers.getByText("Подтвердите документ, удостоверяющий личность", { exact: true })).toHaveCount(0);
+});
+
 test("the service and order tabs and the release checklist follow what each step shows", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const { wizard } = await mount(page, adultLead());
