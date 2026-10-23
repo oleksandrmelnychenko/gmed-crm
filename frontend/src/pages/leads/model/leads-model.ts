@@ -1258,3 +1258,24 @@ export const LEAD_LANGUAGE_HELPERS = {
 export function useLeadLabels() {
   return useLanguageBound(LEAD_LANGUAGE_HELPERS);
 }
+
+/** The server's blocker of an unqualified lead (crates/server/src/routes/leads.rs). */
+export const LEAD_QUALIFICATION_REASON = "Lead must be qualified before conversion";
+
+/**
+ * Whether the wizard's «Создать пациента» can run (owner decision 2026-10-23):
+ * the server says the lead is ready, or the only remaining server blocker is
+ * the qualification of a lead still in work — the conversion qualifies it
+ * itself (the wizard saves the intake and qualifies before converting).
+ * Any other blocker keeps the button disabled, with its list.
+ */
+export function leadConversionRunnable(
+  readiness: { conversion_ready: boolean; blocking_reasons: readonly string[] } | null | undefined,
+  qualificationStatus: string | null | undefined,
+): boolean {
+  if (!readiness) return false;
+  if (readiness.conversion_ready) return true;
+  return readiness.blocking_reasons.length > 0
+    && readiness.blocking_reasons.every((reason) => reason === LEAD_QUALIFICATION_REASON)
+    && (qualificationStatus === "new" || qualificationStatus === "in_progress");
+}

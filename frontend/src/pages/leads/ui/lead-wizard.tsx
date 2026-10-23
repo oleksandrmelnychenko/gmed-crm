@@ -280,6 +280,7 @@ import {
 } from "@/pages/specializations/data/specialization-work-types-api";
 import {
   LEAD_WIZARD_SERVICE_OPTIONS,
+  leadConversionRunnable,
   leadIntakeTypeFromLead,
   leadErrorBlockingReasons,
   leadErrorMessage,
@@ -7385,7 +7386,8 @@ ${serviceCommentLines.join("\n")}`
   const nextStep = STEPS[stepIndex + 1];
   const commercialReady = Boolean(readiness.get("commercial")) && quoteAndPrepaymentReady;
   const demoSignatureChecks = lead?.readiness.demo_onboarding?.credited_checks ?? [];
-  const conversionReady = Boolean(lead?.readiness.conversion_ready) && quoteAndPrepaymentReady;
+  // The conversion qualifies the lead itself: that blocker alone keeps nothing disabled (owner decision 2026-10-23).
+  const conversionReady = leadConversionRunnable(lead?.readiness, lead?.qualification_status) && quoteAndPrepaymentReady;
   const visibleCommercialSaveFeedback = commercialSaveFeedback?.followsReadiness
     ? commercialReadinessFeedback(lead?.readiness, tx)
     : commercialSaveFeedback;

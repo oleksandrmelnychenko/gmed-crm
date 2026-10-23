@@ -7,6 +7,8 @@ import {
   LEAD_WIZARD_SERVICE_OPTIONS,
   formatDate,
   formatDateTime,
+  LEAD_QUALIFICATION_REASON,
+  leadConversionRunnable,
   leadErrorBlockingReasons,
   leadErrorMessage,
   leadPermissions,
@@ -403,4 +405,18 @@ it("explains the existing-parent repeat workflow rather than suggesting a differ
   expect(leadErrorMessage(cause, (ru) => ru)).toContain("повторное обращение");
   expect(leadErrorMessage(cause, (_ru, de) => de)).toContain("erneute Anfrage");
   expect(leadErrorMessage(cause, (ru) => ru)).not.toContain("другую электронную почту");
+});
+
+it("«Создать пациента» runs when only the qualification blocks: the conversion qualifies (owner decision 2026-10-23)", () => {
+  const blocked = (...reasons: string[]) => ({ conversion_ready: false, blocking_reasons: reasons });
+  expect(leadConversionRunnable({ conversion_ready: true, blocking_reasons: [] }, "qualified")).toBe(true);
+  expect(leadConversionRunnable(blocked(LEAD_QUALIFICATION_REASON), "in_progress")).toBe(true);
+  expect(leadConversionRunnable(blocked(LEAD_QUALIFICATION_REASON), "new")).toBe(true);
+  // Any other blocker keeps it disabled.
+  expect(leadConversionRunnable(blocked(LEAD_QUALIFICATION_REASON, "Patient form is not signed"), "in_progress")).toBe(false);
+  expect(leadConversionRunnable(blocked("Patient form is not signed"), "qualified")).toBe(false);
+  // A lead out of work is not qualified by the conversion.
+  expect(leadConversionRunnable(blocked(LEAD_QUALIFICATION_REASON), "not_qualified")).toBe(false);
+  expect(leadConversionRunnable(blocked(), "in_progress")).toBe(false);
+  expect(leadConversionRunnable(null, "in_progress")).toBe(false);
 });
