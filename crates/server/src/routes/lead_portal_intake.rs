@@ -2738,6 +2738,12 @@ pub(crate) async fn request_payload(
         route_by,
         account_holder_suggestion.as_deref(),
     );
+    // The expected total is no longer asked (owner 2026-10-12): the cabinet
+    // neither shows nor sends it; staff still see an older answer.
+    let mut billing_extras = billing_extras;
+    if let Some(extras) = billing_extras.as_object_mut() {
+        extras.remove("expected_total_eur");
+    }
     crate::risk::cabinet::merge_into(&mut billing_json, billing_extras);
     crate::risk::cabinet::merge_into(&mut billing_json, recipient.portal_json());
     // A paying parent answers the payer's questions in the own cabinet

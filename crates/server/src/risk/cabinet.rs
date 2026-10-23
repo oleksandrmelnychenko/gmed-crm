@@ -1070,6 +1070,8 @@ pub const ORGANISATION_KEYS: [&str; 3] = [
     "organisation_contact_name",
 ];
 
+/// Taken out of a billing save: `expected_total_eur` is still accepted from
+/// an older client and dropped (no longer asked, owner 2026-10-12).
 pub const BLOCK_C_KEYS: [&str; 2] = ["expected_total_eur", "via_third_party_kind"];
 
 /// Removes `keys` from an object body and returns them.
@@ -1157,17 +1159,15 @@ pub async fn save_organisation_mask(
     Ok(Ok(changed))
 }
 
-/// Block C's keys after a billing save: the expected total (≥ 0, at most
-/// 9 999 999 999.99) and through whom another person pays (`person` /
-/// `psp`, only while `via_third_party`). The changed keys.
+/// Block C's key after a billing save: through whom another person pays
+/// (`person` / `psp`, only while `via_third_party`). The changed keys.
 pub async fn save_block_c(
     conn: &mut PgConnection,
     lead_id: Uuid,
     keys: &Map<String, Value>,
 ) -> Result<Result<Vec<&'static str>, FieldError>, sqlx::Error> {
     let Some(row) = sqlx::query(
-        r#"SELECT via_third_party, expected_total_eur::float8 AS expected_total_eur,
-                  via_third_party_kind
+        r#"SELECT via_third_party, via_third_party_kind
            FROM lead_payer_declarations WHERE lead_id = $1 FOR UPDATE"#,
     )
     .bind(lead_id)
@@ -1181,38 +1181,11 @@ pub async fn save_block_c(
         .ok()
         .flatten()
         .unwrap_or(false);
-    let current_total: Option<f64> = row.try_get("expected_total_eur").ok().flatten();
     let current_kind: Option<String> = row.try_get("via_third_party_kind").ok().flatten();
-    let mut total = current_total;
     let mut kind = current_kind.clone();
-    if let Some(value) = keys.get("expected_total_eur") {
-        total = match value {
-            Value::Null => None,
-            Value::String(text) if text.trim().is_empty() => None,
-            Value::String(text) => match text.trim().replace(',', ".").parse::<f64>() {
-                Ok(amount) => Some(amount),
-                Err(_) => {
-                    return Ok(Err(field_error(
-                        "expected_total_eur",
-                        "A number is expected",
-                    )));
-                }
-            },
-            Value::Number(number) => number.as_f64(),
-            _ => {
-                return Ok(Err(field_error(
-                    "expected_total_eur",
-                    "A number is expected",
-                )));
-            }
-        };
-        if let Some(amount) = total
-            && !(amount.is_finite() && (0.0..10_000_000_000.0).contains(&amount))
-        {
-            return Ok(Err(field_error("expected_total_eur", "Out of range")));
-        }
-        total = total.map(|amount| (amount * 100.0).round() / 100.0);
-    }
+    // The expected total is no longer asked (owner 2026-10-12, 2026-10-23):
+    // a sent `expected_total_eur` is dropped; the stored value stays as
+    // history for staff.
     if let Some(value) = keys.get("via_third_party_kind") {
         kind = match one_of_text(value, "via_third_party_kind", &["person", "psp"]) {
             Ok(kind) => kind,
@@ -1223,21 +1196,16 @@ pub async fn save_block_c(
         kind = None;
     }
     let mut changed = Vec::new();
-    if total != current_total {
-        changed.push("expected_total_eur");
-    }
     if kind != current_kind {
         changed.push("via_third_party_kind");
     }
     if !changed.is_empty() {
         sqlx::query(
             r#"UPDATE lead_payer_declarations
-               SET expected_total_eur = $2::float8::numeric(12, 2), via_third_party_kind = $3,
-                   updated_at = now()
+               SET via_third_party_kind = $2, updated_at = now()
                WHERE lead_id = $1"#,
         )
         .bind(lead_id)
-        .bind(total)
         .bind(&kind)
         .execute(&mut *conn)
         .await?;

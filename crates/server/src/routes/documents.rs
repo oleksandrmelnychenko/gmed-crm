@@ -19530,8 +19530,26 @@ fn legal_meta_grid(layout: &mut TreatmentPlanPdfLayout, cells: &[(&str, String)]
     // The title helper already leaves 3 mm below the subtitle. Together these
     // 4 mm reproduce the 7 mm title-to-metadata gap from the approved mockup.
     layout.spacer(4.0);
-    let row_count = cells.len().div_ceil(2);
-    let card_height_mm = CARD_PADDING_Y_MM * 2.0 + row_count as f32 * ROW_HEIGHT_MM;
+    let column_width_mm = (PDF_CONTENT_WIDTH_MM - COLUMN_GAP_MM) / 2.0;
+    let available_text_width_mm = column_width_mm - CARD_PADDING_X_MM * 2.0;
+    let fitted = cells
+        .iter()
+        .map(|(label, value)| legal_meta_cell(label, value, available_text_width_mm))
+        .collect::<Vec<_>>();
+    // A row is as high as its longest wrapped value.
+    let row_heights = fitted
+        .chunks(2)
+        .map(|row| {
+            row.iter()
+                .map(|cell| {
+                    ROW_HEIGHT_MM
+                        + cell.value_lines.len().saturating_sub(1) as f32
+                            * pdf_line_height_mm(cell.value_size_pt, 1.3)
+                })
+                .fold(ROW_HEIGHT_MM, f32::max)
+        })
+        .collect::<Vec<_>>();
+    let card_height_mm = CARD_PADDING_Y_MM * 2.0 + row_heights.iter().sum::<f32>();
     layout.ensure_space(card_height_mm);
 
     let card_top_mm = layout.y_mm;
@@ -19570,54 +19588,99 @@ fn legal_meta_grid(layout: &mut TreatmentPlanPdfLayout, cells: &[(&str, String)]
         append_pdf_filled_rect(&mut layout.page_ops, x, y, width, height, border.clone());
     }
 
-    let column_width_mm = (PDF_CONTENT_WIDTH_MM - COLUMN_GAP_MM) / 2.0;
     let regular_font = layout.regular_font.clone();
     let bold_font = layout.bold_font.clone();
-    for (index, (label, value)) in cells.iter().enumerate() {
+    for (index, cell) in fitted.iter().enumerate() {
         let row = index / 2;
         let column = index % 2;
         let column_left_mm = PDF_LEFT_MARGIN_MM + column as f32 * (column_width_mm + COLUMN_GAP_MM);
         let text_x_mm = column_left_mm + CARD_PADDING_X_MM;
         let column_right_mm = column_left_mm + column_width_mm - CARD_PADDING_X_MM;
-        let baseline_y_mm = card_top_mm - CARD_PADDING_Y_MM - 3.2 - row as f32 * ROW_HEIGHT_MM;
-        let available_text_width_mm = column_width_mm - CARD_PADDING_X_MM * 2.0;
-        let label_size_pt = 7.0;
-        let value_size_pt = 9.5;
-        let gap_mm = 2.0;
-        let natural_text_width_mm =
-            approx_text_width_mm(label, label_size_pt) + approx_text_width_mm(value, value_size_pt);
-        let scale = if natural_text_width_mm + gap_mm > available_text_width_mm {
-            (available_text_width_mm - gap_mm) / natural_text_width_mm
-        } else {
-            1.0
-        };
-        let label_size_pt = label_size_pt * scale;
-        let value_size_pt = value_size_pt * scale;
-        let value_width_mm = approx_text_width_mm(value, value_size_pt);
-        let value_x_mm = (column_right_mm - value_width_mm).max(text_x_mm);
+        let row_top_mm = card_top_mm - CARD_PADDING_Y_MM - row_heights[..row].iter().sum::<f32>();
+        let baseline_y_mm = row_top_mm - 3.2;
 
         append_pdf_text_line(
             &mut layout.page_ops,
-            label,
+            cell.label,
             text_x_mm,
             baseline_y_mm,
-            label_size_pt,
+            cell.label_size_pt,
             &regular_font,
             TreatmentPlanPdfColor::Muted,
         );
-        append_pdf_text_line(
-            &mut layout.page_ops,
-            value,
-            value_x_mm,
-            baseline_y_mm,
-            value_size_pt,
-            &bold_font,
-            TreatmentPlanPdfColor::Body,
-        );
+        // Right-aligned; a value too long for one line wraps below its
+        // first line instead of shrinking under the minimum size.
+        let value_line_height_mm = pdf_line_height_mm(cell.value_size_pt, 1.3);
+        for (line_index, line) in cell.value_lines.iter().enumerate() {
+            let value_width_mm = approx_text_width_mm(line, cell.value_size_pt);
+            let value_x_mm = (column_right_mm - value_width_mm).max(text_x_mm);
+            append_pdf_text_line(
+                &mut layout.page_ops,
+                line,
+                value_x_mm,
+                baseline_y_mm - line_index as f32 * value_line_height_mm,
+                cell.value_size_pt,
+                &bold_font,
+                TreatmentPlanPdfColor::Body,
+            );
+        }
     }
 
     layout.y_mm = card_bottom_mm;
     layout.spacer(6.0);
+}
+
+/// The smallest size of a value in the metadata card of the legal documents
+/// (owner 2026-10-23): a longer value wraps instead of shrinking further.
+const LEGAL_META_MIN_VALUE_PT: f32 = 7.0;
+
+/// One cell of [`legal_meta_grid`], fitted to the column.
+struct LegalMetaCell<'a> {
+    label: &'a str,
+    label_size_pt: f32,
+    value_size_pt: f32,
+    value_lines: Vec<String>,
+}
+
+/// Label 7 pt and value 9.5 pt on one line; a cell too wide for the column
+/// shrinks both, the value down to [`LEGAL_META_MIN_VALUE_PT`]; what is still
+/// too wide wraps over several right-aligned lines at that size.
+fn legal_meta_cell<'a>(label: &'a str, value: &str, available_width_mm: f32) -> LegalMetaCell<'a> {
+    const LABEL_PT: f32 = 7.0;
+    const VALUE_PT: f32 = 9.5;
+    const GAP_MM: f32 = 2.0;
+    let natural_width_mm =
+        approx_text_width_mm(label, LABEL_PT) + approx_text_width_mm(value, VALUE_PT);
+    let scale = if natural_width_mm + GAP_MM > available_width_mm {
+        ((available_width_mm - GAP_MM) / natural_width_mm).max(LEGAL_META_MIN_VALUE_PT / VALUE_PT)
+    } else {
+        1.0
+    };
+    let label_size_pt = LABEL_PT * scale;
+    let value_size_pt = VALUE_PT * scale;
+    let fits = approx_text_width_mm(label, label_size_pt)
+        + approx_text_width_mm(value, value_size_pt)
+        + GAP_MM
+        <= available_width_mm + 0.01;
+    let value_lines = if fits {
+        vec![value.to_string()]
+    } else {
+        let value_width_mm =
+            (available_width_mm - approx_text_width_mm(label, label_size_pt) - GAP_MM)
+                .max(available_width_mm * 0.5);
+        let lines = wrap_text_to_width_precise(value, value_size_pt, value_width_mm);
+        if lines.is_empty() {
+            vec![value.to_string()]
+        } else {
+            lines
+        }
+    };
+    LegalMetaCell {
+        label,
+        label_size_pt,
+        value_size_pt,
+        value_lines,
+    }
 }
 
 fn build_manual_generated_text_pdf(
@@ -21570,17 +21633,19 @@ fn build_cost_coverage_pdf(
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .unwrap_or("________");
+    // The payer receives the estimate as service types and amounts only
+    // (Ausfertigung für die zahlende Person); the medical cost calculation
+    // is never sent to the payer and is no part of this declaration (owner
+    // decision 2026-10-06, 2026-10-23).
     for line in [
-        format!("Anlage 1: Kostenvoranschlag zum {ordinal}. Einzelauftrag Nr. {quote_label};"),
         format!(
-            "Anlage 2: {ordinal}. Einzelauftrag vom {} zum Rahmendienstleistungsvertrag vom {} - Auftraggeber: {};",
+            "Anlage 1: Kostenvoranschlag zum {ordinal}. Einzelauftrag Nr. {quote_label} (Ausfertigung für die zahlende Person, nach Leistungsarten zusammengefasst);"
+        ),
+        format!(
+            "Anlage 2: {ordinal}. Einzelauftrag vom {} zum Rahmendienstleistungsvertrag vom {} - Auftraggeber: {}.",
             fmt_de_date(context.order_date),
             fmt_de_date(context.contract_date),
             context.contracting.debtor_name(&context.patient)
-        ),
-        format!(
-            "Anlage 3: Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen für {}.",
-            context.patient.name_with_salutation()
         ),
     ] {
         admin_block(&mut layout, &line, 0.0, 0.5);
@@ -25562,8 +25627,6 @@ struct LeadSelfDisclosure {
     /// of a paying parent): `None` for a third party, who answers it on the
     /// own link.
     payment_route: Option<GwgPaymentRoute>,
-    /// The expected total in EUR the lead stated ("8.000,00 EUR").
-    expected_total: Option<String>,
     /// Block C's recorded intermediary; never inferred from a risk trigger.
     via_third_party_kind: Option<String>,
     /// `None` until the own-interest question was answered.
@@ -25874,10 +25937,8 @@ async fn load_lead_self_disclosure(
         .filter(|_| patient_side_pays)
         .map(GwgPaymentRoute::from_declaration)
         .filter(|route| route.method.is_some() || route.via_third_party.is_some());
-    let expected_total = billing_extras["expected_total_eur"]
-        .as_str()
-        .filter(|_| patient_side_pays)
-        .map(fmt_money_de);
+    // The expected total is no longer asked and not printed (owner
+    // 2026-10-12, 2026-10-23); an older answer stays visible to staff only.
     // The patient's own funds and what the patient said of a third party's
     // funds, from the one source per person (owner decision 2026-10-23).
     let funds = super::lead_funds::lead_funds(declaration.as_ref(), None);
@@ -25888,7 +25949,6 @@ async fn load_lead_self_disclosure(
         follow_up_sent_at,
         invoice_recipient,
         payment_route,
-        expected_total,
         via_third_party_kind: billing_extras["via_third_party_kind"]
             .as_str()
             .filter(|_| patient_side_pays)
@@ -26439,10 +26499,6 @@ fn build_lead_self_disclosure_pdf(
                 ));
             }
         }
-        rows.push((
-            "Voraussichtlicher Gesamtbetrag",
-            data.expected_total.clone(),
-        ));
     }
     lead_disclosure_section(&mut layout, &mut section, "Wer zahlt?", &rows);
 
@@ -26629,7 +26685,12 @@ fn build_lead_self_disclosure_pdf(
             }
         }
     }
-    append_third_party_disclosure_pdf(&mut layout, data.consent_choice.as_ref(), minor);
+    append_third_party_disclosure_pdf(
+        &mut layout,
+        &mut section,
+        data.consent_choice.as_ref(),
+        minor,
+    );
 
     // The declaration of § 11 Abs. 6 GwG and the signature of the
     // patient side: the patient, for a minor every legal representative
@@ -26652,7 +26713,19 @@ fn build_lead_self_disclosure_pdf(
             };
             vec!["____________________".to_string(); count]
         } else {
-            representatives
+            // Joint custody with only one parent recorded: the other legal
+            // representative signs on an empty line (on paper; no electronic
+            // signer exists for it) — owner 2026-10-23.
+            let mut signers = representatives;
+            if data
+                .custody
+                .as_deref()
+                .is_none_or(|custody| custody == "joint")
+                && signers.len() < 2
+            {
+                signers.push("____________________".to_string());
+            }
+            signers
         }
     } else {
         vec![
@@ -26801,10 +26874,26 @@ pub(crate) async fn generate_lead_document(
 /// Fixed explanation of "Auskunft an Dritte" on the patient form PDF.
 const THIRD_PARTY_DISCLOSURE_INTRO: &str = "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
 
+/// The same explanation on a minor's form, addressed to the legal
+/// representatives (owner 2026-10-23: not "an Sie selbst").
+const THIRD_PARTY_DISCLOSURE_INTRO_MINOR: &str = "Wir geben Auskunft über die persönlichen und medizinischen Daten Ihres Kindes ausschließlich an Sie als gesetzliche Vertreter. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Partner, Freunde, Verwandte oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
+
+/// The answer "no" of "Auskunft an Dritte": the patient, or for a minor the
+/// legal representatives.
+fn third_party_disclosure_no(minor: bool) -> &'static str {
+    if minor {
+        "Nein, nur die gesetzlichen Vertreter."
+    } else {
+        "Nein, nur ich selbst."
+    }
+}
+
 /// The scoped release is printed from the immutable cabinet receipt, never
-/// inferred from a contact or an older generic Anlage 1 checkbox.
+/// inferred from a contact or an older generic Anlage 1 checkbox. The
+/// section is numbered with the rest of the form (`section`).
 fn append_third_party_disclosure_pdf(
     layout: &mut TreatmentPlanPdfLayout,
+    section: &mut PayerSectionCounter,
     choice: Option<&crate::consent_choices::OwnConsentChoice>,
     minor: bool,
 ) {
@@ -26828,10 +26917,14 @@ fn append_third_party_disclosure_pdf(
         .filter(|_| disclosure.allow_disclosure)
         .map(crate::consent_choices::OwnConsentChoice::recipient_lines)
         .unwrap_or_default();
-    let intro = THIRD_PARTY_DISCLOSURE_INTRO;
+    let intro = if minor {
+        THIRD_PARTY_DISCLOSURE_INTRO_MINOR
+    } else {
+        THIRD_PARTY_DISCLOSURE_INTRO
+    };
     let guardian_intro = "Die folgenden Angaben und die Einwilligung erklärt die vertretende Person für die oben bezeichnete Person.";
     let question = "Soll eine weitere Person Auskunft erhalten dürfen?";
-    let no = "Nein, nur ich selbst.";
+    let no = third_party_disclosure_no(minor);
     let yes = "Ja, folgende Person(en) dürfen Auskunft erhalten:";
     let checkbox_height = |text: &str| {
         wrap_text_to_width_precise(&format!("[x]  {text}"), 10.5, layout.available_width(4.0)).len()
@@ -26856,15 +26949,7 @@ fn append_third_party_disclosure_pdf(
             .unwrap_or(0.0);
     // Keep the heading with its explanation, then the answers with their question.
     layout.ensure_space(opening_height);
-    layout.text_block(
-        "Auskunft an Dritte",
-        12.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        3.0,
-        2.0,
-    );
+    section.heading(layout, "Auskunft an Dritte");
     if disclosure.access_kind == "guardian" {
         fc_body(layout, guardian_intro);
     }
@@ -36445,7 +36530,11 @@ mod tests {
     fn write_consent_review_sample(name: &str, pdf: &super::GeneratedPdf) {
         for page in normalized_pdf_pages(pdf) {
             if page.contains("Soll eine weitere Person") {
-                assert!(page.contains("Nein, nur ich selbst."), "{page}");
+                assert!(
+                    page.contains("Nein, nur ich selbst.")
+                        || page.contains("Nein, nur die gesetzlichen Vertreter."),
+                    "{page}"
+                );
                 assert!(page.contains("Ja, folgende Person(en)"), "{page}");
             }
         }
@@ -37985,8 +38074,14 @@ mod tests {
         // The fixed "Auskunft an Dritte" explanation names "Behandlung" in
         // general terms. Since 2026-10-22 an unanswered disclosure prints as
         // "Nein", so the section is on every patient form; it carries no data.
-        assert!(text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO), "{text}");
-        let text = &text.replace(super::THIRD_PARTY_DISCLOSURE_INTRO, "");
+        assert!(
+            text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO)
+                || text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO_MINOR),
+            "{text}"
+        );
+        let text = &text
+            .replace(super::THIRD_PARTY_DISCLOSURE_INTRO, "")
+            .replace(super::THIRD_PARTY_DISCLOSURE_INTRO_MINOR, "");
         assert_nothing_medical_or_assessed(text);
         for word in [
             "Risiko",
@@ -38250,7 +38345,8 @@ mod tests {
             "Wohnsitz seit 2019",
             "Arbeit – Lehrerin an einer Schule",
             "Frühere Staatsangehörigkeiten Syrien",
-            "7. Versicherung",
+            "7. Auskunft an Dritte",
+            "8. Versicherung",
             "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG).",
             "Anna Maria Muster",
             "Unterschrift Patient/in",
@@ -38378,6 +38474,48 @@ mod tests {
             text.contains("Ich versichere als gesetzliche/r Vertreter/in"),
             "{text}"
         );
+        // "Auskunft an Dritte" speaks to the representatives and is numbered
+        // with the form (owner 2026-10-23).
+        assert!(
+            text.contains("7. Auskunft an Dritte") && text.contains("8. Versicherung"),
+            "{text}"
+        );
+        assert!(
+            text.contains("[x] Nein, nur die gesetzlichen Vertreter."),
+            "{text}"
+        );
+        assert!(
+            text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO_MINOR),
+            "{text}"
+        );
+        assert!(!text.contains("nur ich selbst"), "{text}");
+        assert!(!text.contains("ausschließlich an Sie selbst"), "{text}");
+
+        // Joint custody with one parent recorded: the other legal
+        // representative gets an empty line (paper), with its frame.
+        let one_of_two = super::LeadSelfDisclosure {
+            custody: Some("joint".to_string()),
+            ..sole.clone()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &one_of_two,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0008",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["guardian_1", "guardian_2"]);
+        assert_signature_frames_detected(&generated);
+        let text = normalized_pdf_text(&generated);
+        assert!(
+            text.contains("Wir versichern als gesetzliche Vertreter"),
+            "{text}"
+        );
+        assert_eq!(
+            text.matches("Unterschrift gesetzl. Vertreter/in").count(),
+            2,
+            "{text}"
+        );
         let unnamed = super::LeadSelfDisclosure {
             custody: None,
             acting_persons: Vec::new(),
@@ -38414,7 +38552,8 @@ mod tests {
             "1. Angaben zur Person",
             "2. Ausweisdokument",
             "wird von GMED erfasst",
-            "3. Versicherung",
+            "3. Auskunft an Dritte",
+            "4. Versicherung",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }
@@ -38504,7 +38643,6 @@ mod tests {
                 flags: vec!["cash_payment"],
                 ..Default::default()
             }),
-            expected_total: Some(super::fmt_money_de("8000.00")),
             ..anna_lead_disclosure()
         };
         let generated = super::build_lead_self_disclosure_pdf(
@@ -38520,10 +38658,11 @@ mod tests {
             "Ich zahle selbst.",
             "Bevorzugte Zahlungsart für Rechnungen Barzahlung",
             "Zahlung über Dritte / Zahlungsdienstleister nein",
-            "Voraussichtlicher Gesamtbetrag 8.000,00 €",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }
+        // No longer asked (owner 2026-10-12, 2026-10-23).
+        assert!(!text.contains("Voraussichtlicher Gesamtbetrag"), "{text}");
         // The lead never reads that a method is checked separately.
         assert!(!text.contains("gesonderte Prüfung"), "{text}");
         assert!(!text.contains("Auftrags-Nr."), "{text}");
@@ -38765,6 +38904,48 @@ mod tests {
             super::gwg_other_representatives(&adult, Uuid::from_u128(4), true),
             ["Clara Betreuer (Rechtliche/r Betreuer/in)"]
         );
+    }
+
+    #[test]
+    fn a_long_header_value_wraps_at_seven_points_instead_of_shrinking() {
+        let width = (super::PDF_CONTENT_WIDTH_MM - 10.0) / 2.0 - 10.0;
+        // A short value keeps 9.5 pt on one line.
+        let short = super::legal_meta_cell("Datum", "23.10.2026", width);
+        assert_eq!(short.value_size_pt, 9.5);
+        assert_eq!(short.value_lines, ["23.10.2026"]);
+        // A long one (owner 2026-10-23: never below 7 pt) wraps.
+        let long_name =
+            "Olena Oleksandrivna Шевченко-Коваленко-Мельниченко, geb. 05.04.2016, Kyjiw";
+        let long = super::legal_meta_cell("Behandelte Person", long_name, width);
+        assert!(
+            long.value_size_pt >= super::LEGAL_META_MIN_VALUE_PT,
+            "{}",
+            long.value_size_pt
+        );
+        assert!(long.value_lines.len() > 1, "{:?}", long.value_lines);
+        assert_eq!(long.value_lines.join(" "), long_name);
+        let label_width = super::approx_text_width_mm("Behandelte Person", long.label_size_pt);
+        for line in &long.value_lines {
+            assert!(
+                super::approx_text_width_mm(line, long.value_size_pt) + label_width + 2.0
+                    <= width + 0.01,
+                "{line}"
+            );
+        }
+        // The card grows with the wrapped lines, and the whole value is printed.
+        let (document, regular, bold) = new_admin_pdf().unwrap();
+        let mut layout = TreatmentPlanPdfLayout::new("Meta".to_string(), regular, bold);
+        super::legal_meta_grid(
+            &mut layout,
+            &[
+                ("Behandelte Person", long_name.to_string()),
+                ("Datum", "23.10.2026".to_string()),
+            ],
+        );
+        let text = normalized_pdf_text(&finalize_admin_pdf(document, layout));
+        for word in long_name.split_whitespace() {
+            assert!(text.contains(word), "{word}: {text}");
+        }
     }
 
     #[test]
@@ -40719,6 +40900,25 @@ mod tests {
         assert!(coverage_text.contains(&format!("*{MIXED_VAT_NOTE}.")));
         assert!(!coverage_text.contains("zzgl. MwSt. 19 %"));
         assert!(coverage_text.contains("MWSt. 19%: 212,80 €"));
+        // The payer never receives the medical cost calculation (owner
+        // 2026-10-06, 2026-10-23): the annexes are the payer's copy of the
+        // estimate and the single order; "Kostenträger" names insurers only.
+        assert!(
+            coverage_text.contains(
+                "Anlage 1: Kostenvoranschlag zum 1. Einzelauftrag Nr. KV-2026-0010 (Ausfertigung für die zahlende Person, nach Leistungsarten zusammengefasst);"
+            ),
+            "{coverage_text}"
+        );
+        assert!(!coverage_text.contains("Anlage 3"), "{coverage_text}");
+        assert!(
+            !coverage_text.contains("Kostenschätzung für medizinische Untersuchungen"),
+            "{coverage_text}"
+        );
+        assert!(
+            coverage_text.contains("Kostenübernehmer: Justus Geldgeber"),
+            "{coverage_text}"
+        );
+        assert!(!coverage_text.contains("Kostenträger/"), "{coverage_text}");
         // The Kostenübernehmer signs in a frame of its own, which is also found
         // in a declaration generated before the frames were recorded.
         let coverage_pdf = super::build_cost_coverage_pdf(&coverage, "DOC-VAT-COVERAGE").unwrap();

@@ -747,11 +747,11 @@ export function billingStatements(
       }
     }
   }
-  // Block C: the total the lead expects to pay, once given (QA 2026-10-10: it
-  // was only printed in the patient form).
+  // Block C's expected total is no longer asked (owner 2026-10-12, 2026-10-23):
+  // an answer given before stays readable for staff, marked as an old answer.
   const expectedTotal = expectedTotalLabel(billing.expected_total_eur);
   if (expectedTotal) {
-    payment.push(statement("expected_total", tx("Ожидаемая общая сумма", "Voraussichtlicher Gesamtbetrag"), expectedTotal));
+    payment.push(statement("expected_total", tx("Ожидаемая общая сумма (старый ответ)", "Voraussichtlicher Gesamtbetrag (alte Angabe)"), expectedTotal));
   }
 
   return { invoice, payment, byPayer, complianceLine: complianceFlagsLine(billing.compliance_flags, tx) };

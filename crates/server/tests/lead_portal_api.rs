@@ -3601,8 +3601,9 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
             "account_holder": null, "bank_name": null, "via_third_party": null,
             "via_third_party_details": null,
             "account_holder_suggestion": "Anna Portal",
-            // Block C of the risk assessment (trigger flow 2026-10-07).
-            "expected_total_eur": null, "via_third_party_kind": null,
+            // Block C of the risk assessment (trigger flow 2026-10-07); the
+            // expected total is no longer asked (owner 2026-10-12).
+            "via_third_party_kind": null,
             // Step 3: the invoice recipient first (owner spec 2026-10-11).
             "invoice_recipient": null, "invoice_recipient_is_payer": null,
             "recipient": {
@@ -3804,8 +3805,9 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert!(seen["invoice_vat_id"].is_null(), "{staff}");
     assert!(seen.get("payer_declared").is_none(), "{staff}");
     assert!(seen.get("account_holder_suggestion").is_none(), "{staff}");
-    // Block C's expected total is shown to staff beside the payment route
-    // (QA 2026-10-10: it was only printed in the patient form).
+    // Block C's expected total is no longer asked (owner 2026-10-12,
+    // 2026-10-23): a value sent by an older client is dropped; staff see
+    // only an answer stored before (read-only).
     assert!(seen["expected_total_eur"].is_null(), "{staff}");
     let (status, body) = json_request(
         router,
@@ -3816,6 +3818,17 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["billing"].get("expected_total_eur").is_none(),
+        "{body}"
+    );
+    let (_, staff) = json_request(router, "GET", &intake, &manager, None).await;
+    assert!(staff["billing"]["expected_total_eur"].is_null(), "{staff}");
+    sqlx::query("UPDATE lead_payer_declarations SET expected_total_eur = 6000 WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
     let (_, staff) = json_request(router, "GET", &intake, &manager, None).await;
     assert_eq!(staff["billing"]["expected_total_eur"], "6000.00", "{staff}");
     let (status, concierge) =

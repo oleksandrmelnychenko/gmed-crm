@@ -12566,10 +12566,9 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
         "Musterweg 1, 10115 Berlin, Deutschland",
         "wird von GMED erfasst",
         "Ich zahle selbst.",
-        // The payment route of the base form and the expected total (QA
-        // 2026-10-10 B5).
+        // The payment route of the base form (QA 2026-10-10 B5); an older
+        // expected total is no longer printed (owner 2026-10-23).
         "Bevorzugte Zahlungsart für Rechnungen Barzahlung",
-        "Voraussichtlicher Gesamtbetrag 8.000,00 €",
         "Herkunft der Mittel Ersparnisse",
         "Ersparnisse aus dem Gehalt",
         "Beruf Lehrerin",
@@ -12581,6 +12580,7 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
     }
     // No order yet: no order number; no word of a separate check of cash.
     for absent in [
+        "Voraussichtlicher Gesamtbetrag",
         "Zweitmeinung",
         "Knie",
         "Fremdstadt",

@@ -831,7 +831,8 @@ describe("sections 7–8 as the group shows them", () => {
       false,
     ]);
     const german = billingStatements(cash, de, "de").payment.find((row) => row.key === "expected_total");
-    expect(german?.label).toBe("Voraussichtlicher Gesamtbetrag");
+    expect(german?.label).toBe("Voraussichtlicher Gesamtbetrag (alte Angabe)");
+    expect(billingStatements(cash, ru, "ru").payment.find((row) => row.key === "expected_total")?.label).toBe("Ожидаемая общая сумма (старый ответ)");
     expect(german?.value).toBe("6.000,00\u00a0€");
     // Not given, or an older server: no row.
     expect(billingStatements(billing({ payment_method: "cash", expected_total_eur: null }), ru, "ru").payment.map((row) => row.key))
