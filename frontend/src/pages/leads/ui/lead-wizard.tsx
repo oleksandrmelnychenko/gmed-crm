@@ -65,7 +65,7 @@ import { Badge } from "@/components/ui/badge";
 import { StatusChip } from "@/components/ui/status-chip";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { CountrySelect, countryCodeFromStoredValue, countryLabel } from "@/components/ui/country-select";
+import { CountrySelect, countryCodeForDisplay, countryCodeFromStoredValue, countryLabel } from "@/components/ui/country-select";
 import { CitizenshipMultiSelect, normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import { nationalityCountryCode } from "@/pages/patients/model/nationalities";
 import {
@@ -1737,7 +1737,8 @@ function draftFromLead(lead: LeadDetail): Draft {
     city: lead.city ?? "",
     state: lead.state ?? "",
     zip: lead.zip_code ?? "",
-    country: lead.country ?? "",
+    // An older lead may hold a written-out name: the next save stores the code.
+    country: countryCodeFromStoredValue(lead.country),
     citizenships: lead.citizenships?.length
       ? normalizeCitizenships(lead.citizenships)
       : normalizeCitizenships([countryCodeFromStoredValue(inputString(lead.wizard_state?.["registration_country"]))]),
@@ -1880,7 +1881,10 @@ function draftFromExistingPatient(patient: PatientDetail): Draft {
     street: patient.address_street?.trim() ?? "",
     city: patient.address_city?.trim() ?? "",
     zip: patient.address_zip?.trim() ?? "",
-    country: patient.address_country?.trim() || patient.residence_country?.trim() || "",
+    // The patient file writes the country out ("Ukraine"); the lead keeps the
+    // ISO code, as the server's repeat intake stores it, so the first save
+    // does not overwrite "UA" with the name.
+    country: countryCodeForDisplay(patient.address_country) || countryCodeForDisplay(patient.residence_country),
     citizenships: patient.citizenships?.length
       ? normalizeCitizenships(patient.citizenships)
       : normalizeCitizenships([nationalityCountryCode(patient.nationality)]),

@@ -174,6 +174,20 @@ test("first save attaches the existing patient and displays their clinical warni
   expect(writes.filter(item => item.path === "/patients")).toHaveLength(0);
 });
 
+test("the patient file's written-out country is saved as its ISO code", async ({page}) => {
+  // The patient file writes the country out; the lead keeps the code (the
+  // server's repeat intake stores "UA"), so the first save must not send the name.
+  await page.addInitScript(() => {
+    (window as typeof window & { repeatIntakePatient?: object }).repeatIntakePatient = { address_country: "Ukraine" };
+  });
+  const {writes, wizard} = await mount(page);
+  await expect(wizard.getByRole("combobox", {name: "Страна проживания"})).toHaveText(/Украина/);
+  await wizard.getByRole("button", {name: "Далее", exact: true}).click();
+  await expect(wizard.getByText("Penicillin", {exact: true})).toBeVisible();
+  expect(writes.find(item => item.path === "/leads")?.body.country).toBe("UA");
+  expect(writes.find(item => item.path === `/leads/${leadId}/update`)?.body.country).toBe("UA");
+});
+
 test("a failed patient attachment stays unsaved and can be retried without another lead", async ({page}) => {
   const {writes, wizard} = await mount(page, "ru", "attach");
   await wizard.getByRole("button", {name: "Далее", exact: true}).click();

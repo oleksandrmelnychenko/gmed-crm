@@ -15,6 +15,8 @@ const patient = {
   email: "anna@example.com", phone_primary: "+4915776543210", address_street: "Teststr. 2",
   address_city: "Berlin", address_zip: "10115", address_country: "DE", languages: ["de"],
   lifecycle_status: "active",
+  // A spec may change the patient file before the harness loads.
+  ...(window as typeof window & { repeatIntakePatient?: Partial<PatientDetail> }).repeatIntakePatient,
 } as PatientDetail;
 
 function Harness() {
