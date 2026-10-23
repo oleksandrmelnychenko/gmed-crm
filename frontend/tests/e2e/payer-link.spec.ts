@@ -827,6 +827,37 @@ for (const status of [422, 503]) {
   });
 }
 
+test("payer recheck: a refused send keeps the answer saved just before it", async ({ page }) => {
+  let releaseWrite = () => {};
+  const writeHeld = new Promise<void>((resolve) => { releaseWrite = resolve; });
+  const { q, calls } = await setup(page, {
+    acknowledged: true, answers: completeAnswers("person"), route: completeRoute(),
+    identityDocuments: [document("doc-id", "pass.pdf")],
+    // The save of the new profession answers only after "send" was pressed.
+    afterAnswersWrite: (_answers, patch) => ("occupation" in patch ? writeHeld : undefined),
+  });
+  // GMED asks for something more meanwhile: the server refuses the send and names it.
+  await page.route("**/api/v1/public/payer-link/submit", (route) =>
+    route.fulfill({ status: 422, json: { code: "questionnaire_incomplete", error: "questionnaire_incomplete", missing: ["id_document_upload"] } }));
+  await signIn(page);
+  await page.getByTestId("payer-link-summary-funds").getByRole("button").click();
+  const occupation = page.getByTestId("payer-link-step-funds").getByRole("textbox", { name: /Beruf/ });
+  await occupation.fill("Neue Tätigkeit");
+  await expect.poll(() => calls.patches.some((patch) => patch.occupation === "Neue Tätigkeit")).toBe(true);
+  await next(page);
+  await next(page);
+  await next(page);
+  await page.getByTestId("payer-link-confirm").check();
+  await page.getByTestId("payer-link-submit").click();
+  releaseWrite();
+  await expect(page.getByTestId("payer-link-step-summary").getByRole("alert")).toBeVisible();
+  expect(q.answers.occupation).toBe("Neue Tätigkeit");
+  // The page shows what is stored, not the answers from before the save.
+  await expect(page.getByTestId("payer-link-summary-funds")).toContainText("Neue Tätigkeit");
+  await page.getByTestId("payer-link-summary-funds").getByRole("button").click();
+  await expect(occupation).toHaveValue("Neue Tätigkeit");
+});
+
 test.describe("payer link", () => {
   // A payer in Germany: before the link names its language, the page follows the browser.
   test.use({ locale: "de-DE" });

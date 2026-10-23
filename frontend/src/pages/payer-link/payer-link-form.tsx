@@ -349,6 +349,9 @@ function DraftForm({
   const topRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef(text);
   textRef.current = text;
+  // The send waits for the last save: its refusal must amend that answer, not the one the click saw.
+  const questionnaireRef = useRef(questionnaire);
+  questionnaireRef.current = questionnaire;
   // Sent, or the session or the link is gone: the last autosave must not write any more.
   const closedRef = useRef(false);
 
@@ -496,7 +499,7 @@ function DraftForm({
       if (error?.code === "questionnaire_incomplete") {
         // The server's list wins: the summary shows it.
         const missing = Array.isArray(error.body.missing) ? error.body.missing.filter((key): key is string => typeof key === "string") : null;
-        if (missing) onQuestionnaire({ ...questionnaire, missing_for_submit: missing });
+        if (missing) onQuestionnaire({ ...questionnaireRef.current, missing_for_submit: missing });
         setSubmitError(text.submitNeedsMissing);
       } else if (error?.code === "declaration_required") {
         setSubmitError(text.submitNeedsConfirm);
