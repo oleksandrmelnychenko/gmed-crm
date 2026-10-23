@@ -19,6 +19,7 @@ import { consentGiven, formatFileSize, type PersonalField, type SaveState } from
 import type { CabinetTarget } from "./lead-request-field-target";
 import { SECTION_ANCHORS, type SectionAnchor, type StepId } from "./lead-request-steps";
 import type { LeadRequestText } from "./lead-request-text";
+import { useServerConflictNotice } from "./lead-request-server-sync";
 
 // Building blocks the steps and sections of the lead cabinet share.
 
@@ -359,6 +360,8 @@ export function LabeledField({
   children: ReactNode;
 }) {
   const stepMissing = useStepMissingError(id);
+  // Another parent (or GMED) changed this field while it was being typed in (owner 2026-10-23).
+  const serverChanged = useServerConflictNotice(id);
   const shownError = error ?? (required ? stepMissing : undefined);
   const labelElement = (
     <label htmlFor={id} className={cn(question ? "text-sm leading-snug text-foreground" : tokens.text.label, "block")}>
@@ -380,6 +383,11 @@ export function LabeledField({
       {shownError ? (
         <p id={`${id}-error`} role="alert" className="text-xs text-destructive">
           {shownError}
+        </p>
+      ) : null}
+      {serverChanged ? (
+        <p className="text-xs text-muted-foreground" data-testid={`${id}-server-changed`} role="status">
+          {serverChanged}
         </p>
       ) : null}
     </div>

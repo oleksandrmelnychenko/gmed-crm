@@ -221,7 +221,8 @@ function recompute(request: Request) {
     request.progress.missing_for_submit = missing;
     return;
   }
-  const declared = payer?.payer_kind === "third_party";
+  // A parent named as payer (2026-10-19) is declared too; the mock gives that parent an own login.
+  const declared = payer?.payer_kind === "third_party" || payer?.payer_kind === "representative";
   const template = request.payer_self_template;
   const parentPays =
     declared &&
@@ -740,6 +741,31 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
     await page.getByTestId("lead-request-submit").click();
     await expect(page.getByTestId("lead-request-sent")).toContainText("05.10.2026");
+  });
+
+  // Owner decision 2026-10-23: the payment method is the paying parent's answer, in the own access.
+  test("a parent whose other half pays with an own login sends without the payment method", async ({ page }) => {
+    const { calls } = await setup(page, {
+      minor: true,
+      prepare: (request) => {
+        request.payer = thirdParty({ payer_kind: "representative", first_name: "Ben", last_name: "Muster", citizenships: ["DE"] });
+        request.billing!.invoice_to = "self";
+      },
+    });
+    await page.goto("/");
+    await step(page, "billing");
+    await expect(page.getByTestId("lead-request-payment-route")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-payment-route-by-payer")).toHaveText(
+      "Die Zahlungsart gibt der andere Elternteil, der zahlt, in seinem eigenen Zugang an. Sie können die Anfrage auch ohne diese Angabe senden.",
+    );
+
+    await page.locator('[data-step="send"]').click();
+    await expect(page.getByTestId("lead-request-missing")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-summary-billing")).toContainText("gibt der andere Elternteil an");
+    await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
+    await page.getByTestId("lead-request-submit").click();
+    await expect(page.getByTestId("lead-request-sent")).toContainText("05.10.2026");
+    expect(calls.billing).toEqual([]);
   });
 
   test("a refused e-mail is marked, not sent again, and does not hold back the other fields", async ({ page }) => {

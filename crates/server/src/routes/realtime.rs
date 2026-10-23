@@ -308,6 +308,29 @@ async fn can_receive_event(
     if !release_workspace_allows_realtime_event(auth.role, &event.event_type) {
         return Ok(false);
     }
+    // The lead cabinet: `lead.portal_updated` (metadata only: what changed,
+    // never a value) reaches the lead's and the parents' logins it names
+    // while the login still reaches the request, so a second parent's open
+    // cabinet re-reads what the other one saved (owner decision 2026-10-23).
+    // Every other lead event stays with staff.
+    if auth.role == Role::Patient && event.entity_type == "lead" {
+        if event.event_type != "lead.portal_updated"
+            || !event.target_user_ids.contains(&auth.user_id)
+        {
+            return Ok(false);
+        }
+        let reachable =
+            super::lead_portal_intake::accessible_leads(&state.db, auth.user_id)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, lead_id = %event.entity_id, "check realtime lead access");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate event access")
+                })?;
+        return Ok(reachable
+            .iter()
+            .any(|(lead_id, _)| *lead_id == event.entity_id));
+    }
+
     // Live updates and replay follow the same service entitlement as HTTP.
     // A package for another family member cannot unlock this patient's data.
     if auth.role == Role::Patient

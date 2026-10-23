@@ -59,6 +59,7 @@ import {
 import type { SaveState } from "./lead-request-model";
 import { CabinetSection as Section, LabeledField, RequiredMark, YesNoSelect, errorBody, useAutosave, runDraftSave, type RequestQueue } from "./lead-request-parts";
 import { invoiceToLabel, type LeadRequestText } from "./lead-request-text";
+import { serverDraftChanges, useServerConflicts } from "./lead-request-server-sync";
 
 // Invoice recipient and payment route (owner spec "Patientenformular",
 // sections 7 and 8; contract phase 2). Both are one record on the server,
@@ -130,12 +131,17 @@ function useBillingForm({
   // aside and given back when the patient side pays again (QA 2026-10-11
   // A-08a: re-ticking "the recipient is the payer" wiped the payment method).
   const lastRouteByRef = useRef<PaymentRouteBy>(billing.payment_route_by);
+  // The other parent changed a field that is being typed in (owner 2026-10-23): the draft stays, the field says so.
+  const draftNowRef = useRef(draft);
+  draftNowRef.current = draft;
+  const reportConflicts = useServerConflicts(draft, (field) => `lead-request-${field}`);
   useEffect(() => {
     setRouteRefused(false);
     const incoming = draftFromBilling(billing);
     const changed = changedOnServer(savedRef.current, incoming);
     if (changed.length > 0) {
       const baseline = savedRef.current;
+      reportConflicts(serverDraftChanges(baseline, incoming, draftNowRef.current).conflicts);
       const cleared = clearedOwnRoute(savedRef.current, lastRouteByRef.current, incoming);
       if (cleared) OWN_ROUTE_SET_ASIDE.set(request.lead_id, { routeBy: lastRouteByRef.current, route: cleared });
       savedRef.current = incoming;
@@ -154,7 +160,7 @@ function useBillingForm({
     OWN_ROUTE_SET_ASIDE.delete(request.lead_id);
     // The autosave sends it as the patient's answer again.
     setDraft((current) => ({ ...current, ...restore }));
-  }, [billing, request.lead_id]);
+  }, [billing, request.lead_id, reportConflicts]);
 
   const save = useCallback(
     (snapshot: BillingDraft) => {
@@ -290,6 +296,8 @@ export function BillingSections({
 }) {
   const guardian = request.access_kind === "guardian";
   const form = useBillingForm({ request, billing, text, lang, enqueue, onChange, onSaveState });
+  // The other parent pays and answers section 8 in the own access (owner 2026-10-23).
+  const routeNote = guardian && request.payer?.payer_kind === "representative" ? text.paymentRouteByOtherParent : text.paymentRouteByPayer;
   const { draft, context } = form;
   // The name of the person who pays is offered as account holder once, while the field is empty.
   const offeredRef = useRef(false);
@@ -457,7 +465,7 @@ export function BillingSections({
       ) : null}
 
       {part === "method" && !asksPaymentRoute(context.routeBy) ? (
-        <Section title={text.sectionPaymentRoute}><p role="note" className="text-sm text-muted-foreground" data-testid="lead-request-payment-route-by-payer">{text.paymentRouteByPayer}</p></Section>
+        <Section title={text.sectionPaymentRoute}><p role="note" className="text-sm text-muted-foreground" data-testid="lead-request-payment-route-by-payer">{routeNote}</p></Section>
       ) : null}
 
       {part === "route" ? (
@@ -526,7 +534,7 @@ export function BillingSections({
             className="rounded-lg border border-border bg-muted/10 px-3 py-2 text-sm leading-snug text-muted-foreground"
             data-testid="lead-request-payment-route-by-payer"
           >
-            {text.paymentRouteByPayer}
+            {routeNote}
           </p>
         )}
       </RouteFrame>

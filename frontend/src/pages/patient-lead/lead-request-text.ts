@@ -411,6 +411,9 @@ export type LeadRequestText = {
   representativeEmailStaff: string;
   /** Under the other parent without a login: GMED invites that parent; nothing happens by itself (owner 2026-10-23). */
   representativeOtherParentInvite: string;
+  /** At a field the other parent changed while this one typed in it (owner 2026-10-23); `serverChangedField` for a cabinet without a second parent. */
+  serverChangedByParent: string;
+  serverChangedField: string;
   /** Name and date of birth of another person with a login or entered by GMED (representative_not_yours). */
   representativeIdentityLocked: string;
   representativeEmailDuplicate: string;
@@ -434,6 +437,9 @@ export type LeadRequestText = {
   paymentRouteByPayer: string;
   /** The same in the summary, as the value of the row "payment route". */
   paymentRouteByPayerShort: string;
+  /** Section 8 when the other parent pays and answers it in the own access (owner 2026-10-23); it does not hold back sending. */
+  paymentRouteByOtherParent: string;
+  paymentRouteByOtherParentShort: string;
   sectionLegal: string;
   legalIntro: string;
   /** Prefix of a legal question in the list of what is still missing. */
@@ -1349,6 +1355,8 @@ const de: LeadRequestText = {
   representativeEmailStaff: "Diese Adresse hat GMED eingetragen; Änderungen nimmt GMED vor.",
   representativeOtherParentInvite:
     "Der andere Elternteil erhält einen eigenen Zugang, sobald GMED ihn dazu einlädt. Bitte geben Sie dafür seine E-Mail-Adresse an.",
+  serverChangedByParent: "Die Angaben hat der andere Elternteil geändert – bitte prüfen Sie das Feld.",
+  serverChangedField: "Diese Angabe wurde inzwischen geändert – bitte prüfen Sie das Feld.",
   representativeIdentityLocked: "Name und Geburtsdatum dieser Person ändert nur sie selbst oder GMED.",
   representativeMinor: "Die vertretende Person muss volljährig sein (mindestens 18 Jahre).",
   representativeEmailDuplicate:
@@ -1394,6 +1402,9 @@ const de: LeadRequestText = {
   },
   paymentRouteByPayer: "Den Zahlungsweg gibt die zahlende Person / Organisation selbst an; GMED wendet sich dazu an sie.",
   paymentRouteByPayerShort: "gibt die zahlende Person an",
+  paymentRouteByOtherParent:
+    "Die Zahlungsart gibt der andere Elternteil, der zahlt, in seinem eigenen Zugang an. Sie können die Anfrage auch ohne diese Angabe senden.",
+  paymentRouteByOtherParentShort: "gibt der andere Elternteil an",
   sectionLegal: "Weitere Fragen",
   legalIntro: "Bitte beantworten Sie jede Frage mit Ja oder Nein.",
   // lawyer review pending (2026-10-22)
@@ -1902,6 +1913,8 @@ const ru: LeadRequestText = {
   representativeEmailStaff: "Этот адрес внесла GMED; изменяет его GMED.",
   representativeOtherParentInvite:
     "Второй родитель получит собственный доступ, когда GMED пригласит его. Для этого укажите его адрес электронной почты.",
+  serverChangedByParent: "Данные изменил другой родитель — проверьте поле.",
+  serverChangedField: "Эти данные тем временем изменились — проверьте поле.",
   representativeIdentityLocked: "Имя и дату рождения этого человека может изменить только он сам или GMED.",
   representativeMinor: "Представитель должен быть совершеннолетним (не младше 18 лет).",
   representativeEmailDuplicate:
@@ -1948,6 +1961,9 @@ const ru: LeadRequestText = {
   paymentRouteByPayer:
     "Способ оплаты указывает сам плательщик (лицо или организация, которая платит); GMED обратится к нему по этому вопросу.",
   paymentRouteByPayerShort: "указывает плательщик",
+  paymentRouteByOtherParent:
+    "Способ оплаты указывает второй родитель, который платит, в своём собственном доступе. Вы можете отправить заявку и без этих данных.",
+  paymentRouteByOtherParentShort: "указывает второй родитель",
   sectionLegal: "Дополнительные вопросы",
   legalIntro:
     "Пожалуйста, ответьте на каждый вопрос «да» или «нет».",
@@ -2456,6 +2472,8 @@ const uk: LeadRequestText = {
   representativeEmailStaff: "Цю адресу внесла GMED; змінює її GMED.",
   representativeOtherParentInvite:
     "Другий з батьків отримає власний доступ, коли GMED запросить його. Для цього вкажіть його адресу електронної пошти.",
+  serverChangedByParent: "Дані змінив інший з батьків — перевірте поле.",
+  serverChangedField: "Ці дані тим часом змінилися — перевірте поле.",
   representativeIdentityLocked: "Ім'я та дату народження цієї людини може змінити лише вона сама або GMED.",
   representativeMinor: "Представник має бути повнолітнім (щонайменше 18 років).",
   representativeEmailDuplicate:
@@ -2502,6 +2520,9 @@ const uk: LeadRequestText = {
   paymentRouteByPayer:
     "Спосіб оплати вказує сам платник (особа або організація, яка платить); GMED звернеться до нього із цього приводу.",
   paymentRouteByPayerShort: "вказує платник",
+  paymentRouteByOtherParent:
+    "Спосіб оплати вказує інший з батьків, який платить, у своєму власному доступі. Ви можете надіслати заявку й без цих даних.",
+  paymentRouteByOtherParentShort: "вказує інший з батьків",
   sectionLegal: "Додаткові запитання",
   legalIntro:
     "Будь ласка, дайте на кожне запитання відповідь «так» або «ні».",
@@ -3003,6 +3024,8 @@ const en: LeadRequestText = {
   representativeEmailStaff: "GMED entered this address; GMED changes it.",
   representativeOtherParentInvite:
     "The other parent gets their own access once GMED invites them. Please enter their e-mail address for this.",
+  serverChangedByParent: "The other parent changed this entry – please check the field.",
+  serverChangedField: "This entry has changed in the meantime – please check the field.",
   representativeIdentityLocked: "Only this person or GMED can change their name and date of birth.",
   representativeMinor: "The representative must be of full age (at least 18).",
   representativeEmailDuplicate:
@@ -3048,6 +3071,9 @@ const en: LeadRequestText = {
   },
   paymentRouteByPayer: "The paying person / organisation states the payment route themselves; GMED will contact them about it.",
   paymentRouteByPayerShort: "stated by the paying person",
+  paymentRouteByOtherParent:
+    "The other parent, who pays, states the payment method in their own access. You can send the request without it.",
+  paymentRouteByOtherParentShort: "stated by the other parent",
   sectionLegal: "Further questions",
   legalIntro: "Please answer each question with yes or no.",
   // lawyer review pending (2026-10-22)

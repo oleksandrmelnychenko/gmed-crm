@@ -481,7 +481,11 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
                 : "",
             ],
           ] satisfies Array<[string, string | null | undefined]>)
-        : [[text.sectionPaymentRoute, text.paymentRouteByPayerShort] satisfies [string, string]]),
+        : [[
+            text.sectionPaymentRoute,
+            // The other parent pays and answers it in the own access (owner 2026-10-23).
+            guardian && request.payer?.payer_kind === "representative" ? text.paymentRouteByOtherParentShort : text.paymentRouteByPayerShort,
+          ] satisfies [string, string]]),
     ]);
   }
 

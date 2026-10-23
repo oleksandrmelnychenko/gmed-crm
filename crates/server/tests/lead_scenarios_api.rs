@@ -1033,6 +1033,85 @@ async fn scenario_both_parents_edit_the_same_request() {
     assert_eq!(intake["changed_since_submit"], false, "{intake}");
 }
 
+/// Owner decision 2026-10-23: the payment method is the paying person's
+/// answer. The father pays and has an own login: the mother sends the
+/// request without it, the father answers it in his cabinet and sends
+/// again; his save reaches the mother's open cabinet as a realtime event.
+#[tokio::test]
+async fn scenario_the_paying_parent_answers_the_payment_method() {
+    let Some(app) = Scn::new().await else { return };
+    let request = fill_joint_custody_request(&app, "DE").await;
+    let (lead, father) = (request.lead, request.father);
+    let base = request.base();
+    let anna = request.anna.clone();
+    let (father_login, ben) = app.guardian_access(lead, father).await;
+    // Section 8 not answered yet: the father answers it himself.
+    sqlx::query(
+        "UPDATE lead_payer_declarations
+         SET payment_method = NULL, payment_method_details = NULL, account_country = NULL,
+             account_holder = NULL, bank_name = NULL, via_third_party = NULL,
+             via_third_party_details = NULL
+         WHERE lead_id = $1",
+    )
+    .bind(lead)
+    .execute(app.pool())
+    .await
+    .unwrap();
+
+    let hers = app.cabinet(lead, &anna).await;
+    assert_eq!(hers["billing"]["payment_route_by"], "payer", "{hers}");
+    assert_eq!(missing(&hers), Vec::<String>::new(), "{hers}");
+    let his = app.cabinet(lead, &ben).await;
+    assert_eq!(his["billing"]["payment_route_by"], "guardian", "{his}");
+    assert_eq!(missing(&his), vec!["payment_method".to_string()], "{his}");
+
+    // The mother sends without the payment method.
+    let sent = submit(&app, &request, &anna).await;
+    assert!(sent["submitted_at"].is_string(), "{sent}");
+    assert_eq!(sent["changed_since_submit"], false, "{sent}");
+
+    // The father answers it in his own cabinet and sends again.
+    app.consent(lead, &ben, "lead_inquiry_processing").await;
+    let answered = app
+        .ok(
+            StatusCode::OK,
+            "POST",
+            &format!("{base}/billing"),
+            &ben,
+            Some(json!({
+                "payment_method": "bank_transfer", "account_country": "DE",
+                "account_holder": "Ben Muster", "bank_name": "Musterbank",
+                "via_third_party": false
+            })),
+        )
+        .await;
+    assert_eq!(missing(&answered), Vec::<String>::new(), "{answered}");
+    assert_eq!(answered["changed_since_submit"], true, "{answered}");
+    // The mother's open cabinet is told (metadata only) and reads it again.
+    let targets: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT target_user_ids FROM realtime_events
+         WHERE entity_id = $1 AND event_type = 'lead.portal_updated' AND actor_user_id = $2
+         ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(lead)
+    .bind(father_login)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert!(targets.contains(&request.mother_login), "{targets:?}");
+    let hers = app.cabinet(lead, &anna).await;
+    assert_eq!(hers["changed_since_submit"], true, "{hers}");
+    assert_eq!(hers["billing"]["payment_method"], Value::Null, "{hers}");
+
+    let sent = submit(&app, &request, &ben).await;
+    assert_eq!(sent["changed_since_submit"], false, "{sent}");
+    assert_eq!(missing(&sent), Vec::<String>::new(), "{sent}");
+    assert_eq!(
+        app.cabinet(lead, &anna).await["changed_since_submit"],
+        false
+    );
+}
+
 /// Scenario 3: a minor under a court-appointed guardian (Vormund): the
 /// guardian relation needs the custody "guardian" at the wizard and in the
 /// cabinet; the Vormund fills the request, is identified with an own sheet

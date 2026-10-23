@@ -74,6 +74,7 @@ import { PayerSection } from "./lead-request-payer-section";
 import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
+import { useServerDraftSync } from "./lead-request-server-sync";
 import type { StepId } from "./lead-request-steps";
 import { asLeadCabinetLang, childSectionTitle, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
@@ -287,6 +288,15 @@ function usePersonalForm({
   );
 
   useAutosave(draft, save);
+  // The other parent saved meanwhile (the request was re-read): untouched fields follow.
+  useServerDraftSync({
+    incoming: draftFromPersonalData(request.personal_data),
+    draft,
+    savedRef,
+    queuedDraftRef,
+    setDraft,
+    idOf: (field) => `lead-request-${field}`,
+  });
 
   const set = <K extends PersonalField>(field: K, value: PersonalDraft[K]) => {
     setDraft((current) => ({ ...current, [field]: field === "date_of_birth" && !value

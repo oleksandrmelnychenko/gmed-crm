@@ -960,12 +960,30 @@ pub async fn publish_lead_event(
             .ok()
             .flatten()
             .flatten();
+    let mut targets: Vec<Uuid> = [actor_user_id, created_by].into_iter().flatten().collect();
+    // The cabinet's own logins (the lead's and the parents'): a second
+    // parent's open cabinet re-reads the request (owner decision 2026-10-23).
+    // Only this event, which carries what changed and never a value; the
+    // websocket checks the access again on delivery.
+    if event_type == "lead.portal_updated" {
+        let portal_users = sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT portal_user_id FROM leads WHERE id = $1 AND portal_user_id IS NOT NULL
+               UNION
+               SELECT user_id FROM lead_portal_access
+               WHERE lead_id = $1 AND kind = 'guardian' AND revoked_at IS NULL"#,
+        )
+        .bind(lead_id)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+        targets.extend(portal_users);
+    }
 
     publish_event(
         state,
         RealtimeEvent::new(event_type, "lead", lead_id)
             .actor(actor_user_id)
-            .target_users([actor_user_id, created_by].into_iter().flatten().collect())
+            .target_users(targets)
             .roles(&[
                 "ceo",
                 "ceo_assistant",

@@ -7,11 +7,13 @@ import { Button } from "@/components/ui/button";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { setPortalAccountLabel } from "@/lib/portal-account-label";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
 
-import { LEAD_REQUEST_ACCESS_CHANGED, fetchMyLeadRequestList, type LeadRequest } from "./lead-request-api";
+import { LEAD_REQUEST_ACCESS_CHANGED, fetchMyLeadRequest, fetchMyLeadRequestList, type LeadRequest } from "./lead-request-api";
+import { ServerConflictContext, useServerConflictRegistry } from "./lead-request-server-sync";
 import { FollowUpStep } from "./lead-request-follow-up";
 import { DisclosureStep } from "./lead-request-disclosure-step";
 import {
@@ -378,6 +380,56 @@ function LeadRequestView({
     latestRequest.current = next;
     onChange(next);
   }, [onChange]);
+  // Both parents may edit at once (owner decision 2026-10-23): the request is
+  // read again when the tab is shown again, the window gets the focus or the
+  // other parent's save arrives as `lead.portal_updated`. Through the write
+  // queue, so it never overtakes a save; the forms keep what is being typed.
+  const conflictRegistry = useServerConflictRegistry(guardian ? text.serverChangedByParent : text.serverChangedField);
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const refresh = useRef({ running: false, again: false, last: 0 });
+  const refreshFromServer = useCallback(function reread(cause: "focus" | "event") {
+    const state = refresh.current;
+    if (state.running) {
+      state.again = true;
+      return;
+    }
+    // The focus and the visibility change come together: one read for both.
+    if (cause === "focus" && Date.now() - state.last < 1000) return;
+    state.running = true;
+    state.last = Date.now();
+    const leadId = latestRequest.current.lead_id;
+    void enqueue(() => fetchMyLeadRequest(leadId))
+      .then((fresh) => {
+        if (fresh.lead_id === latestRequest.current.lead_id && JSON.stringify(fresh) !== JSON.stringify(latestRequest.current)) {
+          updateRequest(fresh);
+        }
+      })
+      .catch(() => { /* The next focus or event reads it again. */ })
+      .finally(() => {
+        state.running = false;
+        if (state.again) {
+          state.again = false;
+          reread("event");
+        }
+      });
+  }, [enqueue, updateRequest]);
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === "visible") refreshFromServer("focus"); };
+    const onFocus = () => refreshFromServer("focus");
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refreshFromServer]);
+  useRealtimeSubscription(["lead.portal_updated"], (event) => {
+    if (event.entity_id !== latestRequest.current.lead_id) return;
+    // The own saves already answered with the request.
+    if (userId && event.actor_user_id === userId) return;
+    refreshFromServer("event");
+  });
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedStep = searchParams.get("step");
   const [chosenStep, setChosenStep] = useState<StepId>(() => visibleSteps(request).find((step) => step === requestedStep) ?? initialStep(request));
@@ -494,89 +546,91 @@ function LeadRequestView({
   const goTo: CabinetGoTo = (next, target) => go(next, false, target);
 
   return (
-    // `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer.
-    <article ref={topRef} className="flex min-h-[calc(100dvh-9rem)] flex-col overflow-clip rounded-xl border border-border bg-card shadow-sm" data-testid="lead-request">
-      {/* The title and the deadline share one line (wrapping on a phone). */}
-      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-4 py-4 sm:px-5">
-        <h1 className="text-lg font-semibold leading-tight">
-          {/* "Request for your child" only for a minor; an adult's representative reads "Request for <name>". */}
-          {guardian
-            ? request.minor
-              ? `${text.titleGuardian}: ${patientName}`
-              : `${text.requestFor} ${patientName}`
-            : text.title}
-        </h1>
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {deadline && !request.submitted_at ? (
-            <div
-              className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-              data-testid="lead-request-deadline"
-            >
-              <Clock aria-hidden="true" className="size-4 shrink-0" />
-              <p className="font-medium">{text.deadline(deadline)}</p>
-            </div>
-          ) : null}
-          {languageSwitch ? <CabinetLanguageSwitch lang={languageSwitch.lang} onLang={languageSwitch.onLang} /> : null}
-        </div>
-      </header>
+    <ServerConflictContext.Provider value={conflictRegistry}>
+      {/* `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer. */}
+      <article ref={topRef} className="flex min-h-[calc(100dvh-9rem)] flex-col overflow-clip rounded-xl border border-border bg-card shadow-sm" data-testid="lead-request">
+        {/* The title and the deadline share one line (wrapping on a phone). */}
+        <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-4 py-4 sm:px-5">
+          <h1 className="text-lg font-semibold leading-tight">
+            {/* "Request for your child" only for a minor; an adult's representative reads "Request for <name>". */}
+            {guardian
+              ? request.minor
+                ? `${text.titleGuardian}: ${patientName}`
+                : `${text.requestFor} ${patientName}`
+              : text.title}
+          </h1>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {deadline && !request.submitted_at ? (
+              <div
+                className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+                data-testid="lead-request-deadline"
+              >
+                <Clock aria-hidden="true" className="size-4 shrink-0" />
+                <p className="font-medium">{text.deadline(deadline)}</p>
+              </div>
+            ) : null}
+            {languageSwitch ? <CabinetLanguageSwitch lang={languageSwitch.lang} onLang={languageSwitch.onLang} /> : null}
+          </div>
+        </header>
 
-      <div className="flex-1 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <StepNavBar
-          request={request}
-          text={text}
-          steps={steps}
-          current={step}
-          missing={missing}
-          badgesFor={badgesFor}
-          onSelect={go}
-        />
-        {/* A short step keeps its footer at the bottom of the column; a new step fades in instead of jumping. */}
-        <CabinetGoToContext.Provider value={goTo}>
-        <div
-          key={step}
-          ref={stepRef}
-          className="min-w-0 bg-muted/40 px-4 pt-5 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 lg:flex lg:flex-col lg:[&>section]:flex lg:[&>section]:flex-1 lg:[&>section]:flex-col"
-          data-testid="lead-request-step"
-          data-current-step={step}
-        >
-          {step === "person" ? <PersonStep {...props} /> : null}
-          {step === "contact" ? <ContactStep {...props} /> : null}
-          {step === "identity" ? <IdentityStep {...props} /> : null}
-          {step === "billing" ? <BillingStep {...props} /> : null}
-          {step === "declarations" ? <DeclarationsStep {...props} /> : null}
-          {step === "follow_up" ? (
-            <FollowUpStep
-              request={request}
-              text={text}
-              lang={lang}
-              enqueue={enqueue}
-              onChange={onChange}
-              onBack={() => nav.onBack?.()}
-              onNext={() => nav.onNext?.()}
-              missingShown={nav.missingShown || (!request.submitted_at && sendOpened)}
-              onShowMissing={nav.onShowMissing}
-              index={nav.index}
-              total={nav.total}
-            />
-          ) : null}
-          {step === "documents" ? <DocumentsStep {...props} /> : null}
-          {step === "disclosure" ? <DisclosureStep {...props} /> : null}
-          {step === "send" ? (
-            <SendStep
-              request={request}
-              text={text}
-              lang={lang}
-              enqueue={enqueue}
-              onChange={onChange}
-              onEdit={goTo}
-              index={nav.index}
-              total={nav.total}
-            />
-          ) : null}
+        <div className="flex-1 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
+          <StepNavBar
+            request={request}
+            text={text}
+            steps={steps}
+            current={step}
+            missing={missing}
+            badgesFor={badgesFor}
+            onSelect={go}
+          />
+          {/* A short step keeps its footer at the bottom of the column; a new step fades in instead of jumping. */}
+          <CabinetGoToContext.Provider value={goTo}>
+          <div
+            key={step}
+            ref={stepRef}
+            className="min-w-0 bg-muted/40 px-4 pt-5 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 lg:flex lg:flex-col lg:[&>section]:flex lg:[&>section]:flex-1 lg:[&>section]:flex-col"
+            data-testid="lead-request-step"
+            data-current-step={step}
+          >
+            {step === "person" ? <PersonStep {...props} /> : null}
+            {step === "contact" ? <ContactStep {...props} /> : null}
+            {step === "identity" ? <IdentityStep {...props} /> : null}
+            {step === "billing" ? <BillingStep {...props} /> : null}
+            {step === "declarations" ? <DeclarationsStep {...props} /> : null}
+            {step === "follow_up" ? (
+              <FollowUpStep
+                request={request}
+                text={text}
+                lang={lang}
+                enqueue={enqueue}
+                onChange={onChange}
+                onBack={() => nav.onBack?.()}
+                onNext={() => nav.onNext?.()}
+                missingShown={nav.missingShown || (!request.submitted_at && sendOpened)}
+                onShowMissing={nav.onShowMissing}
+                index={nav.index}
+                total={nav.total}
+              />
+            ) : null}
+            {step === "documents" ? <DocumentsStep {...props} /> : null}
+            {step === "disclosure" ? <DisclosureStep {...props} /> : null}
+            {step === "send" ? (
+              <SendStep
+                request={request}
+                text={text}
+                lang={lang}
+                enqueue={enqueue}
+                onChange={onChange}
+                onEdit={goTo}
+                index={nav.index}
+                total={nav.total}
+              />
+            ) : null}
+          </div>
+          </CabinetGoToContext.Provider>
         </div>
-        </CabinetGoToContext.Provider>
-      </div>
-    </article>
+      </article>
+    </ServerConflictContext.Provider>
   );
 }
 

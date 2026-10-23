@@ -766,6 +766,46 @@ test.describe("lead cabinet", () => {
     await expect.poll(() => calls.identification.at(-1)).toEqual({ request_reason: "Synthetic concern" });
   });
 
+  // Both parents edit at once (owner decision 2026-10-23): the request is read again on focus;
+  // untouched fields follow the server, a field being typed in keeps the draft and says so.
+  test("the cabinet takes over what was saved elsewhere and keeps what is being typed", async ({ page }) => {
+    const { request, calls } = await setup(page, "lead");
+    await page.clock.install();
+    await page.goto("/");
+    await expect(page.locator("#lead-request-city")).toHaveValue("");
+    await page.clock.pauseAt(Date.now() + 5000);
+    await page.locator("#lead-request-city").fill("Hamburg");
+    // Saved meanwhile elsewhere: another city and another postcode.
+    request.personal_data.city = "München";
+    request.personal_data.zip_code = "80331";
+    // The other parent's save arrives as `lead.portal_updated` (the page's own realtime event bus;
+    // the mocked socket of this suite is closed). The own events are not read again.
+    const reads = { count: 0 };
+    page.on("request", (sent) => {
+      if (sent.method() === "GET" && new URL(sent.url()).pathname === "/api/v1/me/lead-requests/lead-1") reads.count += 1;
+    });
+    const realtime = (actor: string) =>
+      page.evaluate((actorUserId) => window.dispatchEvent(new CustomEvent("gmed:realtime-event", {
+        detail: { id: `event-${actorUserId}`, type: "lead.portal_updated", entity_type: "lead", entity_id: "lead-1", actor_user_id: actorUserId, payload: { change: "personal_data" } },
+      })), actor);
+    await realtime("lead-user");
+    await realtime("other-parent");
+    await expect(page.locator("#lead-request-zip_code")).toHaveValue("80331");
+    expect(reads.count).toBe(1);
+    await expect(page.locator("#lead-request-city")).toHaveValue("Hamburg");
+    await expect(page.getByTestId("lead-request-city-server-changed")).toHaveText(
+      "Diese Angabe wurde inzwischen geändert – bitte prüfen Sie das Feld.",
+    );
+    // Nothing was written over the other change by the re-read itself.
+    expect(calls.personalData).toEqual([]);
+    // Typing on: the notice goes; the autosave sends the typed city only.
+    await page.locator("#lead-request-city").fill("Hamburg-Altona");
+    await expect(page.getByTestId("lead-request-city-server-changed")).toHaveCount(0);
+    await page.clock.runFor(800);
+    await expect.poll(() => calls.personalData.at(-1)).toEqual({ city: "Hamburg-Altona" });
+    await expect(page.locator("#lead-request-zip_code")).toHaveValue("80331");
+  });
+
   test("audit: autosave retries valid fields after multiple independent rejections", async ({ page }) => {
     const { calls } = await setup(page, "lead");
     const attempts: Record<string, unknown>[] = [];

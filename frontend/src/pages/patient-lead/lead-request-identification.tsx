@@ -56,6 +56,7 @@ import {
   type RequestQueue,
 } from "./lead-request-parts";
 import { identificationFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { useServerDraftSync } from "./lead-request-server-sync";
 
 // The lead's own statements for the GwG identification sheet (owner spec
 // "Patientenformular", 2026-10-05). They are one record on the server and are
@@ -148,6 +149,15 @@ export function useIdentificationForm({
   );
 
   useAutosave(draft, save);
+  // The other parent saved meanwhile (the request was re-read): untouched fields follow.
+  useServerDraftSync({
+    incoming: draftFromIdentification(request.identification),
+    draft,
+    savedRef,
+    queuedDraftRef,
+    setDraft,
+    idOf: (field) => `lead-request-${field}`,
+  });
 
   return {
     draft,

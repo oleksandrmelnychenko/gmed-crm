@@ -88,6 +88,7 @@ import {
   representativeUploadLabel,
   type LeadRequestText,
 } from "./lead-request-text";
+import { useServerDraftSync } from "./lead-request-server-sync";
 
 // Who acts for the lead (owner spec "Patientenformular", section 3). An adult
 // says whether somebody acts for him and whether he is under legal
@@ -315,6 +316,24 @@ function useRepresentativeForm({
   );
 
   useAutosave(draft, save);
+  // The other parent saved this person meanwhile (the request was re-read):
+  // a person entered there is this form's from now on, untouched fields follow.
+  const serverId = person?.id ?? null;
+  useLayoutEffect(() => {
+    if (serverId && !existsRef.current && idRef.current === null) {
+      idRef.current = serverId;
+      existsRef.current = true;
+    }
+  }, [serverId]);
+  useServerDraftSync({
+    incoming: draftFromRepresentative(person),
+    draft,
+    savedRef,
+    queuedDraftRef,
+    setDraft,
+    idOf: (field) => `lead-request-${slot}_${field}`,
+    enabled: Boolean(serverId) && (idRef.current ?? serverId) === serverId && !removedRef.current,
+  });
 
   return {
     draft,
