@@ -1299,6 +1299,79 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     let (status, body) = as_payer(&app, "POST", SUBMIT, &headers, Some(json!({}))).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "declaration_required");
+
+    // A database error in the middle of the submit: the partial work rolls
+    // back to the savepoint, the session renewal is still committed (a
+    // transaction left aborted would have lost it).
+    let suffix = lead_id.simple().to_string();
+    sqlx::query(&format!(
+        r#"CREATE FUNCTION test_fail_payer_submit_{suffix}() RETURNS trigger
+           LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test: submit fails'; END $$"#
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(&format!(
+        r#"CREATE TRIGGER test_fail_payer_submit_{suffix}
+           BEFORE UPDATE ON lead_payer_statements FOR EACH ROW
+           WHEN (OLD.submitted_at IS NULL AND NEW.submitted_at IS NOT NULL
+                 AND NEW.lead_id = '{lead_id}'::uuid)
+           EXECUTE FUNCTION test_fail_payer_submit_{suffix}()"#
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE lead_payer_links SET last_seen_at = '2000-01-01T00:00:00Z' WHERE lead_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, body) = as_payer(
+        &app,
+        "POST",
+        SUBMIT,
+        &headers,
+        Some(json!({ "declared_correct": true })),
+    )
+    .await;
+    sqlx::query(&format!(
+        "DROP TRIGGER test_fail_payer_submit_{suffix} ON lead_payer_statements"
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(&format!("DROP FUNCTION test_fail_payer_submit_{suffix}()"))
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    let renewed: bool = sqlx::query_scalar(
+        r#"SELECT last_seen_at > '2000-01-02T00:00:00Z'::timestamptz FROM lead_payer_links
+           WHERE lead_id = $1 AND revoked_at IS NULL"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(
+        renewed,
+        "the session renewal is committed after the refusal"
+    );
+    let submitted: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT submitted_at FROM lead_payer_statements WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(submitted, None);
+    assert!(
+        audit_contexts(pool, "payer_questionnaire_submitted", lead_id)
+            .await
+            .is_empty()
+    );
+
     let (status, body) = as_payer(
         &app,
         "POST",

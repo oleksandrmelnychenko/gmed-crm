@@ -2491,6 +2491,9 @@ async fn payer_session(
 }
 
 /// Ends a refused call: only the session renewal was written, so it is kept.
+/// A handler that wrote before refusing rolls its savepoint back first
+/// (`patch_questionnaire`, `submit`), so a refusal never commits partial work
+/// nor commits a transaction a database error left aborted.
 async fn refuse(tx: Transaction<'static, Postgres>, response: Response) -> Response {
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit payer session");
@@ -3681,8 +3684,14 @@ async fn patch_questionnaire(
         Err(error) => return intake::internal(error, "load payer link lead"),
     };
     let writer = link_writer(&state, &link, &headers);
+    // The answers in a savepoint: a refusal (or a database error) rolls back
+    // what was written so far; only the session renewal is committed.
+    let mut savepoint = match sqlx::Connection::begin(&mut *tx).await {
+        Ok(savepoint) => savepoint,
+        Err(error) => return intake::internal(error, "begin payer answers"),
+    };
     let changed = match save_patch(
-        &mut tx,
+        &mut savepoint,
         &context,
         &writer,
         link.lead_id,
@@ -3692,8 +3701,16 @@ async fn patch_questionnaire(
     .await
     {
         Ok(changed) => changed,
-        Err(response) => return refuse(tx, response).await,
+        Err(response) => {
+            if let Err(error) = savepoint.rollback().await {
+                return intake::internal(error, "roll back payer answers");
+            }
+            return refuse(tx, response).await;
+        }
     };
+    if let Err(error) = savepoint.commit().await {
+        return intake::internal(error, "release payer answers");
+    }
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit payer answers");
     }
@@ -3956,8 +3973,14 @@ async fn submit(State(state): State<AppState>, headers: HeaderMap, body: Bytes) 
         Err(error) => return intake::internal(error, "load payer link lead"),
     };
     let writer = link_writer(&state, &link, &headers);
+    // The submit in a savepoint: a refusal (or a database error) rolls back
+    // what was written so far; only the session renewal is committed.
+    let mut savepoint = match sqlx::Connection::begin(&mut *tx).await {
+        Ok(savepoint) => savepoint,
+        Err(error) => return intake::internal(error, "begin payer submit"),
+    };
     let level = match submit_in_tx(
-        &mut tx,
+        &mut savepoint,
         &context,
         &writer,
         Viewer::Payer,
@@ -3967,8 +3990,16 @@ async fn submit(State(state): State<AppState>, headers: HeaderMap, body: Bytes) 
     .await
     {
         Ok(level) => level,
-        Err(response) => return refuse(tx, response).await,
+        Err(response) => {
+            if let Err(error) = savepoint.rollback().await {
+                return intake::internal(error, "roll back payer submit");
+            }
+            return refuse(tx, response).await;
+        }
     };
+    if let Err(error) = savepoint.commit().await {
+        return intake::internal(error, "release payer submit");
+    }
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit payer submit");
     }
