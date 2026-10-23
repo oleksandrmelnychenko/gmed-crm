@@ -504,4 +504,15 @@ describe("lead retention notifications", () => {
     expect(localizedNotificationCopy(cameOfAge, "de").title).toBe("Patient ist 18: eigenen Zugang anlegen");
     expect(notificationHrefForRole(cameOfAge, "patient_manager")).toBe("/patients?patient=patient-1");
   });
+
+  it("asks staff to issue the lead's own login once a minor's request is 18", () => {
+    const cameOfAge = {
+      ...retention("lead_came_of_age", "Lead is 18: issue the lead's own login", "The parents' access ended."),
+      entity_type: "lead",
+      entity_id: "lead-1",
+    } as Notification;
+    expect(localizedNotificationCopy(cameOfAge, "ru").title).toBe("Лиду исполнилось 18: выдайте собственный вход");
+    expect(localizedNotificationCopy(cameOfAge, "de").title).toBe("Lead ist 18: eigenen Zugang anlegen");
+    expect(notificationHrefForRole(cameOfAge, "patient_manager")).toBe("/leads?lead=lead-1");
+  });
 });

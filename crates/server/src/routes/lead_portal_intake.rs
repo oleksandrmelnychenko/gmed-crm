@@ -548,7 +548,8 @@ pub(crate) async fn is_lead_only_login(
                    OR EXISTS(
                        SELECT 1 FROM lead_portal_access a
                        JOIN leads l ON l.id = a.lead_id
-                       WHERE a.user_id = $1 AND a.kind = 'guardian' AND a.revoked_at IS NULL
+                       WHERE a.user_id = $1 AND a.kind = 'guardian'
+                         AND {GUARDIAN_ACCESS_OR_CAME_OF_AGE_SQL}
                          AND {PORTAL_LEAD_SQL}
                    )
                )"#
@@ -2918,7 +2919,9 @@ async fn list_my_lead_requests(
 /// Whether a parent's access of `user_id` reaches a request no more because
 /// the child is of age now (not a minor by the date of birth on file): the
 /// cabinet then says so instead of "no open request" (QA 2026-10-23). It
-/// names neither the child nor anything of the request.
+/// names neither the child nor anything of the request. The daily job
+/// ([`crate::services::coming_of_age`]) revokes such an access on the 18th
+/// birthday; the revoked access still counts here.
 async fn guardian_access_ended(db: &gmed_db::DbPool, user_id: Uuid) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(&format!(
         r#"SELECT EXISTS (
@@ -2926,7 +2929,7 @@ async fn guardian_access_ended(db: &gmed_db::DbPool, user_id: Uuid) -> Result<bo
                JOIN leads l ON l.id = a.lead_id
                WHERE a.user_id = $1
                  AND a.kind = 'guardian'
-                 AND a.revoked_at IS NULL
+                 AND {GUARDIAN_ACCESS_OR_CAME_OF_AGE_SQL}
                  AND l.date_of_birth IS NOT NULL
                  AND {PORTAL_LEAD_SQL}
                  AND NOT {OWN_LOGIN_CLOSED_SQL}
@@ -2936,6 +2939,12 @@ async fn guardian_access_ended(db: &gmed_db::DbPool, user_id: Uuid) -> Result<bo
     .fetch_one(db)
     .await
 }
+
+/// A guardian access `a` that is active, or that the coming-of-age job ended
+/// (the parent's login keeps the cabinet that says so).
+const GUARDIAN_ACCESS_OR_CAME_OF_AGE_SQL: &str = r#"(
+    a.revoked_at IS NULL
+    OR (a.revoked_by IS NULL AND a.revoked_reason = 'patient_came_of_age'))"#;
 
 /// A minor signed in with the own login before anybody gave the parents
 /// access (owner 2026-10-12): staff are told once per lead to issue it, with
@@ -6041,7 +6050,7 @@ async fn submit_my_lead_request(
 /// Stores a notification about the lead for its owner and the patient
 /// managers (the CEO when there is neither). Like the retention notices it
 /// names no person; best effort.
-const LEAD_NOTIFICATION_RECIPIENTS_SQL: &str = r#"WITH owner AS (
+pub(crate) const LEAD_NOTIFICATION_RECIPIENTS_SQL: &str = r#"WITH owner AS (
        SELECT u.id FROM leads l
        JOIN users u ON u.id = l.created_by
        WHERE l.id = $1 AND u.is_active AND u.role <> 'patient'

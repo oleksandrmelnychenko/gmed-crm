@@ -17,7 +17,8 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::services::coming_of_age::{
-    ComingOfAgeReport, NOTIFICATION_KIND, NOTIFIED_ACTION, REVOKE_REASON, run_on,
+    ComingOfAgeReport, LEAD_NOTIFICATION_KIND, LEAD_NOTIFIED_ACTION, NOTIFICATION_KIND,
+    NOTIFIED_ACTION, REVOKE_REASON, run_on,
 };
 
 const SECRET: &str = "test-secret-at-least-32-characters-long!!";
@@ -574,5 +575,165 @@ async fn an_adults_new_order_names_the_patient_not_the_parents_of_the_minors_con
     assert_eq!(
         before.iter().map(|r| r.relation_id).collect::<Vec<_>>(),
         vec![relation]
+    );
+}
+
+/// A minor's request (lead) that was not converted when the person turned 18
+/// (owner decision 2026-10-23): the parents' access ends on the birthday,
+/// staff are told once to issue the lead's own login, the parents' cabinet
+/// says why, and a second run does nothing.
+#[tokio::test]
+async fn parents_lose_the_access_to_an_open_request_on_the_eighteenth_birthday() {
+    let Some(suite) = support::suite_context(SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let today = gmed_server::app_time::today();
+    let birth = years_before(today, 18);
+
+    let (child_login, _) = user(pool, "Mia", "patient").await;
+    let (mother, _) = user(pool, "Anna", "patient").await;
+    let (father, _) = user(pool, "Ben", "patient").await;
+    let lead: Uuid = sqlx::query_scalar(
+        "INSERT INTO leads (first_name, last_name, date_of_birth, created_by, portal_user_id)
+         VALUES ('Mia', 'Muster', $1, $2, $3) RETURNING id",
+    )
+    .bind(birth)
+    .bind(suite.admin_id)
+    .bind(child_login)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    for parent in [mother, father] {
+        sqlx::query(
+            "INSERT INTO lead_portal_access (lead_id, user_id, kind, created_by) VALUES ($1, $2, 'guardian', $3)",
+        )
+        .bind(lead)
+        .bind(parent)
+        .bind(suite.admin_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    // A younger sibling's request keeps the mother's access.
+    let sibling: Uuid = sqlx::query_scalar(
+        "INSERT INTO leads (first_name, last_name, date_of_birth, created_by)
+         VALUES ('Finn', 'Muster', $1, $2) RETURNING id",
+    )
+    .bind(years_before(today, 10))
+    .bind(suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO lead_portal_access (lead_id, user_id, kind, created_by) VALUES ($1, $2, 'guardian', $3)",
+    )
+    .bind(sibling)
+    .bind(mother)
+    .bind(suite.admin_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let active_sql =
+        "SELECT count(*) FROM lead_portal_access WHERE lead_id = $1 AND revoked_at IS NULL";
+
+    // The day before the birthday nothing happens.
+    let report = run_on(&suite.state, today.pred_opt().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(report, ComingOfAgeReport::default(), "{report:?}");
+    assert_eq!(count(pool, active_sql, lead).await, 2);
+
+    let report = run_on(&suite.state, today).await.unwrap();
+    assert_eq!(report.leads, 1, "{report:?}");
+    assert_eq!(report.patients, 0, "{report:?}");
+    assert_eq!(report.lead_accesses_revoked, 2, "{report:?}");
+    assert_eq!(report.logins_deactivated, 0, "{report:?}");
+    assert!(report.notifications >= 1, "{report:?}");
+    assert_eq!(count(pool, active_sql, lead).await, 0);
+    assert_eq!(
+        count(pool, active_sql, sibling).await,
+        1,
+        "the minor sibling"
+    );
+    let reasons: Vec<(Option<String>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT revoked_reason, revoked_by FROM lead_portal_access WHERE lead_id = $1",
+    )
+    .bind(lead)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        reasons,
+        vec![(Some(REVOKE_REASON.to_string()), None); 2],
+        "ended by the system"
+    );
+    assert_eq!(
+        count(
+            pool,
+            "SELECT count(*) FROM audit_log WHERE action = 'revoke_lead_guardian_access' AND entity_id = $1",
+            lead,
+        )
+        .await,
+        2
+    );
+    let notice_sql = format!(
+        "SELECT count(*) FROM user_notifications WHERE kind = '{LEAD_NOTIFICATION_KIND}' AND entity_type = 'lead' AND entity_id = $1"
+    );
+    let notices = count(pool, &notice_sql, lead).await;
+    assert_eq!(notices, report.notifications as i64);
+    let owner_told: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM user_notifications WHERE kind = $1 AND entity_id = $2 AND user_id = $3)",
+    )
+    .bind(LEAD_NOTIFICATION_KIND)
+    .bind(lead)
+    .bind(suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(owner_told, "the request's owner is told");
+
+    // The parents keep their logins; the father's cabinet says why it is empty.
+    let active: Vec<bool> = sqlx::query_scalar("SELECT is_active FROM users WHERE id = ANY($1)")
+        .bind(vec![mother, father])
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    assert_eq!(active, vec![true, true]);
+    let (status, body) = request(
+        &suite.app,
+        "GET",
+        "/api/v1/me/lead-requests",
+        &bearer(father, "patient"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["requests"], json!([]), "{body}");
+    assert_eq!(body["guardian_access_ended"], true, "{body}");
+    let (status, body) = request(
+        &suite.app,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead}"),
+        &bearer(father, "patient"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    // Idempotent: nothing again, nobody told twice.
+    let again = run_on(&suite.state, today).await.unwrap();
+    assert_eq!(again, ComingOfAgeReport::default());
+    assert_eq!(count(pool, &notice_sql, lead).await, notices);
+    assert_eq!(
+        count(
+            pool,
+            &format!(
+                "SELECT count(*) FROM audit_log WHERE action = '{LEAD_NOTIFIED_ACTION}' AND entity_id = $1"
+            ),
+            lead,
+        )
+        .await,
+        1
     );
 }

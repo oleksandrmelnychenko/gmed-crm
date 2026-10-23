@@ -179,6 +179,18 @@ export function leadRetentionNotificationCopy(
           body: "Доступ родителей к карте пациента закрыт в день 18-летия. Выдайте пациенту собственный вход в таблице пациентов.",
         };
   }
+  // A minor's request not converted yet turned 18 (crates/server/src/services/coming_of_age.rs, 2026-10-23).
+  if (item.kind === "lead_came_of_age") {
+    return lang === "de"
+      ? {
+          title: "Lead ist 18: eigenen Zugang anlegen",
+          body: "Der Zugang der Eltern zur Anfrage endete mit dem 18. Geburtstag. Bitte den eigenen Zugang des Leads in der Lead-Tabelle anlegen.",
+        }
+      : {
+          title: "Лиду исполнилось 18: выдайте собственный вход",
+          body: "Доступ родителей к заявке закрыт в день 18-летия. Выдайте лиду собственный вход в таблице лидов.",
+        };
+  }
   if (item.kind === "lead_portal_consent_revoked") {
     const health = item.params?.consent
       ? item.params.consent === "health_data"
