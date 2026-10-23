@@ -3233,6 +3233,38 @@ fn gwg_adult_acting_role(legal_guardian: bool) -> &'static str {
     }
 }
 
+/// The other persons who act for the lead, named in section 2 of a
+/// representative's sheet "(eigener Bogen)": only those with a place in the
+/// form, who have a sheet of their own — the second parent under joint
+/// custody, the adult's other representative or legal guardian with the
+/// role. A parent on file without custody (single custody, a guardian's
+/// child) is no legal representative and has no sheet.
+fn gwg_other_representatives(
+    representation: &super::lead_representatives::Representation,
+    person_id: Uuid,
+    acts_for_adult: bool,
+) -> Vec<String> {
+    representation
+        .representatives
+        .iter()
+        .filter(|other| other.id != person_id && other.slot.is_some())
+        .filter(|other| !other.name().is_empty())
+        .map(|other| {
+            if acts_for_adult {
+                format!(
+                    "{} ({})",
+                    other.name(),
+                    gwg_adult_acting_role(
+                        other.role == super::lead_representatives::ROLE_LEGAL_GUARDIAN
+                    )
+                )
+            } else {
+                other.name()
+            }
+        })
+        .collect()
+}
+
 /// How the payer will pay, as answered in section 8 of the lead's form
 /// (owner spec "Patientenformular", phase 2): printed on the sheet of the
 /// person who pays, under the § 12 line. Cash, crypto, another method and a
@@ -3934,33 +3966,8 @@ async fn load_gwg_identification_sheet(
                 representation,
                 declaration.as_ref(),
             ) == Some(person.id);
-            sheet.other_representatives = if acts_for_adult {
-                // The adult's other representative or legal guardian, with
-                // the role.
-                representation
-                    .representatives
-                    .iter()
-                    .filter(|other| other.id != person.id && other.slot.is_some())
-                    .filter(|other| !other.name().is_empty())
-                    .map(|other| {
-                        format!(
-                            "{} ({})",
-                            other.name(),
-                            gwg_adult_acting_role(
-                                other.role == super::lead_representatives::ROLE_LEGAL_GUARDIAN
-                            )
-                        )
-                    })
-                    .collect()
-            } else {
-                representation
-                    .representatives
-                    .iter()
-                    .filter(|other| other.id != person.id)
-                    .map(|other| other.name())
-                    .filter(|name| !name.is_empty())
-                    .collect()
-            };
+            sheet.other_representatives =
+                gwg_other_representatives(representation, person.id, acts_for_adult);
             risk_countries.extend(extras.country.clone());
             risk_countries.extend(extras.citizenships.iter().cloned());
         } else {
@@ -18272,12 +18279,41 @@ async fn generate_document(
                 },
                 None => false,
             };
+            // A minor's legal representatives contract in their own name
+            // (§ 328 BGB, owner decision 2026-10-19): they are the contract
+            // partners of the sheet, the child is the patient. Without
+            // complete representatives the sheet names the patient as before.
+            let contract_partners = if lead_id.is_some() || patient_id.is_some() {
+                load_contracting_doc(
+                    &state,
+                    patient_uuid,
+                    lead_id,
+                    None,
+                    None,
+                    crate::app_time::today(),
+                )
+                .await
+                .ok()
+                .filter(ContractingDoc::parents_contract)
+                .map(|contracting| {
+                    contracting
+                        .representatives
+                        .iter()
+                        .map(DocPartyBlock::name_with_salutation)
+                        .filter(|name| !name.trim().is_empty())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             let preview = admin_preview_html(
                 "Durchführung verstärkter Sorgfaltspflichten",
                 &[patient_party.name.clone(), generated_doc_id.clone()],
             );
             let pdf_bytes = match build_enhanced_due_diligence_pdf(
                 &patient_party,
+                &contract_partners,
                 &agency,
                 aml,
                 check_required,
@@ -21611,7 +21647,9 @@ fn build_cost_coverage_pdf(
     admin_block(
         &mut layout,
         &format!(
-            "Kostenträger/Kostenübernehmer: {}",
+            // The declaration's own term throughout; "Kostenträger" names
+            // insurers only (owner decision 2026-10-22).
+            "Kostenübernehmer: {}",
             context.payer.name_with_salutation()
         ),
         0.0,
@@ -22940,9 +22978,30 @@ fn generated_order_reference<'a>(
         })
 }
 
+/// The lines of a short block start on the next page when they do not fit
+/// on this one together: a box is never split from the rest of its sentence,
+/// a label never stands without the first line of its value (GwG sheet,
+/// 2026-10-23: "[ ] Bei Betreuten: … des" | "Ausweisdokuments …"). Longer
+/// blocks keep flowing over the page break.
+const AML_KEEP_TOGETHER_MAX_LINES: usize = 6;
+
+fn aml_keep_lines_together(
+    layout: &mut TreatmentPlanPdfLayout,
+    lines: usize,
+    size_pt: f32,
+    extra_mm: f32,
+) {
+    if lines <= AML_KEEP_TOGETHER_MAX_LINES {
+        layout.ensure_space(lines as f32 * pdf_line_height_mm(size_pt, 1.45) + extra_mm);
+    }
+}
+
 fn aml_checkbox_line(layout: &mut TreatmentPlanPdfLayout, checked: bool, text: &str) {
+    let text = format!("[{}]  {text}", if checked { "X" } else { " " });
+    let lines = wrap_text_to_width_precise(&text, 10.0, layout.available_width(3.0)).len();
+    aml_keep_lines_together(layout, lines, 10.0, 1.0);
     layout.text_block_justified(
-        &format!("[{}]  {text}", if checked { "X" } else { " " }),
+        &text,
         10.0,
         false,
         3.0,
@@ -22953,6 +23012,13 @@ fn aml_checkbox_line(layout: &mut TreatmentPlanPdfLayout, checked: bool, text: &
 }
 
 fn aml_labeled_value(layout: &mut TreatmentPlanPdfLayout, label: &str, value: Option<&str>) {
+    let label_lines = wrap_text_to_width(label, 9.0, layout.available_width(4.0)).len();
+    aml_keep_lines_together(
+        layout,
+        label_lines,
+        9.0,
+        1.0 + 0.3 + pdf_line_height_mm(10.5, 1.45),
+    );
     layout.text_block(
         label,
         9.0,
@@ -23031,8 +23097,11 @@ async fn lead_enhanced_check_required(
 /// The EDD sheet ("Durchführung verstärkter Sorgfaltspflichten").
 /// `check_required`: the owner's rule or the stored risk assessment requires
 /// the check, so a risk tier without a list trigger is no voluntary check.
+/// `contract_partners`: a minor's legal representatives, who contract in
+/// their own name; empty when the patient is the contract partner.
 fn build_enhanced_due_diligence_pdf(
     party: &DocPartyBlock,
+    contract_partners: &[String],
     agency: &AgencyContractSettings,
     aml: &AmlEnhancedDueDiligenceBindings,
     check_required: bool,
@@ -23077,34 +23146,41 @@ fn build_enhanced_due_diligence_pdf(
         0.0,
         2.0,
     );
-    legal_meta_grid(
-        &mut layout,
-        &[
-            ("Vertragspartner", party.name_with_salutation()),
-            (
-                "Auftrags-/Rechnungs-Nr.",
-                order_number
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or("—")
-                    .to_string(),
-            ),
-            (
-                "Bearbeiter/in",
-                aml_binding_value(aml.reviewer_name.as_deref()).to_string(),
-            ),
-            ("Prüfdatum", review_date),
-            ("Risikostufe", risk_tier.to_string()),
-            (
-                "Auslösende Länder",
-                if countries.is_empty() {
-                    aml_binding_value(aml.affected_third_country.as_deref()).to_string()
-                } else {
-                    countries
-                },
-            ),
-        ],
-    );
+    // A minor's legal representatives are the contract partners (§ 328 BGB);
+    // the child is named as the patient.
+    let mut meta = if contract_partners.is_empty() {
+        vec![("Vertragspartner", party.name_with_salutation())]
+    } else {
+        vec![
+            ("Vertragspartner", contract_partners.join(", ")),
+            ("Patient/in", party.name_with_salutation()),
+        ]
+    };
+    meta.extend([
+        (
+            "Auftrags-/Rechnungs-Nr.",
+            order_number
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("—")
+                .to_string(),
+        ),
+        (
+            "Bearbeiter/in",
+            aml_binding_value(aml.reviewer_name.as_deref()).to_string(),
+        ),
+        ("Prüfdatum", review_date),
+        ("Risikostufe", risk_tier.to_string()),
+        (
+            "Auslösende Länder",
+            if countries.is_empty() {
+                aml_binding_value(aml.affected_third_country.as_deref()).to_string()
+            } else {
+                countries
+            },
+        ),
+    ]);
+    legal_meta_grid(&mut layout, &meta);
 
     admin_heading(
         &mut layout,
@@ -23289,6 +23365,9 @@ fn build_enhanced_due_diligence_pdf(
 
 /// "[X] Ja   [ ] Nein" answer of one question of section 5.
 fn gwg_yes_no_line(layout: &mut TreatmentPlanPdfLayout, question: &str, yes: bool) {
+    // The question and its answer stay on one page.
+    let lines = wrap_text_to_width_precise(question, 10.0, layout.available_width(3.0)).len();
+    aml_keep_lines_together(layout, lines + 1, 10.0, 1.8);
     layout.text_block_justified(
         question,
         10.0,
@@ -25192,6 +25271,12 @@ fn build_payer_self_disclosure_pdf(
         ]
     };
     for (label, answer, details) in declarations {
+        // The payer is no longer asked about a high-risk third country
+        // (owner 2026-10-22): the signed declaration never shows "keine
+        // Angabe" for it; an answer stored before stays.
+        if answer.is_none() && label.contains("Drittstaat mit hohem Risiko") {
+            continue;
+        }
         aml_labeled_value(
             &mut layout,
             label,
@@ -37175,6 +37260,7 @@ mod tests {
         };
         let bytes = build_enhanced_due_diligence_pdf(
             &legal_test_party("IR"),
+            &[],
             &legal_test_agency(),
             &aml,
             true,
@@ -37184,6 +37270,44 @@ mod tests {
         .unwrap();
         assert_signature_frames_detected(&bytes);
         let text = assert_legal_pdf_chrome(&bytes, "AML-20260801-UNITTEST0001");
+        assert!(
+            text.contains("Vertragspartner Frau Anna Beispiel"),
+            "{text}"
+        );
+        assert!(!text.contains("Patient/in"), "{text}");
+
+        // A minor: the parents contract in their own name (§ 328 BGB) and are
+        // the contract partners; the child is the patient (2026-10-23).
+        let child = DocPartyBlock {
+            name: "Mia Muster".to_string(),
+            salutation: None,
+            ..legal_test_party("IR")
+        };
+        let parents = [
+            "Frau Olena Шевченко".to_string(),
+            "Herr Jürgen Muster".to_string(),
+        ];
+        let minor = build_enhanced_due_diligence_pdf(
+            &child,
+            &parents,
+            &legal_test_agency(),
+            &aml,
+            true,
+            None,
+            "AML-20261023-UNITTEST0004",
+        )
+        .unwrap();
+        let minor_text = normalized_pdf_text(&minor);
+        for expected in [
+            "Vertragspartner Frau Olena Шевченко, Herr Jürgen Muster",
+            "Patient/in Mia Muster",
+        ] {
+            assert!(minor_text.contains(expected), "{expected}: {minor_text}");
+        }
+        assert!(
+            !minor_text.contains("Vertragspartner Mia Muster"),
+            "{minor_text}"
+        );
         // The lead's statement on links to sanctioned persons (QA 2026-10-10).
         assert!(text.contains("Angaben zu Verbindungen zu sanktionierten Personen"));
         assert!(text.contains("Beispiel GmbH (geschäftlich) – seit 2019"));
@@ -37221,6 +37345,7 @@ mod tests {
         assert_eq!(boxes, (false, true));
         let bytes = build_enhanced_due_diligence_pdf(
             &legal_test_party("DE"),
+            &[],
             &legal_test_agency(),
             &voluntary,
             false,
@@ -37237,6 +37362,7 @@ mod tests {
         // trigger: the tier names the assessment, the boxes follow the form.
         let bytes = build_enhanced_due_diligence_pdf(
             &legal_test_party("DE"),
+            &[],
             &legal_test_agency(),
             &voluntary,
             true,
@@ -37421,6 +37547,41 @@ mod tests {
             contact_channels: vec!["email".to_string(), "phone".to_string()],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn the_payers_self_disclosure_omits_the_high_risk_country_question_not_asked() {
+        // Not asked since 2026-10-22: the payer never signs "keine Angabe"
+        // for it; an answer stored before stays.
+        let not_asked = crate::routes::lead_payer_link::PayerSelfDisclosure {
+            high_risk_country: None,
+            high_risk_country_code: None,
+            ..viktor_disclosure()
+        };
+        let generated = super::build_payer_self_disclosure_pdf(
+            &not_asked,
+            "Mia Muster",
+            &legal_test_agency(),
+            None,
+            "DOC-PAYER-SD-0003",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&generated);
+        assert!(!text.contains("Drittstaat mit hohem Risiko"), "{text}");
+        assert!(!text.contains("keine Angabe"), "{text}");
+        assert!(text.contains("Bezug zu Sanktionen nein"), "{text}");
+        let answered = super::build_payer_self_disclosure_pdf(
+            &viktor_disclosure(),
+            "Mia Muster",
+            &legal_test_agency(),
+            None,
+            "DOC-PAYER-SD-0004",
+        )
+        .unwrap();
+        assert!(
+            normalized_pdf_text(&answered)
+                .contains("Bezug zu einem Drittstaat mit hohem Risiko nein")
+        );
     }
 
     #[test]
@@ -38498,6 +38659,155 @@ mod tests {
         assert!(text.contains("Zahlung aus eigenen Mitteln"));
         assert!(text.contains("Angaben zum Zahlungsweg (Angaben des Kostenübernehmers)"));
         assert!(!text.contains("(Patientenformular"));
+    }
+
+    fn gwg_test_representative(
+        n: u128,
+        slot: Option<&'static str>,
+        role: &'static str,
+        first: &str,
+        last: &str,
+    ) -> crate::routes::lead_representatives::Representative {
+        crate::routes::lead_representatives::Representative {
+            id: Uuid::from_u128(n),
+            slot,
+            role,
+            relation: Some("parent".to_string()),
+            first_name: first.to_string(),
+            last_name: last.to_string(),
+            date_of_birth: None,
+            email: None,
+            phone: None,
+            login_user_ids: Vec::new(),
+            has_data: true,
+            extras: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_representatives_sheet_names_only_the_others_who_act_for_the_lead() {
+        use crate::routes::lead_representatives::{
+            ROLE_AUTHORISED_REPRESENTATIVE, ROLE_LEGAL_GUARDIAN, ROLE_LEGAL_REPRESENTATIVE,
+            Representation, SLOT_AGENT, SLOT_GUARDIAN, SLOT_REP1, SLOT_REP2,
+        };
+        // Single custody: the other parent on file has no custody, no place
+        // in the form and no sheet — never "Weitere/r gesetzliche/r
+        // Vertreter/in des Kindes … (eigener Bogen)".
+        let sole = Representation {
+            minor: true,
+            representatives: vec![
+                gwg_test_representative(
+                    1,
+                    Some(SLOT_REP1),
+                    ROLE_LEGAL_REPRESENTATIVE,
+                    "Olena",
+                    "Шевченко",
+                ),
+                gwg_test_representative(2, None, ROLE_LEGAL_REPRESENTATIVE, "Taras", "Шевченко"),
+            ],
+            ..Default::default()
+        };
+        assert!(super::gwg_other_representatives(&sole, Uuid::from_u128(1), false).is_empty());
+        // Joint custody: the second parent has an own sheet.
+        let joint = Representation {
+            minor: true,
+            representatives: vec![
+                gwg_test_representative(
+                    1,
+                    Some(SLOT_REP1),
+                    ROLE_LEGAL_REPRESENTATIVE,
+                    "Olena",
+                    "Шевченко",
+                ),
+                gwg_test_representative(
+                    2,
+                    Some(SLOT_REP2),
+                    ROLE_LEGAL_REPRESENTATIVE,
+                    "Taras",
+                    "Шевченко",
+                ),
+                gwg_test_representative(
+                    3,
+                    None,
+                    ROLE_LEGAL_REPRESENTATIVE,
+                    "Dritter",
+                    "Elternteil",
+                ),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            super::gwg_other_representatives(&joint, Uuid::from_u128(1), false),
+            ["Taras Шевченко"]
+        );
+        // An adult: the other person who acts, with the role.
+        let adult = Representation {
+            minor: false,
+            representatives: vec![
+                gwg_test_representative(
+                    4,
+                    Some(SLOT_AGENT),
+                    ROLE_AUTHORISED_REPRESENTATIVE,
+                    "Ben",
+                    "Muster",
+                ),
+                gwg_test_representative(
+                    5,
+                    Some(SLOT_GUARDIAN),
+                    ROLE_LEGAL_GUARDIAN,
+                    "Clara",
+                    "Betreuer",
+                ),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            super::gwg_other_representatives(&adult, Uuid::from_u128(4), true),
+            ["Clara Betreuer (Rechtliche/r Betreuer/in)"]
+        );
+    }
+
+    #[test]
+    fn a_split_checkbox_or_label_moves_to_the_next_page_whole() {
+        // QA 2026-10-23: "[ ] Bei Betreuten: Kopie … des" ended page 1 and
+        // "Ausweisdokuments des Betreuers …" began page 2.
+        let (document, regular, bold) = new_admin_pdf().unwrap();
+        let mut layout = TreatmentPlanPdfLayout::new("Keep".to_string(), regular, bold);
+        let text = "Bei Betreuten: Kopie der Bestellungsurkunde des Betreuers sowie eine Kopie des Ausweisdokuments des Betreuers sind beigefügt.";
+        // Fill the page until only one line of the box would fit.
+        let line = super::pdf_line_height_mm(10.0, 1.45);
+        while layout.y_mm - layout.content_bottom_mm() > line * 1.5 {
+            layout.text_block(
+                "Füllzeile",
+                10.0,
+                false,
+                0.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                0.0,
+            );
+        }
+        super::aml_checkbox_line(&mut layout, false, text);
+        super::aml_labeled_value(
+            &mut layout,
+            "Ausweisdokument (Art, Nummer)",
+            Some("Reisepass, Nr. ФА123"),
+        );
+        let bytes = finalize_admin_pdf(document, layout);
+        let pages = normalized_pdf_pages(&bytes);
+        let last = pages.last().unwrap();
+        assert!(
+            last.contains("[ ] Bei Betreuten: Kopie der Bestellungsurkunde"),
+            "{pages:?}"
+        );
+        assert!(
+            last.contains("Ausweisdokument (Art, Nummer) Reisepass, Nr. ФА123"),
+            "{pages:?}"
+        );
+        assert!(
+            !pages[pages.len() - 2].contains("Bei Betreuten"),
+            "{pages:?}"
+        );
     }
 
     #[test]

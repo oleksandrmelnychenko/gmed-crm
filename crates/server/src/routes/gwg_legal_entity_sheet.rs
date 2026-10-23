@@ -464,17 +464,22 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
             sheet.sanctions_links_details.as_deref(),
         ),
     ));
-    items.push(Line(
-        "Bezug zu einem Drittstaat mit hohem Risiko (Angabe des Kostenübernehmers)",
-        answer(
-            sheet.high_risk_country,
-            sheet
-                .high_risk_country_code
-                .as_deref()
-                .map(german_document_country)
-                .as_deref(),
-        ),
-    ));
+    // The payer is no longer asked about a high-risk third country (owner
+    // 2026-10-22, GMED checks the countries itself): only an answer stored
+    // before is printed, never "—" for a question that was not asked.
+    if sheet.high_risk_country.is_some() {
+        items.push(Line(
+            "Bezug zu einem Drittstaat mit hohem Risiko (Angabe des Kostenübernehmers)",
+            answer(
+                sheet.high_risk_country,
+                sheet
+                    .high_risk_country_code
+                    .as_deref()
+                    .map(german_document_country)
+                    .as_deref(),
+            ),
+        ));
+    }
     // The source of the funds only when the enhanced check is required
     // (owner rule 2026-10-07): it is asked then and only then.
     if sheet.enhanced_check_required {
@@ -979,6 +984,22 @@ mod tests {
             SheetItem::Check(checked, text) if text.starts_with(start) => Some(*checked),
             _ => None,
         })
+    }
+
+    #[test]
+    fn the_high_risk_country_line_is_printed_only_for_an_answer_given_before() {
+        const LABEL: &str =
+            "Bezug zu einem Drittstaat mit hohem Risiko (Angabe des Kostenübernehmers)";
+        // An answer stored before the question was dropped stays visible.
+        let items = content(&complete(), day(2026, 10, 22));
+        assert_eq!(value(&items, LABEL), Some("nein"));
+        // Not asked since 2026-10-22: no line with "—".
+        let not_asked = LegalEntitySheet {
+            high_risk_country: None,
+            ..complete()
+        };
+        let items = content(&not_asked, day(2026, 10, 22));
+        assert_eq!(value(&items, LABEL), None);
     }
 
     #[test]
