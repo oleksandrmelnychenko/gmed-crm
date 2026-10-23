@@ -10400,7 +10400,10 @@ ${serviceCommentLines.join("\n")}`
                       >
                         <span className="text-sm text-foreground">{readinessStepLabel(item.key, tx, isRepeatIntake)}</span>
                         <span className="inline-flex shrink-0 items-center gap-2">
-                          <StateMark done={ready} label={ready ? tx("Выполнено", "Erledigt") : tx("Не завершено", "Noch offen")} />
+                          {/* As the tab bar says it: the optional medical step left empty is no "done" (owner 2026-10-22). */}
+                          {item.key === "medical" && ready && !medicalTabFilled
+                            ? <StateMark done={false} label={tx("Необязательно, не заполнено", "Optional, nicht ausgefüllt")} />
+                            : <StateMark done={ready} label={ready ? tx("Выполнено", "Erledigt") : tx("Не завершено", "Noch offen")} />}
                           <ArrowRight aria-hidden="true" className="size-3.5 text-muted-foreground" />
                         </span>
                       </button>

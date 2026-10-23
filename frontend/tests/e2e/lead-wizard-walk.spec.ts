@@ -237,6 +237,9 @@ test("the service and order tabs and the release checklist follow what each step
   await wizard.getByRole("tab", { name: /Создание пациента/ }).click();
   const checklist = wizard.locator("section").filter({ has: page.getByText("Проверьте все этапы.", { exact: false }) }).first();
   await expect(checklist.getByRole("button", { name: /Сервисная история\s*Выполнено/ })).toBeVisible();
+  // The empty optional medical step reads as the tab bar says it, not as done.
+  await expect(wizard.getByRole("tab", { name: /Медицинская характеристика — необязательно, не заполнено/ })).toBeVisible();
+  await expect(checklist.getByRole("button", { name: /Медицинская характеристика\s*Необязательно, не заполнено/ })).toBeVisible();
   // Every wizard step has its row, the order step included.
   await expect(checklist.getByRole("button", { name: /Оформление заказа\s*Не завершено/ })).toBeVisible();
   await checklist.getByRole("button", { name: /Оформление заказа\s*Не завершено/ }).click();
