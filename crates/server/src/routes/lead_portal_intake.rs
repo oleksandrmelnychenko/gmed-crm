@@ -3593,6 +3593,7 @@ async fn update_my_billing(
     }
     // The invoice recipient: applied to the stored answers.
     let mut recipient_marker = None;
+    let mut payer_recorded = None;
     if !recipient_body.is_empty() {
         let stored = match lead_invoice_recipient::load(&mut tx, lead_id).await {
             Ok(stored) => stored,
@@ -3636,6 +3637,22 @@ async fn update_my_billing(
             }
             recipient_marker = Some(next.marker_value());
         }
+        // "The recipient pays": the recipient is the payer at once (owner
+        // decision 2026-10-23), no separate answer "who pays" is needed.
+        payer_recorded = match lead_invoice_recipient::record_as_payer(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+            kind.as_str(),
+            &next,
+            &representation.representation,
+            payer.as_ref(),
+        )
+        .await
+        {
+            Ok(recorded) => recorded,
+            Err(error) => return internal(error, "record invoice recipient as payer"),
+        };
     }
     // Section 7 is derived from the recipient's answers.
     let synced = match lead_invoice_recipient::audit_section_seven_change(
@@ -3653,6 +3670,7 @@ async fn update_my_billing(
     if saved.is_none()
         && block_c_changed.is_empty()
         && recipient_marker.is_none()
+        && payer_recorded.is_none()
         && synced.is_empty()
     {
         drop(tx);
@@ -3683,6 +3701,25 @@ async fn update_my_billing(
                 "by": auth.user_id,
                 "kind": kind.as_str(),
                 "hash": value_marker(lead_id, INVOICE_RECIPIENT_MARKER, Some(value)),
+            }),
+        );
+    }
+    if let Some(declaration) = &payer_recorded {
+        let now = match portal_update_time(&mut tx).await {
+            Ok(now) => now,
+            Err(error) => return internal(error, "read portal update time"),
+        };
+        markers.insert(
+            PAYER_MARKER.to_string(),
+            json!({
+                "at": now,
+                "by": auth.user_id,
+                "kind": kind.as_str(),
+                "hash": value_marker(
+                    lead_id,
+                    PAYER_MARKER,
+                    Some(&lead_payer::portal_marker_value(declaration)),
+                ),
             }),
         );
     }

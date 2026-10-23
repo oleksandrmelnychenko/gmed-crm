@@ -4192,20 +4192,31 @@ async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven()
     assert_eq!(shown["invoice_email"], "rechnung@example.com", "{body}");
     assert_eq!(missing_for_step_three(&body), ["payment_method"], "{body}");
 
-    // The recipient pays after all: the patient as payer no longer fits.
+    // The recipient pays after all: the server names the organisation as the
+    // payer at once (owner decision 2026-10-23), section 7 goes "to the
+    // payer" and no separate "who pays" answer is open.
     let body = save(json!({ "invoice_recipient_is_payer": true })).await;
-    assert!(body["billing"]["invoice_to"].is_null(), "{body}");
+    assert_eq!(body["billing"]["invoice_to"], "payer", "{body}");
+    assert_eq!(body["payer"]["payer_kind"], "third_party", "{body}");
+    assert_eq!(
+        body["payer"]["organisation_name"], "Beispiel GmbH",
+        "{body}"
+    );
     // The reason of a paying organisation is the payer's (`payment_background`).
     assert!(
         body["billing"]["recipient"]["payment_reason"].is_null(),
         "{body}"
     );
-    assert_eq!(
-        missing_for_step_three(&body),
-        ["invoice_recipient_is_payer"],
+    assert!(
+        !missing_for_step_three(&body).contains(&"invoice_recipient_is_payer"),
         "{body}"
     );
-    // The cabinet names the recipient as payer: section 7 goes "to the payer".
+    assert!(
+        !missing_for_step_three(&body).contains(&"payer_kind"),
+        "{body}"
+    );
+    // The cabinet adds what GMED needs of the payer besides: section 7 stays
+    // "to the payer".
     let (status, body) = json_request(
         router,
         "POST",
@@ -4256,12 +4267,13 @@ async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven()
         !missing_for_step_three(&body).contains(&"payer_kind"),
         "{body}"
     );
-    // "I receive and pay it": the third party no longer fits.
+    // "I receive and pay it": the patient is the payer at once.
     let body = save(json!({ "invoice_recipient_is_payer": true })).await;
-    assert!(
-        missing_for_step_three(&body).contains(&"payer_kind"),
-        "{body}"
-    );
+    assert_eq!(body["payer"]["payer_kind"], "self", "{body}");
+    assert_eq!(body["billing"]["invoice_to"], "self", "{body}");
+    let open = missing_for_step_three(&body);
+    assert!(!open.contains(&"payer_kind"), "{body}");
+    assert!(!open.contains(&"invoice_recipient_is_payer"), "{body}");
 
     // Staff see the answers "from the patient", with when they were given.
     let (status, intake) = json_request(

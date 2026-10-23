@@ -1022,6 +1022,132 @@ pub(crate) fn same_name(left: &str, right: &str) -> bool {
     normalized(left) == normalized(right)
 }
 
+/// "Der Rechnungsempfänger ist auch der Zahler" records the recipient as the
+/// payer at once (owner decision 2026-10-23), as the body of
+/// `POST …/payer` ([`lead_payer::PortalPayerInput`]): the patient side of an
+/// adult → the patient (`self`); a minor's parent chosen as recipient → that
+/// parent (`representative`, never a third party and never "the patient pays
+/// himself"); a third-party person or organisation → a third party with the
+/// recipient's identity (what GMED needs of a payer besides — date of birth,
+/// citizenships, the consents — the cabinet adds through `…/payer`).
+/// `None` when nothing is to be recorded: the recipient does not pay, the
+/// stored payer already answers the recipient ([`payer_fits`]), a minor's
+/// parent is not chosen yet, a third party has no type or name yet, or
+/// another third party is the payer on file (with its consents and answers:
+/// the cabinet replaces it only after the lead confirms).
+pub(crate) fn payer_input_for_recipient(
+    recipient: &Recipient,
+    representation: &super::lead_representatives::Representation,
+    stored: Option<&Declaration>,
+) -> Option<Value> {
+    if recipient.is_payer != Some(true) {
+        return None;
+    }
+    let paying_parent =
+        super::lead_representatives::payer_same_person(representation, stored).is_some();
+    if payer_fits(recipient, stored, paying_parent) {
+        return None;
+    }
+    let filled = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    match recipient.recipient.as_deref()? {
+        RECIPIENT_SELF if representation.minor => {
+            let parent = recipient.representative_contact_id?;
+            Some(json!({
+                "payer_kind": lead_payer::PAYER_KIND_REPRESENTATIVE,
+                "payer_representative_id": parent,
+            }))
+        }
+        RECIPIENT_SELF => recipient
+            .representative_contact_id
+            .is_none()
+            .then(|| json!({ "payer_kind": lead_payer::PAYER_KIND_SELF })),
+        // Another third party named as payer before (with its consents and
+        // answers) is replaced only on the cabinet's confirmation.
+        RECIPIENT_THIRD_PARTY if stored.is_some_and(Declaration::is_third_party) => None,
+        RECIPIENT_THIRD_PARTY => {
+            let organisation = recipient.recipient_type.as_deref()? == RECIPIENT_TYPE_ORGANISATION;
+            let mut input = json!({
+                "payer_kind": lead_payer::PAYER_KIND_THIRD_PARTY,
+                "street": filled(&recipient.street),
+                "zip": filled(&recipient.zip),
+                "city": filled(&recipient.city),
+                "country": recipient.country,
+                "email": filled(&recipient.email),
+                "phone": filled(&recipient.phone),
+            });
+            if organisation {
+                let name = filled(&recipient.organisation_name)?;
+                input["payer_type"] = json!("organisation");
+                input["organisation_name"] = json!(name);
+            } else {
+                let first = filled(&recipient.first_name)?;
+                let last = filled(&recipient.last_name)?;
+                input["payer_type"] = json!(lead_payer::PAYER_TYPE_PERSON);
+                input["relationship_kind"] = json!(recipient.relationship_kind);
+                input["relationship"] = json!(filled(&recipient.relationship));
+                input["first_name"] = json!(first);
+                input["last_name"] = json!(last);
+            }
+            Some(input)
+        }
+        _ => None,
+    }
+}
+
+/// Records the recipient who pays as the payer ([`payer_input_for_recipient`])
+/// through the cabinet's own save of "who pays"
+/// ([`lead_payer::save_from_portal`], with its audit event and the payer of
+/// the lead's orders), in the caller's transaction. Nothing when the payer
+/// answered through its own link (only GMED changes that payer) or when the
+/// recipient's data would be refused as a payer (the cabinet's step 3 then
+/// shows what is missing). Returns the stored declaration when it changed.
+pub(crate) async fn record_as_payer(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    actor: Uuid,
+    access_kind: &str,
+    recipient: &Recipient,
+    representation: &super::lead_representatives::Representation,
+    stored: Option<&Declaration>,
+) -> Result<Option<Declaration>, sqlx::Error> {
+    let Some(input) = payer_input_for_recipient(recipient, representation, stored) else {
+        return Ok(None);
+    };
+    if crate::routes::lead_payer_link::answered_by_payer(&mut *conn, lead_id, stored).await? {
+        return Ok(None);
+    }
+    let input: lead_payer::PortalPayerInput = match serde_json::from_value(input) {
+        Ok(input) => input,
+        Err(error) => {
+            tracing::warn!(%error, %lead_id, "invoice recipient as payer: body not read");
+            return Ok(None);
+        }
+    };
+    match lead_payer::save_from_portal(
+        conn,
+        lead_id,
+        actor,
+        access_kind,
+        &input,
+        crate::app_time::today(),
+    )
+    .await
+    {
+        Ok(saved) => Ok(saved),
+        Err(lead_payer::PortalPayerError::Invalid { code, field }) => {
+            tracing::info!(%lead_id, code, field, "invoice recipient not recorded as payer");
+            Ok(None)
+        }
+        Err(lead_payer::PortalPayerError::Database(error)) => Err(error),
+    }
+}
+
 /// Whether the payer question is shown at all: once the recipient and
 /// whether it pays are answered.
 pub(crate) fn payer_question_reached(recipient: &Recipient) -> bool {
@@ -1615,5 +1741,128 @@ mod tests {
         )
         .unwrap();
         assert!(resolve_parent(&mut foreign, &representation).is_err());
+    }
+
+    /// Owner decision 2026-10-23: "the recipient pays" names the payer at
+    /// once — the adult patient, a minor's chosen parent (never the minor,
+    /// never as a third party), or the third-party recipient with its own
+    /// identity; "no" leaves the payer to choose.
+    #[test]
+    fn the_recipient_who_pays_is_recorded_as_the_payer() {
+        let adult = super::super::lead_representatives::Representation::default();
+        let self_pays = apply(
+            &Recipient::default(),
+            &body(json!({ "invoice_recipient": "self" })),
+        )
+        .unwrap();
+        assert_eq!(
+            payer_input_for_recipient(&self_pays, &adult, None),
+            Some(json!({ "payer_kind": "self" }))
+        );
+        // Already the payer: nothing to record.
+        let self_declaration = Declaration {
+            payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+            ..Declaration::default()
+        };
+        assert_eq!(
+            payer_input_for_recipient(&self_pays, &adult, Some(&self_declaration)),
+            None
+        );
+        // "No": the payer stays to be chosen.
+        let not_paying = apply(
+            &Recipient::default(),
+            &body(json!({ "invoice_recipient": "self", "invoice_recipient_is_payer": false })),
+        )
+        .unwrap();
+        assert_eq!(payer_input_for_recipient(&not_paying, &adult, None), None);
+
+        // A minor: the parent chosen as recipient, never "the patient himself".
+        let minor = super::super::lead_representatives::Representation {
+            minor: true,
+            representatives: vec![parent(1, "rep1", None, "DE"), parent(2, "rep2", None, "DE")],
+            ..Default::default()
+        };
+        assert_eq!(payer_input_for_recipient(&self_pays, &minor, None), None);
+        let mut to_parent = apply(
+            &Recipient::default(),
+            &body(json!({
+                "invoice_recipient": "self",
+                "recipient_representative_id": Uuid::from_u128(2).to_string(),
+            })),
+        )
+        .unwrap();
+        resolve_parent(&mut to_parent, &minor).unwrap();
+        assert_eq!(
+            payer_input_for_recipient(&to_parent, &minor, Some(&self_declaration)),
+            Some(json!({
+                "payer_kind": "representative",
+                "payer_representative_id": Uuid::from_u128(2),
+            }))
+        );
+
+        // A third-party person: its identity, in place of the patient.
+        let person = apply(
+            &Recipient::default(),
+            &body(json!({
+                "invoice_recipient": "third_party",
+                "recipient_type": "person",
+                "recipient_first_name": "Olga",
+                "recipient_last_name": "Muster",
+                "recipient_street": "Weg 1",
+                "recipient_zip": "10115",
+                "recipient_city": "Berlin",
+                "recipient_country": "DE",
+                "recipient_email": "olga@example.com",
+                "recipient_relationship_kind": "friend",
+            })),
+        )
+        .unwrap();
+        let first = payer_input_for_recipient(&person, &adult, Some(&self_declaration)).unwrap();
+        assert_eq!(first["payer_kind"], "third_party");
+        assert_eq!(first["payer_type"], "person");
+        assert_eq!(first["first_name"], "Olga");
+        assert_eq!(first["last_name"], "Muster");
+        assert_eq!(first["relationship_kind"], "friend");
+        assert_eq!(first["street"], "Weg 1");
+        assert_eq!(first["country"], "DE");
+        assert_eq!(first["email"], "olga@example.com");
+        assert!(first.get("citizenships").is_none());
+        // The same person already pays: nothing to record.
+        assert_eq!(
+            payer_input_for_recipient(&person, &adult, Some(&third_party_payer("Olga", "Muster"))),
+            None
+        );
+        // Another third party on file is replaced only on the cabinet's
+        // confirmation (its consents and answers would go).
+        assert_eq!(
+            payer_input_for_recipient(&person, &adult, Some(&third_party_payer("Old", "Payer"))),
+            None
+        );
+
+        // An organisation.
+        let organisation = apply(
+            &Recipient::default(),
+            &body(json!({
+                "invoice_recipient": "third_party",
+                "recipient_type": "organisation",
+                "recipient_organisation_name": "Muster GmbH",
+            })),
+        )
+        .unwrap();
+        let input = payer_input_for_recipient(&organisation, &adult, None).unwrap();
+        assert_eq!(input["payer_type"], "organisation");
+        assert_eq!(input["organisation_name"], "Muster GmbH");
+        assert!(input.get("first_name").is_none());
+        // Without a name yet nothing is recorded.
+        let unnamed = apply(
+            &Recipient::default(),
+            &body(json!({ "invoice_recipient": "third_party", "recipient_type": "person" })),
+        )
+        .unwrap();
+        assert_eq!(payer_input_for_recipient(&unnamed, &adult, None), None);
+        // Each body is one the cabinet's "who pays" reads.
+        for input in [first, input] {
+            assert!(serde_json::from_value::<lead_payer::PortalPayerInput>(input).is_ok());
+        }
     }
 }

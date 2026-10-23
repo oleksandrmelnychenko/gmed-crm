@@ -1236,14 +1236,13 @@ async fn scenario_minor_with_a_court_guardian() {
         assert_eq!(code, StatusCode::CREATED, "{path}: {body}");
     }
     let view = app.cabinet(lead, &greta).await;
-    assert_eq!(
-        missing(&view),
-        vec!["invoice_recipient_is_payer".to_string()],
-        "{view}"
-    );
+    // "The recipient pays" (ticked by default) names the Vormund as payer at
+    // once (owner decision 2026-10-23): she is the paying representative,
+    // and her own login answers how she pays.
+    assert_eq!(view["payer"]["payer_kind"], "representative", "{view}");
+    assert_eq!(missing(&view), vec!["payment_method".to_string()], "{view}");
     assert_eq!(view["billing"]["recipient"]["name"], "Greta Vormund");
-    // "The recipient pays": the cabinet names the Vormund as payer; she is
-    // the paying representative, and her own login answers how she pays.
+    // Sending the answer again and naming her as payer change nothing.
     let body = app
         .ok(
             StatusCode::OK,

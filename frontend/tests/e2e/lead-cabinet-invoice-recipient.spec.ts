@@ -244,6 +244,53 @@ function payerFits(request: Request): boolean {
   return false;
 }
 
+/** A paying parent (2026-10-19): the server shows that representative's data. */
+function representativePayer(request: Request, id: unknown): Payer {
+  const person = (request.representation?.representatives ?? [])
+    .find((rep: { id: string }) => rep.id === id) as Record<string, unknown> | undefined;
+  const template = person ? null : request.payer_self_template;
+  return { ...selfPayer(), payer_kind: "representative" as Payer["payer_kind"], payer_representative_id: id,
+    first_name: person?.first_name ?? template?.first_name ?? null, last_name: person?.last_name ?? template?.last_name ?? null,
+    email: person?.email ?? template?.email ?? null, street: person?.street ?? null, relationship_kind: "parent" };
+}
+
+/**
+ * The server's `record_as_payer` (owner decision 2026-10-23): "the recipient pays" names the payer
+ * with the billing answer — the adult patient, the minor's parent named as recipient, or the
+ * third-party recipient in place of the patient side (another third party on file waits for the
+ * cabinet's confirmation).
+ */
+function recordRecipientAsPayer(request: Request) {
+  const billing = request.billing;
+  const party = billing.recipient;
+  if (billing.invoice_recipient_is_payer !== true || payerFits(request)) return;
+  if (billing.invoice_recipient === "self") {
+    if (!request.minor) {
+      request.payer = selfPayer();
+      return;
+    }
+    const parents = (request.representation?.representatives ?? []).filter((rep) => rep.slot === "rep1" || rep.slot === "rep2");
+    const id = party.representative_id ?? (parents.length === 0 ? "parent-of-login" : null);
+    if (id) request.payer = representativePayer(request, id);
+    return;
+  }
+  if (billing.invoice_recipient !== "third_party" || request.payer?.payer_kind === "third_party") return;
+  const organisation = party.type === "organisation";
+  if (!party.type || (organisation ? blank(party.organisation_name) : blank(party.first_name) || blank(party.last_name))) return;
+  request.payer = {
+    ...selfPayer(),
+    payer_kind: "third_party",
+    payer_type: organisation ? "organisation" : "person",
+    organisation_name: organisation ? party.organisation_name : null,
+    first_name: organisation ? null : party.first_name,
+    last_name: organisation ? null : party.last_name,
+    relationship_kind: organisation ? null : party.relationship_kind,
+    relationship: organisation ? null : party.relationship,
+    street: party.street, zip: party.zip, city: party.city, country: party.country,
+    email: party.email, phone: party.phone,
+  };
+}
+
 /** Section 7, the payer's state and what is still missing, as the server computes them. */
 function recompute(request: Request) {
   const billing = request.billing;
@@ -414,6 +461,8 @@ async function setup(page: Page, options: {
         party.payment_reason = null;
       }
       if (billing.invoice_recipient_is_payer === true) party.payment_reason = null;
+      recompute(request);
+      recordRecipientAsPayer(request);
       await options.afterBillingWrite?.(request, patch);
       return route.fulfill({ json: answer() });
     }
@@ -433,14 +482,7 @@ async function setup(page: Page, options: {
               cost_estimate_consent_at: before?.cost_estimate_consent_at ?? null,
             }
           : input.payer_kind === "representative"
-            // A paying parent (2026-10-19): the server shows that representative's data.
-            ? (() => {
-                const person = (request.representation?.representatives ?? [])
-                  .find((rep: { id: string }) => rep.id === input.payer_representative_id) as Record<string, unknown> | undefined;
-                return { ...selfPayer(), payer_kind: "representative", payer_representative_id: input.payer_representative_id,
-                  first_name: person?.first_name ?? null, last_name: person?.last_name ?? null, email: person?.email ?? null,
-                  street: person?.street ?? null, relationship_kind: "parent" };
-              })()
+            ? representativePayer(request, input.payer_representative_id)
             : { ...selfPayer() };
       return route.fulfill({ json: answer() });
     }
@@ -543,7 +585,9 @@ test("'Ich' of a signed-in parent is that parent: no parent question, also with 
   await expect.poll(() => request.billing.recipient.representative_id).toBe(FATHER);
   expect(calls.billing[0]).toMatchObject({ invoice_recipient: "self", recipient_representative_id: FATHER });
   await expect(page.getByRole("combobox", { name: "Welcher Elternteil erhält die Rechnung?" })).toHaveCount(0);
-  await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_kind: "representative", payer_representative_id: FATHER });
+  // The server names the parent as payer with the billing answer (owner decision 2026-10-23).
+  await expect.poll(() => request.payer?.payer_representative_id).toBe(FATHER);
+  expect(calls.payer).toEqual([]);
   expect(request.progress.missing_for_submit).not.toContain("invoice_recipient");
   expect(request.progress.missing_for_submit).not.toContain("recipient_representative_id");
   // The payment method is asked on the same screen.
@@ -583,7 +627,8 @@ test("two parents and a login that is none of them: choose the named invoice par
   await expect.poll(() => request.billing.recipient.representative_id).toBe(father);
   await expect.poll(() => request.payer?.email).toBe("ben.muster@example.com");
   expect(calls.billing.some((patch) => patch.recipient_representative_id === father)).toBe(true);
-  expect(calls.payer.at(-1)).toMatchObject({ payer_kind: "representative", payer_representative_id: father });
+  expect(request.payer).toMatchObject({ payer_kind: "representative", payer_representative_id: father });
+  expect(calls.payer).toEqual([]);
   expect(request.billing.invoice_to).toBe("other");
   expect(request.billing.invoice_name).toBe("Ben Muster");
   await step(page, "send");
@@ -602,7 +647,7 @@ test("two parents and a login that is none of them: choose the named invoice par
   await choose(page, parent, "Maria Muster");
   await expect.poll(() => request.billing.recipient.representative_id).toBe(mother);
   await expect.poll(() => request.payer?.email).toBe("maria.muster@example.com");
-  expect(calls.payer.at(-1)).toMatchObject({ payer_kind: "representative", payer_representative_id: mother });
+  expect(request.payer).toMatchObject({ payer_kind: "representative", payer_representative_id: mother });
   await expect(page.getByRole("combobox", { name: METHOD })).toBeVisible();
   await page.locator("#lead-request-recipient_email").fill("invoices@example.com");
   await expect.poll(() => request.billing.recipient.email).toBe("invoices@example.com");
@@ -635,7 +680,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
   });
 
   test("an adult receives and pays the invoice: the box is ticked and the patient is the payer at once", async ({ page }) => {
-    const { calls } = await setup(page);
+    const { calls, request } = await setup(page);
     await page.goto("/");
     await step(page, "billing");
     const stepBox = page.getByTestId("lead-request-step-billing");
@@ -643,7 +688,9 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     // "The recipient is also the payer" is ticked by default and saved as an answer.
     await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toBeChecked();
     await expect.poll(() => calls.billing).toEqual([{ invoice_recipient: "self", invoice_recipient_is_payer: true }]);
-    await expect.poll(() => calls.payer).toEqual([{ payer_kind: "self" }]);
+    // The server names the patient as payer with that answer (owner decision 2026-10-23).
+    await expect.poll(() => request.payer?.payer_kind).toBe("self");
+    expect(calls.payer).toEqual([]);
     // The e-mail for invoices is optional.
     await expect(stepBox.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" })).toBeVisible();
     // Nobody else is asked about; the bare payment method follows.
@@ -768,17 +815,18 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await expect.poll(() => calls.costEstimate).toEqual([{ consent: true }]);
   });
 
-  test("a parent receives and pays: the parent's own data name the payer", async ({ page }) => {
-    const { calls } = await setup(page, { minor: true });
+  test("a parent receives and pays: the parent is the payer at once", async ({ page }) => {
+    const { calls, request } = await setup(page, { minor: true });
     await page.goto("/");
     await step(page, "billing");
     const stepBox = page.getByTestId("lead-request-step-billing");
     await expect(stepBox.getByRole("combobox", { name: "Hat Ihr Kind eine Krankenversicherung?" })).toBeVisible();
     await stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }).check();
     await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toBeChecked();
-    await expect
-      .poll(() => calls.payer.at(-1))
-      .toMatchObject({ payer_kind: "third_party", payer_type: "person", first_name: "Maria", last_name: "Muster", relationship_kind: "parent" });
+    // The parent pays as the representative, never as a third party; the server names her.
+    await expect.poll(() => request.payer?.payer_kind).toBe("representative");
+    expect(request.payer?.first_name).toBe("Maria");
+    expect(calls.payer).toEqual([]);
     // Unticked with the patient side as recipient: only another person or organisation, at once.
     await stepBox.getByRole("checkbox", { name: IS_PAYER }).uncheck();
     await expect(stepBox.getByTestId("lead-request-payer-party")).toHaveCount(0);

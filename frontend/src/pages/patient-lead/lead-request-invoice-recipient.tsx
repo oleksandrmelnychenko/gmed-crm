@@ -101,7 +101,10 @@ type Refused = Partial<Record<keyof RecipientDraft, string>>;
  *
  * The recipient saves on the billing route on its own; the payer stays the
  * payer declaration (`POST …/payer`), which the risk triggers, the payer link
- * and the documents read.
+ * and the documents read. "The recipient pays" names the payer on the server
+ * with the recipient's answer (owner decision 2026-10-23); the cabinet sends
+ * `…/payer` only for a payer other than the recipient and for a paying third
+ * party's further data.
  */
 export function InvoiceRecipientSection({
   request,
@@ -136,16 +139,6 @@ export function InvoiceRecipientSection({
   const parentChoiceShown = guardian && flowOf(draft).recipient === "self" && parents.length > 0
     && (!ownParent || Boolean(draft.representative_id && draft.representative_id !== ownParent.id));
   const parentChoiceNeeded = !invoiceParent && (parents.length > 1 || Boolean(draft.representative_id));
-  const selectedParentRequest: LeadRequest = invoiceParent ? {
-    ...request,
-    payer_self_template: {
-      representative_id: invoiceParent.id,
-      first_name: invoiceParent.first_name, last_name: invoiceParent.last_name,
-      date_of_birth: invoiceParent.date_of_birth, email: invoiceParent.email, phone: invoiceParent.phone,
-      citizenships: invoiceParent.citizenships, street: invoiceParent.street, zip: invoiceParent.zip,
-      city: invoiceParent.city, country: invoiceParent.country,
-    },
-  } : request;
   const savedRef = useRef<RecipientDraft>(draftFromRecipient(request.billing));
   const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<Refused>({});
@@ -596,11 +589,12 @@ export function InvoiceRecipientSection({
           onChange={onChange}
           onSaveState={partState("payer")}
         />
-      ) : flow.isPayer === "yes" && flow.recipient === "self" && !parentChoiceNeeded ? (
+      ) : flow.isPayer === "yes" && flow.recipient === "self" && !parentChoiceNeeded && guardian && !invoiceParent
+        && request.payer?.payer_kind === "self" ? (
+        // A parent's login with "the patient pays" stored before: the parent names who pays.
         <PatientSidePayer
-          key={`payer-own-${draft.representative_id}`}
-          request={selectedParentRequest}
-          parentSelected={Boolean(invoiceParent)}
+          key="payer-own"
+          request={request}
           text={text}
           lang={lang}
           identification={identification}
@@ -609,6 +603,9 @@ export function InvoiceRecipientSection({
           onSaveState={partState("payer")}
         />
       ) : null}
+      {/* Otherwise the patient side receives and pays: the server names the payer with
+          the recipient's answer (the adult patient, or the parent chosen as recipient;
+          owner decision 2026-10-23), nothing more is asked here. */}
     </>
   );
 }
