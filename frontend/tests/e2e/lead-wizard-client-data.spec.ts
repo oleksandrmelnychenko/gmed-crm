@@ -79,11 +79,15 @@ type Mock = {
   create?: boolean;
   representation?: Json;
   failUpdate?: { status: number; body: Json };
+  /** The switch "who fills in the data" is refused (500). */
+  failFillMode?: boolean;
+  /** The first read of the portal state answers only once this settles. */
+  holdFirstIntake?: Promise<void>;
 };
 
 async function mount(page: Page, mock: Mock) {
-  const state = { lead: { ...(mock.lead ?? adultLead) } as Json };
-  const calls = { updates: [] as Json[], creates: [] as Json[] };
+  const state = { lead: { ...(mock.lead ?? adultLead) } as Json, fillMode: "staff" };
+  const calls = { updates: [] as Json[], creates: [] as Json[], fillModes: [] as Json[], intakeReads: 0 };
   let failUpdate = mock.failUpdate;
   await page.addInitScript((value) => {
     localStorage.setItem("gmed_lang", value);
@@ -114,10 +118,23 @@ async function mount(page: Page, mock: Mock) {
         return;
       }
       response = {};
+    } else if (path === `/leads/${leadId}/portal-intake/fill-mode` && method === "POST") {
+      if (mock.failFillMode) {
+        calls.fillModes.push(request.postDataJSON() as Json);
+        await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Internal Server Error", message: "Failed" }) });
+        return;
+      }
+      state.fillMode = (request.postDataJSON() as { mode: string }).mode;
+      calls.fillModes.push({ fill_mode: state.fillMode });
+      response = { fill_mode: state.fillMode };
     } else if (path === `/leads/${leadId}/portal-intake`) {
+      // What was stored when it was asked; the first read may be held back.
+      const fillMode = state.fillMode;
+      calls.intakeReads += 1;
+      if (calls.intakeReads === 1 && mock.holdFirstIntake) await mock.holdFirstIntake;
       response = {
         lead_id: leadId,
-        fill_mode: "staff",
+        fill_mode: fillMode,
         patient_fields: {},
         patient_payer: null,
         progress: { filled: 0, total: 12, documents: 0, submitted_at: null },
@@ -301,6 +318,36 @@ test("a server failure keeps the draft and offers a retry", async ({ page }) => 
   await expect.poll(() => calls.updates.length).toBe(2);
   expect(calls.updates[1].city).toBe("Hamburg");
   await expect(page.getByText("Daten gespeichert", { exact: true })).toBeVisible();
+});
+
+test("a refused switch of who fills in the data goes back to the stored choice and says so", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { calls } = await mount(page, { lang: "de", failFillMode: true });
+  const mode = page.getByTestId("step1-fill-mode");
+  await expect(mode.getByRole("radio", { name: "Ich fülle aus" })).toHaveAttribute("aria-checked", "true");
+  await mode.getByRole("radio", { name: "Patient füllt aus" }).click();
+  await expect.poll(() => calls.fillModes.length).toBe(1);
+  // Not stored: the switch shows the stored choice again, not the refused one.
+  await expect(mode.getByRole("radio", { name: "Ich fülle aus" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("step1-fill-mode-error")).toBeVisible();
+});
+
+test("a slow older answer about who fills in the data does not undo a newer switch", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  let releaseFirst = () => {};
+  const holdFirstIntake = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const { calls } = await mount(page, { lang: "de", holdFirstIntake });
+  const mode = page.getByTestId("step1-fill-mode");
+  const patient = mode.getByRole("radio", { name: "Patient füllt aus" });
+  await patient.click();
+  // The switch is stored and read back while the first read still hangs.
+  await expect.poll(() => calls.fillModes).toEqual([{ fill_mode: "patient" }]);
+  await expect.poll(() => calls.intakeReads).toBeGreaterThanOrEqual(2);
+  await expect(patient).toHaveAttribute("aria-checked", "true");
+  releaseFirst();
+  // The first read ("staff", asked before the switch) arrives last and is not taken.
+  await expect.poll(() => page.evaluate(() => new Promise((resolve) => setTimeout(() => resolve(true), 300)))).toBe(true);
+  await expect(patient).toHaveAttribute("aria-checked", "true");
 });
 
 test("a minor's parents: the custody has a caption and the child's phone is optional", async ({ page }) => {

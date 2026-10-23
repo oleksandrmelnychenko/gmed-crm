@@ -186,13 +186,18 @@ export function useLeadPortalIntake(
     onPatientEventRef.current = onPatientEvent;
   }, [onPatientEvent]);
 
+  // Reads overlap (opening, realtime, a switch read back): only the last asked
+  // may show, or an older answer replaces a newer state (or another lead's).
+  const requestRef = useRef(0);
   const reload = useCallback(async () => {
+    const request = ++requestRef.current;
     if (!leadId) {
       setIntake(null);
       return null;
     }
     try {
       const next = await fetchLeadPortalIntake(leadId);
+      if (request !== requestRef.current) return next;
       setIntake(next);
       return next;
     } catch {

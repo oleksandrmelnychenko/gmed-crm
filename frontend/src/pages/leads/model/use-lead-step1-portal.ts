@@ -34,6 +34,9 @@ export function useLeadStep1Portal({
   onPatientDataChanged?: () => void;
 }) {
   const [mode, setModeState] = useState<Step1FillMode>("staff");
+  // A switch the server did not store: the stored choice is shown again, with this message.
+  const [modeFailed, setModeFailed] = useState(false);
+  const modeRequestRef = useRef(0);
   const [patientUpdatedAt, setPatientUpdatedAt] = useState<string | null>(null);
   const pendingModeRef = useRef<Step1FillMode | null>(null);
   const onChangedRef = useRef(onPatientDataChanged);
@@ -62,6 +65,8 @@ export function useLeadStep1Portal({
   // Another lead: forget the notice; the mode comes with its portal state.
   useEffect(() => {
     setPatientUpdatedAt(null);
+    setModeFailed(false);
+    modeRequestRef.current += 1;
     if (!pendingModeRef.current) setModeState("staff");
   }, [leadId]);
 
@@ -74,27 +79,46 @@ export function useLeadStep1Portal({
     const pending = pendingModeRef.current;
     if (!leadId || !pending) return;
     pendingModeRef.current = null;
-    void setLeadStep1FillMode(leadId, pending)
-      .then(() => reload())
-      .catch(() => undefined);
+    const request = ++modeRequestRef.current;
+    void setLeadStep1FillMode(leadId, pending).then(
+      () => reload(),
+      () => {
+        if (request !== modeRequestRef.current) return;
+        // Not stored: the new lead is filled in by staff until the switch is made again.
+        setModeState("staff");
+        setModeFailed(true);
+        void reload();
+      },
+    );
   }, [leadId, reload]);
 
   const setMode = useCallback(
     (next: Step1FillMode) => {
+      const previous = mode;
       setModeState(next);
+      setModeFailed(false);
       if (!leadId) {
         pendingModeRef.current = next === "patient" ? next : null;
         return;
       }
-      void setLeadStep1FillMode(leadId, next)
-        .then(() => reload())
-        .catch(() => undefined);
+      const request = ++modeRequestRef.current;
+      void setLeadStep1FillMode(leadId, next).then(
+        () => reload(),
+        () => {
+          // Not stored: the switch must not claim a choice the server does not have.
+          if (request !== modeRequestRef.current) return;
+          setModeState(previous);
+          setModeFailed(true);
+          void reload();
+        },
+      );
     },
-    [leadId, reload],
+    [leadId, mode, reload],
   );
 
   return {
     mode,
+    modeFailed,
     setMode,
     intake,
     reload,

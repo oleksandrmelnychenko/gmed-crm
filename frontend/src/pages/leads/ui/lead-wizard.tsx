@@ -7769,6 +7769,11 @@ ${serviceCommentLines.join("\n")}`
                   <Step1FillModeSwitch mode={step1Portal.mode} onChange={step1Portal.setMode} disabled={isBusy} tx={tx} />
                 )}
               >
+              {step1Portal.modeFailed && !isRepeatIntake ? (
+                <p role="alert" className="mb-3 text-xs font-medium text-destructive" data-testid="step1-fill-mode-error">
+                  {tx("Выбор «кто заполняет» не сохранён. Попробуйте ещё раз.", "Die Auswahl, wer ausfüllt, wurde nicht gespeichert. Bitte erneut versuchen.")}
+                </p>
+              ) : null}
               {step1Portal.patientUpdatedAt ? (
                 <PatientUpdatedBanner at={step1Portal.patientUpdatedAt} onClose={step1Portal.dismissPatientUpdate} tx={tx} />
               ) : null}
