@@ -10409,7 +10409,7 @@ ${serviceCommentLines.join("\n")}`
                               <li key={reason}>
                                 <button
                                   type="button"
-                                  className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  className="block text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                   disabled={isBusy}
                                   onClick={() => openReadinessReason(reason)}
                                 >
@@ -10419,7 +10419,7 @@ ${serviceCommentLines.join("\n")}`
                             ))}
                             {quoteMissing ? (
                               <li>
-                                <button type="button" className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={isBusy} onClick={() => openReadinessReason("Quote is not accepted")}>
+                                <button type="button" className="block text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={isBusy} onClick={() => openReadinessReason("Quote is not accepted")}>
                                   {quoteStateLabel}
                                 </button>
                               </li>

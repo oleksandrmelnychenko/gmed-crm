@@ -134,6 +134,9 @@ test("a minor's release list asks for the parents' or guardian's identity docume
   const blockers = wizard.getByTestId("completion-blockers");
   await expect(blockers.getByRole("button", { name: "Подтвердите документы, удостоверяющие личность родителей или опекуна", exact: true })).toBeVisible();
   await expect(blockers.getByText("Подтвердите документ, удостоверяющий личность", { exact: true })).toHaveCount(0);
+  // At 390 px the label wraps: as a block the bullet stays at its first line.
+  const firstLine = blockers.getByRole("button", { name: "Подтвердите документы, удостоверяющие личность родителей или опекуна", exact: true });
+  expect(await firstLine.evaluate((element) => getComputedStyle(element).display)).toBe("block");
 });
 
 test("switching to self-pay clears the stored insurance coverage on the server", async ({ page }) => {
