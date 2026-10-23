@@ -2146,28 +2146,27 @@ test.describe("lead cabinet", () => {
     await expect(page.getByRole("heading", { name: "Your request" })).toBeVisible();
   });
 
-  test("the language button of the top bar and the cabinet switch agree", async ({ page }) => {
+  test("the cabinet has one language switch: the top bar shows no DE/RU button", async ({ page }) => {
     await setup(page, "lead");
     await page.goto("/");
     const languages = page.getByTestId("lead-cabinet-language");
     const portalLanguage = page.locator("header button:has(svg.lucide-globe)");
     const menu = page.locator("nav");
+    await expect(page.getByTestId("lead-request")).toBeVisible();
+    // The portal's DE/RU toggle read "Русский" while the cabinet was Ukrainian or English (owner 2026-10-23).
+    await expect(portalLanguage).toHaveCount(0);
 
-    // German and Russian are the portal's languages: both controls switch the menu and the cabinet.
-    await portalLanguage.click();
+    // German and Russian of the cabinet switch the menu too.
+    await languages.getByRole("radio", { name: "RU" }).click();
     await expect(page.getByRole("heading", { name: "Ваша заявка" })).toBeVisible();
-    await expect(languages.getByRole("radio", { name: "RU" })).toHaveAttribute("aria-checked", "true");
     await expect(menu.getByRole("link", { name: "Ваша заявка" })).toBeVisible();
     await languages.getByRole("radio", { name: "DE" }).click();
     await expect(menu.getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();
 
-    // Ukrainian exists only in the cabinet: the top bar button changes the menu, the cabinet stays.
     await languages.getByRole("radio", { name: "UA" }).click();
-    await portalLanguage.click();
-    await expect(menu.getByRole("link", { name: "Ваша заявка" })).toBeVisible();
-    await expect(languages.getByRole("radio", { name: "UA" })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("textbox", { name: "Прізвище", exact: true })).toBeVisible();
+    await expect(portalLanguage).toHaveCount(0);
   });
 
   test("a Russian request opens the whole portal in Russian once, then the person's choice counts", async ({ page }) => {
@@ -2178,7 +2177,7 @@ test.describe("lead cabinet", () => {
     await expect(page.locator("nav").getByRole("link", { name: "Ваша заявка" })).toBeVisible();
     await expect(languages.getByRole("radio", { name: "RU" })).toHaveAttribute("aria-checked", "true");
 
-    await page.locator("header button:has(svg.lucide-globe)").click();
+    await languages.getByRole("radio", { name: "DE" }).click();
     await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();
     await page.reload();
     await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();

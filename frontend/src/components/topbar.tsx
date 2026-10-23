@@ -566,20 +566,24 @@ export function Topbar() {
           </TopbarIconButton>
           )}
 
-          {/* Lang; staff below md reach it through the "more" menu. */}
-          <button
-            type="button"
-            onClick={toggleLang}
-            title={t.topbar_language_toggle}
-            aria-label={t.topbar_language_toggle}
-            className={cn(
-              "h-8 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:px-2.5",
-              isPatientPortal ? "flex" : "hidden md:flex",
-            )}
-          >
-            <Globe aria-hidden="true" className="size-3.5" />
-            {t.common_lang_native}
-          </button>
+          {/* Lang; staff below md reach it through the "more" menu. The lead cabinet has
+              its own four-language switch: this DE/RU toggle would show "Русский" while
+              the cabinet is in Ukrainian or English (owner 2026-10-23). */}
+          {leadCabinet ? null : (
+            <button
+              type="button"
+              onClick={toggleLang}
+              title={t.topbar_language_toggle}
+              aria-label={t.topbar_language_toggle}
+              className={cn(
+                "h-8 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:px-2.5",
+                isPatientPortal ? "flex" : "hidden md:flex",
+              )}
+            >
+              <Globe aria-hidden="true" className="size-3.5" />
+              {t.common_lang_native}
+            </button>
+          )}
 
           {/* Staff top bar on phones and small tablets (QA 2026-10-11: 571 px
               of items in a 375 px bar): the online users and the language
