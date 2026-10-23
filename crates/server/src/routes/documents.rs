@@ -18971,7 +18971,7 @@ async fn gwg_sheet_signature_details(
         bindings.as_ref(),
     );
     let missing = super::lead_representatives::signature_details_missing(
-        &mut *conn, details, lead_id, patient_id, order_id,
+        &mut conn, details, lead_id, patient_id, order_id,
     )
     .await?;
     let scope = match details {
