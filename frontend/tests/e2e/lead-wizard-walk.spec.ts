@@ -162,6 +162,69 @@ test("switching to self-pay clears the stored insurance coverage on the server",
   });
 });
 
+test("an autosave sends back every stored field as it was loaded", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const stored = adultLead({
+    middle_name: "Petrovna",
+    suffix: "Jr.",
+    whatsapp_number: "+49 170 1234567",
+    state: "Berlin",
+    country: "UA",
+    citizenships: ["UA", "DE"],
+    primary_language: "uk",
+    has_insurance: true,
+    insurance_type: "foreign",
+    insurance_provider: "Allianz",
+    insurance_number: "A-1",
+    insurance_covers_germany: "not_sure",
+    primary_concern_text: "Knie",
+    additional_concerns: "",
+    services: ["interpreter_support"],
+    needs_interpreter: true,
+    notes: "Ruft abends an",
+    requested_specialties: ["cardiology"],
+    trusted_contacts: [{ id: "11111111-1111-4111-8111-111111111111", related_patient_id: null, name: "Anna Muster", phone: "+49 30 100001", email: "anna@example.com", relation: "sister", birth_date: "1985-03-02", address: "Musterweg 2" }],
+    wizard_state: { program_date_from: "2026-11-02", program_date_to: "2026-11-06", passport_expiry: "2030-01-01", discovery_source: "online", cost_threshold: "700" },
+  });
+  const { wizard, calls } = await mount(page, stored);
+  await wizard.locator("#lead-wizard-city").fill("Potsdam");
+  await expect.poll(() => calls.filter((call) => call.path === `/leads/${leadId}/update`).length, { timeout: 15_000 }).toBeGreaterThan(0);
+  const update = calls.filter((call) => call.path === `/leads/${leadId}/update`).at(-1)!.body!;
+  expect(update).toMatchObject({
+    city: "Potsdam",
+    first_name: "Olga",
+    last_name: "Beispiel",
+    middle_name: "Petrovna",
+    suffix: "Jr.",
+    email: "olga.beispiel@example.com",
+    phone: "+49 30 123456",
+    whatsapp_number: "+49 170 1234567",
+    date_of_birth: "1980-02-03",
+    legal_sex: "female",
+    street_address: "Musterweg 1",
+    zip_code: "10115",
+    state: "Berlin",
+    country: "UA",
+    citizenships: ["UA", "DE"],
+    primary_language: "uk",
+    has_insurance: true,
+    insurance_type: "foreign",
+    insurance_provider: "Allianz",
+    insurance_number: "A-1",
+    insurance_covers_germany: "not_sure",
+    primary_concern_text: "Knie",
+    services: ["interpreter_support"],
+    needs_interpreter: true,
+    notes: "Ruft abends an",
+    requested_specialties: ["cardiology"],
+    consent_privacy_practices: true,
+    consent_healthcare: true,
+    wizard_state: expect.objectContaining({ program_date_from: "2026-11-02", program_date_to: "2026-11-06", passport_expiry: "2030-01-01", discovery_source: "online", cost_threshold: "700" }),
+  });
+  // The contacts go out only when staff changed them (the cabinet may add one meanwhile).
+  expect(update).not.toHaveProperty("trusted_contacts");
+});
+
 test("the service and order tabs and the release checklist follow what each step shows", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const { wizard } = await mount(page, adultLead());
