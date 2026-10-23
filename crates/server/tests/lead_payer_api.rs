@@ -1822,12 +1822,35 @@ async fn a_staff_save_keeps_the_payer_informed_by_the_payers_link() {
             .unwrap();
     assert!(revoked.is_none(), "the same payer keeps the link");
 
+    // Staff reviewed this payer's PEP status.
+    sqlx::query(
+        r#"UPDATE leads
+           SET wizard_state = jsonb_build_object('aml_enhanced_due_diligence',
+               jsonb_build_object('pepReviews', jsonb_build_object('payer',
+                   jsonb_build_object('checked', true, 'isPep', false,
+                                      'checkedOn', '2026-10-20', 'checkedBy', 'Erste Prüferin'))))
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
     // Another payer was not informed by that link, and the link ends.
     let mut other = unticked;
     other["first_name"] = json!("Anna");
     let (status, body) = json_request(&app, "POST", &path, &manager, Some(other)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(payer_informed(pool, lead_id).await, (None, None));
+    // The review was of the previous payer: it does not stand for Anna.
+    let review: Option<Value> = sqlx::query_scalar(
+        "SELECT wizard_state #> '{aml_enhanced_due_diligence,pepReviews,payer}' FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(review.is_none(), "{review:?}");
     let revoked: Option<String> =
         sqlx::query_scalar("SELECT revoked_reason FROM lead_payer_links WHERE id = $1")
             .bind(link_id)

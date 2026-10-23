@@ -286,6 +286,18 @@ pub fn stamp_reviews(
         .cloned()
         .unwrap_or_default();
     reviews.retain(|key, value| is_subject_key(key) && value.is_object());
+    // A review the server no longer has (the payer changed and the review of
+    // the previous payer was cleared) but the client sends back with its old
+    // day: an open form echoing what it loaded, not staff deciding now (a
+    // changed decision always comes without a day). It is not taken over.
+    reviews.retain(|key, value| {
+        key == SUBJECT_PATIENT
+            || review_of(previous, key).reviewed()
+            || value
+                .get("checkedOn")
+                .and_then(Value::as_str)
+                .is_none_or(|day| day.trim().is_empty())
+    });
     // A review the client did not send stays as stored: staff clear one by
     // unticking it, never by leaving it out.
     if let Some(stored) = previous.get(REVIEWS_KEY).and_then(Value::as_object) {
@@ -518,5 +530,27 @@ mod tests {
             cleared["pepReviews"][parent.as_str()]["checkedOn"],
             "2026-10-23"
         );
+    }
+
+    #[test]
+    fn an_echoed_review_of_the_previous_payer_is_not_stamped_again() {
+        // The payer changed: the server cleared the payer's review. An open
+        // form sends the old review back with its old day.
+        let previous = json!({ "pepReviews": {} });
+        let mut echoed = json!({
+            "pepReviews": {
+                "payer": { "checked": true, "isPep": false, "checkedOn": "2026-10-20", "checkedBy": "Erste Prüferin" }
+            }
+        });
+        let changed = stamp_reviews(&previous, &mut echoed, day("2026-10-23"), "Zweiter Prüfer");
+        assert!(changed.is_empty());
+        assert!(!review_of(&echoed, SUBJECT_PAYER).reviewed());
+        // Staff deciding now send no day: that review is taken and stamped.
+        let mut decided = json!({
+            "pepReviews": { "payer": { "checked": true, "isPep": false, "checkedOn": null } }
+        });
+        let changed = stamp_reviews(&previous, &mut decided, day("2026-10-23"), "Zweiter Prüfer");
+        assert_eq!(changed.len(), 1);
+        assert_eq!(decided["pepReviews"]["payer"]["checkedOn"], "2026-10-23");
     }
 }

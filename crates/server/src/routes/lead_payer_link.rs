@@ -4944,6 +4944,37 @@ pub(crate) async fn payer_changed_in_tx(
     if payer_changed {
         sqlx::query("UPDATE lead_payer_declarations SET organisation_legal_form = NULL, organisation_register_number = NULL, organisation_contact_name = NULL WHERE lead_id = $1")
             .bind(lead_id).execute(&mut *conn).await?;
+        // Staff's PEP review was of the previous payer: it must not stand on
+        // the new payer's GwG sheet (question 5 b), "geprüft am … von …").
+        let cleared = sqlx::query(
+            r#"UPDATE leads
+               SET wizard_state = wizard_state #- '{aml_enhanced_due_diligence,pepReviews,payer}'
+               WHERE id = $1
+                 AND wizard_state #> '{aml_enhanced_due_diligence,pepReviews,payer}' IS NOT NULL"#,
+        )
+        .bind(lead_id)
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        if cleared > 0 {
+            audit::write_in_transaction(
+                conn,
+                &audit::domain_event(
+                    "lead_pep_review_changed",
+                    actor,
+                    "lead",
+                    Some(lead_id),
+                    json!({
+                        "lead_id": lead_id,
+                        "subject": crate::services::pep_review::SUBJECT_PAYER,
+                        "pep_status_checked": false,
+                        "is_pep": false,
+                        "reason": "payer_changed",
+                    }),
+                ),
+            )
+            .await?;
+        }
         revoke_active(conn, lead_id, "payer_changed", actor).await?;
         return reset_statement(conn, lead_id, "payer_changed", actor, &[]).await;
     }
