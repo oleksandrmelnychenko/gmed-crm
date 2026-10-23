@@ -3,6 +3,7 @@ import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { addDaysToDateKey, appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { OnboardingSignatureManifest } from "./onboarding-signature-manifest";
 import {
@@ -117,8 +118,7 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
   };
   const presetIds = candidates.preset_document_ids.filter(id => id !== documentId && candidates.documents.some(document => document.id === id && !document.paper_signed && !document.ineligible_reason));
   const presetApplied = presetIds.length > 0 && presetIds.every(id => selection.documentIds.includes(id));
-  const minDate = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-  const maxDate = new Date(Date.now() + candidates.limits.max_expiry_days * 86_400_000).toISOString().slice(0, 10);
+  const { min: minDate, max: maxDate } = expiryDateBounds(candidates.limits.max_expiry_days);
   const documentWarnings = (id: string) => resolved.warnings.filter(warning => warning.document_id === id);
 
   return <div className="space-y-4">
@@ -229,6 +229,16 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
       </label>
     </section>
   </div>;
+}
+
+/**
+ * The days a package may expire on: from tomorrow up to the server's limit,
+ * counted in Berlin calendar days (UTC was a day behind between midnight and
+ * 01:00/02:00 Berlin time).
+ */
+export function expiryDateBounds(maxExpiryDays: number, now: Date | number = new Date()): { min: string; max: string } {
+  const today = appDateKey(now);
+  return { min: addDaysToDateKey(today, 1), max: addDaysToDateKey(today, maxExpiryDays) };
 }
 
 /** End of the chosen day in Berlin, as the server expects an instant. */

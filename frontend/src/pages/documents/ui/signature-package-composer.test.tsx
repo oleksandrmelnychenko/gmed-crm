@@ -6,7 +6,7 @@ import {
   type PackageCandidate, type PackageCandidates, type SignatureRequest, type Signer,
 } from "../data/document-signature-api";
 import { SignatureRequestMembers, signersForPolicy } from "./document-signature-panel";
-import { SignaturePackageComposer, emptyPackageSelection, expiryInstant, resolvePackage } from "./signature-package-composer";
+import { SignaturePackageComposer, emptyPackageSelection, expiryDateBounds, expiryInstant, resolvePackage } from "./signature-package-composer";
 import { rolesForPolicy } from "./signature-signer-fields";
 
 vi.mock("@/lib/i18n", async importOriginal => {
@@ -264,5 +264,14 @@ describe("signature request members", () => {
   it("shows nothing extra for a single document without attachments", () => {
     const markup = renderToStaticMarkup(<SignatureRequestMembers request={{ ...request, is_package: false, members: request.members!.slice(0, 1), attachments: [] }} documentId="contract" />);
     expect(markup).toBe("");
+  });
+});
+
+describe("expiry date bounds of a signature package", () => {
+  it("count from the Berlin calendar day, not from UTC", () => {
+    // 23.10.2026 22:30 UTC is already 24.10.2026 00:30 in Berlin.
+    expect(expiryDateBounds(30, new Date("2026-10-23T22:30:00Z"))).toEqual({ min: "2026-10-25", max: "2026-11-23" });
+    // Across the change to winter time (25.10.2026) a day stays a calendar day.
+    expect(expiryDateBounds(1, new Date("2026-10-24T23:30:00Z"))).toEqual({ min: "2026-10-26", max: "2026-10-26" });
   });
 });
