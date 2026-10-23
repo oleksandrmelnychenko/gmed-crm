@@ -1167,6 +1167,19 @@ async fn the_identification_sheet_generates_with_the_signature_and_the_marks_go_
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{subject}: {generated}");
+        // The generation names what confirming the signature still misses
+        // (DEV audit 2026-10-23): the patient has no identity document data
+        // yet; the payer's sheet needs no data of the client side.
+        let missing = generated["signature_details"]["missing"]
+            .as_array()
+            .cloned()
+            .unwrap_or_else(|| panic!("{subject}: {generated}"));
+        if subject == "contract_partner" {
+            assert!(!missing.is_empty(), "{generated}");
+            assert_eq!(generated["signature_details"]["scope"], "person");
+        } else {
+            assert!(missing.is_empty(), "{generated}");
+        }
         let template: Option<String> =
             sqlx::query_scalar("SELECT generated_template_id FROM documents WHERE id = $1")
                 .bind(Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap())

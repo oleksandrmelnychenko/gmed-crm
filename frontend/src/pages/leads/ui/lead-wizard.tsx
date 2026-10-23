@@ -311,7 +311,7 @@ import { LeadIdentityDocumentData } from "./lead-identity-document-data";
 import { LeadRepresentativeUploads, representativeFileOrigin } from "./lead-representative-uploads";
 import { LeadPatientConcern } from "./lead-patient-concern";
 import { useLeadRiskAssessment } from "../model/use-lead-risk-assessment";
-import { representativeDocumentSlot, riskGateErrorText } from "../model/lead-risk-assessment";
+import { gwgSheetSignatureNotice, representativeDocumentSlot, riskGateErrorText } from "../model/lead-risk-assessment";
 import { LeadIdentificationStatus } from "./lead-identification-status";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
@@ -6129,6 +6129,9 @@ export function LeadWizard({
       setDocuments(nextDocuments);
       const generatedDocument = nextDocuments.find((document) => document.id === generated.id);
       if (generatedDocument) await openOrDownloadDocument(generatedDocument, true);
+      // Named now, not first when the signature is confirmed.
+      const notice = gwgSheetSignatureNotice(generated.signature_details, tx);
+      if (notice) setError(notice);
     } catch (nextError) {
       showWizardError(nextError);
     } finally {

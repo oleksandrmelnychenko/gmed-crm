@@ -18,6 +18,7 @@ import {
   riskGateErrorText,
   representativeDocumentFieldsMissing,
   representativeDocumentSlot,
+  gwgSheetSignatureNotice,
   representativeMissingText,
   riskLevelTone,
   riskMissingLabel,
@@ -377,6 +378,14 @@ describe("the contract gate names the missing parent details (staff report 2026-
     expect(representativeMissingText(["rep2_phone"], de)).toBe("Es fehlt: zweiter Elternteil — Telefon.");
     expect(representativeMissingText([], ru)).toBeNull();
     expect(representativeMissingText(undefined, ru)).toBeNull();
+  });
+
+  it("names what a generated GwG sheet still lacks before its signature is confirmed", () => {
+    expect(gwgSheetSignatureNotice({ missing: ["rep2_phone"], scope: "person" }, de)).toBe(
+      "Der Bogen wurde erstellt, die Unterschrift kann aber noch nicht bestätigt werden. Es fehlt: zweiter Elternteil — Telefon.",
+    );
+    expect(gwgSheetSignatureNotice({ missing: [] }, de)).toBeNull();
+    expect(gwgSheetSignatureNotice(null, de)).toBeNull();
   });
 
   it("adds the list to the contract refusal", () => {

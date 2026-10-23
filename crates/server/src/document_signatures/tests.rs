@@ -845,6 +845,22 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
                 .unwrap();
                 assert!(poll_one(&state, Some(request_id)).await.unwrap());
             }
+            // A poll that learns nothing new backs off (up to an hour after
+            // three unchanged hours) and leaves `updated_at` alone.
+            sqlx::query("UPDATE document_signature_requests SET next_poll_at=now(), updated_at=now()-interval '3 hours' WHERE id=$1")
+                .bind(request_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert!(poll_one(&state, Some(request_id)).await.unwrap());
+            let (backed_off, untouched): (bool, bool) = sqlx::query_as(
+                "SELECT next_poll_at > now() + interval '50 minutes', updated_at < now() - interval '2 hours' FROM document_signature_requests WHERE id=$1",
+            )
+            .bind(request_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert!(backed_off && untouched);
             let notices: Vec<Value> = sqlx::query_scalar("SELECT params FROM user_notifications WHERE user_id=$1 AND kind='signature_client_signed' AND params->>'request_id'=$2")
                 .bind(actor).bind(request_id.to_string()).fetch_all(&pool).await.unwrap();
             assert_eq!(notices.len(), 1, "poll retry must not duplicate notices");

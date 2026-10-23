@@ -204,7 +204,17 @@ pub async fn sync_due(state: &AppState) -> SyncOutcome {
                SET delivery_status = $2,
                    provider_status = $3,
                    smtp_code = $4,
-                   delivery_final = $5,
+                   -- Mittaro reports `sent` once the receiving server took
+                   -- the message and often never says more: a `sent` that
+                   -- stayed unchanged for a day is final, so the message
+                   -- leaves the queue instead of being asked about for the
+                   -- whole three days (DEV audit 2026-10-23).
+                   delivery_final = $5 OR COALESCE(
+                       $2 = 'sent'
+                       AND delivery_status = 'sent'
+                       AND delivery_updated_at < now() - interval '24 hours',
+                       false
+                   ),
                    delivery_updated_at = CASE
                        WHEN delivery_status IS DISTINCT FROM $2 THEN now()
                        ELSE delivery_updated_at

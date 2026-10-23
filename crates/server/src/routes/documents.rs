@@ -18874,7 +18874,8 @@ async fn generate_document(
         Some(document_id),
         json!({
             "template_id": template.id,
-            "patient_id": patient_uuid,
+            "patient_id": patient_id,
+            "lead_id": lead_id,
             "order_id": order_id,
             "appointment_id": appointment_id,
             "language": language,
@@ -18890,7 +18891,8 @@ async fn generate_document(
         document_id,
         json!({
             "template_id": template.id,
-            "patient_id": patient_uuid,
+            "patient_id": patient_id,
+            "lead_id": lead_id,
             "order_id": order_id,
             "appointment_id": appointment_id,
             "language": language,
@@ -18899,6 +18901,24 @@ async fn generate_document(
         }),
     )
     .await;
+
+    // A GwG sheet is confirmed as signed only with the data of its person
+    // (mark-signed refuses it otherwise). The generation names what is still
+    // missing, so the wizard shows it before the sheet goes out for signature
+    // instead of after (DEV audit 2026-10-23: 18 sheets, 24 refused
+    // confirmations for one lead).
+    let signature_details = if template.id == "gwg_identification" {
+        match gwg_sheet_signature_details(&state, document_id, lead_id, patient_id, order_id).await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(%error, %document_id, "check the GwG sheet's signature details");
+                Value::Null
+            }
+        }
+    } else {
+        Value::Null
+    };
 
     Json(json!({
         "ok": true,
@@ -18910,6 +18930,7 @@ async fn generate_document(
         "file_size": file_size,
         "language": language,
         "generated_template_id": template.id,
+        "signature_details": signature_details,
         "version_number": persist_input.version_number,
         "version_root_document_id": replacement
             .as_ref()
@@ -18919,6 +18940,50 @@ async fn generate_document(
         "preview_html": preview_html,
     }))
     .into_response()
+}
+
+/// What confirming the signature of a just generated GwG sheet would still
+/// refuse for (the check of `mark-signed`, scoped to the sheet's person):
+/// `{ "missing": [...], "scope": "person" | "payer" | "contract" }`, or
+/// `{ "missing": [] }` when nothing is missing.
+async fn gwg_sheet_signature_details(
+    state: &AppState,
+    document_id: Uuid,
+    lead_id: Option<Uuid>,
+    patient_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+) -> Result<Value, sqlx::Error> {
+    let mut conn = state.db.acquire().await?;
+    let row = sqlx::query(
+        "SELECT generated_template_id, art, generated_bindings FROM documents WHERE id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let template = row.try_get::<Option<String>, _>("generated_template_id")?;
+    let art = row.try_get::<String, _>("art").unwrap_or_default();
+    let bindings = row.try_get::<Option<Value>, _>("generated_bindings")?;
+    let details = super::lead_representatives::SignatureDetails::of_document(
+        template.as_deref(),
+        &art,
+        bindings.as_ref(),
+    );
+    let missing = super::lead_representatives::signature_details_missing(
+        &mut *conn, details, lead_id, patient_id, order_id,
+    )
+    .await?;
+    let scope = match details {
+        super::lead_representatives::SignatureDetails::PayerOrganisation => "payer",
+        super::lead_representatives::SignatureDetails::Representative(_)
+        | super::lead_representatives::SignatureDetails::Patient => "person",
+        super::lead_representatives::SignatureDetails::Contract
+        | super::lead_representatives::SignatureDetails::Nobody => "contract",
+    };
+    Ok(if missing.is_empty() {
+        json!({ "missing": [] })
+    } else {
+        json!({ "missing": missing, "scope": scope })
+    })
 }
 
 // ---------------------------------------------------------------------------

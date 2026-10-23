@@ -2325,10 +2325,29 @@ async fn staff_upload_a_parents_identity_document_in_the_wizard() {
     .unwrap();
     assert_eq!(stored, 0);
 
+    // The request was sent before staff upload (DEV audit 2026-10-23): staff's
+    // file is no change by the lead, so the lead is not asked to send again
+    // and the Patientenformular is not refused.
+    sqlx::query("UPDATE leads SET portal_submitted_at = clock_timestamp() WHERE id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
     // Staff upload the mother's scan: the gate no longer asks for it.
     let (status, body) =
         upload_file(router, &path, &pm, "ausweis.pdf", "application/pdf", PDF).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(intake["changed_since_submit"], false, "{intake}");
     let document_id: Uuid = body["document_id"].as_str().unwrap().parse().unwrap();
     let files = representative(&body, mother)["identity_documents"].clone();
     assert_eq!(files.as_array().map(Vec::len), Some(1), "{body}");

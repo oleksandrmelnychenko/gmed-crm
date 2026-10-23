@@ -2478,6 +2478,10 @@ pub(super) const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NO
         WHERE pu.lead_id = l.id
           -- The payer's files are not part of the request.
           AND pu.kind NOT IN ('payer_identity', 'payer_funds_proof')
+          -- Staff's own uploads (a representative's ID copy or proof of
+          -- authority from the wizard) are no change by the lead: they never
+          -- ask the lead to send again nor block the Patientenformular.
+          AND pu.access_kind <> 'staff'
           AND GREATEST(pu.created_at, pu.withdrawn_at) > CASE
             WHEN pu.kind IN ('self_funds_proof', 'relationship_proof') THEN GREATEST(
                 l.portal_submitted_at,

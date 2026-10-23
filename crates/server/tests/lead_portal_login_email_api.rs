@@ -448,6 +448,50 @@ async fn the_delivery_status_is_read_back_from_mittaro_and_shown_with_the_login(
         0
     );
 
+    // `sent` (the receiving server took it) is checked again for a day; a
+    // `sent` unchanged for a day is final (DEV audit 2026-10-23).
+    fake.statuses.lock().unwrap().insert(
+        message_id.clone(),
+        json!({ "id": message_id, "status": "sent", "smtp_code": "250" }),
+    );
+    let settled = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT delivery_final FROM portal_login_emails WHERE lead_id = $1",
+        )
+        .bind(lead_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    sqlx::query("UPDATE portal_login_emails SET delivery_checked_at = NULL WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        gmed_server::mail::delivery::sync_due(&state).await.changed,
+        1
+    );
+    assert!(!settled(pool.clone()).await);
+    sqlx::query(
+        "UPDATE portal_login_emails SET delivery_checked_at = NULL, delivery_updated_at = now() - interval '25 hours' WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        gmed_server::mail::delivery::sync_due(&state).await.checked,
+        1
+    );
+    assert!(settled(pool.clone()).await);
+    // (The fixture goes on with a late bounce: reopen the check.)
+    sqlx::query("UPDATE portal_login_emails SET delivery_final = false WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
     // Then the address bounces for good.
     fake.statuses.lock().unwrap().insert(
         message_id.clone(),

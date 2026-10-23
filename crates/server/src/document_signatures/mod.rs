@@ -1221,8 +1221,43 @@ async fn sync_claim(state: &AppState, row: &PgRow, token: Uuid) -> Result<(), &'
             .begin()
             .await
             .map_err(|_| "signature_database_error")?;
-        let updated = sqlx::query("UPDATE document_signature_requests SET status=$3,evidence=$4,last_error=NULL,lease_until=NULL,lease_token=NULL,next_poll_at=now()+interval '1 minute',updated_at=now() WHERE id=$1 AND lease_token=$2")
-            .bind(id).bind(token).bind(status).bind(verified.evidence).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+        // Backoff (DEV audit 2026-10-23: an open request was asked every
+        // minute for days): the next poll waits as long as the request has
+        // stood unchanged, between 1 minute and 1 hour, and a poll that
+        // learns nothing new leaves `updated_at` alone. A webhook or a staff
+        // refresh sets `next_poll_at` to now as before. (SET reads the old
+        // row, so the comparisons see the stored values.)
+        let updated = sqlx::query(
+            r#"UPDATE document_signature_requests
+               SET status = $3,
+                   evidence = $4,
+                   last_error = NULL,
+                   lease_until = NULL,
+                   lease_token = NULL,
+                   next_poll_at = now() + CASE
+                       WHEN status IS DISTINCT FROM $3
+                            OR evidence IS DISTINCT FROM $4
+                            OR last_error IS NOT NULL
+                       THEN interval '1 minute'
+                       ELSE LEAST(interval '1 hour',
+                                  GREATEST(interval '1 minute', now() - updated_at))
+                   END,
+                   updated_at = CASE
+                       WHEN status IS DISTINCT FROM $3
+                            OR evidence IS DISTINCT FROM $4
+                            OR last_error IS NOT NULL
+                       THEN now()
+                       ELSE updated_at
+                   END
+               WHERE id = $1 AND lease_token = $2"#,
+        )
+        .bind(id)
+        .bind(token)
+        .bind(status)
+        .bind(verified.evidence)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| "signature_database_error")?;
         // The provider decided (declined, withdrawn, expired, error): record the
         // status change for every document of the request, with the update.
         let terminal = updated.rows_affected() > 0 && previous != status && status != "pending";

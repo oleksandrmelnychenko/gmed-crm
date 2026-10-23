@@ -442,6 +442,8 @@ export type GenerateDocumentResponse = {
   file_size: number;
   language?: string;
   generated_template_id?: string;
+  /** GwG sheet only: what confirming its signature would still miss. */
+  signature_details?: { missing: string[]; scope?: "person" | "payer" | "contract" } | null;
   version_number?: number;
   preview_html?: string;
 };

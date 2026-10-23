@@ -411,10 +411,15 @@ fn spawn_patient_retention_sweeper(state: state::AppState) {
 
 fn spawn_lead_purger(state: state::AppState) {
     tokio::spawn(async move {
-        // Once per 24 hours — the window the retention policy operates
-        // on is days, so sub-day cadence adds noise without benefit.
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(86_400));
-        ticker.tick().await; // skip initial fire so startup is not noisy
+        // Every hour, the first pass five minutes after boot. A daily
+        // interval that skipped its first tick never ran: every deploy
+        // restarted the 24 hours (DEV audit 2026-10-23), so no lead was
+        // ever warned or purged. Both sweeps are idempotent (a purged lead
+        // leaves the subject set, the warning is stamped once per lead, a
+        // blocked purge is told at most once a week), so the hourly pass
+        // only makes the 14-day deadline hold to the hour.
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(3_600));
         loop {
             ticker.tick().await;
             match gmed_server::routes::leads::auto_purge_stale_archived(&state).await {

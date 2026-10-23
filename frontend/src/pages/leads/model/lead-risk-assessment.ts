@@ -920,6 +920,23 @@ export function representativeDocumentSlot(error: unknown): string | null {
   return null;
 }
 
+/**
+ * What a just generated GwG sheet still lacks before its signature can be
+ * confirmed (`signature_details` of `POST /documents/generate`; DEV audit
+ * 2026-10-23: sheets were generated and only the confirmation was refused).
+ * Null when nothing is missing.
+ */
+export function gwgSheetSignatureNotice(details: unknown, tx: Tx): string | null {
+  if (!details || typeof details !== "object") return null;
+  const missing = (details as { missing?: unknown }).missing;
+  if (!Array.isArray(missing) || missing.length === 0) return null;
+  const base = tx(
+    "Лист создан, но подпись на нём пока нельзя будет подтвердить.",
+    "Der Bogen wurde erstellt, die Unterschrift kann aber noch nicht bestätigt werden.",
+  );
+  return [base, representativeMissingText(missing, tx)].filter(Boolean).join(" ");
+}
+
 /** 409 `risk_review_required` of the gated staff actions (qualify, convert, signatures …). */
 export function riskGateErrorText(error: unknown, tx: Tx): string | null {
   if (!(error instanceof ApiRequestError)) return null;

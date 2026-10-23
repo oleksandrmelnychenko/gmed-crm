@@ -3151,11 +3151,23 @@ async fn create_repeat_intake(
         tx.commit().await.map_err(failed)?;
         return Ok(id);
     }
+    // The patient file keeps the country written out ("Ukraine"); the lead
+    // keeps an ISO code (DEV 2026-10-21: a name in an ISO column broke the
+    // invoice recipient). A name that maps to no code is left out.
+    let stored_country: Option<String> = sqlx::query_scalar(
+        "SELECT COALESCE(NULLIF(btrim(address_country), ''), NULLIF(btrim(residence_country), '')) FROM patients WHERE id = $1",
+    )
+    .bind(patient)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(failed)?
+    .flatten();
+    let country = lead_country_code(stored_country.as_deref());
     let id: Option<Uuid> = sqlx::query_scalar(
         "INSERT INTO leads(first_name,last_name,email,phone,source,country,primary_language,date_of_birth,legal_sex,street_address,city,zip_code,created_by,intake_source,intake_model,creation_key,repeat_patient_id,prospect_patient_id)
-         SELECT first_name,last_name,email,phone_primary,'manual',COALESCE(address_country,residence_country),languages[1],birth_date,gender,address_street,address_city,address_zip,$2,'staff_wizard','patient_first',$3,id,id
+         SELECT first_name,last_name,email,phone_primary,'manual',$4::text,languages[1],birth_date,gender,address_street,address_city,address_zip,$2,'staff_wizard','patient_first',$3,id,id
          FROM patients WHERE id=$1 AND lifecycle_status IN ('active','inactive') RETURNING id")
-        .bind(patient).bind(auth.user_id).bind(key).fetch_optional(&mut *tx).await.map_err(failed)?;
+        .bind(patient).bind(auth.user_id).bind(key).bind(country).fetch_optional(&mut *tx).await.map_err(failed)?;
     let id = id.ok_or_else(|| {
         err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -5787,6 +5799,25 @@ fn patient_country(value: Option<&str>) -> Option<String> {
         _ => value,
     };
     Some(canonical.to_string())
+}
+
+/// The ISO code of a country as a patient file stores it (the English name
+/// [`patient_country`] writes, or a code): leads keep ISO codes only. `None`
+/// for a value that names no known country.
+fn lead_country_code(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if let Some(code) = crate::services::lead_guardian_identity::iso_country(value) {
+        return Some(code);
+    }
+    super::patients::ISO_3166_ALPHA_2_COUNTRY_CODES
+        .iter()
+        .find(|code| {
+            patient_country(Some(**code)).is_some_and(|name| name.eq_ignore_ascii_case(value))
+        })
+        .map(|code| (*code).to_string())
 }
 
 fn lead_wizard_text(wizard_state: &Value, key: &str) -> Option<String> {
@@ -10846,6 +10877,21 @@ mod questionnaire_mapping_tests {
             converted_patient_languages(Some("  "), Some("")),
             vec!["de".to_string()]
         );
+    }
+
+    #[test]
+    fn patient_country_names_become_lead_country_codes() {
+        assert_eq!(lead_country_code(Some("Ukraine")), Some("UA".to_string()));
+        assert_eq!(lead_country_code(Some(" ukraine ")), Some("UA".to_string()));
+        assert_eq!(lead_country_code(Some("Denmark")), Some("DK".to_string()));
+        assert_eq!(
+            lead_country_code(Some("Saudi Arabia")),
+            Some("SA".to_string())
+        );
+        assert_eq!(lead_country_code(Some("de")), Some("DE".to_string()));
+        assert_eq!(lead_country_code(Some("Narnia")), None);
+        assert_eq!(lead_country_code(Some("  ")), None);
+        assert_eq!(lead_country_code(None), None);
     }
 
     #[test]
