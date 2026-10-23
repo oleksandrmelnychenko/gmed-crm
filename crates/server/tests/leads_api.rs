@@ -7576,7 +7576,6 @@ async fn a_wizard_save_with_an_older_contact_list_keeps_the_representative_from_
     // The wizard still has the list with the mother alone and saves it — also
     // together with other fields, and also as an empty list.
     for stale in [json!([mother_contact.clone()]), json!([])] {
-        let keeps_mother = stale.as_array().is_some_and(|list| !list.is_empty());
         let (status, body) = json_request(
             &app,
             "POST",
@@ -7594,17 +7593,13 @@ async fn a_wizard_save_with_an_older_contact_list_keeps_the_representative_from_
             contacts.contains(&(father.to_string(), "Ben Muster".to_string())),
             "the father entered in the cabinet is still a trusted contact: {lead}"
         );
-        // The mother has no row: the wizard removes her as before.
-        assert_eq!(
+        // The mother has no row but an open access: she stays too, so her
+        // access never outlives her contact (the explicit trusted-contact
+        // DELETE removes both).
+        assert!(
             contacts.iter().any(|(id, _)| *id == mother.to_string()),
-            keeps_mother,
             "{lead}"
         );
-        if !keeps_mother {
-            // The kept contact is the first one now, like after any save.
-            assert_eq!(lead["trusted_contact_name"], "Ben Muster", "{lead}");
-            assert_eq!(lead["trusted_contact_phone"], "+49 30 000000", "{lead}");
-        }
     }
     let rows: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM lead_representatives WHERE lead_id = $1::uuid AND contact_id = $2",
@@ -7630,6 +7625,16 @@ async fn a_wizard_save_with_an_older_contact_list_keeps_the_representative_from_
     );
     let (status, gone) = json_request(&app, "DELETE", &remove, &pm, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{gone}");
+    // The mother's contact and access go together.
+    let (status, removed) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/leads/{lead_id}/trusted-contacts/{mother}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
     let (status, body) = json_request(
         &app,
         "POST",

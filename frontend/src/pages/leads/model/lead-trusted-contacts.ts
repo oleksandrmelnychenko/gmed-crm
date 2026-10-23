@@ -197,7 +197,9 @@ export function withoutTrustedContacts<T extends Record<string, unknown>>(payloa
  * `stored` is what the server has as far as the wizard knows: the contacts it
  * loaded or took over from the cabinet, or — once a save carried contacts —
  * the list of that save. `contacts` is the list that goes out, null when none
- * does.
+ * does. `stored` goes with it as `trusted_contacts_base`: what staff left as
+ * loaded keeps the server's value, so a parent's change in the cabinet since
+ * the load is not reverted by this save.
  */
 export function leadUpdateWithChangedContacts<T extends Record<string, unknown>>(
   payload: T,
@@ -206,7 +208,7 @@ export function leadUpdateWithChangedContacts<T extends Record<string, unknown>>
 ): { body: T | Omit<T, "trusted_contacts">; contacts: TrustedContactPayload[] | null } {
   const contacts = trustedContactsPayload(draftContacts);
   return trustedContactsChanged(contacts, stored)
-    ? { body: { ...payload, trusted_contacts: contacts }, contacts }
+    ? { body: { ...payload, trusted_contacts: contacts, trusted_contacts_base: [...stored] }, contacts }
     : { body: withoutTrustedContacts(payload), contacts: null };
 }
 

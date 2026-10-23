@@ -3534,8 +3534,9 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
         "{body}"
     );
 
-    // The contact is gone from the lead: the login still reaches the request,
-    // but there is nobody to prefill (never the other parent).
+    // A wizard list without the mother keeps her: her access is open, and an
+    // access never outlives its contact. The template stays hers (never the
+    // other parent's).
     let (status, body) = json_request(
         router,
         "POST",
@@ -3550,7 +3551,23 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
     let (status, body) = json_request(router, "GET", &request, &parent, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["access_kind"], "guardian", "{body}");
-    assert!(body["payer_self_template"].is_null(), "{body}");
+    assert_eq!(
+        body["payer_self_template"]["representative_id"],
+        json!(mother),
+        "{body}"
+    );
+    // Staff remove her contact: the access goes with it.
+    let (status, body) = json_request(
+        router,
+        "DELETE",
+        &format!("/api/v1/leads/{child}/trusted-contacts/{mother}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(router, "GET", &request, &parent, None).await;
+    assert_ne!(status, StatusCode::OK, "{body}");
 }
 
 /// The keys of sections 7 and 8 in `progress.missing_for_submit`.

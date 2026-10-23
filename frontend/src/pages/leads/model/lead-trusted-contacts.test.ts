@@ -186,6 +186,9 @@ describe("a wizard save and the trusted contacts", () => {
       email: "child@example.com",
       wizard_state: { step: "documents" },
       trusted_contacts: stored(anna, aunt),
+      // The list the wizard loaded: what staff left as loaded keeps the
+      // server's value (a parent's change in the cabinet since the load).
+      trusted_contacts_base: stored(anna),
     });
     const edited = leadUpdateWithChangedContacts(update, [{ ...anna, phone: "+49 30 100001" }], stored(anna));
     expect(edited.contacts?.[0].phone).toBe("+49 30 100001");

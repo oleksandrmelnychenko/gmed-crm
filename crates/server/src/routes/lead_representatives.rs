@@ -840,9 +840,14 @@ pub(crate) fn payer_same_person(
         return None;
     }
     if let Some(declared) = payer.filter(|payer| payer.is_representative()) {
+        // Only a parent with a place represents the child: after a switch
+        // to sole custody the other parent is on file without one and no
+        // longer the paying representative (the same rule as naming one,
+        // `lead_payer::fit_to_representation`, and the invoice recipient).
         return declared
             .payer_representative_id
             .and_then(|id| representation.find(id))
+            .filter(|person| person.slot.is_some())
             .map(|person| person.id);
     }
     let payer = payer.filter(|payer| payer.is_third_party() && !payer.is_organisation())?;
@@ -3910,31 +3915,109 @@ pub(crate) async fn remove_lead_trusted_contact(
 }
 
 /// The wizard saves the whole list of trusted contacts. A stored entry the
-/// cabinet added to (it has a row) and that the incoming list does not name is
-/// kept: a save with a list loaded before the parent entered the second
-/// parent must not drop that person. Called in the transaction of the save;
-/// the lead row is locked here, so the list cannot change in between. To
-/// remove such a contact staff use the explicit trusted-contact DELETE.
+/// cabinet added to (it has a row) or that has an open parent's access, and
+/// that the incoming list does not name, is kept: a save with a list loaded
+/// before the parent entered the second parent, or before staff issued a
+/// parent's access, must neither drop that person nor leave the access
+/// without its contact. Called in the transaction of the save; the lead row
+/// is locked here, so the list cannot change in between. To remove such a
+/// contact staff use the explicit trusted-contact DELETE, which also closes
+/// the access.
+///
+/// `base` is the list the wizard loaded (`trusted_contacts_base`, sent by
+/// newer clients): then a field of a contact the save leaves as it was
+/// loaded takes the stored value, so a parent's change in the cabinet since
+/// the load is not reverted by staff editing another field or contact, and
+/// a contact added since the load (unknown to the wizard) stays.
 pub(crate) async fn keep_represented_contacts(
     conn: &mut PgConnection,
     lead_id: Uuid,
     incoming: Value,
+    base: Option<&Value>,
 ) -> Result<Value, sqlx::Error> {
     let stored: Option<Value> =
         sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id = $1 FOR UPDATE")
             .bind(lead_id)
             .fetch_optional(&mut *conn)
             .await?;
-    let represented: Vec<Uuid> =
-        sqlx::query_scalar("SELECT contact_id FROM lead_representatives WHERE lead_id = $1")
-            .bind(lead_id)
-            .fetch_all(&mut *conn)
-            .await?;
+    let represented: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT contact_id FROM lead_representatives WHERE lead_id = $1
+           UNION
+           SELECT trusted_contact_id FROM lead_portal_access
+           WHERE lead_id = $1 AND kind = 'guardian' AND revoked_at IS NULL
+             AND trusted_contact_id IS NOT NULL"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let incoming = match base {
+        Some(base) => merge_with_base(stored.as_ref(), base, incoming),
+        None => incoming,
+    };
     Ok(merge_represented_contacts(
         stored.as_ref(),
         &represented,
         incoming,
     ))
+}
+
+/// The keys of a trusted contact entry a wizard save writes.
+const CONTACT_ENTRY_FIELDS: [&str; 7] = [
+    "related_patient_id",
+    "name",
+    "email",
+    "phone",
+    "relation",
+    "birth_date",
+    "address",
+];
+
+/// Three-way merge of a wizard save (`incoming`) with the list it was loaded
+/// from (`base`) and the stored list: a field the save leaves as loaded takes
+/// the stored value; a stored entry the wizard did not know (not in `base`)
+/// and does not name is kept.
+fn merge_with_base(stored: Option<&Value>, base: &Value, incoming: Value) -> Value {
+    let Value::Array(mut contacts) = incoming else {
+        return incoming;
+    };
+    let stored = stored
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let base = base.as_array().cloned().unwrap_or_default();
+    let find = |list: &[Value], id: Uuid| -> Option<Value> {
+        list.iter()
+            .find(|entry| entry_id(entry) == Some(id))
+            .cloned()
+    };
+    for entry in contacts.iter_mut() {
+        let Some(id) = entry_id(entry) else { continue };
+        let (Some(loaded), Some(current)) = (find(&base, id), find(&stored, id)) else {
+            continue;
+        };
+        let Some(object) = entry.as_object_mut() else {
+            continue;
+        };
+        for field in CONTACT_ENTRY_FIELDS {
+            let sent = object.get(field).cloned().unwrap_or(Value::Null);
+            if sent == loaded.get(field).cloned().unwrap_or(Value::Null) {
+                object.insert(
+                    field.to_string(),
+                    current.get(field).cloned().unwrap_or(Value::Null),
+                );
+            }
+        }
+    }
+    let named = contacts.iter().filter_map(entry_id).collect::<Vec<_>>();
+    for entry in &stored {
+        if let Some(id) = entry_id(entry)
+            && !named.contains(&id)
+            && find(&base, id).is_none()
+        {
+            contacts.push(entry.clone());
+        }
+    }
+    Value::Array(contacts)
 }
 
 /// `incoming` with the stored entries of `represented` it leaves out, in
@@ -4654,6 +4737,43 @@ mod tests {
     }
 
     #[test]
+    fn a_save_with_the_loaded_list_keeps_what_the_cabinet_changed_since() {
+        let loaded = json!([
+            contact(1, "Anna Muster", "mother"),
+            contact(2, "Ben Muster", "father"),
+        ]);
+        // Since the load the mother changed her phone in the cabinet and a
+        // contact was added; staff removed none.
+        let mut stored = loaded.clone();
+        stored[0]["phone"] = json!("+49 30 111111");
+        stored
+            .as_array_mut()
+            .unwrap()
+            .push(contact(3, "Tante Muster", "aunt"));
+        // Staff set the father's date of birth with the list they loaded.
+        let mut incoming = loaded.clone();
+        incoming[1]["birth_date"] = json!("1983-04-06");
+        let merged = merge_with_base(Some(&stored), &loaded, incoming);
+        assert_eq!(merged[0]["phone"], "+49 30 111111");
+        assert_eq!(merged[1]["birth_date"], "1983-04-06");
+        assert_eq!(entry_id(&merged[2]), Some(id(3)));
+        // What staff change themselves wins; a contact staff remove goes.
+        let mut incoming = json!([loaded[0].clone()]);
+        incoming[0]["phone"] = json!("+49 30 222222");
+        let merged = merge_with_base(Some(&stored), &loaded, incoming);
+        assert_eq!(merged[0]["phone"], "+49 30 222222");
+        assert_eq!(
+            merged
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(entry_id)
+                .collect::<Vec<_>>(),
+            vec![id(1), id(3)]
+        );
+    }
+
+    #[test]
     fn a_save_with_an_older_list_keeps_the_contacts_the_cabinet_added_to() {
         let stored = json!([
             contact(1, "Anna Muster", "mother"),
@@ -4739,6 +4859,15 @@ mod tests {
             ),
             None
         );
+        // Named as the paying representative and then left without custody
+        // (staff switched to sole custody): no longer the paying parent.
+        let declared = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_REPRESENTATIVE.into(),
+            payer_representative_id: Some(id(1)),
+            ..Default::default()
+        };
+        assert_eq!(payer_same_person(&minor, Some(&declared)), Some(id(1)));
+        assert_eq!(payer_same_person(&without_custody, Some(&declared)), None);
         // Not for an organisation, a self-payer or an adult lead.
         let company = lead_payer::Declaration {
             payer_type: Some("company".into()),

@@ -290,6 +290,11 @@ struct UpdateLeadRequest {
     trusted_contact_birth_date: Option<String>,
     trusted_contact_address: Option<String>,
     trusted_contacts: Option<Vec<TrustedContactRequest>>,
+    /// The list of trusted contacts the wizard loaded, sent with
+    /// `trusted_contacts`: what the save leaves as loaded keeps the stored
+    /// value (a parent's change in the cabinet since the load), see
+    /// `lead_representatives::keep_represented_contacts`.
+    trusted_contacts_base: Option<Vec<TrustedContactRequest>>,
     requested_specialties: Option<serde_json::Value>,
     wizard_state: Option<serde_json::Value>,
     /// Whether the client has medical documents: `yes`, `no` or `none`.
@@ -5223,13 +5228,25 @@ async fn update_lead(
         .as_deref()
         .is_some_and(|value| value != current_compliance_status);
     // The wizard sends the whole list of trusted contacts. A contact the lead
-    // added to in the cabinet (it has a `lead_representatives` row) stays even
-    // when the list was loaded before and does not name it; the lead row is
-    // locked from here, so the list and the write are one step.
+    // added to in the cabinet (it has a `lead_representatives` row) or with an
+    // open parent's access stays even when the list was loaded before and
+    // does not name it, and with the loaded list (`trusted_contacts_base`)
+    // what staff left as loaded keeps the stored value; the lead row is
+    // locked from here, so the list and the write are one step. A base that
+    // does not normalize is no base (the save works as before).
+    let trusted_contacts_base = body
+        .trusted_contacts_base
+        .as_deref()
+        .and_then(|base| normalize_trusted_contacts(base).ok());
     let trusted_contacts = match trusted_contacts {
         Some(incoming) => {
-            match super::lead_representatives::keep_represented_contacts(&mut tx, lead_id, incoming)
-                .await
+            match super::lead_representatives::keep_represented_contacts(
+                &mut tx,
+                lead_id,
+                incoming,
+                trusted_contacts_base.as_ref(),
+            )
+            .await
             {
                 Ok(contacts) => Some(contacts),
                 Err(error) => {
