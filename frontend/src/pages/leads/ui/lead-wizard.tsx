@@ -1084,7 +1084,8 @@ function autosavePayload(
     suffix: draft.suffix.trim(),
     whatsapp_number: draft.whatsappNumber.trim(),
     has_insurance: draft.hasInsurance ? draft.hasInsurance === "yes" : undefined,
-    insurance_covers_germany: draft.insuranceCoversGermany || undefined,
+    // Empty clears the stored answer (self-pay resets it); left out, it stayed.
+    insurance_covers_germany: draft.insuranceCoversGermany,
     insurance_type: draft.insuranceType || undefined,
     insurance_provider: draft.insuranceProvider.trim(),
     insurance_number: draft.insuranceNumber.trim(),

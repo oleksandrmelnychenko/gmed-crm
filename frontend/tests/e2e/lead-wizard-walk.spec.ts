@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import { chooseComboboxOption } from "./helpers";
+
 // The staff lead wizard walked step by step as staff would (QA 2026-10-23):
 // what each tab and the release checklist say about a step, where a blocker
 // leads, and what reaches the server. Mocked API, synthetic data.
@@ -132,6 +134,29 @@ test("a minor's release list asks for the parents' or guardian's identity docume
   const blockers = wizard.getByTestId("completion-blockers");
   await expect(blockers.getByRole("button", { name: "Подтвердите документы, удостоверяющие личность родителей или опекуна", exact: true })).toBeVisible();
   await expect(blockers.getByText("Подтвердите документ, удостоверяющий личность", { exact: true })).toHaveCount(0);
+});
+
+test("switching to self-pay clears the stored insurance coverage on the server", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const lead = adultLead({
+    has_insurance: true,
+    insurance_type: "private",
+    insurance_provider: "Allianz",
+    insurance_number: "A123",
+    insurance_covers_germany: "yes",
+  });
+  const { wizard, calls } = await mount(page, lead);
+  await chooseComboboxOption(page, wizard.locator("#lead-wizard-has-insurance"), "Нет, самооплата");
+  await expect.poll(() => calls.filter((call) => call.path === `/leads/${leadId}/update`).length, { timeout: 15_000 }).toBeGreaterThan(0);
+  const update = calls.filter((call) => call.path === `/leads/${leadId}/update`).at(-1)!.body!;
+  expect(update).toMatchObject({
+    has_insurance: false,
+    insurance_type: "self_pay",
+    insurance_provider: "",
+    insurance_number: "",
+    // Sent empty, so the server clears the "yes" it holds; left out, it stayed.
+    insurance_covers_germany: "",
+  });
 });
 
 test("the service and order tabs and the release checklist follow what each step shows", async ({ page }) => {
