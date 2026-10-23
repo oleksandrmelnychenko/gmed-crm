@@ -998,6 +998,14 @@ async fn list_leads(
                         .unwrap_or_default(),
                     "attachment_count": r.try_get::<i64, _>("attachment_count").unwrap_or(0),
                 });
+                let mut lead = lead;
+                if !lead_medical_visible(&auth)
+                    && let Some(reason) = lead["failed_outcome"]["reason"].as_str()
+                {
+                    // Staff's own words may name a diagnosis: the code only.
+                    let code = anonymised_failure_reason(reason).to_string();
+                    lead["failed_outcome"]["reason"] = json!(code);
+                }
                 leads.push(if concierge_grid_only {
                     lead_service_grid_projection(&lead)
                 } else {
@@ -4138,6 +4146,41 @@ fn lead_without_medical_fields(lead: Value) -> Value {
     }
     fields.insert("requested_specialties".into(), json!([]));
     fields.insert("wizard_state".into(), json!({}));
+    // Staff's words on why the lead failed may name a diagnosis (mixed
+    // content, like the notes): the reason code stays, the text goes — the
+    // same scrub the erasure applies.
+    if let Some(outcome) = fields
+        .get_mut("failed_outcome")
+        .and_then(Value::as_object_mut)
+    {
+        if outcome.contains_key("note") {
+            outcome.insert("note".into(), Value::Null);
+        }
+        if let Some(reason) = outcome.get("reason").and_then(Value::as_str) {
+            let code = anonymised_failure_reason(reason).to_string();
+            outcome.insert("reason".into(), json!(code));
+        }
+    }
+    if let Some(history) = fields
+        .get_mut("lifecycle")
+        .and_then(|lifecycle| lifecycle.get_mut("history"))
+        .and_then(Value::as_array_mut)
+    {
+        for event in history.iter_mut() {
+            let transition = event["transition_kind"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            let note = event["note"].as_str().map(str::to_string);
+            let metadata = event["metadata"].clone();
+            if let Some((next_note, next_metadata)) =
+                scrubbed_lifecycle_event(&transition, note.as_deref(), &metadata)
+            {
+                event["note"] = json!(next_note);
+                event["metadata"] = next_metadata;
+            }
+        }
+    }
     // Questionnaire uploads are medical records; only their number stays.
     if let Some(attachments) = fields.get("attachments").and_then(Value::as_array) {
         let count = attachments.len();

@@ -8757,6 +8757,63 @@ async fn backfill_stores_the_contracting_party_of_an_old_converted_minor_once() 
     assert_eq!((custody, stored), (None, Vec::new()));
 }
 
+/// Sales sees why a lead failed as a code only: staff's own words (the
+/// failure note, a free-text reason) may name a diagnosis.
+#[tokio::test]
+async fn sales_sees_the_failure_reason_code_not_staff_words() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Failed",
+            "last_name": "Reason",
+            "email": format!("failed-reason-{tag}@test.local"),
+            "phone": "+49111000004",
+            "source": "Test",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap().to_string();
+    sqlx::query(
+        r#"UPDATE leads
+           SET failed_reason = 'Diabetes, Behandlung zu teuer',
+               failed_note = 'Insulinpumpe gewünscht'
+           WHERE id = $1"#,
+    )
+    .bind(Uuid::parse_str(&lead_id).unwrap())
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+    let sales = app.auth_header("sales");
+    let (status, lead) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}"),
+        &sales,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert_eq!(lead["failed_outcome"]["reason"], "other", "{lead}");
+    assert!(lead["failed_outcome"]["note"].is_null(), "{lead}");
+    let (status, list) = json_request(&app, "GET", "/api/v1/leads", &sales, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(!list.to_string().contains("Diabetes"), "{list}");
+    // Medical access reads staff's words.
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(
+        lead["failed_outcome"]["reason"], "Diabetes, Behandlung zu teuer",
+        "{lead}"
+    );
+}
+
 /// The CEO Assistant reads the lead fully (RBAC matrix: CEO, CEO Assistant
 /// and PM), not the concierge's service grid.
 #[tokio::test]
