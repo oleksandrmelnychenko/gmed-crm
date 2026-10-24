@@ -11085,8 +11085,8 @@ ${serviceCommentLines.join("\n")}`
                         {amlReviewers.map((reviewer) => <option key={reviewer.id} value={reviewer.name} />)}
                       </datalist>
                     </Field>
-                    <Field required label={tx("Дата проверки", "Prüfdatum")}>
-                      <Input className={inputClass} type="date" required value={draft.amlEnhancedDueDiligence.reviewDate} onChange={(event) => patchAml("reviewDate", event.target.value)} />
+                    <Field required label={tx("Дата проверки", "Prüfdatum")} htmlFor="lead-aml-review-date">
+                      <Input id="lead-aml-review-date" className={inputClass} type="date" required value={draft.amlEnhancedDueDiligence.reviewDate} onChange={(event) => patchAml("reviewDate", event.target.value)} />
                     </Field>
                   </div>
                 </section>
@@ -11249,8 +11249,10 @@ ${serviceCommentLines.join("\n")}`
                       </p>
                     ) : null}
                   </Field>
-                  <Field label={tx("Дата рождения", "Geburtsdatum")} error={trustedContactBirthDateError || undefined} errorId="trusted-contact-birth-date-error">
+                  {/* `htmlFor`: inside a wrapping <label> a click on the day opened the calendar instead of the typing field. */}
+                  <Field label={tx("Дата рождения", "Geburtsdatum")} error={trustedContactBirthDateError || undefined} errorId="trusted-contact-birth-date-error" htmlFor="trusted-contact-birth-date">
                     <Input
+                      id="trusted-contact-birth-date"
                       className={inputClass}
                       type="date"
                       min={EARLIEST_BIRTH_DATE}

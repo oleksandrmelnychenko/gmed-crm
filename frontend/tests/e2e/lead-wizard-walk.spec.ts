@@ -243,8 +243,11 @@ test("an autosave sends back every stored field as it was loaded", async ({ page
     requested_specialties: ["cardiology"],
     consent_privacy_practices: true,
     consent_healthcare: true,
-    wizard_state: expect.objectContaining({ program_date_from: "2026-11-02", program_date_to: "2026-11-06", passport_expiry: "2030-01-01", discovery_source: "online", cost_threshold: "700" }),
+    wizard_state: expect.objectContaining({ program_date_from: "2026-11-02", program_date_to: "2026-11-06", discovery_source: "online", cost_threshold: "700" }),
   });
+  // The wizard's old "valid until" key is only a fallback for the ID form and is
+  // not written back: the document data from the scan are its one place (2026-10-24).
+  expect(update.wizard_state).not.toHaveProperty("passport_expiry");
   // The contacts go out only when staff changed them (the cabinet may add one meanwhile).
   expect(update).not.toHaveProperty("trusted_contacts");
 });

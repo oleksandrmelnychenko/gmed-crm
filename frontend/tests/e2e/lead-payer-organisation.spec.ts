@@ -252,8 +252,12 @@ test("staff turn a private payer into a company: name and seat instead of the pe
 
   // A kind from the list replaces the free text.
   await relationship.click();
-  // Empty choice + ten kinds (sibling and grandparent since 2026-10-07).
-  await expect(page.getByRole("option")).toHaveCount(11);
+  // An organisation is no spouse or parent: empty choice + employer, business partner,
+  // other — as the payer's own link asks it (live staff walk-through 2026-10-24).
+  await expect(page.getByRole("option")).toHaveCount(4);
+  for (const option of ["Работодатель", "Деловой партнёр", "Другое (уточните)"]) {
+    await expect(page.getByRole("option", { name: option, exact: true })).toBeVisible();
+  }
   await page.getByRole("option", { name: "Работодатель", exact: true }).click();
   await expect(relationshipText).toHaveCount(0);
   await relationship.click();
