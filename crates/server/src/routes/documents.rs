@@ -1158,6 +1158,9 @@ struct GeneratedAppointmentConfirmationContext {
 #[allow(dead_code)]
 struct GeneratedConsentContext {
     sole_guardian: bool,
+    /// The single signer is the child's guardian (Vormund), not a parent:
+    /// "das von mir vertretene Kind", never "mein Kind".
+    court_guardian: bool,
     auto_name: String,
     document_reference: String,
     child_name: Option<String>,
@@ -16303,6 +16306,8 @@ async fn generate_document(
     // The Einverständniserklärung for a child is signed by the parents of a
     // minor: never generated for an adult, where it would read "von meinem
     // Kind: … geb. 1988" (QA 2026-10-12 B2-05).
+    // The lead's stated custody, for the wording of the child's form.
+    let mut consent_custody: Option<String> = None;
     if matches!(
         template.id,
         "consent_data_release_child" | "consent_data_release_single"
@@ -16325,6 +16330,54 @@ async fn generate_document(
                 })),
             )
                 .into_response();
+        }
+        // The form follows the stated custody (document review 2026-10-24:
+        // under joint custody the form of a sole parent was generated with
+        // the mother alone as "alleinige/r Personensorgeberechtigte/r", and
+        // under sole custody the form of both parents with an empty second
+        // parent): joint custody → both parents' form, a sole parent or a
+        // guardian (Vormund) → the single form. Without a stated custody
+        // either form may be made.
+        if let Some(lead_uuid) = lead_id {
+            let custody = match state.db.acquire().await {
+                Ok(mut conn) => {
+                    match super::lead_representatives::load(&mut conn, lead_uuid).await {
+                        Ok(loaded) => {
+                            loaded.and_then(|loaded| loaded.representation.answers.custody)
+                        }
+                        Err(error) => {
+                            tracing::error!(%error, %lead_uuid, "load custody for the consent form");
+                            return err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to load the custody",
+                            );
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(%error, "acquire custody for the consent form");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to load the custody",
+                    );
+                }
+            };
+            consent_custody = custody.clone();
+            if let Some(expected) = consent_form_for_custody(custody.as_deref())
+                && expected != template.id
+            {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(json!({
+                        "error": "consent_form_custody_mismatch",
+                        "code": "consent_form_custody_mismatch",
+                        "message": "The consent form does not match the child's custody",
+                        "custody": custody,
+                        "expected_template": expected,
+                    })),
+                )
+                    .into_response();
+            }
         }
     }
 
@@ -18352,38 +18405,20 @@ async fn generate_document(
                     "Enhanced due diligence data is required",
                 );
             };
-            let required_text_fields = [
-                aml.risk_reason.as_deref(),
-                aml.manager_approval_name.as_deref(),
-                aml.continuous_monitoring.as_deref(),
-                aml.reviewer_name.as_deref(),
-            ];
-            let country_risk = matches!(aml.risk_tier.as_deref(), Some("blacklist" | "high_risk"))
-                || !aml.triggered_countries.is_empty();
-            let pep_risk = aml.pep_contract_partner || aml.pep_beneficial_owner;
-            let country_required_fields = [
-                aml.affected_third_country.as_deref(),
-                aml.additional_contract_partner_info.as_deref(),
-                aml.intended_business_relationship_info.as_deref(),
-                aml.contract_partner_asset_info.as_deref(),
-                aml.transaction_reasons.as_deref(),
-                aml.planned_asset_use.as_deref(),
-            ];
-            let pep_required_fields = [
-                aml.pep_office_function.as_deref(),
-                aml.pep_asset_origin.as_deref(),
-            ];
-            let missing_text =
-                |value: &Option<&str>| value.map(str::trim).is_none_or(|value| value.is_empty());
-            if required_text_fields.iter().any(missing_text)
-                || (country_risk && country_required_fields.iter().any(missing_text))
-                || (pep_risk && pep_required_fields.iter().any(missing_text))
-                || aml.review_date.is_none()
-            {
-                return err(
+            let missing = aml_required_fields_missing(aml);
+            if !missing.is_empty() {
+                // The same message as before (the wizard matches it) and the
+                // fields, so a caller can name what is missing.
+                return (
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "Required enhanced due diligence fields are missing",
-                );
+                    Json(json!({
+                        "error": StatusCode::UNPROCESSABLE_ENTITY.canonical_reason(),
+                        "code": "aml_fields_missing",
+                        "message": "Required enhanced due diligence fields are missing",
+                        "missing": missing,
+                    })),
+                )
+                    .into_response();
             }
             // A lead's check required by the rule or the risk assessment is no
             // voluntary individual check, whatever tier the form sends.
@@ -18778,6 +18813,9 @@ async fn generate_document(
             };
             let context = GeneratedConsentContext {
                 sole_guardian,
+                court_guardian: sole_guardian
+                    && consent_custody.as_deref()
+                        == Some(super::lead_representatives::CUSTODY_GUARDIAN),
                 auto_name: auto_name.clone(),
                 document_reference: generated_doc_id.clone(),
                 child_name: bindings.child_name.clone().or_else(|| {
@@ -19629,6 +19667,14 @@ fn admin_block(layout: &mut TreatmentPlanPdfLayout, text: &str, before: f32, aft
 }
 
 fn admin_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    // A heading never stands alone at the foot of a page (document review
+    // 2026-10-24: "2. Für den Vertragspartner auftretende Person" ended page 1
+    // of a GwG sheet, its content began page 2): it keeps the room of its own
+    // lines and two lines of what follows.
+    let heading_lines = wrap_text_to_width_precise(text, 13.0, layout.available_width(0.0))
+        .len()
+        .max(1);
+    layout.ensure_space(5.0 + heading_lines as f32 * pdf_line_height_mm(13.0, 1.2) + 12.0);
     layout.text_block(text, 13.0, true, 0.0, TreatmentPlanPdfColor::Body, 3.0, 2.0);
 }
 
@@ -19974,15 +20020,21 @@ fn admin_signature_rows(
         } else {
             format!("Unterschrift {}", party.role)
         };
-        append_pdf_text_line(
-            &mut layout.page_ops,
-            &truncate_text_to_width(party.name, 8.5, column_width_mm),
-            x_mm,
-            signature_line_y_mm - 4.0,
-            8.5,
-            &bold_font,
-            TreatmentPlanPdfColor::Body,
-        );
+        // The signer's name in full (a long name or "Name, Funktion" of an
+        // organisation's representative was cut off with "..."): a smaller
+        // size, then two lines above the place and date.
+        let (name_size, name_lines) = admin_signature_name_lines(party.name, column_width_mm);
+        for (line_index, line) in name_lines.iter().enumerate() {
+            append_pdf_text_line(
+                &mut layout.page_ops,
+                line,
+                x_mm,
+                signature_line_y_mm - 4.0 - line_index as f32 * pdf_line_height_mm(name_size, 1.15),
+                name_size,
+                &bold_font,
+                TreatmentPlanPdfColor::Body,
+            );
+        }
         append_pdf_text_line(
             &mut layout.page_ops,
             &place_and_date,
@@ -20117,8 +20169,15 @@ impl ContractingDoc {
         if !self.parents_contract() {
             return Vec::new();
         }
+        // "der Patientin Frau …", not "des Patienten Frau …" (document
+        // review 2026-10-24).
+        let beneficiary = if patient.clean_salutation() == Some("Frau") {
+            "der Patientin"
+        } else {
+            "des Patienten"
+        };
         let mut lines = vec![format!(
-            "im eigenen Namen zugunsten des Patienten {}{} (Vertrag zugunsten Dritter, § 328 BGB)",
+            "im eigenen Namen zugunsten {beneficiary} {}{} (Vertrag zugunsten Dritter, § 328 BGB)",
             patient.name_with_salutation(),
             patient
                 .birth_date
@@ -22753,6 +22812,31 @@ fn legal_signature_caption_lines(caption: &str, width_mm: f32) -> (f32, Vec<Stri
     (size, lines)
 }
 
+/// The signer's name under a signature line of [`admin_signature_rows`]: one
+/// line at 8.5 pt or smaller, else at most two lines at 6.5 pt (only a name
+/// that does not fit even then ends with "...").
+fn admin_signature_name_lines(name: &str, width_mm: f32) -> (f32, Vec<String>) {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let fits =
+        |text: &str, size: f32| approx_text_width_mm(text, size) * BOLD_WIDTH_FACTOR <= width_mm;
+    for size in [8.5, 7.5] {
+        if fits(&name, size) {
+            return (size, vec![name]);
+        }
+    }
+    let size = 6.5;
+    let mut lines = wrap_text_to_width_precise(&name, size, width_mm / BOLD_WIDTH_FACTOR);
+    if lines.len() > 2 {
+        let mut rest = lines[1..].join(" ");
+        lines.truncate(1);
+        while !rest.is_empty() && !fits(&format!("{rest}..."), size) {
+            rest.pop();
+        }
+        lines.push(format!("{}...", rest.trim_end()));
+    }
+    (size, lines)
+}
+
 /// One "Ort, Datum … Unterschrift: ____" line with the signer's name below the
 /// underline and a signature frame reserved above it.
 fn legal_signature_line(
@@ -22783,21 +22867,41 @@ fn legal_signature_line(
         TreatmentPlanPdfColor::Body,
     );
     // The name stays inside the right margin: a smaller size, then two lines
-    // (QA 2026-10-10: a long staff name ran off the page).
-    let (caption_size, caption_lines) = legal_signature_caption_lines(
-        caption,
-        PDF_PAGE_WIDTH_MM - PDF_RIGHT_MARGIN_MM - LEGAL_SIGNATURE_FRAME_X_MM,
-    );
-    for (index, line) in caption_lines.iter().enumerate() {
+    // (QA 2026-10-10: a long staff name ran off the page). "Name\nRolle"
+    // prints the role as its own smaller line above the name, so a long name
+    // with its role is never cut off (document review 2026-10-24).
+    let (name, role_caption) = match caption.split_once('\n') {
+        Some((name, role_caption)) => (name, Some(role_caption.trim())),
+        None => (caption, None),
+    };
+    let caption_width = PDF_PAGE_WIDTH_MM - PDF_RIGHT_MARGIN_MM - LEGAL_SIGNATURE_FRAME_X_MM;
+    let (caption_size, caption_lines) = legal_signature_caption_lines(name, caption_width);
+    let mut caption_y = signature_y - 6.0;
+    // The role right under the line: the frames read from the text of an
+    // older PDF look for it there (`document_signatures::frames`).
+    if let Some(role_caption) = role_caption.filter(|value| !value.is_empty()) {
+        append_pdf_text_line(
+            &mut layout.page_ops,
+            &truncate_text_to_width(role_caption, 7.0, caption_width),
+            LEGAL_SIGNATURE_FRAME_X_MM,
+            caption_y,
+            7.0,
+            &layout.regular_font,
+            TreatmentPlanPdfColor::Muted,
+        );
+        caption_y -= pdf_line_height_mm(7.0, 1.2) + 0.6;
+    }
+    for line in &caption_lines {
         append_pdf_text_line(
             &mut layout.page_ops,
             line,
             LEGAL_SIGNATURE_FRAME_X_MM,
-            signature_y - 6.0 - index as f32 * pdf_line_height_mm(caption_size, 1.2),
+            caption_y,
             caption_size,
             &layout.bold_font,
             TreatmentPlanPdfColor::Body,
         );
+        caption_y -= pdf_line_height_mm(caption_size, 1.2);
     }
     layout.push_signature_anchor(
         role,
@@ -23135,6 +23239,77 @@ fn build_adult_privacy_information_pdf(
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     render_adult_privacy_information(&mut layout, agency);
     Ok(finalize_admin_pdf(document, layout))
+}
+
+/// The required fields of the AML form (binding keys) that are empty: always
+/// the reason, the approving manager, the monitoring, the reviewer and the
+/// date; the country fields for a country trigger; the PEP fields for a PEP.
+fn aml_required_fields_missing(aml: &AmlEnhancedDueDiligenceBindings) -> Vec<&'static str> {
+    let empty = |value: Option<&str>| value.map(str::trim).is_none_or(str::is_empty);
+    let country_risk = matches!(aml.risk_tier.as_deref(), Some("blacklist" | "high_risk"))
+        || !aml.triggered_countries.is_empty();
+    let pep_risk = aml.pep_contract_partner || aml.pep_beneficial_owner;
+    let mut fields = vec![
+        ("riskReason", aml.risk_reason.as_deref(), true),
+        (
+            "managerApprovalName",
+            aml.manager_approval_name.as_deref(),
+            true,
+        ),
+        (
+            "continuousMonitoring",
+            aml.continuous_monitoring.as_deref(),
+            true,
+        ),
+        ("reviewerName", aml.reviewer_name.as_deref(), true),
+    ];
+    fields.extend([
+        (
+            "affectedThirdCountry",
+            aml.affected_third_country.as_deref(),
+            country_risk,
+        ),
+        (
+            "additionalContractPartnerInfo",
+            aml.additional_contract_partner_info.as_deref(),
+            country_risk,
+        ),
+        (
+            "intendedBusinessRelationshipInfo",
+            aml.intended_business_relationship_info.as_deref(),
+            country_risk,
+        ),
+        (
+            "contractPartnerAssetInfo",
+            aml.contract_partner_asset_info.as_deref(),
+            country_risk,
+        ),
+        (
+            "transactionReasons",
+            aml.transaction_reasons.as_deref(),
+            country_risk,
+        ),
+        (
+            "plannedAssetUse",
+            aml.planned_asset_use.as_deref(),
+            country_risk,
+        ),
+        (
+            "pepOfficeFunction",
+            aml.pep_office_function.as_deref(),
+            pep_risk,
+        ),
+        ("pepAssetOrigin", aml.pep_asset_origin.as_deref(), pep_risk),
+    ]);
+    let mut missing = fields
+        .into_iter()
+        .filter(|(_, value, required)| *required && empty(*value))
+        .map(|(key, _, _)| key)
+        .collect::<Vec<_>>();
+    if aml.review_date.is_none() {
+        missing.push("reviewDate");
+    }
+    missing
 }
 
 fn aml_binding_value(value: Option<&str>) -> &str {
@@ -23526,18 +23701,14 @@ fn build_enhanced_due_diligence_pdf(
         "Zusätzlich getroffene Maßnahmen",
         aml.additional_measures.as_deref(),
     );
-    let reviewer_name = aml_binding_value(aml.reviewer_name.as_deref());
-    legal_signature_line(
+    // The reviewer in full beside the label, as on the identification sheet
+    // (the line cut a longer name off with "...").
+    gwg_reviewer_signature_line(
         &mut layout,
-        &format!(
-            "Datum: {}     Bearbeiter/in: {}",
-            aml.review_date
-                .map(|date| date.format("%d.%m.%Y").to_string())
-                .unwrap_or_else(|| "____________".to_string()),
-            reviewer_name,
-        ),
-        reviewer_name,
-        "agency",
+        &aml.review_date
+            .map(|date| date.format("%d.%m.%Y").to_string())
+            .unwrap_or_else(|| "____________".to_string()),
+        aml_binding_value(aml.reviewer_name.as_deref()),
     );
 
     Ok(finalize_generated_pdf(document, layout))
@@ -24736,7 +24907,9 @@ fn build_payer_cost_estimate_pdf_with_terms(
             layout.table_row_aligned_middle_compact(&cells, bold, shaded);
         }
     }
-    admin_block(&mut layout, PAYER_COST_ESTIMATE_PRIVACY_SENTENCE, 3.0, 0.0);
+    // Clear of the shaded total row (document review 2026-10-24: the
+    // sentence touched "Gesamtsumme").
+    admin_block(&mut layout, PAYER_COST_ESTIMATE_PRIVACY_SENTENCE, 6.0, 0.0);
     let listed = context
         .line_items
         .iter()
@@ -26030,7 +26203,14 @@ async fn load_lead_self_disclosure(
             third_party: recipient.is_third_party(),
             organisation,
             is_payer: recipient.is_payer,
-            name: recipient.name().filter(|_| recipient.is_third_party()),
+            // A third party, or the parent / guardian of a minor who receives
+            // the invoice (named on the form, document review 2026-10-24).
+            name: recipient
+                .name()
+                .filter(|name| !name.trim().is_empty())
+                .filter(|_| {
+                    recipient.is_third_party() || recipient.representative_contact_id.is_some()
+                }),
             legal_form: party(&recipient.legal_form),
             contact_name: party(&recipient.contact_name),
             address: Some(address)
@@ -26472,7 +26652,13 @@ fn build_lead_self_disclosure_pdf(
             "Wer ist Rechnungsempfänger?",
             Some(if !recipient.third_party {
                 if minor {
-                    "Die gesetzlichen Vertreter der Patientin / des Patienten".to_string()
+                    match recipient.name.as_deref() {
+                        // The parent or guardian who receives it.
+                        Some(parent) => format!("{parent} (gesetzliche Vertretung)"),
+                        None => {
+                            "Die gesetzlichen Vertreter der Patientin / des Patienten".to_string()
+                        }
+                    }
                 } else {
                     "Ich selbst".to_string()
                 }
@@ -27311,12 +27497,18 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
         "entbinden"
     };
     // "Ebenso entbinde ich" vs "Ebenso entbinden wir" – subject ordering also differs.
-    let our = if context.sole_guardian {
+    // A guardian (Vormund) declares for the child they represent, never for
+    // "mein Kind" (document review 2026-10-24).
+    let our = if context.court_guardian {
+        "dem von mir vertretenen"
+    } else if context.sole_guardian {
         "meinem"
     } else {
         "unserem"
     };
-    let our_gen = if context.sole_guardian {
+    let our_gen = if context.court_guardian {
+        "des von mir vertretenen"
+    } else if context.sole_guardian {
         "meines"
     } else {
         "unseres"
@@ -27338,7 +27530,11 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     if context.sole_guardian {
         admin_block(
             &mut layout,
-            "Ich (alleinige/r Personensorgeberechtigte/r):",
+            if context.court_guardian {
+                "Ich (Vormund/in):"
+            } else {
+                "Ich (alleinige/r Personensorgeberechtigte/r):"
+            },
             0.0,
             0.5,
         );
@@ -27655,29 +27851,70 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     admin_block(&mut layout, &e_signature_clause, 0.0, 4.0);
 
     // ---- Signature block(s) ----
+    // Each line names the parent who signs it, as the persons above
+    // (document review 2026-10-24: only "Personensorgeberechtigte/r 1/2"); an
+    // unknown second parent keeps the bare role for the handwritten name.
+    let signer = |name: Option<&str>, role: &str| match name.map(str::trim) {
+        // The role, then the name on its own line (`legal_signature_line`).
+        Some(name) if !name.is_empty() => format!("{name}\n{role}"),
+        _ => role.to_string(),
+    };
     if context.sole_guardian {
+        // A short role over a name, so it fits the caption's width; the
+        // bare role without a name stays as before.
+        let named = context
+            .guardian_name
+            .as_deref()
+            .is_some_and(|name| !name.trim().is_empty());
         legal_signature_line(
             &mut layout,
             "Ort, Datum: __________________________",
-            "Personensorgeberechtigte/r / ges. Vertreter",
+            &signer(
+                context.guardian_name.as_deref(),
+                match (context.court_guardian, named) {
+                    (true, _) => "Vormund/in (ges. Vertreter)",
+                    (false, true) => "Personensorgeberechtigte/r",
+                    (false, false) => "Personensorgeberechtigte/r / ges. Vertreter",
+                },
+            ),
             "guardian_1",
         );
     } else {
         legal_signature_line(
             &mut layout,
             "Ort, Datum: _________________",
-            "Personensorgeberechtigte/r 1",
+            &signer(
+                context.guardian_name.as_deref(),
+                "Personensorgeberechtigte/r 1",
+            ),
             "guardian_1",
         );
         legal_signature_line(
             &mut layout,
             "Ort, Datum: _________________",
-            "Personensorgeberechtigte/r 2",
+            &signer(
+                context.guardian2_name.as_deref(),
+                "Personensorgeberechtigte/r 2",
+            ),
             "guardian_2",
         );
     }
 
     Ok(finalize_generated_pdf(document, layout))
+}
+
+/// The child's consent form of a stated custody: both parents sign under
+/// joint custody, the one parent or the guardian (Vormund) otherwise; `None`
+/// while no custody is stated.
+fn consent_form_for_custody(custody: Option<&str>) -> Option<&'static str> {
+    match custody.map(str::trim) {
+        Some(super::lead_representatives::CUSTODY_JOINT) => Some("consent_data_release_child"),
+        Some(
+            super::lead_representatives::CUSTODY_SOLE_PARENT
+            | super::lead_representatives::CUSTODY_GUARDIAN,
+        ) => Some("consent_data_release_single"),
+        _ => None,
+    }
 }
 
 fn consent_person_line(name: Option<&str>, birth: Option<NaiveDate>) -> String {
@@ -36628,6 +36865,7 @@ mod tests {
     fn child_consent_uses_legal_chrome_without_relationship_labels() {
         let context = GeneratedConsentContext {
             sole_guardian: false,
+            court_guardian: false,
             auto_name: "Einverständniserklärung".to_string(),
             document_reference: "EW-20260721-UNITTEST0001".to_string(),
             child_name: Some("Kind Beispiel".to_string()),
@@ -36663,6 +36901,15 @@ mod tests {
         assert!(text.contains("[ ] dass alle behandelnden"), "{text}");
         assert!(text.contains("[ ] WhatsApp-Messenger"), "{text}");
         assert!(text.contains("Personensorgeberechtigte/r 2"), "{text}");
+        // Each signature line names its parent (document review 2026-10-24).
+        assert!(
+            text.contains("Personensorgeberechtigte/r 1 Alex Beispiel"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Personensorgeberechtigte/r 2 Maria Beispiel"),
+            "{text}"
+        );
         assert!(!text.contains("GMED-Kundenkabinett"), "{text}");
     }
 
@@ -36724,6 +36971,7 @@ mod tests {
         };
         let mut context = GeneratedConsentContext {
             sole_guardian: true,
+            court_guardian: false,
             auto_name: "Einverständniserklärung".to_string(),
             document_reference: "EW-20261012-UNITTEST0003".to_string(),
             child_name: Some("Mia MusterAR".to_string()),
@@ -36762,13 +37010,34 @@ mod tests {
         assert!(text.contains("[x] E-mail"), "{text}");
         assert!(text.contains("[ ] WhatsApp-Messenger"), "{text}");
         assert!(!text.contains("GMED-Kundenkabinett"), "{text}");
+        // A guardian (Vormund) signs for the child they represent, never for
+        // "mein Kind" (document review 2026-10-24); the line names the signer.
+        assert!(
+            text.contains("Personensorgeberechtigte/r Maria MusterAR"),
+            "{text}"
+        );
+        context.court_guardian = true;
+        let guardian = normalized_pdf_text(&build_consent_pdf(&context).unwrap());
+        context.court_guardian = false;
+        for expected in [
+            "Ich (Vormund/in):",
+            "von dem von mir vertretenen Kind: Mia MusterAR, geb. am 10.05.2015",
+            "Einrichtungen des von mir vertretenen Kindes dessen Behandlungsunterlagen",
+            "Vormund/in (ges. Vertreter) Maria MusterAR",
+        ] {
+            assert!(guardian.contains(expected), "{expected}: {guardian}");
+        }
+        assert!(!guardian.contains("meinem Kind"), "{guardian}");
+        assert!(!guardian.contains("meines Kindes"), "{guardian}");
         assert!(!text.contains("Die Auswahl hat"), "{text}");
         // Never the adult first-person wording in the child's name.
         assert!(!text.contains("Ich, Mia MusterAR"), "{text}");
         assert!(!text.contains("meine eigene Auswahl"), "{text}");
         assert!(!text.contains("unterzeichnende Person"), "{text}");
+        // The named parent signs as "Personensorgeberechtigte/r" (a short
+        // role above the name, document review 2026-10-24).
         assert!(
-            text.contains("Personensorgeberechtigte/r / ges. Vertreter"),
+            text.contains("Personensorgeberechtigte/r Maria MusterAR"),
             "{text}"
         );
         // The Schweigepflichtsentbindung stays part of the form (owner 2026-10-12).
@@ -36864,6 +37133,7 @@ mod tests {
         for recipients in 0..40 {
             let context = GeneratedConsentContext {
                 sole_guardian: false,
+                court_guardian: false,
                 auto_name: "Einverständniserklärung".to_string(),
                 document_reference: "EW-20261012-UNITTEST0004".to_string(),
                 child_name: Some("Mia Muster".to_string()),
@@ -39198,6 +39468,119 @@ mod tests {
     }
 
     #[test]
+    fn enhanced_due_diligence_names_the_reviewer_in_full() {
+        // Document review 2026-10-24: "Bearbeiter/in: Dr. Konst..." — the
+        // reviewer line cut the name off.
+        let reviewer = "Dr. Konstantin Geschäftsführer-Großmann";
+        let aml = AmlEnhancedDueDiligenceBindings {
+            risk_tier: Some("individual".to_string()),
+            individual_review: true,
+            risk_reason: Some("Einzelfall".to_string()),
+            reviewer_name: Some(reviewer.to_string()),
+            review_date: NaiveDate::from_ymd_opt(2026, 10, 24),
+            ..Default::default()
+        };
+        let bytes = build_enhanced_due_diligence_pdf(
+            &legal_test_party("DE"),
+            &[],
+            &legal_test_agency(),
+            &aml,
+            false,
+            None,
+            "AML-20261024-UNITTEST0005",
+        )
+        .unwrap();
+        assert_signature_frames_detected(&bytes);
+        assert_eq!(recorded_roles(&bytes), ["agency"]);
+        let text = normalized_pdf_text(&bytes);
+        let start = text
+            .find("Datum: 24.10.2026 Bearbeiter/in:")
+            .unwrap_or_else(|| panic!("no reviewer line in {text}"));
+        let compact = |value: &str| value.split_whitespace().collect::<String>();
+        let tail = compact(&text[start..]).replace("Unterschrift:____________________", "");
+        assert!(
+            tail.contains(&compact(&format!("Bearbeiter/in: {reviewer}"))),
+            "{text}"
+        );
+        assert!(!tail.contains("..."), "{text}");
+    }
+
+    #[test]
+    fn the_aml_refusal_names_the_missing_fields() {
+        // Document review 2026-10-24: a 422 without the fields left the
+        // caller guessing.
+        let complete = AmlEnhancedDueDiligenceBindings {
+            risk_reason: Some("Grund".to_string()),
+            manager_approval_name: Some("Leitung".to_string()),
+            continuous_monitoring: Some("Jährlich".to_string()),
+            reviewer_name: Some("Bearbeiter".to_string()),
+            review_date: NaiveDate::from_ymd_opt(2026, 10, 24),
+            ..Default::default()
+        };
+        assert!(super::aml_required_fields_missing(&complete).is_empty());
+        let country = AmlEnhancedDueDiligenceBindings {
+            risk_tier: Some("blacklist".to_string()),
+            pep_contract_partner: true,
+            affected_third_country: Some("IR".to_string()),
+            review_date: None,
+            ..complete.clone()
+        };
+        assert_eq!(
+            super::aml_required_fields_missing(&country),
+            [
+                "additionalContractPartnerInfo",
+                "intendedBusinessRelationshipInfo",
+                "contractPartnerAssetInfo",
+                "transactionReasons",
+                "plannedAssetUse",
+                "pepOfficeFunction",
+                "pepAssetOrigin",
+                "reviewDate",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_organisations_signer_is_named_in_full_under_the_signature_line() {
+        // Document review 2026-10-24: "Hans-Dieter Müller, Geschäftsführer
+        // der Kom..." under the payer's signature line.
+        let company = crate::routes::lead_payer_link::PayerSelfDisclosure {
+            organisation: true,
+            payer_type: "company".to_string(),
+            first_name: None,
+            last_name: None,
+            organisation_name: Some(
+                "Müller & Söhne Präzisionstechnik GmbH & Co. KG – Niederlassung Süd".to_string(),
+            ),
+            representative_first_name: Some("Hans-Dieter".to_string()),
+            representative_last_name: Some("Müller".to_string()),
+            representative_role: Some("Geschäftsführer der Komplementär-GmbH".to_string()),
+            ..viktor_disclosure()
+        };
+        let generated = super::build_payer_self_disclosure_pdf(
+            &company,
+            "Mia Muster",
+            &legal_test_agency(),
+            None,
+            "DOC-PAYER-SD-0009",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&generated);
+        assert!(!text.contains("..."), "{text}");
+        // The section of the person, the line "Für …:" and the signature block.
+        assert_eq!(text.matches("Komplementär-GmbH").count(), 3, "{text}");
+        let (size, lines) = super::admin_signature_name_lines(
+            "Hans-Dieter Müller, Geschäftsführer der Komplementär-GmbH",
+            83.0,
+        );
+        assert!(size < 8.5 || lines.len() == 1, "{size} {lines:?}");
+        assert!(
+            lines.len() <= 2 && !lines.concat().contains("..."),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
     fn gwg_identification_sheet_carries_the_lead_data_and_the_answers() {
         let sheet = super::GwgIdentificationSheet {
             role: "Patient/in",
@@ -40090,6 +40473,17 @@ mod tests {
         let beneficiary = contracting.beneficiary_lines(&child);
         assert!(beneficiary[0].contains("zugunsten des Patienten Mia Muster, geb. am 04.03.2015"));
         assert!(beneficiary[0].contains("§ 328 BGB"));
+        // A girl is "der Patientin" (document review 2026-10-24).
+        let girl = DocPartyBlock {
+            salutation: Some("Frau".to_string()),
+            ..child.clone()
+        };
+        assert!(
+            contracting.beneficiary_lines(&girl)[0]
+                .contains("zugunsten der Patientin Frau Mia Muster, geb. am 04.03.2015"),
+            "{:?}",
+            contracting.beneficiary_lines(&girl)
+        );
         assert!(beneficiary[1].contains("Gesamtschuldner"));
         let signers = contracting.signers("Mia Muster");
         assert_eq!(

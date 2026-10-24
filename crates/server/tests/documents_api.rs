@@ -11815,7 +11815,11 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                         assert!(!text.contains("Veralteter Kontakt"), "{text}");
                         if !represented && matches!(template, "framework_contract" | "single_order")
                         {
-                            assert!(text.contains("zugunsten des Patienten"), "{text}");
+                            assert!(
+                                text.contains("zugunsten des Patienten")
+                                    || text.contains("zugunsten der Patientin"),
+                                "{text}"
+                            );
                         }
                         if repeat && template == "order_cost_estimate" {
                             let (status, unchanged) = json_request(
