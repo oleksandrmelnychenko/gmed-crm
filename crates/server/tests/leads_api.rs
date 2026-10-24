@@ -6431,6 +6431,120 @@ async fn repeat_intake_inherits_the_latest_signed_framework_contract() {
     );
 }
 
+/// Walk-through 2026-10-24: a repeat request's GwG sheet asked for the
+/// patient's identity document again. The card's passport and the earlier
+/// request's data of the same document come back; another number on the card
+/// is another document.
+#[tokio::test]
+async fn repeat_intake_takes_the_identity_document_from_the_patient_card() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    type Identity = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<chrono::NaiveDate>,
+        Option<chrono::NaiveDate>,
+    );
+    let repeat = |patient: Uuid| {
+        let pm = pm.clone();
+        let app = &app;
+        async move {
+            let (status, created) = json_request(
+                app,
+                "POST",
+                "/api/v1/leads",
+                &pm,
+                Some(json!({
+                    "first_name": "Repeat",
+                    "last_name": "Regression",
+                    "repeat_patient_id": patient,
+                    "creation_key": Uuid::new_v4()
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED, "{created}");
+            let lead = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+            sqlx::query_as::<_, Identity>(
+                r#"SELECT id_document_type, id_document_number, id_issuing_authority,
+                          id_issuing_country, id_issued_on, id_valid_until
+                   FROM lead_gwg_declarations WHERE lead_id = $1"#,
+            )
+            .bind(lead)
+            .fetch_optional(&app.suite.pool)
+            .await
+            .unwrap()
+        }
+    };
+    let date = |value: &str| chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap();
+    let earlier_request = |patient: Uuid, number: &'static str| async move {
+        let earlier: Uuid = sqlx::query_scalar(
+            "INSERT INTO leads (first_name, last_name, email, source, intake_source, converted_patient_id) VALUES ('Repeat', 'Regression', $2, 'manual', 'staff_wizard', $1) RETURNING id",
+        )
+        .bind(patient)
+        .bind(format!("repeat-{}@example.test", Uuid::new_v4().simple()))
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO lead_gwg_declarations (lead_id, id_document_type, id_document_number,
+                   id_issuing_authority, id_issuing_country, id_issued_on, id_valid_until)
+               VALUES ($1, 'id_card', $2, 'Stadt Berlin', 'DE', DATE '2021-05-01', DATE '2031-04-30')"#,
+        )
+        .bind(earlier)
+        .bind(number)
+        .execute(pool)
+        .await
+        .unwrap();
+    };
+
+    // The card's passport, completed by the earlier request of that document.
+    let patient = seed_repeat_patient(&app, true).await;
+    sqlx::query("UPDATE patients SET passport_number = 'L01X 00T47', passport_expiry = DATE '2031-04-30' WHERE id = $1")
+        .bind(patient)
+        .execute(pool)
+        .await
+        .unwrap();
+    earlier_request(patient, "L01X00T47").await;
+    assert_eq!(
+        repeat(patient).await,
+        Some((
+            Some("id_card".into()),
+            Some("L01X 00T47".into()),
+            Some("Stadt Berlin".into()),
+            Some("DE".into()),
+            Some(date("2021-05-01")),
+            Some(date("2031-04-30")),
+        ))
+    );
+
+    // Another document on the card: only what the card holds.
+    let renewed = seed_repeat_patient(&app, true).await;
+    sqlx::query("UPDATE patients SET passport_number = 'C55NEW123', passport_expiry = DATE '2035-01-31' WHERE id = $1")
+        .bind(renewed)
+        .execute(pool)
+        .await
+        .unwrap();
+    earlier_request(renewed, "L01X00T47").await;
+    assert_eq!(
+        repeat(renewed).await,
+        Some((
+            Some("passport".into()),
+            Some("C55NEW123".into()),
+            None,
+            None,
+            None,
+            Some(date("2035-01-31")),
+        ))
+    );
+
+    // Nothing known: no row is made up.
+    let unknown = seed_repeat_patient(&app, true).await;
+    assert_eq!(repeat(unknown).await, None);
+}
+
 #[tokio::test]
 async fn repeat_clinical_retry_conflict_and_explicit_removal_preserve_integrity() {
     let Some(app) = test_app().await else { return };

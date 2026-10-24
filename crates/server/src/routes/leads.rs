@@ -3516,6 +3516,94 @@ async fn prefill_minor_repeat_representation(
     .await
 }
 
+/// A repeat request's GwG sheet starts with the patient's identity document
+/// as GMED knows it (walk-through 2026-10-24: the sheet asked for it again):
+/// the passport number and validity of the patient card, completed with the
+/// type, authority, country and issue date the patient's earlier request
+/// recorded for that same document. Another number on the card means another
+/// document: only the card's data then. The data are checked for the request
+/// as usual (an expired document is named as such); the scan is not copied.
+async fn prefill_repeat_identity_document(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    patient_id: Uuid,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let source: Option<String> = sqlx::query_scalar(
+        r#"WITH card AS (
+               SELECT CASE WHEN char_length(btrim(passport_number)) BETWEEN 1 AND 60
+                           THEN btrim(passport_number) END AS number,
+                      passport_expiry AS valid_until
+               FROM patients WHERE id = $2
+           ), earlier AS (
+               SELECT g.id_document_type, g.id_document_number, g.id_issuing_authority,
+                      g.id_issuing_country, g.id_issued_on, g.id_valid_until
+               FROM lead_gwg_declarations g
+               JOIN leads p ON p.id = g.lead_id
+               WHERE p.id <> $1
+                 AND (p.converted_patient_id = $2 OR p.repeat_patient_id = $2)
+                 AND (g.id_document_number IS NOT NULL OR g.id_valid_until IS NOT NULL)
+               ORDER BY g.id_data_entered_at DESC NULLS LAST, g.updated_at DESC, p.created_at DESC
+               LIMIT 1
+           ), source AS (
+               SELECT card.number, card.valid_until, earlier.*,
+                      (earlier.id_document_number IS NOT NULL OR earlier.id_valid_until IS NOT NULL)
+                      AND (card.number IS NULL OR earlier.id_document_number IS NULL
+                           OR upper(regexp_replace(card.number, '\s', '', 'g'))
+                              = upper(regexp_replace(earlier.id_document_number, '\s', '', 'g')))
+                          AS same_document
+               FROM card LEFT JOIN earlier ON true
+           ), prefill AS (
+               SELECT CASE WHEN same_document THEN COALESCE(id_document_type, CASE WHEN number IS NOT NULL THEN 'passport' END)
+                           WHEN number IS NOT NULL THEN 'passport' END AS document_type,
+                      COALESCE(number, CASE WHEN same_document THEN id_document_number END) AS document_number,
+                      CASE WHEN same_document THEN id_issuing_authority END AS authority,
+                      CASE WHEN same_document THEN id_issuing_country END AS issuing_country,
+                      CASE WHEN same_document THEN id_issued_on END AS issued_on,
+                      COALESCE(valid_until, CASE WHEN same_document THEN id_valid_until END) AS valid_until,
+                      CASE WHEN same_document THEN 'earlier_request' ELSE 'patient_card' END AS source
+               FROM source
+           )
+           INSERT INTO lead_gwg_declarations (
+               lead_id, id_document_type, id_document_number, id_issuing_authority,
+               id_issuing_country, id_issued_on, id_valid_until,
+               id_data_entered_by, id_data_entered_at, updated_by)
+           SELECT $1, document_type, document_number, authority, issuing_country, issued_on,
+                  valid_until, $3, clock_timestamp(), $3
+           FROM prefill
+           WHERE document_number IS NOT NULL OR valid_until IS NOT NULL
+           ON CONFLICT (lead_id) DO UPDATE SET
+               id_document_type = COALESCE(lead_gwg_declarations.id_document_type, EXCLUDED.id_document_type),
+               id_document_number = COALESCE(lead_gwg_declarations.id_document_number, EXCLUDED.id_document_number),
+               id_issuing_authority = COALESCE(lead_gwg_declarations.id_issuing_authority, EXCLUDED.id_issuing_authority),
+               id_issuing_country = COALESCE(lead_gwg_declarations.id_issuing_country, EXCLUDED.id_issuing_country),
+               id_issued_on = COALESCE(lead_gwg_declarations.id_issued_on, EXCLUDED.id_issued_on),
+               id_valid_until = COALESCE(lead_gwg_declarations.id_valid_until, EXCLUDED.id_valid_until),
+               id_data_entered_by = COALESCE(lead_gwg_declarations.id_data_entered_by, EXCLUDED.id_data_entered_by),
+               id_data_entered_at = COALESCE(lead_gwg_declarations.id_data_entered_at, EXCLUDED.id_data_entered_at)
+           RETURNING (SELECT source FROM prefill)"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(actor)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(source) = source else {
+        return Ok(());
+    };
+    audit::write_in_transaction(
+        tx,
+        &audit::domain_event(
+            "prefill_repeat_intake_identity_document",
+            Some(actor),
+            "lead",
+            Some(lead_id),
+            json!({ "patient_id": patient_id, "source": source }),
+        ),
+    )
+    .await
+}
+
 /// The citizenships a repeat request's representative row takes from the
 /// patient relation: valid ISO codes, upper-cased, each once, in order (the
 /// row's check refuses anything else).
@@ -3621,6 +3709,15 @@ async fn create_repeat_intake(
         .await
         .map_err(|error| {
             tracing::error!(%error, lead_id = %id, patient_id = %patient, "prefill the parents of a minor's repeat intake");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create repeat intake",
+            )
+        })?;
+    prefill_repeat_identity_document(&mut tx, id, patient, auth.user_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, lead_id = %id, patient_id = %patient, "prefill the identity document of a repeat intake");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to create repeat intake",
