@@ -542,7 +542,8 @@ test("staff read who represents a minor, as the cabinet knows it", async ({ page
   const grid = statements.getByTestId("lead-gwg-statements-grid");
   await expect.poll(() => grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").length)).toBe(4);
   const content = statements.getByTestId("lead-gwg-statements-content");
-  await expect(content.locator("input, textarea, select, button")).toHaveCount(0);
+  // The only control is "move to slot" next to a not yet accepted cabinet upload (2026-10-24).
+  await expect(content.locator("input, textarea, select:not([data-testid^='lead-upload-move-']), button")).toHaveCount(0);
   await statements.getByRole("button", { name: "Свернуть данные пациента" }).click();
   await expect(content).toBeHidden();
   await statements.getByRole("button", { name: "Развернуть данные пациента" }).click();
