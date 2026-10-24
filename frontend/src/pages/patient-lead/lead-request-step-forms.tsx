@@ -268,7 +268,8 @@ function usePersonalForm({
             rejected[refused.field] = refused.value;
             setFieldErrors((current) => ({ ...current, [field]:
               body?.code === "minor_needs_guardian" ? text.minorNeedsGuardian :
-              body?.code === "dob_staff_only" ? text.dobStaffOnly : text.invalidField,
+              body?.code === "dob_staff_only" ? text.dobStaffOnly :
+              field === "phone" ? text.invalidPhone : text.invalidField,
             }));
           }
         }

@@ -13,6 +13,7 @@ import {
   draftFromExtra,
   followUpShown,
   openFollowUpBlocks,
+  paymentReasonAskedWithPayer,
   type StatedFundsSource,
 } from "./lead-request-follow-up-model";
 import {
@@ -522,7 +523,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       if (asks.funds_proof) rows.push([text.extraFields.funds_proof, fileNames(request.follow_up?.funds_proof_documents)]);
     }
     if (blocks.includes("B")) {
-      rows.push([identificationLabel("payment_background"), identification?.payment_background]);
+      // An organisation's reason stands with the payer (owner 2026-10-24: one place).
+      if (!paymentReasonAskedWithPayer(request)) rows.push([identificationLabel("payment_background"), identification?.payment_background]);
       rows.push([identificationLabel("relationship_since"), identification?.relationship_since]);
       rows.push([text.relationshipProofTitle, fileNames(request.follow_up?.relationship_proof_documents)]);
     }

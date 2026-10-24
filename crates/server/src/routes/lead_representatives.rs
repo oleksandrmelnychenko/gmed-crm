@@ -1772,10 +1772,10 @@ fn apply_person_patch(
     let earliest = NaiveDate::from_ymd_opt(1900, 1, 1).unwrap_or(today);
     let mut next = current.clone();
     if let Some(value) = patch.text("first_name") {
-        next.first_name = intake::clean_text(value, "first_name", 100)?;
+        next.first_name = intake::clean_name(value, "first_name")?;
     }
     if let Some(value) = patch.text("last_name") {
-        next.last_name = intake::clean_text(value, "last_name", 100)?;
+        next.last_name = intake::clean_name(value, "last_name")?;
     }
     if let Some(value) = patch.text("date_of_birth") {
         let date = intake::optional_date(value, "date_of_birth")?;
@@ -1815,7 +1815,7 @@ fn apply_person_patch(
         next.zip = intake::clean_text(value, "zip", 20)?;
     }
     if let Some(value) = patch.text("city") {
-        next.city = intake::clean_text(value, "city", 200)?;
+        next.city = intake::clean_city(value, "city")?;
     }
     if let Some(value) = patch.text("country") {
         next.country = iso_country(value, "country")?;
@@ -3834,6 +3834,188 @@ pub(crate) async fn notify_custody_access_ended(state: &AppState, lead_id: Uuid)
     .await;
 }
 
+/// The data of a representative staff may correct in the wizard (owner
+/// 2026-10-24): birth place and country, citizenships and the address. The
+/// name, date of birth, e-mail and phone are the trusted contact's (saved with
+/// the contact list); the identity document has its own route.
+const STAFF_DETAIL_FIELDS: [&str; 7] = [
+    "birth_place",
+    "birth_country",
+    "citizenships",
+    "street",
+    "zip",
+    "city",
+    "country",
+];
+
+/// The patch of a staff save of a representative's details: the keys of
+/// `values` that differ from `base`, what the wizard loaded. A key staff left
+/// as loaded is not written, so a change the cabinet made after staff loaded
+/// stays (the three-way merge of `trusted_contacts_base`). `null` and `""`
+/// are the same empty value.
+#[allow(clippy::result_large_err)]
+fn staff_details_patch(body: &Value) -> Result<PersonPatch, axum::response::Response> {
+    let Some(object) = body.as_object() else {
+        return Err(invalid_key("body", "A JSON object is expected"));
+    };
+    if let Some(key) = object
+        .keys()
+        .find(|key| !matches!(key.as_str(), "values" | "base"))
+    {
+        return Err(invalid_key(key, "Unknown field"));
+    }
+    let Some(values) = object.get("values").and_then(Value::as_object) else {
+        return Err(invalid_key("values", "The values are expected"));
+    };
+    let base = object.get("base").and_then(Value::as_object);
+    let empty = |value: Option<&Value>| match value {
+        None | Some(Value::Null) => Value::Null,
+        Some(Value::String(text)) if text.trim().is_empty() => Value::Null,
+        Some(Value::Array(items)) if items.is_empty() => Value::Null,
+        Some(value) => value.clone(),
+    };
+    let mut changed = Map::new();
+    for (key, value) in values {
+        if !STAFF_DETAIL_FIELDS.contains(&key.as_str()) {
+            return Err(invalid_key(key, "Staff change these data elsewhere"));
+        }
+        let loaded = base.map(|base| empty(base.get(key)));
+        if loaded.is_some_and(|loaded| loaded == empty(Some(value))) {
+            continue;
+        }
+        changed.insert(key.clone(), value.clone());
+    }
+    parse_person_patch(&Value::Object(changed))
+}
+
+/// `PUT /leads/{lead_id}/representatives/{representative_id}/details`
+/// `{ "values": {…}, "base": {…} }`: staff correct a representative's birth
+/// place and country, citizenships and address (owner 2026-10-24) — the parts
+/// the GwG sheet and the consent form print. Only what staff changed since
+/// loading is written (see [`staff_details_patch`]); the same rules as the
+/// cabinet apply. The trusted contact's one-line address follows. Audited.
+pub(crate) async fn update_lead_representative_details(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, representative_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<Value>,
+) -> axum::response::Response {
+    if let Err(response) = require_staff_editor(&auth) {
+        return response;
+    }
+    let patch = match staff_details_patch(&body) {
+        Ok(patch) => patch,
+        Err(response) => return response,
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin"),
+    };
+    if let Err(response) = lock_open_lead(&mut tx, lead_id).await {
+        return response;
+    }
+    let loaded = match load(&mut tx, lead_id).await {
+        Ok(Some(loaded)) => loaded,
+        Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(error) => return intake::internal(error, "load representation"),
+    };
+    let Some(person) = loaded.representation.find(representative_id) else {
+        return intake::err(StatusCode::NOT_FOUND, "Representative not found");
+    };
+    let current = Person::of(person);
+    let next = match apply_person_patch(&current, &patch, crate::app_time::today()) {
+        Ok(next) => next,
+        Err(error) => return error.into_response(),
+    };
+    let fields = changed_person_fields(&current, &next);
+    if fields.is_empty() {
+        drop(tx);
+        return Json(json!({ "representation": staff_payload(&loaded) })).into_response();
+    }
+    let role = person.role;
+    let parent_payer = match lead_payer::load_declaration(&mut tx, lead_id).await {
+        Ok(payer) => payer.filter(|payer| {
+            payer.is_third_party()
+                && payer_same_person(&loaded.representation, Some(payer)) == Some(representative_id)
+        }),
+        Err(error) => return intake::internal(error, "load parent payer"),
+    };
+    let mut contacts = loaded.contacts.clone();
+    let relation = person.relation.clone().unwrap_or_default();
+    write_entry(
+        &mut contacts,
+        representative_id,
+        &next,
+        &relation,
+        patch.sends_address(),
+    );
+    let mut invalidated = Vec::new();
+    let written = async {
+        // A paying parent is one person: the payer's copy follows, as when
+        // the cabinet corrects it.
+        if let Some(mut payer) = parent_payer {
+            payer.place_of_birth = next.birth_place.clone();
+            payer.citizenships = next.citizenships.clone();
+            payer.street = next.street.clone();
+            payer.zip = next.zip.clone();
+            payer.city = next.city.clone();
+            payer.country = next.country.clone();
+            lead_payer::adopt_payer_identity(&mut tx, lead_id, &payer, Some(auth.user_id), None)
+                .await?;
+        }
+        // A row keeps its origin; a person without one gets a staff row.
+        store_row(
+            &mut tx,
+            lead_id,
+            representative_id,
+            role,
+            ORIGIN_STAFF,
+            &next,
+            auth.user_id,
+        )
+        .await?;
+        store_lead(&mut tx, lead_id, Some(contacts.as_slice()), &json!({})).await?;
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "update_lead_representative_details",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({
+                    "representative_id": representative_id,
+                    "role": role,
+                    "fields": fields,
+                }),
+            ),
+        )
+        .await?;
+        invalidated = crate::document_signatures::invalidate_representative_identity(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+        )
+        .await?
+        .1;
+        Ok::<_, sqlx::Error>(())
+    }
+    .await;
+    if let Err(error) = written {
+        return intake::internal(error, "store representative details");
+    }
+    let loaded = match load(&mut tx, lead_id).await {
+        Ok(Some(loaded)) => loaded,
+        Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(error) => return intake::internal(error, "reload representation"),
+    };
+    if let Err(error) = tx.commit().await {
+        return intake::internal(error, "commit representative details");
+    }
+    crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
+    publish_staff_change(&state, lead_id, auth.user_id).await;
+    Json(json!({ "representation": staff_payload(&loaded) })).into_response()
+}
+
 /// `DELETE /leads/{lead_id}/representatives/{representative_id}`: staff
 /// remove what the cabinet entered for a representative — the row and with
 /// it the links to the uploaded files. The trusted contact and the documents
@@ -5086,6 +5268,66 @@ mod tests {
         };
         lead_payer::fit_to_representation(&mut aunt, &minor, None).unwrap();
         assert!(aunt.is_third_party());
+    }
+
+    /// Owner 2026-10-24: staff correct a parent's structured data; only what
+    /// staff changed since loading is written, a cabinet change made meanwhile
+    /// stays, and the cabinet's rules apply.
+    #[test]
+    fn a_staff_save_of_a_representatives_details_writes_only_staff_changes() {
+        let patch = staff_details_patch(&json!({
+            "values": {
+                "street": "Neue Str. 2",
+                "city": "Berlin",
+                "zip": "",
+                "citizenships": ["UA"],
+                "birth_place": "Kyiv",
+            },
+            "base": {
+                "street": "Musterweg 1",
+                "city": "Berlin",
+                "zip": null,
+                "citizenships": ["UA"],
+                "birth_place": "Lviv",
+            },
+        }))
+        .unwrap();
+        assert_eq!(patch.text("street"), Some("Neue Str. 2"));
+        assert_eq!(patch.text("birth_place"), Some("Kyiv"));
+        // Left as loaded: the stored value (maybe the cabinet's newer one) stays.
+        assert_eq!(patch.text("city"), None);
+        assert_eq!(patch.text("zip"), None);
+        assert_eq!(patch.citizenships, None);
+        assert!(patch.sends_address());
+        // Without a base every sent key is written.
+        let all = staff_details_patch(&json!({ "values": { "country": "de" } })).unwrap();
+        assert_eq!(all.text("country"), Some("de"));
+        // Names, contact data and the document are not changed here.
+        for key in ["first_name", "email", "phone", "id_document_number"] {
+            assert!(
+                staff_details_patch(&json!({ "values": { key: "x" } })).is_err(),
+                "{key}"
+            );
+        }
+        assert!(staff_details_patch(&json!({ "values": {}, "other": 1 })).is_err());
+        // The cabinet's rules: an ISO country, the shared city length.
+        let person = Person {
+            last_name: Some("Muster".into()),
+            ..Person::default()
+        };
+        let today = NaiveDate::from_ymd_opt(2026, 10, 24).unwrap();
+        let country = staff_details_patch(&json!({ "values": { "country": "XX" } })).unwrap();
+        assert_eq!(
+            apply_person_patch(&person, &country, today)
+                .unwrap_err()
+                .field,
+            "country"
+        );
+        let city = staff_details_patch(&json!({ "values": { "city": "y".repeat(121) } })).unwrap();
+        assert_eq!(
+            apply_person_patch(&person, &city, today).unwrap_err().field,
+            "city"
+        );
     }
 
     #[test]

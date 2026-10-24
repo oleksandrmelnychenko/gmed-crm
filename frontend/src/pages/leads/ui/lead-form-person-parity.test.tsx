@@ -41,9 +41,11 @@ describe("fresh cabinet to wizard personal-data parity audit", () => {
     for (const value of [
       "Frau", "Former Example", "Kyiv", "Ukraine", "Österreich", "E-Mail, Telefon, Messenger",
       "Family support", "Since 2001", "Since 2012", "Earlier residence in Paris", "Frankreich",
-      "Employment contract", "Example public office", "Spanien", "2010–2014", "Example relationship",
+      "Employment contract", "Example public office", "Spanien", "2010–2014",
       "Example savings", "Example organisation", "geschäftlich", "Ended in 2008",
     ]) expect(html).toContain(value);
+    // Block H/J details show next to a "yes" only (owner 2026-10-24): the relative is no PEP here.
+    expect(html).not.toContain("Example relationship");
     // A negative answer is an answer too: it must remain in the read-only staff view.
     expect(html).toContain('data-testid="lead-gwg-answer-pep_self"');
     expect(html).toContain('data-testid="lead-gwg-answer-pep_related"');

@@ -550,6 +550,8 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   // the custody "guardian"; a new or changed phone number needs six digits.
   relation_guardian_needs_custody: "api_relation_guardian_needs_custody",
   trusted_contact_phone_invalid: "api_trusted_contact_phone_invalid",
+  // A parent or representative entered by staff is of full age, as in the cabinet.
+  trusted_contact_representative_minor: "api_trusted_contact_representative_minor",
   // Orders, contracts, quotes and the service catalogues (lib/order-api-errors.ts).
   ...ORDER_API_ERROR_KEYS,
   // Internal notes and re-billing waivers (lib/billing-api-errors.ts).

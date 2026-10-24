@@ -39,7 +39,7 @@ use crate::routes::lead_payer::{
     self, Declaration, INVOICE_TO_OTHER, INVOICE_TO_PAYER, INVOICE_TO_SELF, RELATIONSHIP_KINDS,
 };
 use crate::routes::lead_portal_intake::{
-    FieldError, clean_long_text, clean_phone, clean_text, field_error,
+    FieldError, clean_city, clean_long_text, clean_name, clean_phone, clean_text, field_error,
 };
 use crate::services::citizenships::normalize_country_code;
 
@@ -403,17 +403,15 @@ pub(crate) fn apply(
                 )?;
             }
             "recipient_first_name" => {
-                next.first_name = clean_text(
+                next.first_name = clean_name(
                     &text_value(value, "recipient_first_name")?,
                     "recipient_first_name",
-                    100,
                 )?;
             }
             "recipient_last_name" => {
-                next.last_name = clean_text(
+                next.last_name = clean_name(
                     &text_value(value, "recipient_last_name")?,
                     "recipient_last_name",
-                    100,
                 )?;
             }
             "recipient_organisation_name" => {
@@ -448,8 +446,7 @@ pub(crate) fn apply(
                 next.zip = clean_text(&text_value(value, "recipient_zip")?, "recipient_zip", 20)?;
             }
             "recipient_city" => {
-                next.city =
-                    clean_text(&text_value(value, "recipient_city")?, "recipient_city", 200)?;
+                next.city = clean_city(&text_value(value, "recipient_city")?, "recipient_city")?;
             }
             "recipient_country" => {
                 let text = text_value(value, "recipient_country")?;

@@ -40,6 +40,7 @@ import {
   fundsSourceOptions,
   missingOfRefusal,
   openFollowUpBlocks,
+  paymentReasonAskedWithPayer,
   type ExtraDraft,
   type ExtraSourceField,
   type ExtraTextField,
@@ -594,7 +595,10 @@ function RelationshipBlock({
 }) {
   const leadId = request.lead_id;
   const missing = followUpMissing(request, "B");
-  const asks = (key: "payment_background" | "relationship_since") => missing.includes(key) || Boolean(request.identification?.[key]);
+  const asks = (key: "payment_background" | "relationship_since") =>
+    // An organisation's reason is asked with the payer, in one place (owner 2026-10-24).
+    !(key === "payment_background" && paymentReasonAskedWithPayer(request))
+    && (missing.includes(key) || Boolean(request.identification?.[key]));
   if (request.payer?.payer_kind !== "third_party") return <p className="text-sm text-muted-foreground">{text.followUpNothingNeeded}</p>;
   return (
     <div className="space-y-4">

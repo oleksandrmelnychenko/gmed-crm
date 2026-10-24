@@ -64,7 +64,7 @@ use axum::{
     extract::{DefaultBodyLimit, Extension, Multipart, Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Deserializer};
@@ -385,6 +385,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/leads/{lead_id}/representatives/{representative_id}",
             delete(lead_representatives::remove_lead_representative),
+        )
+        .route(
+            "/leads/{lead_id}/representatives/{representative_id}/details",
+            put(lead_representatives::update_lead_representative_details),
         )
         .route(
             "/leads/{lead_id}/trusted-contacts/{representative_id}",
@@ -1027,23 +1031,29 @@ pub(crate) fn clean_text(
     Ok((!value.is_empty()).then_some(value))
 }
 
-/// A phone number: at least six digits, with the usual separators only. Six
-/// as the staff wizard ([`crate::routes::patients::is_valid_contact_phone`]),
-/// the payer and the cabinet's own error text: a five-digit number entered
-/// here was refused when staff saved it in the wizard.
+/// A phone number by the shared rule
+/// ([`crate::services::person_fields::is_valid_phone`]): the cabinet, the
+/// staff wizard, the payer and the invoice recipient take the same numbers.
 pub(crate) fn clean_phone(value: &str, field: &'static str) -> Result<Option<String>, FieldError> {
-    let phone = clean_text(value, field, 40)?;
-    if let Some(phone) = &phone {
-        let digits = phone.chars().filter(char::is_ascii_digit).count();
-        if digits < 6
-            || !phone
-                .chars()
-                .all(|ch| ch.is_ascii_digit() || " +-()/.".contains(ch))
-        {
-            return Err(field_error(field, "Invalid phone number"));
-        }
+    let phone = clean_text(value, field, crate::services::person_fields::PHONE_MAX)?;
+    if let Some(phone) = &phone
+        && !crate::services::person_fields::is_valid_phone(phone)
+    {
+        return Err(field_error(field, "Invalid phone number"));
     }
     Ok(phone)
+}
+
+/// A first, middle or last name by the shared rule: one line, at most
+/// [`crate::services::person_fields::NAME_MAX`] characters.
+pub(crate) fn clean_name(value: &str, field: &'static str) -> Result<Option<String>, FieldError> {
+    clean_text(value, field, crate::services::person_fields::NAME_MAX)
+}
+
+/// A city by the shared rule: one line, at most
+/// [`crate::services::person_fields::CITY_MAX`] characters.
+pub(crate) fn clean_city(value: &str, field: &'static str) -> Result<Option<String>, FieldError> {
+    clean_text(value, field, crate::services::person_fields::CITY_MAX)
 }
 
 /// One of `allowed`, or nothing for an empty value.
@@ -1063,7 +1073,7 @@ pub(crate) fn one_of(
 }
 
 fn required_name(value: &str, field: &'static str) -> Result<String, FieldError> {
-    clean_text(value, field, 100)?.ok_or_else(|| field_error(field, "Required"))
+    clean_name(value, field)?.ok_or_else(|| field_error(field, "Required"))
 }
 
 fn country_code(value: &str, field: &'static str) -> Result<Option<String>, FieldError> {
@@ -1091,7 +1101,7 @@ pub(crate) fn apply_personal_data_patch(
         next.first_name = required_name(value, "first_name")?;
     }
     if let Some(value) = &patch.middle_name {
-        next.middle_name = clean_text(value, "middle_name", 100)?;
+        next.middle_name = clean_name(value, "middle_name")?;
     }
     if let Some(value) = &patch.last_name {
         next.last_name = required_name(value, "last_name")?;
@@ -1146,7 +1156,7 @@ pub(crate) fn apply_personal_data_patch(
         next.zip_code = clean_text(value, "zip_code", 20)?;
     }
     if let Some(value) = &patch.city {
-        next.city = clean_text(value, "city", 120)?;
+        next.city = clean_city(value, "city")?;
     }
     if let Some(value) = &patch.country {
         next.country = country_code(value, "country")?;

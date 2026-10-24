@@ -849,6 +849,34 @@ pub fn without_stale_details(mut statements: Statements) -> Statements {
     statements
 }
 
+/// The details of blocks H and J that belong to the current answers, for
+/// what is printed and shown (owner 2026-10-24): the office of a PEP while
+/// the lead or a relative is one, the relationship while a relative is, the
+/// sanctioned link while there is one. The stored data stay (triggers are
+/// sticky); only a "yes" shows them.
+pub fn declared_details(
+    mut statements: Statements,
+    pep_self: Option<bool>,
+    pep_related: Option<bool>,
+    sanctions_links: Option<bool>,
+) -> Statements {
+    if pep_self != Some(true) && pep_related != Some(true) {
+        statements.pep_office = None;
+        statements.pep_country = None;
+        statements.pep_period = None;
+        statements.pep_wealth_origin = None;
+    }
+    if pep_related != Some(true) {
+        statements.pep_relationship = None;
+    }
+    if sanctions_links != Some(true) {
+        statements.sanctions_link_name = None;
+        statements.sanctions_link_kind = None;
+        statements.sanctions_link_since_extent = None;
+    }
+    statements
+}
+
 /// The keys whose value differs.
 pub fn changed_statements(before: &Statements, after: &Statements) -> Vec<&'static str> {
     let (mut left, mut right) = (before.gwg_json(), after.gwg_json());
@@ -1513,6 +1541,37 @@ mod tests {
             changed_statements(&other, &work),
             ["stay_reason", "stay_reason_details"]
         );
+    }
+
+    #[test]
+    fn only_a_yes_shows_the_details_of_blocks_h_and_j() {
+        let stated = Statements {
+            pep_office: Some("Bürgermeister".into()),
+            pep_country: Some("UA".into()),
+            pep_period: Some("2010–2014".into()),
+            pep_relationship: Some("Vater".into()),
+            pep_wealth_origin: Some("Gehalt".into()),
+            sanctions_link_name: Some("ACME".into()),
+            sanctions_link_kind: Some("business".into()),
+            sanctions_link_since_extent: Some("seit 2019".into()),
+            stay_reason: Some("work".into()),
+            ..Statements::default()
+        };
+        let all = declared_details(stated.clone(), Some(false), Some(true), Some(true));
+        assert_eq!(all, stated);
+        let own = declared_details(stated.clone(), Some(true), Some(false), Some(false));
+        assert_eq!(own.pep_office.as_deref(), Some("Bürgermeister"));
+        assert_eq!(own.pep_relationship, None);
+        assert_eq!(own.sanctions_link_name, None);
+        assert_eq!(own.sanctions_link_kind, None);
+        let none = declared_details(stated.clone(), Some(false), None, None);
+        assert_eq!(none.pep_office, None);
+        assert_eq!(none.pep_country, None);
+        assert_eq!(none.pep_period, None);
+        assert_eq!(none.pep_wealth_origin, None);
+        assert_eq!(none.sanctions_link_since_extent, None);
+        // Other statements are untouched.
+        assert_eq!(none.stay_reason.as_deref(), Some("work"));
     }
 
     #[test]

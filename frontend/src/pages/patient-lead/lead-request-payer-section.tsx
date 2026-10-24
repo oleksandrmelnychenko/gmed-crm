@@ -17,6 +17,7 @@ import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { payerPhoneAcceptable } from "@/lib/payer-phone";
+import { PERSON_CITY_MAX, PERSON_NAME_MAX } from "@/lib/person-fields";
 
 import {
   NO_THIRD_PARTY_PAYER,
@@ -481,6 +482,7 @@ export function PayerSection({
                       {...fieldProps("payer_first_name")}
                       className={inputClass}
                       autoComplete="off"
+                      maxLength={PERSON_NAME_MAX}
                       value={draft.first_name}
                       onChange={(event) => set("first_name", event.target.value)}
                     />
@@ -490,6 +492,7 @@ export function PayerSection({
                       {...fieldProps("payer_last_name")}
                       className={inputClass}
                       autoComplete="off"
+                      maxLength={PERSON_NAME_MAX}
                       value={draft.last_name}
                       onChange={(event) => set("last_name", event.target.value)}
                     />
@@ -635,6 +638,7 @@ export function PayerSection({
                   {...fieldProps("payer_city")}
                   className={inputClass}
                   autoComplete="off"
+                  maxLength={PERSON_CITY_MAX}
                   value={draft.city}
                   onChange={(event) => set("city", event.target.value)}
                 />

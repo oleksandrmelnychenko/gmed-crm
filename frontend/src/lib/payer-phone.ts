@@ -1,12 +1,11 @@
+import { isValidPersonPhone, personPhoneAcceptable } from "./person-fields";
+
 /**
- * The payer's phone rule (owner decision 2026-10-22): at least six digits —
- * the server's `is_valid_payer_phone` (`crates/server/src/routes/lead_payer.rs`)
- * — and, as the owner asked for the form, besides digits only "+", spaces,
- * brackets, "-" and "/". Surrounding spaces are ignored.
+ * The payer's phone rule: the shared rule of every person a lead names
+ * (`person-fields.ts`, the server's `services::person_fields::is_valid_phone`).
  */
 export function isValidPayerPhone(value: string): boolean {
-  const phone = value.trim();
-  return /^[0-9+ ()\-/]*$/.test(phone) && phone.replace(/\D/g, "").length >= 6;
+  return isValidPersonPhone(value);
 }
 
 /**
@@ -14,6 +13,5 @@ export function isValidPayerPhone(value: string): boolean {
  * one need not follow the rule), or a number of [`isValidPayerPhone`].
  */
 export function payerPhoneAcceptable(value: string | null | undefined, stored: string | null | undefined): boolean {
-  const phone = (value ?? "").trim();
-  return !phone || phone === (stored ?? "").trim() || isValidPayerPhone(phone);
+  return personPhoneAcceptable(value, stored);
 }

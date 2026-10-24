@@ -1556,8 +1556,8 @@ fn apply_answers_patch(
             "salutation" => {
                 next.salutation = intake::one_of(text_of(value, key)?, key, &SALUTATIONS)?
             }
-            "first_name" => next.first_name = intake::clean_text(text_of(value, key)?, key, 100)?,
-            "last_name" => next.last_name = intake::clean_text(text_of(value, key)?, key, 100)?,
+            "first_name" => next.first_name = intake::clean_name(text_of(value, key)?, key)?,
+            "last_name" => next.last_name = intake::clean_name(text_of(value, key)?, key)?,
             "former_names" => {
                 next.former_names = intake::clean_text(text_of(value, key)?, key, 200)?;
             }
@@ -1569,7 +1569,16 @@ fn apply_answers_patch(
                     .map_err(|_| field_error(key, "Use ISO 3166-1 alpha-2 country codes"))?;
             }
             "street" => next.street = intake::clean_text(text_of(value, key)?, key, 200)?,
-            "city" => next.city = intake::clean_text(text_of(value, key)?, key, 200)?,
+            // The shared city rule for a new or changed city; a stored one stays.
+            "city" => {
+                let typed = text_of(value, key)?;
+                next.city =
+                    if crate::services::person_fields::changed(typed, current.city.as_deref()) {
+                        intake::clean_city(typed, key)?
+                    } else {
+                        current.city.clone()
+                    };
+            }
             "zip" => next.zip = intake::clean_text(text_of(value, key)?, key, 20)?,
             "country" => next.country = country_of(text_of(value, key)?, key)?,
             "habitual_residence_country" => {

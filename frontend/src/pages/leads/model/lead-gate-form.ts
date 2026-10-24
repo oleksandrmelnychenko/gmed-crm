@@ -1,4 +1,5 @@
-import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
+import { isValidEmailAddress } from "@/lib/contact-validation";
+import { isValidPersonPhone } from "@/lib/person-fields";
 
 import type { LeadGateForm } from "./types";
 
@@ -37,7 +38,7 @@ export function leadGateFormErrors(
   if (changed(form.email, stored.email) && !isValidEmailAddress(form.email.trim())) {
     errors.email = tx("Введите корректный адрес электронной почты", "Gültige E-Mail-Adresse eingeben");
   }
-  if (changed(form.phone, stored.phone) && !isValidPhoneNumber(form.phone.trim())) {
+  if (changed(form.phone, stored.phone) && !isValidPersonPhone(form.phone)) {
     errors.phone = tx("Введите корректный номер телефона (не менее 6 цифр)", "Gültige Telefonnummer eingeben (mindestens 6 Ziffern)");
   }
   const birthDate = form.dateOfBirth.trim();

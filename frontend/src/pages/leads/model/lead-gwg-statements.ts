@@ -20,6 +20,7 @@ import type {
   LeadRepresentation,
   LeadRepresentative,
 } from "../data/lead-portal-intake-api";
+import type { LeadGwgFollowUpAnswers } from "./lead-risk-intake";
 import {
   PAYER_RELATIONSHIP_KINDS,
   invoiceTaxLine,
@@ -196,6 +197,32 @@ export function hasGwgStatements(intake: GwgIntake | null | undefined): boolean 
 function enumLabel(labels: Record<string, string>, value: string | null | undefined): string {
   if (!value) return "";
   return Object.hasOwn(labels, value) ? labels[value] : value;
+}
+
+/**
+ * The details of blocks H and J that belong to the current answers (owner
+ * 2026-10-24), as the Patientenformular prints them
+ * (`risk::cabinet::declared_details`): the office while the lead or a
+ * relative is a PEP, the relationship while a relative is, the sanctioned
+ * link while there is one. The stored data stay; only a "yes" shows them.
+ */
+export function declaredFollowUpDetails<T extends Pick<LeadGwgIdentification, "pep_self" | "pep_related" | "sanctions_links"> & LeadGwgFollowUpAnswers>(
+  identification: T,
+): T {
+  const next = { ...identification };
+  if (next.pep_self !== true && next.pep_related !== true) {
+    next.pep_office = null;
+    next.pep_country = null;
+    next.pep_period = null;
+    next.pep_wealth_origin = null;
+  }
+  if (next.pep_related !== true) next.pep_relationship = null;
+  if (next.sanctions_links !== true) {
+    next.sanctions_link_name = null;
+    next.sanctions_link_kind = null;
+    next.sanctions_link_since_extent = null;
+  }
+  return next;
 }
 
 export function salutationLabel(value: string | null | undefined, tx: Tx): string {

@@ -27,7 +27,8 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryLabel } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { ApiRequestError } from "@/lib/api";
-import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
+import { isValidEmailAddress } from "@/lib/contact-validation";
+import { isValidPersonPhone } from "@/lib/person-fields";
 import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { EmailDomainWarning } from "@/components/email-domain-warning";
 import { useAuth } from "@/lib/auth";
@@ -99,7 +100,7 @@ const payerEmailInvalid = (form: PayerDeclarationForm) =>
 
 /** A typed third-party phone with fewer than six digits: kept in the form, never autosaved. */
 const payerPhoneInvalid = (form: PayerDeclarationForm) =>
-  form.kind === "third_party" && Boolean(form.phone.trim()) && !isValidPhoneNumber(form.phone);
+  form.kind === "third_party" && Boolean(form.phone.trim()) && !isValidPersonPhone(form.phone);
 
 function PayerField({
   label,

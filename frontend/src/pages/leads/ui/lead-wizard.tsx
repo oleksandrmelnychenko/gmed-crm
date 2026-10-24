@@ -131,6 +131,7 @@ import {
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
   representativeCabinetAddress,
+  representativeMinorOnSave,
   storedTrustedContactDrafts,
   guardianRelationOptionLabel,
   trustedContactRelationLabel,
@@ -162,7 +163,8 @@ import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatMoneyLabel, formatMoneyRange, moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { appDateKey, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput, parseDateKey } from "@/lib/app-time-zone";
-import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
+import { isValidEmailAddress } from "@/lib/contact-validation";
+import { PERSON_CITY_MAX, PERSON_NAME_MAX, isValidPersonPhone, oneLine, personPhoneAcceptable } from "@/lib/person-fields";
 import { EmailDomainWarning, emailDomainWarningText, knownNoMailEmailError } from "@/components/email-domain-warning";
 import { useEmailDomainStatus } from "@/lib/email-domain-check";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
@@ -313,6 +315,7 @@ import { enhancedFundsProofOutstanding } from "../model/lead-gwg-statements";
 import { LeadRiskAssessmentPanel } from "./lead-risk-assessment-panel";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { LeadIdentityDocumentData } from "./lead-identity-document-data";
+import { LeadRepresentativeDetailsForm } from "./lead-representative-details";
 import { LeadRepresentativeUploads, representativeFileOrigin } from "./lead-representative-uploads";
 import { LeadPatientConcern } from "./lead-patient-concern";
 import { useLeadRiskAssessment } from "../model/use-lead-risk-assessment";
@@ -2760,6 +2763,9 @@ function minorEmailOptional(draft: Pick<Draft, "birthDate">): boolean {
   return isMinor(draft.birthDate, new Date());
 }
 
+/** The stored names, city and phone of the lead (shared rules: a change only). */
+type StoredPersonFields = { firstName?: string | null; lastName?: string | null; city?: string | null; phone?: string | null };
+
 function validateMasterDraft(
   draft: Draft | null,
   tx: Tx,
@@ -2768,6 +2774,8 @@ function validateMasterDraft(
   emailNoMail = false,
   // The health-data consent given in the cabinet needs the address like the toggle.
   cabinetHealthcare = false,
+  // What the server has: the shared rules check a new or changed value only.
+  stored: StoredPersonFields = {},
 ): MasterValidationErrors {
   if (!draft) return {};
 
@@ -2776,8 +2784,15 @@ function validateMasterDraft(
   if (discoveryReferrerMissing(draft, repeatIntake)) {
     errors.referrerPatientId = required;
   }
+  const changedValue = (value: string, before: string | null | undefined) => oneLine(value) !== oneLine(before);
+  const nameTooLong = tx(`Не более ${PERSON_NAME_MAX} символов`, `Höchstens ${PERSON_NAME_MAX} Zeichen`);
   if (!draft.firstName.trim()) errors.firstName = required;
+  else if (changedValue(draft.firstName, stored.firstName) && oneLine(draft.firstName).length > PERSON_NAME_MAX) errors.firstName = nameTooLong;
   if (!draft.lastName.trim()) errors.lastName = required;
+  else if (changedValue(draft.lastName, stored.lastName) && oneLine(draft.lastName).length > PERSON_NAME_MAX) errors.lastName = nameTooLong;
+  if (changedValue(draft.city, stored.city) && oneLine(draft.city).length > PERSON_CITY_MAX) {
+    errors.city = tx(`Не более ${PERSON_CITY_MAX} символов`, `Höchstens ${PERSON_CITY_MAX} Zeichen`);
+  }
   if (!draft.birthDate) {
     errors.birthDate = required;
   } else if (draft.birthDate > appDateKey()) {
@@ -2817,10 +2832,10 @@ function validateMasterDraft(
       "Обязательное поле — это логин пациента в портале",
       "Pflichtfeld – Login des Patienten im Portal",
     );
-    if (phone && !isValidPhoneNumber(phone)) {
+    if (phone && changedValue(phone, stored.phone) && !isValidPersonPhone(phone)) {
       errors.phone = tx(
-        "Введите корректный номер телефона",
-        "Gültige Telefonnummer eingeben",
+        "Введите корректный номер телефона: не менее 6 цифр, только цифры, +, пробелы, ( ) - / .",
+        "Gültige Telefonnummer eingeben: mindestens 6 Ziffern, nur Ziffern, +, Leerzeichen, ( ) - / .",
       );
     }
   } else if (repeatIntake && !email && !phone) {
@@ -2839,10 +2854,10 @@ function validateMasterDraft(
     } else if (email && emailNoMail) {
       errors.email = emailDomainWarningText(email, tx("ru", "de"));
     }
-    if (phone && !isValidPhoneNumber(phone)) {
+    if (phone && changedValue(phone, stored.phone) && !isValidPersonPhone(phone)) {
       errors.phone = tx(
-        "Введите корректный номер телефона",
-        "Gültige Telefonnummer eingeben",
+        "Введите корректный номер телефона: не менее 6 цифр, только цифры, +, пробелы, ( ) - / .",
+        "Gültige Telefonnummer eingeben: mindestens 6 Ziffern, nur Ziffern, +, Leerzeichen, ( ) - / .",
       );
     }
   }
@@ -4718,9 +4733,13 @@ export function LeadWizard({
   };
   const masterEmailNoMail = useEmailDomainStatus(draft?.email ?? "") === "no_mail";
   const cabinetConsents = useMemo(() => cabinetConsentsOf(lead?.readiness), [lead?.readiness]);
+  const storedPerson = useMemo<StoredPersonFields>(
+    () => ({ firstName: lead?.first_name, lastName: lead?.last_name, city: lead?.city, phone: lead?.phone }),
+    [lead?.first_name, lead?.last_name, lead?.city, lead?.phone],
+  );
   const strictMasterErrors = useMemo(
-    () => validateMasterDraft(draft, tx, isRepeatIntake, masterEmailNoMail, cabinetConsents.healthcare),
-    [draft, isRepeatIntake, masterEmailNoMail, tx, cabinetConsents.healthcare],
+    () => validateMasterDraft(draft, tx, isRepeatIntake, masterEmailNoMail, cabinetConsents.healthcare, storedPerson),
+    [draft, isRepeatIntake, masterEmailNoMail, tx, cabinetConsents.healthcare, storedPerson],
   );
   // "The patient fills it in": only names and e-mail are needed for the lead.
   const masterErrors = useMemo(
@@ -5632,8 +5651,11 @@ export function LeadWizard({
       return;
     }
     const contactPhone = trustedContactEditor.phone.trim();
-    if (contactPhone && contactPhone !== (storedContact?.phone ?? "").trim() && !isValidPhoneNumber(contactPhone)) {
-      setTrustedContactPhoneError(tx("Введите корректный номер телефона (не менее 6 цифр)", "Gültige Telefonnummer eingeben (mindestens 6 Ziffern)"));
+    if (!personPhoneAcceptable(contactPhone, storedContact?.phone)) {
+      setTrustedContactPhoneError(tx(
+        "Введите корректный номер телефона: не менее 6 цифр, только цифры, +, пробелы, ( ) - / .",
+        "Gültige Telefonnummer eingeben: mindestens 6 Ziffern, nur Ziffern, +, Leerzeichen, ( ) - / .",
+      ));
       return;
     }
     // A parent is reached and gets the access through these (the minor's check asks for one).
@@ -5646,6 +5668,19 @@ export function LeadWizard({
       setTrustedContactBirthDateError(tx(
         "Дата рождения не может быть в будущем или раньше 01.01.1900",
         "Das Geburtsdatum darf nicht in der Zukunft oder vor dem 01.01.1900 liegen",
+      ));
+      return;
+    }
+    // A parent, guardian or representative is of full age, as in the cabinet and on
+    // the server (owner 2026-10-24); a stored entry keeps saving as it is.
+    if (representativeMinorOnSave(
+      trustedContactEditor,
+      storedContact ? { relation: storedContact.relation ?? "", birthDate: storedContact.birth_date ?? "" } : undefined,
+      appDateKey(),
+    )) {
+      setTrustedContactBirthDateError(tx(
+        "Родитель или представитель должен быть совершеннолетним (18+)",
+        "Ein Elternteil oder eine Vertretung muss volljährig sein (18+)",
       ));
       return;
     }
@@ -11036,8 +11071,8 @@ ${serviceCommentLines.join("\n")}`
                         {cabinetAddress ? (
                           <p id="trusted-contact-address-cabinet" className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground" data-testid="trusted-contact-address-cabinet">
                             {tx(
-                              "Из кабинета: адрес указан представителем, так он стоит в анкете GwG и в документах. Изменить его может представитель в кабинете.",
-                              "Aus dem Kundenkabinett: von der Vertretung angegeben, so steht sie im GwG-Bogen und in den Unterlagen. Ändern kann sie die Vertretung im Kabinett.",
+                              "Из кабинета: так адрес стоит в анкете GwG и в документах. Исправить его можно в блоке «Адрес и данные для анкеты GwG» ниже.",
+                              "Aus dem Kundenkabinett: so steht sie im GwG-Bogen und in den Unterlagen. Korrigieren unten unter „Anschrift und Angaben für den GwG-Bogen“.",
                             )}
                           </p>
                         ) : null}
@@ -11046,13 +11081,25 @@ ${serviceCommentLines.join("\n")}`
                   })()}
                 </div>
                 {(() => {
-                  // A representative on file: staff upload the identity document
+                  // A representative on file: staff correct the parts the GwG sheet
+                  // prints (owner 2026-10-24) and upload the identity document
                   // copy (and proof of authority) the contract gate asks for.
                   const person = leadId && editingTrustedContact
                     ? portalRepresentation?.representatives.find((item) => item.id === trustedContactEditor.id)
                     : undefined;
                   if (!leadId || !person) return null;
                   return (
+                    <>
+                    <div className="mt-4 border-t border-border/70 pt-3">
+                      <LeadRepresentativeDetailsForm
+                        leadId={leadId}
+                        person={person}
+                        tx={tx}
+                        lang={lang}
+                        disabled={isBusy}
+                        onSaved={afterRepresentativeUpload}
+                      />
+                    </div>
                     <div className="mt-4 space-y-2 border-t border-border/70 pt-3" data-testid="trusted-contact-representative-uploads">
                       <h4 className="text-xs font-semibold text-foreground">
                         {tx("Документы представителя", "Unterlagen des Vertreters")}
@@ -11067,6 +11114,7 @@ ${serviceCommentLines.join("\n")}`
                         onUploaded={afterRepresentativeUpload}
                       />
                     </div>
+                    </>
                   );
                 })()}
                 </AdminFormSection>

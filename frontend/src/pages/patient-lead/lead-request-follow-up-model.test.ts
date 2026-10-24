@@ -18,6 +18,7 @@ import {
   fundsSourceOptions,
   missingOfRefusal,
   openFollowUpBlocks,
+  paymentReasonAskedWithPayer,
 } from "./lead-request-follow-up-model";
 
 const payer = (payer_kind: LeadRequestPayer["payer_kind"]): LeadRequestPayer => ({
@@ -152,5 +153,15 @@ describe("follow-up blocks", () => {
       expect(familyPayer(related(kind)), String(kind)).toBe(false);
     }
     expect(familyPayer({ payer: null })).toBe(false);
+  });
+
+  it("asks why an organisation pays only with the payer, not again in block B", () => {
+    for (const payer_type of ["company", "organisation", "insurance"] as const) {
+      expect(paymentReasonAskedWithPayer({ payer: { ...payer("third_party"), payer_type } }), payer_type).toBe(true);
+    }
+    expect(paymentReasonAskedWithPayer({ payer: { ...payer("third_party"), payer_type: "person" } })).toBe(false);
+    expect(paymentReasonAskedWithPayer({ payer: payer("third_party") })).toBe(false);
+    expect(paymentReasonAskedWithPayer({ payer: { ...payer("self"), payer_type: "company" } })).toBe(false);
+    expect(paymentReasonAskedWithPayer({ payer: null })).toBe(false);
   });
 });

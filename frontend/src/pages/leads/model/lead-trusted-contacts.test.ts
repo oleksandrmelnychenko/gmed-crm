@@ -7,6 +7,7 @@ import {
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
   representativeCabinetAddress,
+  representativeMinorOnSave,
   storedTrustedContactDrafts,
   trustedContactRelationLabel,
   trustedContactsChanged,
@@ -277,6 +278,23 @@ describe("which patient events reach the wizard draft", () => {
     for (const change of ["payer", "identification", "document_reviewed", "", undefined, null]) {
       expect(patientEventChangesLeadData(change)).toBe(false);
     }
+  });
+});
+
+describe("a parent or representative entered by staff", () => {
+  const today = "2026-10-24";
+  const person = (relation: string, birthDate: string) => ({ relation, birthDate });
+
+  it("is of full age when the date or the role is new or changed, as in the cabinet", () => {
+    expect(representativeMinorOnSave(person("mother", "2015-03-02"), undefined, today)).toBe(true);
+    expect(representativeMinorOnSave(person("representative", "2010-01-01"), undefined, today)).toBe(true);
+    expect(representativeMinorOnSave(person("Vormund", "2010-01-01"), person("Vormund", "2011-01-01"), today)).toBe(true);
+    expect(representativeMinorOnSave(person("father", "2008-10-24"), undefined, today)).toBe(false);
+    // A sibling may be a child; an unchanged stored parent keeps saving.
+    expect(representativeMinorOnSave(person("relative", "2015-03-02"), undefined, today)).toBe(false);
+    expect(representativeMinorOnSave(person("mother", "2015-03-02"), person("mother", "2015-03-02"), today)).toBe(false);
+    expect(representativeMinorOnSave(person("mother", "2015-03-02"), person("relative", "2015-03-02"), today)).toBe(true);
+    expect(representativeMinorOnSave(person("mother", ""), undefined, today)).toBe(false);
   });
 });
 

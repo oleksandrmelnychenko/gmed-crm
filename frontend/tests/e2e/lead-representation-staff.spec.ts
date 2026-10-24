@@ -285,6 +285,8 @@ async function mount(page: Page, mock: Mock) {
     idSaves: [] as Array<{ id: string; body: Json }>,
     /** Bodies of the document data saves of the patient. */
     patientIdSaves: [] as Json[],
+    /** Bodies of the staff saves of a representative's address and birth data. */
+    detailSaves: [] as Array<{ id: string; body: { values: Json; base: Json } }>,
   };
   let patientIdentification: Json = { birth_place: "Berlin", birth_country: "DE", contact_channels: ["email"], ...mock.patientId };
   let lateIntakeSent = false;
@@ -308,6 +310,22 @@ async function mount(page: Page, mock: Mock) {
       if (mock.idSaveDelayMs) await new Promise((resolve) => setTimeout(resolve, mock.idSaveDelayMs));
       patientIdentification = { ...patientIdentification, ...body, id_data_entered_by_name: "Intake QA", id_data_entered_at: new Date().toISOString() };
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(patientIdentification) });
+      return;
+    }
+    const details = path.match(/^\/leads\/[^/]+\/representatives\/([^/]+)\/details$/);
+    if (details && method === "PUT") {
+      const body = request.postDataJSON() as { values: Json; base: Json };
+      calls.detailSaves.push({ id: details[1], body });
+      // The server's merge: only what staff changed since loading is written.
+      state.representation = {
+        ...state.representation,
+        representatives: state.representation.representatives.map((person) => {
+          if (person.id !== details[1]) return person;
+          const changed = Object.fromEntries(Object.entries(body.values).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(body.base[key])));
+          return { ...person, ...changed };
+        }),
+      };
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ representation: state.representation }) });
       return;
     }
     if (idData && method === "PUT") {
@@ -1048,6 +1066,50 @@ test("a parent's address from the cabinet is shown read-only, as the GwG sheet p
   await expect(address).toHaveValue("Musterweg 1, 10115 Berlin, Германия");
   await expect(address).toHaveAttribute("readonly", "");
   await expect(editor.getByTestId("trusted-contact-address-cabinet")).toContainText("Из кабинета");
+});
+
+test("staff correct a parent's address and birth data for the GwG sheet (owner 2026-10-24)", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", step: "master" });
+  await wizard.locator("#lead-wizard-guardian").getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
+  const editor = page.getByTestId("trusted-contact-editor");
+  const form = editor.getByTestId(`lead-representative-details-${ANNA_ID}`);
+  await expect(form.locator('input[name="street"]')).toHaveValue("Musterweg 1");
+  const save = form.getByRole("button", { name: "Сохранить адрес и данные" });
+  await expect(save).toBeDisabled();
+  await form.locator('input[name="street"]').fill("Neue Straße 5");
+  await form.locator('input[name="birth_place"]').fill("Lviv");
+  await save.click();
+  await expect.poll(() => calls.detailSaves.length).toBe(1);
+  // What the form loaded goes along, so the server keeps a cabinet change made meanwhile.
+  expect(calls.detailSaves[0]).toMatchObject({
+    id: ANNA_ID,
+    body: {
+      values: { street: "Neue Straße 5", birth_place: "Lviv", city: "Berlin", zip: "10115", country: "DE", citizenships: ["UA", "DE"] },
+      base: { street: "Musterweg 1", birth_place: "Kyiv", city: "Berlin" },
+    },
+  });
+  await expect(form.getByTestId(`lead-representative-details-${ANNA_ID}-saved`)).toBeVisible();
+  // The one-line address shows the parts the GwG sheet prints.
+  await expect(editor.getByRole("textbox", { name: /^Адрес/ })).toHaveValue("Neue Straße 5, 10115 Berlin, Германия");
+  // A city too long for the shared rule is refused before saving.
+  await form.locator('input[name="city"]').evaluate((input: HTMLInputElement) => input.removeAttribute("maxlength"));
+  await form.locator('input[name="city"]').fill("y".repeat(121));
+  await expect(form.getByText("Слишком длинное значение")).toBeVisible();
+  await expect(save).toBeDisabled();
+});
+
+test("a parent born less than 18 years ago is refused in the contact editor", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", step: "master" });
+  await wizard.locator("#lead-wizard-guardian").getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
+  const editor = page.getByTestId("trusted-contact-editor");
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Мать (родитель)", exact: true }).click();
+  // Typed like staff type it: day, month, year.
+  await editor.getByRole("group", { name: "Дата рождения" }).getByRole("spinbutton").first().click();
+  await page.keyboard.type("02032015");
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(editor.getByText("Родитель или представитель должен быть совершеннолетним (18+)")).toBeVisible();
+  expect(calls.updates).toEqual([]);
 });
 
 test("staff reuse a mother who is still a lead without creating a patient link", async ({ page }) => {

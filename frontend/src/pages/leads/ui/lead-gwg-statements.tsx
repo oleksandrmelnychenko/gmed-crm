@@ -24,6 +24,7 @@ import {
   answerLabel,
   billingStatements,
   contactChannelsLabel,
+  declaredFollowUpDetails,
   EMPTY_STATEMENT,
   gwgLegalAnswers,
   hasBillingStatements,
@@ -567,7 +568,7 @@ function sanctionsLinkKindLabel(value: string | null | undefined, tx: Tx): strin
  * shown; nothing for a lead who was not asked. Read-only.
  */
 function LeadGwgFollowUpAnswers({
-  identification,
+  identification: stated,
   tx,
   lang,
   cards = false,
@@ -578,6 +579,8 @@ function LeadGwgFollowUpAnswers({
   cards?: boolean;
 }) {
   const country = (code: string | null | undefined) => countryNameForDisplay(code ?? null, lang);
+  // Blocks H and J only next to a "yes", as the Patientenformular (owner 2026-10-24).
+  const identification = declaredFollowUpDetails(stated);
   const stay = [
     identification.residence_since,
     identification.other_residences,

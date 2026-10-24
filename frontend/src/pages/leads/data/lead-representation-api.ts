@@ -45,6 +45,36 @@ export async function removeLeadRepresentativeData(
   );
 }
 
+/** A representative's data staff correct in the wizard (owner 2026-10-24). */
+export type RepresentativeDetails = {
+  birth_place: string;
+  birth_country: string;
+  citizenships: string[];
+  street: string;
+  zip: string;
+  city: string;
+  country: string;
+};
+
+/**
+ * Saves a representative's birth place and country, citizenships and address.
+ * `base` is what the form loaded: a value staff left as loaded is not written,
+ * so a change made in the cabinet meanwhile stays.
+ */
+export async function updateLeadRepresentativeDetails(
+  leadId: string,
+  representativeId: string,
+  values: RepresentativeDetails,
+  loaded: RepresentativeDetails,
+): Promise<LeadRepresentation | null> {
+  return representationOf(
+    await apiFetch<unknown>(`${base(leadId)}/representatives/${encodeURIComponent(representativeId)}/details`, {
+      method: "PUT",
+      body: JSON.stringify({ values, base: loaded }),
+    }),
+  );
+}
+
 /** Removes a contact and its access to this request in one server transaction. */
 export async function removeLeadTrustedContact(
   leadId: string,

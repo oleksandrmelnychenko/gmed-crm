@@ -87,6 +87,16 @@ export function familyPayer(request: Pick<LeadRequest, "payer">): boolean {
   return FAMILY_RELATIONSHIPS.has(request.payer?.relationship_kind ?? "");
 }
 
+/**
+ * An organisation pays: the step "insurance and invoice" asks why the payment
+ * goes through it (`payment_background`), so block B does not ask it a second
+ * time (owner 2026-10-24: one place to answer).
+ */
+export function paymentReasonAskedWithPayer(request: Pick<LeadRequest, "payer">): boolean {
+  const type = request.payer?.payer_type;
+  return request.payer?.payer_kind === "third_party" && (type === "company" || type === "organisation" || type === "insurance");
+}
+
 // ---------------------------------------------------------------------------
 // Block A: the source of funds (one choice with the words, profession, sector, proofs)
 // ---------------------------------------------------------------------------

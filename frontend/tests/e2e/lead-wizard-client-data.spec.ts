@@ -278,7 +278,7 @@ test("implausible dates and a short phone are refused at the field", async ({ pa
   await expect(page.locator("#lead-wizard-birth-date")).toHaveValue("03.02.1980");
   await page.locator("#lead-wizard-phone").fill("123");
   await page.locator("#lead-wizard-phone").blur();
-  await expect(page.locator("#lead-wizard-phone-error")).toHaveText("Введите корректный номер телефона");
+  await expect(page.locator("#lead-wizard-phone-error")).toHaveText("Введите корректный номер телефона: не менее 6 цифр, только цифры, +, пробелы, ( ) - / .");
   await page.locator("#lead-wizard-email").fill("olga@");
   await page.locator("#lead-wizard-email").blur();
   await expect(page.locator("#lead-wizard-email-error")).toHaveText("Введите корректный адрес электронной почты");
@@ -394,7 +394,7 @@ test("adding a parent: a father is not offered as a guardian by mistake", async 
   await expect(editor.locator("#trusted-contact-phone-error")).toHaveText("Укажите e-mail или телефон представителя");
   await editor.getByLabel("Телефон").fill("12");
   await editor.getByRole("button", { name: "Добавить", exact: true }).click();
-  await expect(editor.locator("#trusted-contact-phone-error")).toHaveText("Введите корректный номер телефона (не менее 6 цифр)");
+  await expect(editor.locator("#trusted-contact-phone-error")).toHaveText("Введите корректный номер телефона: не менее 6 цифр, только цифры, +, пробелы, ( ) - / .");
   await editor.getByLabel("Телефон").fill("+49 30 100003");
   await relation.click();
   await page.getByRole("option", { name: "Отец (родитель)", exact: true }).click();
@@ -473,7 +473,7 @@ test("a contact the server refuses shows its message at that contact", async ({ 
   });
   await page.locator("#lead-wizard-city").fill("Hamburg");
   await expect(page.getByTestId("trusted-contact-server-error").first()).toHaveText(
-    "Kontaktperson „Ben Muster“: gültige Telefonnummer eingeben (mindestens 6 Ziffern).",
+    "Kontaktperson „Ben Muster“: gültige Telefonnummer eingeben (mindestens 6 Ziffern; nur Ziffern, +, Leerzeichen, ( ) - / .).",
   );
 });
 

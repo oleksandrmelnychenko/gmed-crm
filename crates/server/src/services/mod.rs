@@ -28,3 +28,4 @@ pub mod patient_lab_results_pdf;
 pub mod patient_medication_pdf;
 pub mod patient_pdf_brand;
 pub mod pep_review;
+pub mod person_fields;

@@ -350,6 +350,25 @@ fn plausible_birth_date(date: NaiveDate, today: NaiveDate) -> Result<NaiveDate, 
     Ok(date)
 }
 
+/// The first of `(field, value, stored)` that is a new or changed name too
+/// long for the shared rule (`services::person_fields`, as the cabinet); a
+/// stored name stays acceptable.
+fn new_name_too_long<'a>(names: &[(&'a str, &str, Option<&str>)]) -> Option<&'a str> {
+    names.iter().find_map(|(field, value, stored)| {
+        (crate::services::person_fields::changed(value, *stored)
+            && !crate::services::person_fields::name_fits(value))
+        .then_some(*field)
+    })
+}
+
+/// A new or changed city too long for the shared rule; a stored one stays.
+fn new_city_too_long(value: Option<&str>, stored: Option<&str>) -> bool {
+    value.is_some_and(|city| {
+        crate::services::person_fields::changed(city, stored)
+            && !crate::services::person_fields::city_fits(city)
+    })
+}
+
 /// A 422 that names the field it refuses, so the wizard shows it at the field.
 fn field_err(field: &str, message: &str) -> axum::response::Response {
     (
@@ -433,6 +452,13 @@ enum TrustedContactIssue {
         id: String,
         name: String,
     },
+    /// A parent, guardian or representative newly born less than 18 years
+    /// ago: a representative is of full age, as in the cabinet.
+    MinorRepresentative {
+        index: usize,
+        id: String,
+        name: String,
+    },
 }
 
 fn contact_text<'a>(contact: &'a Value, key: &str) -> Option<&'a str> {
@@ -480,7 +506,7 @@ fn changed_trusted_contact_issue(
             .to_string();
         if let Some(phone) = contact_text(contact, "phone")
             && previous.and_then(|entry| contact_text(entry, "phone")) != Some(phone)
-            && !crate::routes::patients::is_valid_contact_phone(phone)
+            && !crate::services::person_fields::is_valid_phone(phone)
         {
             return Some(TrustedContactIssue::InvalidPhone { index, id, name });
         }
@@ -491,6 +517,26 @@ fn changed_trusted_contact_issue(
                 .is_some_and(|entry| is_legal_guardian_relation(contact_text(entry, "relation")))
         {
             return Some(TrustedContactIssue::GuardianRelation { index, id, name });
+        }
+        // A parent, guardian or representative is of full age, as in the
+        // cabinet (owner 2026-10-24): checked when the date or the role is
+        // new or changed.
+        let acts_for = |relation: Option<&str>| {
+            is_parent_or_guardian_relation(relation)
+                || relation.is_some_and(|relation| relation.eq_ignore_ascii_case("representative"))
+        };
+        let birth_date = contact_text(contact, "birth_date");
+        let changed = previous.is_none_or(|entry| {
+            contact_text(entry, "birth_date") != birth_date
+                || acts_for(contact_text(entry, "relation")) != acts_for(relation)
+        });
+        if changed
+            && acts_for(relation)
+            && birth_date
+                .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+                .is_some_and(|date| is_minor_on(Some(date), crate::app_time::today()))
+        {
+            return Some(TrustedContactIssue::MinorRepresentative { index, id, name });
         }
     }
     None
@@ -516,6 +562,14 @@ fn trusted_contact_issue_response(issue: &TrustedContactIssue) -> axum::response
             id,
             name,
             "relation",
+        ),
+        TrustedContactIssue::MinorRepresentative { index, id, name } => (
+            "trusted_contact_representative_minor",
+            "A parent or representative is of full age",
+            index,
+            id,
+            name,
+            "birth_date",
         ),
     };
     (
@@ -645,6 +699,39 @@ mod changed_trusted_contact_tests {
             changed_trusted_contact_issue(&bad_phone, &json!([]), false),
             Some(TrustedContactIssue::InvalidPhone { .. })
         ));
+    }
+
+    /// Owner 2026-10-24: a parent or representative entered by staff is of
+    /// full age, as in the cabinet; an older stored entry keeps saving.
+    #[test]
+    fn a_parent_or_representative_born_less_than_18_years_ago_is_refused() {
+        let born = |id: &str, birth_date: &str, relation: &str| json!({ "id": id, "name": "Anna", "relation": relation, "birth_date": birth_date });
+        let child = json!([born(ID, "2015-03-02", "mother")]);
+        assert_eq!(
+            changed_trusted_contact_issue(&child, &json!([]), true),
+            Some(TrustedContactIssue::MinorRepresentative {
+                index: 0,
+                id: ID.into(),
+                name: "Anna".into()
+            })
+        );
+        let agent = json!([born(ID, "2015-03-02", "representative")]);
+        assert!(matches!(
+            changed_trusted_contact_issue(&agent, &json!([]), false),
+            Some(TrustedContactIssue::MinorRepresentative { .. })
+        ));
+        // A sibling may be young; an adult parent passes; a stored entry stays.
+        let sibling = json!([born(ID, "2015-03-02", "relative")]);
+        assert_eq!(
+            changed_trusted_contact_issue(&sibling, &json!([]), true),
+            None
+        );
+        let adult = json!([born(ID, "1985-03-02", "father")]);
+        assert_eq!(
+            changed_trusted_contact_issue(&adult, &json!([]), true),
+            None
+        );
+        assert_eq!(changed_trusted_contact_issue(&child, &child, true), None);
     }
 
     #[test]
@@ -3554,7 +3641,7 @@ async fn create_repeat_intake(
 async fn create_lead(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
-    Json(body): Json<CreateLeadRequest>,
+    Json(mut body): Json<CreateLeadRequest>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::LeadsEdit) {
         return e;
@@ -3569,6 +3656,15 @@ async fn create_lead(
 
     if body.first_name.trim().is_empty() || body.last_name.trim().is_empty() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Name required");
+    }
+    // The names on one line and short, as in the cabinet (shared rule).
+    body.first_name = crate::services::person_fields::one_line(&body.first_name);
+    body.last_name = crate::services::person_fields::one_line(&body.last_name);
+    if let Some(field) = new_name_too_long(&[
+        ("first_name", &body.first_name, None),
+        ("last_name", &body.last_name, None),
+    ]) {
+        return field_err(field, "Name is too long");
     }
     let date_of_birth = match body.date_of_birth.as_deref() {
         Some(value) if !value.trim().is_empty() => {
@@ -3600,7 +3696,7 @@ async fn create_lead(
         return field_err("email", "A valid email is required");
     }
     if body.phone.as_deref().map(str::trim).is_some_and(|phone| {
-        !phone.is_empty() && !crate::routes::patients::is_valid_contact_phone(phone)
+        !phone.is_empty() && !crate::services::person_fields::is_valid_phone(phone)
     }) {
         return field_err("phone", "Invalid phone");
     }
@@ -4953,14 +5049,14 @@ async fn update_lead(
         Some(value) if value.trim().is_empty() => {
             return field_err("first_name", "first_name cannot be empty");
         }
-        Some(value) => Some(value.trim().to_string()),
+        Some(value) => Some(crate::services::person_fields::one_line(value)),
         None => None,
     };
     let last_name = match body.last_name.as_deref() {
         Some(value) if value.trim().is_empty() => {
             return field_err("last_name", "last_name cannot be empty");
         }
-        Some(value) => Some(value.trim().to_string()),
+        Some(value) => Some(crate::services::person_fields::one_line(value)),
         None => None,
     };
     if let Some(ref value) = body.requested_specialties
@@ -5069,7 +5165,7 @@ async fn update_lead(
     }
 
     let current_identity = match sqlx::query(
-        r#"SELECT first_name, last_name, date_of_birth, email, phone,
+        r#"SELECT first_name, last_name, middle_name, city, date_of_birth, email, phone,
                   trusted_contacts, repeat_patient_id, prospect_patient_id,
                   converted_patient_id, qualification_status, compliance_status,
                   portal_user_id
@@ -5108,6 +5204,41 @@ async fn update_lead(
             Ok(value) => value,
             Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
         };
+    // Names and city by the shared rule (as the cabinet), for a new or
+    // changed value only.
+    let stored_text = |column: &str| {
+        current_identity
+            .try_get::<Option<String>, _>(column)
+            .ok()
+            .flatten()
+    };
+    let (stored_first, stored_last, stored_middle) = (
+        stored_text("first_name"),
+        stored_text("last_name"),
+        stored_text("middle_name"),
+    );
+    if let Some(field) = new_name_too_long(&[
+        (
+            "first_name",
+            first_name.as_deref().unwrap_or_default(),
+            first_name.as_ref().and(stored_first.as_deref()),
+        ),
+        (
+            "last_name",
+            last_name.as_deref().unwrap_or_default(),
+            last_name.as_ref().and(stored_last.as_deref()),
+        ),
+        (
+            "middle_name",
+            body.middle_name.as_deref().unwrap_or_default(),
+            body.middle_name.as_ref().and(stored_middle.as_deref()),
+        ),
+    ]) {
+        return field_err(field, "Name is too long");
+    }
+    if new_city_too_long(body.city.as_deref(), stored_text("city").as_deref()) {
+        return field_err("city", "City is too long");
+    }
     let effective_first_name = first_name
         .clone()
         .unwrap_or_else(|| current_identity.get::<String, _>("first_name"));
@@ -5149,7 +5280,7 @@ async fn update_lead(
         && body
             .phone
             .as_deref()
-            .is_some_and(|phone| !crate::routes::patients::is_valid_contact_phone(phone.trim()))
+            .is_some_and(|phone| !crate::services::person_fields::is_valid_phone(phone))
     {
         return field_err("phone", "Invalid phone");
     }
@@ -12042,6 +12173,29 @@ mod lead_conversion_readiness_tests {
             plausible_birth_date(NaiveDate::from_ymd_opt(1899, 12, 31).expect("date"), today),
             Err("date_of_birth is too early")
         );
+    }
+
+    /// Owner 2026-10-24: staff names and city follow the cabinet's rule when
+    /// new or changed; a longer stored value does not block other edits.
+    #[test]
+    fn staff_names_and_city_follow_the_shared_rule_when_changed() {
+        let long = "x".repeat(101);
+        assert_eq!(
+            new_name_too_long(&[("first_name", "Anna", None), ("last_name", &long, None)]),
+            Some("last_name")
+        );
+        assert_eq!(
+            new_name_too_long(&[("last_name", &long, Some(long.as_str()))]),
+            None
+        );
+        assert_eq!(new_name_too_long(&[("middle_name", "", None)]), None);
+        assert!(new_city_too_long(Some(&"y".repeat(121)), None));
+        assert!(!new_city_too_long(
+            Some(&"y".repeat(121)),
+            Some(&"y".repeat(121))
+        ));
+        assert!(!new_city_too_long(Some("Berlin"), None));
+        assert!(!new_city_too_long(None, None));
     }
 
     #[test]

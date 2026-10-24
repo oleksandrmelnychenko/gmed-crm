@@ -1363,6 +1363,144 @@ async fn a_parent_cannot_change_the_address_staff_entered_for_the_other_parent()
     assert_eq!(representative(&body, father)["email"], json!(father_email));
 }
 
+/// Owner 2026-10-24: staff correct a parent's address and birth data (what
+/// the GwG sheet prints). Only what staff changed since loading is written,
+/// so a cabinet change made meanwhile stays; the cabinet's rules apply; the
+/// change is audited and the contact's one-line address follows.
+#[tokio::test]
+async fn staff_correct_a_parents_details_without_overwriting_the_cabinet() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let mother = Uuid::new_v4();
+    let lead_id = minor_lead(
+        &app,
+        json!([{ "id": mother, "name": "Anna Muster", "relation": "mother",
+                 "email": address("anna.details") }]),
+    )
+    .await;
+    let (_, parent) = guardian_login(&app, lead_id, mother).await;
+    let mother_path = format!("/api/v1/me/lead-requests/{lead_id}/representatives/{mother}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &mother_path,
+        &parent,
+        Some(
+            json!({ "street": "Musterweg 1", "zip": "10115", "city": "Berlin",
+                     "country": "DE", "birth_place": "Kyiv" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let staff_path = format!("/api/v1/leads/{lead_id}/representatives/{mother}/details");
+    let staff = app.staff("patient_manager");
+
+    // Staff correct the street; the city is left as loaded.
+    let (status, body) = json_request(
+        router,
+        "PUT",
+        &staff_path,
+        &staff,
+        Some(json!({
+            "values": { "street": "Neue Str. 5", "city": "Berlin" },
+            "base": { "street": "Musterweg 1", "city": "Berlin" },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let person = representative(&body, mother);
+    assert_eq!(person["street"], "Neue Str. 5", "{person}");
+    assert_eq!(person["birth_place"], "Kyiv", "{person}");
+
+    // The parent moves meanwhile; a staff save from the older load keeps it.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &mother_path,
+        &parent,
+        Some(json!({ "city": "Potsdam", "zip": "14467" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "PUT",
+        &staff_path,
+        &staff,
+        Some(json!({
+            "values": { "city": "Berlin", "zip": "10115", "birth_place": "Lviv" },
+            "base": { "city": "Berlin", "zip": "10115", "birth_place": "Kyiv" },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let person = representative(&body, mother);
+    assert_eq!(person["city"], "Potsdam", "{person}");
+    assert_eq!(person["zip"], "14467", "{person}");
+    assert_eq!(person["birth_place"], "Lviv", "{person}");
+
+    // The contact's one-line address follows the parts.
+    let contacts: Value = sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    let entry = contacts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == json!(mother))
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        entry["address"], "Neue Str. 5, 14467 Potsdam, Deutschland",
+        "{entry}"
+    );
+
+    // The cabinet's rules; names and contacts are not changed here.
+    let (status, error) = json_request(
+        router,
+        "PUT",
+        &staff_path,
+        &staff,
+        Some(json!({ "values": { "country": "XX" }, "base": { "country": "DE" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["field"], "country", "{error}");
+    let (status, error) = json_request(
+        router,
+        "PUT",
+        &staff_path,
+        &staff,
+        Some(json!({ "values": { "first_name": "Eve" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+
+    // Staff only; audited once per write.
+    let (status, _) = json_request(
+        router,
+        "PUT",
+        &staff_path,
+        &parent,
+        Some(json!({ "values": { "street": "X" } })),
+    )
+    .await;
+    assert!(
+        status == StatusCode::FORBIDDEN || status == StatusCode::UNAUTHORIZED,
+        "{status}"
+    );
+    let audits = audit_contexts(
+        &app.suite.pool,
+        "update_lead_representative_details",
+        lead_id,
+    )
+    .await;
+    assert_eq!(audits.len(), 2, "{audits:?}");
+    assert_eq!(audits[0]["fields"], json!(["street"]), "{audits:?}");
+}
+
 #[tokio::test]
 async fn both_parents_of_a_minor_are_asked_for_by_default() {
     let Some(app) = test_app().await else { return };

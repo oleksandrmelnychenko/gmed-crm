@@ -89,6 +89,7 @@ import {
   type LeadRequestText,
 } from "./lead-request-text";
 import { useServerDraftSync } from "./lead-request-server-sync";
+import { PERSON_CITY_MAX } from "@/lib/person-fields";
 
 // Who acts for the lead (owner spec "Patientenformular", section 3). An adult
 // says whether somebody acts for him and whether he is under legal
@@ -747,7 +748,7 @@ function RepresentativeBlock({
           <LabeledField {...labeled("street", "sm:col-span-2 lg:col-span-3")}>{textInput("street", 200)}</LabeledField>
         ) : null}
         {asked("zip") ? <LabeledField {...labeled("zip")}>{textInput("zip", 20)}</LabeledField> : null}
-        {asked("city") ? <LabeledField {...labeled("city")}>{textInput("city", 200)}</LabeledField> : null}
+        {asked("city") ? <LabeledField {...labeled("city")}>{textInput("city", PERSON_CITY_MAX)}</LabeledField> : null}
         {asked("country") ? <LabeledField {...labeled("country")}>{countrySelect("country")}</LabeledField> : null}
         {asked("email") ? (
           <LabeledField {...labeled("email", "sm:col-start-1")}>

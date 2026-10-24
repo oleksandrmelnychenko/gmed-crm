@@ -78,6 +78,7 @@ import {
   type RecipientField,
 } from "./lead-request-recipient-model";
 import { payerAnsweredByPayer } from "./lead-request-summary";
+import { PERSON_CITY_MAX } from "@/lib/person-fields";
 import { asLeadCabinetLang, payerFieldLabel, recipientFieldLabel, recipientOptions, type LeadRequestText } from "./lead-request-text";
 
 type Refused = Partial<Record<keyof RecipientDraft, string>>;
@@ -408,7 +409,7 @@ export function InvoiceRecipientSection({
                   )}
                   <LabeledField {...labeled("street", true, "sm:col-span-2 lg:col-span-3")}>{textInput("street", 200)}</LabeledField>
                   <LabeledField {...labeled("zip", true)}>{textInput("zip", 20)}</LabeledField>
-                  <LabeledField {...labeled("city", true)}>{textInput("city", 200)}</LabeledField>
+                  <LabeledField {...labeled("city", true)}>{textInput("city", PERSON_CITY_MAX)}</LabeledField>
                   <LabeledField {...labeled("country", true)}>
                     <CountrySelect
                       value={draft.country || null}

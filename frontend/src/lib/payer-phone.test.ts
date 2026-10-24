@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { isValidPayerPhone, payerPhoneAcceptable } from "./payer-phone";
 
 describe("payer phone rule (owner 2026-10-22)", () => {
-  it("needs six digits and only + ( ) - / and spaces besides them", () => {
-    for (const valid of ["+49 30 1234567", "+49 (151) 123-456", "030/123456", " 0151123456 "]) {
+  it("needs six digits and only + ( ) - / . and spaces besides them (the shared rule, 2026-10-24)", () => {
+    for (const valid of ["+49 30 1234567", "+49 (151) 123-456", "030/123456", " 0151123456 ", "+49.30.123456"]) {
       expect(isValidPayerPhone(valid), valid).toBe(true);
     }
-    for (const invalid of ["", "abc", "+49 12", "12345", "call me 123456", "+49.30.123456"]) {
+    for (const invalid of ["", "abc", "+49 12", "12345", "call me 123456", "0301234567 ext"]) {
       expect(isValidPayerPhone(invalid), invalid).toBe(false);
     }
   });

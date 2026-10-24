@@ -25899,6 +25899,13 @@ async fn load_lead_self_disclosure(
     let follow_up = crate::risk::cabinet::load_statements(&mut conn, lead_id)
         .await
         .map_err(|error| failed(error, "follow-up statements"))?;
+    // Blocks H and J print only next to a "yes" (owner 2026-10-24).
+    let follow_up = crate::risk::cabinet::declared_details(
+        follow_up,
+        statements.pep_self,
+        statements.pep_related,
+        statements.sanctions_links,
+    );
     let declaration = super::lead_payer::load_declaration(&mut conn, lead_id)
         .await
         .map_err(|error| failed(error, "payer declaration"))?;

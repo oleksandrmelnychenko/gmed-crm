@@ -10,6 +10,8 @@
  * contacts staff did not edit.
  */
 
+import { isAdultOn } from "@/lib/person-fields";
+
 /** The relations the wizard offers for a trusted contact, in the order of its list. */
 export const TRUSTED_CONTACT_RELATIONS = ["mother", "father", "guardian", "representative", "spouse", "relative", "other"] as const;
 
@@ -106,6 +108,28 @@ export function guardianRelationOptionLabel(
     default:
       return trustedContactRelationLabel(relation, tx);
   }
+}
+
+/** A parent, guardian or authorised representative: they act for the lead. */
+function actsForLead(relation: string): boolean {
+  return isParentOrGuardianRelation(relation) || relation.trim().toLowerCase() === "representative";
+}
+
+/**
+ * Whether staff save a parent, guardian or representative born less than 18
+ * years ago (owner 2026-10-24: of full age, as in the cabinet; the server's
+ * `TrustedContactIssue::MinorRepresentative`). Checked only when the date or
+ * the role is new or changed, so a stored entry keeps saving.
+ */
+export function representativeMinorOnSave(
+  contact: Pick<TrustedContactDraft, "relation" | "birthDate">,
+  stored: Pick<TrustedContactDraft, "relation" | "birthDate"> | undefined,
+  today: string,
+): boolean {
+  const birthDate = contact.birthDate.trim();
+  if (!birthDate || !actsForLead(contact.relation)) return false;
+  const changed = !stored || stored.birthDate.trim() !== birthDate || actsForLead(stored.relation) !== actsForLead(contact.relation);
+  return changed && !isAdultOn(birthDate, today);
 }
 
 /** The address parts a representative stated in the cabinet (`lead_representatives`). */

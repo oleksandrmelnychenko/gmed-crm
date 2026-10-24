@@ -1014,6 +1014,8 @@ describe("LeadGwgStatements: trigger flow additions", () => {
           stay_reason: "work",
           stay_reason_details: "Projekt in Wien",
           relationship_since: "2010",
+          pep_self: true,
+          sanctions_links: true,
           pep_office: "Bürgermeister",
           pep_country: "at",
           sanctions_link_name: "Beispiel GmbH",

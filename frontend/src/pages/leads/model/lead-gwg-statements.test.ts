@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
 
+describe("the details of blocks H and J", () => {
+  const stated = {
+    pep_self: false as boolean | null,
+    pep_related: true as boolean | null,
+    sanctions_links: true as boolean | null,
+    pep_office: "Bürgermeister",
+    pep_country: "UA",
+    pep_period: "2010–2014",
+    pep_relationship: "Vater",
+    pep_wealth_origin: "Gehalt",
+    sanctions_link_name: "ACME",
+    sanctions_link_kind: "business",
+    sanctions_link_since_extent: "seit 2019",
+    stay_reason: "work",
+  };
+
+  it("show next to a yes only, as the Patientenformular prints them", () => {
+    expect(declaredFollowUpDetails(stated)).toEqual(stated);
+    const own = declaredFollowUpDetails({ ...stated, pep_self: true, pep_related: false, sanctions_links: false });
+    expect(own).toMatchObject({ pep_office: "Bürgermeister", pep_relationship: null, sanctions_link_name: null, sanctions_link_kind: null });
+    const none = declaredFollowUpDetails({ ...stated, pep_related: null, sanctions_links: null });
+    expect(none).toMatchObject({ pep_office: null, pep_country: null, pep_period: null, pep_wealth_origin: null, sanctions_link_since_extent: null, stay_reason: "work" });
+  });
+});
+
 import {
   normalizeLeadPortalBilling,
   normalizeLeadPortalIntake,
@@ -18,6 +43,7 @@ import {
   contactChannelsLabel,
   custodyLabel,
   custodyStatement,
+  declaredFollowUpDetails,
   gwgLegalAnswers,
   hasBillingStatements,
   hasGwgStatements,

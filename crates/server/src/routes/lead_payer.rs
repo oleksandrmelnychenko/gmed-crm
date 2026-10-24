@@ -906,12 +906,31 @@ fn text(value: &Option<String>, max: usize) -> Result<Option<String>, &'static s
     }
 }
 
-/// The payer's phone number: the rule of the lead wizard and the patient
-/// record ([`crate::routes::patients::is_valid_contact_phone`], at least six
-/// digits). The one check for the payer declaration's phone, whoever writes
-/// it (staff form, cabinet, payer link).
+/// The payer's phone number: the shared rule of the cabinet, the wizard and
+/// the invoice recipient ([`crate::services::person_fields::is_valid_phone`]).
+/// The one check for the payer declaration's phone, whoever writes it (staff
+/// form, cabinet, payer link).
 pub(crate) fn is_valid_payer_phone(value: &str) -> bool {
-    crate::routes::patients::is_valid_contact_phone(value.trim())
+    crate::services::person_fields::is_valid_phone(value)
+}
+
+/// A name or city of the payer on one line; a new or changed value must fit
+/// the shared rule (`fits`), a stored one is kept as it is.
+fn person_text(
+    value: &Option<String>,
+    stored: Option<&str>,
+    fits: fn(&str) -> bool,
+) -> Result<Option<String>, &'static str> {
+    let value = value
+        .as_deref()
+        .map(crate::services::person_fields::one_line)
+        .filter(|value| !value.is_empty());
+    match value {
+        Some(value) if crate::services::person_fields::changed(&value, stored) && !fits(&value) => {
+            Err("payer_field_too_long")
+        }
+        value => Ok(value),
+    }
 }
 
 /// Validates and normalizes a submitted declaration. An incomplete
@@ -1010,8 +1029,17 @@ fn declaration_from_input(
             if date_of_birth.is_some_and(|date| date > today) {
                 return Err("payer_date_of_birth_invalid");
             }
-            declaration.first_name = text(&input.first_name, SHORT_TEXT_MAX)?;
-            declaration.last_name = text(&input.last_name, SHORT_TEXT_MAX)?;
+            let name_fits = crate::services::person_fields::name_fits;
+            declaration.first_name = person_text(
+                &input.first_name,
+                previous.and_then(|previous| previous.first_name.as_deref()),
+                name_fits,
+            )?;
+            declaration.last_name = person_text(
+                &input.last_name,
+                previous.and_then(|previous| previous.last_name.as_deref()),
+                name_fits,
+            )?;
             declaration.date_of_birth = date_of_birth;
             declaration.place_of_birth = text(&input.place_of_birth, SHORT_TEXT_MAX)?;
             declaration.citizenships = normalize_citizenships(&input.citizenships)
@@ -1036,7 +1064,11 @@ fn declaration_from_input(
         declaration.payer_type = Some(payer_type);
         declaration.street = text(&input.street, SHORT_TEXT_MAX)?;
         declaration.zip = text(&input.zip, SHORT_TEXT_MAX)?;
-        declaration.city = text(&input.city, SHORT_TEXT_MAX)?;
+        declaration.city = person_text(
+            &input.city,
+            previous.and_then(|previous| previous.city.as_deref()),
+            crate::services::person_fields::city_fits,
+        )?;
         declaration.country = normalize_country_code(input.country.as_deref())
             .map_err(|_| "payer_country_invalid")?;
         // The words describe the kind `other`; with any other kind they go.
@@ -4704,6 +4736,30 @@ mod tests {
         );
         assert!(is_valid_payer_phone(" +43 1 5555 "));
         assert!(!is_valid_payer_phone("abc"));
+        // The shared rule: letters around six digits are no phone number.
+        assert!(!is_valid_payer_phone("tel. 0301234567"));
+    }
+
+    /// Owner 2026-10-24: the payer's names and city follow the shared rule
+    /// (one line, names 100, city 120) when new or changed.
+    #[test]
+    fn the_payers_names_and_city_follow_the_shared_rule() {
+        let mut value = input("third_party");
+        value.first_name = Some("  Anna   Maria ".into());
+        let saved = from_input(&value).unwrap();
+        assert_eq!(saved.first_name.as_deref(), Some("Anna Maria"));
+        value.last_name = Some("x".repeat(101));
+        assert_eq!(from_input(&value), Err("payer_field_too_long"));
+        value = input("third_party");
+        value.city = Some("y".repeat(121));
+        assert_eq!(from_input(&value), Err("payer_field_too_long"));
+        // A longer name stored before still lets the other fields save.
+        let mut stored = from_input(&input("third_party")).unwrap();
+        stored.last_name = Some("x".repeat(150));
+        value = input("third_party");
+        value.last_name = Some("x".repeat(150));
+        value.city = Some("Wien".into());
+        assert!(declaration_from_input(&value, Some(&stored), today()).is_ok());
     }
 
     fn third_party_state(document: CostAssumptionDocument) -> PayerState {
