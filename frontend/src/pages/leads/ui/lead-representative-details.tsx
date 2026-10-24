@@ -270,10 +270,11 @@ export function RepresentativeDetailsFields({
         />
       </div>
       <div className="sm:col-span-2">
-        <span className="mb-1 block text-xs font-medium text-muted-foreground" id={field("citizenships")}>
+        <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor={field("citizenships")}>
           {tx("Гражданства", "Staatsangehörigkeiten")}
-        </span>
+        </label>
         <CitizenshipMultiSelect
+          id={field("citizenships")}
           maxItems={5}
           value={draft.citizenships}
           lang={lang}
