@@ -1814,6 +1814,10 @@ struct LeadContext {
     /// Served by the portal: neither deleted nor converted.
     open: bool,
     request_submitted_at: Option<DateTime<Utc>>,
+    /// Staff fill the request themselves ("Заполняю сам", the wizard's
+    /// default fill mode): their entries stand for the request the lead
+    /// would send from the cabinet (walk-through 2026-10-24).
+    staff_fills: bool,
     declaration: Option<Declaration>,
     /// The organisation mask the lead entered (defaults of the link).
     organisation_mask: OrganisationMask,
@@ -1828,7 +1832,8 @@ async fn load_context(
 ) -> Result<Option<LeadContext>, sqlx::Error> {
     let Some(lead) = sqlx::query(&format!(
         r#"SELECT l.first_name, l.last_name, l.primary_language, l.portal_submitted_at,
-                  l.converted_patient_id, ({PORTAL_LEAD_SQL}) AS open
+                  l.converted_patient_id, ({PORTAL_LEAD_SQL}) AS open,
+                  l.wizard_state->>'step1_fill_mode' AS fill_mode
            FROM leads l
            WHERE l.id = $1"#
     ))
@@ -1868,12 +1873,25 @@ async fn load_context(
             .try_get::<Option<DateTime<Utc>>, _>("portal_submitted_at")
             .ok()
             .flatten(),
+        staff_fills: staff_fill_mode(
+            lead.try_get::<Option<String>, _>("fill_mode")
+                .ok()
+                .flatten()
+                .as_deref(),
+        ),
         declaration,
         organisation_mask,
         loaded,
         statement,
         uploads,
     }))
+}
+
+/// The wizard's step 1 mode as stored: staff fill the data in unless the
+/// patient was chosen ("Заполняю сам" is the default), as for the patient
+/// form (`documents::self_disclosure_source_ready`).
+fn staff_fill_mode(fill_mode: Option<&str>) -> bool {
+    fill_mode.map(str::trim) != Some("patient")
 }
 
 impl LeadContext {
@@ -1921,7 +1939,9 @@ impl LeadContext {
         if !self.open {
             return Some("lead_deleted");
         }
-        if self.request_submitted_at.is_none() {
+        // A lead in the cabinet sends the request first; in mode "Заполняю
+        // сам" staff's entries are that request (walk-through 2026-10-24).
+        if self.request_submitted_at.is_none() && !self.staff_fills {
             return Some("request_not_submitted");
         }
         // A minor's paying parent is the contracting party: no payer's link
@@ -1946,7 +1966,9 @@ impl LeadContext {
         if declaration.contact_consent_at.is_none() {
             return Some("contact_consent_missing");
         }
-        if declaration.contact_consent_at > self.request_submitted_at {
+        // The cabinet's request carries the current consent; staff record
+        // it themselves in mode "Заполняю сам".
+        if !self.staff_fills && declaration.contact_consent_at > self.request_submitted_at {
             return Some("request_not_submitted");
         }
         if !declaration.email.as_deref().is_some_and(is_plausible_email) {
@@ -5689,6 +5711,7 @@ mod tests {
             converted: false,
             open: true,
             request_submitted_at: Some(at - Duration::minutes(1)),
+            staff_fills: false,
             declaration: Some(payer),
             organisation_mask: OrganisationMask::default(),
             loaded: lead_representatives::Loaded::default(),
@@ -5700,6 +5723,18 @@ mod tests {
         assert_eq!(context.blocked_reason(), None);
         context.declaration.as_mut().unwrap().contact_consent_at = None;
         assert_eq!(context.blocked_reason(), Some("contact_consent_missing"));
+
+        // "Заполняю сам" (walk-through 2026-10-24): nothing sent from the
+        // cabinet, staff's entries stand for the request.
+        context.declaration.as_mut().unwrap().contact_consent_at = Some(at);
+        context.request_submitted_at = None;
+        assert_eq!(context.blocked_reason(), Some("request_not_submitted"));
+        context.staff_fills = true;
+        assert_eq!(context.blocked_reason(), None);
+        context.declaration.as_mut().unwrap().email = None;
+        assert_eq!(context.blocked_reason(), Some("payer_email_missing"));
+        assert!(staff_fill_mode(None) && staff_fill_mode(Some("staff")));
+        assert!(!staff_fill_mode(Some("patient")));
     }
 
     #[test]

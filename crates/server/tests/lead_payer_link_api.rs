@@ -361,7 +361,22 @@ async fn lead(app: &PayerApp, tag: &str) -> (Uuid, String) {
         .unwrap()
         .parse()
         .unwrap();
+    // The lead fills the request in the cabinet and sends it.
+    fill_mode(app, lead_id, "patient").await;
     (lead_id, bearer(user_id, "patient"))
+}
+
+/// Step 1 of the wizard: "the patient fills it in" or "Заполняю сам".
+async fn fill_mode(app: &PayerApp, lead_id: Uuid, mode: &str) {
+    let (status, body) = with_login(
+        app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-intake/fill-mode"),
+        &app.manager(),
+        Some(json!({ "mode": mode })),
+    )
+    .await;
+    assert!(status.is_success(), "{status} {body}");
 }
 
 async fn submit_request(app: &PayerApp, lead_id: Uuid) {
@@ -799,6 +814,40 @@ async fn staff_send_the_link_only_through_the_gate_and_resend_or_revoke_it() {
     assert_eq!(body["code"], "link_expired");
     let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
     assert_eq!(info["link"]["status"], "expired", "{info}");
+}
+
+/// Walk-through 2026-10-24: in mode "Заполняю сам" nothing is sent from the
+/// cabinet, so the link could never be sent. Staff's entries stand for the
+/// request there; a lead who fills the cabinet still sends it first.
+#[tokio::test]
+async fn staff_who_fill_the_request_send_the_link_without_a_cabinet_request() {
+    let Some(app) = payer_app().await else { return };
+    let (lead_id, patient) = lead(&app, "staff-fill").await;
+    let path = format!("/api/v1/leads/{lead_id}/payer-link");
+    name_payer(&app, lead_id, &patient, viktor()).await;
+    let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    assert_eq!(info["blocked_reason"], "request_not_submitted", "{info}");
+
+    fill_mode(&app, lead_id, "staff").await;
+    let (status, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert!(info["blocked_reason"].is_null(), "{info}");
+    assert_eq!(info["can_send"], true, "{info}");
+    // The rest of the gate still applies.
+    let mut without_email = viktor();
+    without_email["email"] = Value::Null;
+    name_payer(&app, lead_id, &patient, without_email).await;
+    let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    assert_eq!(info["blocked_reason"], "payer_email_missing", "{info}");
+    name_payer(&app, lead_id, &patient, viktor()).await;
+    let (_, sent) = send_link(&app, lead_id, json!({})).await;
+    assert!(sent["link"].is_object(), "{sent}");
+    assert_eq!(active_links(app.pool(), lead_id).await, 1);
+
+    // Back to the cabinet: the request is sent there first.
+    fill_mode(&app, lead_id, "patient").await;
+    let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    assert_eq!(info["blocked_reason"], "request_not_submitted", "{info}");
 }
 
 #[tokio::test]
