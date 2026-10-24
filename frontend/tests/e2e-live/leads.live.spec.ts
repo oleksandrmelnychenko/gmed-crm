@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import { pickerSection } from "../e2e/helpers";
 
 import {
@@ -6,7 +6,46 @@ import {
   bootstrapAndLogin,
   chooseComboboxOption,
   setGermanLanguage,
+  type LiveApiClient,
 } from "./support/live-helpers";
+
+/**
+ * "Wer zahlt" belongs to every onboarding; the seeded leads leave it open
+ * ("Angaben „Wer zahlt“ ausfüllen" holds back the release). Staff record
+ * that the patient pays himself, on his own account.
+ */
+async function declareSelfPayer(request: APIRequestContext, api: LiveApiClient, leadId: string) {
+  const response = await request.post(`${api.backendUrl}/api/v1/leads/${leadId}/payer-declaration`, {
+    headers: api.headers,
+    data: { payer_kind: "self", acts_on_own_account: true },
+  });
+  expect(response.ok(), `payer declaration: ${await response.text()}`).toBe(true);
+}
+
+/**
+ * Compliance is "signed" only from the signed DSGVO package (since
+ * 2026-10-11): staff generate the consent form and record the scan of the
+ * copy the client signed on paper — never one click.
+ */
+async function recordSignedDsgvoPackage(request: APIRequestContext, api: LiveApiClient, leadId: string) {
+  const generated = await request.post(`${api.backendUrl}/api/v1/documents/generate`, {
+    headers: api.headers,
+    data: { template_id: "privacy_consents", lead_id: leadId, language: "de", status: "active" },
+  });
+  expect(generated.ok(), `consent form: ${await generated.text()}`).toBe(true);
+  const { id } = (await generated.json()) as { id: string };
+  const signed = await request.post(`${api.backendUrl}/api/v1/documents/${id}/paper-signature`, {
+    headers: api.headers,
+    multipart: {
+      file: {
+        name: "einverstaendnis-unterschrieben.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("%PDF-1.4\n% synthetic signed scan\n%%EOF\n"),
+      },
+    },
+  });
+  expect(signed.ok(), `paper signature: ${await signed.text()}`).toBe(true);
+}
 
 function leadCard(page: Page, leadName: string) {
   // Desktop lists leads as table rows, mobile as cards (list items).
@@ -186,8 +225,8 @@ async function saveLeadGateData(
     await selectLeadGateOption(page, sheet, /Geschlecht laut Ausweisdokument|Legal sex/i, /Weiblich|female/i);
     // Compliance is "signed" from the seeded DSGVO signature; staff cannot choose it.
     for (const consent of [
-      /Medizinische Einwilligung liegt vor|Healthcare consent available/i,
-      /Einwilligung zur Bearbeitung der Anfrage|Inquiry processing consent given/i,
+      /Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor/i,
+      /Einwilligung zur Bearbeitung der Anfrage auf Papier erhalten/i,
     ]) {
       await sheet
         .locator("label")
@@ -288,8 +327,9 @@ test.describe("lead live workflows", () => {
     );
     expect(documentsResponse.ok()).toBe(true);
     const leadDocuments = (await documentsResponse.json()) as Array<{ id: string }>;
-    // 3 signed compliance documents + 4 generated commercial documents.
-    expect(leadDocuments).toHaveLength(7);
+    // 3 signed compliance documents, the signed patient form (owner decision
+    // 2026-10-23) and 4 generated commercial documents.
+    expect(leadDocuments).toHaveLength(8);
 
     const pageDocumentsResponse = page.waitForResponse(
       (response) =>
@@ -299,7 +339,7 @@ test.describe("lead live workflows", () => {
     const wizard = await openLeadWizard(page, scenario.leads.ready.name);
     const loadedDocumentsResponse = await pageDocumentsResponse;
     expect(loadedDocumentsResponse.ok()).toBe(true);
-    expect((await loadedDocumentsResponse.json()) as unknown[]).toHaveLength(7);
+    expect((await loadedDocumentsResponse.json()) as unknown[]).toHaveLength(8);
     await expect(wizard.getByText("Versicherung", { exact: true })).toBeVisible();
 
     const desktopBox = await wizard.boundingBox();
@@ -466,6 +506,11 @@ test.describe("lead live workflows", () => {
     );
 
     await saveLeadGateData(page, detailSheet, scenario.leads.blocked.id, "1991-01-01");
+    await declareSelfPayer(
+      request,
+      await authenticateApiClient(request, scenario.credentials.pm.email, scenario.credentials.password),
+      scenario.leads.blocked.id,
+    );
     const wizard = await openLeadReleaseStep(
       page,
       scenario.leads.blocked.name,
@@ -619,6 +664,11 @@ test.describe("lead live workflows", () => {
   }) => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
+    await declareSelfPayer(
+      request,
+      await authenticateApiClient(request, scenario.credentials.pm.email, scenario.credentials.password),
+      scenario.leads.ready.id,
+    );
 
     const wizard = await openLeadReleaseStep(
       page,
@@ -715,6 +765,14 @@ test.describe("lead live workflows", () => {
     );
 
     await saveLeadGateData(page, detailSheet, createdLead.id, "1992-02-02");
+    // Sales neither generate nor record documents: a patient manager records
+    // the signed DSGVO package, which makes the compliance "signed".
+    await recordSignedDsgvoPackage(
+      request,
+      await authenticateApiClient(request, scenario.credentials.pm.email, scenario.credentials.password),
+      createdLead.id,
+    );
+    await page.reload();
     await detailSheet
       .getByRole("button", { name: /Prozess|Process/i })
       .click();
