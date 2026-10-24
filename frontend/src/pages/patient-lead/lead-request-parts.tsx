@@ -130,12 +130,55 @@ export type RequestQueue = <Result>(task: () => Promise<Result>) => Promise<Resu
  */
 export function createRequestQueue(): RequestQueue {
   let tail: Promise<unknown> = Promise.resolve();
-  return (task) => {
-    const run = tail.then(task);
+  // Settles once every write queued so far that is not an upload batch has answered.
+  let writesTail: Promise<unknown> = Promise.resolve();
+  let uploadBatches = 0;
+  const run = <Result,>(task: () => Promise<Result>, upload: boolean) => {
+    const result = tail.then(task);
     // A failed write is the caller's to report; the next one still runs.
-    tail = run.catch(() => undefined);
-    return run;
+    tail = result.catch(() => undefined);
+    if (upload) {
+      uploadBatches += 1;
+      void tail.then(() => { uploadBatches -= 1; });
+    } else {
+      writesTail = tail;
+    }
+    return result;
   };
+  const enqueue: RequestQueue = (task) => run(task, false);
+  queueLanes.set(enqueue, {
+    upload: (task) => run(task, true),
+    read: (task) => writesTail.then(task),
+    uploading: () => uploadBatches > 0,
+  });
+  return enqueue;
+}
+
+type QueueLanes = { upload: RequestQueue; read: RequestQueue; uploading: () => boolean };
+const queueLanes = new WeakMap<RequestQueue, QueueLanes>();
+
+/**
+ * An upload batch in the queue: like any write, but a read through
+ * `readAfterWrites` does not wait for it (a long batch must not keep a part
+ * that is opened again from showing its form).
+ */
+export function enqueueUploadBatch<Result>(enqueue: RequestQueue, task: () => Promise<Result>): Promise<Result> {
+  const lanes = queueLanes.get(enqueue);
+  return lanes ? lanes.upload(task) : enqueue(task);
+}
+
+/**
+ * A read that never overtakes a save still in flight, but passes upload batches.
+ * `uploadsPending` says whether a batch was still running when the read was queued.
+ */
+export async function readAfterWrites<Result>(
+  enqueue: RequestQueue,
+  task: () => Promise<Result>,
+): Promise<{ result: Result; uploadsPending: boolean }> {
+  const lanes = queueLanes.get(enqueue);
+  if (!lanes) return { result: await enqueue(task), uploadsPending: false };
+  const uploadsPending = lanes.uploading();
+  return { result: await lanes.read(task), uploadsPending };
 }
 
 export function useRequestQueue(): RequestQueue {
@@ -684,7 +727,7 @@ export function FileUploadField({
     setUploading(true);
     const nextErrors: string[] = [];
     // Reserve all files together so a follow-up submit cannot split the batch.
-    await enqueue(async () => {
+    await enqueueUploadBatch(enqueue, async () => {
       for (const file of files) {
         if (file.size > 25 * 1024 * 1024) {
           nextErrors.push(text.fileTooLarge(file.name));

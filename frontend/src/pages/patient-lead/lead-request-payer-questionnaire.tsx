@@ -70,6 +70,8 @@ import {
   errorMessage,
   useAutosave,
   runDraftSave,
+  enqueueUploadBatch,
+  readAfterWrites,
   useRequestPatch,
   type RequestQueue,
 } from "./lead-request-parts";
@@ -116,11 +118,23 @@ export function PayerQuestionnaireSection({
 
   const load = useCallback(async () => {
     try {
-      // Through the queue: the read never overtakes a save of the cabinet still in flight.
-      const next = normalizeLeadPayerQuestionnaire(await enqueue(() => fetchLeadPayerQuestionnaire(request.lead_id)));
+      // The read never overtakes a save of the cabinet still in flight, but it does not wait
+      // for a proof upload batch: billing opened again during one shows its form at once
+      // (a send then queues behind the batch).
+      const { result, uploadsPending } = await readAfterWrites(enqueue, () => fetchLeadPayerQuestionnaire(request.lead_id));
+      const next = normalizeLeadPayerQuestionnaire(result);
       if (!next) throw new Error("not a questionnaire");
       setLoadFailed(false);
       apply(next);
+      // The files the batch still uploads: read once more after it.
+      if (uploadsPending) {
+        void enqueue(() => fetchLeadPayerQuestionnaire(request.lead_id))
+          .then((later) => {
+            const refreshed = normalizeLeadPayerQuestionnaire(later);
+            if (refreshed) apply(refreshed);
+          })
+          .catch(() => undefined);
+      }
       return next;
     } catch {
       setLoadFailed(true);
@@ -342,7 +356,7 @@ function PayerQuestionnaireForm({
     if (files.length === 0) return;
     setUploading(true);
     const nextErrors: string[] = [];
-    await enqueue(async () => {
+    await enqueueUploadBatch(enqueue, async () => {
       for (const file of files) {
         if (file.size > MAX_UPLOAD_BYTES) {
           nextErrors.push(text.fileTooLarge(file.name));
