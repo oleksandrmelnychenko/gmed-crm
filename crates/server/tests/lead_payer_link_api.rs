@@ -62,6 +62,18 @@ struct FakeMittaro {
     received: Arc<Mutex<Vec<Value>>>,
     accepted: Arc<Mutex<HashMap<String, String>>>,
     fail: Arc<AtomicBool>,
+    /// The delivery status reported per message id (`GET /v1/emails/{id}`).
+    statuses: Arc<Mutex<HashMap<String, Value>>>,
+}
+
+async fn fake_status(
+    State(fake): State<FakeMittaro>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    match fake.statuses.lock().unwrap().get(&id) {
+        Some(status) => axum::Json(status.clone()).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn fake_send(
@@ -100,6 +112,7 @@ async fn start_fake_mittaro() -> (String, FakeMittaro) {
     let fake = FakeMittaro::default();
     let router = Router::new()
         .route("/v1/emails", post(fake_send))
+        .route("/v1/emails/{id}", axum::routing::get(fake_status))
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -114,6 +127,8 @@ struct PayerApp {
     app: Router,
     fake: FakeMittaro,
     users: Vec<(&'static str, Uuid)>,
+    /// The state with the stand-in mailer, for the delivery sync.
+    state: gmed_server::state::AppState,
 }
 
 impl PayerApp {
@@ -203,12 +218,13 @@ async fn payer_app() -> Option<PayerApp> {
         reply_to: None,
         console_url: Some("https://console.gmed-health.test".into()),
     });
-    let app = gmed_server::build_app_for_role_contract_tests(state);
+    let app = gmed_server::build_app_for_role_contract_tests(state.clone());
     Some(PayerApp {
         suite,
         app,
         fake,
         users,
+        state,
     })
 }
 
@@ -2479,4 +2495,141 @@ async fn issuing_a_paying_parent_cabinet_login_revokes_an_older_payer_link() {
     let (status, rejected) = as_payer(&app, "POST", CODE, &[("X-Payer-Link", &token)], None).await;
     assert_eq!(status, StatusCode::GONE, "{rejected}");
     assert_eq!(rejected["code"], "link_revoked", "{rejected}");
+}
+
+/// The payer's invitation and code are followed like the sign-in e-mails
+/// (owner request 2026-10-24): a bounce is stored and told once to the staff
+/// member who sent the link, also for the code the payer asked for, without
+/// the payer's address or name.
+#[tokio::test]
+async fn an_undelivered_payer_e_mail_is_told_once_to_who_sent_the_link() {
+    let Some(app) = payer_app().await else { return };
+    let (lead_id, _) = lead_with_payer(&app, "bounce").await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let (status, body) = as_payer(&app, "POST", CODE, &[("X-Payer-Link", &token)], None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let message = |kind: &'static str| {
+        let pool = app.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, String>(
+                "SELECT provider_message_id FROM lead_payer_link_emails
+                 WHERE lead_id = $1 AND kind = $2 AND status = 'sent'",
+            )
+            .bind(lead_id)
+            .bind(kind)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let invitation = message("invitation").await;
+    let code = message("code").await;
+    {
+        let mut statuses = app.fake.statuses.lock().unwrap();
+        statuses.insert(
+            invitation.clone(),
+            json!({ "id": invitation, "status": "delivered" }),
+        );
+        statuses.insert(
+            code.clone(),
+            json!({ "id": code, "status": "bounced", "smtp_code": "550" }),
+        );
+    }
+    // Other tests of this binary send e-mails too: sync until ours settled.
+    for _ in 0..20 {
+        gmed_server::mail::delivery::sync_due(&app.state).await;
+        let open: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM lead_payer_link_emails
+             WHERE lead_id = $1 AND status = 'sent' AND NOT delivery_final",
+        )
+        .bind(lead_id)
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+        if open == 0 {
+            break;
+        }
+    }
+    let stored: Vec<(String, Option<String>, bool)> = sqlx::query_as(
+        "SELECT kind, delivery_status, delivery_final FROM lead_payer_link_emails
+         WHERE lead_id = $1 AND status = 'sent' ORDER BY kind",
+    )
+    .bind(lead_id)
+    .fetch_all(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        stored,
+        vec![
+            ("code".to_string(), Some("bounced".to_string()), true),
+            (
+                "invitation".to_string(),
+                Some("delivered".to_string()),
+                true
+            ),
+        ]
+    );
+    let manager_id = app
+        .users
+        .iter()
+        .find(|(role, _)| *role == "patient_manager")
+        .unwrap()
+        .1;
+    let notices: Vec<(Uuid, String, Option<String>, Option<Value>)> = sqlx::query_as(
+        "SELECT user_id, title, body, params FROM user_notifications
+         WHERE kind = 'payer_link_email_undelivered' AND entity_type = 'lead' AND entity_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_all(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].0, manager_id);
+    assert_eq!(
+        notices[0].3,
+        Some(json!({ "email": "code", "delivery_status": "bounced" }))
+    );
+    let shown = format!("{} {:?}", notices[0].1, notices[0].2);
+    assert!(
+        !shown.contains("viktor") && !shown.contains("Zahler"),
+        "{shown}"
+    );
+
+    // A later problem word of the same message adds no second notice.
+    sqlx::query(
+        "UPDATE lead_payer_link_emails SET delivery_final = false, delivery_checked_at = NULL
+         WHERE lead_id = $1 AND kind = 'code'",
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    app.fake
+        .statuses
+        .lock()
+        .unwrap()
+        .insert(code.clone(), json!({ "id": code, "status": "complained" }));
+    for _ in 0..20 {
+        gmed_server::mail::delivery::sync_due(&app.state).await;
+        let status: Option<String> = sqlx::query_scalar(
+            "SELECT delivery_status FROM lead_payer_link_emails
+             WHERE lead_id = $1 AND kind = 'code' AND status = 'sent'",
+        )
+        .bind(lead_id)
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+        if status.as_deref() == Some("complained") {
+            break;
+        }
+    }
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications
+         WHERE kind = 'payer_link_email_undelivered' AND entity_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(count, 1);
 }

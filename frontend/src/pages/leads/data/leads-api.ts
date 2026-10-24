@@ -165,8 +165,13 @@ function loginEmailPath(target: PortalLoginTarget) {
   return `/${target.kind === "patient" ? "patients" : "leads"}/${target.id}/portal-login-email`;
 }
 
-export function fetchPortalLoginEmails(target: PortalLoginTarget) {
-  return apiFetch<LeadLoginEmailInfo>(loginEmailPath(target));
+/**
+ * `userId`: the login the dialog shows; for a parent's login the server
+ * answers with the parent's own language as `default_language`.
+ */
+export function fetchPortalLoginEmails(target: PortalLoginTarget, userId?: string) {
+  const query = target.kind === "lead" && userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+  return apiFetch<LeadLoginEmailInfo>(`${loginEmailPath(target)}${query}`);
 }
 
 export function sendPortalLoginEmail(

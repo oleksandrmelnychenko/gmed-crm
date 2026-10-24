@@ -520,6 +520,29 @@ async fn the_delivery_status_is_read_back_from_mittaro_and_shown_with_the_login(
     .unwrap();
     assert!(final_);
     assert_eq!(smtp_code.as_deref(), Some("550"));
+    // The manager who sent it is told once, without the address.
+    let notices: Vec<(Uuid, Option<String>, Option<Value>)> = sqlx::query_as(
+        "SELECT user_id, body, params FROM user_notifications
+         WHERE kind = 'login_email_undelivered' AND entity_type = 'lead' AND entity_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].0, manager_id);
+    assert_eq!(
+        notices[0].2,
+        Some(json!({ "email": "login", "delivery_status": "bounced" }))
+    );
+    assert!(
+        !notices[0]
+            .1
+            .clone()
+            .unwrap_or_default()
+            .contains("deliverytest"),
+        "{notices:?}"
+    );
 
     // A settled message is never asked about again.
     sqlx::query("UPDATE portal_login_emails SET delivery_checked_at = NULL WHERE lead_id = $1")
@@ -805,4 +828,105 @@ async fn a_replay_of_a_message_logged_as_failed_is_logged_as_sent() {
         "{rows:?}"
     );
     assert_eq!(rows.len(), 2, "{rows:?}");
+}
+
+/// A parent's sign-in e-mail uses the parent's own language when known (the
+/// portal language the parent chose), else the child's request language.
+#[tokio::test]
+async fn a_parent_s_login_e_mail_defaults_to_the_parent_s_language() {
+    let Some(suite) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let manager_id = seed_user(pool, &format!("login-parent-{tag}"), "patient_manager").await;
+    let manager = bearer(manager_id, "patient_manager");
+    let (api_url, fake) = start_fake_mittaro().await;
+    let state = suite.state.clone().with_mailer(MailConfig {
+        mittaro_api_key: Some(SecretString::from("tx_live_test")),
+        mittaro_api_url: Some(api_url),
+        from: Some("zugang@gmed-health.test".into()),
+        reply_to: None,
+        console_url: Some("https://console.gmed-health.test".into()),
+    });
+    let app = gmed_server::build_app_for_role_contract_tests(state).layer(Extension(ConnectInfo(
+        SocketAddr::from(([127, 0, 0, 1], 41004)),
+    )));
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &manager,
+        Some(json!({
+            "first_name": "Kira",
+            "last_name": "Parenttest",
+            "email": format!("kira.parent.{tag}@example.com"),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let contact_id = Uuid::new_v4();
+    let parent_email = format!("parent.{tag}@example.com");
+    sqlx::query(
+        "UPDATE leads SET primary_language = 'uk',
+                date_of_birth = (CURRENT_DATE - INTERVAL '10 years')::date,
+                trusted_contacts = $2
+         WHERE id = $1",
+    )
+    .bind(lead_id)
+    .bind(json!([{ "id": contact_id, "name": "Oksana Parenttest", "relation": "mother", "email": parent_email }]))
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, issued) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-guardians"),
+        &manager,
+        Some(json!({ "trusted_contact_id": contact_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let parent_id: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let password = issued["one_time_password"].as_str().unwrap().to_string();
+    let path = format!("/api/v1/leads/{lead_id}/portal-login-email");
+    let parent_path = format!("{path}?user_id={parent_id}");
+
+    // Nothing known about the parent: the request's language.
+    let (_, info) = json_request(&app, "GET", &parent_path, &manager, None).await;
+    assert_eq!(info["default_language"], "uk", "{info}");
+    assert_eq!(info["lead_language"], "uk", "{info}");
+
+    // The parent chose Russian for the portal: that is the default now.
+    sqlx::query("UPDATE users SET preferred_language = 'ru' WHERE id = $1")
+        .bind(parent_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (_, info) = json_request(&app, "GET", &parent_path, &manager, None).await;
+    assert_eq!(info["default_language"], "ru", "{info}");
+    assert_eq!(info["lead_language"], "uk", "{info}");
+    // Without the login, or for a login that is not a parent's: the request's.
+    let (_, info) = json_request(&app, "GET", &path, &manager, None).await;
+    assert_eq!(info["default_language"], "uk", "{info}");
+    let other_path = format!("{path}?user_id={manager_id}");
+    let (_, info) = json_request(&app, "GET", &other_path, &manager, None).await;
+    assert_eq!(info["default_language"], "uk", "{info}");
+
+    // A send without a language goes out in the parent's.
+    let (status, sent) = json_request(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({ "user_id": parent_id, "password": password })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert_eq!(sent["language"], "ru", "{sent}");
+    assert_eq!(
+        fake.received.lock().unwrap().last().unwrap().1["subject"],
+        "Ваш доступ в портал пациента GMED"
+    );
 }

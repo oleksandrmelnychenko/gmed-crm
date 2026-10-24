@@ -4381,6 +4381,85 @@ async fn a_retention_warning_reaches_staff_when_the_creator_left() {
     );
 }
 
+/// The warning marker and the notices are stored together: when a notice
+/// cannot be stored, the lead is not marked as warned and the next sweep
+/// warns it.
+#[tokio::test]
+async fn a_failed_retention_notice_leaves_the_lead_to_be_warned_again() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let policy = gmed_server::routes::leads::UnqualifiedLeadRetention {
+        days: 14,
+        effective_at: chrono::Utc::now() - chrono::Duration::days(90),
+    };
+    let lead = insert_unqualified_lead(&app, &format!("{tag}-atomic"), 12).await;
+    // A notice for this one lead fails (scoped, so parallel tests go on).
+    let function = format!("fail_notice_{tag}");
+    sqlx::query(&format!(
+        r#"CREATE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$
+           BEGIN
+               IF NEW.entity_id = '{lead}'::uuid THEN
+                   RAISE EXCEPTION 'synthetic notice failure';
+               END IF;
+               RETURN NEW;
+           END $$"#
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(&format!(
+        "CREATE TRIGGER {function} BEFORE INSERT ON user_notifications
+         FOR EACH ROW EXECUTE FUNCTION {function}()"
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+    let failed = gmed_server::routes::leads::purge_unqualified_leads(
+        &app.suite.state,
+        policy,
+        chrono::Utc::now(),
+        Some(&[lead]),
+    )
+    .await;
+    sqlx::query(&format!("DROP TRIGGER {function} ON user_notifications"))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(&format!("DROP FUNCTION {function}()"))
+        .execute(pool)
+        .await
+        .unwrap();
+    let marked: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT retention_warning_sent_at FROM leads WHERE id = $1")
+            .bind(lead)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(marked.is_none(), "{failed:?}");
+
+    let report = gmed_server::routes::leads::purge_unqualified_leads(
+        &app.suite.state,
+        policy,
+        chrono::Utc::now(),
+        Some(&[lead]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.warned, 1, "{report:?}");
+    let notices: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications
+         WHERE kind = 'lead_retention_warning' AND entity_id = $1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(notices > 0);
+}
+
 /// QA B-18 a (decision 2026-10-11): a repeat intake of an existing patient
 /// with a valid signed DSGVO consent is not purged after 14 days and shows no
 /// deadline; without such a consent (never signed, or withdrawn) the rule

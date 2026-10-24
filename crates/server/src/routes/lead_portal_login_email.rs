@@ -136,6 +136,7 @@ async fn login_email_info(
     auth: &AuthUser,
     subject: Subject,
     default_language: Option<String>,
+    lead_language: Option<String>,
 ) -> axum::response::Response {
     let history = match login_email_history(&state.db, subject).await {
         Ok(history) => history,
@@ -149,26 +150,60 @@ async fn login_email_info(
             reason_code: code,
         },
     };
-    let language = default_language
-        .as_deref()
-        .map(|code| MailLanguage::from_code(Some(code)).code());
+    let mail_language =
+        |code: Option<String>| code.map(|code| MailLanguage::from_code(Some(&code)).code());
     Json(json!({
         "available": capability.available,
         "reason_code": capability.reason_code,
         "can_send": may_issue_portal_password(auth.role),
-        // The language the e-mail uses unless the dialog picks another one.
-        "default_language": language,
-        "lead_language": language,
+        // The language the e-mail uses unless the dialog picks another one:
+        // for a parent's login the parent's own language when known.
+        "default_language": mail_language(default_language),
+        "lead_language": mail_language(lead_language),
         "sent": history,
     }))
     .into_response()
 }
 
 /// `GET /leads/{id}/portal-login-email`.
+#[derive(Deserialize, Default)]
+struct LoginEmailQuery {
+    /// The login the dialog shows: a parent's login gets the parent's language.
+    #[serde(default)]
+    user_id: Option<Uuid>,
+}
+
+/// The language of a parent's login, when known: the language the parent
+/// chose for the portal, else the language of the parent's own most recent
+/// request. `None` falls back to the child's request language.
+async fn guardian_language(
+    db: &gmed_db::DbPool,
+    user_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<String>>(
+        r#"SELECT COALESCE(
+               (SELECT NULLIF(btrim(preferred_language), '') FROM users WHERE id = $1),
+               (SELECT NULLIF(btrim(l.primary_language), '') FROM leads l
+                WHERE l.portal_user_id = $1 AND l.qualification_status <> 'deleted'
+                  AND NULLIF(btrim(l.primary_language), '') IS NOT NULL
+                ORDER BY l.created_at DESC LIMIT 1)
+           )"#,
+    )
+    .bind(user_id)
+    .fetch_one(db)
+    .await
+}
+
+/// A parent's language for the e-mail, else the request's language.
+fn login_language(guardian: Option<String>, lead: Option<String>) -> Option<String> {
+    guardian.or(lead)
+}
+
 async fn get_login_emails(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
+    axum::extract::Query(query): axum::extract::Query<LoginEmailQuery>,
 ) -> axum::response::Response {
     if let Err(response) = auth.require_capability(Capability::LeadsView) {
         return response;
@@ -184,7 +219,37 @@ async fn get_login_emails(
         Ok(None) => return coded(StatusCode::NOT_FOUND, "lead_not_found", "Lead not found"),
         Err(error) => return internal(error, lead_id, "lead language"),
     };
-    login_email_info(&state, &auth, Subject::Lead(lead_id), primary_language).await
+    // Only a login that is a parent's active access to this request.
+    let guardian = match query.user_id {
+        Some(user_id) => {
+            let is_guardian = sqlx::query_scalar::<_, bool>(
+                r#"SELECT EXISTS(SELECT 1 FROM lead_portal_access
+                   WHERE lead_id = $1 AND user_id = $2 AND kind = 'guardian'
+                     AND revoked_at IS NULL)"#,
+            )
+            .bind(lead_id)
+            .bind(user_id)
+            .fetch_one(&state.db)
+            .await;
+            match is_guardian {
+                Ok(true) => match guardian_language(&state.db, user_id).await {
+                    Ok(language) => language,
+                    Err(error) => return internal(error, lead_id, "parent language"),
+                },
+                Ok(false) => None,
+                Err(error) => return internal(error, lead_id, "parent access"),
+            }
+        }
+        None => None,
+    };
+    login_email_info(
+        &state,
+        &auth,
+        Subject::Lead(lead_id),
+        login_language(guardian, primary_language.clone()),
+        primary_language,
+    )
+    .await
 }
 
 /// The name a login e-mail greets: the account's name, none when the account
@@ -263,6 +328,7 @@ async fn get_patient_login_emails(
         &state,
         &auth,
         Subject::Patient(patient_id),
+        patient_language(&languages),
         patient_language(&languages),
     )
     .await
@@ -413,6 +479,15 @@ async fn send_login_email(
         Ok(hash) => hash,
         Err(error) => return internal(error, lead_id, "read hash"),
     };
+    let lead_language: Option<String> = row.try_get("primary_language").ok().flatten();
+    let default_language = if own_login {
+        lead_language
+    } else {
+        match guardian_language(&state.db, body.user_id).await {
+            Ok(guardian) => login_language(guardian, lead_language),
+            Err(error) => return internal(error, lead_id, "parent language"),
+        }
+    };
     deliver(
         &state,
         &auth,
@@ -433,7 +508,7 @@ async fn send_login_email(
             is_active: row.try_get::<bool, _>("is_active").unwrap_or(false),
             password_hash,
             recipient_name,
-            default_language: row.try_get("primary_language").ok().flatten(),
+            default_language,
             complete_by,
         },
     )
@@ -723,6 +798,19 @@ mod tests {
         assert_eq!(greeting_name(" Sofia Muster "), "Sofia Muster");
         assert_eq!(greeting_name("sofia.muster@example.com"), "");
         assert_eq!(greeting_name(""), "");
+    }
+
+    #[test]
+    fn a_parent_s_own_language_wins_over_the_request_s() {
+        assert_eq!(
+            login_language(Some("ru".into()), Some("de".into())).as_deref(),
+            Some("ru")
+        );
+        assert_eq!(
+            login_language(None, Some("uk".into())).as_deref(),
+            Some("uk")
+        );
+        assert_eq!(login_language(None, None), None);
     }
 
     #[test]

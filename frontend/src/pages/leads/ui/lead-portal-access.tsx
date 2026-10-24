@@ -647,7 +647,7 @@ function PortalCredentialsContent({
   useEffect(() => {
     if (!targetKind || !targetId || !userId) return;
     let cancelled = false;
-    fetchPortalLoginEmails({ kind: targetKind, id: targetId })
+    fetchPortalLoginEmails({ kind: targetKind, id: targetId }, userId)
       .then((info) => {
         if (!cancelled) setEmailInfo(info);
       })

@@ -11095,7 +11095,7 @@ async fn purge_unqualified_lead(
 /// deactivated meanwhile) every patient manager and CEO, so the one-time
 /// warning never goes to nobody.
 async fn unqualified_lead_recipients(
-    pool: &gmed_db::DbPool,
+    conn: &mut sqlx::PgConnection,
     created_by: Option<Uuid>,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
     sqlx::query_scalar(
@@ -11116,20 +11116,23 @@ async fn unqualified_lead_recipients(
            ORDER BY created_at"#,
     )
     .bind(created_by)
-    .fetch_all(pool)
+    .fetch_all(conn)
     .await
 }
 
 /// Stores a notification about a lead without naming the person: the row
 /// outlives nothing it should not, and the lead purge deletes it anyway.
-async fn notify_about_lead_retention(
-    state: &crate::state::AppState,
+/// Returns `(recipient, notification id)` for the realtime events, which the
+/// caller publishes after its commit.
+async fn store_lead_retention_notices(
+    conn: &mut sqlx::PgConnection,
     recipients: &[Uuid],
     kind: &str,
     title: &str,
     body: &str,
     lead_id: Uuid,
-) -> Result<(), sqlx::Error> {
+) -> Result<Vec<(Uuid, Uuid)>, sqlx::Error> {
+    let mut stored = Vec::with_capacity(recipients.len());
     for recipient in recipients {
         let notification_id: Uuid = sqlx::query_scalar(
             r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
@@ -11141,37 +11144,62 @@ async fn notify_about_lead_retention(
         .bind(title)
         .bind(body)
         .bind(lead_id)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *conn)
         .await?;
+        stored.push((*recipient, notification_id));
+    }
+    Ok(stored)
+}
+
+async fn publish_lead_retention_notices(
+    state: &crate::state::AppState,
+    lead_id: Uuid,
+    stored: &[(Uuid, Uuid)],
+) {
+    for (recipient, notification_id) in stored {
         crate::realtime::publish_notification_event(
             state,
             *recipient,
             "notification.created",
-            Some(notification_id),
+            Some(*notification_id),
             json!({ "entity_type": "lead", "entity_id": lead_id }),
         )
         .await;
     }
-    Ok(())
 }
 
-/// Warn once, [`UNQUALIFIED_LEAD_WARNING_DAYS`] before the deadline. Returns
-/// the number of leads warned about.
+/// Warn once, [`UNQUALIFIED_LEAD_WARNING_DAYS`] before the deadline. Each
+/// lead in its own transaction: the warning marker is set together with the
+/// notifications, so a failed insert leaves the lead to be warned on the next
+/// sweep instead of marked as warned without a notice. Returns the number of
+/// leads warned about.
 async fn warn_about_unqualified_lead_deadlines(
     state: &crate::state::AppState,
     policy: UnqualifiedLeadRetention,
     now: chrono::DateTime<chrono::Utc>,
     only: Option<&[Uuid]>,
 ) -> Result<u64, sqlx::Error> {
-    let due_soon = sqlx::query(&format!(
-        r#"UPDATE leads AS l
-           SET retention_warning_sent_at = $3
+    let due_soon_sql = |lead_filter: &str| {
+        format!(
+            r#"UPDATE leads AS l
+               SET retention_warning_sent_at = $3
+               WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
+                 AND l.retention_warning_sent_at IS NULL
+                 AND {UNQUALIFIED_LEAD_DEADLINE_SQL} > $3
+                 AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3 + make_interval(days => $6::int)
+                 AND {lead_filter}
+               RETURNING l.id, l.created_by, {UNQUALIFIED_LEAD_DEADLINE_SQL} AS deadline"#
+        )
+    };
+    // The candidates without a change; each is re-checked under its update.
+    let candidates: Vec<Uuid> = sqlx::query_scalar(&format!(
+        r#"SELECT l.id FROM leads AS l
            WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
              AND l.retention_warning_sent_at IS NULL
              AND {UNQUALIFIED_LEAD_DEADLINE_SQL} > $3
              AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3 + make_interval(days => $6::int)
              AND ($5::uuid[] IS NULL OR l.id = ANY($5))
-           RETURNING l.id, l.created_by, {UNQUALIFIED_LEAD_DEADLINE_SQL} AS deadline"#
+           ORDER BY l.id"#
     ))
     .bind(policy.days as i32)
     .bind(policy.effective_at)
@@ -11182,13 +11210,27 @@ async fn warn_about_unqualified_lead_deadlines(
     .fetch_all(&state.db)
     .await?;
 
-    for row in &due_soon {
+    let mut warned = 0;
+    for candidate in candidates {
+        let mut tx = state.db.begin().await?;
+        let Some(row) = sqlx::query(&due_soon_sql("l.id = $5"))
+            .bind(policy.days as i32)
+            .bind(policy.effective_at)
+            .bind(now)
+            .bind(ANONYMIZED_FIRST_NAME)
+            .bind(candidate)
+            .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
+            .fetch_optional(&mut *tx)
+            .await?
+        else {
+            continue;
+        };
         let lead_id: Uuid = row.try_get("id")?;
         let deadline: chrono::DateTime<chrono::Utc> = row.try_get("deadline")?;
-        let recipients = unqualified_lead_recipients(&state.db, row.try_get("created_by")?).await?;
+        let recipients = unqualified_lead_recipients(&mut tx, row.try_get("created_by")?).await?;
         // The frontend shows these facts in RU/DE (topbar-data.ts).
-        notify_about_lead_retention(
-            state,
+        let stored = store_lead_retention_notices(
+            &mut tx,
             &recipients,
             "lead_retention_warning",
             "Lead will be deleted automatically",
@@ -11200,8 +11242,11 @@ async fn warn_about_unqualified_lead_deadlines(
             lead_id,
         )
         .await?;
+        tx.commit().await?;
+        publish_lead_retention_notices(state, lead_id, &stored).await;
+        warned += 1;
     }
-    Ok(due_soon.len() as u64)
+    Ok(warned)
 }
 
 /// A due lead that cannot be deleted automatically needs a manual decision.
@@ -11225,16 +11270,20 @@ async fn notify_unqualified_lead_purge_blocked(
     if already_told {
         return Ok(());
     }
-    let recipients = unqualified_lead_recipients(&state.db, None).await?;
-    notify_about_lead_retention(
-        state,
+    let mut tx = state.db.begin().await?;
+    let recipients = unqualified_lead_recipients(&mut tx, None).await?;
+    let stored = store_lead_retention_notices(
+        &mut tx,
         &recipients,
         "lead_retention_blocked",
         "Lead is due for deletion and needs a decision",
         "It has an order with an invoice or an order that could not be withdrawn.",
         lead_id,
     )
-    .await
+    .await?;
+    tx.commit().await?;
+    publish_lead_retention_notices(state, lead_id, &stored).await;
+    Ok(())
 }
 
 #[cfg(test)]

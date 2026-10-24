@@ -88,6 +88,30 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
     }
   });
 
+  it("words an undelivered sign-in or payer e-mail without the address", () => {
+    const login = notice("login_email_undelivered", "Sign-in e-mail not delivered", "x", {
+      email: "login",
+      delivery_status: "bounced",
+    });
+    expect(notificationCopyFromFacts(login, "ru")).toEqual({
+      title: "Письмо с доступом не доставлено",
+      body: "Адрес не принял письмо. Проверьте адрес или передайте доступ другим способом.",
+    });
+    const code = notice("payer_link_email_undelivered", "E-mail to the payer not delivered", "x", {
+      email: "code",
+      delivery_status: "complained",
+    });
+    expect(notificationCopyFromFacts(code, "de")?.title).toBe("Bestätigungscode an den Zahler nicht zugestellt");
+    expect(notificationCopyFromFacts(code, "de")?.body).toContain("Spam");
+    const invitation = notice("payer_link_email_undelivered", "E-mail to the payer not delivered", "x", {
+      email: "invitation",
+      delivery_status: "unexpected",
+    });
+    expect(notificationCopyFromFacts(invitation, "ru")?.body).toBe(
+      "Проверьте адрес плательщика и отправьте ссылку ещё раз.",
+    );
+  });
+
   it("words a security incident with the Berlin deadline", () => {
     const item = notice(
       "security_incident",

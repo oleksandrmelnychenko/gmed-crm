@@ -158,6 +158,36 @@ const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
   },
 };
 
+const DELIVERY_PROBLEM: Record<string, Texts> = {
+  bounced: { ru: "адрес не принял письмо", de: "die Adresse hat die E-Mail abgewiesen" },
+  failed: { ru: "ошибка отправки", de: "Versandfehler" },
+  suppressed: { ru: "адрес заблокирован у почтового сервиса", de: "die Adresse ist beim Versanddienst gesperrt" },
+  complained: { ru: "письмо отмечено как спам", de: "die E-Mail wurde als Spam gemeldet" },
+};
+
+// A sign-in or payer-link e-mail did not arrive (crates/server/src/mail/delivery.rs).
+function emailUndelivered(item: NotificationFacts, lang: Lang): NotificationCopy {
+  const status = text(item, "delivery_status");
+  const reason = status && DELIVERY_PROBLEM[status] ? pick(DELIVERY_PROBLEM[status], lang) : null;
+  const email = text(item, "email");
+  const payer = item.kind === "payer_link_email_undelivered";
+  const title = payer
+    ? email === "code"
+      ? pick({ ru: "Код плательщику не доставлен", de: "Bestätigungscode an den Zahler nicht zugestellt" }, lang)
+      : pick({ ru: "Письмо плательщику не доставлено", de: "E-Mail an den Zahler nicht zugestellt" }, lang)
+    : pick({ ru: "Письмо с доступом не доставлено", de: "E-Mail mit den Zugangsdaten nicht zugestellt" }, lang);
+  const action = payer
+    ? pick({
+        ru: "Проверьте адрес плательщика и отправьте ссылку ещё раз.",
+        de: "Bitte die Adresse des Zahlers prüfen und den Link erneut senden.",
+      }, lang)
+    : pick({
+        ru: "Проверьте адрес или передайте доступ другим способом.",
+        de: "Bitte die Adresse prüfen oder den Zugang auf anderem Weg übergeben.",
+      }, lang);
+  return { title, body: reason ? `${reason[0].toUpperCase()}${reason.slice(1)}. ${action}` : action };
+}
+
 function leadPayerSubmitted(item: NotificationFacts, lang: Lang): NotificationCopy {
   const level = text(item, "level") ?? legacy(item.body, /check level (\d+)/)?.[1] ?? null;
   return {
@@ -705,6 +735,9 @@ export function notificationCopyFromFacts(
       return newLead(item, lang);
     case "lead_payer_submitted":
       return leadPayerSubmitted(item, lang);
+    case "login_email_undelivered":
+    case "payer_link_email_undelivered":
+      return emailUndelivered(item, lang);
     case "security_incident":
       return securityIncident(item, lang);
     case "privacy_request":
