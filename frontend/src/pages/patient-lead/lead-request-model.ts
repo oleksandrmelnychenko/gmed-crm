@@ -962,6 +962,22 @@ export function withContactChannel(draft: IdentificationDraft, channel: ContactC
   return { ...draft, contact_channels: contactChannels(chosen ? [...rest, channel] : rest) };
 }
 
+/**
+ * The draft after one statement changed. The words on the reason of the stay
+ * belong to "other" only (asked only then): with another reason they go, as
+ * for a parent's answers and on the server — the staff view and the
+ * Patientenformular printed "Arbeit – <old words>" before.
+ */
+export function withIdentificationField<Field extends IdentificationField>(
+  draft: IdentificationDraft,
+  field: Field,
+  value: IdentificationDraft[Field],
+): IdentificationDraft {
+  const next = { ...draft, [field]: value };
+  if (field === "stay_reason" && next.stay_reason !== "other") next.stay_reason_details = "";
+  return next;
+}
+
 /** The comparable form of a field: what would be sent, as text. */
 export function identificationValue(field: IdentificationField, draft: IdentificationDraft): string {
   if (field === "contact_channels") return contactChannels(draft.contact_channels).join(",");

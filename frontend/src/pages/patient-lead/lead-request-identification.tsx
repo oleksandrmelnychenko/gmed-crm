@@ -35,6 +35,7 @@ import {
   identificationValue,
   stillRejectedIdentification,
   withContactChannel,
+  withIdentificationField,
   withLegalAnswer,
   withRejectedIdentification,
   type IdentificationDraft,
@@ -162,7 +163,7 @@ export function useIdentificationForm({
 
   return {
     draft,
-    set: (field, value) => setDraft((current) => ({ ...current, [field]: value })),
+    set: (field, value) => setDraft((current) => withIdentificationField(current, field, value)),
     update: (change) => setDraft(change),
     errorFor: (field) => {
       // The message belongs to the refused value: it goes as soon as the patient changes it.

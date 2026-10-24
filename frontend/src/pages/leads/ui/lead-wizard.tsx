@@ -130,6 +130,7 @@ import {
   isParentOrGuardianRelation,
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
+  representativeCabinetAddress,
   storedTrustedContactDrafts,
   guardianRelationOptionLabel,
   trustedContactRelationLabel,
@@ -11014,13 +11015,35 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchTrustedContactEditor("birthDate", event.target.value)}
                     />
                   </Field>
-                  <Field className="sm:col-span-2" label={tx("Адрес", "Adresse")}>
-                    <Input
-                      className={inputClass}
-                      value={trustedContactEditor.address}
-                      onChange={(event) => patchTrustedContactEditor("address", event.target.value)}
-                    />
-                  </Field>
+                  {(() => {
+                    // A representative's address from the cabinet: the GwG sheet and the
+                    // consent form print these parts, so the one-line address is not edited here.
+                    const cabinetAddress = leadId && editingTrustedContact
+                      ? representativeCabinetAddress(
+                          portalRepresentation?.representatives.find((item) => item.id === trustedContactEditor.id),
+                          (code) => countryLabel(code, lang),
+                        )
+                      : null;
+                    return (
+                      <Field className="sm:col-span-2" label={tx("Адрес", "Adresse")}>
+                        <Input
+                          className={cn(inputClass, cabinetAddress && "bg-muted/40 text-muted-foreground")}
+                          value={cabinetAddress ?? trustedContactEditor.address}
+                          readOnly={Boolean(cabinetAddress)}
+                          aria-describedby={cabinetAddress ? "trusted-contact-address-cabinet" : undefined}
+                          onChange={(event) => patchTrustedContactEditor("address", event.target.value)}
+                        />
+                        {cabinetAddress ? (
+                          <p id="trusted-contact-address-cabinet" className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground" data-testid="trusted-contact-address-cabinet">
+                            {tx(
+                              "Из кабинета: адрес указан представителем, так он стоит в анкете GwG и в документах. Изменить его может представитель в кабинете.",
+                              "Aus dem Kundenkabinett: von der Vertretung angegeben, so steht sie im GwG-Bogen und in den Unterlagen. Ändern kann sie die Vertretung im Kabinett.",
+                            )}
+                          </p>
+                        ) : null}
+                      </Field>
+                    );
+                  })()}
                 </div>
                 {(() => {
                   // A representative on file: staff upload the identity document

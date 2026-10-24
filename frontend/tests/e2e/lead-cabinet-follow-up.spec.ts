@@ -999,6 +999,13 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(residence.locator("#lead-request-stay_reason_details")).toHaveCount(0);
     await choose(page, residence.getByRole("combobox", { name: "Grund des Aufenthalts im Wohnsitzland" }), "Sonstiges");
     await expect(residence.locator("#lead-request-stay_reason_details")).toBeVisible();
+    // The words go with another reason: staff and the Patientenformular no longer show them (field parity 2026-10-24).
+    await residence.locator("#lead-request-stay_reason_details").fill("Pflege der Mutter");
+    await expect.poll(() => calls.identification.at(-1)).toMatchObject({ stay_reason_details: "Pflege der Mutter" });
+    await choose(page, residence.getByRole("combobox", { name: "Grund des Aufenthalts im Wohnsitzland" }), "Arbeit");
+    await expect.poll(() => calls.identification.at(-1)).toEqual({ stay_reason: "work", stay_reason_details: "" });
+    await choose(page, residence.getByRole("combobox", { name: "Grund des Aufenthalts im Wohnsitzland" }), "Sonstiges");
+    await expect(residence.locator("#lead-request-stay_reason_details")).toHaveValue("");
     await page.screenshot({ path: testInfo.outputPath("cabinet-1440-follow-up.png"), fullPage: true });
 
     // A phone: the dots side by side, the current step named below, no horizontal scrolling.

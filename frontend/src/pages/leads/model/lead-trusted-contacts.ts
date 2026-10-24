@@ -108,6 +108,32 @@ export function guardianRelationOptionLabel(
   }
 }
 
+/** The address parts a representative stated in the cabinet (`lead_representatives`). */
+export type RepresentativeAddressParts = {
+  street: string | null;
+  zip: string | null;
+  city: string | null;
+  country: string | null;
+};
+
+/**
+ * The address a representative stated in the cabinet, as one line, or null
+ * without one. The GwG sheet and the consent form print these parts, not the
+ * one-line address of the trusted contact: while they exist, staff do not
+ * edit that line in the wizard (a change there reached no document).
+ */
+export function representativeCabinetAddress(
+  person: RepresentativeAddressParts | null | undefined,
+  countryName: (code: string) => string,
+): string | null {
+  if (!person) return null;
+  const clean = (value: string | null) => (value ?? "").trim();
+  const locality = [clean(person.zip), clean(person.city)].filter(Boolean).join(" ");
+  const country = clean(person.country);
+  const line = [clean(person.street), locality, country ? countryName(country) : ""].filter(Boolean).join(", ");
+  return line || null;
+}
+
 /** A trusted contact as the wizard edits it. */
 export type TrustedContactDraft = {
   id: string;

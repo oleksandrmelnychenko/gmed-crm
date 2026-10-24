@@ -6,6 +6,7 @@ import {
   isParentOrGuardianRelation,
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
+  representativeCabinetAddress,
   storedTrustedContactDrafts,
   trustedContactRelationLabel,
   trustedContactsChanged,
@@ -276,5 +277,20 @@ describe("which patient events reach the wizard draft", () => {
     for (const change of ["payer", "identification", "document_reviewed", "", undefined, null]) {
       expect(patientEventChangesLeadData(change)).toBe(false);
     }
+  });
+});
+
+describe("the address a representative stated in the cabinet", () => {
+  const name = (code: string) => ({ DE: "Deutschland", UA: "Ukraine" } as Record<string, string>)[code] ?? code;
+
+  it("is one line of the parts the documents print", () => {
+    expect(representativeCabinetAddress({ street: " Hauptstr. 1 ", zip: "10115", city: "Berlin", country: "DE" }, name))
+      .toBe("Hauptstr. 1, 10115 Berlin, Deutschland");
+    expect(representativeCabinetAddress({ street: null, zip: null, city: "Kyiv", country: "UA" }, name)).toBe("Kyiv, Ukraine");
+  });
+
+  it("is null without any part, so staff keep editing the contact's address", () => {
+    expect(representativeCabinetAddress({ street: " ", zip: null, city: "", country: null }, name)).toBeNull();
+    expect(representativeCabinetAddress(null, name)).toBeNull();
   });
 });

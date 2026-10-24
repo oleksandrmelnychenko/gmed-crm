@@ -1027,12 +1027,15 @@ pub(crate) fn clean_text(
     Ok((!value.is_empty()).then_some(value))
 }
 
-/// A phone number: at least five digits, with the usual separators only.
+/// A phone number: at least six digits, with the usual separators only. Six
+/// as the staff wizard ([`crate::routes::patients::is_valid_contact_phone`]),
+/// the payer and the cabinet's own error text: a five-digit number entered
+/// here was refused when staff saved it in the wizard.
 pub(crate) fn clean_phone(value: &str, field: &'static str) -> Result<Option<String>, FieldError> {
     let phone = clean_text(value, field, 40)?;
     if let Some(phone) = &phone {
         let digits = phone.chars().filter(char::is_ascii_digit).count();
-        if digits < 5
+        if digits < 6
             || !phone
                 .chars()
                 .all(|ch| ch.is_ascii_digit() || " +-()/.".contains(ch))
@@ -7565,6 +7568,14 @@ mod tests {
             (
                 PersonalDataPatch {
                     phone: Some("call me".into()),
+                    ..Default::default()
+                },
+                "phone",
+            ),
+            // Six digits at least, as the staff wizard and the payer.
+            (
+                PersonalDataPatch {
+                    phone: Some("+49 123".into()),
                     ..Default::default()
                 },
                 "phone",

@@ -28,6 +28,7 @@ import {
   stillRejectedIdentification,
   thirdPartyPayerNamed,
   withContactChannel,
+  withIdentificationField,
   withInsuranceAnswer,
   withLegalAnswer,
   withPayerAnswer,
@@ -182,6 +183,16 @@ describe("lead request identification autosave", () => {
       pep_wealth_origin: "Gehalt,\nErbschaft",
       request_reason: "Zweitmeinung\nzur Knie-OP",
     });
+  });
+
+  it("drops the words on the stay reason with a reason other than \"other\"", () => {
+    const saved = draftFromIdentification({ ...identification, stay_reason: "other", stay_reason_details: "Lehrerin" });
+    const work = withIdentificationField(saved, "stay_reason", "work");
+    expect(work.stay_reason_details).toBe("");
+    expect(identificationPatch(saved, work)).toEqual({ stay_reason: "work", stay_reason_details: "" });
+    // "Other" keeps them, and any other field leaves them alone.
+    expect(withIdentificationField(saved, "stay_reason", "other").stay_reason_details).toBe("Lehrerin");
+    expect(withIdentificationField(saved, "residence_since", "2015").stay_reason_details).toBe("Lehrerin");
   });
 
   it("keeps the contact channels a set in the order of the form", () => {

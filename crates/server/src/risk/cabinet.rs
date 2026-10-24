@@ -837,6 +837,18 @@ pub fn apply_statements(
     Ok(next)
 }
 
+/// The lead's statements as stored: the words on the reason of the stay
+/// belong to the reason "other" (as for a parent's answers, see
+/// `lead_representatives`); with another reason they go, so the staff view
+/// and the Patientenformular no longer print "Arbeit – <old words>". Not part
+/// of [`apply_statements`], which also checks a parent's single answers.
+pub fn without_stale_details(mut statements: Statements) -> Statements {
+    if statements.stay_reason.as_deref() != Some("other") {
+        statements.stay_reason_details = None;
+    }
+    statements
+}
+
 /// The keys whose value differs.
 pub fn changed_statements(before: &Statements, after: &Statements) -> Vec<&'static str> {
     let (mut left, mut right) = (before.gwg_json(), after.gwg_json());
@@ -952,7 +964,7 @@ pub async fn save_statements(
     }
     let current = load_statements(conn, lead_id).await?;
     let next = match apply_statements(&current, body) {
-        Ok(next) => next,
+        Ok(next) => without_stale_details(next),
         Err(error) => return Ok(Err(error)),
     };
     let changed = changed_statements(&current, &next);
@@ -1477,6 +1489,30 @@ mod tests {
         )
         .unwrap();
         assert_eq!(citizen.stay_reason.as_deref(), Some("citizenship_or_birth"));
+        // The words on the reason go with a reason other than "other".
+        let other = without_stale_details(
+            apply_statements(
+                &next,
+                &body(json!({ "stay_reason": "other", "stay_reason_details": "Lehrerin" })),
+            )
+            .unwrap(),
+        );
+        assert_eq!(other.stay_reason_details.as_deref(), Some("Lehrerin"));
+        let work = without_stale_details(
+            apply_statements(&other, &body(json!({ "stay_reason": "work" }))).unwrap(),
+        );
+        assert_eq!(work.stay_reason_details, None);
+        // A parent's single answer is checked alone: the words stay there.
+        let words = apply_statements(
+            &Statements::default(),
+            &body(json!({ "stay_reason_details": "Lehrerin" })),
+        )
+        .unwrap();
+        assert_eq!(words.stay_reason_details.as_deref(), Some("Lehrerin"));
+        assert_eq!(
+            changed_statements(&other, &work),
+            ["stay_reason", "stay_reason_details"]
+        );
     }
 
     #[test]

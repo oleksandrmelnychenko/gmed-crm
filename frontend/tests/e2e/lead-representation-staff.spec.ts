@@ -1038,6 +1038,18 @@ for (const width of [1440, 390]) {
   });
 }
 
+test("a parent's address from the cabinet is shown read-only, as the GwG sheet prints it", async ({ page }) => {
+  // Field parity 2026-10-24: staff changed the one-line address of a parent here,
+  // while the GwG sheet and the consent form kept printing the cabinet's parts.
+  const { wizard } = await mount(page, { lang: "ru", step: "master" });
+  await wizard.locator("#lead-wizard-guardian").getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
+  const editor = page.getByTestId("trusted-contact-editor");
+  const address = editor.getByRole("textbox", { name: /^Адрес/ });
+  await expect(address).toHaveValue("Musterweg 1, 10115 Berlin, Германия");
+  await expect(address).toHaveAttribute("readonly", "");
+  await expect(editor.getByTestId("trusted-contact-address-cabinet")).toContainText("Из кабинета");
+});
+
 test("staff reuse a mother who is still a lead without creating a patient link", async ({ page }) => {
   const { wizard, calls } = await mount(page, { lang: "ru", step: "master", motherOnly: true });
   await page.route("**/api/v1/leads/guardian-candidates**", route => route.fulfill({ json: [{
