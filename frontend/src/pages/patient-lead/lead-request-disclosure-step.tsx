@@ -14,11 +14,12 @@ import type { StepProps } from "./lead-request-step-forms";
 import { asLeadCabinetLang } from "./lead-request-text";
 import { TrustedPersonsEditor } from "./lead-trusted-persons-editor";
 import { disclosureChanged, disclosureDefaultsToNo, disclosureDraft, disclosureProblem, disclosureToSend, type DisclosureDraft } from "./lead-trusted-persons-model";
-import { disclosureConsentText, disclosureSubject, trustedPersonsText } from "./lead-trusted-persons-text";
+import { disclosureConsentText, disclosureSubject, disclosureWording, trustedPersonsText } from "./lead-trusted-persons-text";
 
 export function DisclosureStep({ request, text: common, lang, enqueue, onChange, nav }: StepProps) {
   const { user } = useAuth();
   const text = trustedPersonsText(lang);
+  const wording = disclosureWording(text, request);
   const [draft, setDraft] = useState(() => disclosureDraft(request, user?.id));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -117,7 +118,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
           <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <p>{choosesForChild(request) ? text.guardianContext(personName) : text.representativeContext(personName)}</p>
         </div> : null}
-        <p className="text-sm leading-6 text-muted-foreground">{text.introduction}</p>
+        <p className="text-sm leading-6 text-muted-foreground">{wording.introduction}</p>
         <fieldset className="space-y-3" disabled={busy}>
           <legend className="mb-3 text-sm font-semibold">{text.question}</legend>
           <div className="grid gap-2.5 xl:grid-cols-2">
@@ -127,7 +128,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
               busy && "cursor-wait",
             )}>
               <input type="radio" name={`disclosure-${request.lead_id}`} className="mt-1 size-4 shrink-0 accent-current" checked={draft.allowDisclosure === allow} data-testid={allow ? "disclosure-yes" : "disclosure-no"} onChange={() => update({ allowDisclosure: allow, consentGiven: false })} />
-              <span>{allow ? text.yes : text.no}</span>
+              <span>{allow ? text.yes : wording.no}</span>
             </label>)}
           </div>
         </fieldset>

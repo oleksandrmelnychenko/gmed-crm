@@ -1045,7 +1045,7 @@ export function RepresentationSection({
         </Button>
       ) : undefined}>
         <div className="space-y-4" data-testid="lead-request-representation">
-          {representation.document_stage === false && !showDocumentDetails ? <p className="text-sm leading-relaxed text-muted-foreground">{text.parentShortFormIntro}</p> : null}
+          {representation.document_stage === false && !showDocumentDetails ? <p className="text-sm leading-relaxed text-muted-foreground">{draft.custody === "guardian" ? text.parentShortFormIntroVormund : text.parentShortFormIntro}</p> : null}
           {/* The server lists `custody` as missing until it is stated. Staff's statement is read-only
               here (owner decision 2026-10-22): the parent writes to GMED instead. */}
           {custodyByStaff ? (

@@ -39,7 +39,7 @@ function oneOf<Key extends string>(labels: Record<Key, string>, value: string): 
 }
 
 /** The entered answers grouped by step; empty answers are left out. */
-function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDraft, steps: readonly PayerStep[], text: PayerLinkText, lang: string): Group[] {
+export function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDraft, steps: readonly PayerStep[], text: PayerLinkText, lang: string): Group[] {
   const payerType: PayerType = questionnaire.payer_type;
   const organisation = isOrganisation(payerType);
   const label = (field: PayerLabelField) => fieldLabel(text, field, payerType);
@@ -132,7 +132,11 @@ function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDraft, ste
     row(
       "relationship_kind",
       draft.relationship_kind
-        ? [oneOf(text.relationshipKinds, draft.relationship_kind), draft.relationship_kind === "other" ? draft.relationship : ""]
+        ? [
+            // The label of the select (QA 2026-10-24): an organisation reads "the patient's employer".
+            oneOf(organisation ? { ...text.relationshipKinds, ...text.organisationRelationshipKinds } : text.relationshipKinds, draft.relationship_kind),
+            draft.relationship_kind === "other" ? draft.relationship : "",
+          ]
             .filter(Boolean)
             .join(": ")
         : "",
@@ -179,7 +183,11 @@ function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDraft, ste
     {
       step: "funds",
       rows: funds,
-      documents: { label: text.fundsProof, items: questionnaire.funds_proof_documents ?? [] },
+      // A proof that is not asked for is no "no file" row (QA 2026-10-24); a file uploaded anyway is listed.
+      documents:
+        questionnaire.funds_proof_required || (questionnaire.funds_proof_documents ?? []).length > 0
+          ? { label: text.fundsProof, items: questionnaire.funds_proof_documents ?? [] }
+          : undefined,
     },
     { step: "payment", rows: payment },
     { step: "declarations", rows: declarations },

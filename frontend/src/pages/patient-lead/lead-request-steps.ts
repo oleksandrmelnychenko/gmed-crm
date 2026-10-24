@@ -181,15 +181,26 @@ export function missingByStep(
 }
 
 /**
+ * The consent to process the request data counts as missing in the first
+ * step only while the request was never sent: sending needs it, and it is no
+ * key of the server's lists. Once a request is sent (by the other parent, for
+ * instance) the steps follow the server's lists alone (QA 2026-10-24); step
+ * "send" still asks for the consent of a login that sends again.
+ */
+export function inquiryConsentMissing(request: Pick<LeadRequest, "consents"> & Partial<Pick<LeadRequest, "submitted_at">>): boolean {
+  return !request.submitted_at && !consentGiven(request, INQUIRY_CONSENT);
+}
+
+/**
  * The count on a step's badge: its missing keys, and in the first step the
- * consent to process the request data (needed to send, not a key of the list).
+ * consent while the request was never sent (`inquiryConsentMissing`).
  */
 export function stepMissingCount(
-  request: Pick<LeadRequest, "progress" | "follow_up" | "consents">,
+  request: Pick<LeadRequest, "progress" | "follow_up" | "consents"> & Partial<Pick<LeadRequest, "submitted_at">>,
   step: StepId,
   missing: Record<StepId, string[]> = missingByStep(request),
 ): number {
-  const consent = step === "person" && !consentGiven(request, INQUIRY_CONSENT) ? 1 : 0;
+  const consent = step === "person" && inquiryConsentMissing(request) ? 1 : 0;
   return missing[step].length + consent;
 }
 

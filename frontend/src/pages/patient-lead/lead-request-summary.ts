@@ -43,6 +43,7 @@ import {
   extraWorkSubject,
   followUpFieldLabel,
   recipientOptions,
+  hasInsuranceLabel,
   invoiceToLabel,
   payerFieldLabel,
   representativeFieldLabel,
@@ -302,7 +303,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
   }
 
   group("insurance", childSectionTitle(text, "insurance", request.minor), [
-    [guardian ? text.hasInsuranceGuardian : text.fields.has_insurance, yesNo(data.has_insurance)],
+    [hasInsuranceLabel(text, request), yesNo(data.has_insurance)],
     ...(data.has_insurance
       ? ([
           [text.fields.insurance_type, option(text.insuranceTypeOptions, data.insurance_type)],
@@ -336,7 +337,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     group("billing", text.recipient.section, [
       [
         text.recipient.question,
-        billing.invoice_recipient ? recipientOptions(text, request)[billing.invoice_recipient] : "",
+        // "One of the parents" when the other parent receives the invoice; that parent's name follows.
+        billing.invoice_recipient ? recipientOptions(text, request, Boolean(invoiceParent && !invoiceParent.mine))[billing.invoice_recipient] : "",
       ],
       [text.recipient.typeQuestion, third && recipient?.type ? text.recipient.typeOptions[recipient.type] : ""],
       [text.recipient.parentQuestion, invoiceParent ? [invoiceParent.first_name, invoiceParent.last_name].filter(Boolean).join(" ") : ""],

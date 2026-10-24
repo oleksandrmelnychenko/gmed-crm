@@ -1,4 +1,4 @@
-import { asLeadCabinetLang } from "./lead-request-text";
+import { actsAsVormund, asLeadCabinetLang } from "./lead-request-text";
 
 const texts = {
   de: {
@@ -8,6 +8,9 @@ const texts = {
     guardianContext: (child: string) => `Sie entscheiden als Elternteil oder gesetzliche Vertretung für ${child}. Die folgenden Angaben und die Einwilligung beziehen sich auf die Daten dieses Kindes.`,
     representativeContext: (person: string) => `Sie entscheiden als Vertretung für ${person}. Die folgenden Angaben und die Einwilligung beziehen sich auf die Daten dieser Person.`,
     question: "Soll eine weitere Person Auskunft erhalten dürfen?", no: "Nein, nur ich selbst.", yes: "Ja, folgende Person(en) dürfen Auskunft erhalten:",
+    noParents: "Nein, nur wir als Eltern.", noGuardian: "Nein, nur ich als Vormund.",
+    introductionParents: "Wir geben Auskunft über die persönlichen und medizinischen Daten Ihres Kindes ausschließlich an Sie als Eltern. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Partner, Freunde, Geschwister oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.",
+    introductionGuardian: "Wir geben Auskunft über die persönlichen und medizinischen Daten des Kindes ausschließlich an Sie als Vormund. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Partner, Freunde, Geschwister oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.",
     name: "Name, Vorname", relation: "Beziehung zu Ihnen (z. B. Ehefrau, Tochter, Freund)", contact: "Telefon / E-Mail", scope: "Umfang der Auskunft", scopePlaceholder: "Bitte auswählen",
     scopeHint: "Diese Auswahl wird in Ihre Einverständniserklärung zur Datenübermittlung (Anlage 1) übernommen.",
     scopeLegacy: (typed: string) => `Bisher angegeben: „${typed}“. Bitte wählen Sie den Umfang der Auskunft aus der Liste.`,
@@ -29,6 +32,9 @@ const texts = {
     guardianContext: (child: string) => `You are deciding as a parent or legal representative for ${child}. The following details and consent relate to this child's data.`,
     representativeContext: (person: string) => `You are deciding as a representative for ${person}. The following details and consent relate to this person's data.`,
     question: "May another person receive information?", no: "No, only me.", yes: "Yes, the following person(s) may receive information:",
+    noParents: "No, only us as parents.", noGuardian: "No, only me as the guardian.",
+    introductionParents: "We provide information about your child's personal and medical data only to you as parents. This also applies to people close to you who are not involved in organising the care or treatment, such as partners, friends, siblings or other relatives. Without your explicit designation, we may not provide these people with any information.",
+    introductionGuardian: "We provide information about the child's personal and medical data only to you as the guardian. This also applies to people close to you who are not involved in organising the care or treatment, such as partners, friends, siblings or other relatives. Without your explicit designation, we may not provide these people with any information.",
     name: "Last name, first name", relation: "Relationship to you (e.g. wife, daughter, friend)", contact: "Phone / email", scope: "Scope of information", scopePlaceholder: "Please choose",
     scopeHint: "This choice is included in your consent to data transfer (Annex 1).",
     scopeLegacy: (typed: string) => `Previously entered: “${typed}”. Please choose the scope of information from the list.`,
@@ -49,6 +55,9 @@ const texts = {
     guardianContext: (child: string) => `Ви приймаєте рішення як один із батьків або законний представник дитини ${child}. Наведені нижче відомості та згода стосуються даних цієї дитини.`,
     representativeContext: (person: string) => `Ви приймаєте рішення як представник особи ${person}. Наведені нижче відомості та згода стосуються даних цієї особи.`,
     question: "Чи можуть інші особи отримувати інформацію?", no: "Ні, лише я особисто.", yes: "Так, інформацію можуть отримувати такі особи:",
+    noParents: "Ні, тільки ми (батьки).", noGuardian: "Ні, тільки я як опікун.",
+    introductionParents: "Ми надаємо інформацію про персональні та медичні дані вашої дитини лише вам як батькам. Це стосується й людей із вашого оточення, які не беруть участі в організації та лікуванні, наприклад партнерів, друзів, братів і сестер або інших родичів. Без вашої прямої вказівки ми не маємо права надавати цим особам жодної інформації.",
+    introductionGuardian: "Ми надаємо інформацію про персональні та медичні дані дитини лише вам як опікуну. Це стосується й людей із вашого оточення, які не беруть участі в організації та лікуванні, наприклад партнерів, друзів, братів і сестер або інших родичів. Без вашої прямої вказівки ми не маємо права надавати цим особам жодної інформації.",
     name: "Прізвище, ім’я", relation: "Ким доводиться вам (напр. дружина, донька, друг)", contact: "Телефон / ел. пошта", scope: "Обсяг інформації", scopePlaceholder: "Будь ласка, виберіть",
     scopeHint: "Цей вибір буде внесено до вашої згоди на передачу даних (додаток 1).",
     scopeLegacy: (typed: string) => `Раніше вказано: «${typed}». Виберіть, будь ласка, обсяг інформації зі списку.`,
@@ -69,6 +78,9 @@ const texts = {
     guardianContext: (child: string) => `Вы принимаете решение как родитель или законный представитель ребёнка ${child}. Приведённые ниже сведения и согласие относятся к данным этого ребёнка.`,
     representativeContext: (person: string) => `Вы принимаете решение как представитель лица ${person}. Приведённые ниже сведения и согласие относятся к данным этого лица.`,
     question: "Могут ли другие лица получать информацию?", no: "Нет, только я сам(а).", yes: "Да, информацию могут получать следующие лица:",
+    noParents: "Нет, только мы (родители).", noGuardian: "Нет, только я как опекун.",
+    introductionParents: "Мы предоставляем информацию о персональных и медицинских данных вашего ребёнка только вам как родителям. Это касается и людей из вашего окружения, которые не участвуют в организации и лечении, например партнёров, друзей, братьев и сестёр или других родственников. Без вашего прямого указания мы не вправе предоставлять этим лицам никакую информацию.",
+    introductionGuardian: "Мы предоставляем информацию о персональных и медицинских данных ребёнка только вам как опекуну. Это касается и людей из вашего окружения, которые не участвуют в организации и лечении, например партнёров, друзей, братьев и сестёр или других родственников. Без вашего прямого указания мы не вправе предоставлять этим лицам никакую информацию.",
     name: "Фамилия, имя", relation: "Кем приходится вам (напр. жена, дочь, друг)", contact: "Телефон / эл. почта", scope: "Объём информации", scopePlaceholder: "Пожалуйста, выберите",
     scopeHint: "Этот выбор будет внесён в ваше согласие на передачу данных (приложение 1).",
     scopeLegacy: (typed: string) => `Ранее указано: «${typed}». Выберите, пожалуйста, объём информации из списка.`,
@@ -94,6 +106,21 @@ export type DisclosureSubject = "own" | "child" | "represented";
 export function disclosureSubject(request: { access_kind?: string | null; minor?: boolean | null }): DisclosureSubject {
   if (request.access_kind !== "guardian") return "own";
   return request.minor === true ? "child" : "represented";
+}
+
+type TrustedPersonsText = ReturnType<typeof trustedPersonsText>;
+type ChildCabinet = { access_kind?: string | null; minor?: boolean | null; representation?: { custody?: string | null } | null };
+
+/**
+ * "No" and the introduction of the disclosure in a child's cabinet (QA 2026-10-24): the data are the
+ * child's, and only the parents ("wir als Eltern") or the guardian ("ich als Vormund") get the
+ * information — never "only me myself". An adult's own and a representative's login keep the own wording.
+ */
+export function disclosureWording(text: TrustedPersonsText, request: ChildCabinet): { no: string; introduction: string } {
+  if (disclosureSubject(request) !== "child") return { no: text.no, introduction: text.introduction };
+  return actsAsVormund(request)
+    ? { no: text.noGuardian, introduction: text.introductionGuardian }
+    : { no: text.noParents, introduction: text.introductionParents };
 }
 
 // The phrase of the own text and its replacements; the server stores the same wording.

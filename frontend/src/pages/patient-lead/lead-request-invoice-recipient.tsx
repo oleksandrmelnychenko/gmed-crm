@@ -274,7 +274,11 @@ export function InvoiceRecipientSection({
     update((current) => ({ ...current, is_payer: answer }));
   };
 
-  const options = recipientOptions(text, request);
+  // "I (as a parent)" only for the parent who receives the invoice (QA 2026-10-24): the other
+  // parent, or a login that is none of the parents, reads "one of the parents" with the name below.
+  const otherParentReceives = guardian && parents.length > 0
+    && (!ownParent || Boolean(draft.representative_id && draft.representative_id !== ownParent.id));
+  const options = recipientOptions(text, request, otherParentReceives);
   // Unanswered after "Next": said at the question too, not only in the list at the top.
   const recipientMissing = useStepMissingError("lead-request-invoice_recipient");
   // The data a payer needs are required of the recipient who pays (owner request 2026-10-07): the

@@ -76,8 +76,8 @@ import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
 import { useServerDraftSync } from "./lead-request-server-sync";
-import type { StepId } from "./lead-request-steps";
-import { asLeadCabinetLang, childSectionTitle, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { inquiryConsentMissing, type StepId } from "./lead-request-steps";
+import { asLeadCabinetLang, childSectionTitle, hasInsuranceLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // The steps of the lead cabinet that hold the base form (trigger flow
 // 2026-10-07, contract 6): short steps of the wider layout, each with what it
@@ -329,7 +329,8 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
   const identification = useIdentificationForm({ request, text, enqueue, onChange, onSaveState: parts.on("identification") });
   const withIdentification = request.identification !== undefined;
   const { draft, set, errorFor, fieldProps } = personal;
-  const consentMissing = consentGiven(request, INQUIRY_CONSENT) ? [] : [{ label: text.sectionConsent, field: "inquiry_consent" }];
+  // The step's list follows the badge: the consent only while the request was never sent (QA 2026-10-24).
+  const consentMissing = inquiryConsentMissing(request) ? [{ label: text.sectionConsent, field: "inquiry_consent" }] : [];
 
   const showLatinNameHint = /\p{Script=Cyrillic}/u.test([draft.first_name, draft.last_name, draft.middle_name].join(" "));
   const cabinetLang = asLeadCabinetLang(lang);
@@ -875,7 +876,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
         <div className={GRID} data-testid="lead-request-insurance">
           <LabeledField
             id="lead-request-has_insurance"
-            label={guardian ? text.hasInsuranceGuardian : text.fields.has_insurance}
+            label={hasInsuranceLabel(text, request)}
             error={errorFor("has_insurance")}
             question
             className="sm:col-span-2 lg:col-span-3"

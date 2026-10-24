@@ -51,6 +51,8 @@ import {
 export type LeadRequestText = {
   title: string;
   titleGuardian: string;
+  /** The same in the login of a minor's guardian (Vormund): not "your child" (QA 2026-10-24). */
+  titleVormund: string;
   /** The account label of a parent's login in the side bar, instead of "Patient". */
   accountLabelGuardian: string;
   intro: string;
@@ -166,6 +168,8 @@ export type LeadRequestText = {
   insuranceCoverageOptions: { yes: string; no: string; not_sure: string };
   /** After sending, when the request was changed: why to send again. */
   changedAfterSend: string;
+  /** On every other step while the request changed since sending: the way to step "send" (QA 2026-10-24). */
+  changedAfterSendGo: string;
   /** The payer section of step 3 (no own "who pays" step since 2026-10-11). */
   sectionPayer: string;
   payerQuestion: string;
@@ -228,6 +232,8 @@ export type LeadRequestText = {
   payerBlockConsent: string;
   /** "Do you have health insurance?" for a parent: asked about the patient. */
   hasInsuranceGuardian: string;
+  /** The same for a minor's guardian (Vormund): "the child", not "your child". */
+  hasInsuranceVormund: string;
   /**
    * Step 3 (owner spec 2026-10-11): the invoice recipient first — the patient
    * side or a third party (a person or an organisation) with its data —,
@@ -242,6 +248,8 @@ export type LeadRequestText = {
     options: Record<InvoiceRecipient, string>;
     /** A parent's login of a minor: the parent is the recipient. */
     optionsGuardian: Record<InvoiceRecipient, string>;
+    /** The same when the other parent receives the invoice: "one of the parents", the name below (QA 2026-10-24). */
+    optionsOtherParent: Record<InvoiceRecipient, string>;
     /** A representative's login of an adult patient: the patient is the recipient, through the representative (owner 2026-10-22). */
     optionsRepresentative: Record<InvoiceRecipient, string>;
     typeQuestion: string;
@@ -379,6 +387,8 @@ export type LeadRequestText = {
   parentShortForm: string;
   parentDocumentDetails: string;
   parentShortFormIntro: string;
+  /** The same for a minor's guardian (Vormund): the guardian's details, not the parents'. */
+  parentShortFormIntroVormund: string;
   custodyQuestion: string;
   /** Under the custody GMED staff stated (read-only, owner 2026-10-22). */
   custodySetByStaffHint: string;
@@ -776,16 +786,49 @@ export function childSectionTitle(text: LeadRequestText, key: keyof LeadRequestT
 }
 
 /**
+ * The login of a minor's guardian (Vormund / Pfleger): custody "guardian". Its
+ * texts name "the child you represent", never "your child" or the parents (QA 2026-10-24).
+ */
+export function actsAsVormund(request: {
+  access_kind?: string | null;
+  minor?: boolean | null;
+  representation?: { custody?: string | null } | null;
+}): boolean {
+  return request.access_kind === "guardian" && request.minor === true && request.representation?.custody === "guardian";
+}
+
+/** "Do you have health insurance?" by login: the own, a parent's child's, or the child a guardian represents. */
+export function hasInsuranceLabel(text: LeadRequestText, request: Parameters<typeof actsAsVormund>[0]): string {
+  if (request.access_kind !== "guardian") return text.fields.has_insurance;
+  return actsAsVormund(request) ? text.hasInsuranceVormund : text.hasInsuranceGuardian;
+}
+
+/** The heading of a representative's cabinet: the own child, the child a guardian represents, or an adult. */
+export function guardianCabinetTitle(
+  text: LeadRequestText,
+  request: Parameters<typeof actsAsVormund>[0],
+  patientName: string,
+): string {
+  if (!request.minor) return `${text.requestFor} ${patientName}`;
+  return `${actsAsVormund(request) ? text.titleVormund : text.titleGuardian}: ${patientName}`;
+}
+
+/**
  * The invoice recipient's options by login: the patient's own, a parent's of
  * a minor ("Ich (als Elternteil …)"), or a representative's of an adult
  * patient ("Die Patientin / der Patient (über mich als Vertretung)").
+ * `otherParentReceives`: the chosen parent is not the signed-in one (or the
+ * login is none of the parents), so the patient side reads "one of the
+ * parents", not "I" (QA 2026-10-24); the name of the parent follows below.
  */
 export function recipientOptions(
   text: LeadRequestText,
   request: { access_kind?: string | null; minor?: boolean | null },
+  otherParentReceives = false,
 ): Record<InvoiceRecipient, string> {
   if (request.access_kind !== "guardian") return text.recipient.options;
-  return request.minor ? text.recipient.optionsGuardian : text.recipient.optionsRepresentative;
+  if (!request.minor) return text.recipient.optionsRepresentative;
+  return otherParentReceives ? text.recipient.optionsOtherParent : text.recipient.optionsGuardian;
 }
 
 /** Whose profession and sector block A asks: the signed-in patient's, a minor child's, or an adult patient's (representative's login). */
@@ -867,7 +910,9 @@ export function submitFieldLabel(
   who: { mineSlot?: RepresentativeSlot | null; custody?: Custody | null } = {},
 ): string {
   if (field === "id_document_upload" && minor) return text.childIdentityFiles;
-  if (field === "has_insurance" && guardian) return text.hasInsuranceGuardian;
+  if (field === "has_insurance" && guardian) {
+    return minor && who.custody === "guardian" ? text.hasInsuranceVormund : text.hasInsuranceGuardian;
+  }
   // A parent reads the child's fields next to the own ones: "Date of birth" alone does not say whose.
   if (field in text.fields && minor) {
     const section = CHILD_SECTION_OF[field as PersonalField];
@@ -926,6 +971,7 @@ export function submitFieldLabel(
 const de: LeadRequestText = {
   title: "Ihre Anfrage",
   titleGuardian: "Anfrage für Ihr Kind",
+  titleVormund: "Anfrage für das von Ihnen vertretene Kind",
   accountLabelGuardian: "Elternteil / gesetzliche Vertretung",
   intro: "Bitte tragen Sie Ihre persönlichen Daten ein und laden Sie Ihre Unterlagen hoch. Alles wird automatisch gespeichert.",
   introGuardian:
@@ -1059,6 +1105,7 @@ const de: LeadRequestText = {
   insuranceCoverageOptions: { yes: "Ja", no: "Nein", not_sure: "Weiß ich nicht" },
   changedAfterSend:
     "Sie haben Ihre Anfrage nach dem Senden geändert. Senden Sie sie erneut, damit Ihre Ansprechperson die Änderungen erhält.",
+  changedAfterSendGo: "Zu „Prüfen & Senden“",
   sectionPayer: "Zahler",
   payerQuestion: "Wer ist der Zahler?",
   payerOptions: { self: "Ich selbst", third_party: "Eine andere Person oder Organisation" },
@@ -1123,6 +1170,7 @@ const de: LeadRequestText = {
   payerBlockContact: "Kontakt",
   payerBlockConsent: "Einwilligungen",
   hasInsuranceGuardian: "Hat Ihr Kind eine Krankenversicherung?",
+  hasInsuranceVormund: "Hat das Kind eine Krankenversicherung?",
   recipient: {
     section: "Rechnungsempfänger",
     confirmPayerChange: "Diesen Rechnungsempfänger als Zahler bestätigen",
@@ -1134,6 +1182,7 @@ const de: LeadRequestText = {
       self: "Ich (als Elternteil / gesetzliche Vertretung)",
       third_party: "Eine andere Person oder Organisation",
     },
+    optionsOtherParent: { self: "Ein Elternteil", third_party: "Eine andere Person oder Organisation" },
     optionsRepresentative: {
       self: "Die Patientin / der Patient (über mich als Vertretung)",
       third_party: "Eine andere Person oder Organisation",
@@ -1319,6 +1368,7 @@ const de: LeadRequestText = {
   childIdentityUploadHint: "Bitte laden Sie einen gut lesbaren Scan oder ein Foto des Ausweisdokuments des Kindes hoch: PDF, JPG oder PNG, bis 25 MB pro Datei.",
   parentDocumentDetails: "Angaben für den Vertrag anzeigen",
   parentShortFormIntro: "Für die erste Anfrage genügen die Namen, Kontaktdaten, das Wohnsitzland und die Staatsangehörigkeiten der vertretenden Eltern. Weitere Angaben und Nachweise werden vor Vertrag und Unterschrift benötigt. Bereits gespeicherte Daten bleiben erhalten.",
+  parentShortFormIntroVormund: "Für die erste Anfrage genügen Ihr Name, Ihre Kontaktdaten, Ihr Wohnsitzland und Ihre Staatsangehörigkeiten als Vormund. Weitere Angaben und Nachweise werden vor Vertrag und Unterschrift benötigt. Bereits gespeicherte Daten bleiben erhalten.",
   custodyQuestion: "Wer vertritt das Kind?",
   custodySetByStaffHint: "Von GMED angegeben; falls das nicht stimmt, schreiben Sie uns bitte.",
   custodyGuardianContact: "Bei GMED ist eine Person als Vormund eingetragen, daher bleibt die Vormundschaft angegeben. Falls das nicht stimmt, schreiben Sie uns bitte.",
@@ -1494,6 +1544,7 @@ const de: LeadRequestText = {
 const ru: LeadRequestText = {
   title: "Ваша заявка",
   titleGuardian: "Заявка для вашего ребёнка",
+  titleVormund: "Заявка для ребёнка, которого вы представляете",
   accountLabelGuardian: "Родитель / законный представитель",
   intro: "Пожалуйста, заполните свои личные данные и загрузите документы. Всё сохраняется автоматически.",
   introGuardian:
@@ -1625,6 +1676,7 @@ const ru: LeadRequestText = {
   insuranceCoverageOptions: { yes: "Да", no: "Нет", not_sure: "Не знаю" },
   changedAfterSend:
     "После отправки вы изменили заявку. Отправьте её ещё раз, чтобы менеджер получил изменения.",
+  changedAfterSendGo: "К шагу «Проверка и отправка»",
   sectionPayer: "Плательщик",
   payerQuestion: "Кто является плательщиком?",
   payerOptions: { self: "Я сам(а)", third_party: "Другой человек или организация" },
@@ -1687,6 +1739,7 @@ const ru: LeadRequestText = {
   payerBlockContact: "Контакты",
   payerBlockConsent: "Согласия",
   hasInsuranceGuardian: "Есть ли у вашего ребёнка медицинская страховка?",
+  hasInsuranceVormund: "Есть ли у ребёнка медицинская страховка?",
   recipient: {
     section: "Получатель счёта",
     confirmPayerChange: "Подтвердить этого получателя как плательщика",
@@ -1698,6 +1751,7 @@ const ru: LeadRequestText = {
       self: "Я (как родитель / законный представитель)",
       third_party: "Третье лицо или организация",
     },
+    optionsOtherParent: { self: "Один из родителей", third_party: "Третье лицо или организация" },
     optionsRepresentative: {
       self: "Пациент (через меня как представителя)",
       third_party: "Третье лицо или организация",
@@ -1879,6 +1933,7 @@ const ru: LeadRequestText = {
   childIdentityUploadHint: "Загрузите читаемый скан или фото документа ребёнка: PDF, JPG или PNG, до 25 МБ на файл.",
   parentDocumentDetails: "Показать данные для договора",
   parentShortFormIntro: "Для первого обращения достаточно имён, контактов, страны проживания и гражданства родителей, представляющих ребёнка. Остальные сведения и документы понадобятся перед договором и подписью. Уже сохранённые данные не теряются.",
+  parentShortFormIntroVormund: "Для первого обращения достаточно вашего имени, контактов, страны проживания и гражданства как опекуна. Остальные сведения и документы понадобятся перед договором и подписью. Уже сохранённые данные не теряются.",
   custodyQuestion: "Кто представляет ребёнка?",
   custodySetByStaffHint: "Указано сотрудником GMED; если неверно — напишите нам.",
   custodyGuardianContact: "В GMED один из контактов указан как опекун, поэтому опека остаётся. Если это неверно — напишите нам.",
@@ -2055,6 +2110,7 @@ const ru: LeadRequestText = {
 const uk: LeadRequestText = {
   title: "Ваша заявка",
   titleGuardian: "Заявка для вашої дитини",
+  titleVormund: "Заявка для дитини, яку ви представляєте",
   accountLabelGuardian: "Один із батьків / законний представник",
   intro: "Будь ласка, заповніть свої особисті дані та завантажте документи. Усе зберігається автоматично.",
   introGuardian:
@@ -2186,6 +2242,7 @@ const uk: LeadRequestText = {
   insuranceCoverageOptions: { yes: "Так", no: "Ні", not_sure: "Не знаю" },
   changedAfterSend:
     "Після надсилання ви змінили заявку. Надішліть її ще раз, щоб менеджер отримав зміни.",
+  changedAfterSendGo: "До кроку «Перевірка й надсилання»",
   sectionPayer: "Платник",
   payerQuestion: "Хто є платником?",
   payerOptions: { self: "Я сам(а)", third_party: "Інша людина або організація" },
@@ -2248,6 +2305,7 @@ const uk: LeadRequestText = {
   payerBlockContact: "Контакти",
   payerBlockConsent: "Згоди",
   hasInsuranceGuardian: "Чи є у вашої дитини медична страховка?",
+  hasInsuranceVormund: "Чи є у дитини медична страховка?",
   recipient: {
     section: "Отримувач рахунку",
     confirmPayerChange: "Підтвердити цього отримувача як платника",
@@ -2259,6 +2317,7 @@ const uk: LeadRequestText = {
       self: "Я (як один із батьків / законний представник)",
       third_party: "Третя особа або організація",
     },
+    optionsOtherParent: { self: "Один із батьків", third_party: "Третя особа або організація" },
     optionsRepresentative: {
       self: "Пацієнт (через мене як представника)",
       third_party: "Третя особа або організація",
@@ -2440,6 +2499,7 @@ const uk: LeadRequestText = {
   childIdentityUploadHint: "Завантажте читабельний скан або фото документа дитини: PDF, JPG або PNG, до 25 МБ на файл.",
   parentDocumentDetails: "Показати дані для договору",
   parentShortFormIntro: "Для першого звернення достатньо імен, контактів, країни проживання та громадянства батьків, які представляють дитину. Решта відомостей і документів знадобиться перед договором і підписом. Уже збережені дані залишаються.",
+  parentShortFormIntroVormund: "Для першого звернення достатньо вашого імені, контактів, країни проживання та громадянства як опікуна. Решта відомостей і документів знадобиться перед договором і підписом. Уже збережені дані залишаються.",
   custodyQuestion: "Хто представляє дитину?",
   custodySetByStaffHint: "Вказано співробітником GMED; якщо неправильно — напишіть нам.",
   custodyGuardianContact: "У GMED один із контактів указано як опікуна, тому опіка залишається. Якщо це неправильно — напишіть нам.",
@@ -2616,6 +2676,7 @@ const uk: LeadRequestText = {
 const en: LeadRequestText = {
   title: "Your request",
   titleGuardian: "Request for your child",
+  titleVormund: "Request for the child you represent",
   accountLabelGuardian: "Parent / legal representative",
   intro: "Please enter your personal details and upload your documents. Everything is saved automatically.",
   introGuardian:
@@ -2747,6 +2808,7 @@ const en: LeadRequestText = {
   insuranceCoverageOptions: { yes: "Yes", no: "No", not_sure: "Not sure" },
   changedAfterSend:
     "You changed your request after sending it. Send it again so that your contact person receives the changes.",
+  changedAfterSendGo: "Go to “Review & send”",
   sectionPayer: "Payer",
   payerQuestion: "Who is the payer?",
   payerOptions: { self: "I do", third_party: "Another person or organisation" },
@@ -2809,6 +2871,7 @@ const en: LeadRequestText = {
   payerBlockContact: "Contact",
   payerBlockConsent: "Consents",
   hasInsuranceGuardian: "Does your child have health insurance?",
+  hasInsuranceVormund: "Does the child have health insurance?",
   recipient: {
     section: "Invoice recipient",
     confirmPayerChange: "Confirm this recipient as the payer",
@@ -2820,6 +2883,7 @@ const en: LeadRequestText = {
       self: "Me (as a parent / legal representative)",
       third_party: "Another person or an organisation",
     },
+    optionsOtherParent: { self: "One of the parents", third_party: "Another person or an organisation" },
     optionsRepresentative: {
       self: "The patient (through me as representative)",
       third_party: "Another person or an organisation",
@@ -2995,6 +3059,7 @@ const en: LeadRequestText = {
   childIdentityUploadHint: "Upload a readable scan or photo of the child’s identity document: PDF, JPG or PNG, up to 25 MB per file.",
   parentDocumentDetails: "Show details for the contract",
   parentShortFormIntro: "For the initial inquiry, we only need the names, contact details, country of residence and citizenships of the parents representing the child. Further details and documents will be needed before the contract and signature. Previously saved data is retained.",
+  parentShortFormIntroVormund: "For the initial inquiry, we only need your name, contact details, country of residence and citizenships as the child's guardian. Further details and documents will be needed before the contract and signature. Previously saved data is retained.",
   custodyQuestion: "Who represents the child?",
   custodySetByStaffHint: "Stated by GMED staff; if this is wrong, please write to us.",
   custodyGuardianContact: "GMED has a contact on file as the guardian, so the guardianship stays. If this is wrong, please write to us.",

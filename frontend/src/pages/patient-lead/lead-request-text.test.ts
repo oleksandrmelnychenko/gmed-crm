@@ -7,6 +7,8 @@ import {
   extraFieldLabel,
   extraWorkSubject,
   followUpFieldLabel,
+  guardianCabinetTitle,
+  hasInsuranceLabel,
   identificationFieldLabel,
   invoiceToLabel,
   leadRequestText,
@@ -15,6 +17,48 @@ import {
   resolveLeadCabinetLang,
   submitFieldLabel,
 } from "./lead-request-text";
+import { disclosureWording, trustedPersonsText } from "./lead-trusted-persons-text";
+
+describe("a child's cabinet by who signs in (QA 2026-10-24)", () => {
+  const parentLogin = { access_kind: "guardian", minor: true, representation: { custody: "joint" } };
+  const vormundLogin = { access_kind: "guardian", minor: true, representation: { custody: "guardian" } };
+
+  it("reads 'one of the parents' when the other parent receives the invoice", () => {
+    expect(["de", "ru", "uk", "en"].map((lang) => recipientOptions(leadRequestText(lang), parentLogin, true).self)).toEqual([
+      "Ein Elternteil",
+      "Один из родителей",
+      "Один із батьків",
+      "One of the parents",
+    ]);
+    expect(recipientOptions(leadRequestText("uk"), parentLogin).self).toBe("Я (як один із батьків / законний представник)");
+    // An adult's representative and an own login are not touched.
+    expect(recipientOptions(leadRequestText("de"), { access_kind: "self", minor: false }, true).self).toBe("Ich");
+  });
+
+  it("names the child a guardian represents, not 'your child'", () => {
+    const de = leadRequestText("de");
+    expect(guardianCabinetTitle(de, parentLogin, "Mia Muster")).toBe("Anfrage für Ihr Kind: Mia Muster");
+    expect(guardianCabinetTitle(de, vormundLogin, "Mia Muster")).toBe("Anfrage für das von Ihnen vertretene Kind: Mia Muster");
+    expect(guardianCabinetTitle(de, { access_kind: "guardian", minor: false }, "Max Muster")).toBe("Anfrage für Max Muster");
+    for (const lang of ["de", "ru", "uk", "en"]) {
+      const text = leadRequestText(lang);
+      expect(guardianCabinetTitle(text, vormundLogin, "Mia")).not.toContain(text.titleGuardian);
+      expect(hasInsuranceLabel(text, vormundLogin)).toBe(text.hasInsuranceVormund);
+      expect(hasInsuranceLabel(text, parentLogin)).toBe(text.hasInsuranceGuardian);
+      expect(text.parentShortFormIntroVormund).not.toBe(text.parentShortFormIntro);
+    }
+    expect(submitFieldLabel(de, "has_insurance", true, null, true, { custody: "guardian" })).toBe("Hat das Kind eine Krankenversicherung?");
+  });
+
+  it("answers 'only us as parents' or 'only me as guardian' about the child's data", () => {
+    const uk = trustedPersonsText("uk");
+    expect(disclosureWording(uk, parentLogin).no).toBe("Ні, тільки ми (батьки).");
+    expect(disclosureWording(uk, parentLogin).introduction).toContain("дані вашої дитини");
+    expect(disclosureWording(trustedPersonsText("de"), parentLogin).no).toBe("Nein, nur wir als Eltern.");
+    expect(disclosureWording(trustedPersonsText("de"), vormundLogin).no).toBe("Nein, nur ich als Vormund.");
+    expect(disclosureWording(uk, { access_kind: "self", minor: false })).toEqual({ no: uk.no, introduction: uk.introduction });
+  });
+});
 
 describe("lead cabinet languages", () => {
   it("speaks DE, EN, UA and RU", () => {

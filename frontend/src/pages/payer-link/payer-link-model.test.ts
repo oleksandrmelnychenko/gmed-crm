@@ -4,6 +4,7 @@ import type { PayerAnswers, PayerQuestionnaire, PayerType } from "./payer-link-a
 import {
   FUNDS_SOURCES,
   ORGANISATION_MISSING_ORDER,
+  PAYER_STEPS,
   PERSON_MISSING_ORDER,
   answersPatch,
   draftFromQuestionnaire,
@@ -46,6 +47,7 @@ import {
   type CodeProblem,
   type StorageLike,
 } from "./payer-link-session";
+import { summaryGroups } from "./payer-link-summary";
 import { missingLabels, payerLinkText } from "./payer-link-text";
 
 const TOKEN = "a".repeat(64);
@@ -658,5 +660,21 @@ describe("code step helpers", () => {
     expect(codeDigits("12 34-56")).toBe("123456");
     expect(codeDigits("1234567")).toBe("123456");
     expect(codeDigits("abc")).toBe("");
+  });
+});
+
+describe("the summary of the funds step", () => {
+  const text = payerLinkText("uk");
+  const funds = (current: PayerQuestionnaire) =>
+    summaryGroups(current, draftFromQuestionnaire(current), PAYER_STEPS, text, "uk").find((group) => group.step === "funds");
+
+  it("names an organisation's relationship as its select does", () => {
+    expect(funds(questionnaire("company", { relationship_kind: "employer" }))?.rows[0]?.value).toBe("Роботодавець пацієнта");
+    expect(funds(questionnaire("person", { relationship_kind: "employer" }))?.rows[0]?.value).toBe("Роботодавець");
+  });
+
+  it("lists the proof of funds only when it is asked for or a file is there", () => {
+    expect(funds(questionnaire("company"))?.documents).toBeUndefined();
+    expect(funds({ ...questionnaire("company"), funds_proof_required: true })?.documents?.label).toBe(text.fundsProof);
   });
 });

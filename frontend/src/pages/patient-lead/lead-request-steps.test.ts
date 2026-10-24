@@ -146,6 +146,10 @@ describe("lead cabinet steps", () => {
     const withoutConsent = request({ consents: {} });
     expect(stepMissingCount(withoutConsent, "person")).toBe(1);
     expect(stepDone(withoutConsent, "person")).toBe(false);
+    // Sent by the other parent: the second parent's own consent is no missing entry (QA 2026-10-24).
+    const sentByOther = request({ consents: {}, submitted_at: "2026-10-07T09:00:00Z" });
+    expect(stepMissingCount(sentByOther, "person")).toBe(0);
+    expect(stepDone(sentByOther, "person")).toBe(true);
     const open = request({
       submitted_at: "2026-10-07T09:00:00Z",
       follow_up: followUp({ blocks: ["A", "B"], missing: { A: ["funds_sources", "funds_proof_upload"], B: [], C: ["payment_method"] } }),
