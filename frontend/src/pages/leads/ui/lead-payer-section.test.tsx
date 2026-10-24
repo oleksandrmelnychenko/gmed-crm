@@ -752,3 +752,35 @@ describe("LeadPayerDeclarationSection: the third party's phone", () => {
   });
 });
 
+describe("LeadPayerDeclarationSection: prefill of a repeat request (live QA 2026-10-24)", () => {
+  const renderPrefilled = (declaration: PayerDeclaration | null) => renderToStaticMarkup(
+    <LocalizationProvider dateAdapter={AdapterDayjs}>
+      <LeadPayerDeclarationSection
+        leadId="lead-2"
+        data={{ declaration, status: status() }}
+        loading={false}
+        loadError={null}
+        disabled={false}
+        canEdit
+        lang="ru"
+        tx={tx}
+        prefill={selfPayer}
+        onSave={async () => undefined}
+        errorText={() => "error"}
+      />
+    </LocalizationProvider>,
+  );
+
+  it("lets staff confirm a prefill that needs no edit, e.g. a self-payer", () => {
+    const html = renderPrefilled(null);
+    expect(html).toContain('data-testid="lead-payer-prefill-note"');
+    expect(html).toContain('data-testid="lead-payer-prefill-confirm"');
+    expect(html).toContain("Данные верны");
+  });
+
+  it("offers no confirmation once the request has its own declaration", () => {
+    const html = renderPrefilled(selfPayer);
+    expect(html).not.toContain('data-testid="lead-payer-prefill-confirm"');
+  });
+});
+

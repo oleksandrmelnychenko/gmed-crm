@@ -300,6 +300,7 @@ export function LeadPayerDeclarationSection({
   const [form, setForm] = useState<PayerDeclarationForm>(initialForm);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<"upload" | null>(null);
+  const [confirmingPrefill, setConfirmingPrefill] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [autosave, setAutosave] = useState<PayerAutosaveState>({ status: "idle", dirty: false, error: null });
   const [evidenceName, setEvidenceName] = useState("");
@@ -391,6 +392,21 @@ export function LeadPayerDeclarationSection({
   };
 
   const readOnly = disabled || !canEdit || busy !== null || (loading && !data);
+  // Saves the untouched prefill of a repeat request as this lead's declaration.
+  const confirmPrefill = async () => {
+    const current = formRef.current;
+    if (payerEmailInvalid(current)) return;
+    setConfirmingPrefill(true);
+    setMessage(null);
+    try {
+      await onSave(current);
+      if (activeLeadRef.current === leadId) void payerLink?.reload();
+    } catch (error) {
+      if (activeLeadRef.current === leadId) setMessage({ tone: "error", text: errorText(error) });
+    } finally {
+      setConfirmingPrefill(false);
+    }
+  };
   const thirdParty = form.kind === "third_party";
   // An older server knows neither the payer type nor the relationship kind
   // nor the lead's contact consent: the form then stays the one for a person.
@@ -817,12 +833,29 @@ export function LeadPayerDeclarationSection({
           <p className="text-xs text-muted-foreground">{tx("Загружается…", "Wird geladen…")}</p>
         ) : null}
         {prefillActive && canEdit ? (
-          <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-800" data-testid="lead-payer-prefill-note">
-            {tx(
-              "Заполнено по декларации плательщика, зафиксированной при конвертации прошлого обращения. Проверьте данные: внесённые изменения сохраняются автоматически.",
-              "Aus der Zahlererklärung übernommen, die bei der Umwandlung der letzten Anfrage festgehalten wurde. Bitte prüfen: Änderungen werden automatisch gespeichert.",
-            )}
-          </p>
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2" data-testid="lead-payer-prefill-note">
+            <p className="min-w-0 flex-1 text-xs leading-5 text-sky-800">
+              {tx(
+                "Заполнено по декларации плательщика, зафиксированной при конвертации прошлого обращения. Проверьте данные: внесённые изменения сохраняются автоматически.",
+                "Aus der Zahlererklärung übernommen, die bei der Umwandlung der letzten Anfrage festgehalten wurde. Bitte prüfen: Änderungen werden automatisch gespeichert.",
+              )}
+            </p>
+            {/* Untouched prefill is not written (QA B-18); data that need no
+                edit — a self-payer — are confirmed here, or "Кто платит" stayed
+                "не заполнено" with the answer already ticked (live QA 2026-10-24). */}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 shrink-0"
+              disabled={readOnly || confirmingPrefill}
+              data-testid="lead-payer-prefill-confirm"
+              onClick={() => void confirmPrefill()}
+            >
+              {confirmingPrefill ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Check aria-hidden="true" className="size-3.5" />}
+              {tx("Данные верны", "Angaben stimmen")}
+            </Button>
+          </div>
         ) : null}
 
         <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg bg-muted/40 p-1">
