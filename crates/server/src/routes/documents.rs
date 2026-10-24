@@ -4692,26 +4692,55 @@ fn generated_document_file_name(name: &str, extension: &str) -> String {
     }
 }
 
+/// The longest text after the last dot kept as the extension of a stored file
+/// name; a longer one (a name without extension that has a dot early, "Dr. …")
+/// is part of the name.
+const MAX_STORAGE_EXTENSION_BYTES: usize = 16;
+
+/// The file name part of a storage key: at most `max_len` bytes (not
+/// characters), so a long Cyrillic or CJK name, or a name whose last dot comes
+/// early, never exceeds the 255-byte limit of a file name on disk (QA
+/// 2026-10-24: such an upload failed with "Storage error").
 fn compact_storage_filename(name: &str, max_len: usize) -> String {
+    fn take_bytes(value: &str, max_bytes: usize) -> &str {
+        let mut end = 0;
+        for (index, ch) in value.char_indices() {
+            if index + ch.len_utf8() > max_bytes {
+                break;
+            }
+            end = index + ch.len_utf8();
+        }
+        &value[..end]
+    }
+
     let sanitized = sanitize_filename(name);
     if sanitized.len() <= max_len {
         return sanitized;
     }
 
     let (stem, extension) = match sanitized.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() && !extension.is_empty() => {
+        Some((stem, extension))
+            if !stem.is_empty()
+                && !extension.is_empty()
+                && extension.len() <= MAX_STORAGE_EXTENSION_BYTES
+                && extension.len() < max_len =>
+        {
             (stem, Some(extension))
         }
         _ => (sanitized.as_str(), None),
     };
 
     let reserved = extension.map(|value| value.len() + 1).unwrap_or(0);
-    let stem_max_len = max_len.saturating_sub(reserved).max(1);
-    let truncated_stem: String = stem.chars().take(stem_max_len).collect();
+    let truncated_stem = take_bytes(stem, max_len.saturating_sub(reserved));
+    let truncated_stem = if truncated_stem.is_empty() {
+        "document"
+    } else {
+        truncated_stem
+    };
 
     match extension {
         Some(extension) => format!("{truncated_stem}.{extension}"),
-        None => truncated_stem,
+        None => truncated_stem.to_string(),
     }
 }
 
@@ -5169,6 +5198,41 @@ fn medical_classification_audit_event(
         "reason": "medical_document_classification",
     });
     event
+}
+
+#[cfg(test)]
+mod storage_filename_tests {
+    use super::compact_storage_filename;
+
+    /// QA 2026-10-24: the storage key is `<uuid>_<name>`; a file name on disk
+    /// holds at most 255 bytes. A long CJK name (3 bytes a character) or a
+    /// name whose last dot comes early (no real extension) produced a longer
+    /// name, and the upload failed with "Storage error".
+    #[test]
+    fn the_stored_name_stays_within_the_byte_limit() {
+        let cjk = format!("{}.pdf", "診".repeat(120));
+        let early_dot = format!("Dr. {}", "Ш".repeat(190));
+        let long_ascii_tail = format!("a.{}", "b".repeat(198));
+        for name in [cjk.as_str(), early_dot.as_str(), long_ascii_tail.as_str()] {
+            let compact = compact_storage_filename(name, 96);
+            assert!(compact.len() <= 96, "{} bytes: {compact}", compact.len());
+            assert!(!compact.is_empty());
+        }
+        let cjk = compact_storage_filename(&cjk, 96);
+        assert!(cjk.ends_with(".pdf"), "{cjk}");
+    }
+
+    #[test]
+    fn short_names_and_extensions_stay_as_they_are() {
+        assert_eq!(
+            compact_storage_filename("Befund 12.03.2024.pdf", 96),
+            "Befund_12.03.2024.pdf"
+        );
+        let long = format!("{}.jpeg", "x".repeat(150));
+        let compact = compact_storage_filename(&long, 96);
+        assert_eq!(compact.len(), 96);
+        assert!(compact.ends_with(".jpeg"));
+    }
 }
 
 #[cfg(test)]

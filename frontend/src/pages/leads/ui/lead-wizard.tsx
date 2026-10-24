@@ -137,6 +137,7 @@ import {
   type TrustedContactPayload,
 } from "../model/lead-trusted-contacts";
 import { medicalStepHasContent } from "../model/medical-step-content";
+import { uploadEach } from "../model/upload-each";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
 import { removeLeadRepresentativeData, removeLeadTrustedContact } from "../data/lead-representation-api";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
@@ -5950,14 +5951,12 @@ export function LeadWizard({
 
   async function upload(kind: "identity" | "medical", files: File[]) {
     if (!leadId || files.length === 0) return;
-    if (files.some((file) => file.size > MAX_DOCUMENT_FILE_SIZE)) {
-      setError(tx("Размер файла не должен превышать 25 МБ", "Die Datei darf höchstens 25 MB groß sein"));
-      return;
-    }
     setBusy("upload-" + kind);
     setError("");
     try {
-      for (const file of files) {
+      // Each file on its own: a refused file does not stop the others, and
+      // the ones uploaded are shown (QA 2026-10-24).
+      const result = await uploadEach(files, async (file) => {
         const form = new FormData();
         form.set("lead_id", leadId);
         form.set("file", file);
@@ -5973,12 +5972,23 @@ export function LeadWizard({
           form.set("is_medical", "true");
         }
         await uploadDocument(form);
+      }, MAX_DOCUMENT_FILE_SIZE);
+      if (result.uploaded.length > 0) {
+        // Uploaded medical files answer the "documents exist" question.
+        if (kind === "medical" && lead?.has_medical_records !== "yes") {
+          await updateLeadWizard(leadId, { has_medical_records: "yes" });
+        }
+        await refreshDocumentsState();
       }
-      // Uploaded medical files answer the "documents exist" question.
-      if (kind === "medical" && lead?.has_medical_records !== "yes") {
-        await updateLeadWizard(leadId, { has_medical_records: "yes" });
+      const firstFailure = result.failed[0];
+      if (result.uploaded.length === 0 && result.tooLarge.length === 0 && result.failed.length === 1 && firstFailure) {
+        showWizardError(firstFailure.error);
+      } else if (result.tooLarge.length > 0 || result.failed.length > 0) {
+        setError([
+          ...result.tooLarge.map((file) => `${file.name}: ${tx("размер файла не должен превышать 25 МБ", "die Datei darf höchstens 25 MB groß sein")}`),
+          ...result.failed.map(({ file, error }) => `${file.name}: ${errorText(error, tx)}`),
+        ].join(" · "));
       }
-      await refreshDocumentsState();
     } catch (nextError) {
       showWizardError(nextError);
     } finally {

@@ -31,8 +31,19 @@ pub(crate) async fn validate_lead_attachment(
     content_type: Option<&str>,
     data: &[u8],
 ) -> Result<String, axum::response::Response> {
+    // Coded, so the cabinet and the payer's link say what is wrong with the
+    // file instead of "please try again" (QA 2026-10-24): a photo renamed to
+    // .jpg (HEIC) or a damaged file is refused for its content, a malware hit
+    // for good; a scanner that did not answer is worth a retry.
     let canonical_mime = validate_upload_magic_bytes(Some(file_name), content_type, data)
-        .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))?
+        .map_err(|message| {
+            crate::routes::lead_portal_intake::coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "unsupported_file_type",
+                message,
+                json!({}),
+            )
+        })?
         .unwrap_or_else(|| "application/octet-stream".to_string());
 
     match scan_upload_bytes(Some(file_name), data).await {
@@ -40,9 +51,23 @@ pub(crate) async fn validate_lead_attachment(
         Ok(FileScanOutcome::Skipped) => {
             tracing::warn!(file_name, "lead attachment malware scan skipped");
         }
+        Err(error) if error == crate::file_scan::MALWARE_FOUND => {
+            tracing::warn!(file_name, "lead attachment rejected by malware scan");
+            return Err(crate::routes::lead_portal_intake::coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "file_rejected",
+                &error,
+                json!({}),
+            ));
+        }
         Err(error) => {
-            tracing::warn!(file_name, error = %error, "lead attachment rejected by malware scan");
-            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, &error));
+            tracing::error!(file_name, error = %error, "lead attachment malware scan failed");
+            return Err(crate::routes::lead_portal_intake::coded(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "file_scan_unavailable",
+                "The file could not be checked right now; please try again later",
+                json!({}),
+            ));
         }
     }
 

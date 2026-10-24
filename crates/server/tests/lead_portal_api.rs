@@ -2317,6 +2317,15 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "unsupported_file_type", "{body}");
+    // A file whose content is not what its name says (an iPhone photo saved
+    // as .jpg, a damaged file) is refused with a code the cabinet translates,
+    // not with a bare "try again" (QA 2026-10-24); the medical documents too.
+    for path in [identity_document.clone(), format!("{request}/documents")] {
+        let (status, body) =
+            upload_file(router, &path, &patient, "pass.jpg", "image/jpeg", PDF).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "unsupported_file_type", "{path} {body}");
+    }
     let (status, body) = upload_file(
         router,
         &identity_document,
@@ -2409,6 +2418,16 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
         }]),
         "{intake}"
     );
+    // Sales sees the file listed but cannot open it (no identity documents).
+    let (status, body) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &app.staff("sales"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     let (_, intake) = json_request(
         router,
         "GET",

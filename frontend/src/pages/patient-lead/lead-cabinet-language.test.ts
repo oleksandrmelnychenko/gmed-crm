@@ -154,6 +154,7 @@ describe("lead cabinet and payer link: language", () => {
         "too_many_documents",
         "unsupported_file_type",
         "file_too_large",
+        "file_rejected",
         "personal_data_incomplete",
         "consent_version_outdated",
         "lead_converted",

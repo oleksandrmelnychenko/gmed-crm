@@ -9,6 +9,8 @@ import type { LeadCustody, LeadIdentityDocument, LeadRepresentative } from "../d
 import { uploadRepresentativeDocument, type RepresentativeUploadKind } from "../data/lead-risk-api";
 import type { Tx } from "../model/lead-payer";
 
+const MAX_REPRESENTATIVE_FILE_SIZE = 25 * 1024 * 1024;
+
 /**
  * Whether the person's proof of authority is asked for: the contract gate
  * needs it of an adult's agent or guardian and of the guardian (Vormund) of
@@ -56,6 +58,11 @@ function UploadBlock({
     ? tx("Подтверждение полномочий", "Vertretungsnachweis")
     : tx("Скан документа", "Ausweiskopie");
   const upload = async (file: File) => {
+    // The server refuses more than 25 MB; say so before sending it.
+    if (file.size > MAX_REPRESENTATIVE_FILE_SIZE) {
+      setError(tx("Размер файла не должен превышать 25 МБ", "Die Datei darf höchstens 25 MB groß sein"));
+      return;
+    }
     setBusy(true);
     setError("");
     try {

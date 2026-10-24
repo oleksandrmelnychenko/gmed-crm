@@ -7,6 +7,10 @@ use std::{
 
 use uuid::Uuid;
 
+/// The error of [`scan_upload_bytes`] when the scanner found malware; every
+/// other error means the file could not be checked.
+pub const MALWARE_FOUND: &str = "File failed malware scan";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileScanOutcome {
     Clean,
@@ -91,8 +95,11 @@ pub async fn scan_upload_bytes(
 }
 
 fn build_temp_scan_path(original_filename: Option<&str>) -> PathBuf {
+    // ASCII only, so bytes are characters: the tail (with the extension) of a
+    // long name, as a file name on disk holds at most 255 bytes.
     let safe_name = original_filename
         .map(sanitize_filename)
+        .map(|value| value[value.len().saturating_sub(100)..].to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "upload.bin".to_string());
 
@@ -131,7 +138,7 @@ fn run_scan_command(path: &Path) -> Result<FileScanOutcome, String> {
                             return Ok(FileScanOutcome::Clean);
                         }
                         Ok(Some(status)) if status.code() == Some(1) => {
-                            return Err("File failed malware scan".to_string());
+                            return Err(MALWARE_FOUND.to_string());
                         }
                         Ok(Some(_)) => return Err(format!("{scanner} failed to scan upload")),
                         Ok(None) if started.elapsed() < Duration::from_secs(30) => {
@@ -161,5 +168,21 @@ fn run_scan_command(path: &Path) -> Result<FileScanOutcome, String> {
         )
     } else {
         Ok(FileScanOutcome::Skipped)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_temp_scan_path;
+
+    /// A long upload name must not exceed the file name limit of the staged
+    /// copy (255 bytes), or the scan refuses a clean file (QA 2026-10-24).
+    #[test]
+    fn the_staged_copy_of_a_long_name_fits_on_disk() {
+        let name = format!("{}.pdf", "Befund".repeat(60));
+        let path = build_temp_scan_path(Some(&name));
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+        assert!(file_name.len() <= 255, "{}", file_name.len());
+        assert!(file_name.ends_with(".pdf"));
     }
 }
