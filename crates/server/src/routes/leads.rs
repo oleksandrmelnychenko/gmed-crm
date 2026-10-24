@@ -26,24 +26,55 @@ const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 const MAX_BUNDLE_BYTES: usize = 512 * 1024;
 const MAX_ATTACHMENTS: usize = 20;
 
-pub(crate) async fn validate_lead_attachment(
+/// Why a lead's file is refused. Coded, so the cabinet and the payer's link
+/// say what is wrong with the file instead of "please try again" (QA
+/// 2026-10-24): a photo renamed to .jpg (HEIC) or a damaged file is refused
+/// for its content, a malware hit for good; a scanner that did not answer is
+/// worth a retry.
+pub(crate) enum LeadAttachmentRefusal {
+    /// 422 `unsupported_file_type`: a type not offered, or content that does
+    /// not match the type.
+    UnsupportedFileType(String),
+    /// 422 `file_rejected`: the malware scan found something.
+    FileRejected(String),
+    /// 503 `file_scan_unavailable`: the scanner did not answer.
+    ScanUnavailable,
+}
+
+impl LeadAttachmentRefusal {
+    pub(crate) fn code(&self) -> &'static str {
+        match self {
+            Self::UnsupportedFileType(_) => "unsupported_file_type",
+            Self::FileRejected(_) => "file_rejected",
+            Self::ScanUnavailable => "file_scan_unavailable",
+        }
+    }
+
+    pub(crate) fn into_response(self) -> axum::response::Response {
+        let code = self.code();
+        let (status, message) = match self {
+            Self::UnsupportedFileType(message) | Self::FileRejected(message) => {
+                (StatusCode::UNPROCESSABLE_ENTITY, message)
+            }
+            Self::ScanUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "The file could not be checked right now; please try again later".to_string(),
+            ),
+        };
+        crate::routes::lead_portal_intake::coded(status, code, &message, json!({}))
+    }
+}
+
+/// The checks of a lead's file (type against content, malware scan) with the
+/// refusal as a value; [`validate_lead_attachment`] turns it into the coded
+/// response. Returns the canonical MIME type.
+pub(crate) async fn check_lead_attachment(
     file_name: &str,
     content_type: Option<&str>,
     data: &[u8],
-) -> Result<String, axum::response::Response> {
-    // Coded, so the cabinet and the payer's link say what is wrong with the
-    // file instead of "please try again" (QA 2026-10-24): a photo renamed to
-    // .jpg (HEIC) or a damaged file is refused for its content, a malware hit
-    // for good; a scanner that did not answer is worth a retry.
+) -> Result<String, LeadAttachmentRefusal> {
     let canonical_mime = validate_upload_magic_bytes(Some(file_name), content_type, data)
-        .map_err(|message| {
-            crate::routes::lead_portal_intake::coded(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "unsupported_file_type",
-                message,
-                json!({}),
-            )
-        })?
+        .map_err(|message| LeadAttachmentRefusal::UnsupportedFileType(message.to_string()))?
         .unwrap_or_else(|| "application/octet-stream".to_string());
 
     match scan_upload_bytes(Some(file_name), data).await {
@@ -53,25 +84,25 @@ pub(crate) async fn validate_lead_attachment(
         }
         Err(error) if error == crate::file_scan::MALWARE_FOUND => {
             tracing::warn!(file_name, "lead attachment rejected by malware scan");
-            return Err(crate::routes::lead_portal_intake::coded(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "file_rejected",
-                &error,
-                json!({}),
-            ));
+            return Err(LeadAttachmentRefusal::FileRejected(error));
         }
         Err(error) => {
             tracing::error!(file_name, error = %error, "lead attachment malware scan failed");
-            return Err(crate::routes::lead_portal_intake::coded(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "file_scan_unavailable",
-                "The file could not be checked right now; please try again later",
-                json!({}),
-            ));
+            return Err(LeadAttachmentRefusal::ScanUnavailable);
         }
     }
 
     Ok(canonical_mime)
+}
+
+pub(crate) async fn validate_lead_attachment(
+    file_name: &str,
+    content_type: Option<&str>,
+    data: &[u8],
+) -> Result<String, axum::response::Response> {
+    check_lead_attachment(file_name, content_type, data)
+        .await
+        .map_err(LeadAttachmentRefusal::into_response)
 }
 
 // ----------------------------------------------------------------------------
@@ -1561,97 +1592,6 @@ struct LeadConversionReadiness {
     payload: Value,
 }
 
-/// A country of the longer list of high-risk third countries (with the black
-/// list). Since the owner's rule of 2026-10-07 it is a fact for the GwG
-/// identification sheet ("Hochrisiko-Drittstaat") only; whether the enhanced
-/// check is required decides [`super::lead_enhanced_check`].
-pub(crate) fn is_enhanced_due_diligence_country(value: &str) -> bool {
-    let normalized = value.trim();
-    if normalized.is_empty() {
-        return false;
-    }
-    let upper = normalized.to_uppercase();
-    if matches!(
-        upper.as_str(),
-        "AF" | "DZ"
-            | "AO"
-            | "BO"
-            | "VG"
-            | "CI"
-            | "CD"
-            | "HT"
-            | "YE"
-            | "CM"
-            | "KE"
-            | "LA"
-            | "LB"
-            | "MC"
-            | "MM"
-            | "NA"
-            | "NP"
-            | "RU"
-            | "SS"
-            | "SY"
-            | "TT"
-            | "VU"
-            | "VE"
-            | "VN"
-            | "KP"
-            | "IR"
-    ) {
-        return true;
-    }
-    matches!(
-        normalized.to_lowercase().as_str(),
-        "afghanistan"
-            | "algeria"
-            | "algerien"
-            | "angola"
-            | "bolivia"
-            | "bolivien"
-            | "british virgin islands"
-            | "britische jungferninseln"
-            | "côte d’ivoire"
-            | "côte d'ivoire"
-            | "democratic republic of the congo"
-            | "demokratische republik kongo"
-            | "haiti"
-            | "yemen"
-            | "jemen"
-            | "cameroon"
-            | "kamerun"
-            | "kenya"
-            | "kenia"
-            | "laos"
-            | "lebanon"
-            | "libanon"
-            | "monaco"
-            | "myanmar"
-            | "myanmar/birma"
-            | "burma"
-            | "namibia"
-            | "nepal"
-            | "russian federation"
-            | "russische föderation"
-            | "russia"
-            | "russland"
-            | "south sudan"
-            | "südsudan"
-            | "syria"
-            | "syrien"
-            | "trinidad and tobago"
-            | "trinidad und tobago"
-            | "vanuatu"
-            | "venezuela"
-            | "vietnam"
-            | "democratic people's republic of korea"
-            | "demokratische volksrepublik korea"
-            | "north korea"
-            | "nordkorea"
-            | "iran"
-    )
-}
-
 fn readiness_decimal(value: Option<&Value>) -> String {
     let parsed = value.and_then(|value| match value {
         Value::Number(number) => number.as_f64(),
@@ -1758,6 +1698,69 @@ pub(crate) fn normalized_patient_relation_type(value: Option<&str>) -> &'static 
     } else {
         "other"
     }
+}
+
+/// The patient's emergency contact among the lead's trusted contacts: the
+/// entry marked `is_emergency_contact` (name, phone, relation). A trusted
+/// contact is no emergency contact by itself (owner decision 2026-10-19), so
+/// without a mark there is none — never the first entry of the list, which
+/// the legacy `trusted_contact_*` columns mirror.
+fn emergency_contact_of(contacts: &Value) -> (Option<String>, Option<String>, Option<String>) {
+    let text = |contact: &Value, key: &str| {
+        contact
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    contacts
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|contact| {
+            contact
+                .get("is_emergency_contact")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                && text(contact, "name").is_some()
+        })
+        .map(|contact| {
+            (
+                text(contact, "name"),
+                text(contact, "phone"),
+                text(contact, "relation"),
+            )
+        })
+        .unwrap_or_default()
+}
+
+/// The emergency contact a conversion writes: the contact marked as such;
+/// without a mark, the legacy single contact of the `trusted_contact_*`
+/// columns (the old one-contact model named the emergency contact there) —
+/// but never while a parent or guardian is among the contacts, since a
+/// minor's parents are not the emergency contact by themselves (owner
+/// decision 2026-10-19).
+fn emergency_contact_for_patient(
+    contacts: &Value,
+    legacy: (Option<String>, Option<String>, Option<String>),
+) -> (Option<String>, Option<String>, Option<String>) {
+    let marked = emergency_contact_of(contacts);
+    if marked.0.is_some() {
+        return marked;
+    }
+    let represented = contacts.as_array().into_iter().flatten().any(|contact| {
+        is_parent_or_guardian_relation(contact.get("relation").and_then(Value::as_str))
+    });
+    if represented
+        || legacy
+            .0
+            .as_deref()
+            .is_none_or(|name| name.trim().is_empty())
+    {
+        return (None, None, None);
+    }
+    legacy
 }
 
 pub(crate) fn is_parent_or_guardian_relation(value: Option<&str>) -> bool {
@@ -2106,6 +2109,12 @@ struct LeadConversionReadinessInput {
     /// only in a new patient's first onboarding (owner decision 2026-10-23,
     /// `crate::lead_self_disclosure`).
     self_disclosure: crate::lead_self_disclosure::Status,
+    /// The contract details of a minor's representatives that are still
+    /// missing (`lead_representatives::contract_details_missing`, keys like
+    /// `representative:<id>:birth_place`). The conversion refuses with them
+    /// (422 `representative_details_incomplete`), so the release list says so
+    /// before staff click; never a qualification reason.
+    contract_details_missing: Vec<String>,
 }
 
 fn evaluate_lead_conversion_readiness(
@@ -2478,39 +2487,53 @@ fn evaluate_lead_conversion_readiness(
     } else if cost_estimate_required && !input.cost_estimate_document_generated {
         conversion_reasons.push("Preliminary cost calculation document is missing".to_string());
     }
+    if !input.contract_details_missing.is_empty() {
+        conversion_reasons.push(CONTRACT_DETAILS_MISSING.to_string());
+    }
     if input.converted_patient_id.is_some() {
         conversion_reasons.push("Lead is already converted".to_string());
     }
     let conversion_ready = conversion_reasons.is_empty();
 
+    let mut payload = json!({
+        "qualification_ready": qualification_ready,
+        "conversion_ready": conversion_ready,
+        "qualification_reasons": qualification_reasons,
+        "blocking_reasons": conversion_reasons,
+        "checks": checks,
+        // The wizard shows these as given in the cabinet next to its own
+        // toggles (which record a paper consent).
+        "cabinet_consents": {
+            "privacy_practices": input.cabinet_consent_privacy,
+            "healthcare": input.cabinet_consent_healthcare,
+        },
+        "steps": [
+            { "key": "master_data", "label": "Stammdaten", "ready": master_data_ready },
+            { "key": "medical", "label": "Medizinische Merkmale", "ready": medical_ready },
+            { "key": "service", "label": "Servicehistorie", "ready": service_ready },
+            { "key": "documents", "label": "Unterlagen", "ready": documents_ready },
+            { "key": "commercial", "label": "Vertrag & Auftrag", "ready": commercial_ready },
+            { "key": "release", "label": "Freigabe", "ready": conversion_ready }
+        ],
+    });
+    // The missing keys point the wizard at the person and the field; left
+    // out when there is nothing to complete.
+    if !input.contract_details_missing.is_empty() {
+        payload["contract_details_missing"] = json!(input.contract_details_missing);
+    }
+
     LeadConversionReadiness {
         qualification_ready,
         conversion_ready,
-        qualification_reasons: qualification_reasons.clone(),
-        conversion_reasons: conversion_reasons.clone(),
-        payload: json!({
-            "qualification_ready": qualification_ready,
-            "conversion_ready": conversion_ready,
-            "qualification_reasons": qualification_reasons,
-            "blocking_reasons": conversion_reasons,
-            "checks": checks,
-            // The wizard shows these as given in the cabinet next to its own
-            // toggles (which record a paper consent).
-            "cabinet_consents": {
-                "privacy_practices": input.cabinet_consent_privacy,
-                "healthcare": input.cabinet_consent_healthcare,
-            },
-            "steps": [
-                { "key": "master_data", "label": "Stammdaten", "ready": master_data_ready },
-                { "key": "medical", "label": "Medizinische Merkmale", "ready": medical_ready },
-                { "key": "service", "label": "Servicehistorie", "ready": service_ready },
-                { "key": "documents", "label": "Unterlagen", "ready": documents_ready },
-                { "key": "commercial", "label": "Vertrag & Auftrag", "ready": commercial_ready },
-                { "key": "release", "label": "Freigabe", "ready": conversion_ready }
-            ],
-        }),
+        qualification_reasons,
+        conversion_reasons,
+        payload,
     }
 }
+
+/// The conversion reason of [`LeadConversionReadinessInput::contract_details_missing`];
+/// the frontend maps this exact text.
+const CONTRACT_DETAILS_MISSING: &str = "Contract details of the representatives are missing";
 
 fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversionReadinessInput {
     let wizard_state = row
@@ -2596,6 +2619,8 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         ),
         // Set by `load_lead_conversion_readiness` from the owner's rule.
         self_disclosure: Default::default(),
+        // Set by `load_lead_conversion_readiness` (needs the representatives).
+        contract_details_missing: Vec::new(),
     }
 }
 
@@ -2969,6 +2994,12 @@ async fn load_lead_conversion_readiness(
     {
         input.identity_document_verified = true;
     }
+    // The same check the conversion makes (`convert_lead`): a release list
+    // that says "ready" while the conversion would refuse is no release list.
+    input.contract_details_missing =
+        super::lead_representatives::contract_details_missing(&mut conn, lead_id)
+            .await
+            .map_err(enhanced_check_failed)?;
     drop(conn);
     input.self_disclosure = crate::lead_self_disclosure::status(&state.db, lead_id)
         .await
@@ -3078,7 +3109,15 @@ async fn apply_repeat_patient_readiness(
                   o.package_coverage_status
            FROM leads l
            JOIN patients p ON p.id = l.prospect_patient_id
-           LEFT JOIN orders o ON o.source_lead_id = l.id
+           -- The current order of the lead, as the main readiness reads it;
+           -- a lead with several orders must not answer with an older one.
+           LEFT JOIN LATERAL (
+               SELECT o.contract_id, o.package_coverage_status
+               FROM orders o
+               WHERE o.source_lead_id = l.id
+               ORDER BY o.created_at DESC, o.id DESC
+               LIMIT 1
+           ) o ON true
            LEFT JOIN framework_contracts fc ON fc.id = o.contract_id
            WHERE l.id = $1 AND l.intake_model = 'patient_first'
              AND p.lifecycle_status IN ('active', 'inactive')"#,
@@ -3130,7 +3169,8 @@ async fn apply_repeat_patient_readiness(
     let document_state: (bool, bool) = sqlx::query_as(
         "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='single_order' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)),
                 EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='order_cost_estimate' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id))
-         FROM orders o WHERE o.source_lead_id=$1")
+         FROM orders o WHERE o.source_lead_id=$1
+         ORDER BY o.created_at DESC, o.id DESC LIMIT 1")
         .bind(lead_id).fetch_optional(&state.db).await
         .map_err(|_|err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to check current order documents"))?.unwrap_or((false,false));
     input.order_document_generated = document_state.0;
@@ -3619,6 +3659,19 @@ async fn create_repeat_intake(
     .map_err(failed)?;
     sqlx::query("INSERT INTO workflow_lifecycle_events(entity_type,entity_id,to_stage,transition_kind,changed_by,metadata) VALUES('lead',$1,'new','created',$2,$3)")
         .bind(id).bind(auth.user_id).bind(json!({"intake_source":"staff_wizard","repeat_patient_id":patient})).execute(&mut *tx).await.map_err(failed)?;
+    // The audit row commits with the intake (audit policy: never dropped).
+    audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "create_repeat_intake",
+            Some(auth.user_id),
+            "lead",
+            Some(id),
+            json!({"patient_id":patient,"case_id":case_id,"inherited_contract_id":contract_id}),
+        ),
+    )
+    .await
+    .map_err(failed)?;
     tx.commit().await.map_err(failed)?;
     crate::realtime::publish_lead_event(
         state,
@@ -3628,13 +3681,6 @@ async fn create_repeat_intake(
         json!({"intake_source":"staff_wizard","repeat_patient_id":patient}),
     )
     .await;
-    state.audit_sender.try_send(audit::domain_event(
-        "create_repeat_intake",
-        Some(auth.user_id),
-        "lead",
-        Some(id),
-        json!({"patient_id":patient,"case_id":case_id,"inherited_contract_id":contract_id}),
-    ));
     Ok(id)
 }
 
@@ -3825,8 +3871,18 @@ async fn create_lead(
         r#"INSERT INTO leads (
                 first_name, last_name, email, phone, source, country,
                 notes, created_by, intake_source, creation_key, date_of_birth,
-                trusted_contacts
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual', $9, $10, $11)
+                trusted_contacts,
+                -- The legacy single-contact columns mirror the first entry,
+                -- as `update_lead` keeps them (older readers still use them).
+                trusted_contact_name, trusted_contact_phone, trusted_contact_relation,
+                trusted_contact_birth_date, trusted_contact_address, trusted_contact_email
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual', $9, $10, $11,
+                     NULLIF($11::jsonb #>> '{0,name}', ''),
+                     NULLIF($11::jsonb #>> '{0,phone}', ''),
+                     NULLIF($11::jsonb #>> '{0,relation}', ''),
+                     NULLIF($11::jsonb #>> '{0,birth_date}', '')::date,
+                     NULLIF($11::jsonb #>> '{0,address}', ''),
+                     NULLIF($11::jsonb #>> '{0,email}', ''))
            ON CONFLICT(created_by,creation_key) WHERE creation_key IS NOT NULL
            DO UPDATE SET creation_key=EXCLUDED.creation_key
            RETURNING id, (xmax = 0)"#,
@@ -3934,17 +3990,26 @@ async fn create_lead(
         tracing::error!(%error, lead = %id, "link parents' logins to the new lead");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
     }
+    // The audit row commits with the lead (audit policy: never dropped).
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "create_lead",
+            Some(auth.user_id),
+            "lead",
+            Some(id),
+            json!({}),
+        ),
+    )
+    .await
+    {
+        tracing::error!(%error, lead = %id, "audit lead creation");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+    }
     if let Err(error) = tx.commit().await {
         tracing::error!(%error, lead = %id, "commit lead creation");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
     }
-    state.audit_sender.try_send(audit::domain_event(
-        "create_lead",
-        Some(auth.user_id),
-        "lead",
-        Some(id),
-        json!({}),
-    ));
     if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
         &state,
         crate::routes::workflow_lifecycle::RecordEvent {
@@ -5250,11 +5315,22 @@ async fn update_lead(
     // unrelated edits such as trusted contacts.
     let current_email = current_identity.get::<Option<String>, _>("email");
     let current_phone = current_identity.get::<Option<String>, _>("phone");
-    let changed_email = body.email.clone().filter(|email| {
+    // A blank address or number is no value: like the create path, which
+    // stores none, it is neither validated nor written, so the stored value
+    // stays (a `COALESCE` with "" would store the empty string).
+    let blank_is_none = |value: Option<&str>| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let email_sent = blank_is_none(body.email.as_deref());
+    let phone_sent = blank_is_none(body.phone.as_deref());
+    let changed_email = email_sent.clone().filter(|email| {
         normalized_identity_email(Some(email))
             != normalized_identity_email(current_email.as_deref())
     });
-    let changed_phone = body.phone.clone().filter(|phone| {
+    let changed_phone = phone_sent.clone().filter(|phone| {
         normalized_identity_phone(Some(phone))
             != normalized_identity_phone(current_phone.as_deref())
     });
@@ -5534,8 +5610,8 @@ async fn update_lead(
            WHERE id = $1 AND qualification_status <> 'deleted'"#,
     )
     .bind(lead_id)
-    .bind(body.email.as_deref())
-    .bind(body.phone.as_deref())
+    .bind(email_sent.as_deref())
+    .bind(phone_sent.as_deref())
     .bind(body.country.as_deref())
     .bind(primary_language.as_deref())
     .bind(date_of_birth)
@@ -5593,6 +5669,26 @@ async fn update_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    // A contact whose relation is no longer parent / guardian keeps no
+    // parent's access to the request: ended here, in the transaction of the
+    // save, like a custody change ends it.
+    let revoked_guardian_access = if trusted_contacts.is_some() {
+        match super::lead_representatives::revoke_access_of_former_guardians(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(revoked) => revoked,
+            Err(error) => {
+                tracing::error!(%error, lead_id = %lead_id, "end access of former guardians");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    } else {
+        Vec::new()
+    };
     let previous_citizenships = match citizenships.as_deref() {
         Some(codes) => {
             match super::lead_payer::set_lead_citizenships(&mut tx, lead_id, codes).await {
@@ -5650,11 +5746,13 @@ async fn update_lead(
     let mut audit_context = json!({
         "compliance_status": compliance_status,
         "identity_fields": identity_fields,
-        "contact_updated": body.email.is_some() || body.phone.is_some(),
+        "contact_updated": email_sent.is_some() || phone_sent.is_some(),
         "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
         "consent_healthcare": body.consent_healthcare,
         "consent_privacy_practices": body.consent_privacy_practices,
         "referrer_patient_id": referrer_patient_id,
+        // Access ids only; the revocation itself is audited by the helper.
+        "guardian_access_revoked": revoked_guardian_access,
     });
     if compliance_changed {
         audit_context["previous_compliance_status"] = json!(current_compliance_status);
@@ -5763,6 +5861,9 @@ async fn update_lead(
     }
     crate::document_signatures::withdraw_invalidated_consents(&state, &representative_invites)
         .await;
+    if !revoked_guardian_access.is_empty() {
+        super::lead_representatives::notify_custody_access_ended(&state, lead_id).await;
+    }
     // Open pages show the new name at once: Users & Roles reloads its list and
     // the lead's cabinet reloads the profile.
     if let Some(user_id) = renamed_login {
@@ -5790,7 +5891,7 @@ async fn update_lead(
         json!({
             "compliance_status": compliance_status,
             "identity_fields": identity_fields,
-            "contact_updated": body.email.is_some() || body.phone.is_some(),
+            "contact_updated": email_sent.is_some() || phone_sent.is_some(),
             "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
             "consent_healthcare": body.consent_healthcare,
             "consent_privacy_practices": body.consent_privacy_practices,
@@ -5873,21 +5974,28 @@ async fn promote_lead_to_console(
             .as_deref(),
     );
 
-    match sqlx::query(
-        r#"UPDATE leads
-           SET console_promoted_at = COALESCE(console_promoted_at, now()),
-               console_promoted_by = COALESCE(console_promoted_by, $2),
-               created_by = COALESCE(created_by, $2),
-               updated_at = now()
-           WHERE id = $1"#,
-    )
-    .bind(lead_id)
-    .bind(auth.user_id)
-    .execute(&state.db)
-    .await
-    {
-        Ok(result) if result.rows_affected() > 0 => {
-            state.audit_sender.try_send(audit::domain_event(
+    // The audit row commits with the promotion (never dropped on a full
+    // channel, never written for a failed update).
+    let promoted = async {
+        let mut tx = state.db.begin().await?;
+        let result = sqlx::query(
+            r#"UPDATE leads
+               SET console_promoted_at = COALESCE(console_promoted_at, now()),
+                   console_promoted_by = COALESCE(console_promoted_by, $2),
+                   created_by = COALESCE(created_by, $2),
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(lead_id)
+        .bind(auth.user_id)
+        .execute(&mut *tx)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Ok(false);
+        }
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
                 "promote_lead_to_console",
                 Some(auth.user_id),
                 "lead",
@@ -5896,8 +6004,15 @@ async fn promote_lead_to_console(
                     "previous_lead_type": previous_type,
                     "lead_type": "console",
                 }),
-            ));
-
+            ),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok::<bool, sqlx::Error>(true)
+    }
+    .await;
+    match promoted {
+        Ok(true) => {
             let qualification_status = current
                 .try_get::<String, _>("qualification_status")
                 .unwrap_or_else(|_| "new".to_string());
@@ -5940,7 +6055,7 @@ async fn promote_lead_to_console(
             }))
             .into_response()
         }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Lead not found"),
+        Ok(false) => err(StatusCode::NOT_FOUND, "Lead not found"),
         Err(e) => {
             tracing::error!(error = %e, lead_id = %lead_id, "promote lead to console");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
@@ -6398,11 +6513,26 @@ fn lead_wizard_date(wizard_state: &Value, key: &str) -> Option<NaiveDate> {
         .and_then(|value| NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok())
 }
 
+/// What an import of the questionnaire attachments did: the files stored as
+/// the lead's documents in this run, and the files refused for their content
+/// (this run and earlier ones; `id`, `file_name`, `code`), so the wizard can
+/// name them.
+pub(crate) struct AttachmentImportSummary {
+    pub imported: usize,
+    pub refused: Vec<Value>,
+}
+
+impl AttachmentImportSummary {
+    fn payload(&self) -> Value {
+        json!({ "imported": self.imported, "refused": self.refused })
+    }
+}
+
 async fn import_lead_attachments_internal(
     state: &AppState,
     lead_id: Uuid,
     uploaded_by: Uuid,
-) -> Result<usize, axum::response::Response> {
+) -> Result<AttachmentImportSummary, axum::response::Response> {
     let lead_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM leads WHERE id = $1)",
     )
@@ -6420,7 +6550,7 @@ async fn import_lead_attachments_internal(
     let attachments = sqlx::query(
         r#"SELECT id, file_name, content_type, data
            FROM lead_attachments
-           WHERE lead_id = $1 AND imported_at IS NULL
+           WHERE lead_id = $1 AND imported_at IS NULL AND import_refused_at IS NULL
            ORDER BY uploaded_at, id"#,
     )
     .bind(lead_id)
@@ -6432,14 +6562,44 @@ async fn import_lead_attachments_internal(
     })?;
 
     let mut imported = 0usize;
+    let mut refused_now = 0usize;
     for attachment in attachments {
         let attachment_id: Uuid = attachment.try_get("id").unwrap_or_default();
         let file_name: String = attachment.try_get("file_name").unwrap_or_default();
         let content_type: Option<String> = attachment.try_get("content_type").unwrap_or_default();
         let data: Vec<u8> = attachment.try_get("data").unwrap_or_default();
 
-        let canonical_mime =
-            validate_lead_attachment(&file_name, content_type.as_deref(), &data).await?;
+        let checked = check_lead_attachment(&file_name, content_type.as_deref(), &data).await;
+        let canonical_mime = match checked {
+            Ok(mime) => mime,
+            Err(LeadAttachmentRefusal::ScanUnavailable) => {
+                // Nothing can be checked: the whole import waits for the
+                // scanner and is retried.
+                return Err(LeadAttachmentRefusal::ScanUnavailable.into_response());
+            }
+            Err(refusal) => {
+                // Refused for its content: recorded on the row, so the next
+                // import does not try it again; the import goes on with the
+                // next file (QA 2026-10-24: one bad file stopped them all).
+                let code = refusal.code();
+                sqlx::query(
+                    r#"UPDATE lead_attachments
+                       SET import_refused_at = now(), import_refusal_code = $2
+                       WHERE id = $1 AND imported_at IS NULL"#,
+                )
+                .bind(attachment_id)
+                .bind(code)
+                .execute(&state.db)
+                .await
+                .map_err(|error| {
+                    tracing::error!(error = %error, lead_id = %lead_id, attachment_id = %attachment_id, "mark questionnaire attachment refused");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to import attachments")
+                })?;
+                tracing::warn!(lead_id = %lead_id, attachment_id = %attachment_id, code, "questionnaire attachment refused on import");
+                refused_now += 1;
+                continue;
+            }
+        };
 
         let document_exists =
             sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM documents WHERE id = $1)")
@@ -6520,17 +6680,62 @@ async fn import_lead_attachments_internal(
         })?;
     }
 
-    if imported > 0 {
-        state.audit_sender.try_send(audit::domain_event(
-            "import_lead_attachments",
-            Some(uploaded_by),
-            "lead",
-            Some(lead_id),
-            json!({ "imported_count": imported }),
-        ));
+    // The refused files, this run's and earlier ones, by id, name and code.
+    let refused: Vec<Value> = sqlx::query(
+        r#"SELECT id, file_name, import_refusal_code
+           FROM lead_attachments
+           WHERE lead_id = $1 AND import_refused_at IS NOT NULL
+           ORDER BY uploaded_at, id"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, lead_id = %lead_id, "list refused questionnaire attachments");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to import attachments")
+    })?
+    .iter()
+    .map(|row| {
+        json!({
+            "id": row.try_get::<Uuid, _>("id").ok(),
+            "file_name": row.try_get::<String, _>("file_name").ok(),
+            "code": row.try_get::<Option<String>, _>("import_refusal_code").ok().flatten(),
+        })
+    })
+    .collect();
+
+    if imported > 0 || refused_now > 0 {
+        // Each file is its own write (the document store is outside a
+        // transaction), so the summary row is written on a connection of its
+        // own rather than through the channel, which drops events when full.
+        let mut conn = state.db.acquire().await.map_err(|error| {
+            tracing::error!(error = %error, lead_id = %lead_id, "audit attachment import");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to import attachments",
+            )
+        })?;
+        audit::write_in_transaction(
+            &mut conn,
+            &audit::domain_event(
+                "import_lead_attachments",
+                Some(uploaded_by),
+                "lead",
+                Some(lead_id),
+                json!({ "imported_count": imported, "refused_count": refused_now }),
+            ),
+        )
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, lead_id = %lead_id, "audit attachment import");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to import attachments",
+            )
+        })?;
     }
 
-    Ok(imported)
+    Ok(AttachmentImportSummary { imported, refused })
 }
 
 async fn import_lead_attachments(
@@ -6543,7 +6748,7 @@ async fn import_lead_attachments(
     }
 
     match import_lead_attachments_internal(&state, lead_id, auth.user_id).await {
-        Ok(imported) => Json(json!({ "imported": imported })).into_response(),
+        Ok(summary) => Json(summary.payload()).into_response(),
         Err(response) => response,
     }
 }
@@ -6726,7 +6931,7 @@ async fn create_prospect_patient(
                   date_of_birth, legal_sex, email, phone, phones, whatsapp_number,
                   country, primary_language, locale,
                   has_insurance, insurance_provider, insurance_number, insurance_type,
-                  trusted_contact_name, trusted_contact_phone, trusted_contact_relation,
+                  trusted_contacts,
                   street_address, city, zip_code, notes,
                   primary_concern_text, additional_concerns,
                   qualification_status, converted_patient_id, failed_outcome_status,
@@ -6976,17 +7181,25 @@ async fn create_prospect_patient(
             tracing::error!(error = %error, lead_id = %lead_id, patient_id = %attach_id, "assign attached patient");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
+        if let Err(error) = audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "attach_prospect_patient",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({ "patient_id": attach_id, "case_id": case_uuid }),
+            ),
+        )
+        .await
+        {
+            tracing::error!(error = %error, lead_id = %lead_id, "audit prospect attach");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
         if let Err(error) = tx.commit().await {
             tracing::error!(error = %error, lead_id = %lead_id, "commit prospect attach");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-        state.audit_sender.try_send(audit::domain_event(
-            "attach_prospect_patient",
-            Some(auth.user_id),
-            "lead",
-            Some(lead_id),
-            json!({ "patient_id": attach_id, "case_id": case_uuid }),
-        ));
         crate::realtime::publish_lead_event(
             &state,
             Some(auth.user_id),
@@ -7120,6 +7333,26 @@ async fn create_prospect_patient(
             }
         };
 
+    // The prospect's emergency contact, as the conversion writes it: the
+    // trusted contact marked as such, else the legacy single contact of a
+    // lead without parents or guardians.
+    let legacy_text = |column: &str| {
+        lead.try_get::<Option<String>, _>(column)
+            .ok()
+            .flatten()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let prospect_emergency_contact = emergency_contact_for_patient(
+        &lead
+            .try_get::<Value, _>("trusted_contacts")
+            .unwrap_or_else(|_| json!([])),
+        (
+            legacy_text("trusted_contact_name"),
+            legacy_text("trusted_contact_phone"),
+            legacy_text("trusted_contact_relation"),
+        ),
+    );
     let seq: i64 = match sqlx::query_scalar::<_, i64>("SELECT nextval('patient_id_seq')")
         .fetch_one(&mut *tx)
         .await
@@ -7174,21 +7407,9 @@ async fn create_prospect_patient(
             .flatten(),
     )
     .bind(insurance_type)
-    .bind(
-        lead.try_get::<Option<String>, _>("trusted_contact_name")
-            .ok()
-            .flatten(),
-    )
-    .bind(
-        lead.try_get::<Option<String>, _>("trusted_contact_phone")
-            .ok()
-            .flatten(),
-    )
-    .bind(
-        lead.try_get::<Option<String>, _>("trusted_contact_relation")
-            .ok()
-            .flatten(),
-    )
+    .bind(prospect_emergency_contact.0)
+    .bind(prospect_emergency_contact.1)
+    .bind(prospect_emergency_contact.2)
     .bind(json!({ "source": "lead_prospect", "source_lead_id": lead_id }))
     .bind(json!({
         "dsgvo_signed": false,
@@ -7261,22 +7482,29 @@ async fn create_prospect_patient(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "create_prospect_patient",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            json!({
+                "patient_id": patient_id,
+                "patient_pid": pid.clone(),
+                "case_id": case_uuid,
+            }),
+        ),
+    )
+    .await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, "audit prospect creation");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, lead_id = %lead_id, "commit prospect creation");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-
-    state.audit_sender.try_send(audit::domain_event(
-        "create_prospect_patient",
-        Some(auth.user_id),
-        "lead",
-        Some(lead_id),
-        json!({
-            "patient_id": patient_id,
-            "patient_pid": pid.clone(),
-            "case_id": case_uuid,
-        }),
-    ));
     crate::realtime::publish_lead_event(
         &state,
         Some(auth.user_id),
@@ -7684,6 +7912,18 @@ async fn convert_lead(
     } else {
         json!([])
     };
+    // The patient's emergency contact is the entry marked as such, as the
+    // relation rows written below read it; the legacy single contact counts
+    // only for a lead without parents or guardians among the contacts.
+    let (emergency_contact_name, emergency_contact_phone, emergency_contact_relation) =
+        emergency_contact_for_patient(
+            &trusted_contacts,
+            (
+                trusted_contact_name.clone(),
+                trusted_contact_phone.clone(),
+                trusted_contact_relation.clone(),
+            ),
+        );
     let street_address: Option<String> = lead.try_get("street_address").ok().flatten();
     let city: Option<String> = lead.try_get("city").ok().flatten();
     let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
@@ -7945,9 +8185,9 @@ async fn convert_lead(
                 .bind(insurance_provider)
                 .bind(insurance_number)
                 .bind(insurance_type)
-                .bind(trusted_contact_name)
-                .bind(trusted_contact_phone)
-                .bind(trusted_contact_relation)
+                .bind(&emergency_contact_name)
+                .bind(&emergency_contact_phone)
+                .bind(&emergency_contact_relation)
                 .bind(&intake_profile)
                 .bind(&legal_status)
                 .bind(lead_notes.as_deref())
@@ -8081,9 +8321,9 @@ async fn convert_lead(
             .bind(insurance_provider)
             .bind(insurance_number)
             .bind(insurance_type)
-            .bind(trusted_contact_name)
-            .bind(trusted_contact_phone)
-            .bind(trusted_contact_relation)
+            .bind(&emergency_contact_name)
+            .bind(&emergency_contact_phone)
+            .bind(&emergency_contact_relation)
             .bind(intake_profile)
             .bind(legal_status)
             .bind(lead_notes.as_deref())
@@ -10968,6 +11208,14 @@ pub(crate) async fn is_outside_unqualified_purge(pool: &gmed_db::DbPool, lead_id
 const UNQUALIFIED_LEAD_DEADLINE_SQL: &str =
     "GREATEST(l.created_at, $2) + make_interval(days => $1::int)";
 
+/// The staff warning of a lead (alias `l`) was issued at least the warning
+/// lead time (`$6` days, [`UNQUALIFIED_LEAD_WARNING_DAYS`]) before `$3`: the
+/// sweep never deletes silently. A lead that re-enters the rule after its
+/// deadline (qualified → in progress, consent revoked) is warned first and
+/// deleted no earlier than that many days after the warning.
+const UNQUALIFIED_LEAD_WARNED_SQL: &str = "(l.retention_warning_sent_at IS NOT NULL \
+     AND l.retention_warning_sent_at + make_interval(days => $6::int) <= $3)";
+
 /// The rule from `system_settings`, or `None` when it is switched off (window
 /// of 0 days) or was never started in this environment.
 pub async fn load_unqualified_lead_retention(
@@ -11078,6 +11326,7 @@ pub async fn purge_unqualified_leads(
         r#"SELECT l.id FROM leads l
            WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
              AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3
+             AND {UNQUALIFIED_LEAD_WARNED_SQL}
              AND ($5::uuid[] IS NULL OR l.id = ANY($5))
            ORDER BY l.created_at, l.id"#
     ))
@@ -11086,6 +11335,7 @@ pub async fn purge_unqualified_leads(
     .bind(now)
     .bind(ANONYMIZED_FIRST_NAME)
     .bind(only)
+    .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
     .fetch_all(&state.db)
     .await?;
     report.scanned = candidates.len() as u64;
@@ -11127,6 +11377,7 @@ async fn purge_unqualified_lead(
            WHERE l.id = $5
              AND {UNQUALIFIED_LEAD_SUBJECT_SQL}
              AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3
+             AND {UNQUALIFIED_LEAD_WARNED_SQL}
            FOR UPDATE OF l"#
     ))
     .bind(policy.days as i32)
@@ -11134,6 +11385,7 @@ async fn purge_unqualified_lead(
     .bind(now)
     .bind(ANONYMIZED_FIRST_NAME)
     .bind(lead_id)
+    .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
     .fetch_optional(&mut *tx)
     .await?;
     let Some(lead) = lead else {
@@ -11339,11 +11591,15 @@ async fn publish_lead_retention_notices(
     }
 }
 
-/// Warn once, [`UNQUALIFIED_LEAD_WARNING_DAYS`] before the deadline. Each
-/// lead in its own transaction: the warning marker is set together with the
-/// notifications, so a failed insert leaves the lead to be warned on the next
-/// sweep instead of marked as warned without a notice. Returns the number of
-/// leads warned about.
+/// Warn once, [`UNQUALIFIED_LEAD_WARNING_DAYS`] before the deadline — or at
+/// once for a lead that is overdue and was never warned (it re-entered the
+/// rule after its deadline): the sweep deletes only a lead warned at least
+/// that many days ago ([`UNQUALIFIED_LEAD_WARNED_SQL`]). A lead an invoice
+/// keeps is not warned: the sweep never deletes it. Each lead in its own
+/// transaction: the warning marker is set together with the notifications,
+/// so a failed insert leaves the lead to be warned on the next sweep instead
+/// of marked as warned without a notice. Returns the number of leads warned
+/// about.
 async fn warn_about_unqualified_lead_deadlines(
     state: &crate::state::AppState,
     policy: UnqualifiedLeadRetention,
@@ -11355,8 +11611,8 @@ async fn warn_about_unqualified_lead_deadlines(
             r#"UPDATE leads AS l
                SET retention_warning_sent_at = $3
                WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
+                 AND NOT {UNQUALIFIED_LEAD_INVOICED_SQL}
                  AND l.retention_warning_sent_at IS NULL
-                 AND {UNQUALIFIED_LEAD_DEADLINE_SQL} > $3
                  AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3 + make_interval(days => $6::int)
                  AND {lead_filter}
                RETURNING l.id, l.created_by, {UNQUALIFIED_LEAD_DEADLINE_SQL} AS deadline"#
@@ -11366,8 +11622,8 @@ async fn warn_about_unqualified_lead_deadlines(
     let candidates: Vec<Uuid> = sqlx::query_scalar(&format!(
         r#"SELECT l.id FROM leads AS l
            WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
+             AND NOT {UNQUALIFIED_LEAD_INVOICED_SQL}
              AND l.retention_warning_sent_at IS NULL
-             AND {UNQUALIFIED_LEAD_DEADLINE_SQL} > $3
              AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3 + make_interval(days => $6::int)
              AND ($5::uuid[] IS NULL OR l.id = ANY($5))
            ORDER BY l.id"#
@@ -11398,6 +11654,9 @@ async fn warn_about_unqualified_lead_deadlines(
         };
         let lead_id: Uuid = row.try_get("id")?;
         let deadline: chrono::DateTime<chrono::Utc> = row.try_get("deadline")?;
+        // An overdue lead is deleted no earlier than the lead time after this
+        // warning ([`UNQUALIFIED_LEAD_WARNED_SQL`]): the notice names that day.
+        let delete_at = deadline.max(now + chrono::Duration::days(UNQUALIFIED_LEAD_WARNING_DAYS));
         let recipients = unqualified_lead_recipients(&mut tx, row.try_get("created_by")?).await?;
         // The frontend shows these facts in RU/DE (topbar-data.ts).
         let stored = store_lead_retention_notices(
@@ -11408,7 +11667,7 @@ async fn warn_about_unqualified_lead_deadlines(
             &format!(
                 "Not qualified and no signed consent; deletion on {}.",
                 // The German calendar day of the deletion, not the UTC one.
-                crate::app_time::date_of(deadline).format("%Y-%m-%d")
+                crate::app_time::date_of(delete_at).format("%Y-%m-%d")
             ),
             lead_id,
         )
@@ -11421,8 +11680,10 @@ async fn warn_about_unqualified_lead_deadlines(
 }
 
 /// The leads (alias `l`) the sweep would really delete within the warning
-/// window ([`UNQUALIFIED_LEAD_WARNING_DAYS`]) and that got no reminder yet:
-/// the rule covers them, no invoice keeps them, the deadline is still ahead.
+/// window ([`UNQUALIFIED_LEAD_WARNING_DAYS`]) and that got no accepted
+/// reminder yet (`retention_reminder_sent_at` is set only once the provider
+/// accepted an e-mail, so a lead whose e-mails all failed stays due): the
+/// rule covers them, no invoice keeps them, the deadline is still ahead.
 fn retention_reminder_due_sql(lead_filter: &str) -> String {
     format!(
         r#"{UNQUALIFIED_LEAD_SUBJECT_SQL}
@@ -11609,30 +11870,57 @@ async fn remind_lead_before_purge(
         // Nobody to write to: nothing marked, a later address is used.
         return Ok(false);
     }
-    sqlx::query("UPDATE leads SET retention_reminder_sent_at = $2 WHERE id = $1")
-        .bind(lead_id)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
+    // The rows are stored before the e-mails go out; the lead is marked as
+    // reminded (`retention_reminder_sent_at`) only once the provider accepted
+    // at least one of them, so a failed send is retried by the next sweep. An
+    // address whose earlier e-mail was not accepted (`failed`, or `pending`
+    // after a crash) keeps its row — and with it the idempotency key, which
+    // the provider recognises as a replay.
     let mut recipients = Vec::with_capacity(planned.len());
     for (user_id, audience, recipient, name, language) in planned {
-        let id: Uuid = sqlx::query_scalar(
-            r#"INSERT INTO lead_retention_reminder_emails
-                   (lead_id, user_id, audience, recipient, language, deadline_on)
-               VALUES ($1, $2, $3, $4, $5, $6)
+        let audience_code = match audience {
+            LoginAudience::Guardian => "guardian",
+            _ => "lead",
+        };
+        let retried: Option<Uuid> = sqlx::query_scalar(
+            r#"UPDATE lead_retention_reminder_emails
+               SET user_id = $2, audience = $3, language = $4, deadline_on = $5,
+                   status = 'pending', error_code = NULL
+               WHERE id = (
+                   SELECT id FROM lead_retention_reminder_emails
+                   WHERE lead_id = $1 AND recipient = $6 AND status <> 'sent'
+                   ORDER BY created_at DESC, id DESC
+                   LIMIT 1
+               )
                RETURNING id"#,
         )
         .bind(lead_id)
         .bind(user_id)
-        .bind(match audience {
-            LoginAudience::Guardian => "guardian",
-            _ => "lead",
-        })
-        .bind(&recipient)
+        .bind(audience_code)
         .bind(language.code())
         .bind(delete_on)
-        .fetch_one(&mut *tx)
+        .bind(&recipient)
+        .fetch_optional(&mut *tx)
         .await?;
+        let id: Uuid = match retried {
+            Some(id) => id,
+            None => {
+                sqlx::query_scalar(
+                    r#"INSERT INTO lead_retention_reminder_emails
+                           (lead_id, user_id, audience, recipient, language, deadline_on)
+                       VALUES ($1, $2, $3, $4, $5, $6)
+                       RETURNING id"#,
+                )
+                .bind(lead_id)
+                .bind(user_id)
+                .bind(audience_code)
+                .bind(&recipient)
+                .bind(language.code())
+                .bind(delete_on)
+                .fetch_one(&mut *tx)
+                .await?
+            }
+        };
         recipients.push(ReminderRecipient {
             id,
             user_id,
@@ -11660,6 +11948,7 @@ async fn remind_lead_before_purge(
 
     let login_url = format!("{console_url}/login");
     let logo_url = crate::mail::templates::logo_url(console_url);
+    let mut accepted = 0usize;
     for target in &recipients {
         let rendered = crate::mail::templates::retention_reminder(
             &crate::mail::templates::RetentionReminderEmail {
@@ -11685,6 +11974,9 @@ async fn remind_lead_before_purge(
             Ok(sent) => ("sent", Some(sent.message_id.clone()), None),
             Err(error) => ("failed", None, Some(error.code())),
         };
+        if result.is_ok() {
+            accepted += 1;
+        }
         let mut conn = state.db.acquire().await?;
         sqlx::query(
             r#"UPDATE lead_retention_reminder_emails
@@ -11725,6 +12017,19 @@ async fn remind_lead_before_purge(
         )
         .await?;
     }
+    if accepted == 0 {
+        // Nothing went out: the lead stays due, the next sweep retries the
+        // same rows (while the deadline is still ahead).
+        return Ok(false);
+    }
+    sqlx::query(
+        "UPDATE leads SET retention_reminder_sent_at = COALESCE(retention_reminder_sent_at, $2)
+         WHERE id = $1",
+    )
+    .bind(lead_id)
+    .bind(now)
+    .execute(&state.db)
+    .await?;
     Ok(true)
 }
 
@@ -12074,6 +12379,7 @@ mod lead_conversion_readiness_tests {
                 required: true,
                 signed: true,
             },
+            contract_details_missing: Vec::new(),
         }
     }
 
@@ -12306,6 +12612,27 @@ mod lead_conversion_readiness_tests {
     }
 
     #[test]
+    fn missing_contract_details_of_representatives_block_the_conversion_only() {
+        let mut input = ready_input();
+        input.contract_details_missing = vec!["representative:abc:birth_place".to_string()];
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(readiness.qualification_ready);
+        assert!(!readiness.conversion_ready);
+        assert_eq!(
+            readiness.conversion_reasons,
+            vec![CONTRACT_DETAILS_MISSING.to_string()]
+        );
+        assert!(readiness.qualification_reasons.is_empty());
+        assert_eq!(
+            readiness.payload["contract_details_missing"],
+            json!(["representative:abc:birth_place"])
+        );
+        // Nothing to complete: the key is left out.
+        let ready = evaluate_lead_conversion_readiness(&ready_input());
+        assert!(ready.payload.get("contract_details_missing").is_none());
+    }
+
+    #[test]
     fn signed_lead_can_convert_while_awaiting_prepayment() {
         let mut input = ready_input();
         input.prepayment_ready = false;
@@ -12343,15 +12670,6 @@ mod lead_conversion_readiness_tests {
                 .map(|check| &check["passed"]),
             Some(&Value::Bool(false))
         );
-    }
-
-    #[test]
-    fn the_high_risk_list_stays_a_fact_of_the_identification_sheet() {
-        // The longer list is no trigger of the enhanced check any more
-        // (`lead_enhanced_check`), but the sheet still names the country.
-        assert!(is_enhanced_due_diligence_country("IR"));
-        assert!(is_enhanced_due_diligence_country("Russische Föderation"));
-        assert!(!is_enhanced_due_diligence_country("AT"));
     }
 
     #[test]

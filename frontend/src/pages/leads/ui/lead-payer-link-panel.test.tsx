@@ -108,6 +108,15 @@ describe("LeadPayerLinkPanel", () => {
     expect(html).not.toContain("lead-payer-link-blocked");
   });
 
+  it("only notes the contracting parent for a payer stored as a third party before", () => {
+    const html = render(state({ can_send: false, blocked_reason: "payer_is_representative" }));
+    expect(html).toContain("ссылка плательщика и заявление о принятии расходов не нужны");
+    expect(html).not.toContain("Отправить ссылку плательщику");
+    expect(html).not.toContain("Язык письма");
+    expect(html).not.toContain("lead-payer-link-blocked");
+    expect(html).not.toContain('data-testid="lead-payer-link-badge"');
+  });
+
   it("offers no writes without leads.edit", () => {
     const html = render(state({ link: { status: "opened", sent_at: "2026-10-06T10:00:00Z" } }), { canEdit: false });
     expect(html).not.toMatch(/<button/);

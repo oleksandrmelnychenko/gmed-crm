@@ -4067,6 +4067,18 @@ async fn insert_unqualified_lead(app: &TestApp, tag: &str, age_days: i32) -> Uui
     .unwrap()
 }
 
+/// The staff warning went out long enough ago: the sweep may delete these
+/// leads (since 2026-10-24 nothing is purged without a prior warning).
+async fn mark_retention_warned(app: &TestApp, leads: &[Uuid]) {
+    sqlx::query(
+        "UPDATE leads SET retention_warning_sent_at = now() - interval '4 days' WHERE id = ANY($1)",
+    )
+    .bind(leads.to_vec())
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
 async fn an_unqualified_lead_without_consent_is_purged_with_everything_it_owns() {
     let Some(app) = test_app().await else {
@@ -4166,6 +4178,7 @@ async fn an_unqualified_lead_without_consent_is_purged_with_everything_it_owns()
     assert!(detail["retention_deadline_at"].is_null(), "{detail}");
 
     let all = [due, signed, qualified, young, soon, invoiced];
+    mark_retention_warned(&app, &[due, invoiced]).await;
     let report = gmed_server::routes::leads::purge_unqualified_leads(
         &app.suite.state,
         policy,
@@ -4370,7 +4383,11 @@ async fn a_retention_warning_reaches_staff_when_the_creator_left() {
             .fetch_one(pool)
             .await
             .unwrap();
-    let day = gmed_server::app_time::date_of(created_at + chrono::Duration::days(14))
+    // The notice names the day the sweep may delete: the deadline, or three
+    // days after a late warning (nothing is purged within three days of it).
+    let delete_at = (created_at + chrono::Duration::days(14))
+        .max(chrono::Utc::now() + chrono::Duration::days(3));
+    let day = gmed_server::app_time::date_of(delete_at)
         .format("%Y-%m-%d")
         .to_string();
     assert!(
@@ -4561,6 +4578,7 @@ async fn a_repeat_intake_of_a_consented_patient_is_kept_past_the_unqualified_win
         assert!(detail["retention_deadline_at"].is_string(), "{detail}");
     }
 
+    mark_retention_warned(&app, &[kept, withdrawn_lead, unconsented_lead]).await;
     let report = gmed_server::routes::leads::purge_unqualified_leads(
         &app.suite.state,
         policy,

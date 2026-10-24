@@ -145,7 +145,7 @@ export function LeadPayerLinkPanel({
 
       {actions.cabinet ? (
         <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-payer-link-cabinet">
-          {payerLinkCabinetNote(tx)}
+          {actions.note ?? payerLinkCabinetNote(tx)}
         </p>
       ) : (
         <>

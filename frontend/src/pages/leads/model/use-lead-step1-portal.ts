@@ -44,7 +44,7 @@ export function useLeadStep1Portal({
     onChangedRef.current = onPatientDataChanged;
   }, [onPatientDataChanged]);
 
-  const { intake, reload, setIntake } = useLeadPortalIntake(leadId, open && Boolean(leadId), (event) => {
+  const { intake, reload, setIntake, error } = useLeadPortalIntake(leadId, open && Boolean(leadId), (event) => {
     if (!patientEventChangesLeadData(event.payload?.change)) return;
     setPatientUpdatedAt(event.occurred_at ?? new Date().toISOString());
     onChangedRef.current?.();
@@ -121,6 +121,8 @@ export function useLeadStep1Portal({
     modeFailed,
     setMode,
     intake,
+    /** The last portal-state load failed; `intake` is the last known state (or null). */
+    error,
     reload,
     applyRepresentation,
     patientUpdatedAt,

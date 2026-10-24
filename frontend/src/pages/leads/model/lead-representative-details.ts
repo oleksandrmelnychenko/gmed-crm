@@ -23,10 +23,46 @@ export function representativeDetailsOf(person: Pick<LeadRepresentative, "birth_
 
 const TEXT_KEYS = ["birth_place", "birth_country", "street", "zip", "city", "country"] as const;
 
+/** Whether one field of the form holds the same value in both (spacing and the citizenship order aside). */
+function sameDetail(key: keyof RepresentativeDetails, a: RepresentativeDetails, b: RepresentativeDetails): boolean {
+  return key === "citizenships"
+    ? normalizeCitizenships(a.citizenships).join() === normalizeCitizenships(b.citizenships).join()
+    : oneLine(a[key]) === oneLine(b[key]);
+}
+
 /** Whether staff changed anything against what the form loaded. */
 export function representativeDetailsChanged(draft: RepresentativeDetails, loaded: RepresentativeDetails): boolean {
-  return TEXT_KEYS.some((key) => oneLine(draft[key]) !== oneLine(loaded[key]))
-    || normalizeCitizenships(draft.citizenships).join() !== normalizeCitizenships(loaded.citizenships).join();
+  return TEXT_KEYS.some((key) => !sameDetail(key, draft, loaded)) || !sameDetail("citizenships", draft, loaded);
+}
+
+/**
+ * A newer server state (`fresh`) while staff edit: a field staff left as
+ * loaded takes the fresh value (and the fresh value becomes its base, so the
+ * save does not write it); a field staff typed in keeps the typed value with
+ * its old base (DEV 2026-10-24: the save sent the old values of the untouched
+ * fields with the new base and the server wrote the cabinet's change back).
+ * `conflict` is true when the server changed a field staff typed in too.
+ */
+export function mergeRepresentativeDetails(
+  draft: RepresentativeDetails,
+  loaded: RepresentativeDetails,
+  fresh: RepresentativeDetails,
+): { draft: RepresentativeDetails; loaded: RepresentativeDetails; changedMeanwhile: boolean; conflict: boolean } {
+  const nextDraft = { ...draft };
+  const nextLoaded = { ...loaded };
+  let changedMeanwhile = false;
+  let conflict = false;
+  for (const key of [...TEXT_KEYS, "citizenships"] as const) {
+    const serverChanged = !sameDetail(key, loaded, fresh);
+    if (serverChanged) changedMeanwhile = true;
+    if (sameDetail(key, draft, loaded)) {
+      (nextDraft as Record<string, unknown>)[key] = fresh[key];
+      (nextLoaded as Record<string, unknown>)[key] = fresh[key];
+    } else if (serverChanged) {
+      conflict = true;
+    }
+  }
+  return { draft: nextDraft, loaded: nextLoaded, changedMeanwhile, conflict };
 }
 
 /** What the shared rules refuse in a changed value (the server checks the same). */

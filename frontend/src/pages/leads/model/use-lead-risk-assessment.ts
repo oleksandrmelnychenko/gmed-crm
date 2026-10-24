@@ -25,35 +25,43 @@ export type LeadRiskController = {
  * keeps it fresh: again whenever `version` changes (the wizard passes the
  * lead and the payer declaration) and on `lead.updated` /
  * `lead.portal_updated` of the lead (the cabinet, the payer link, a
- * sanctions decision). A failed load keeps the last answer; an older server
- * leaves `null` and the panel is not shown.
+ * sanctions decision). A failed load keeps the last answer and reports the
+ * `error` (the wizard shows it with a retry instead of an empty section); an
+ * older server leaves `null` and the panel is not shown.
  */
 export function useLeadRiskAssessment(leadId: string | null | undefined, version?: unknown) {
   const [assessment, setAssessment] = useState<LeadRiskAssessment | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   const requestRef = useRef(0);
 
   const reload = useCallback(async () => {
     const request = ++requestRef.current;
     if (!leadId) {
       setAssessment(null);
+      setError(null);
       return null;
     }
     try {
       const next = await fetchLeadRiskAssessment(leadId);
       if (request === requestRef.current) {
         setAssessment(next);
+        setError(null);
         setLoaded(true);
       }
       return next;
-    } catch {
-      if (request === requestRef.current) setLoaded(true);
+    } catch (cause) {
+      if (request === requestRef.current) {
+        setError(cause);
+        setLoaded(true);
+      }
       return null;
     }
   }, [leadId]);
 
   useEffect(() => {
     setAssessment(null);
+    setError(null);
     setLoaded(false);
   }, [leadId]);
 
@@ -92,5 +100,5 @@ export function useLeadRiskAssessment(leadId: string | null | undefined, version
     [leadId, reload],
   );
 
-  return { assessment, loaded, controller };
+  return { assessment, loaded, error, controller };
 }

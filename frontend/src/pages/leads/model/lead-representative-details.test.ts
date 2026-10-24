@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { representativeDetailsChanged, representativeDetailsErrors, representativeDetailsOf } from "./lead-representative-details";
+import { mergeRepresentativeDetails, representativeDetailsChanged, representativeDetailsErrors, representativeDetailsOf } from "./lead-representative-details";
 
 const anna = {
   birth_place: "Kyiv",
@@ -29,5 +29,49 @@ describe("a representative's details staff edit", () => {
     const loaded = representativeDetailsOf(anna);
     expect(representativeDetailsErrors({ ...loaded, city: "y".repeat(121) }, loaded)).toEqual({ city: "too_long" });
     expect(representativeDetailsErrors({ ...loaded, city: "y".repeat(121) }, { ...loaded, city: "y".repeat(121) })).toEqual({});
+  });
+});
+
+describe("a newer server state while staff edit a representative's details", () => {
+  const loaded = representativeDetailsOf(anna);
+
+  it("replaces an untouched form and writes nothing", () => {
+    const fresh = { ...loaded, city: "Potsdam" };
+    const merged = mergeRepresentativeDetails(loaded, loaded, fresh);
+    expect(merged.draft).toEqual(fresh);
+    expect(merged.loaded).toEqual(fresh);
+    expect(representativeDetailsChanged(merged.draft, merged.loaded)).toBe(false);
+    expect(merged).toMatchObject({ changedMeanwhile: true, conflict: false });
+  });
+
+  it("keeps the typed field with its old base and takes the cabinet's change of another field", () => {
+    const draft = { ...loaded, street: "Neuer Weg 2" };
+    const fresh = { ...loaded, city: "Potsdam", citizenships: ["UA"] };
+    const merged = mergeRepresentativeDetails(draft, loaded, fresh);
+    // The typed street stays; city and citizenships follow the server.
+    expect(merged.draft).toEqual({ ...fresh, street: "Neuer Weg 2" });
+    // Only the street differs from its base: the save writes the street alone.
+    expect(merged.loaded).toEqual(fresh);
+    expect(representativeDetailsChanged(merged.draft, merged.loaded)).toBe(true);
+    expect(representativeDetailsChanged({ ...merged.draft, street: fresh.street }, merged.loaded)).toBe(false);
+    expect(merged).toMatchObject({ changedMeanwhile: true, conflict: false });
+  });
+
+  it("names a conflict when the server changed the field staff type in", () => {
+    const draft = { ...loaded, city: "Dresden" };
+    const fresh = { ...loaded, city: "Potsdam" };
+    const merged = mergeRepresentativeDetails(draft, loaded, fresh);
+    expect(merged.draft.city).toBe("Dresden");
+    expect(merged.loaded.city).toBe("Berlin");
+    expect(merged).toMatchObject({ changedMeanwhile: true, conflict: true });
+  });
+
+  it("changes nothing when the server state is the loaded one", () => {
+    const draft = { ...loaded, zip: "10117" };
+    const merged = mergeRepresentativeDetails(draft, loaded, { ...loaded, citizenships: ["ua", "DE"] });
+    // The same citizenships in another spelling are no change; the untouched field takes the server's spelling.
+    expect(merged.draft).toEqual({ ...draft, citizenships: ["ua", "DE"] });
+    expect(merged.loaded).toEqual({ ...loaded, citizenships: ["ua", "DE"] });
+    expect(merged).toMatchObject({ changedMeanwhile: false, conflict: false });
   });
 });

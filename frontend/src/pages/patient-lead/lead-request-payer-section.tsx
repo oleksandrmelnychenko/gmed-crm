@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type MutableRefObject } from "react";
 
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -42,6 +42,7 @@ import {
   payerAnswer,
   payerAnswerSavable,
   payerChoiceOf,
+  payerFieldOfDraft,
   payerInput,
   payerTypeOf,
   payerContactRequired,
@@ -65,6 +66,7 @@ import {
   type RequestQueue,
 } from "./lead-request-parts";
 import { payerFitsFlow, type PayerChoice, type RecipientDraft, type RecipientFlow } from "./lead-request-recipient-model";
+import { useServerDraftSync } from "./lead-request-server-sync";
 import { SummaryRows } from "./lead-request-send-step";
 import { answeredPayerRows, payerAnsweredByPayer } from "./lead-request-summary";
 import { asLeadCabinetLang, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -91,7 +93,12 @@ export function usePayerAutosave({
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
-}): { fieldError: string | null } {
+}): {
+  fieldError: string | null;
+  /** The last server state the autosave knows and the last queued draft: the baseline of a server sync. */
+  savedRef: MutableRefObject<PayerDraft>;
+  queuedDraftRef: MutableRefObject<PayerDraft>;
+} {
   // An older server knows only a person as payer, with the relationship in words.
   const typed = knowsPayerType(request);
   // The payer answered on the own link: nothing is sent from the cabinet.
@@ -196,7 +203,7 @@ export function usePayerAutosave({
   );
 
   useAutosave(draft, save);
-  return { fieldError };
+  return { fieldError, savedRef, queuedDraftRef };
 }
 
 /**
@@ -263,7 +270,18 @@ export function PayerSection({
     const choice = payerChoiceOf(stored);
     return ownAccountOnly || !choice || choices.includes(choice) ? stored : unansweredPayerDraft(request.payer);
   });
-  const { fieldError } = usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
+  const { fieldError, savedRef, queuedDraftRef } = usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
+  // The other parent saved the payer meanwhile (the request was re-read): the untouched fields
+  // follow, a field being typed in keeps its value and says so. Not once the payer answered.
+  useServerDraftSync({
+    incoming: draftFromPayer(request.payer),
+    draft,
+    savedRef,
+    queuedDraftRef,
+    setDraft,
+    idOf: (field) => `lead-request-${payerFieldOfDraft(field)}`,
+    enabled: !answered,
+  });
   // E-mail, phone and residence of a third party are required, not of the paying parent.
   const contactRequired = (name: "payer_email" | "payer_phone" | "payer_country" | "payer_city") =>
     payerContactRequired(draft, request, name);

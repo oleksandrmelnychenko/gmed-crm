@@ -1096,7 +1096,7 @@ fn declaration_from_input(
         declaration.messenger = match &input.messenger {
             Some(value) => text(value, MESSENGER_MAX).map_err(|_| "payer_messenger_too_long")?,
             None => stored
-                .filter(|stored| stored.payer_key() == declaration.payer_key())
+                .filter(|stored| stored.same_payer(&declaration))
                 .and_then(|stored| stored.messenger.clone()),
         };
     }
@@ -1333,7 +1333,7 @@ pub(crate) struct PayerState {
     /// third party pays), so the conversion waits for the paying parent.
     pub minor_self: bool,
     /// No trigger of the enhanced check: the source of funds is not asked
-    /// and not required (2026-10-19). Loaded only while it is not stated.
+    /// and not required (2026-10-19), stated or not.
     pub funds_optional: bool,
     /// The payer's sent statement of its funds (`lead_payer_statements`):
     /// the payer's source of funds when somebody else pays (2026-10-23).
@@ -1647,15 +1647,12 @@ pub(crate) async fn load_payer_state(
                     .as_ref()
                     .is_some_and(|declaration| declaration.payer_kind == PAYER_KIND_SELF);
         }
-        // Without a trigger the source of funds is not asked (2026-10-19).
-        if state.declaration.as_ref().is_some_and(|declaration| {
-            !declaration.source_of_funds_stated(state.statement_funds.as_ref())
-        }) {
-            state.funds_optional =
-                !super::lead_enhanced_check::enhanced_check_triggers(&mut *conn, lead_id)
-                    .await?
-                    .required;
-        }
+        // Without a trigger the source of funds is not asked (2026-10-19) —
+        // whether it is stated or not: the payload says what is required.
+        state.funds_optional =
+            !super::lead_enhanced_check::enhanced_check_triggers(&mut *conn, lead_id)
+                .await?
+                .required;
     }
     if let Some(order_id) = row.try_get::<Option<Uuid>, _>("order_id").ok().flatten() {
         state.order_id = Some(order_id);
@@ -2466,7 +2463,7 @@ async fn save_payer_declaration(
         && let Some(previous) = previous.as_ref().filter(|previous| {
             previous.is_third_party()
                 && previous.payer_informed_at.is_some()
-                && previous.payer_key() == declaration.payer_key()
+                && previous.same_payer(&declaration)
         })
     {
         match crate::routes::lead_payer_link::link_sent_for(
@@ -2513,7 +2510,7 @@ async fn save_payer_declaration(
         // The first confirmation keeps its time and author.
         let earlier = previous
             .as_ref()
-            .filter(|previous| previous.payer_key() == declaration.payer_key())
+            .filter(|previous| previous.same_payer(&declaration))
             .and_then(|previous| previous.payer_informed_at.zip(previous.payer_informed_by));
         let (at, by) = match earlier {
             Some(earlier) => earlier,
@@ -2942,12 +2939,50 @@ fn changed_json_fields(before: &Value, after: &Value) -> Vec<String> {
         .collect()
 }
 
+/// Whether two [`Declaration::payer_key`] values name the same payer. A
+/// cosmetic correction of the name — a trailing space, a doubled space,
+/// another case, "Anna-Maria" for "Anna Maria" — is the same payer: it keeps
+/// the payer's statement, files, consents and link. Another normalised name,
+/// type, organisation or date of birth is another payer. Only comparisons
+/// normalise; the stored keys (`identity_adopted_key`,
+/// `lead_payer_links.payer_key`) keep the raw values and match through this
+/// function.
+pub(crate) fn same_payer_key(left: &Value, right: &Value) -> bool {
+    normalized_payer_key(left) == normalized_payer_key(right)
+}
+
+/// [`same_payer_key`]: the type, organisation and names normalised, the date
+/// of birth as it is.
+fn normalized_payer_key(key: &Value) -> Value {
+    let Some(parts) = key.as_array() else {
+        return key.clone();
+    };
+    Value::Array(
+        parts
+            .iter()
+            .enumerate()
+            .map(|(index, part)| match (index, part) {
+                (0..=3, Value::String(text)) => Value::String(normalized_payer_name(text)),
+                _ => part.clone(),
+            })
+            .collect(),
+    )
+}
+
+/// A name for [`same_payer_key`]: trimmed, inner whitespace collapsed,
+/// hyphens read as spaces, case-folded.
+fn normalized_payer_name(text: &str) -> String {
+    text.split(|character: char| character.is_whitespace() || character == '-')
+        .filter(|part| !part.is_empty())
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 impl Declaration {
     fn keep_patient_consents(&mut self, previous: Option<&Self>) {
         let same = previous.filter(|previous| {
-            self.is_third_party()
-                && previous.is_third_party()
-                && self.payer_key() == previous.payer_key()
+            self.is_third_party() && previous.is_third_party() && self.same_payer(previous)
         });
         self.contact_consent_at = same.and_then(|previous| previous.contact_consent_at);
         self.cost_estimate_consent_at = same.and_then(|previous| previous.cost_estimate_consent_at);
@@ -2965,6 +3000,11 @@ impl Declaration {
             self.last_name,
             self.date_of_birth,
         ])
+    }
+
+    /// Whether `other` names the same payer ([`same_payer_key`]).
+    pub(crate) fn same_payer(&self, other: &Self) -> bool {
+        same_payer_key(&self.payer_key(), &other.payer_key())
     }
 
     /// The part of the declaration the lead cabinet shows and edits.
@@ -3313,7 +3353,7 @@ fn declaration_from_portal(
     let same_payer = previous.filter(|previous| {
         previous.is_third_party()
             && declaration.is_third_party()
-            && previous.payer_key() == declaration.payer_key()
+            && previous.same_payer(&declaration)
     });
     if let Some(previous) = same_payer {
         declaration.place_of_birth = previous.place_of_birth.clone();
@@ -3939,7 +3979,7 @@ impl Declaration {
         }
         let same_payer = previous.payer_kind == self.payer_kind
             && previous.payer_representative_id == self.payer_representative_id
-            && (!self.is_third_party() || previous.payer_key() == self.payer_key());
+            && (!self.is_third_party() || previous.same_payer(self));
         if !same_payer {
             self.clear_payment_route();
         }
@@ -3999,9 +4039,7 @@ impl Declaration {
     /// goes like the payer's other data.
     pub(crate) fn carry_payer_funds_stated(&mut self, previous: Option<&Declaration>) {
         let kept = previous.filter(|previous| {
-            self.is_third_party()
-                && previous.is_third_party()
-                && previous.payer_key() == self.payer_key()
+            self.is_third_party() && previous.is_third_party() && previous.same_payer(self)
         });
         self.payer_funds_source_stated =
             kept.and_then(|previous| previous.payer_funds_source_stated.clone());
@@ -4016,9 +4054,8 @@ impl Declaration {
     /// changes or another person or organisation is named (another
     /// [`Declaration::payer_key`]).
     pub(crate) fn carry_identity_adoption(&mut self, previous: Option<&Declaration>) {
-        let same_payer = previous.filter(|previous| {
-            previous.payer_kind == self.payer_kind && previous.payer_key() == self.payer_key()
-        });
+        let same_payer = previous
+            .filter(|previous| previous.payer_kind == self.payer_kind && previous.same_payer(self));
         self.identity_adopted_at = same_payer.and_then(|previous| previous.identity_adopted_at);
         self.identity_adopted_key =
             same_payer.and_then(|previous| previous.identity_adopted_key.clone());
@@ -4035,7 +4072,7 @@ impl Declaration {
             && self
                 .identity_adopted_key
                 .as_ref()
-                .is_some_and(|key| *key == self.payer_key())
+                .is_some_and(|key| same_payer_key(key, &self.payer_key()))
     }
 
     /// Clears section 8 and returns the keys that held an answer: the payer's
@@ -4753,6 +4790,41 @@ mod tests {
         value.last_name = Some("x".repeat(150));
         value.city = Some("Wien".into());
         assert!(declaration_from_input(&value, Some(&stored), today()).is_ok());
+    }
+
+    /// A cosmetic correction of the payer's name is the same payer: the
+    /// statement, files and link stay. Another name or date of birth is
+    /// another payer.
+    #[test]
+    fn a_cosmetic_correction_of_the_name_is_the_same_payer() {
+        let stored = from_input(&input("third_party")).unwrap();
+        let mut corrected = stored.clone();
+        corrected.first_name = Some("erika ".into());
+        corrected.last_name = Some(" MUSTER".into());
+        assert!(stored.same_payer(&corrected));
+        corrected.first_name = Some("Anna-Maria".into());
+        let mut spaced = corrected.clone();
+        spaced.first_name = Some("Anna  Maria".into());
+        assert!(corrected.same_payer(&spaced));
+        assert!(same_payer_key(&corrected.payer_key(), &spaced.payer_key()));
+        // The raw key of a link sent before still matches the corrected name.
+        let raw_link_key = json!([
+            PAYER_TYPE_PERSON,
+            Value::Null,
+            " Erika ",
+            "Muster",
+            "1970-05-01"
+        ]);
+        assert!(same_payer_key(&raw_link_key, &stored.payer_key()));
+        let mut another = stored.clone();
+        another.last_name = Some("Mustermann".into());
+        assert!(!stored.same_payer(&another));
+        let mut born = stored.clone();
+        born.date_of_birth = NaiveDate::from_ymd_opt(1971, 5, 1);
+        assert!(!stored.same_payer(&born));
+        let mut organisation = stored.clone();
+        organisation.payer_type = Some("company".into());
+        assert!(!stored.same_payer(&organisation));
     }
 
     fn third_party_state(document: CostAssumptionDocument) -> PayerState {

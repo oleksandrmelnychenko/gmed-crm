@@ -276,6 +276,30 @@ export const PAYER_FIELDS: PayerField[] = [
   "payer_beneficial_owner",
 ];
 
+/** The key of the payer block (its field id `lead-request-<key>`) a field of the draft is shown under. */
+export function payerFieldOfDraft(field: string): PayerField {
+  switch (field) {
+    case "payer_kind":
+    case "guardian_pays":
+    case "representative_id":
+      return "payer_kind";
+    case "organisation_name":
+      return "payer_organisation_name";
+    case "organisation_legal_form":
+      return "payer_legal_form";
+    case "organisation_register_number":
+      return "payer_register_number";
+    case "organisation_contact_name":
+      return "payer_contact_name";
+    case "acts_on_own_account":
+      return "payer_own_account";
+    case "beneficial_owner":
+      return "payer_beneficial_owner";
+    default:
+      return (field.startsWith("payer_") ? field : `payer_${field}`) as PayerField;
+  }
+}
+
 /** A stored yes/no answer as the value of its select: "yes", "no" or "". */
 export function answerFromBoolean(value: boolean | null | undefined): string {
   return value == null ? "" : value ? "yes" : "no";

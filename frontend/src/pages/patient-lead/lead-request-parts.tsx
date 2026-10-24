@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, Check, CircleAlert, FileText, LoaderCircle, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -110,6 +110,8 @@ export function errorMessage(error: unknown, text?: LeadRequestText): string {
     if (code === "dob_staff_only") return text.dobStaffOnly;
     if (code === "lead_request_guardian_only") return text.guardianOnly;
     if (error instanceof ApiRequestError && error.status === 413) return text.errors.file_too_large;
+    // The limit as the server states it (`max_documents`), not a number of the cabinet's own.
+    if (code === "too_many_documents" && typeof body?.max_documents === "number") return text.tooManyDocuments(body.max_documents);
     // An iPhone photo (HEIC): how to send it as JPG.
     if (code === "unsupported_file_type" && body?.format === "heic") return text.errors.heic_not_supported;
     return (code && text.errors[code]) || text.errors.request_failed;
@@ -142,6 +144,28 @@ export function useRequestQueue(): RequestQueue {
 
 export type AutosaveFlush = { save: () => Promise<boolean>; version: () => string | undefined };
 export const AutosaveFlushContext = createContext<Set<AutosaveFlush> | null>(null);
+
+/**
+ * Changes the newest request: `update` gets the request as it is by then, so a
+ * part that stores one field (a consent, a summary) never writes a copy of the
+ * render its answer started from over the saves of the other parts.
+ */
+export type RequestPatch = (update: (current: LeadRequest) => LeadRequest) => void;
+export const RequestPatchContext = createContext<RequestPatch | null>(null);
+
+/**
+ * The way a part changes one field of the request: through the page's patch when
+ * it offers one, else through `onChange` with the request as the part saw it last.
+ */
+export function useRequestPatch(onChange: (request: LeadRequest) => void, request: LeadRequest): RequestPatch {
+  const patch = useContext(RequestPatchContext);
+  const latest = useRef(request);
+  latest.current = request;
+  return useCallback<RequestPatch>((update) => {
+    if (patch) patch(update);
+    else onChange(update(latest.current));
+  }, [patch, onChange]);
+}
 /** Told after an autosave went through: a "could not be saved" notice may be over. */
 export const AutosaveSavedContext = createContext<(() => void) | null>(null);
 
@@ -478,26 +502,26 @@ export function ConsentCheckbox({
   const given = consentGiven(request, purpose);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  // The answer carries only the consent: it goes into the request as it is by then.
-  const latest = useRef(request);
-  latest.current = request;
+  // The answer carries only the consent: only that field changes, in the newest request.
+  const patch = useRequestPatch(onChange, request);
 
   async function toggle(checked: boolean) {
     if (!consent) return;
     if (!checked && !window.confirm(text.consentWithdrawConfirm)) return;
     setBusy(true);
     setError("");
-    const withConsent = (givenAt: string | null): LeadRequest => ({
-      ...latest.current,
-      consents: { ...latest.current.consents, [purpose]: { ...consent, given_at: givenAt } },
-    });
+    const withConsent = (givenAt: string | null) =>
+      patch((current) => ({
+        ...current,
+        consents: { ...current.consents, [purpose]: { ...(current.consents[purpose] ?? consent), given_at: givenAt } },
+      }));
     try {
       if (checked) {
         const result = await enqueue(() => giveLeadConsent(request.lead_id, purpose, consent.version, lang));
-        onChange(withConsent(result.given_at));
+        withConsent(result.given_at);
       } else {
         await enqueue(() => revokeLeadConsent(request.lead_id, purpose));
-        onChange(withConsent(null));
+        withConsent(null);
       }
     } catch (cause) {
       setError(errorMessage(cause, text));

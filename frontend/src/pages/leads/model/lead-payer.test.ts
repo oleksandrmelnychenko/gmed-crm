@@ -544,6 +544,8 @@ describe("payer AML and signing order", () => {
   it("feeds residence and citizenships of a third party into the AML risk", () => {
     expect(payerAmlCountries({ declaration: thirdParty, status: status() })).toEqual(["DE", "IR"]);
     expect(payerAmlCountries({ declaration: { ...thirdParty, payer_kind: "self" }, status: status() })).toEqual([]);
+    // A legacy third-party row naming a parent: the parent is screened as a representative, not as a payer.
+    expect(payerAmlCountries({ declaration: thirdParty, status: status({ paying_parent: true }) })).toEqual([]);
     expect(payerAmlCountries(null)).toEqual([]);
   });
 

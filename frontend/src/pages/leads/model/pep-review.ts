@@ -130,7 +130,11 @@ export type PepPersonsInput = {
   patientAnswers: { pep_self: boolean | null; pep_related: boolean | null; sanctions_links: boolean | null } | null;
   /** The persons the cabinet lists; only those who act for the lead (a slot) count. */
   representatives: readonly RepresentativeInput[];
-  /** A third party pays (a person or an organisation). */
+  /**
+   * A third party pays (a person or an organisation). False for a paying
+   * parent, also one stored as a third-party row of before (the server's
+   * `paying_parent`): the parent is already listed as a representative.
+   */
   thirdPartyPayer: boolean;
   payerName: string;
   /** The payer's own answers from the sent statement; null while nothing was sent. */

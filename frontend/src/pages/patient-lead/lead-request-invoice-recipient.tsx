@@ -77,6 +77,7 @@ import {
   type RecipientDraft,
   type RecipientField,
 } from "./lead-request-recipient-model";
+import { useServerDraftSync } from "./lead-request-server-sync";
 import { payerAnsweredByPayer } from "./lead-request-summary";
 import { PERSON_CITY_MAX } from "@/lib/person-fields";
 import { asLeadCabinetLang, payerFieldLabel, recipientFieldLabel, recipientOptions, type LeadRequestText } from "./lead-request-text";
@@ -201,6 +202,16 @@ export function InvoiceRecipientSection({
     [enqueue, onChange, onRecipientState, request.lead_id],
   );
   useAutosave(draft, save);
+  // The other parent saved the recipient meanwhile (the request was re-read): the untouched
+  // fields follow, a field being typed in keeps its value and says so at the field.
+  useServerDraftSync({
+    incoming: draftFromRecipient(request.billing),
+    draft,
+    savedRef,
+    queuedDraftRef,
+    setDraft,
+    idOf: (field) => `lead-request-recipient_${field}`,
+  });
 
   const flow = flowOf(draft);
   const third = flow.recipient === "third_party";
@@ -282,9 +293,9 @@ export function InvoiceRecipientSection({
   // Unanswered after "Next": said at the question too, not only in the list at the top.
   const recipientMissing = useStepMissingError("lead-request-invoice_recipient");
   // The data a payer needs are required of the recipient who pays (owner request 2026-10-07): the
-  // e-mail also of an organisation, which answers on its own link (QA 2026-10-11 A-35), the phone of a person.
+  // e-mail also of an organisation, which answers on its own link (QA 2026-10-11 A-35). The phone
+  // is optional, as on the server (2026-10-24).
   const emailRequired = third && recipientPays;
-  const phoneRequired = third && recipientPays && !organisation;
 
   return (
     <>
@@ -428,7 +439,7 @@ export function InvoiceRecipientSection({
                     {textInput("email", 254, "email")}
                     {errorFor("email") ? null : <EmailDomainWarning email={draft.email} lang={lang} />}
                   </LabeledField>
-                  <LabeledField {...labeled("phone", phoneRequired)}>{textInput("phone", 40, "tel")}</LabeledField>
+                  <LabeledField {...labeled("phone")}>{textInput("phone", 40, "tel")}</LabeledField>
                   {organisation ? (
                     // An organisation that pays states the reason as the payer's (`payment_background`).
                     recipientPays && identification ? (
@@ -727,6 +738,19 @@ function RecipientPayer({
   const [base] = useState<PayerDraft>(() => fits ? draftFromPayer(request.payer) : unansweredPayerDraft(request.payer));
   const [replacementConfirmed, setReplacementConfirmed] = useState(false);
   const [extras, setExtras] = useState<RecipientPayerExtras>(() => recipientPayerExtras(fits ? request.payer : null));
+  // The payer's extras as the server last had them: the other parent's newer values are taken
+  // over where nothing is typed; the recipient's own data come through the recipient's sync.
+  const savedExtrasRef = useRef<RecipientPayerExtras>(recipientPayerExtras(fits ? request.payer : null));
+  const queuedExtrasRef = useRef(savedExtrasRef.current);
+  useServerDraftSync({
+    incoming: recipientPayerExtras(fits ? request.payer : null),
+    draft: extras,
+    savedRef: savedExtrasRef,
+    queuedDraftRef: queuedExtrasRef,
+    setDraft: setExtras,
+    idOf: (field) => `lead-request-payer_${field}`,
+    enabled: fits,
+  });
   const [messengerSameAsPhone, setMessengerSameAsPhone] = useState(
     () => Boolean(extras.messenger) && extras.messenger === recipient.phone,
   );

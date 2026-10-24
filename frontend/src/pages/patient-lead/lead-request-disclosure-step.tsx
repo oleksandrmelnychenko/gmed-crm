@@ -13,7 +13,7 @@ import { AutosaveFlushContext, CabinetSection, StepFooter, errorBody } from "./l
 import type { StepProps } from "./lead-request-step-forms";
 import { asLeadCabinetLang } from "./lead-request-text";
 import { TrustedPersonsEditor } from "./lead-trusted-persons-editor";
-import { disclosureChanged, disclosureDefaultsToNo, disclosureDraft, disclosureProblem, disclosureToSend, type DisclosureDraft } from "./lead-trusted-persons-model";
+import { disclosureChanged, disclosureDefaultsToNo, disclosureDraft, disclosureProblem, disclosureToSend, mergeDisclosureDraft, type DisclosureDraft } from "./lead-trusted-persons-model";
 import { disclosureConsentText, disclosureSubject, disclosureWording, trustedPersonsText } from "./lead-trusted-persons-text";
 
 export function DisclosureStep({ request, text: common, lang, enqueue, onChange, nav }: StepProps) {
@@ -37,21 +37,43 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       : current === "required" && draft.persons.length > 0 ? text.invalid
         : text[current];
 
+  // The draft and the request as they are now, also between renders: a save
+  // started while another one runs judges what was typed meanwhile, not the
+  // closure of an earlier render.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const requestRef = useRef(request);
+  requestRef.current = request;
+  // The save of the newest render, for the flusher, the timer and a save that waited for another.
+  const latest = useRef<{ save: () => Promise<boolean>; draft: DisclosureDraft }>({ save: () => Promise.resolve(true), draft });
+
   const save = useCallback(async (): Promise<boolean> => {
-    if (saving.current) return saving.current;
-    if (!changed || ownMinor) return true;
-    if (problem) {
+    if (saving.current) {
+      // Typed during the save: saved right after it, never dropped.
+      const ok = await saving.current;
+      return ok ? latest.current.save() : false;
+    }
+    const current = draftRef.current;
+    const base = requestRef.current;
+    if (!disclosureChanged(current, base, user?.id) || ownMinor) return true;
+    const problemNow = disclosureProblem(current);
+    if (problemNow) {
       // The step stays: every missing entry is marked at its field.
       setAttempted(true);
-      setError(problemMessage(problem));
+      setError(problemMessage(problemNow));
       return false;
     }
     setBusy(true);
     setError("");
     const pending = (async () => {
       try {
-        const saved = await enqueue(() => saveLeadTrustedPersons(request.lead_id, disclosureToSend(draft, asLeadCabinetLang(lang) ?? "ru")));
-        setDraft(disclosureDraft(saved, user?.id));
+        const baseline = disclosureDraft(base, user?.id);
+        const saved = await enqueue(() => saveLeadTrustedPersons(base.lead_id, disclosureToSend(current, asLeadCabinetLang(lang) ?? "ru")));
+        // The server's state for what stayed as sent; an edit made while the save ran stays and is saved next.
+        const merged = mergeDisclosureDraft(draftRef.current, current, disclosureDraft(saved, user?.id), baseline);
+        draftRef.current = merged;
+        requestRef.current = saved;
+        setDraft(merged);
         onChange(saved);
         return true;
       } catch (cause) {
@@ -72,11 +94,10 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     })();
     saving.current = pending;
     return pending;
-  }, [changed, ownMinor, problem, text, enqueue, request.lead_id, draft, lang, user?.id, onChange, common.errors.request_failed]);
+  }, [ownMinor, problemMessage, text, enqueue, lang, user?.id, onChange, common.errors.request_failed]);
 
   // Leaving via a tab, Next or another child's request saves a valid choice
   // in the shared queue. A failed/incomplete draft stays visible for correction.
-  const latest = useRef({ save, draft });
   latest.current = { save, draft };
   useEffect(() => {
     const flush = { save: () => latest.current.save(), version: () => JSON.stringify(latest.current.draft) };
@@ -98,7 +119,10 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   }, [changed, busy]);
 
   function update(patch: Partial<DisclosureDraft>) {
-    setDraft((current) => ({ ...current, ...patch }));
+    // The ref first: a save that ends in this moment merges with what is typed now.
+    const next = { ...draftRef.current, ...patch };
+    draftRef.current = next;
+    setDraft(next);
     setError("");
   }
 

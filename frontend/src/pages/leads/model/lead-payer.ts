@@ -1182,10 +1182,15 @@ export function payerGateErrorText(error: unknown, tx: Tx): string | null {
     : tx("проверьте раздел «Кто платит»", "Angaben „Wer zahlt“ prüfen"));
 }
 
-/** Countries of a third-party payer for the AML country risk. */
+/**
+ * Countries of a third-party payer for the AML country risk. A third-party
+ * row of before that names one of the minor's parents (the server's
+ * `status.paying_parent`) is the parent, screened as a representative: no
+ * payer countries.
+ */
 export function payerAmlCountries(response: PayerDeclarationResponse | null | undefined): string[] {
   const declaration = response?.declaration;
-  if (!declaration || declaration.payer_kind !== "third_party") return [];
+  if (!declaration || declaration.payer_kind !== "third_party" || response?.status?.paying_parent === true) return [];
   return normalizeCitizenships([
     ...(declaration.country ? [declaration.country] : []),
     ...(declaration.citizenships ?? []),

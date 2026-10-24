@@ -66,20 +66,23 @@ const dateKey = (value: string | null | undefined) => appDateKeyOf(value);
 
 /**
  * The form values of a stored document; `fallbackValidUntil` is the wizard's
- * old "passport valid until", read only while nothing was stored in the new
- * place (it is never written again). A stored country name becomes its code.
+ * old "passport valid until", read only while staff never entered document
+ * data in the new place (`id_data_entered_at` unset; it is never written
+ * again). A date staff cleared and stored stays empty (DEV 2026-10-24: the
+ * old date came back after the save). A stored country name becomes its code.
  */
 export function identityDocumentDraft(
   source: IdentityDocumentSource | null | undefined,
   fallbackValidUntil = "",
 ): IdentityDocumentDraft {
+  const fallback = source?.id_data_entered_at ? "" : dateKey(fallbackValidUntil);
   return {
     type: source?.id_document_type ?? "",
     number: source?.id_document_number ?? "",
     authority: source?.id_issuing_authority ?? "",
     country: countryCodeFromStoredValue(source?.id_issuing_country) || (source?.id_issuing_country ?? "").trim().toUpperCase(),
     issuedOn: dateKey(source?.id_issued_on),
-    validUntil: dateKey(source?.id_valid_until) || dateKey(fallbackValidUntil),
+    validUntil: dateKey(source?.id_valid_until) || fallback,
     unreadable: source?.id_document_unreadable === true,
   };
 }
@@ -276,13 +279,23 @@ export function identityDocumentStatusText(status: IdentityDocumentStatus, tx: T
   }
 }
 
-/** Which source is newer: `true` when `candidate` is older than `known` (a late reload). */
+/**
+ * Which source is newer: `true` when `candidate` is older than `known` (a
+ * late reload). A source without an entry time after a known one is no late
+ * reload but a reset («Убрать данные GwG» cleared the document): it is taken
+ * (DEV 2026-10-24: the form kept the old data and the next keystroke stored
+ * the whole document again).
+ */
 export function identityDocumentSourceIsStale(candidate: string | null | undefined, known: string | null | undefined): boolean {
-  if (!known) return false;
-  if (!candidate) return true;
+  if (!known || !candidate) return false;
   const candidateTime = Date.parse(candidate);
   const knownTime = Date.parse(known);
   return Number.isFinite(candidateTime) && Number.isFinite(knownTime) && candidateTime < knownTime;
+}
+
+/** The server cleared the document (no entry time) after one was known here: the form starts over. */
+export function identityDocumentSourceIsReset(candidate: string | null | undefined, known: string | null | undefined): boolean {
+  return Boolean(known) && !candidate;
 }
 
 /** "Внесено сотрудником: Ben Muster · 07.10.2026 12:00"; "" while staff entered nothing. */

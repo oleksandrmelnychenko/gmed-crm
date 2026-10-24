@@ -490,10 +490,16 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
             let self_payer =
                 payer.is_some_and(|payer| payer.payer_kind == lead_payer::PAYER_KIND_SELF);
             if self_payer {
-                if payer.is_none_or(|payer| payer.self_funds_source.is_none()) {
+                // One rule of completeness (`lead_funds`): a source, and the
+                // words only with `other`.
+                let (source_missing, description_missing) =
+                    crate::routes::lead_funds::lead_funds(payer, None)
+                        .patient
+                        .missing_parts();
+                if source_missing {
                     missing.push("funds_source");
                 }
-                if blank(&payer.and_then(|payer| payer.self_funds_description.clone())) {
+                if description_missing {
                     missing.push("funds_description");
                 }
             }
@@ -2019,13 +2025,7 @@ mod tests {
                 );
                 assert_eq!(
                     asked["A"].missing,
-                    vec![
-                        "funds_source",
-                        "funds_description",
-                        "occupation",
-                        "sector",
-                        "funds_proof_upload"
-                    ],
+                    vec!["funds_source", "occupation", "sector", "funds_proof_upload"],
                     "{key} level {level}"
                 );
             }
@@ -2089,8 +2089,34 @@ mod tests {
         };
         assert_eq!(
             block_missing("A", &own).1,
+            vec!["funds_source", "occupation", "sector", "funds_proof_upload"]
+        );
+        // A source is enough; the words are required only with `other`
+        // (`lead_funds::PersonFunds::stated`): "income" without a description
+        // no longer keeps block A open.
+        let income = BlockAnswers {
+            payer: Some(Declaration {
+                payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+                self_funds_source: Some("income".into()),
+                ..Declaration::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            block_missing("A", &income).1,
+            vec!["occupation", "sector", "funds_proof_upload"]
+        );
+        let other = BlockAnswers {
+            payer: Some(Declaration {
+                payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+                self_funds_source: Some("other".into()),
+                ..Declaration::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            block_missing("A", &other).1,
             vec![
-                "funds_source",
                 "funds_description",
                 "occupation",
                 "sector",

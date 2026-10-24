@@ -210,21 +210,44 @@ impl DisclosureDecision {
     }
 }
 
-/// Whose data the disclosure consent is about: the person's own, a minor's
-/// (a parent or the guardian declares, like the child's Anlage 1), or an
-/// adult's represented by a legal representative.
+/// Whose data the disclosure consent is about, and who declares it: the
+/// person's own; a minor's, declared by one parent with sole custody
+/// ("meines Kindes"), by both parents together under joint custody ("Wir …
+/// unseres Kindes", the form of both parents) or by the child's guardian,
+/// Vormund ("des von mir vertretenen Kindes"); or an adult's represented by a
+/// legal representative. One table for the recorded consent of the cabinet
+/// and the printed Anlage 1, so both say the same.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisclosureSubject {
     Own,
     Child,
+    ChildOfBothParents,
+    ChildUnderGuardianship,
     Represented,
 }
 
 impl DisclosureSubject {
-    /// From the chooser's access kind and whether the subject is a minor.
+    /// From the chooser's access kind and whether the subject is a minor,
+    /// without the custody: a minor's is the one parent's wording.
     pub fn of(access_kind: &str, minor: bool) -> Self {
+        Self::for_custody(access_kind, minor, None)
+    }
+
+    /// [`DisclosureSubject::of`] with the minor's stated custody
+    /// (`lead_representatives::Answers::custody`): joint custody is the form
+    /// of both parents, a guardian (Vormund) declares for the child they
+    /// represent, a sole parent and an unstated custody as the one parent.
+    pub fn for_custody(access_kind: &str, minor: bool, custody: Option<&str>) -> Self {
         match (access_kind, minor) {
-            ("guardian", true) => Self::Child,
+            ("guardian", true) => match custody.map(str::trim) {
+                Some(crate::routes::lead_representatives::CUSTODY_JOINT) => {
+                    Self::ChildOfBothParents
+                }
+                Some(crate::routes::lead_representatives::CUSTODY_GUARDIAN) => {
+                    Self::ChildUnderGuardianship
+                }
+                _ => Self::Child,
+            },
             ("guardian", false) => Self::Represented,
             _ => Self::Own,
         }
@@ -237,12 +260,16 @@ pub fn disclosure_consent_text(language: &str, company: &str) -> String {
 }
 
 /// The disclosure consent in the wording for whose data it is: a parent
-/// consents for "die Daten meines Kindes", never for "meine Daten".
+/// consents for "die Daten meines Kindes", never for "meine Daten"; both
+/// parents declare together ("Wir … unseres Kindes").
 pub fn disclosure_consent_text_for(
     language: &str,
     company: &str,
     subject: DisclosureSubject,
 ) -> String {
+    if subject == DisclosureSubject::ChildOfBothParents {
+        return both_parents_disclosure_consent_text(language, company);
+    }
     let own = own_disclosure_consent_text(language, company);
     let (mine, theirs) = match language {
         "ru" => (
@@ -250,6 +277,9 @@ pub fn disclosure_consent_text_for(
             match subject {
                 DisclosureSubject::Child => {
                     "о персональных данных моего ребёнка, включая данные о состоянии его здоровья,"
+                }
+                DisclosureSubject::ChildUnderGuardianship => {
+                    "о персональных данных представляемого мною ребёнка, включая данные о состоянии его здоровья,"
                 }
                 _ => {
                     "о персональных данных представляемого мною лица, включая данные о состоянии его здоровья,"
@@ -262,6 +292,9 @@ pub fn disclosure_consent_text_for(
                 DisclosureSubject::Child => {
                     "про персональні дані моєї дитини, зокрема дані про стан її здоров’я,"
                 }
+                DisclosureSubject::ChildUnderGuardianship => {
+                    "про персональні дані дитини, яку я представляю, зокрема дані про стан її здоров’я,"
+                }
                 _ => {
                     "про персональні дані особи, яку я представляю, зокрема дані про стан її здоров’я,"
                 }
@@ -272,6 +305,9 @@ pub fn disclosure_consent_text_for(
             match subject {
                 DisclosureSubject::Child => {
                     "about my child's personal data, including my child's health data,"
+                }
+                DisclosureSubject::ChildUnderGuardianship => {
+                    "about the personal data of the child I represent, including the child's health data,"
                 }
                 _ => {
                     "about the personal data of the person I represent, including their health data,"
@@ -284,6 +320,9 @@ pub fn disclosure_consent_text_for(
                 DisclosureSubject::Child => {
                     "über die personenbezogenen Daten meines Kindes, einschließlich seiner Gesundheitsdaten,"
                 }
+                DisclosureSubject::ChildUnderGuardianship => {
+                    "über die personenbezogenen Daten des von mir vertretenen Kindes, einschließlich seiner Gesundheitsdaten,"
+                }
                 _ => {
                     "über die personenbezogenen Daten der von mir vertretenen Person, einschließlich ihrer Gesundheitsdaten,"
                 }
@@ -294,6 +333,27 @@ pub fn disclosure_consent_text_for(
         DisclosureSubject::Own => own,
         _ => own.replacen(mine, theirs, 1),
     }
+}
+
+/// The disclosure consent of both parents under joint custody: the whole
+/// declaration says "Wir … unseres Kindes" (owner 2026-10-24), in the
+/// cabinet's language; the German is the original.
+fn both_parents_disclosure_consent_text(language: &str, company: &str) -> String {
+    let text = match language {
+        "ru" => {
+            "Мы даём явное согласие на то, что [company] предоставляет указанным выше лицам в указанном объёме информацию о персональных данных нашего ребёнка, включая данные о состоянии его здоровья, и передаёт им эти данные. Если существует обязанность соблюдать врачебную тайну, мы в этом объёме освобождаем лиц, участвующих в организации и лечении, от этой обязанности. Мы можем в любое время отозвать это согласие на будущее. Обработка данных, осуществлённая до отзыва, остаётся законной. Дополнительная информация содержится в Уведомлении о защите данных."
+        }
+        "uk" => {
+            "Ми надаємо явну згоду на те, що [company] надає зазначеним вище особам у вказаному обсязі інформацію про персональні дані нашої дитини, зокрема дані про стан її здоров’я, та передає їм ці дані. Якщо існує обов’язок дотримуватися лікарської таємниці, ми в цьому обсязі звільняємо осіб, які беруть участь в організації та лікуванні, від цього обов’язку. Ми можемо будь-коли відкликати цю згоду на майбутнє. Обробка даних, здійснена до відкликання, залишається законною. Додаткова інформація міститься в Повідомленні про захист даних."
+        }
+        "en" => {
+            "We expressly consent to [company] providing the persons named above with information about our child's personal data, including our child's health data, within the specified scope, and transmitting this data to them. Where a duty of confidentiality applies, we release those involved in organisation and treatment from that duty to this extent. We may withdraw this consent at any time with effect for the future. Processing carried out before withdrawal remains unaffected. Further information can be found in the Privacy Notice."
+        }
+        _ => {
+            "Wir willigen ausdrücklich ein, dass [company] den oben genannten Personen im angegebenen Umfang Auskunft über die personenbezogenen Daten unseres Kindes, einschließlich seiner Gesundheitsdaten, erteilt und diese Daten an sie übermittelt. Soweit eine Schweigepflicht besteht, entbinden wir die an Organisation und Behandlung Beteiligten insoweit von dieser. Wir können diese Einwilligung jederzeit mit Wirkung für die Zukunft widerrufen. Die bis dahin erfolgte Verarbeitung bleibt davon unberührt. Weitere Informationen finden Sie im Datenschutzhinweis."
+        }
+    };
+    text.replace("[company]", company)
 }
 
 fn own_disclosure_consent_text(language: &str, company: &str) -> String {
@@ -956,6 +1016,63 @@ mod tests {
             disclosure_consent_text_for("ru", "GMED", DisclosureSubject::Child)
                 .contains("о персональных данных моего ребёнка")
         );
+    }
+
+    #[test]
+    fn the_recorded_consent_follows_the_custody_like_the_printed_form() {
+        // Joint custody: the form of both parents ("Wir … unseres Kindes");
+        // a guardian (Vormund) declares for the child they represent; a sole
+        // parent and an unstated custody keep the one parent's wording.
+        assert_eq!(
+            DisclosureSubject::for_custody("guardian", true, Some("joint")),
+            DisclosureSubject::ChildOfBothParents
+        );
+        assert_eq!(
+            DisclosureSubject::for_custody("guardian", true, Some("guardian")),
+            DisclosureSubject::ChildUnderGuardianship
+        );
+        assert_eq!(
+            DisclosureSubject::for_custody("guardian", true, Some("sole_parent")),
+            DisclosureSubject::Child
+        );
+        assert_eq!(
+            DisclosureSubject::for_custody("guardian", true, None),
+            DisclosureSubject::Child
+        );
+        assert_eq!(
+            DisclosureSubject::for_custody("guardian", false, Some("joint")),
+            DisclosureSubject::Represented
+        );
+        assert_eq!(
+            DisclosureSubject::for_custody("self", true, Some("joint")),
+            DisclosureSubject::Own
+        );
+        let both = disclosure_consent_text_for("de", "GMED", DisclosureSubject::ChildOfBothParents);
+        assert!(both.starts_with("Wir willigen ausdrücklich ein, dass GMED "));
+        assert!(both.contains("Daten unseres Kindes"));
+        assert!(!both.contains("Ich ") && !both.contains(" ich "));
+        let ward =
+            disclosure_consent_text_for("de", "GMED", DisclosureSubject::ChildUnderGuardianship);
+        assert!(ward.contains("Daten des von mir vertretenen Kindes"));
+        assert!(!ward.contains("meines Kindes"));
+        for language in ["de", "en", "uk", "ru"] {
+            let mut texts: Vec<String> = [
+                DisclosureSubject::Own,
+                DisclosureSubject::Child,
+                DisclosureSubject::ChildOfBothParents,
+                DisclosureSubject::ChildUnderGuardianship,
+                DisclosureSubject::Represented,
+            ]
+            .into_iter()
+            .map(|subject| disclosure_consent_text_for(language, "GMED", subject))
+            .collect();
+            for text in &texts {
+                assert!(text.contains("GMED"), "{language}: company named");
+            }
+            texts.sort();
+            texts.dedup();
+            assert_eq!(texts.len(), 5, "{language}: one wording per subject");
+        }
     }
 
     #[test]

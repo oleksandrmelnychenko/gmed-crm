@@ -106,6 +106,8 @@ export type LeadRequestText = {
   removeDocument: string;
   documentTakenOver: string;
   maxDocuments: (count: number) => string;
+  /** The server refused an upload over its limit (`too_many_documents` with `max_documents`). */
+  tooManyDocuments: (count: number) => string;
   sendTitle: string;
   missingTitle: string;
   inquiryConsentMissing: string;
@@ -1031,7 +1033,7 @@ const de: LeadRequestText = {
   dobStaffOnly: "Bitte wenden Sie sich an GMED, um das Geburtsdatum zu korrigieren.",
   healthConsentRequired: "Bitte stimmen Sie zuerst der Verarbeitung der Gesundheitsdaten zu.",
   furtherDetails: "Weitere Angaben",
-  errors: {"upload_reviewed":"GMED hat dieses Dokument bereits übernommen. Bitte wenden Sie sich für die Entfernung an unser Team.","upload_in_use":"Dieses Dokument wird bereits verwendet. Bitte wenden Sie sich an GMED.","too_many_documents":"Sie können höchstens 30 Dokumente hochladen. Entfernen Sie zuerst eine nicht benötigte Datei.","unsupported_file_type":"Bitte laden Sie eine PDF-, JPG- oder PNG-Datei hoch.","file_too_large":"Die Datei darf höchstens 25 MB groß sein.","file_rejected":"Diese Datei kann nicht angenommen werden. Bitte laden Sie eine andere Datei hoch.","duplicate_document":"Diese Datei ist bereits hochgeladen.","heic_not_supported":"HEIC-Fotos (iPhone) können wir nicht annehmen. Bitte speichern Sie das Foto als JPG und laden Sie es erneut hoch – wenn Sie das Foto direkt hier auf dem iPhone auswählen, wird es automatisch als JPG gesendet.","personal_data_incomplete":"Bitte ergänzen Sie die markierten Angaben, bevor Sie die Anfrage senden.","request_failed":"Das hat leider nicht geklappt. Bitte versuchen Sie es erneut.","consent_version_outdated":"Der Text der Einwilligung wurde inzwischen aktualisiert. Bitte laden Sie die Seite neu und bestätigen Sie den aktuellen Text.","lead_converted":"Ihre Anfrage wird inzwischen im Patientenportal weitergeführt. Bitte laden Sie die Seite neu."},
+  errors: {"upload_reviewed":"GMED hat dieses Dokument bereits übernommen. Bitte wenden Sie sich für die Entfernung an unser Team.","upload_in_use":"Dieses Dokument wird bereits verwendet. Bitte wenden Sie sich an GMED.","too_many_documents":"Die Höchstzahl an Dokumenten ist erreicht. Entfernen Sie zuerst eine nicht benötigte Datei.","unsupported_file_type":"Bitte laden Sie eine PDF-, JPG- oder PNG-Datei hoch.","file_too_large":"Die Datei darf höchstens 25 MB groß sein.","file_rejected":"Diese Datei kann nicht angenommen werden. Bitte laden Sie eine andere Datei hoch.","duplicate_document":"Diese Datei ist bereits hochgeladen.","heic_not_supported":"HEIC-Fotos (iPhone) können wir nicht annehmen. Bitte speichern Sie das Foto als JPG und laden Sie es erneut hoch – wenn Sie das Foto direkt hier auf dem iPhone auswählen, wird es automatisch als JPG gesendet.","personal_data_incomplete":"Bitte ergänzen Sie die markierten Angaben, bevor Sie die Anfrage senden.","request_failed":"Das hat leider nicht geklappt. Bitte versuchen Sie es erneut.","consent_version_outdated":"Der Text der Einwilligung wurde inzwischen aktualisiert. Bitte laden Sie die Seite neu und bestätigen Sie den aktuellen Text.","lead_converted":"Ihre Anfrage wird inzwischen im Patientenportal weitergeführt. Bitte laden Sie die Seite neu."},
   minorNeedsGuardian:
     "Für Personen unter 18 Jahren füllen die Eltern oder der gesetzliche Vertreter die Anfrage aus. Wir haben unser GMED-Team informiert und melden uns.",
   next: "Weiter",
@@ -1055,6 +1057,7 @@ const de: LeadRequestText = {
   removeDocument: "Entfernen",
   documentTakenOver: "Von uns übernommen",
   maxDocuments: (count) => `Höchstens ${count} Dateien pro Anfrage.`,
+  tooManyDocuments: (count) => `Sie können höchstens ${count} Dokumente hochladen. Entfernen Sie zuerst eine nicht benötigte Datei.`,
   sendTitle: "An Ihre Ansprechperson senden",
   missingTitle: "Bitte noch ergänzen:",
   inquiryConsentMissing: "Bitte stimmen Sie unter „Einwilligung & Person“ der Verarbeitung Ihrer Angaben zu.",
@@ -1604,7 +1607,7 @@ const ru: LeadRequestText = {
   dobStaffOnly: "Чтобы исправить дату рождения, обратитесь в GMED.",
   healthConsentRequired: "Сначала дайте согласие на обработку данных о здоровье.",
   furtherDetails: "Дополнительные сведения",
-  errors: {"upload_reviewed":"GMED уже приняла этот документ. Чтобы удалить его, обратитесь к нашей команде.","upload_in_use":"Этот документ уже используется. Для удаления обратитесь в GMED.","too_many_documents":"Можно загрузить до 30 документов. Сначала удалите ненужный файл.","unsupported_file_type":"Загрузите файл PDF, JPG или PNG.","file_too_large":"Размер файла не должен превышать 25 МБ.","file_rejected":"Этот файл не может быть принят. Загрузите, пожалуйста, другой файл.","duplicate_document":"Этот файл уже загружен.","heic_not_supported":"Фото в формате HEIC (iPhone) мы не можем принять. Сохраните фото как JPG и загрузите его снова — если выбрать фото прямо здесь на iPhone, оно автоматически отправится как JPG.","personal_data_incomplete":"Заполните отмеченные поля перед отправкой заявки.","request_failed":"Не удалось выполнить действие. Попробуйте ещё раз.","consent_version_outdated":"Текст согласия тем временем обновлён. Перезагрузите страницу и подтвердите актуальный текст.","lead_converted":"Ваша заявка теперь ведётся в портале пациента. Перезагрузите страницу."},
+  errors: {"upload_reviewed":"GMED уже приняла этот документ. Чтобы удалить его, обратитесь к нашей команде.","upload_in_use":"Этот документ уже используется. Для удаления обратитесь в GMED.","too_many_documents":"Достигнуто максимальное число документов. Сначала удалите ненужный файл.","unsupported_file_type":"Загрузите файл PDF, JPG или PNG.","file_too_large":"Размер файла не должен превышать 25 МБ.","file_rejected":"Этот файл не может быть принят. Загрузите, пожалуйста, другой файл.","duplicate_document":"Этот файл уже загружен.","heic_not_supported":"Фото в формате HEIC (iPhone) мы не можем принять. Сохраните фото как JPG и загрузите его снова — если выбрать фото прямо здесь на iPhone, оно автоматически отправится как JPG.","personal_data_incomplete":"Заполните отмеченные поля перед отправкой заявки.","request_failed":"Не удалось выполнить действие. Попробуйте ещё раз.","consent_version_outdated":"Текст согласия тем временем обновлён. Перезагрузите страницу и подтвердите актуальный текст.","lead_converted":"Ваша заявка теперь ведётся в портале пациента. Перезагрузите страницу."},
   minorNeedsGuardian:
     "Для лиц младше 18 лет заявку заполняют родители или законный представитель. Мы сообщили нашей команде GMED и свяжемся с вами.",
   next: "Далее",
@@ -1627,6 +1630,7 @@ const ru: LeadRequestText = {
   removeDocument: "Удалить",
   documentTakenOver: "Принято в работу",
   maxDocuments: (count) => `Не более ${count} файлов на заявку.`,
+  tooManyDocuments: (count) => `Можно загрузить до ${count} документов. Сначала удалите ненужный файл.`,
   sendTitle: "Отправить вашему менеджеру",
   missingTitle: "Пожалуйста, дополните:",
   inquiryConsentMissing: "Пожалуйста, дайте согласие на обработку данных на шаге «Согласие и личные данные».",
@@ -2170,7 +2174,7 @@ const uk: LeadRequestText = {
   dobStaffOnly: "Щоб виправити дату народження, зверніться до GMED.",
   healthConsentRequired: "Спочатку дайте згоду на обробку даних про здоров’я.",
   furtherDetails: "Додаткові відомості",
-  errors: {"upload_reviewed":"GMED уже прийняла цей документ. Щоб видалити його, зверніться до нашої команди.","upload_in_use":"Цей документ уже використовується. Для видалення зверніться до GMED.","too_many_documents":"Можна завантажити до 30 документів. Спочатку видаліть непотрібний файл.","unsupported_file_type":"Завантажте файл PDF, JPG або PNG.","file_too_large":"Розмір файлу не має перевищувати 25 МБ.","file_rejected":"Цей файл не може бути прийнято. Завантажте, будь ласка, інший файл.","duplicate_document":"Цей файл уже завантажено.","heic_not_supported":"Фото у форматі HEIC (iPhone) ми не можемо прийняти. Збережіть фото як JPG і завантажте його знову — якщо вибрати фото прямо тут на iPhone, воно автоматично надішлеться як JPG.","personal_data_incomplete":"Заповніть позначені поля перед надсиланням заявки.","request_failed":"Не вдалося виконати дію. Спробуйте ще раз.","consent_version_outdated":"Текст згоди тим часом оновлено. Перезавантажте сторінку та підтвердьте актуальний текст.","lead_converted":"Ваша заявка тепер ведеться в порталі пацієнта. Перезавантажте сторінку."},
+  errors: {"upload_reviewed":"GMED уже прийняла цей документ. Щоб видалити його, зверніться до нашої команди.","upload_in_use":"Цей документ уже використовується. Для видалення зверніться до GMED.","too_many_documents":"Досягнуто максимальну кількість документів. Спочатку видаліть непотрібний файл.","unsupported_file_type":"Завантажте файл PDF, JPG або PNG.","file_too_large":"Розмір файлу не має перевищувати 25 МБ.","file_rejected":"Цей файл не може бути прийнято. Завантажте, будь ласка, інший файл.","duplicate_document":"Цей файл уже завантажено.","heic_not_supported":"Фото у форматі HEIC (iPhone) ми не можемо прийняти. Збережіть фото як JPG і завантажте його знову — якщо вибрати фото прямо тут на iPhone, воно автоматично надішлеться як JPG.","personal_data_incomplete":"Заповніть позначені поля перед надсиланням заявки.","request_failed":"Не вдалося виконати дію. Спробуйте ще раз.","consent_version_outdated":"Текст згоди тим часом оновлено. Перезавантажте сторінку та підтвердьте актуальний текст.","lead_converted":"Ваша заявка тепер ведеться в порталі пацієнта. Перезавантажте сторінку."},
   minorNeedsGuardian:
     "Для осіб, молодших 18 років, заявку заповнюють батьки або законний представник. Ми повідомили нашу команду GMED і зв’яжемося з вами.",
   next: "Далі",
@@ -2193,6 +2197,7 @@ const uk: LeadRequestText = {
   removeDocument: "Видалити",
   documentTakenOver: "Прийнято в роботу",
   maxDocuments: (count) => `Не більше ${count} файлів на заявку.`,
+  tooManyDocuments: (count) => `Можна завантажити до ${count} документів. Спочатку видаліть непотрібний файл.`,
   sendTitle: "Надіслати вашому менеджеру",
   missingTitle: "Будь ласка, доповніть:",
   inquiryConsentMissing: "Будь ласка, надайте згоду на обробку даних на кроці «Згода й особисті дані».",
@@ -2736,7 +2741,7 @@ const en: LeadRequestText = {
   dobStaffOnly: "Please contact GMED to correct the date of birth.",
   healthConsentRequired: "Please consent to health data processing first.",
   furtherDetails: "Further information",
-  errors: {"upload_reviewed":"GMED has already taken over this document. Please contact our team to remove it.","upload_in_use":"This document is already in use. Please contact GMED to remove it.","too_many_documents":"You can upload up to 30 documents. Remove an unneeded file first.","unsupported_file_type":"Please upload a PDF, JPG or PNG file.","file_too_large":"The file must be no larger than 25 MB.","file_rejected":"This file cannot be accepted. Please upload a different file.","duplicate_document":"This file is already uploaded.","heic_not_supported":"We cannot accept HEIC photos (iPhone). Please save the photo as JPG and upload it again – if you pick the photo right here on the iPhone, it is sent as JPG automatically.","personal_data_incomplete":"Please complete the highlighted fields before sending the request.","request_failed":"The action could not be completed. Please try again.","consent_version_outdated":"The consent text has been updated in the meantime. Please reload the page and confirm the current text.","lead_converted":"Your request now continues in the patient portal. Please reload the page."},
+  errors: {"upload_reviewed":"GMED has already taken over this document. Please contact our team to remove it.","upload_in_use":"This document is already in use. Please contact GMED to remove it.","too_many_documents":"The maximum number of documents has been reached. Remove an unneeded file first.","unsupported_file_type":"Please upload a PDF, JPG or PNG file.","file_too_large":"The file must be no larger than 25 MB.","file_rejected":"This file cannot be accepted. Please upload a different file.","duplicate_document":"This file is already uploaded.","heic_not_supported":"We cannot accept HEIC photos (iPhone). Please save the photo as JPG and upload it again – if you pick the photo right here on the iPhone, it is sent as JPG automatically.","personal_data_incomplete":"Please complete the highlighted fields before sending the request.","request_failed":"The action could not be completed. Please try again.","consent_version_outdated":"The consent text has been updated in the meantime. Please reload the page and confirm the current text.","lead_converted":"Your request now continues in the patient portal. Please reload the page."},
   minorNeedsGuardian:
     "For persons under 18 the parents or the legal guardian fill in the request. We have informed our GMED team and will get in touch.",
   next: "Next",
@@ -2759,6 +2764,7 @@ const en: LeadRequestText = {
   removeDocument: "Remove",
   documentTakenOver: "Taken over by us",
   maxDocuments: (count) => `At most ${count} files per request.`,
+  tooManyDocuments: (count) => `You can upload up to ${count} documents. Remove an unneeded file first.`,
   sendTitle: "Send to your contact person",
   missingTitle: "Please add:",
   inquiryConsentMissing: "Please agree to the processing of your details in the step “Consent & person”.",

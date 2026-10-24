@@ -37,6 +37,7 @@ import {
   followUpAnswered,
   followUpBeforeSubmit,
   followUpMissing,
+  fundsDescriptionRequired,
   fundsSourceOptions,
   missingOfRefusal,
   openFollowUpBlocks,
@@ -334,14 +335,9 @@ export function FollowUpStep({
             type="button"
             variant="outline"
             className="h-9"
-            onClick={() => {
-              // What is missing shows only after "Next" (or "Send"): the first press shows it.
-              if (blocks.some((block) => followUpMissing(request, block).length > 0) && !showMissing) {
-                onShowMissing();
-                return;
-              }
-              onNext();
-            }}
+            // The page saves the entry still in its autosave delay first and judges the fresh
+            // response (like the base steps): the first press with something missing shows it.
+            onClick={onNext}
           >
             {text.next}
             <ArrowRight aria-hidden="true" className="size-3.5" />
@@ -491,8 +487,9 @@ function FundsBlock({
       </NativeComboboxSelect>
     </LabeledField>
   );
+  // The words are required with the source "other" only, as on the server (`lead_funds::stated`).
   const description = (field: "funds_description" | "payer_funds_description") => (
-    <LabeledField id={controlId(field)} label={text.extraFields[field]} error={errorFor(field)} required className={FULL_ROW}>
+    <LabeledField id={controlId(field)} label={text.extraFields[field]} error={errorFor(field)} required={fundsDescriptionRequired(draft[field === "funds_description" ? "funds_source" : "payer_funds_source"])} className={FULL_ROW}>
       <textarea
         {...control(field)}
         // 16 px on phones: a smaller text makes iOS zoom into the field.

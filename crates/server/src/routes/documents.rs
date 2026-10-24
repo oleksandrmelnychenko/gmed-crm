@@ -3712,7 +3712,7 @@ async fn load_gwg_identification_sheet(
     .await
     .map_err(|error| failed(error, "lead"))?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Lead not found"))?;
-    let (declaration, identification, represented, enhanced_check_required) = {
+    let (declaration, identification, represented, enhanced_check_required, risk_config) = {
         let mut conn = state
             .db
             .acquire()
@@ -3726,6 +3726,11 @@ async fn load_gwg_identification_sheet(
                 .await
                 .map_err(|error| failed(error, "enhanced check"))?
                 .required;
+        // The lists of high-risk third countries live only in the risk
+        // configuration (owner rule 2026-10-22); the sheet reads them there.
+        let risk_config = crate::risk::store::load_config(&mut conn)
+            .await
+            .map_err(|error| failed(error, "risk configuration"))?;
         let identification =
             super::lead_identification::load_identification_status(&mut conn, lead_id)
                 .await
@@ -3739,6 +3744,7 @@ async fn load_gwg_identification_sheet(
             identification,
             represented,
             enhanced_check_required,
+            risk_config,
         )
     };
     let representation = &represented.representation;
@@ -4190,13 +4196,15 @@ async fn load_gwg_identification_sheet(
     );
     sheet.politically_exposed =
         crate::services::pep_review::politically_exposed(&sheet.person_answers, &sheet.pep_review);
+    // "Hochrisiko-Drittstaat": a country of the configured lists of high-risk
+    // third countries (list 1, the long list, and list 2, the black list);
+    // the retired cabinet question (owner 2026-10-22) does not count.
     sheet.high_risk_third_country = aml.high_risk_country_transaction
         || aml.high_risk_country_resident
         || !aml.triggered_countries.is_empty()
-        || statements.high_risk_country == Some(true)
         || risk_countries
             .iter()
-            .any(|country| super::leads::is_enhanced_due_diligence_country(country));
+            .any(|country| risk_config.list_of(country).is_some());
     sheet.increased_risk = gwg_increased_risk(&aml, enhanced_check_required);
     Ok(sheet)
 }
@@ -12337,6 +12345,10 @@ fn shareable_document_context_from_row(
             row.try_get::<Option<String>, _>("art").unwrap_or_default(),
             row.try_get::<Option<String>, _>("category")
                 .unwrap_or_default(),
+            row.try_get::<Option<String>, _>("access_category")
+                .ok()
+                .flatten()
+                .as_deref(),
             share_status,
         ),
         share_status,
@@ -12807,12 +12819,77 @@ mod patient_upload_preset_tests {
     fn an_unknown_upload_kind_is_refused() {
         assert!(parse_patient_upload_preset("visa").is_err());
     }
+
+    #[test]
+    fn the_stored_access_category_decides_the_data_class_where_the_type_words_do_not() {
+        let infer = |art: &str, category: &str, access_category: Option<&str>| {
+            infer_document_sensitivity(
+                false,
+                Some(art.to_string()),
+                Some(category.to_string()),
+                access_category,
+                ShareStatus::InternalOnly,
+            )
+        };
+        // The cabinet's proof of the origin of funds is financial by its
+        // access category, whatever its type is called.
+        assert_eq!(
+            infer("self_funds_proof", "finance", Some("financial")),
+            DataSensitivity::Financial
+        );
+        assert_eq!(
+            infer("payer_funds_proof", "finance", Some("financial")),
+            DataSensitivity::Financial
+        );
+        assert_eq!(
+            infer("some_scan", "other", Some("medical")),
+            DataSensitivity::Medical
+        );
+        // The audience categories carry no data class: an identity scan
+        // filed as `internal` stays an identity document (Billing keeps
+        // seeing the lead's ID scans, QA 2026-10-06).
+        assert_eq!(
+            infer("identity", "identity", Some("internal")),
+            DataSensitivity::PatientIdentity
+        );
+        assert_eq!(
+            infer(
+                "representative_authority",
+                "administrative",
+                Some("internal")
+            ),
+            DataSensitivity::Internal
+        );
+        // Without an access category the type words decide, as before.
+        assert_eq!(
+            infer("self_funds_proof", "finance", None),
+            DataSensitivity::Internal
+        );
+        assert_eq!(
+            infer("invoice_document", "finance", None),
+            DataSensitivity::Financial
+        );
+        // A reclassification into an invoice is financial data even while
+        // the row still carries the medical access category of the upload.
+        assert_eq!(
+            infer("invoice_document", "finance", Some("medical")),
+            DataSensitivity::Financial
+        );
+    }
 }
 
+/// The data class of a document for the access policy. The type and category
+/// words decide first; where they say nothing, the stored access category
+/// does when it names a data class (`medical`, `financial`: a proof of the
+/// origin of funds is financial whatever its type is called). The audience
+/// categories (`internal`, `patient`, `provider`, `authority`, `other`) carry
+/// no data class, so an identity scan filed as `internal` stays an identity
+/// document.
 fn infer_document_sensitivity(
     is_medical: bool,
     art: Option<String>,
     category: Option<String>,
+    access_category: Option<&str>,
     share_status: ShareStatus,
 ) -> DataSensitivity {
     if is_medical {
@@ -12857,6 +12934,16 @@ fn infer_document_sensitivity(
         || searchable.contains("service")
     {
         return DataSensitivity::Service;
+    }
+
+    // The type words said nothing: a stored data class decides (a proof of
+    // the origin of funds is financial whatever its type is called). The
+    // words keep the upper hand so that a reclassification into an invoice
+    // is judged as financial data even while the row still says `medical`.
+    match access_category.map(str::trim) {
+        Some("medical") => return DataSensitivity::Medical,
+        Some("financial") => return DataSensitivity::Financial,
+        _ => {}
     }
 
     if share_status == ShareStatus::InternalOnly {
@@ -13123,6 +13210,10 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         row.try_get::<bool, _>("is_medical").unwrap_or(false),
         art.clone(),
         category.clone(),
+        row.try_get::<Option<String>, _>("access_category")
+            .ok()
+            .flatten()
+            .as_deref(),
         share_status,
     );
     let classification_suggestion = if matches!(ursprung.as_deref(), Some("manual_intake")) {
@@ -14185,6 +14276,10 @@ fn explicit_document_policy_boundary_allows(auth: &AuthUser, row: &sqlx::postgre
         row.try_get::<Option<String>, _>("art").unwrap_or_default(),
         row.try_get::<Option<String>, _>("category")
             .unwrap_or_default(),
+        row.try_get::<Option<String>, _>("access_category")
+            .ok()
+            .flatten()
+            .as_deref(),
         share_status,
     );
 
@@ -14435,6 +14530,10 @@ pub(crate) fn can_view_document_row(
         row.try_get::<Option<String>, _>("art").unwrap_or_default(),
         row.try_get::<Option<String>, _>("category")
             .unwrap_or_default(),
+        row.try_get::<Option<String>, _>("access_category")
+            .ok()
+            .flatten()
+            .as_deref(),
         share_status,
     );
 
@@ -27357,12 +27456,19 @@ enum RecipientsConsentWording {
     BothParents,
 }
 
-/// The disclosure consent of both parents (owner 2026-10-24: the form of
-/// both parents says "Wir … unseres Kindes" throughout, also here).
-fn both_parents_disclosure_consent_text(company: &str) -> String {
-    format!(
-        "Wir willigen ausdrücklich ein, dass {company} den genannten Personen im angegebenen Umfang Auskunft über die personenbezogenen Daten unseres Kindes, einschließlich seiner Gesundheitsdaten, erteilt und diese Daten an sie übermittelt. Soweit eine Schweigepflicht besteht, entbinden wir die an Organisation und Behandlung Beteiligten insoweit von dieser. Wir können diese Einwilligung jederzeit mit Wirkung für die Zukunft widerrufen. Die bis dahin erfolgte Verarbeitung bleibt davon unberührt. Weitere Informationen finden Sie im Datenschutzhinweis."
-    )
+impl RecipientsConsentWording {
+    /// Whose data the printed consent is about, in the shared wording table
+    /// (`consent_choices`) the cabinet records the consent from, so the
+    /// recorded text and the printed Anlage 1 say the same.
+    fn subject(self, access_kind: &str) -> crate::consent_choices::DisclosureSubject {
+        use crate::consent_choices::DisclosureSubject;
+        match self {
+            Self::Adult => DisclosureSubject::of(access_kind, false),
+            Self::SoleParent => DisclosureSubject::Child,
+            Self::Guardian => DisclosureSubject::ChildUnderGuardianship,
+            Self::BothParents => DisclosureSubject::ChildOfBothParents,
+        }
+    }
 }
 
 fn append_named_recipients_consent_pdf(
@@ -27370,7 +27476,6 @@ fn append_named_recipients_consent_pdf(
     choice: Option<&crate::consent_choices::OwnConsentChoice>,
     wording: RecipientsConsentWording,
 ) {
-    let child_form = wording != RecipientsConsentWording::Adult;
     let Some(choice) = choice else {
         return;
     };
@@ -27396,23 +27501,13 @@ fn append_named_recipients_consent_pdf(
             0.8,
         );
     }
-    let consent = match wording {
-        RecipientsConsentWording::BothParents => {
-            both_parents_disclosure_consent_text(&disclosure.company_name)
-        }
-        _ => crate::consent_choices::disclosure_consent_text_for(
-            "de",
-            &disclosure.company_name,
-            crate::consent_choices::DisclosureSubject::of(&disclosure.access_kind, child_form),
-        )
-        .replace("den oben genannten Personen", "den genannten Personen"),
-    };
-    // A guardian (Vormund) declares for the child they represent.
-    let consent = if wording == RecipientsConsentWording::Guardian {
-        consent.replace("meines Kindes", "des von mir vertretenen Kindes")
-    } else {
-        consent
-    };
+    // The persons stand right above the consent on this form.
+    let consent = crate::consent_choices::disclosure_consent_text_for(
+        "de",
+        &disclosure.company_name,
+        wording.subject(&disclosure.access_kind),
+    )
+    .replace("den oben genannten Personen", "den genannten Personen");
     layout.text_block(
         &consent,
         10.5,
@@ -28001,16 +28096,14 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     Ok(finalize_generated_pdf(document, layout))
 }
 
-/// The child's consent form of a stated custody: both parents sign under
-/// joint custody, the one parent or the guardian (Vormund) otherwise; `None`
-/// while no custody is stated.
+/// The child's consent form a stated custody requires: both parents sign
+/// under joint custody, the one parent or the guardian (Vormund) otherwise;
+/// `None` while no custody is stated (either form may be made). The same
+/// rule as the onboarding manifest and the package
+/// ([`crate::document_signatures::package::consent_forms_for_custody`]).
 fn consent_form_for_custody(custody: Option<&str>) -> Option<&'static str> {
-    match custody.map(str::trim) {
-        Some(super::lead_representatives::CUSTODY_JOINT) => Some("consent_data_release_child"),
-        Some(
-            super::lead_representatives::CUSTODY_SOLE_PARENT
-            | super::lead_representatives::CUSTODY_GUARDIAN,
-        ) => Some("consent_data_release_single"),
+    match crate::document_signatures::package::consent_forms_for_custody(custody) {
+        [only] => Some(*only),
         _ => None,
     }
 }
@@ -34247,6 +34340,7 @@ async fn update_document(
         is_medical,
         Some(art.clone()),
         category.clone(),
+        access_category.as_deref(),
         resulting_share_status,
     );
     let intake_medical_classification = teamlead_review
@@ -34966,6 +35060,37 @@ async fn delete_document_file(
         }
     }
 
+    // A file the lead uploaded in the cabinet is withdrawn with its deletion
+    // (same transaction): the cabinet stops listing it, and a later
+    // withdrawal of the lead's own finds nothing to withdraw.
+    let upload_lead_id = current
+        .try_get::<Option<Uuid>, _>("upload_lead_id")
+        .unwrap_or_default();
+    if upload_lead_id.is_some() {
+        let withdrawn = match super::lead_portal_intake::portal_update_time(&mut tx).await {
+            Ok(withdrawn_at) => sqlx::query(
+                "UPDATE lead_portal_uploads SET withdrawn_at = $2
+                 WHERE document_id = $1 AND withdrawn_at IS NULL",
+            )
+            .bind(id)
+            .bind(withdrawn_at)
+            .execute(&mut *tx)
+            .await
+            .map(|_| ()),
+            Err(error) => Err(error),
+        };
+        if let Err(error) = withdrawn {
+            if let Some(staged) = staged_delete.as_ref() {
+                rollback_staged_document_delete(staged).await;
+            }
+            tracing::error!(error = %error, document_id = %id, "withdraw the cabinet upload of a deleted file");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete document file",
+            );
+        }
+    }
+
     if let Err(error) = tx.commit().await {
         if let Some(staged) = staged_delete.as_ref() {
             rollback_staged_document_delete(staged).await;
@@ -35022,6 +35147,18 @@ async fn delete_document_file(
         }),
     )
     .await;
+    // The cabinet learns of a withdrawn upload the same way as of the lead's
+    // own withdrawal (`lead_portal_intake::withdraw_my_lead_document`).
+    if let Some(lead_id) = upload_lead_id {
+        crate::realtime::publish_lead_event(
+            &state,
+            Some(auth.user_id),
+            "lead.portal_updated",
+            lead_id,
+            json!({ "change": "document_withdrawn", "document_id": id, "access_kind": "staff" }),
+        )
+        .await;
+    }
 
     let fresh_row = match fetch_document_row(&state, id, auth.user_id).await {
         Ok(Some(row)) => row,

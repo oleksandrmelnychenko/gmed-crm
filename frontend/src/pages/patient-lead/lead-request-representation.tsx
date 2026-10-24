@@ -482,7 +482,7 @@ export function RepresentativeUpload({
       ) : (
         <p className="text-xs text-muted-foreground">{person ? text.identityUploadHint : text.representativeUploadNeedsPerson}</p>
       )}
-      {full ? <p className="text-xs text-muted-foreground">{text.errors.too_many_documents}</p> : null}
+      {full ? <p className="text-xs text-muted-foreground">{text.tooManyDocuments(request.max_documents)}</p> : null}
       {errors.map((message) => (
         <p key={message} role="alert" className="text-xs text-destructive">
           {message}

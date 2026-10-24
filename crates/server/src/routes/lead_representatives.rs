@@ -3165,6 +3165,27 @@ async fn store_staff_upload(
         Ok(file) => file,
         Err(response) => return response,
     };
+    // The same file in the same place is not stored again, as in the cabinet
+    // (409 `duplicate_document`).
+    let sha256 = intake::content_sha256(&data);
+    let duplicate = match state.db.acquire().await {
+        Ok(mut conn) => {
+            intake::is_duplicate_upload(
+                &mut conn,
+                lead_id,
+                upload_kind,
+                Some(representative_id),
+                &sha256,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    match duplicate {
+        Ok(false) => {}
+        Ok(true) => return intake::duplicate_document(),
+        Err(error) => return intake::internal(error, "check duplicate upload"),
+    }
     let stored = match intake::store_upload_document(
         &state,
         lead_id,
@@ -3813,6 +3834,73 @@ pub(crate) async fn revoke_unplaced_parent_access(
                     "lead_id": lead_id,
                     "revoked_access_ids": revoked,
                     "reason": ACCESS_REVOKED_CUSTODY_CHANGED,
+                }),
+            ),
+        )
+        .await?;
+    }
+    Ok(revoked)
+}
+
+/// A trusted contact whose relation the save changed away from parent /
+/// guardian (or whom the saved list no longer names) keeps no parent's
+/// access to this request: the access is ended in the transaction of the
+/// save, with an audit row, under the same reason as a custody change
+/// ([`ACCESS_REVOKED_CUSTODY_CHANGED`]) — the person no longer holds the
+/// parental role for this request, and the cabinet says neutrally that the
+/// access ended, as it does there. The login stays. Returns the revoked
+/// access ids; the caller tells staff after the commit
+/// ([`notify_custody_access_ended`]).
+pub(crate) async fn revoke_access_of_former_guardians(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    actor: Uuid,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let contacts: Option<Value> =
+        sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .flatten();
+    let guardians: Vec<Uuid> = contacts
+        .as_ref()
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|contact| {
+            crate::routes::leads::is_parent_or_guardian_relation(
+                contact.get("relation").and_then(Value::as_str),
+            )
+        })
+        .filter_map(entry_id)
+        .collect();
+    let revoked: Vec<Uuid> = sqlx::query_scalar(
+        r#"UPDATE lead_portal_access
+           SET revoked_at = now(), revoked_by = $3, revoked_reason = $4
+           WHERE lead_id = $1 AND kind = 'guardian' AND revoked_at IS NULL
+             AND trusted_contact_id IS NOT NULL
+             AND trusted_contact_id <> ALL($2)
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .bind(&guardians)
+    .bind(actor)
+    .bind(ACCESS_REVOKED_CUSTODY_CHANGED)
+    .fetch_all(&mut **tx)
+    .await?;
+    if !revoked.is_empty() {
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "lead_guardian_access_revoked",
+                Some(actor),
+                "lead",
+                Some(lead_id),
+                json!({
+                    "lead_id": lead_id,
+                    "revoked_access_ids": revoked,
+                    "reason": ACCESS_REVOKED_CUSTODY_CHANGED,
+                    "cause": "relation_changed",
                 }),
             ),
         )

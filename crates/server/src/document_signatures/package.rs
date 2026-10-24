@@ -9,6 +9,21 @@ pub(super) fn companion(template: Option<&str>) -> Option<&'static str> {
 
 const MINOR_CONSENTS: &[&str] = &["consent_data_release_child", "consent_data_release_single"];
 
+/// The child's consent forms a stated custody allows (one rule for the
+/// generation, the onboarding manifest and the package): both parents sign
+/// under joint custody, the one parent or the guardian (Vormund) otherwise;
+/// while no custody is stated either form may be made and counts.
+pub(crate) fn consent_forms_for_custody(custody: Option<&str>) -> &'static [&'static str] {
+    match custody.map(str::trim) {
+        Some(crate::routes::lead_representatives::CUSTODY_JOINT) => &["consent_data_release_child"],
+        Some(
+            crate::routes::lead_representatives::CUSTODY_SOLE_PARENT
+            | crate::routes::lead_representatives::CUSTODY_GUARDIAN,
+        ) => &["consent_data_release_single"],
+        _ => MINOR_CONSENTS,
+    }
+}
+
 /// The lead's patient form ("Patientenformular – Angaben und Erklärungen",
 /// owner request 2026-10-08): signed by the patient side inside the lead's
 /// package. A new patient's first onboarding requires it, a repeat order may
@@ -1283,6 +1298,24 @@ mod tests {
             assert!(!optional_slot(&[], self_disclosure_required));
         }
         assert!(!optional_slot(&["lead_self_disclosure"], true));
+    }
+
+    #[test]
+    fn the_childs_consent_form_follows_the_custody_and_either_counts_while_unstated() {
+        assert_eq!(
+            consent_forms_for_custody(Some("joint")),
+            &["consent_data_release_child"]
+        );
+        assert_eq!(
+            consent_forms_for_custody(Some("sole_parent")),
+            &["consent_data_release_single"]
+        );
+        assert_eq!(
+            consent_forms_for_custody(Some(" guardian ")),
+            &["consent_data_release_single"]
+        );
+        assert_eq!(consent_forms_for_custody(None), MINOR_CONSENTS);
+        assert_eq!(consent_forms_for_custody(Some("")), MINOR_CONSENTS);
         assert!(optional_slot(&["lead_self_disclosure"], false));
         let first_onboarding = crate::lead_self_disclosure::required(None, None);
         let repeat_order = crate::lead_self_disclosure::required(None, Some(Uuid::new_v4()));

@@ -70,6 +70,7 @@ import {
   errorMessage,
   useAutosave,
   runDraftSave,
+  useRequestPatch,
   type RequestQueue,
 } from "./lead-request-parts";
 import { payerQuestionnaireFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -102,21 +103,21 @@ export function PayerQuestionnaireSection({
 }) {
   const [questionnaire, setQuestionnaire] = useState<LeadPayerQuestionnaire | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  // The request as it is by the time an answer arrives: only its short form of the questionnaire changes.
-  const latest = useRef(request);
-  latest.current = request;
+  // An answer changes only the request's short form of the questionnaire, in the newest request.
+  const patch = useRequestPatch(onChange, request);
 
   const apply = useCallback(
     (next: LeadPayerQuestionnaire) => {
       setQuestionnaire(next);
-      onChange({ ...latest.current, payer_questionnaire: payerQuestionnaireSummary(next, latest.current.payer_questionnaire) });
+      patch((current) => ({ ...current, payer_questionnaire: payerQuestionnaireSummary(next, current.payer_questionnaire) }));
     },
-    [onChange],
+    [patch],
   );
 
   const load = useCallback(async () => {
     try {
-      const next = normalizeLeadPayerQuestionnaire(await fetchLeadPayerQuestionnaire(request.lead_id));
+      // Through the queue: the read never overtakes a save of the cabinet still in flight.
+      const next = normalizeLeadPayerQuestionnaire(await enqueue(() => fetchLeadPayerQuestionnaire(request.lead_id)));
       if (!next) throw new Error("not a questionnaire");
       setLoadFailed(false);
       apply(next);
@@ -125,7 +126,7 @@ export function PayerQuestionnaireSection({
       setLoadFailed(true);
       return null;
     }
-  }, [apply, request.lead_id]);
+  }, [apply, enqueue, request.lead_id]);
 
   useEffect(() => {
     void load();

@@ -5762,7 +5762,6 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
         json!({
             "A": [
                 "funds_source",
-                "funds_description",
                 "occupation",
                 "sector",
                 "funds_proof_upload"
@@ -5811,13 +5810,7 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     );
     assert_eq!(
         follow_up_missing(&body)["A"],
-        json!([
-            "funds_source",
-            "funds_description",
-            "occupation",
-            "sector",
-            "funds_proof_upload"
-        ]),
+        json!(["funds_source", "occupation", "sector", "funds_proof_upload"]),
         "{body}"
     );
     assert_eq!(
@@ -9513,7 +9506,8 @@ async fn duplicates_are_refused_files_move_between_slots_and_downloads_name_the_
     let (_, body) = json_request(router, "GET", &request, &patient, None).await;
     assert_eq!(body["identity_documents"], json!([]), "{body}");
 
-    // Once taken over it stays where it is.
+    // A review alone no longer pins the file (2026-10-24): staff may still
+    // move a reviewed scan to another slot while nothing uses it.
     let (status, body) = json_request(
         router,
         "POST",
@@ -9531,8 +9525,15 @@ async fn duplicates_are_refused_files_move_between_slots_and_downloads_name_the_
         Some(json!({ "kind": "identity" })),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "upload_reviewed", "{body}");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["moved"], true, "{body}");
+    let kind: String =
+        sqlx::query_scalar("SELECT kind FROM lead_portal_uploads WHERE document_id = $1")
+            .bind(document_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(kind, "identity");
 
     // The download is recorded, with the lead, before the file goes out.
     let download = Request::builder()

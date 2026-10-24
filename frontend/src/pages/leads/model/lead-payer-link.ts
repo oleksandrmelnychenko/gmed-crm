@@ -357,8 +357,14 @@ export function payerLinkRiskHoldText(hold: PayerLinkRiskHold, tx: Tx): string {
 
 /** What the panel offers now, and why a button is disabled. */
 export type PayerLinkActions = {
-  /** The paying parent answers in the cabinet: no link, a note instead. */
+  /**
+   * No link for this payer, a note instead: the paying parent answers in the
+   * cabinet, or the payer is a parent / legal representative (the contracting
+   * party; also a third-party row of before that names one).
+   */
   cabinet: boolean;
+  /** The note shown instead of the controls while `cabinet`; null otherwise. */
+  note: string | null;
   /** "Send" for the first link (or after the last one ended), "send again" while one is active. */
   sendKind: "send" | "resend";
   sendEnabled: boolean;
@@ -377,7 +383,11 @@ export function payerLinkActions(
   reopen: boolean,
   tx: Tx,
 ): PayerLinkActions {
-  const cabinet = state.mode === "cabinet" || state.blocked_reason === "payer_has_cabinet_login";
+  // A paying parent (also one stored as a third party before) gets no link:
+  // the note alone, no language buttons and no disabled send button (DEV 2026-10-24).
+  const representative = state.blocked_reason === "payer_is_representative";
+  const cabinet = state.mode === "cabinet" || state.blocked_reason === "payer_has_cabinet_login" || representative;
+  const note = representative ? payerRepresentativeNote(tx) : cabinet ? payerLinkCabinetNote(tx) : null;
   const active = payerLinkActive(state.link);
   const submitted = Boolean(state.questionnaire?.submitted_at) || state.link?.status === "submitted";
   const riskHold = state.risk_hold ?? null;
@@ -397,6 +407,7 @@ export function payerLinkActions(
   }
   return {
     cabinet,
+    note,
     sendKind: active ? "resend" : "send",
     sendEnabled: !cabinet && sendBlockedText === null,
     sendBlockedText: cabinet ? null : sendBlockedText,

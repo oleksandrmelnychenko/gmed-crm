@@ -674,6 +674,9 @@ pub(super) async fn load(
         crate::routes::lead_enhanced_check::enhanced_check_triggers(&mut *conn, lead_id)
             .await?
             .required;
+    // The lists of high-risk third countries live only in the risk
+    // configuration (owner rule 2026-10-22); the sheet reads them there.
+    let risk_config = crate::risk::store::load_config(&mut *conn).await?;
 
     let wizard_state = lead
         .try_get::<Option<Value>, _>("wizard_state")
@@ -820,13 +823,15 @@ pub(super) async fn load(
             .iter()
             .filter_map(|owner| owner_text(owner, "country")),
     );
+    // "Hochrisiko-Drittstaat": a country of the configured lists of high-risk
+    // third countries (list 1, the long list, and list 2, the black list);
+    // the retired payer question (owner 2026-10-22) does not count.
     sheet.high_risk_third_country = aml.high_risk_country_transaction
         || aml.high_risk_country_resident
         || !aml.triggered_countries.is_empty()
-        || sheet.high_risk_country == Some(true)
         || risk_countries
             .iter()
-            .any(|country| crate::routes::leads::is_enhanced_due_diligence_country(country));
+            .any(|country| risk_config.list_of(country).is_some());
     Ok(Some(sheet))
 }
 

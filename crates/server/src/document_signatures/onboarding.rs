@@ -85,13 +85,10 @@ pub(super) async fn manifest(
             .await
             .map_err(db_error)?
             .unwrap_or_default();
-        let consent: &'static [&'static str] = if loaded.representation.answers.custody()
-            == crate::routes::lead_representatives::CUSTODY_JOINT
-        {
-            &["consent_data_release_child"]
-        } else {
-            &["consent_data_release_single"]
-        };
+        // The same rule as the generation: while no custody is stated either
+        // form counts, never a demand for the single form.
+        let consent =
+            package::consent_forms_for_custody(loaded.representation.answers.custody.as_deref());
         if let Some(slot) = slots.last_mut() {
             *slot = consent;
         }

@@ -1050,6 +1050,36 @@ async fn issue_lead_portal_access(
             return internal(error, lead_id, "commit lookup");
         }
         let one_time_password = password_policy::generate_one_time_password();
+        // The audit row and the rejection of open sign-ins are one
+        // transaction, committed only once the new password is stored (a
+        // refused or failed reset leaves no audit row). The password itself
+        // goes through the shared policy helper on the pool, which has no
+        // in-transaction variant, so the row and the change are coupled up to
+        // a failed commit after the change.
+        let mut reset_tx = match state.db.begin().await {
+            Ok(tx) => tx,
+            Err(error) => return internal(error, lead_id, "begin password reset"),
+        };
+        if let Err(error) = sqlx::query(
+            "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
+             WHERE user_id = $1 AND status IN ('pending', 'approved')",
+        )
+        .bind(user_id)
+        .execute(&mut *reset_tx)
+        .await
+        {
+            return internal(error, lead_id, "reject open sign-ins");
+        }
+        let audit_event = audit::domain_event(
+            "reset_lead_portal_password",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            json!({ "portal_user_id": user_id, "sessions_revoked": true }),
+        );
+        if let Err(error) = audit::write_in_transaction(&mut reset_tx, &audit_event).await {
+            return internal(error, lead_id, "audit password reset");
+        }
         match password_policy::replace_password(&state.db, user_id, &one_time_password, false).await
         {
             Ok(()) => {}
@@ -1063,29 +1093,10 @@ async fn issue_lead_portal_access(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         }
-        let _ = sqlx::query(
-            "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
-             WHERE user_id = $1 AND status IN ('pending', 'approved')",
-        )
-        .bind(user_id)
-        .execute(&state.db)
-        .await;
-        crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
-        let audit_event = audit::domain_event(
-            "reset_lead_portal_password",
-            Some(auth.user_id),
-            "lead",
-            Some(lead_id),
-            json!({ "portal_user_id": user_id, "sessions_revoked": true }),
-        );
-        let mut audit_conn = match state.db.acquire().await {
-            Ok(conn) => conn,
-            Err(error) => return internal(error, lead_id, "audit password reset"),
-        };
-        if let Err(error) = audit::write_in_transaction(&mut audit_conn, &audit_event).await {
-            return internal(error, lead_id, "audit password reset");
+        if let Err(error) = reset_tx.commit().await {
+            return internal(error, lead_id, "commit password reset");
         }
-        drop(audit_conn);
+        crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
         let email: Option<String> = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_optional(&state.db)

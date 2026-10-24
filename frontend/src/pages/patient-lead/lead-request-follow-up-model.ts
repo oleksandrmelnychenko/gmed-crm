@@ -234,3 +234,12 @@ export function extraFieldOf(field: unknown): keyof ExtraAnswers | null {
   const key = blockAKey(field);
   return (EXTRA_FIELDS as readonly string[]).includes(key) ? (key as keyof ExtraAnswers) : null;
 }
+
+/**
+ * Whether the words about a source of funds are required: with the source
+ * "other" only — the server's one rule (`lead_funds::stated`) for the
+ * patient's own sources, the payer's and the questionnaire's.
+ */
+export function fundsDescriptionRequired(sources: string | readonly string[]): boolean {
+  return (typeof sources === "string" ? [sources] : sources).includes("other");
+}

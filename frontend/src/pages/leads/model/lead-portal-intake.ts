@@ -181,6 +181,8 @@ export function useLeadPortalIntake(
   onPatientEvent?: (event: RealtimeEvent) => void,
 ) {
   const [intake, setIntake] = useState<LeadPortalIntake | null>(null);
+  // The last load failed (the data stays as it was): the wizard says so and offers a retry.
+  const [error, setError] = useState<unknown>(null);
   const onPatientEventRef = useRef(onPatientEvent);
   useEffect(() => {
     onPatientEventRef.current = onPatientEvent;
@@ -193,14 +195,17 @@ export function useLeadPortalIntake(
     const request = ++requestRef.current;
     if (!leadId) {
       setIntake(null);
+      setError(null);
       return null;
     }
     try {
       const next = await fetchLeadPortalIntake(leadId);
       if (request !== requestRef.current) return next;
       setIntake(next);
+      setError(null);
       return next;
-    } catch {
+    } catch (cause) {
+      if (request === requestRef.current) setError(cause);
       return null;
     }
   }, [leadId]);
@@ -216,5 +221,5 @@ export function useLeadPortalIntake(
     if (isPatientPortalEvent(event)) onPatientEventRef.current?.(event);
   });
 
-  return { intake, reload, setIntake };
+  return { intake, reload, setIntake, error };
 }

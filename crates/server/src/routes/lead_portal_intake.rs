@@ -2083,10 +2083,15 @@ fn missing_extra(
         }
     }
     if questions.funds {
-        if payer.is_none_or(|payer| payer.self_funds_source.is_none()) {
+        // One rule of completeness (`lead_funds`): a source, and the words
+        // only with `other`.
+        let (source_missing, description_missing) = super::lead_funds::lead_funds(payer, None)
+            .patient
+            .missing_parts();
+        if source_missing {
             missing.push("enhanced_funds_source");
         }
-        if blank(payer.and_then(|payer| payer.self_funds_description.as_ref())) {
+        if description_missing {
             missing.push("enhanced_funds_description");
         }
     }
@@ -3087,9 +3092,15 @@ async fn update_my_personal_data(
         Ok(next) => next,
         Err(error) => return error.into_response(),
     };
+    // The child's date of birth is changed only by staff (owner rule): a
+    // guardian may set it while none is stored (the short minor form), never
+    // to a date that makes the child an adult, and nobody clears it.
     if patch.date_of_birth.is_some()
         && ((kind == AccessKind::Guardian
-            && !crate::routes::leads::is_minor_on(next.date_of_birth, today))
+            && current.date_of_birth.is_some()
+            && next.date_of_birth != current.date_of_birth)
+            || (kind == AccessKind::Guardian
+                && !crate::routes::leads::is_minor_on(next.date_of_birth, today))
             || (current.date_of_birth.is_some() && next.date_of_birth.is_none()))
     {
         return coded(
@@ -4776,8 +4787,14 @@ async fn save_trusted_persons(
         Err(error) => return internal(error, "lock request"),
     };
     // A parent consents for the child's data, a representative for the
-    // represented person's: the stored text says so (like the child's Anlage 1).
-    let subject = consent_choices::DisclosureSubject::of(
+    // represented person's: the stored text says so, in the wording the
+    // child's Anlage 1 prints for the stated custody (both parents under
+    // joint custody, the guardian for the child they represent).
+    let custody = match lead_representatives::load(&mut tx, lead_id).await {
+        Ok(loaded) => loaded.and_then(|loaded| loaded.representation.answers.custody),
+        Err(error) => return internal(error, "load custody"),
+    };
+    let subject = consent_choices::DisclosureSubject::for_custody(
         kind.as_str(),
         crate::routes::leads::is_minor_on(
             lead_row
@@ -4786,6 +4803,7 @@ async fn save_trusted_persons(
                 .flatten(),
             crate::app_time::today(),
         ),
+        custody.as_deref(),
     );
     let current = match consent_choices::current_for(&mut *tx, Some(lead_id), None).await {
         Ok(current) => current,
@@ -5621,8 +5639,8 @@ pub(crate) async fn store_my_upload(
                 coded(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "too_many_documents",
-                    "No more documents can be uploaded",
-                    json!({ "max": MAX_PORTAL_UPLOADS }),
+                    "Too many documents for this request",
+                    json!({ "max_documents": MAX_PORTAL_UPLOADS }),
                 )
             } else {
                 not_found()
@@ -6507,8 +6525,9 @@ pub(crate) async fn notify_lead_staff_with(
 /// from the patient, progress, consents, uploads and the guardian logins.
 /// Upload details only for roles with medical access; Sales sees counts. The
 /// lead's statements, who acts for the lead (`representation`) and where the
-/// invoice goes and how the payer pays (`billing`, with the compliance flags)
-/// only for the roles that read the payer declaration.
+/// invoice goes and how the payer pays (`billing`, with the compliance flags),
+/// the parents' logins (`guardians`) and who sent the request
+/// (`submitted_by`) only for the roles that read the payer declaration.
 async fn get_lead_portal_intake(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -6897,13 +6916,19 @@ async fn get_lead_portal_intake(
             })
         })
         .collect();
-    let guardians =
+    // The parents' names, e-mail addresses and login state are personal data
+    // of the lead's people: only the roles that read the payer declaration
+    // see them (a role with leads.view alone gets `null`).
+    let guardians = if statements_visible {
         match crate::routes::lead_portal_guardians::guardian_access_summary(&state.db, lead_id)
             .await
         {
             Ok(value) => value,
             Err(error) => return internal(error, "load guardians"),
-        };
+        }
+    } else {
+        Value::Null
+    };
     // The lead's own login is closed while the minor's parents have access
     // (QA 2026-10-12, A3-01): the access row says so, and offers no password.
     let own_login_closed: bool = match sqlx::query_scalar(&format!(
@@ -6926,7 +6951,11 @@ async fn get_lead_portal_intake(
         Some("patient") => "patient",
         _ => "staff",
     };
-    let submitted_by = if row
+    // Who sent the request (the child's own login or a parent's) is a
+    // statement about the lead's people as well: `null` for the other roles.
+    let submitted_by = if !statements_visible {
+        None
+    } else if row
         .try_get::<bool, _>("submitted_by_guardian")
         .unwrap_or(false)
     {
@@ -7158,8 +7187,13 @@ struct MoveUploadRequest {
 /// slot — the child's ID uploaded as a parent's, a parent's ID in the other
 /// parent's place (owner 2026-10-24). The document's type, category, name and
 /// the registration's kind and person change together, audited; only while
-/// the file is not taken over (reviewed, confirmed, its data entered, shared,
-/// signed or moved to a patient). Needs what accepting it needs.
+/// the file is not in use (its ID data entered, shared, in a review, signed
+/// or moved to a patient). A file merely marked as reviewed — staff's own
+/// upload is registered reviewed — still moves. Only identity copies,
+/// proofs of authority and the GwG proofs are movable (never a medical
+/// document), so the move needs what staff's own upload of such a file
+/// needs (`lead_representatives::store_staff_upload`): leads.edit and the
+/// payer-declaration view, and being able to open the file.
 async fn move_portal_upload(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -7169,8 +7203,8 @@ async fn move_portal_upload(
     if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
         return response;
     }
-    if let Err(response) = auth.require_capability(Capability::PatientsMedicalView) {
-        return response;
+    if !lead_payer::may_view(&auth) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     let Some(target) = movable_upload_kind(&body.kind) else {
         return coded(
@@ -7249,7 +7283,18 @@ async fn move_portal_upload(
             json!({}),
         );
     }
-    let taken_over = upload_taken_over(&upload)
+    // In use: signed, its ID data entered from it, moved to a patient, shared
+    // or in a document review. `reviewed_at` alone is not: staff's own
+    // upload is registered as reviewed, and a file staff only looked at is
+    // still in the wrong slot.
+    let in_use = upload
+        .try_get::<Option<DateTime<Utc>>, _>("signed_at")
+        .ok()
+        .flatten()
+        .is_some()
+        || upload
+            .try_get::<bool, _>("identity_in_use")
+            .unwrap_or(false)
         || upload
             .try_get::<Option<Uuid>, _>("patient_id")
             .ok()
@@ -7258,7 +7303,7 @@ async fn move_portal_upload(
         || upload.try_get::<Option<Uuid>, _>("lead_id").ok().flatten() != Some(lead_id)
         || upload.try_get::<bool, _>("shared").unwrap_or(true)
         || upload.try_get::<bool, _>("in_review").unwrap_or(true);
-    if taken_over {
+    if in_use {
         return coded(
             StatusCode::CONFLICT,
             "upload_reviewed",
@@ -8812,27 +8857,25 @@ mod tests {
             ..complete.clone()
         };
         assert!(missing(&stated, &profile, true, false).is_empty());
-        // The extra step's own list (the staff view) still names them.
+        // The extra step's own list (the staff view) follows the one rule of
+        // `lead_funds`: a source is enough, the words only with `other`.
         let undescribed = lead_payer::Declaration {
             self_funds_description: None,
             ..stated.clone()
         };
+        let extra_of = |declaration: &lead_payer::Declaration| ExtraState {
+            questions: ExtraQuestions::of(true, Some(declaration), PaymentRouteBy::Patient, false),
+            funds_proof_uploaded: true,
+            payer_contact_known: false,
+            paying_parent: false,
+        };
+        assert!(missing_extra(Some(&undescribed), &profile, extra_of(&undescribed)).is_empty());
+        let other = lead_payer::Declaration {
+            self_funds_source: Some("other".into()),
+            ..undescribed.clone()
+        };
         assert_eq!(
-            missing_extra(
-                Some(&undescribed),
-                &profile,
-                ExtraState {
-                    questions: ExtraQuestions::of(
-                        true,
-                        Some(&undescribed),
-                        PaymentRouteBy::Patient,
-                        false
-                    ),
-                    funds_proof_uploaded: true,
-                    payer_contact_known: false,
-                    paying_parent: false,
-                }
-            ),
+            missing_extra(Some(&other), &profile, extra_of(&other)),
             ["enhanced_funds_description"]
         );
         // The cabinet learns which questions are asked, never why.

@@ -23,3 +23,17 @@ describe("cabinet uploads (owner 2026-10-24)", () => {
     expect(errorMessage(refusal(422, { code: "file_rejected" }), text)).toBe(text.errors.file_rejected);
   });
 });
+
+describe("the upload limit", () => {
+  it("names the limit the server states, in every language, and never a number of its own", () => {
+    for (const lang of ["de", "ru", "uk", "en"] as const) {
+      const text = leadRequestText(lang);
+      const message = errorMessage(refusal(422, { code: "too_many_documents", max_documents: 12 }), text);
+      expect(message).toBe(text.tooManyDocuments(12));
+      expect(message).toContain("12");
+      // An older server without the number: the fixed sentence, which names no number.
+      expect(errorMessage(refusal(422, { code: "too_many_documents" }), text)).toBe(text.errors.too_many_documents);
+      expect(text.errors.too_many_documents).not.toMatch(/\d/);
+    }
+  });
+});

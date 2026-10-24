@@ -320,7 +320,7 @@ import { LeadRepresentativeDetailsForm } from "./lead-representative-details";
 import { LeadRepresentativeUploads, representativeFileOrigin } from "./lead-representative-uploads";
 import { LeadPatientConcern } from "./lead-patient-concern";
 import { useLeadRiskAssessment } from "../model/use-lead-risk-assessment";
-import { gwgSheetSignatureNotice, representativeDocumentSlot, riskGateErrorText } from "../model/lead-risk-assessment";
+import { gwgSheetSignatureNotice, representativeDocumentFieldsMissing, representativeDocumentSlot, representativeMissingText, riskGateErrorText } from "../model/lead-risk-assessment";
 import { LeadIdentificationStatus } from "./lead-identification-status";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
@@ -365,6 +365,7 @@ import {
   WizardDocumentRowErrorProvider,
   type WizardDocumentRowErrorState,
 } from "./wizard-document-row-error";
+import { WizardLoadError } from "./wizard-load-error";
 import {
   discoveryReferrerMissing,
   intakeAsksDiscoverySource,
@@ -746,7 +747,8 @@ type ValidationIssue = {
 
 type ValidationContext =
   | { kind: "master" }
-  | { kind: "documents" }
+  /** `qualification`: only what the server's qualification asks for (the rest blocks the conversion alone). */
+  | { kind: "documents"; scope?: "qualification" }
   | { kind: "order" }
   | { kind: "server"; reasons: string[] };
 
@@ -786,6 +788,13 @@ const CONFIDENTIALITY_RELEASE_ID = "lead-wizard-confidentiality-release";
 const SELF_DISCLOSURE_SECTION_ID = "lead-wizard-self-disclosure";
 /** Server blocking reason (crates/server/src/routes/leads.rs `SELF_DISCLOSURE_UNSIGNED`). */
 const SELF_DISCLOSURE_UNSIGNED_REASON = "Patient form is not signed";
+/**
+ * Server conversion reason: the contract data of the representatives (birth
+ * place, address, citizenships, identity document …) is incomplete. The
+ * readiness names the keys in `contract_details_missing` (`rep1_birth_place`,
+ * `rep2_id_valid_until` …; the same keys as `representative_details_incomplete`).
+ */
+const CONTRACT_DETAILS_MISSING_REASON = "Contract details of the representatives are missing";
 const PRIVACY_DOCUMENT_ID = "lead-wizard-privacy-document";
 const IDENTITY_DOCUMENT_ID = "lead-wizard-identity-document";
 const FRAMEWORK_DOCUMENT_ID = "lead-wizard-framework-document";
@@ -1152,7 +1161,9 @@ function autosavePayload(
       // `citizenships` is the one source; the legacy key of older leads is
       // dropped (undefined is left out of the JSON body).
       registration_country: undefined,
-      passport_expiry: draft.passportExpiry,
+      // The identity document data entered from the scan is the one place of
+      // "valid until" (2026-10-24); the wizard's old key is dropped the same way.
+      passport_expiry: undefined,
       aml_enhanced_due_diligence: draft.amlEnhancedDueDiligence,
       selected_specialization_work_type_ids:
         draft.selectedSpecializationWorkTypeIds,
@@ -1903,7 +1914,9 @@ function draftFromExistingPatient(patient: PatientDetail): Draft {
     citizenships: patient.citizenships?.length
       ? normalizeCitizenships(patient.citizenships)
       : normalizeCitizenships([nationalityCountryCode(patient.nationality)]),
-    passportExpiry: patient.passport_expiry?.trim() ?? "",
+    // Not taken from the patient card any more: staff enter "valid until"
+    // with the document data from the scan (2026-10-24).
+    passportExpiry: "",
     language: normalizedLanguageCode(patient.languages?.[0]),
     hasInsurance: insuranceProvider || insuranceNumber || insuranceType ? "yes" : "",
     // The patient file keeps the coverage only in the intake of the first
@@ -2429,9 +2442,33 @@ function readinessReasonLabel(reason: string, tx: Tx, minor = false) {
     [COST_ESTIMATE_WORK_TYPES_REASON]: tx("Выберите медицинские виды работ для предварительного расчёта", "Medizinische Leistungsarten für die vorläufige Kostenkalkulation auswählen"),
     "Required prepayment is not complete": tx("Предоплата получена не полностью", "Vorauszahlung noch nicht vollständig eingegangen"),
     "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
+    [CONTRACT_DETAILS_MISSING_REASON]: tx("Данные представителей для договора неполные", "Angaben der Vertreter für den Vertrag unvollständig"),
     ...payerReadinessReasonLabels(tx),
   };
   return labels[reason] ?? tx("Проверьте незавершённые данные", "Unvollständige Angaben prüfen");
+}
+
+/** The optional readiness field with the missing contract keys of the representatives; `[]` on an older server. */
+function contractDetailsMissingOf(readiness: unknown): string[] {
+  const value = readiness && typeof readiness === "object" ? (readiness as { contract_details_missing?: unknown }).contract_details_missing : null;
+  return Array.isArray(value) ? value.filter((key): key is string => typeof key === "string") : [];
+}
+
+/**
+ * The reason as the lists show it: the label, and for the representatives'
+ * contract data also who lacks what and where staff enter it (the person's
+ * card under the identity document, or the contact's card in «Данные клиента»).
+ */
+function readinessReasonText(reason: string, tx: Tx, minor: boolean, readiness: unknown): string {
+  const label = readinessReasonLabel(reason, tx, minor);
+  if (reason !== CONTRACT_DETAILS_MISSING_REASON) return label;
+  const missing = contractDetailsMissingOf(readiness);
+  const detail = representativeMissingText(missing, tx);
+  if (!detail) return label;
+  const where = representativeDocumentFieldsMissing(missing)
+    ? tx("Вносится в карточке этого лица в блоке «Документ, удостоверяющий личность».", "Wird in der Karte dieser Person im Block „Ausweisdokument“ erfasst.")
+    : tx("Вносится в карточке контакта в разделе «Данные клиента».", "Wird in der Kontaktkarte unter „Personendaten“ erfasst.");
+  return `${label}. ${detail} ${where}`;
 }
 
 function readinessReasonStep(reason: string): StepId {
@@ -2468,6 +2505,7 @@ function readinessReasonStep(reason: string): StepId {
     [COST_ESTIMATE_WORK_TYPES_REASON]: "order",
     "Required prepayment is not complete": "commercial",
     "Lead is already converted": "release",
+    [CONTRACT_DETAILS_MISSING_REASON]: "documents",
     ...payerReadinessReasonSteps(),
   };
   return steps[reason] ?? "release";
@@ -2546,6 +2584,8 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Required prepayment is not complete": QUOTE_SECTION_ID,
     "Cost estimate document is missing": COST_ESTIMATE_DOCUMENT_ID,
     "Preliminary cost calculation document is missing": COST_ESTIMATE_DOCUMENT_ID,
+    // The representatives' cards sit under the identity document; address and birth data are fixed in the contact's card.
+    [CONTRACT_DETAILS_MISSING_REASON]: IDENTITY_DOCUMENT_ID,
     ...payerReadinessReasonFields(),
   };
   if (reason === COST_ESTIMATE_WORK_TYPES_REASON) {
@@ -2655,6 +2695,24 @@ function cabinetConsentsOf(readiness: { cabinet_consents?: { privacy_practices: 
     privacy: readiness?.cabinet_consents?.privacy_practices === true,
     healthcare: readiness?.cabinet_consents?.healthcare === true,
   };
+}
+
+/**
+ * The documents-step issues the server's qualification asks for
+ * (`qualification_reasons`: the signed consent form, the two consents, the
+ * risk decision). The signed confidentiality release, the confirmed identity
+ * document and the signed enhanced check block the conversion only (DEV
+ * 2026-10-24: the wizard refused to qualify without them).
+ */
+const QUALIFICATION_DOCUMENT_ISSUE_KEYS: ReadonlySet<string> = new Set([
+  "risk-assessment",
+  "privacy-consent",
+  "healthcare-consent",
+  "privacy-document",
+]);
+
+function qualificationDocumentIssues(issues: ValidationIssue[]): ValidationIssue[] {
+  return issues.filter((issue) => QUALIFICATION_DOCUMENT_ISSUE_KEYS.has(issue.key));
 }
 
 function documentsValidationIssues(
@@ -4762,7 +4820,8 @@ export function LeadWizard({
       return masterValidationIssues(masterErrors, tx);
     }
     if (validationContext.kind === "documents") {
-      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents, readinessChecks.get("risk_assessment_released") === false, readinessChecks.get("identity_document_verified") === true);
+      const issues = documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents, readinessChecks.get("risk_assessment_released") === false, readinessChecks.get("identity_document_verified") === true);
+      return validationContext.scope === "qualification" ? qualificationDocumentIssues(issues) : issues;
     }
     if (validationContext.kind === "order") {
       return orderIssues;
@@ -4770,10 +4829,10 @@ export function LeadWizard({
     return validationContext.reasons.map((reason) => ({
       key: reason,
       step: readinessReasonStep(reason),
-      message: readinessReasonLabel(reason, tx, Boolean(draft && isMinor(draft.birthDate, new Date()))),
+      message: readinessReasonText(reason, tx, Boolean(draft && isMinor(draft.birthDate, new Date())), lead?.readiness),
       fieldId: readinessReasonFieldId(reason, draft),
     }));
-  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents]);
+  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, amlRequired, lead?.readiness, cabinetConsents]);
   const visibleOrderErrors = orderValidationAttempted ? orderIssues : [];
   const orderFieldError = (...keys: string[]) =>
     visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
@@ -5691,13 +5750,17 @@ export function LeadWizard({
     }
     // A guardian (Vormund) of a minor needs the custody "guardian" (owner
     // 2026-10-22, the server refuses it too); a contact stored as guardian
-    // before keeps saving as it is.
+    // before keeps saving as it is. While the portal state is still loading
+    // the custody is unknown here: the server decides (DEV 2026-10-24: the
+    // editor refused «Опекун» before the state arrived).
+    const knownCustody = leadId ? step1Portal.intake?.representation?.custody : newLeadCustody;
     if (
       draft
       && isMinor(draft.birthDate, new Date())
       && isLegalGuardianRelation(trustedContactEditor.relation)
       && !isLegalGuardianRelation(storedContact?.relation ?? "")
-      && (leadId ? step1Portal.intake?.representation?.custody : newLeadCustody) !== "guardian"
+      && (!leadId || step1Portal.intake?.representation != null)
+      && knownCustody !== "guardian"
     ) {
       setTrustedContactRelationError(tx(
         "Опекун возможен только при опеке по решению суда; для родителя выберите Мать или Отец",
@@ -5964,9 +6027,11 @@ export function LeadWizard({
       intakeDraft = { ...draft, concern: patientRequestReason };
       setDraft((current) => current && !current.concern.trim() ? { ...current, concern: patientRequestReason } : current);
     }
-    const documentIssues = documentsValidationIssues(intakeDraft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents, readinessChecks.get("risk_assessment_released") === false, readinessChecks.get("identity_document_verified") === true);
+    // Qualification asks for what the server's `qualification_reasons` hold;
+    // the conversion-level documents stay in the release list only.
+    const documentIssues = qualificationDocumentIssues(documentsValidationIssues(intakeDraft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired, lead?.readiness.demo_onboarding?.credited_checks, cabinetConsents, readinessChecks.get("risk_assessment_released") === false, readinessChecks.get("identity_document_verified") === true));
     if (documentIssues.length > 0) {
-      setValidationContext({ kind: "documents" });
+      setValidationContext({ kind: "documents", scope: "qualification" });
       setStep("documents");
       window.requestAnimationFrame(() => {
         document.getElementById(documentIssues[0]?.fieldId ?? "")?.focus();
@@ -7235,7 +7300,7 @@ ${serviceCommentLines.join("\n")}`
     openValidationIssue({
       key: reason,
       step: readinessReasonStep(reason),
-      message: readinessReasonLabel(reason, tx, draftIsMinor),
+      message: readinessReasonText(reason, tx, draftIsMinor, lead?.readiness),
       fieldId: readinessReasonFieldId(reason, draft),
     });
   }
@@ -7330,7 +7395,7 @@ ${serviceCommentLines.join("\n")}`
         key: `request:${reason}`,
         label: tx("В этом обращении", "In dieser Anfrage"),
         ready: false,
-        status: readinessReasonLabel(reason, tx, draftIsMinor),
+        status: readinessReasonText(reason, tx, draftIsMinor, lead.readiness),
         detail: "—",
         action: { label: tx("Исправить", "Beheben"), onClick: () => openReadinessReason(reason) },
       })),
@@ -7508,7 +7573,9 @@ ${serviceCommentLines.join("\n")}`
     patientName: `${draft.firstName} ${draft.lastName}`,
     patientAnswers: step1Portal.intake?.identification_hidden ? null : step1Portal.intake?.identification ?? null,
     representatives: portalRepresentation?.representatives ?? [],
-    thirdPartyPayer: amlPayerDeclaration?.payer_kind === "third_party",
+    // A third-party row of before that names a parent is the parent's card
+    // (the server's `paying_parent`), never a second person.
+    thirdPartyPayer: amlPayerDeclaration?.payer_kind === "third_party" && payer.data?.status.paying_parent !== true,
     payerName: amlPayerSent?.answers.organisation_name?.trim()
       || [amlPayerSent?.answers.first_name, amlPayerSent?.answers.last_name].filter(Boolean).join(" ")
       || amlPayerDeclaration?.organisation_name?.trim()
@@ -8863,6 +8930,15 @@ ${serviceCommentLines.join("\n")}`
                     />
                   )}
                 >
+                  {identification.error ? (
+                    <WizardLoadError
+                      message={tx("Не удалось загрузить статус идентификации", "Identifizierungsstatus konnte nicht geladen werden")}
+                      detail={errorText(identification.error, tx)}
+                      onRetry={() => void identification.reload()}
+                      tx={tx}
+                      testId="lead-identification-load-error"
+                    />
+                  ) : null}
                   <LeadIdentificationStatus
                     identification={identification}
                     canEdit
@@ -8905,6 +8981,24 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               {leadId ? (
                 <div id={RISK_ASSESSMENT_SECTION_ID} tabIndex={-1} className="focus:outline-none">
+                  {risk.error ? (() => {
+                    // Without a last known assessment the panel renders nothing: the
+                    // section stays, with the reason and a retry.
+                    const line = (
+                      <WizardLoadError
+                        message={tx("Не удалось загрузить оценку риска", "Risikobewertung konnte nicht geladen werden")}
+                        detail={errorText(risk.error, tx)}
+                        onRetry={() => void risk.controller.reload()}
+                        tx={tx}
+                        testId="lead-risk-assessment-load-error"
+                      />
+                    );
+                    return risk.assessment ? line : (
+                      <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Оценка риска", "Risikobewertung")}>
+                        {line}
+                      </Section>
+                    );
+                  })() : null}
                   <LeadRiskAssessmentPanel assessment={risk.assessment} controller={risk.controller} tx={tx} disabled={isBusy} />
                 </div>
               ) : null}
@@ -9328,6 +9422,18 @@ ${serviceCommentLines.join("\n")}`
                   );
                   if (!leadId) return patientScans;
                   return (
+                    <>
+                    {step1Portal.error ? (
+                      // The document data and the representatives' cards come
+                      // with the portal state: say why they are missing.
+                      <WizardLoadError
+                        message={tx("Не удалось загрузить данные кабинета (документ и представители)", "Portaldaten (Ausweis und Vertretung) konnten nicht geladen werden")}
+                        detail={errorText(step1Portal.error, tx)}
+                        onRetry={() => void reloadStep1PortalState()}
+                        tx={tx}
+                        testId="lead-portal-intake-load-error"
+                      />
+                    ) : null}
                     <LeadIdentityDocumentData
                       leadId={leadId}
                       intake={step1Portal.intake}
@@ -9345,6 +9451,7 @@ ${serviceCommentLines.join("\n")}`
                       }}
                       onUploaded={afterRepresentativeUpload}
                     />
+                    </>
                   );
                 })()}
               </Section>
@@ -10510,7 +10617,7 @@ ${serviceCommentLines.join("\n")}`
                                   disabled={isBusy}
                                   onClick={() => openReadinessReason(reason)}
                                 >
-                                  {readinessReasonLabel(reason, tx, draftIsMinor)}
+                                  {readinessReasonText(reason, tx, draftIsMinor, lead.readiness)}
                                 </button>
                               </li>
                             ))}

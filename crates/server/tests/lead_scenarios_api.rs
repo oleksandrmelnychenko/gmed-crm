@@ -114,6 +114,12 @@ impl Scn {
     }
 
     async fn upload(&self, path: &str, auth: &str) -> (StatusCode, Value) {
+        self.upload_with(path, auth, b"").await
+    }
+
+    /// Uploads the synthetic PDF with `extra` bytes appended: another scan
+    /// of the same kind (the same bytes twice are refused as a duplicate).
+    async fn upload_with(&self, path: &str, auth: &str, extra: &[u8]) -> (StatusCode, Value) {
         let boundary = format!("----gmed-scenario-{}", Uuid::new_v4().simple());
         let mut body = Vec::new();
         body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
@@ -121,6 +127,7 @@ impl Scn {
             b"Content-Disposition: form-data; name=\"file\"; filename=\"ausweis.pdf\"\r\nContent-Type: application/pdf\r\n\r\n",
         );
         body.extend_from_slice(PDF);
+        body.extend_from_slice(extra);
         body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
         let request = Request::builder()
             .method("POST")
@@ -1008,12 +1015,15 @@ async fn scenario_both_parents_edit_the_same_request() {
         false
     );
 
-    // Staff upload the father's identity document in the wizard after
-    // sending: no change by the parents, nothing to send again.
+    // Staff upload another scan of the father's identity document in the
+    // wizard after sending (the parents' own scan is on file, the same bytes
+    // again would be a duplicate): no change by the parents, nothing to send
+    // again.
     let (code, uploaded) = app
-        .upload(
+        .upload_with(
             &format!("/leads/{lead}/representatives/{father}/identity-document"),
             &app.pm(),
+            b"% second scan by staff\n",
         )
         .await;
     assert_eq!(code, StatusCode::CREATED, "{uploaded}");
@@ -1138,6 +1148,13 @@ async fn scenario_minor_with_a_court_guardian() {
     assert_eq!(refused["contact_id"], json!(guardian));
     // Staff state the guardianship first, then name the Vormund.
     let lead = app.minor_lead("Lina", json!([])).await;
+    // The child's date of birth is staff's to set: the cabinet may only
+    // repeat it (owner rule, server 422 `dob_staff_only` on a change).
+    sqlx::query("UPDATE leads SET date_of_birth = DATE '2014-02-03' WHERE id = $1")
+        .bind(lead)
+        .execute(app.pool())
+        .await
+        .unwrap();
     app.ok(
         StatusCode::OK,
         "POST",

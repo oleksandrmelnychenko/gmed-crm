@@ -8,7 +8,7 @@ import type {
   LeadRequestFollowUp,
   PayerQuestionnairePatch,
 } from "./lead-request-api";
-import { followUpShown, openFollowUpBlocks } from "./lead-request-follow-up-model";
+import { followUpShown, fundsDescriptionRequired as fundsDescriptionRequiredFor, openFollowUpBlocks } from "./lead-request-follow-up-model";
 import { SECTION_ANCHORS, type SectionAnchor, type StepId } from "./lead-request-steps";
 
 // The paying parent's own questionnaire in the lead cabinet (contract phase
@@ -325,9 +325,9 @@ export function withFundsSource(draft: PayerQuestionnaireDraft, source: string, 
   return { ...draft, funds_sources: sortedSources(chosen ? [...rest, source] : rest) };
 }
 
-/** The description is required with "other" (contract 3.5). */
+/** The description is required with "other" (contract 3.5): the one rule of the server (`lead_funds::stated`). */
 export function fundsDescriptionRequired(draft: Pick<PayerQuestionnaireDraft, "funds_sources">): boolean {
-  return draft.funds_sources.includes("other");
+  return fundsDescriptionRequiredFor(draft.funds_sources);
 }
 
 /** Keys of `missing_for_submit` the parent answers in the representatives' block: person, address, identity document. */

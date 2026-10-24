@@ -1159,13 +1159,27 @@ export function leadReadinessCheckLabel(
   return labelKey ? tr[labelKey] : dashOrValue(check.label, tr);
 }
 
+/**
+ * Server reasons added after the catalogue (2026-10-24), worded here until a
+ * catalogue key exists: the lists never show the English sentence.
+ */
+const LEAD_READINESS_REASON_INLINE_LABELS: Partial<Record<string, { ru: string; de: string }>> = {
+  "Contract details of the representatives are missing": {
+    ru: "Данные представителей для договора неполные",
+    de: "Angaben der Vertreter für den Vertrag unvollständig",
+  },
+};
+
 export function leadReadinessReasonLabel(
   reason: string,
   translations?: Translations,
 ) {
   const tr = runtimeTranslations(translations);
   const labelKey = LEAD_READINESS_REASON_LABEL_KEYS[reason];
-  return labelKey ? tr[labelKey] : reason;
+  if (labelKey) return tr[labelKey];
+  const inline = LEAD_READINESS_REASON_INLINE_LABELS[reason];
+  // `t("de")` is one object per language: the catalogue tells its language.
+  return inline ? (tr === translateCatalog("de") ? inline.de : inline.ru) : reason;
 }
 
 /** "DD.MM.YYYY" in every language; calendar dates are never shifted. */

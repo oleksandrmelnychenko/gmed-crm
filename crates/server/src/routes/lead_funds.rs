@@ -91,9 +91,19 @@ impl PersonFunds {
 
     /// Stated: a source, and the words with `other`.
     pub(crate) fn stated(&self) -> bool {
-        !self.sources.is_empty()
-            && (!self.sources.iter().any(|source| source == "other")
-                || present(self.description.as_deref()).is_some())
+        let (source_missing, description_missing) = self.missing_parts();
+        !source_missing && !description_missing
+    }
+
+    /// What [`Self::stated`] still misses: `(source, description)`. The
+    /// description is missing only while a source is `other` and no words
+    /// are given — the one rule of every "what is missing" list (the risk
+    /// blocks, the cabinet's extra step, the payer readiness).
+    pub(crate) fn missing_parts(&self) -> (bool, bool) {
+        let source_missing = self.sources.is_empty();
+        let description_missing = self.sources.iter().any(|source| source == "other")
+            && present(self.description.as_deref()).is_none();
+        (source_missing, description_missing)
     }
 
     /// The German labels of the sources.

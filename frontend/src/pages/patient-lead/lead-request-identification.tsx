@@ -458,7 +458,7 @@ export function IdentityDocumentSection({
         ) : (
           <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
         )}
-        {full ? <p className="text-xs text-muted-foreground">{text.errors.too_many_documents}</p> : null}
+        {full ? <p className="text-xs text-muted-foreground">{text.tooManyDocuments(request.max_documents)}</p> : null}
         {errors.map((message) => (
           <p key={message} role="alert" className="text-xs text-destructive">
             {message}

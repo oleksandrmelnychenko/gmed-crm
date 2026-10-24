@@ -1676,11 +1676,16 @@ async fn scenario_unsigned_minor_request_is_purged_with_the_parents_access() {
             .unwrap();
     assert_eq!(documents.len(), 3, "{documents:?}");
 
-    sqlx::query("UPDATE leads SET created_at = now() - interval '15 days' WHERE id = $1")
-        .bind(lead)
-        .execute(pool)
-        .await
-        .unwrap();
+    // Overdue and warned four days ago: nothing is purged without a prior warning.
+    sqlx::query(
+        "UPDATE leads SET created_at = now() - interval '15 days',
+                          retention_warning_sent_at = now() - interval '4 days'
+         WHERE id = $1",
+    )
+    .bind(lead)
+    .execute(pool)
+    .await
+    .unwrap();
     let policy = gmed_server::routes::leads::UnqualifiedLeadRetention {
         days: 14,
         effective_at: chrono::Utc::now() - chrono::Duration::days(60),

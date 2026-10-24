@@ -1,5 +1,6 @@
+import type { LeadRequest } from "./lead-request-api";
 import { isBillingField } from "./lead-request-billing-model";
-import { isRecipientField } from "./lead-request-recipient-model";
+import { draftFromRecipient, flowOf, isRecipientField, recipientFieldOf } from "./lead-request-recipient-model";
 import { representativeSubmitPart } from "./lead-request-representation-model";
 import { SECTION_ANCHORS, type SectionAnchor } from "./lead-request-steps";
 
@@ -16,6 +17,49 @@ export type FoundCabinetTarget = { element: HTMLElement; field: boolean };
 /** Keys are form keys (`first_name`, `rep1_last_name`) or follow-up keys `<block>:<key>`. */
 const SAFE_KEY = /^[A-Za-z0-9_-]+$/;
 
+/**
+ * Block R names a representative's answer as `representative:<id>:<field>`;
+ * the input of that answer has the id `representative-<id>-<field>`
+ * (`RepresentativeQuestionsBlock`). Null for any other key.
+ */
+export function representativeQuestionId(key: string): { id: string; person: string } | null {
+  if (!key.startsWith("representative:")) return null;
+  const [, person, field, ...rest] = key.split(":");
+  if (!person || !field || rest.length > 0 || !SAFE_KEY.test(person) || !SAFE_KEY.test(field)) return null;
+  return { id: `representative-${person}-${field}`, person };
+}
+
+/**
+ * The recipient's field that answers a payer key when the invoice recipient
+ * is the payer: the server lists `payer_email`, the form shows the recipient's
+ * e-mail (`recipient_email`); null for a key the recipient has no field for.
+ */
+export function recipientKeyOfPayerKey(key: string): string | null {
+  if (!key.startsWith("payer_")) return null;
+  const field = key.slice("payer_".length);
+  return recipientFieldOf(`recipient_${field}`) ? `recipient_${field}` : null;
+}
+
+/** Whether the invoice recipient of the request is a third party who pays (step 3). */
+export function recipientIsPayer(request: Pick<LeadRequest, "billing">): boolean {
+  const flow = flowOf(draftFromRecipient(request.billing));
+  return flow.recipient === "third_party" && flow.isPayer === "yes";
+}
+
+/**
+ * The keys a step's missing list marks at the fields: each key itself and,
+ * when the recipient pays, the recipient's field for a payer key.
+ */
+export function missingFieldKeys(keys: readonly string[], recipientPays: boolean): Set<string> {
+  const result = new Set<string>();
+  for (const key of keys) {
+    result.add(key);
+    const twin = recipientPays ? recipientKeyOfPayerKey(key) : null;
+    if (twin) result.add(twin);
+  }
+  return result;
+}
+
 const FOCUSABLE =
   'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -31,6 +75,11 @@ function byTestId(scope: ParentNode, id: string): HTMLElement | null {
 
 /** The element that answers one form key, searched by the ids and labels the cabinet gives its fields. */
 export function fieldElement(scope: ParentNode, key: string): HTMLElement | null {
+  // Block R: a representative's answer, else the person's box.
+  const representativeQuestion = representativeQuestionId(key);
+  if (representativeQuestion) {
+    return byId(scope, representativeQuestion.id) ?? byTestId(scope, `lead-request-representative-questions-${representativeQuestion.person}`);
+  }
   if (!SAFE_KEY.test(key)) return null;
   const dashed = key.replace(/_/g, "-");
   const label = scope.querySelector<HTMLElement>(`label[for="lead-request-${key}"]`);
@@ -63,6 +112,10 @@ export function fieldElement(scope: ParentNode, key: string): HTMLElement | null
   }
   if (key === "has_insurance" || key.startsWith("insurance_")) return byTestId(scope, "lead-request-insurance");
   if (isRecipientField(key)) return byTestId(scope, "lead-request-invoice-recipient");
+  // The recipient who pays answers the payer's e-mail, phone or residence in the recipient's fields.
+  const recipientTwin = recipientKeyOfPayerKey(key);
+  const twinElement = recipientTwin ? byId(scope, `lead-request-${recipientTwin}`) : null;
+  if (twinElement) return twinElement;
   if (key.startsWith("payer_")) return byId(scope, SECTION_ANCHORS.payer) ?? byTestId(scope, "lead-request-payer");
   if (isBillingField(key)) return byTestId(scope, "lead-request-billing");
   return null;
@@ -76,7 +129,9 @@ export function fieldElement(scope: ParentNode, key: string): HTMLElement | null
 export function findCabinetTarget(target: CabinetTarget, root: ParentNode = document): FoundCabinetTarget | null {
   const section = target.anchor ? byId(root, target.anchor) : null;
   if (target.field) {
-    const [block, key] = target.field.includes(":") ? target.field.split(":", 2) : [null, target.field];
+    // Only the first colon separates the block: block R's keys carry colons of their own.
+    const colon = target.field.indexOf(":");
+    const [block, key] = colon >= 0 ? [target.field.slice(0, colon), target.field.slice(colon + 1)] : [null, target.field];
     const blockElement = block && SAFE_KEY.test(block) ? byTestId(root, `lead-request-follow-up-${block}`) : null;
     const scope = blockElement ?? section ?? root;
     const field = fieldElement(scope, key) ?? (scope !== root ? fieldElement(root, key) : null);

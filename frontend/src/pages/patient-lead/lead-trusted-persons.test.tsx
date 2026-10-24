@@ -1,10 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CONSENT_RECIPIENT_SCOPES, cabinetScopeSummary, checkedScopeCodes, normalizeScopeCodes, scopeOptionLabel, staffScopeSummary, toggleScopeCode } from "@/lib/consent-recipient-scope";
-import { CONSENT_RECIPIENT_RELATIONS, NO_CONSENT_FORM_CHOICES, type ConsentRecipient, type LeadRequest } from "./lead-request-api";
+import { CONSENT_RECIPIENT_RELATIONS, DISCLOSURE_VERSION, NO_CONSENT_FORM_CHOICES, type ConsentRecipient, type LeadRequest } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { TrustedPersonsEditor, TrustedPersonsList } from "./lead-trusted-persons-editor";
-import { contactValid, disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, personScope, recipientDrafts, recipientProblems, recipientsToSend, requestForLead, samePersons, storedTrustedPersons, trustedPersonsProblem, type RecipientDraft } from "./lead-trusted-persons-model";
+import { contactValid, disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, mergeDisclosureDraft, personScope, recipientDrafts, recipientProblems, recipientsToSend, requestForLead, samePersons, storedTrustedPersons, trustedPersonsProblem, type DisclosureDraft, type RecipientDraft } from "./lead-trusted-persons-model";
 import { disclosureConsentText, disclosureSubject, trustedPersonsText } from "./lead-trusted-persons-text";
 
 const stored = { name: "Eva Muster", relation: "friend", contact: "", scope_codes: ["medical"] } satisfies ConsentRecipient;
@@ -193,5 +193,34 @@ describe("disclosure consent wording", () => {
     }
     expect(disclosureConsentText("de", "GMED", "child")).toContain("über die personenbezogenen Daten meines Kindes");
     expect(disclosureConsentText("ru", "GMED", "child")).toContain("о персональных данных моего ребёнка");
+  });
+});
+
+describe("a save that ends while the person keeps typing", () => {
+  const baseline: DisclosureDraft = { allowDisclosure: false, consentGiven: false, persons: [] };
+  const sent: DisclosureDraft = { allowDisclosure: true, consentGiven: false, persons: [friend] };
+  // What the server stored: the person normalized, the consent of this login.
+  const fresh: DisclosureDraft = { allowDisclosure: true, consentGiven: true, persons: [{ ...friend, name: "Eva Muster" }] };
+
+  it("takes the server's state when nothing changed meanwhile", () => {
+    expect(mergeDisclosureDraft(sent, sent, fresh, baseline)).toEqual(fresh);
+  });
+
+  it("keeps a person added during the save and the consent box as it is now", () => {
+    const typed: DisclosureDraft = { ...sent, persons: [friend, { ...friend, name: "Max Muster", relation: "spouse" }] };
+    const merged = mergeDisclosureDraft(typed, sent, fresh, baseline);
+    expect(merged.persons.map((person) => person.name)).toEqual(["Eva Muster", "Max Muster"]);
+    // The decision was not touched: the server's value.
+    expect(merged.allowDisclosure).toBe(true);
+    expect(merged.consentGiven).toBe(true);
+    // And the merged draft still differs from the server: another save follows.
+    expect(disclosureChanged(merged, { disclosure: { allow_disclosure: true, consent_given: true, version: DISCLOSURE_VERSION, chosen_by: "u1", chosen_at: "", company_name: "GMED" } as never, trusted_persons: [stored] }, "u1")).toBe(true);
+  });
+
+  it("keeps a decision changed during the save", () => {
+    const typed: DisclosureDraft = { allowDisclosure: false, consentGiven: false, persons: [friend] };
+    const merged = mergeDisclosureDraft(typed, sent, fresh, baseline);
+    expect(merged.allowDisclosure).toBe(false);
+    expect(merged.persons).toEqual(fresh.persons);
   });
 });

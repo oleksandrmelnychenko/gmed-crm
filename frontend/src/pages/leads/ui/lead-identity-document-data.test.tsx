@@ -17,6 +17,7 @@ import {
   identityDocumentInput,
   identityDocumentMissing,
   identityDocumentSavableDraft,
+  identityDocumentSourceIsReset,
   identityDocumentSourceIsStale,
   identityDocumentStatus,
   identityDocumentStatusText,
@@ -70,9 +71,13 @@ describe("identity document data entered by staff", () => {
     expect(identityDocumentDraftChanged({ ...draft, unreadable: false }, draft)).toBe(true);
   });
 
-  it("takes the old 'valid until' of the wizard while nothing is stored", () => {
+  it("takes the old 'valid until' of the wizard only while staff entered nothing", () => {
     expect(identityDocumentDraft(null, "2030-01-31").validUntil).toBe("2030-01-31");
     expect(identityDocumentDraft(stored, "2030-01-31").validUntil).toBe("2025-04-30");
+    // Staff cleared the date and stored it: it stays empty.
+    expect(identityDocumentDraft({ ...stored, id_valid_until: null }, "2030-01-31").validUntil).toBe("");
+    // Nothing entered yet in the new place: the wizard's old date is offered.
+    expect(identityDocumentDraft({ ...stored, id_valid_until: null, id_data_entered_at: null }, "2030-01-31").validUntil).toBe("2030-01-31");
   });
 
   it("accepts a past expiry (it is a trigger) and flags dates in the wrong order", () => {
@@ -168,11 +173,15 @@ describe("identity document data entered by staff", () => {
     expect(identityDocumentSavableDraft({ ...good, validUntil: "2014-01-01" }, storedDraft, rules)?.validUntil).toBe(storedDraft.validUntil);
   });
 
-  it("knows a reload older than the last save", () => {
+  it("knows a reload older than the last save, and a cleared document from a late reload", () => {
     expect(identityDocumentSourceIsStale("2026-10-22T12:15:50Z", "2026-10-22T12:15:53Z")).toBe(true);
-    expect(identityDocumentSourceIsStale(null, "2026-10-22T12:15:53Z")).toBe(true);
     expect(identityDocumentSourceIsStale("2026-10-22T12:15:53Z", "2026-10-22T12:15:53Z")).toBe(false);
     expect(identityDocumentSourceIsStale("2026-10-22T12:16:00Z", null)).toBe(false);
+    // «Убрать данные GwG»: the server's document has no entry time any more — a reset, not a stale reload.
+    expect(identityDocumentSourceIsStale(null, "2026-10-22T12:15:53Z")).toBe(false);
+    expect(identityDocumentSourceIsReset(null, "2026-10-22T12:15:53Z")).toBe(true);
+    expect(identityDocumentSourceIsReset(null, null)).toBe(false);
+    expect(identityDocumentSourceIsReset("2026-10-22T12:16:00Z", "2026-10-22T12:15:53Z")).toBe(false);
   });
 
   it("adds one form per representative and hides everything from a role without the GwG data", () => {

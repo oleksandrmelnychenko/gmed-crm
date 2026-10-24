@@ -27,9 +27,11 @@ import {
   AutosaveFlushContext,
   AutosaveSavedContext,
   CabinetGoToContext,
+  RequestPatchContext,
   createRequestQueue,
   type AutosaveFlush,
   type CabinetGoTo,
+  type RequestPatch,
   type RequestQueue,
 } from "./lead-request-parts";
 import { findCabinetTarget, revealCabinetTarget, type CabinetTarget } from "./lead-request-field-target";
@@ -408,6 +410,9 @@ function LeadRequestView({
     latestRequest.current = next;
     onChange(next);
   }, [onChange]);
+  // A part that changes one field (a consent, the payer questionnaire's summary) changes the
+  // newest request, never a copy of the render its answer started from.
+  const patchRequest = useCallback<RequestPatch>((update) => updateRequest(update(latestRequest.current)), [updateRequest]);
   // Both parents may edit at once (owner decision 2026-10-23): the request is
   // read again when the tab is shown again, the window gets the focus or the
   // other parent's save arrives as `lead.portal_updated`. Through the write
@@ -575,6 +580,7 @@ function LeadRequestView({
 
   return (
     <ServerConflictContext.Provider value={conflictRegistry}>
+    <RequestPatchContext.Provider value={patchRequest}>
       {/* `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer. */}
       <article ref={topRef} className="flex min-h-[calc(100dvh-9rem)] flex-col overflow-clip rounded-xl border border-border bg-card shadow-sm" data-testid="lead-request">
         {/* The title and the deadline share one line (wrapping on a phone). */}
@@ -646,7 +652,7 @@ function LeadRequestView({
                 text={text}
                 lang={lang}
                 enqueue={enqueue}
-                onChange={onChange}
+                onChange={updateRequest}
                 onBack={() => nav.onBack?.()}
                 onNext={() => nav.onNext?.()}
                 missingShown={nav.missingShown || (!request.submitted_at && sendOpened)}
@@ -663,7 +669,7 @@ function LeadRequestView({
                 text={text}
                 lang={lang}
                 enqueue={enqueue}
-                onChange={onChange}
+                onChange={updateRequest}
                 onEdit={goTo}
                 index={nav.index}
                 total={nav.total}
@@ -673,6 +679,7 @@ function LeadRequestView({
           </CabinetGoToContext.Provider>
         </div>
       </article>
+    </RequestPatchContext.Provider>
     </ServerConflictContext.Provider>
   );
 }

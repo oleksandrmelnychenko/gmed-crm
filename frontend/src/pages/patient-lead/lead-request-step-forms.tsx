@@ -73,6 +73,7 @@ import {
 import { InvoiceRecipientSection } from "./lead-request-invoice-recipient";
 import { PayerSection } from "./lead-request-payer-section";
 import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
+import { missingFieldKeys, recipientIsPayer } from "./lead-request-field-target";
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
 import { useServerDraftSync } from "./lead-request-server-sync";
@@ -168,11 +169,13 @@ function StepFrame({
   // press with something missing shows it and stays, the next press goes on. The page keeps
   // which steps showed it, for the badges of the step bar.
   const showMissing = nav.missingShown;
-  // The empty required fields say so below themselves too, once "Next" was pressed.
+  // The empty required fields say so below themselves too, once "Next" was pressed. A payer key
+  // of the recipient who pays (`payer_email`) marks the recipient's field, where it is answered.
   const missingKey = fields.filter(Boolean).join("|");
+  const recipientPays = recipientIsPayer(request);
   const stepMissing = useMemo(
-    () => (showMissing ? { keys: new Set(missingKey.split("|").filter(Boolean)), message: text.required } : null),
-    [showMissing, missingKey, text.required],
+    () => (showMissing ? { keys: missingFieldKeys(missingKey.split("|").filter(Boolean), recipientPays), message: text.required } : null),
+    [showMissing, missingKey, recipientPays, text.required],
   );
   const next = () => {
     // The page validates the fresh server response after flushing this step.
@@ -332,6 +335,8 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
   // The step's list follows the badge: the consent only while the request was never sent (QA 2026-10-24).
   const consentMissing = inquiryConsentMissing(request) ? [{ label: text.sectionConsent, field: "inquiry_consent" }] : [];
 
+  // A guardian may set the child's date of birth while it is empty; a stored one is GMED's to correct.
+  const dobLocked = request.access_kind === "guardian" && Boolean(request.personal_data.date_of_birth);
   const showLatinNameHint = /\p{Script=Cyrillic}/u.test([draft.first_name, draft.last_name, draft.middle_name].join(" "));
   const cabinetLang = asLeadCabinetLang(lang);
   const showNamePassportHint = showLatinNameHint || cabinetLang === "ru" || cabinetLang === "uk";
@@ -475,9 +480,18 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               pickerLang={asLeadCabinetLang(lang) ?? undefined}
               max={appDateKey()}
               min="1900-01-01"
+              // A parent sets the child's date of birth once; a stored one only GMED corrects
+              // (the server refuses the change: `dob_staff_only`).
+              disabled={dobLocked}
+              aria-describedby={[fieldProps("date_of_birth")["aria-describedby"], dobLocked ? "lead-request-date_of_birth-locked" : null].filter(Boolean).join(" ") || undefined}
               value={draft.date_of_birth}
               onChange={(event) => set("date_of_birth", event.target.value)}
             />
+            {dobLocked ? (
+              <p id="lead-request-date_of_birth-locked" className="text-xs text-muted-foreground" data-testid="lead-request-date_of_birth-locked">
+                {text.dobStaffOnly}
+              </p>
+            ) : null}
           </FormField>
           <FormField field="legal_sex" text={text} error={errorFor("legal_sex")} required>
             <NativeComboboxSelect

@@ -83,6 +83,7 @@ const SERVER_READINESS_REASONS = [
   "Preliminary cost calculation document is missing",
   "Medical work types are not selected",
   "Lead is already converted",
+  "Contract details of the representatives are missing",
 ];
 
 describe("lead readiness labels", () => {
@@ -105,6 +106,13 @@ describe("lead readiness labels", () => {
       }
     });
   }
+
+  it("words the representatives' contract data per language without a catalogue key", () => {
+    expect(leadReadinessReasonLabel("Contract details of the representatives are missing", translateCatalog("de")))
+      .toBe("Angaben der Vertreter für den Vertrag unvollständig");
+    expect(leadReadinessReasonLabel("Contract details of the representatives are missing", translateCatalog("ru")))
+      .toBe("Данные представителей для договора неполные");
+  });
 
   it("names the terminated framework contract in German", () => {
     expect(

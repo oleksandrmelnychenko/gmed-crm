@@ -309,6 +309,7 @@ pub(crate) async fn load_subjects(
                   s.country AS statement_country,
                   s.habitual_residence_country AS statement_habitual_residence_country,
                   s.citizenships AS statement_citizenships,
+                  d.payer_representative_id,
                   pr.country AS representative_payer_country,
                   pr.citizenships AS representative_payer_citizenships,
                   hits.patient_confirmed,
@@ -322,7 +323,9 @@ pub(crate) async fn load_subjects(
            LEFT JOIN lead_payer_declarations d ON d.lead_id = l.id
            LEFT JOIN lead_payer_statements s ON s.lead_id = l.id
            -- A paying parent (2026-10-19) keeps the identity on the
-           -- representative row, never on the declaration.
+           -- representative row, never on the declaration. The row is the
+           -- fallback: the canonical identity (`lead_guardian_identity`)
+           -- is read below.
            LEFT JOIN lead_representatives pr
                   ON d.payer_kind = 'representative'
                  AND pr.lead_id = l.id
@@ -448,14 +451,37 @@ pub(crate) async fn load_subjects(
         // check as it did while a paying parent was stored as a third party
         // (scenario test 2026-10-23). The risk score keeps the parent's own
         // block R: its payer triggers stay a third party's.
-        push_text(
-            &mut subjects.payer_residence,
-            text("representative_payer_country"),
-        );
-        push_all(
-            &mut subjects.payer_citizenships,
-            list("representative_payer_citizenships"),
-        );
+        // The parent's countries are the canonical identity the risk engine
+        // reads (`lead_guardian_identity`: the contact and the representative
+        // row, completed from a linked patient record); the raw row only
+        // while the canonical loader knows no such person.
+        let payer_representative_id = row
+            .try_get::<Option<Uuid>, _>("payer_representative_id")
+            .ok()
+            .flatten();
+        let canonical = match payer_representative_id {
+            Some(contact_id) => crate::services::lead_guardian_identity::load(conn, lead_id)
+                .await?
+                .into_iter()
+                .find(|identity| identity.contact_id == Some(contact_id)),
+            None => None,
+        };
+        match canonical {
+            Some(identity) => {
+                push_all(&mut subjects.payer_residence, identity.residences);
+                push_all(&mut subjects.payer_citizenships, identity.citizenships);
+            }
+            None => {
+                push_text(
+                    &mut subjects.payer_residence,
+                    text("representative_payer_country"),
+                );
+                push_all(
+                    &mut subjects.payer_citizenships,
+                    list("representative_payer_citizenships"),
+                );
+            }
+        }
     }
     Ok(Some(subjects))
 }

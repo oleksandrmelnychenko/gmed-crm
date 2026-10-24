@@ -239,6 +239,7 @@ describe("payer link: what may be done", () => {
     const actions = payerLinkActions(state(), false, de);
     expect(actions).toEqual({
       cabinet: false,
+      note: null,
       sendKind: "send",
       sendEnabled: true,
       sendBlockedText: null,
@@ -335,9 +336,14 @@ describe("payer link: what may be done", () => {
     );
   });
 
-  it("offers nothing for a paying parent with a cabinet login", () => {
+  it("offers nothing for a paying parent, with or without a cabinet login", () => {
     const cabinet = payerLinkActions(state({ mode: "cabinet", can_send: false, blocked_reason: "payer_has_cabinet_login" }), false, de);
     expect(cabinet).toMatchObject({ cabinet: true, sendEnabled: false, sendBlockedText: null, revokeEnabled: false, highlight: false });
+    expect(cabinet.note).toBe("Zahler ist Elternteil mit Portalzugang: Fragebogen im Portal");
+    // A parent stored as a third-party row of before: the note alone, no language buttons, no disabled send button.
+    const parent = payerLinkActions(state({ can_send: false, blocked_reason: "payer_is_representative" }), false, de);
+    expect(parent).toMatchObject({ cabinet: true, sendEnabled: false, sendBlockedText: null, revokeEnabled: false, highlight: false, reopenOffered: false });
+    expect(parent.note).toContain("Zahler-Link und Kostenübernahmeerklärung entfallen");
     expect(payerLinkBlockedReasonText("payer_has_cabinet_login", de)).toBe(
       "Zahler ist Elternteil mit Portalzugang: Fragebogen im Portal",
     );

@@ -27,6 +27,7 @@ import {
   identityDocumentInput,
   identityDocumentSavableDraft,
   identityDocumentServerError,
+  identityDocumentSourceIsReset,
   identityDocumentSourceIsStale,
   identityDocumentStatus,
   identityDocumentStatusText,
@@ -203,15 +204,27 @@ export function LeadIdentityDocumentDataForm({
 
   // A newer server state replaces the form unless staff typed over the last
   // known one; an older one (a reload that overtook a later save) is ignored.
+  // A cleared document after a known one («Убрать данные GwG») starts the form
+  // over: nothing typed before is kept or stored again.
   useEffect(() => {
     if (identityDocumentSourceIsStale(sourceAt, baselineAtRef.current)) return;
+    const reset = identityDocumentSourceIsReset(sourceAt, baselineAtRef.current);
     const previous = baselineRef.current;
     baselineRef.current = saved;
-    baselineAtRef.current = sourceAt ?? baselineAtRef.current;
+    baselineAtRef.current = reset ? null : sourceAt ?? baselineAtRef.current;
     setBaseline(saved);
     setMarks(null);
+    if (reset) {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+      timerRef.current = null;
+      pendingRef.current = false;
+      serverErrorsRef.current = {};
+      setServerErrorsState({});
+      setSaveState("idle");
+      setError("");
+    }
     const current = draftRef.current;
-    const next = identityDocumentDraftChanged(current, previous) ? current : saved;
+    const next = !reset && identityDocumentDraftChanged(current, previous) ? current : saved;
     draftRef.current = next;
     setDraftState(next);
   }, [saved, sourceAt]);
@@ -669,6 +682,8 @@ export function LeadIdentityDocumentData({
         </ul>
       ) : null}
       <LeadIdentityDocumentDataForm
+        // Another lead: a fresh form (the stored baseline and entry time are per lead).
+        key={leadId}
         source={intake?.identification ?? null}
         fallbackValidUntil={fallbackValidUntil}
         tx={tx}

@@ -1,6 +1,7 @@
 import { cabinetScopeSummary, normalizeScopeCodes, type ConsentRecipientScope } from "@/lib/consent-recipient-scope";
 import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
 import { CONSENT_RECIPIENT_RELATIONS, DISCLOSURE_VERSION, MAX_CONSENT_RECIPIENTS, type ConsentRecipient, type ConsentRecipientRelation, type LeadDisclosureInput, type LeadRequest } from "./lead-request-api";
+import { mergeSavedDraft } from "./lead-request-autosave";
 
 /** `scope` is the read-only free text of a person named before 2026-10-19; `scopeCodes` the choice. */
 export type RecipientDraft = { name: string; relation: ConsentRecipientRelation | ""; contact: string; scope: string; scopeCodes: ConsentRecipientScope[] };
@@ -109,6 +110,15 @@ export function disclosureChanged(draft: DisclosureDraft, request: Pick<LeadRequ
   const saved = disclosureDraft(request, viewerId);
   return draft.allowDisclosure !== saved.allowDisclosure || draft.consentGiven !== saved.consentGiven ||
     (draft.allowDisclosure !== false && !samePersons(recipientsToSend(draft.persons), recipientsToSend(saved.persons)));
+}
+
+/**
+ * The draft after a save answered: the server's state for every part left as
+ * it was sent, the newer typing for a part changed while the save ran (it is
+ * saved next). `baseline` is the state the save started from.
+ */
+export function mergeDisclosureDraft(current: DisclosureDraft, sent: DisclosureDraft, fresh: DisclosureDraft, baseline: DisclosureDraft): DisclosureDraft {
+  return mergeSavedDraft(current, sent, fresh, baseline, Object.keys(fresh));
 }
 
 export function disclosureToSend(draft: DisclosureDraft, language: LeadDisclosureInput["language"]): LeadDisclosureInput {

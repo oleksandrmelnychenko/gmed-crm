@@ -15,6 +15,7 @@ import {
   followUpMissing,
   followUpMissingAll,
   followUpShown,
+  fundsDescriptionRequired,
   fundsSourceOptions,
   missingOfRefusal,
   openFollowUpBlocks,
@@ -163,5 +164,16 @@ describe("follow-up blocks", () => {
     expect(paymentReasonAskedWithPayer({ payer: payer("third_party") })).toBe(false);
     expect(paymentReasonAskedWithPayer({ payer: { ...payer("self"), payer_type: "company" } })).toBe(false);
     expect(paymentReasonAskedWithPayer({ payer: null })).toBe(false);
+  });
+});
+
+describe("the words about a source of funds", () => {
+  it("are required with the source 'other' only, as on the server (lead_funds::stated)", () => {
+    expect(fundsDescriptionRequired("other")).toBe(true);
+    expect(fundsDescriptionRequired("income")).toBe(false);
+    expect(fundsDescriptionRequired("")).toBe(false);
+    expect(fundsDescriptionRequired(["income", "other"])).toBe(true);
+    expect(fundsDescriptionRequired(["income", "savings"])).toBe(false);
+    expect(fundsDescriptionRequired([])).toBe(false);
   });
 });

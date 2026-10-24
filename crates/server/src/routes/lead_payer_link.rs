@@ -2445,7 +2445,7 @@ async fn resolve_link(conn: &mut PgConnection, headers: &HeaderMap) -> Result<Li
     let current = declaration.filter(|declaration| {
         declaration.is_third_party()
             && declaration.contact_consent_at.is_some()
-            && declaration.payer_key() == link.payer_key
+            && lead_payer::same_payer_key(&declaration.payer_key(), &link.payer_key)
             && normalized_email(declaration.email.as_deref()) == normalized_email(Some(&link.email))
     });
     if current.is_none() {
@@ -4957,7 +4957,7 @@ pub(crate) async fn answered_by_payer(
     .fetch_optional(&mut *conn)
     .await?
     .flatten();
-    Ok(payer_key.is_some_and(|key| key == declaration.payer_key()))
+    Ok(payer_key.is_some_and(|key| lead_payer::same_payer_key(&key, &declaration.payer_key())))
 }
 
 /// When the payer's answers were sent, if they are.
@@ -5048,7 +5048,7 @@ pub(crate) async fn payer_changed_in_tx(
     };
     let mut payer_changed = previous.payer_kind != next.payer_kind
         || previous.payer_representative_id != next.payer_representative_id
-        || (next.is_third_party() && previous.payer_key() != next.payer_key());
+        || (next.is_third_party() && !previous.same_payer(next));
     // A third-party row of before that named the minor's parent, now
     // recorded as that representative (owner decision 2026-10-19): the same
     // person, whose answers in the own cabinet stay.
@@ -5096,6 +5096,12 @@ pub(crate) async fn payer_changed_in_tx(
         }
         revoke_active(conn, lead_id, "payer_changed", actor).await?;
         return reset_statement(conn, lead_id, "payer_changed", actor, &[]).await;
+    }
+    // Nobody but a third party answers through a link: once the payer is the
+    // patient or a paying parent — the same parent the third-party row of
+    // before named included, whose answers stay — no link may stay open.
+    if !next.is_third_party() {
+        revoke_active(conn, lead_id, "payer_changed", actor).await?;
     }
     if previous.contact_consent_at.is_some() && next.contact_consent_at.is_none() {
         revoke_active(conn, lead_id, "consent_withdrawn", actor).await?;
