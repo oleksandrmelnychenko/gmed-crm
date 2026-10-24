@@ -5280,6 +5280,25 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .await
     .unwrap();
     let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    // A previous payer's archived ID copy stays in the lead's archive; it is
+    // not the patient's (owner 2026-10-24).
+    let previous_payer_copy = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, lead_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, mime_type, file_size,
+                version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+                $1, $2, 'Früherer Zahler – Ausweisdokument', 'pass.pdf', 'payer_identity',
+                'identity', 'archived', 'internal', false, 'application/pdf', 128, $1, 1, $3
+           )"#,
+    )
+    .bind(previous_payer_copy)
+    .bind(lead_id)
+    .bind(app.patient_manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
     let source_attachment_id = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO lead_attachments
@@ -5551,6 +5570,13 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .await
     .unwrap();
     assert_eq!(moved_document_count, artifacts.document_ids.len() as i64);
+    let kept: (Option<Uuid>, Option<Uuid>) =
+        sqlx::query_as("SELECT lead_id, patient_id FROM documents WHERE id = $1")
+            .bind(previous_payer_copy)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(kept, (Some(lead_id), None));
 
     let (documents_status, patient_documents) = json_request(
         &app,

@@ -1921,6 +1921,19 @@ async fn another_payer_or_address_ends_the_link_and_the_purge_removes_it() {
     // Another payer: the link ends, the answers go, the files are withdrawn
     // (the documents stay with the lead for staff).
     let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass-neu.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let current_copy: Uuid = body["identity_documents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    // The same file again in the same place is not stored twice.
+    let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass-neu.pdf").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "duplicate_document", "{body}");
     let mut other = viktor();
     other["first_name"] = json!("Ben");
     other["email"] = json!("ben.zahler@example.com");
@@ -1957,6 +1970,37 @@ async fn another_payer_or_address_ends_the_link_and_the_purge_removes_it() {
     let resets = audit_contexts(pool, "payer_questionnaire_reset", lead_id).await;
     assert_eq!(resets.len(), 2);
     assert_eq!(resets[1].1["reason"], "payer_changed", "{:?}", resets[1]);
+    // The previous payer's copy is archived as such: kept with the lead, not
+    // current (owner 2026-10-24); so is the copy of before the address
+    // change.
+    let (status, name, file_kept): (String, String, bool) = sqlx::query_as(
+        "SELECT status, auto_name, storage_key IS NOT NULL FROM documents WHERE id = $1",
+    )
+    .bind(current_copy)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "archived");
+    assert!(name.starts_with("Früherer Zahler – "), "{name}");
+    assert!(file_kept);
+    assert_eq!(
+        resets[1].1["archived_previous_payer_documents"],
+        json!([current_copy]),
+        "{:?}",
+        resets[1]
+    );
+    let first_status: String = sqlx::query_scalar("SELECT status FROM documents WHERE id = $1")
+        .bind(document)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(first_status, "archived");
+    assert_eq!(
+        resets[0].1["archived_previous_payer_documents"],
+        json!([document]),
+        "{:?}",
+        resets[0]
+    );
 
     // The newly named payer and contact consent need a freshly submitted
     // request before another invitation can be issued.

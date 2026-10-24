@@ -26,6 +26,7 @@ import {
 import {
   CONTACT_CHANNELS,
   LEGAL_QUESTIONS,
+  LEAD_UPLOAD_ACCEPT,
   MAX_UPLOAD_BYTES,
   consentGiven,
   uploadLimitReached,
@@ -431,7 +432,7 @@ export function IdentityDocumentSection({
           id="lead-request-identity-files"
           type="file"
           multiple
-          accept=".pdf,.jpg,.jpeg,.png"
+          accept={LEAD_UPLOAD_ACCEPT}
           className="sr-only"
           disabled={!consentReady || uploading || full}
           onChange={(event) => {

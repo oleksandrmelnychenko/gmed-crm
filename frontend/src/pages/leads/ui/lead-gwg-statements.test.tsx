@@ -66,6 +66,21 @@ function statement(html: string, testId: string): string {
   return html.slice(start, end);
 }
 
+describe("LeadGwgStatements: moving a cabinet file (owner 2026-10-24)", () => {
+  it("offers the other slots for a file not taken over, only to staff who may move it", () => {
+    const intake = portalState();
+    const html = renderToStaticMarkup(
+      <LeadGwgStatements intake={intake} payer={null} tx={ru} lang="ru" today={TODAY} onMoveDocument={() => undefined} />,
+    );
+    expect(html).toContain('data-testid="lead-upload-move-doc-1"');
+    // A reviewed file stays where it is.
+    expect(html).not.toContain('data-testid="lead-upload-move-doc-2"');
+    expect(html).toContain("Подтверждение связи с плательщиком");
+    expect(html).not.toContain('<option value="identity">');
+    expect(render(intake)).not.toContain("lead-upload-move-");
+  });
+});
+
 describe("LeadGwgStatements", () => {
   it("shows saved organisation fields with provenance even before identification is filled", () => {
     const intake = portalState({

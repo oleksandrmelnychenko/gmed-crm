@@ -50,7 +50,7 @@ function offenders(langs: readonly CabinetLang[], bad: (text: string, path: stri
 
 /** Names, brands, codes and German legal terms that stay as they are in every language. */
 const KEPT_WORDS = new Set([
-  "GMED", "Mia", "Muster", "E-mail", "e-mail", "WhatsApp", "Threema", "Telegram", "Skribble", "PDF", "JPG", "PNG",
+  "GMED", "Mia", "Muster", "E-mail", "e-mail", "WhatsApp", "Threema", "Telegram", "Skribble", "PDF", "JPG", "PNG", "HEIC", "iPhone",
   "ID", "IBAN", "USt-IdNr", "DSGVO", "GDPR", "Betreuer", "Betreuerausweis", "Auskunft", "an", "Dritte", "Anna",
   "Ivanova", "Hanna", "Ivanenko", "name", "example", "de", "EUR",
 ]);
@@ -155,6 +155,8 @@ describe("lead cabinet and payer link: language", () => {
         "unsupported_file_type",
         "file_too_large",
         "file_rejected",
+        "duplicate_document",
+        "heic_not_supported",
         "personal_data_incomplete",
         "consent_version_outdated",
         "lead_converted",

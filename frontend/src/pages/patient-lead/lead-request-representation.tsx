@@ -32,7 +32,7 @@ import {
   type RepresentativeUploadKind,
 } from "./lead-request-api";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
-import { MAX_UPLOAD_BYTES, combinedSaveState, consentGiven, uploadLimitReached, type SaveState } from "./lead-request-model";
+import { LEAD_UPLOAD_ACCEPT, MAX_UPLOAD_BYTES, combinedSaveState, consentGiven, uploadLimitReached, type SaveState } from "./lead-request-model";
 import {
   CabinetSection as Section,
   ConsentNeededNote,
@@ -452,7 +452,7 @@ export function RepresentativeUpload({
         id={`${id}-files`}
         type="file"
         multiple
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept={LEAD_UPLOAD_ACCEPT}
         className="sr-only"
         aria-labelledby={`${id}-label`}
         disabled={!ready || uploading}

@@ -5201,6 +5201,32 @@ fn medical_classification_audit_event(
 }
 
 #[cfg(test)]
+mod gwg_identity_copy_tests {
+    use super::{Role, gwg_identity_copy_closed_to_role};
+
+    #[test]
+    fn the_concierge_does_not_open_the_payers_or_a_representatives_copies() {
+        for art in [
+            "payer_identity",
+            "payer_funds_proof",
+            "representative_identity",
+            "representative_authority",
+        ] {
+            assert!(gwg_identity_copy_closed_to_role(Role::Concierge, Some(art)));
+            assert!(!gwg_identity_copy_closed_to_role(
+                Role::PatientManager,
+                Some(art)
+            ));
+        }
+        assert!(!gwg_identity_copy_closed_to_role(
+            Role::Concierge,
+            Some("identity")
+        ));
+        assert!(!gwg_identity_copy_closed_to_role(Role::Concierge, None));
+    }
+}
+
+#[cfg(test)]
 mod storage_filename_tests {
     use super::compact_storage_filename;
 
@@ -13376,6 +13402,8 @@ async fn fetch_document_row(
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
+                  (SELECT u.lead_id FROM lead_portal_uploads u WHERE u.document_id = d.id)
+                      AS upload_lead_id,
                   (SELECT COALESCE(
                        (SELECT latest.id FROM documents latest
                          WHERE COALESCE(latest.version_root_document_id, latest.id)
@@ -14220,7 +14248,30 @@ pub(crate) fn is_consent_document_row(row: &sqlx::postgres::PgRow) -> bool {
 /// Patient Manager and CEO Assistant keep their access; Billing keeps the
 /// identity document scans (owner decision 2026-10-06).
 pub(crate) fn consent_document_closed_to_role(role: Role, row: &sqlx::postgres::PgRow) -> bool {
-    matches!(role, Role::Concierge | Role::Billing) && is_consent_document_row(row)
+    (matches!(role, Role::Concierge | Role::Billing) && is_consent_document_row(row))
+        || gwg_identity_copy_closed_to_role(
+            role,
+            row.try_get::<Option<String>, _>("art")
+                .unwrap_or_default()
+                .as_deref(),
+        )
+}
+
+/// The identity copies of the payer and of a representative are GwG evidence
+/// of the request. The concierge gets none of the lead's GwG statements, so
+/// not these copies either once they belong to the patient (owner
+/// 2026-10-24); the patient's own passport stays open for bookings.
+pub(crate) fn gwg_identity_copy_closed_to_role(role: Role, art: Option<&str>) -> bool {
+    role == Role::Concierge
+        && matches!(
+            art.map(str::trim),
+            Some(
+                crate::routes::lead_representatives::UPLOAD_IDENTITY
+                    | crate::routes::lead_representatives::UPLOAD_AUTHORITY
+                    | "payer_identity"
+                    | "payer_funds_proof"
+            )
+        )
 }
 
 pub(crate) fn document_access_allowed(
@@ -32082,16 +32133,33 @@ async fn download_document(
 
     // Who took a copy of a patient file is part of the disclosure record, so it
     // is a domain event (kept a year) rather than a short-lived request row.
-    state.audit_sender.try_send(audit::domain_event(
+    // Written before the file goes out, not through the lossy queue: a copy
+    // nobody recorded is not handed out (QA 2026-10-24). The lead names the
+    // file of a request, also once it moved to the patient.
+    let event = audit::domain_event(
         "download_document",
         Some(auth.user_id),
         "document",
         Some(id),
         json!({
             "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+            "lead_id": row.try_get::<Option<Uuid>, _>("lead_id").unwrap_or_default()
+                .or(row.try_get::<Option<Uuid>, _>("upload_lead_id").unwrap_or_default()),
             "downloaded_by": "staff",
         }),
-    ));
+    );
+    let recorded = async {
+        let mut conn = state.db.acquire().await?;
+        audit::write_in_transaction(&mut conn, &event).await
+    }
+    .await;
+    if let Err(error) = recorded {
+        tracing::error!(%error, document_id = %id, "record document download");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record the download",
+        );
+    }
 
     document_attachment_response(&mime_type, disposition, data)
 }

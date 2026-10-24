@@ -387,11 +387,22 @@ async fn cabinet_submission_protects_health_identity_and_base_changes() {
         None,
     )
     .await;
+    // RBAC matrix (owner 2026-10-24): accepting a file needs leads.edit and
+    // patients.medical.view, and the right to open it; Sales has neither.
     assert_eq!(
         status,
-        StatusCode::OK,
-        "Identity review needs leads.edit: {body}"
+        StatusCode::FORBIDDEN,
+        "Sales cannot accept a file it cannot open: {body}"
     );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead}/portal-intake/documents/{document}/review"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     let (status, body) = json_request(
         router,
         "POST",
@@ -2325,6 +2336,20 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
             upload_file(router, &path, &patient, "pass.jpg", "image/jpeg", PDF).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
         assert_eq!(body["code"], "unsupported_file_type", "{path} {body}");
+        // What the cabinet does not offer is refused for medical documents
+        // too, and an iPhone photo (HEIC) says how to send it (owner
+        // 2026-10-24).
+        let (status, body) =
+            upload_file(router, &path, &patient, "notes.txt", "text/plain", b"notes").await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "unsupported_file_type", "{path} {body}");
+        assert_eq!(body["accept"], ".pdf,.jpg,.jpeg,.png", "{body}");
+        let heic = b"\0\0\0\x18ftypheic\0\0\0\0mif1heic synthetic";
+        let (status, body) =
+            upload_file(router, &path, &patient, "IMG_0001.HEIC", "image/heic", heic).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "unsupported_file_type", "{body}");
+        assert_eq!(body["format"], "heic", "{body}");
     }
     let (status, body) = upload_file(
         router,
@@ -7556,15 +7581,17 @@ async fn concurrent_uploads_respect_the_locked_thirty_document_limit() {
         .await
         .unwrap();
     let mut uploads = Vec::new();
-    for _ in 0..2 {
+    for index in 0..2 {
         let router = app.suite.app.clone();
         let patient = patient.clone();
+        // Two different files: the same one twice is a duplicate (owner 2026-10-24).
+        let bytes = format!("%PDF-1.4\n% concurrent upload {index}\n%%EOF\n").into_bytes();
         uploads.push(tokio::spawn(async move {
             upload(
                 &router,
                 &format!("/api/v1/me/lead-requests/{lead}/documents"),
                 &patient,
-                PDF,
+                &bytes,
             )
             .await
         }));
@@ -9367,4 +9394,164 @@ async fn a_second_parent_entered_in_the_cabinet_is_not_linked_to_a_patient_recor
     let text = body.to_string();
     assert!(!text.contains("Geheimweg"), "{text}");
     assert!(!text.contains("1979-05-06"), "{text}");
+}
+
+/// Owner 2026-10-24: the same file in the same slot is not stored twice;
+/// staff move a file uploaded in the wrong slot while it is not taken over;
+/// a download of a lead's document is recorded with the lead.
+#[tokio::test]
+async fn duplicates_are_refused_files_move_between_slots_and_downloads_name_the_lead() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, _, patient) = lead_with_login(&app, "Mira", "mira.slots@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let identity_document = format!("{request}/identity-document");
+    give_consent(router, lead_id, &patient, "lead_inquiry_processing").await;
+    give_consent(router, lead_id, &patient, "health_data_processing").await;
+
+    let (status, body) = upload_file(
+        router,
+        &identity_document,
+        &patient,
+        "pass.png",
+        "image/png",
+        PNG,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let document_id: Uuid = body["identity_documents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    // The same content again, under another name: refused, nothing stored.
+    let (status, body) = upload_file(
+        router,
+        &identity_document,
+        &patient,
+        "pass-2.png",
+        "image/png",
+        PNG,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "duplicate_document", "{body}");
+    let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM documents WHERE lead_id = $1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 1);
+    // In another slot the same content is another document.
+    let (status, body) = upload_file(
+        router,
+        &format!("{request}/documents"),
+        &patient,
+        "scan.png",
+        "image/png",
+        PNG,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let move_path = format!("/api/v1/leads/{lead_id}/portal-intake/documents/{document_id}/move");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &move_path,
+        &app.staff("sales"),
+        Some(json!({ "kind": "relationship_proof" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let pm = app.staff("patient_manager");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &move_path,
+        &pm,
+        Some(json!({ "kind": "medical" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "invalid_upload_kind", "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &move_path,
+        &pm,
+        Some(json!({ "kind": "representative_identity", "representative_id": Uuid::new_v4() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &move_path,
+        &pm,
+        Some(json!({ "kind": "relationship_proof" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["moved"], true, "{body}");
+    let (art, category, auto_name, kind): (String, Option<String>, String, String) =
+        sqlx::query_as(
+            r#"SELECT d.art, d.category, d.auto_name, u.kind
+               FROM documents d JOIN lead_portal_uploads u ON u.document_id = d.id
+               WHERE d.id = $1"#,
+        )
+        .bind(document_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(art, "relationship_proof");
+    assert_eq!(category.as_deref(), Some("administrative"));
+    assert_eq!(auto_name, "Nachweis der Beziehung zum Kostenübernehmer");
+    assert_eq!(kind, "relationship_proof");
+    assert_eq!(
+        audit_count(pool, "lead_portal_upload_moved", document_id).await,
+        1
+    );
+    let (_, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(body["identity_documents"], json!([]), "{body}");
+
+    // Once taken over it stays where it is.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-intake/documents/{document_id}/review"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &move_path,
+        &pm,
+        Some(json!({ "kind": "identity" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "upload_reviewed", "{body}");
+
+    // The download is recorded, with the lead, before the file goes out.
+    let download = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/documents/{document_id}/download"))
+        .header("Authorization", &pm)
+        .body(Body::empty())
+        .unwrap();
+    let response = router.clone().oneshot(download).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let context: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action = 'download_document' AND entity_id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(context["lead_id"], json!(lead_id), "{context}");
 }

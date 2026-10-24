@@ -717,6 +717,27 @@ export function reviewLeadPortalUpload(leadId: string, documentId: string): Prom
   });
 }
 
+/** The slots of a cabinet file staff can move it between (owner 2026-10-24). */
+export type LeadUploadSlotKind =
+  | "identity"
+  | "representative_identity"
+  | "representative_authority"
+  | "self_funds_proof"
+  | "relationship_proof";
+
+/** Staff put a cabinet file into the right slot, before it is taken over. */
+export function moveLeadPortalUpload(
+  leadId: string,
+  documentId: string,
+  kind: LeadUploadSlotKind,
+  representativeId: string | null,
+): Promise<{ moved: boolean }> {
+  return apiFetch(`${base(leadId)}/portal-intake/documents/${encodeURIComponent(documentId)}/move`, {
+    method: "POST",
+    body: JSON.stringify({ kind, representative_id: representativeId }),
+  });
+}
+
 export function issueLeadGuardianAccess(leadId: string, trustedContactId: string): Promise<LeadGuardianAccessIssued> {
   return apiFetch<LeadGuardianAccessIssued>(`${base(leadId)}/portal-guardians`, {
     method: "POST",

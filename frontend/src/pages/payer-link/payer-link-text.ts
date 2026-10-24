@@ -137,6 +137,8 @@ export type PayerLinkText = {
   documentReviewed: string;
   fileTooLarge: (name: string) => string;
   tooManyDocuments: string;
+  duplicateDocument: (name: string) => string;
+  heicNotSupported: (name: string) => string;
   uploadFailed: (name: string) => string;
   uploadReviewed: string;
   removeFailed: string;
@@ -394,6 +396,8 @@ const de: PayerLinkText = {
   documentReviewed: "Von GMED geprüft",
   fileTooLarge: (name) => `${name} ist größer als 25 MB.`,
   tooManyDocuments: "Es können keine weiteren Dateien hochgeladen werden. Bitte wenden Sie sich an GMED.",
+  duplicateDocument: (name) => `${name} ist bereits hochgeladen.`,
+  heicNotSupported: (name) => `${name}: HEIC-Fotos (iPhone) können wir nicht annehmen. Bitte speichern Sie das Foto als JPG und laden Sie es erneut hoch.`,
   uploadFailed: (name) => `${name} konnte nicht hochgeladen werden. Bitte prüfen Sie die Datei (PDF, JPG oder PNG, bis 25 MB).`,
   uploadReviewed: "Diese Datei hat GMED bereits geprüft; sie kann nicht mehr entfernt werden.",
   removeFailed: "Die Datei konnte nicht entfernt werden.",
@@ -692,6 +696,8 @@ const en: PayerLinkText = {
   documentReviewed: "Checked by GMED",
   fileTooLarge: (name) => `${name} is larger than 25 MB.`,
   tooManyDocuments: "No further files can be uploaded. Please contact GMED.",
+  duplicateDocument: (name) => `${name} is already uploaded.`,
+  heicNotSupported: (name) => `${name}: we cannot accept HEIC photos (iPhone). Please save the photo as JPG and upload it again.`,
   uploadFailed: (name) => `${name} could not be uploaded. Please check the file (PDF, JPG or PNG, up to 25 MB).`,
   uploadReviewed: "GMED has already checked this file; it can no longer be removed.",
   removeFailed: "The file could not be removed.",
@@ -993,6 +999,8 @@ const uk: PayerLinkText = {
   documentReviewed: "Перевірено GMED",
   fileTooLarge: (name) => `${name} більший за 25 МБ.`,
   tooManyDocuments: "Більше файлів завантажити не можна. Будь ласка, зверніться до GMED.",
+  duplicateDocument: (name) => `${name} уже завантажено.`,
+  heicNotSupported: (name) => `${name}: фото у форматі HEIC (iPhone) ми не можемо прийняти. Збережіть фото як JPG і завантажте його знову.`,
   uploadFailed: (name) => `Не вдалося завантажити ${name}. Будь ласка, перевірте файл (PDF, JPG або PNG, до 25 МБ).`,
   uploadReviewed: "GMED уже перевірила цей файл; видалити його більше не можна.",
   removeFailed: "Не вдалося видалити файл.",
@@ -1293,6 +1301,8 @@ const ru: PayerLinkText = {
   documentReviewed: "Проверено GMED",
   fileTooLarge: (name) => `${name} больше 25 МБ.`,
   tooManyDocuments: "Больше файлов загрузить нельзя. Пожалуйста, обратитесь в GMED.",
+  duplicateDocument: (name) => `${name} уже загружен.`,
+  heicNotSupported: (name) => `${name}: фото в формате HEIC (iPhone) мы не можем принять. Сохраните фото как JPG и загрузите его снова.`,
   uploadFailed: (name) => `Не удалось загрузить ${name}. Пожалуйста, проверьте файл (PDF, JPG или PNG, до 25 МБ).`,
   uploadReviewed: "GMED уже проверила этот файл; удалить его больше нельзя.",
   removeFailed: "Не удалось удалить файл.",

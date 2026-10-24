@@ -8524,9 +8524,14 @@ async fn convert_lead(
                WHERE lead_id = $1 OR source_lead_id = $1
                RETURNING id, source_lead_id
            ), moved_documents AS (
+               -- A previous payer's archived copies stay in the lead's archive
+               -- (retention, audit); they are not the patient's (owner
+               -- 2026-10-24).
                UPDATE documents
                SET patient_id = $2, lead_id = NULL
                WHERE lead_id = $1
+                 AND NOT (status = 'archived'
+                          AND art IN ('payer_identity', 'payer_funds_proof'))
                RETURNING id
            ), moved_contracts AS (
                UPDATE framework_contracts

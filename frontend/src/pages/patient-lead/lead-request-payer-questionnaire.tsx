@@ -28,7 +28,7 @@ import {
   type LeadRequest,
   type LeadRequestDocument,
 } from "./lead-request-api";
-import { CONTACT_CHANNELS, MAX_UPLOAD_BYTES, languageName, type SaveState } from "./lead-request-model";
+import { CONTACT_CHANNELS, LEAD_UPLOAD_ACCEPT, MAX_UPLOAD_BYTES, languageName, type SaveState } from "./lead-request-model";
 import {
   FUNDS_SOURCES,
   PAYER_LANGUAGES,
@@ -609,7 +609,7 @@ function PayerQuestionnaireForm({
                 id="lead-request-payer-funds-proof-files"
                 type="file"
                 multiple
-                accept=".pdf,.jpg,.jpeg,.png"
+                accept={LEAD_UPLOAD_ACCEPT}
                 className="sr-only"
                 disabled={readOnly || uploading}
                 onChange={(event) => {

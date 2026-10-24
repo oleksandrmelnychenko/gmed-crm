@@ -1185,6 +1185,14 @@ export function consentText(request: Pick<LeadRequest, "consents">, purpose: str
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
+/**
+ * The file types of every upload of a lead's request and of the payer: the
+ * server takes exactly these (`LEAD_UPLOAD_ACCEPT` and
+ * `IDENTITY_DOCUMENT_MIME_TYPES` in `lead_portal_intake.rs`; both pinned by
+ * tests, owner 2026-10-24).
+ */
+export const LEAD_UPLOAD_ACCEPT = ".pdf,.jpg,.jpeg,.png";
+
 export function formatFileSize(size: number | null | undefined, lang: string): string {
   if (!size || size <= 0) return "";
   const locale = cabinetLocale(lang);

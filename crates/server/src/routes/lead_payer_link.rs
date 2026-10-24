@@ -100,6 +100,8 @@ const LOCK_AFTER_FAILED: i32 = 10;
 pub(crate) const PRIVACY_TEXT_VERSION: &str = "payer-privacy-2026-10-06";
 /// Active payer uploads per lead.
 const MAX_PAYER_UPLOADS: usize = 10;
+/// The name prefix of a previous payer's archived copy (owner 2026-10-24).
+pub(crate) const PREVIOUS_PAYER_PREFIX: &str = "Früherer Zahler – ";
 const MAX_BENEFICIAL_OWNERS: usize = 10;
 /// `numeric(12, 2)`: at most 9 999 999 999.99.
 #[cfg(test)]
@@ -2855,6 +2857,7 @@ struct StoredFile {
     file_size: i64,
     storage_key: String,
     mime_type: String,
+    sha256: String,
 }
 
 /// Reads, checks (type, content, malware scan) and stores a payer file as a
@@ -2871,16 +2874,24 @@ async fn store_payer_file(
     multipart: &mut Multipart,
 ) -> Result<StoredFile, Response> {
     let (file_name, content_type, data) = intake::read_upload_file(multipart).await?;
+    if intake::is_heic_upload(&file_name, content_type.as_deref(), &data) {
+        return Err(intake::unsupported_upload(true));
+    }
+    // The same file in the same place is not stored again (owner 2026-10-24).
+    let sha256 = intake::content_sha256(&data);
+    let mut conn = state.db.acquire().await.map_err(database)?;
+    if intake::is_duplicate_upload(&mut conn, lead_id, kind, None, &sha256)
+        .await
+        .map_err(database)?
+    {
+        return Err(intake::duplicate_document());
+    }
+    drop(conn);
     let mime_type =
         crate::routes::leads::validate_lead_attachment(&file_name, content_type.as_deref(), &data)
             .await?;
     if !intake::IDENTITY_DOCUMENT_MIME_TYPES.contains(&mime_type.as_str()) {
-        return Err(coded(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "unsupported_file_type",
-            "Upload the document as PDF, JPG or PNG",
-            json!({}),
-        ));
+        return Err(intake::unsupported_upload(false));
     }
     // German names, like every document of the lead (QA 2026-10-10).
     let (auto_name, category) = match kind {
@@ -2939,22 +2950,30 @@ async fn store_payer_file(
         file_size,
         storage_key,
         mime_type,
+        sha256,
     })
 }
 
-/// Registers a stored payer file in `lead_portal_uploads`, audited.
+/// Registers a stored payer file in `lead_portal_uploads`, audited; 409
+/// `duplicate_document` when the same file won meanwhile.
 async fn register_payer_file(
     conn: &mut PgConnection,
     lead_id: Uuid,
     kind: UploadKind,
     writer: &Writer,
     file: &StoredFile,
-) -> Result<(), sqlx::Error> {
+) -> Result<(), Response> {
+    if intake::is_duplicate_upload(conn, lead_id, kind, None, &file.sha256)
+        .await
+        .map_err(database)?
+    {
+        return Err(intake::duplicate_document());
+    }
     sqlx::query(
         r#"INSERT INTO lead_portal_uploads
                (document_id, lead_id, uploaded_by, access_kind, consent_record_id, kind,
-                payer_link_id)
-           VALUES ($1, $2, $3, $4, NULL, $5, $6)"#,
+                payer_link_id, content_sha256)
+           VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)"#,
     )
     .bind(file.document_id)
     .bind(lead_id)
@@ -2962,8 +2981,10 @@ async fn register_payer_file(
     .bind(writer.access_kind())
     .bind(kind.as_str())
     .bind(writer.link_id())
+    .bind(&file.sha256)
     .execute(&mut *conn)
-    .await?;
+    .await
+    .map_err(database)?;
     audit::write_in_transaction(
         conn,
         &writer.event(
@@ -2979,6 +3000,7 @@ async fn register_payer_file(
         ),
     )
     .await
+    .map_err(database)
 }
 
 /// The payer's own identity adopted into the declaration (D8). The payer's
@@ -3816,9 +3838,7 @@ async fn link_upload(
             return Err(response);
         }
         let writer = link_writer(&state, &current, &headers);
-        register_payer_file(&mut tx, current.lead_id, kind, &writer, &file)
-            .await
-            .map_err(database)?;
+        register_payer_file(&mut tx, current.lead_id, kind, &writer, &file).await?;
         tx.commit().await.map_err(database)
     }
     .await;
@@ -4313,9 +4333,7 @@ async fn cabinet_funds_proof(
         let writer = Writer::Parent {
             user_id: auth.user_id,
         };
-        register_payer_file(&mut tx, lead_id, kind, &writer, &file)
-            .await
-            .map_err(database)?;
+        register_payer_file(&mut tx, lead_id, kind, &writer, &file).await?;
         tx.commit().await.map_err(database)
     }
     .await;
@@ -5147,6 +5165,34 @@ async fn reset_statement(
     .bind(lead_id)
     .fetch_optional(&mut *conn)
     .await?;
+    // Another person pays now — or the payer's address changed, whose holder
+    // may be somebody else (QA 2026-10-06): the previous payer's copies are
+    // archived as "früherer Zahler" — kept with the lead for retention and
+    // audit, never shown as current nor carried to the patient (owner
+    // 2026-10-24).
+    let archived: Vec<Uuid> = if matches!(reason, "payer_changed" | "email_changed") {
+        sqlx::query_scalar(&format!(
+            r#"UPDATE documents d
+               SET status = 'archived',
+                   auto_name = CASE WHEN d.auto_name LIKE '{PREVIOUS_PAYER_PREFIX}%' THEN d.auto_name
+                                    ELSE '{PREVIOUS_PAYER_PREFIX}' || d.auto_name END,
+                   notes = concat_ws(E'\n', NULLIF(d.notes, ''),
+                       'Archiviert: Zahler oder E-Mail-Adresse des Zahlers geändert (' || to_char(now() AT TIME ZONE 'Europe/Berlin', 'DD.MM.YYYY') || ')'),
+                   updated_at = now()
+               FROM lead_portal_uploads u
+               WHERE u.document_id = d.id
+                 AND u.lead_id = $1
+                 AND u.kind IN ('payer_identity', 'payer_funds_proof')
+                 AND u.withdrawn_at IS NULL
+                 AND d.lead_id = $1
+               RETURNING d.id"#
+        ))
+        .bind(lead_id)
+        .fetch_all(&mut *conn)
+        .await?
+    } else {
+        Vec::new()
+    };
     let withdrawn = sqlx::query(
         r#"UPDATE lead_portal_uploads SET withdrawn_at = now()
                WHERE lead_id = $1
@@ -5168,6 +5214,7 @@ async fn reset_statement(
                 json!({
                     "reason": reason,
                     "withdrawn_uploads": withdrawn,
+                    "archived_previous_payer_documents": archived,
                     "payment_route_cleared": payment_route_cleared,
                 }),
             ),

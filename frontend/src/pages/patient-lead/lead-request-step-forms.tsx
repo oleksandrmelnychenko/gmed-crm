@@ -32,6 +32,7 @@ import {
   useIdentificationForm,
 } from "./lead-request-identification";
 import {
+  LEAD_UPLOAD_ACCEPT,
   MAX_UPLOAD_BYTES,
   combinedSaveState,
   consentGiven,
@@ -1135,7 +1136,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
             id="lead-request-files"
             type="file"
             multiple
-            accept=".pdf,.jpg,.jpeg,.png"
+            accept={LEAD_UPLOAD_ACCEPT}
             className="sr-only"
             disabled={!consentReady || uploading || full}
             onChange={(event) => {

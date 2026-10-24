@@ -2523,7 +2523,8 @@ test.describe("lead cabinet", () => {
         });
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto("/");
-        await page.getByTestId("lead-cabinet-language").getByRole("radio", { name: language }).click();
+        // The request card's own switch: the frame's top switch shows until the card claims it.
+        await page.getByTestId("lead-request").getByTestId("lead-cabinet-language").getByRole("radio", { name: language }).click();
         await expect(page.getByRole("heading", { name: language === "UA" ? /Ваша заявка|Заявка для/ : /Your request|Request for/ }).first()).toBeVisible();
         const steps = await page.locator("[data-step]").evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("data-step") ?? ""));
         expect(steps.length).toBeGreaterThan(4);

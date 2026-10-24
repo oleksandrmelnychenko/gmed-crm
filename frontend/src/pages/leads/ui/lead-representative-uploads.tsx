@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { LeadCustody, LeadIdentityDocument, LeadRepresentative } from "../data/lead-portal-intake-api";
 import { uploadRepresentativeDocument, type RepresentativeUploadKind } from "../data/lead-risk-api";
 import type { Tx } from "../model/lead-payer";
+import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
 
 const MAX_REPRESENTATIVE_FILE_SIZE = 25 * 1024 * 1024;
 
@@ -84,7 +85,7 @@ function UploadBlock({
             id={inputId}
             type="file"
             className="peer sr-only"
-            accept=".pdf,.jpg,.jpeg,.png"
+            accept={LEAD_UPLOAD_ACCEPT}
             disabled={disabled || busy}
             data-testid={`lead-representative-upload-${kind}-${person.id}-input`}
             onChange={(event) => {

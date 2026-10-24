@@ -243,7 +243,9 @@ function useUploads({
           messages.push(text.tooManyDocuments);
           break;
         }
-        if (error?.status === 413) messages.push(text.fileTooLarge(file.name));
+        if (error?.code === "duplicate_document") messages.push(text.duplicateDocument(file.name));
+        else if (error?.code === "unsupported_file_type" && error.body.format === "heic") messages.push(text.heicNotSupported(file.name));
+        else if (error?.status === 413) messages.push(text.fileTooLarge(file.name));
         else if (error && error.status === 0) messages.push(text.networkError);
         else messages.push(text.uploadFailed(file.name));
       }

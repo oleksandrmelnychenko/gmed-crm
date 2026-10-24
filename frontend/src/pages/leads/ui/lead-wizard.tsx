@@ -80,7 +80,7 @@ import {
 import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
 import { useLeadPayerLink } from "../model/use-lead-payer-link";
 import { amlPrefillFromLeadAnswers, applyAmlLeadPrefill } from "../model/enhanced-check-prefill";
-import { fetchLeadPortalIntake, LEAD_CUSTODY_VALUES, type LeadCustody, type LeadRepresentative } from "../data/lead-portal-intake-api";
+import { fetchLeadPortalIntake, LEAD_CUSTODY_VALUES, moveLeadPortalUpload, type LeadCustody, type LeadRepresentative } from "../data/lead-portal-intake-api";
 import type { RepresentativeUploadKind } from "../data/lead-risk-api";
 import { useLeadEnhancedCheck } from "../model/use-lead-enhanced-check";
 import { useRiskCountryLists } from "../model/use-risk-country-lists";
@@ -138,6 +138,7 @@ import {
 } from "../model/lead-trusted-contacts";
 import { medicalStepHasContent } from "../model/medical-step-content";
 import { uploadEach } from "../model/upload-each";
+import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
 import { removeLeadRepresentativeData, removeLeadTrustedContact } from "../data/lead-representation-api";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
@@ -8586,7 +8587,7 @@ ${serviceCommentLines.join("\n")}`
                         type="file"
                         multiple
                         className="peer sr-only"
-                        accept=".pdf,.jpg,.jpeg,.png"
+                        accept={LEAD_UPLOAD_ACCEPT}
                         disabled={isBusy}
                         onChange={(event) => {
                           const files = Array.from(event.currentTarget.files ?? []);
@@ -8830,6 +8831,13 @@ ${serviceCommentLines.join("\n")}`
                   <LeadGwgStatements
                     intake={step1Portal.intake}
                     onDownloadDocument={(document) => void downloadDocumentFile(document.id, document.file_name).catch(showWizardError)}
+                    onMoveDocument={canReviewPortalUploads && leadId ? (document, target) => {
+                      // A file in the wrong slot (owner 2026-10-24).
+                      setError("");
+                      void moveLeadPortalUpload(leadId, document.id, target.kind, target.representativeId)
+                        .then(() => reloadStep1PortalState())
+                        .catch(showWizardError);
+                    } : undefined}
                     payer={payer.data?.declaration ?? null}
                     payerLink={payerLink.data}
                     askedBlocks={riskAskedBlocks}
@@ -9226,7 +9234,7 @@ ${serviceCommentLines.join("\n")}`
                       id="lead-file-identity"
                       type="file"
                       className="peer sr-only"
-                      accept=".pdf,.jpg,.jpeg,.png"
+                      accept={LEAD_UPLOAD_ACCEPT}
                       disabled={isBusy}
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];

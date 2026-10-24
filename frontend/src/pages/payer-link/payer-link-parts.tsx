@@ -7,7 +7,7 @@ import { selectClass, tokens } from "@/components/record-workspace/primitives/de
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import { cn } from "@/lib/utils";
-import { formatFileSize } from "@/pages/patient-lead/lead-request-model";
+import { LEAD_UPLOAD_ACCEPT, formatFileSize } from "@/pages/patient-lead/lead-request-model";
 
 import type { PayerDocument } from "./payer-link-api";
 import type { PayerLinkText } from "./payer-link-text";
@@ -234,7 +234,7 @@ export function UploadBlock({
         id={id}
         type="file"
         multiple
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept={LEAD_UPLOAD_ACCEPT}
         className="sr-only"
         aria-labelledby={`${id}-label`}
         disabled={disabled || busy}

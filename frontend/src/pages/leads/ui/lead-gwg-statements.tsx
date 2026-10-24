@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { createContext, useContext, useId, useState, type ReactNode } from "react";
 import { ChevronDown, CircleAlert, Download } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
@@ -57,6 +57,7 @@ import { statedFundsSourceLabel, statedFundsSourcesLabel } from "../model/lead-p
 import { identityDocumentEnteredLine } from "../model/lead-identity-document-data";
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
+import { uploadMoveTargets, type UploadMoveTarget } from "../model/upload-move";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
 const STATEMENT_COLUMNS = "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
@@ -161,11 +162,49 @@ function Statement({
   );
 }
 
+/**
+ * Staff move a cabinet file into the right slot (owner 2026-10-24); given by
+ * the wizard when the role may do it. The server refuses a file already
+ * taken over.
+ */
+type UploadMove = {
+  targets: readonly UploadMoveTarget[];
+  onMove: (document: LeadIdentityDocument, target: UploadMoveTarget) => void;
+};
+const UploadMoveContext = createContext<UploadMove | null>(null);
+
+/** "Move to …" of one cabinet file that is not taken over yet. */
+function UploadMoveSelect({ document, slot, tx }: { document: LeadIdentityDocument; slot: string; tx: Tx }) {
+  const move = useContext(UploadMoveContext);
+  if (!move || document.reviewed || document.uploaded_by_staff) return null;
+  const targets = move.targets.filter((target) => target.value !== slot);
+  if (targets.length === 0) return null;
+  return (
+    <select
+      className="ml-2 h-6 max-w-full rounded border border-border bg-background px-1 text-xs text-muted-foreground"
+      aria-label={tx("Переместить файл", "Datei verschieben")}
+      data-testid={`lead-upload-move-${document.id}`}
+      value=""
+      onChange={(event) => {
+        const target = targets.find((item) => item.value === event.currentTarget.value);
+        if (target) move.onMove(document, target);
+      }}
+    >
+      <option value="">{tx("Переместить в…", "Verschieben nach…")}</option>
+      {targets.map((target) => (
+        <option key={target.value} value={target.value}>{target.label}</option>
+      ))}
+    </select>
+  );
+}
+
 /** The uploaded files of one kind, each with the day of the upload and "reviewed". */
-function UploadedFiles({ documents, tx, onDownload }: {
+function UploadedFiles({ documents, tx, onDownload, slot }: {
   documents: readonly LeadIdentityDocument[];
   tx: Tx;
   onDownload?: (document: LeadIdentityDocument) => void;
+  /** The cabinet slot of these files (`kind` or `kind:representativeId`): they can be moved elsewhere. */
+  slot?: string;
 }) {
   return (
     <ul className="min-w-0 space-y-1 break-words text-[13px] leading-5 [overflow-wrap:anywhere]">
@@ -181,6 +220,7 @@ function UploadedFiles({ documents, tx, onDownload }: {
             {document.uploaded_at ? ` · ${formatAppDate(document.uploaded_at)}` : ""}
             {document.reviewed ? ` · ${tx("просмотрен", "geprüft")}` : ""}
           </span>
+          {slot ? <UploadMoveSelect document={document} slot={slot} tx={tx} /> : null}
         </li>
       ))}
     </ul>
@@ -258,14 +298,14 @@ function RepresentativeStatements({
           className="col-span-full"
           testId={`lead-gwg-representative-identity-documents-${person.id}`}
         >
-          {person.identity_documents.length > 0 ? <UploadedFiles documents={person.identity_documents} tx={tx} /> : null}
+          {person.identity_documents.length > 0 ? <UploadedFiles documents={person.identity_documents} tx={tx} slot={`representative_identity:${person.id}`} /> : null}
         </Statement>
         <Statement
           label={tx("Файлы: подтверждение полномочий", "Dateien: Vertretungsnachweis")}
           className="col-span-full"
           testId={`lead-gwg-representative-authority-documents-${person.id}`}
         >
-          {person.authority_documents.length > 0 ? <UploadedFiles documents={person.authority_documents} tx={tx} /> : null}
+          {person.authority_documents.length > 0 ? <UploadedFiles documents={person.authority_documents} tx={tx} slot={`representative_authority:${person.id}`} /> : null}
         </Statement>
       </dl>
     </div>
@@ -673,7 +713,7 @@ function EnhancedDetailsGroup({ details, tx, card = false }: { details: LeadPort
         ) : null}
         {ownFunds ? (
           <Statement label={proofLabel} className="col-span-full" warning={proofMissing} testId="lead-gwg-self-funds-proof">
-            {details.funds_proof_documents.length > 0 ? <UploadedFiles documents={details.funds_proof_documents} tx={tx} /> : null}
+            {details.funds_proof_documents.length > 0 ? <UploadedFiles documents={details.funds_proof_documents} tx={tx} slot="self_funds_proof" /> : null}
           </Statement>
         ) : null}
       </dl>
@@ -705,7 +745,7 @@ function RelationshipProofGroup({ details, tx, onDownload, fallbackRequested, ca
       <h4 className="text-xs font-semibold text-foreground">
         {tx("Подтверждение связи с плательщиком", "Nachweis der Beziehung zum Zahler")}
       </h4>
-      {documents.length > 0 ? <UploadedFiles documents={documents} tx={tx} onDownload={onDownload} /> : (
+      {documents.length > 0 ? <UploadedFiles documents={documents} tx={tx} onDownload={onDownload} slot="relationship_proof" /> : (
         <StatusChip tone="warning" data-testid="lead-gwg-relationship-proof-missing">
           <CircleAlert aria-hidden="true" />
           <span>{tx("Подтверждение связи запрошено — документ ещё не загружен", "Beziehungsnachweis angefordert – noch kein Dokument hochgeladen")}</span>
@@ -863,6 +903,22 @@ function ChangedSinceSubmitLine({ intake, tx }: { intake: LeadPortalIntake; tx: 
  * after them, from the payer link the wizard loads.
  */
 export function LeadGwgStatements({
+  onMoveDocument,
+  ...props
+}: Parameters<typeof LeadGwgStatementsBody>[0] & {
+  /** Staff may move a cabinet file into another slot (owner 2026-10-24). */
+  onMoveDocument?: (document: LeadIdentityDocument, target: UploadMoveTarget) => void;
+}) {
+  const body = <LeadGwgStatementsBody {...props} />;
+  if (!onMoveDocument || !props.intake) return body;
+  return (
+    <UploadMoveContext.Provider value={{ targets: uploadMoveTargets(props.intake, props.tx), onMove: onMoveDocument }}>
+      {body}
+    </UploadMoveContext.Provider>
+  );
+}
+
+function LeadGwgStatementsBody({
   intake,
   payer,
   payerLink,
@@ -1009,7 +1065,7 @@ export function LeadGwgStatements({
                 : formatAppDate(identification.id_valid_until)}
           </Statement>
           <Statement label={tx("Загруженные файлы", "Hochgeladene Dateien")} className="col-span-full" testId="lead-gwg-identity-documents">
-            {intake.identity_documents.length > 0 ? <UploadedFiles documents={intake.identity_documents} tx={tx} /> : null}
+            {intake.identity_documents.length > 0 ? <UploadedFiles documents={intake.identity_documents} tx={tx} slot="identity" /> : null}
           </Statement>
         </StatementGroup>
 

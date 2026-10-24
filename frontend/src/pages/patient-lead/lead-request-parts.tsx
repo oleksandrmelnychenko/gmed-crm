@@ -15,7 +15,7 @@ import {
   type LeadRequest,
   type LeadRequestDocument,
 } from "./lead-request-api";
-import { consentGiven, formatFileSize, type PersonalField, type SaveState } from "./lead-request-model";
+import { LEAD_UPLOAD_ACCEPT, consentGiven, formatFileSize, type PersonalField, type SaveState } from "./lead-request-model";
 import type { CabinetTarget } from "./lead-request-field-target";
 import { SECTION_ANCHORS, type SectionAnchor, type StepId } from "./lead-request-steps";
 import type { LeadRequestText } from "./lead-request-text";
@@ -110,6 +110,8 @@ export function errorMessage(error: unknown, text?: LeadRequestText): string {
     if (code === "dob_staff_only") return text.dobStaffOnly;
     if (code === "lead_request_guardian_only") return text.guardianOnly;
     if (error instanceof ApiRequestError && error.status === 413) return text.errors.file_too_large;
+    // An iPhone photo (HEIC): how to send it as JPG.
+    if (code === "unsupported_file_type" && body?.format === "heic") return text.errors.heic_not_supported;
     return (code && text.errors[code]) || text.errors.request_failed;
   }
   return error instanceof Error ? error.message : String(error);
@@ -690,7 +692,7 @@ export function FileUploadField({
         id={`${id}-files`}
         type="file"
         multiple
-        accept=".pdf,.jpg,.jpeg,.png"
+        accept={LEAD_UPLOAD_ACCEPT}
         className="sr-only"
         aria-labelledby={`${id}-label`}
         disabled={!consentReady || uploading}

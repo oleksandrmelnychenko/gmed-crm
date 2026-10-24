@@ -373,6 +373,10 @@ pub fn router() -> Router<AppState> {
             "/leads/{lead_id}/portal-intake/documents/{document_id}/review",
             post(review_portal_upload),
         )
+        .route(
+            "/leads/{lead_id}/portal-intake/documents/{document_id}/move",
+            post(move_portal_upload),
+        )
         // Staff: the custody of a minor, and the row of a representative.
         .route(
             "/leads/{lead_id}/representation",
@@ -5082,10 +5086,98 @@ async fn upload_my_funds_proof(
     .await
 }
 
-/// File types of a copy of an identity document or of a proof of authority
-/// (and of the payer's files, phase 3a).
+/// File types of every upload of a lead's request — medical documents, copies
+/// of identity documents, proofs — and of the payer's files: exactly what the
+/// cabinet's file inputs offer (`LEAD_UPLOAD_ACCEPT` in the frontend's
+/// `lead-request-model.ts`; [`LEAD_UPLOAD_ACCEPT`] here, both pinned by a
+/// test; owner 2026-10-24).
 pub(crate) const IDENTITY_DOCUMENT_MIME_TYPES: [&str; 3] =
     ["application/pdf", "image/jpeg", "image/png"];
+
+/// The `accept` list of the cabinet's file inputs for
+/// [`IDENTITY_DOCUMENT_MIME_TYPES`].
+pub(crate) const LEAD_UPLOAD_ACCEPT: &str = ".pdf,.jpg,.jpeg,.png";
+
+/// A HEIC/HEIF photo (an iPhone's own format), by name, declared type or
+/// content (`ftypheic`, `ftypmif1` …): refused with its own hint, as browsers
+/// cannot show it. iOS converts it to JPG by itself when the photo is picked
+/// in the cabinet; a file from elsewhere is exported as JPG first.
+pub(crate) fn is_heic_upload(file_name: &str, content_type: Option<&str>, data: &[u8]) -> bool {
+    let name = file_name.trim().to_ascii_lowercase();
+    let declared = content_type.unwrap_or_default().trim().to_ascii_lowercase();
+    name.ends_with(".heic")
+        || name.ends_with(".heif")
+        || matches!(declared.as_str(), "image/heic" | "image/heif")
+        || (data.len() >= 12
+            && &data[4..8] == b"ftyp"
+            && matches!(
+                &data[8..12],
+                b"heic" | b"heix" | b"hevc" | b"hevx" | b"heim" | b"heis" | b"mif1" | b"msf1"
+            ))
+}
+
+/// 422 `unsupported_file_type` of a lead upload; `format: "heic"` for an
+/// iPhone photo, so the cabinet tells how to send it as JPG.
+pub(crate) fn unsupported_upload(heic: bool) -> axum::response::Response {
+    coded(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "unsupported_file_type",
+        if heic {
+            "HEIC photos cannot be accepted; export the photo as JPG and upload it again"
+        } else {
+            "Upload the document as PDF, JPG or PNG"
+        },
+        if heic {
+            json!({ "format": "heic", "accept": LEAD_UPLOAD_ACCEPT })
+        } else {
+            json!({ "accept": LEAD_UPLOAD_ACCEPT })
+        },
+    )
+}
+
+/// The SHA-256 (hex) of an upload's content, kept with the registration.
+pub(crate) fn content_sha256(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(data))
+}
+
+/// Whether the same content is already an active upload of the same slot of
+/// the request: the same kind and, for a representative's file, the same
+/// person (owner 2026-10-24: a duplicate is not stored again).
+pub(crate) async fn is_duplicate_upload(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    kind: UploadKind,
+    representative_id: Option<Uuid>,
+    sha256: &str,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM lead_portal_uploads u
+               JOIN documents d ON d.id = u.document_id
+               WHERE u.lead_id = $1 AND u.kind = $2
+                 AND u.representative_id IS NOT DISTINCT FROM $3
+                 AND u.content_sha256 = $4
+                 AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL
+           )"#,
+    )
+    .bind(lead_id)
+    .bind(kind.as_str())
+    .bind(representative_id)
+    .bind(sha256)
+    .fetch_one(conn)
+    .await
+}
+
+/// 409 `duplicate_document`: the file is already uploaded in this place.
+pub(crate) fn duplicate_document() -> axum::response::Response {
+    coded(
+        StatusCode::CONFLICT,
+        "duplicate_document",
+        "This file is already uploaded",
+        json!({}),
+    )
+}
 
 /// Reads the multipart field `file` of an upload: the name as sent (at most
 /// 200 characters), the declared type and the bytes. Over 25 MB, unreadable
@@ -5224,6 +5316,21 @@ pub(crate) async fn store_my_upload(
         Ok(file) => file,
         Err(response) => return response,
     };
+    // The same file in the same place is not stored again (and so never
+    // counts against the limit).
+    let sha256 = content_sha256(&data);
+    let representative_key = representative.as_ref().map(|(id, _)| *id);
+    let duplicate = match state.db.acquire().await {
+        Ok(mut conn) => {
+            is_duplicate_upload(&mut conn, lead_id, upload_kind, representative_key, &sha256).await
+        }
+        Err(error) => Err(error),
+    };
+    match duplicate {
+        Ok(false) => {}
+        Ok(true) => return duplicate_document(),
+        Err(error) => return internal(error, "check duplicate upload"),
+    }
 
     // The payer's files have a limit of their own and are not the lead's.
     let active_uploads: i64 = match sqlx::query_scalar(
@@ -5278,11 +5385,17 @@ pub(crate) async fn store_my_upload(
     // The upload is registered with its consent in one transaction; if the
     // link or the consent went away meanwhile, the stored file goes again.
     let mut upload_limit_reached = false;
+    let mut duplicate_found = false;
     let registered = async {
         let mut tx = state.db.begin().await?;
         let Some((kind, _)) = lock_my_lead(&mut tx, lead_id, auth.user_id).await? else {
             return Ok::<_, sqlx::Error>(None);
         };
+        // A parallel upload of the same file may have won meanwhile.
+        if is_duplicate_upload(&mut tx, lead_id, upload_kind, representative_key, &sha256).await? {
+            duplicate_found = true;
+            return Ok(None);
+        }
         let count: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM lead_portal_uploads u
              JOIN documents d ON d.id = u.document_id
@@ -5322,8 +5435,8 @@ pub(crate) async fn store_my_upload(
         sqlx::query(
             r#"INSERT INTO lead_portal_uploads
                    (document_id, lead_id, uploaded_by, access_kind, consent_record_id, kind,
-                    representative_id, created_at)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
+                    representative_id, created_at, content_sha256)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
         )
         .bind(document_id)
         .bind(lead_id)
@@ -5333,6 +5446,7 @@ pub(crate) async fn store_my_upload(
         .bind(upload_kind.as_str())
         .bind(representative.as_ref().map(|(id, _)| *id))
         .bind(uploaded_at)
+        .bind(&sha256)
         .execute(&mut *tx)
         .await?;
         audit::write_in_transaction(
@@ -5363,6 +5477,9 @@ pub(crate) async fn store_my_upload(
         Ok(Some(_)) => {}
         Ok(None) => {
             discard_stored_document(&state, document_id, &storage_key).await;
+            if duplicate_found {
+                return duplicate_document();
+            }
             return if upload_limit_reached {
                 coded(
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -5428,73 +5545,24 @@ pub(crate) async fn store_upload_document(
     uploaded_by: Uuid,
     by_staff: bool,
 ) -> Result<StoredUpload, axum::response::Response> {
-    // Same checks as the files of the website questionnaire: the content must
-    // match the file type, and the malware scan must not object.
+    // Exactly the types the cabinet offers, medical documents too (owner
+    // 2026-10-24): a HEIC photo, a Word file or an archive could not be
+    // previewed nor imported. Then the checks of the website questionnaire:
+    // the content must match the file type, and the malware scan must not
+    // object.
+    if is_heic_upload(file_name, content_type, data) {
+        return Err(unsupported_upload(true));
+    }
     let mime_type =
         crate::routes::leads::validate_lead_attachment(file_name, content_type, data).await?;
     let medical = upload_kind == UploadKind::Medical;
-    if !medical && !IDENTITY_DOCUMENT_MIME_TYPES.contains(&mime_type.as_str()) {
-        return Err(coded(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "unsupported_file_type",
-            if matches!(
-                upload_kind,
-                UploadKind::SelfFundsProof | UploadKind::RelationshipProof
-            ) {
-                "Upload the document as PDF, JPG or PNG"
-            } else {
-                "Upload the identity document as PDF, JPG or PNG"
-            },
-            json!({}),
-        ));
+    if !IDENTITY_DOCUMENT_MIME_TYPES.contains(&mime_type.as_str()) {
+        return Err(unsupported_upload(false));
     }
-    // A copy of the lead's identity document is stored like the one staff
-    // upload in the wizard (`identity`), so the identity check finds it. The
-    // files of a representative have a document type of their own: they are
-    // never the lead's identity document.
-    let (auto_name, art, category, access_category) = match upload_kind {
-        UploadKind::Medical => (
-            file_name.to_string(),
-            "patient_medical_upload",
-            "medical",
-            "medical",
-        ),
-        // German names, like every document of the lead: the staff UI shows
-        // them in pickers and lists (QA 2026-10-10).
-        UploadKind::Identity => (
-            "Ausweisdokument".to_string(),
-            "identity",
-            "identity",
-            "internal",
-        ),
-        UploadKind::RepresentativeIdentity => (
-            format!("Ausweisdokument – {person}"),
-            lead_representatives::UPLOAD_IDENTITY,
-            "identity",
-            "internal",
-        ),
-        UploadKind::RepresentativeAuthority => (
-            format!("Vertretungsnachweis – {person}"),
-            lead_representatives::UPLOAD_AUTHORITY,
-            "administrative",
-            "internal",
-        ),
-        // A financial document of the patient's own: neither an identity
-        // document nor an administrative one, so it never fulfils the
-        // patient's required documents (passport, consent form).
-        UploadKind::SelfFundsProof => (
-            "Nachweis der Mittelherkunft".to_string(),
-            SELF_FUNDS_PROOF_KIND,
-            "finance",
-            "financial",
-        ),
-        UploadKind::RelationshipProof => (
-            "Nachweis der Beziehung zum Kostenübernehmer".to_string(),
-            RELATIONSHIP_PROOF_KIND,
-            "administrative",
-            "internal",
-        ),
-        UploadKind::PayerIdentity | UploadKind::PayerFundsProof => return Err(not_found()),
+    let Some((auto_name, art, category, access_category)) =
+        upload_document_meta(upload_kind, person, file_name)
+    else {
+        return Err(not_found());
     };
     let input = NewStoredDocument {
         document_id: None,
@@ -6867,6 +6935,311 @@ async fn set_step1_fill_mode(
     Json(json!({ "fill_mode": mode })).into_response()
 }
 
+/// Name, document type, category and access category of a lead upload of
+/// `kind` (`person`: the representative a representative's file is named
+/// after; `file_name`: the name of a medical document). `None` for the
+/// payer's files, which are stored by the payer's link.
+pub(crate) fn upload_document_meta(
+    kind: UploadKind,
+    person: &str,
+    file_name: &str,
+) -> Option<(String, &'static str, &'static str, &'static str)> {
+    // A copy of the lead's identity document is stored like the one staff
+    // upload in the wizard (`identity`), so the identity check finds it. The
+    // files of a representative have a document type of their own: they are
+    // never the lead's identity document. German names, like every document
+    // of the lead: the staff UI shows them in pickers and lists (QA
+    // 2026-10-10).
+    Some(match kind {
+        UploadKind::Medical => (
+            file_name.to_string(),
+            "patient_medical_upload",
+            "medical",
+            "medical",
+        ),
+        UploadKind::Identity => (
+            "Ausweisdokument".to_string(),
+            "identity",
+            "identity",
+            "internal",
+        ),
+        UploadKind::RepresentativeIdentity => (
+            format!("Ausweisdokument – {person}"),
+            lead_representatives::UPLOAD_IDENTITY,
+            "identity",
+            "internal",
+        ),
+        UploadKind::RepresentativeAuthority => (
+            format!("Vertretungsnachweis – {person}"),
+            lead_representatives::UPLOAD_AUTHORITY,
+            "administrative",
+            "internal",
+        ),
+        // A financial document of the patient's own: neither an identity
+        // document nor an administrative one, so it never fulfils the
+        // patient's required documents (passport, consent form).
+        UploadKind::SelfFundsProof => (
+            "Nachweis der Mittelherkunft".to_string(),
+            SELF_FUNDS_PROOF_KIND,
+            "finance",
+            "financial",
+        ),
+        UploadKind::RelationshipProof => (
+            "Nachweis der Beziehung zum Kostenübernehmer".to_string(),
+            RELATIONSHIP_PROOF_KIND,
+            "administrative",
+            "internal",
+        ),
+        UploadKind::PayerIdentity | UploadKind::PayerFundsProof => return None,
+    })
+}
+
+/// The slots a cabinet file can be moved between by staff: the lead's and
+/// the representatives' identity copies and proofs. Medical documents (other
+/// consent, other access) and the payer's files (other person) are not.
+fn movable_upload_kind(value: &str) -> Option<UploadKind> {
+    [
+        UploadKind::Identity,
+        UploadKind::RepresentativeIdentity,
+        UploadKind::RepresentativeAuthority,
+        UploadKind::SelfFundsProof,
+        UploadKind::RelationshipProof,
+    ]
+    .into_iter()
+    .find(|kind| kind.as_str() == value.trim())
+}
+
+#[derive(Deserialize)]
+struct MoveUploadRequest {
+    kind: String,
+    #[serde(default)]
+    representative_id: Option<Uuid>,
+}
+
+/// `POST /leads/{lead_id}/portal-intake/documents/{document_id}/move`
+/// (`{kind, representative_id?}`): staff put a cabinet file into the right
+/// slot — the child's ID uploaded as a parent's, a parent's ID in the other
+/// parent's place (owner 2026-10-24). The document's type, category, name and
+/// the registration's kind and person change together, audited; only while
+/// the file is not taken over (reviewed, confirmed, its data entered, shared,
+/// signed or moved to a patient). Needs what accepting it needs.
+async fn move_portal_upload(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, document_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<MoveUploadRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
+        return response;
+    }
+    if let Err(response) = auth.require_capability(Capability::PatientsMedicalView) {
+        return response;
+    }
+    let Some(target) = movable_upload_kind(&body.kind) else {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_upload_kind",
+            "This is not a slot a file can be moved to",
+            json!({}),
+        );
+    };
+    let target_person = match (target.of_representative(), body.representative_id) {
+        (false, _) => None,
+        (true, Some(representative_id)) => {
+            match lead_representatives::upload_target(&state, lead_id, representative_id).await {
+                Ok(Some(name)) => Some((representative_id, name)),
+                Ok(None) => return err(StatusCode::NOT_FOUND, "Representative not found"),
+                Err(error) => return internal(error, "resolve representative"),
+            }
+        }
+        (true, None) => return err(StatusCode::NOT_FOUND, "Representative not found"),
+    };
+    match crate::routes::documents::current_user_can_view_document(&state, &auth, document_id).await
+    {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return internal(error, "begin"),
+    };
+    let open: Option<i32> = match sqlx::query_scalar(&format!(
+        "SELECT 1 FROM leads l WHERE l.id = $1 AND {PORTAL_LEAD_SQL} FOR UPDATE"
+    ))
+    .bind(lead_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(open) => open,
+        Err(error) => return internal(error, "lock lead"),
+    };
+    if open.is_none() {
+        return not_found();
+    }
+    let upload = match sqlx::query(
+        r#"SELECT u.kind, u.representative_id, u.reviewed_at, u.content_sha256,
+                  d.original_filename, d.patient_id, d.lead_id, d.signed_at,
+                  COALESCE(u.created_at <= CASE u.kind
+                    WHEN 'identity' THEN (SELECT g.id_data_entered_at FROM lead_gwg_declarations g WHERE g.lead_id = u.lead_id)
+                    WHEN 'representative_identity' THEN (SELECT r.id_data_entered_at FROM lead_representatives r WHERE r.lead_id = u.lead_id AND r.contact_id = u.representative_id)
+                  END, false) AS identity_in_use,
+                  EXISTS(SELECT 1 FROM document_shares s WHERE s.document_id = d.id) AS shared,
+                  EXISTS(SELECT 1 FROM document_review_events r WHERE r.document_id = d.id)
+                      AS in_review
+           FROM lead_portal_uploads u
+           JOIN documents d ON d.id = u.document_id
+           WHERE u.document_id = $1 AND u.lead_id = $2
+             AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL
+           FOR UPDATE OF u, d"#,
+    )
+    .bind(document_id)
+    .bind(lead_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient upload not found"),
+        Err(error) => return internal(error, "lock upload"),
+    };
+    let from_kind: String = upload.try_get("kind").unwrap_or_default();
+    let from_representative: Option<Uuid> = upload.try_get("representative_id").ok().flatten();
+    if movable_upload_kind(&from_kind).is_none() {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "upload_not_movable",
+            "Medical documents and the payer's files stay where they are",
+            json!({}),
+        );
+    }
+    let taken_over = upload_taken_over(&upload)
+        || upload
+            .try_get::<Option<Uuid>, _>("patient_id")
+            .ok()
+            .flatten()
+            .is_some()
+        || upload.try_get::<Option<Uuid>, _>("lead_id").ok().flatten() != Some(lead_id)
+        || upload.try_get::<bool, _>("shared").unwrap_or(true)
+        || upload.try_get::<bool, _>("in_review").unwrap_or(true);
+    if taken_over {
+        return coded(
+            StatusCode::CONFLICT,
+            "upload_reviewed",
+            "The file is already taken over; it can no longer be moved",
+            json!({}),
+        );
+    }
+    let to_representative = target_person.as_ref().map(|(id, _)| *id);
+    if from_kind == target.as_str() && from_representative == to_representative {
+        return Json(json!({
+            "document_id": document_id,
+            "kind": target.as_str(),
+            "representative_id": to_representative,
+            "moved": false,
+        }))
+        .into_response();
+    }
+    if let Some(representative_id) = to_representative {
+        match lead_representatives::ensure_row_for_upload(
+            &mut tx,
+            lead_id,
+            representative_id,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::NOT_FOUND, "Representative not found"),
+            Err(error) => return internal(error, "prepare representative"),
+        }
+    }
+    if let Some(sha256) = upload
+        .try_get::<Option<String>, _>("content_sha256")
+        .ok()
+        .flatten()
+    {
+        match is_duplicate_upload(&mut tx, lead_id, target, to_representative, &sha256).await {
+            Ok(false) => {}
+            Ok(true) => return duplicate_document(),
+            Err(error) => return internal(error, "check duplicate upload"),
+        }
+    }
+    let file_name: String = upload
+        .try_get::<Option<String>, _>("original_filename")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let person = target_person
+        .as_ref()
+        .map(|(_, name)| name.as_str())
+        .unwrap_or_default();
+    let Some((auto_name, art, category, access_category)) =
+        upload_document_meta(target, person, &file_name)
+    else {
+        return not_found();
+    };
+    let result = async {
+        sqlx::query(
+            r#"UPDATE documents
+               SET art = $2, category = $3, access_category = $4, auto_name = $5,
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(document_id)
+        .bind(art)
+        .bind(category)
+        .bind(access_category)
+        .bind(&auto_name)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE lead_portal_uploads SET kind = $2, representative_id = $3 WHERE document_id = $1",
+        )
+        .bind(document_id)
+        .bind(target.as_str())
+        .bind(to_representative)
+        .execute(&mut *tx)
+        .await?;
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "lead_portal_upload_moved",
+                Some(auth.user_id),
+                "document",
+                Some(document_id),
+                json!({
+                    "lead_id": lead_id,
+                    "from_kind": from_kind,
+                    "to_kind": target.as_str(),
+                    "from_representative_id": from_representative,
+                    "to_representative_id": to_representative,
+                }),
+            ),
+        )
+        .await?;
+        tx.commit().await
+    }
+    .await;
+    if let Err(error) = result {
+        return internal(error, "move upload");
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.portal_updated",
+        lead_id,
+        json!({ "change": "document_moved", "document_id": document_id }),
+    )
+    .await;
+    Json(json!({
+        "document_id": document_id,
+        "kind": target.as_str(),
+        "representative_id": to_representative,
+        "moved": true,
+    }))
+    .into_response()
+}
+
 /// `POST /leads/{lead_id}/portal-intake/documents/{document_id}/review`:
 /// staff took over a patient upload; the patient can no longer remove it.
 async fn review_portal_upload(
@@ -6887,12 +7260,20 @@ async fn review_portal_upload(
         Ok(kind) => kind,
         Err(error) => return internal(error, "load upload kind"),
     };
-    if !matches!(
-        kind.as_deref(),
-        Some("identity" | "representative_identity" | "representative_authority")
-    ) && let Err(response) = auth.require_capability(Capability::PatientsMedicalView)
-    {
+    // RBAC matrix: "accepted" needs leads.edit + patients.medical.view, for
+    // every file; and taking a file over means having been able to open it
+    // (owner 2026-10-24: Sales could accept an identity copy it cannot open).
+    if let Err(response) = auth.require_capability(Capability::PatientsMedicalView) {
         return response;
+    }
+    if kind.is_some() {
+        match crate::routes::documents::current_user_can_view_document(&state, &auth, document_id)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(response) => return response,
+        }
     }
     let reviewed: Option<DateTime<Utc>> = match sqlx::query_scalar(
         r#"UPDATE lead_portal_uploads
@@ -7055,6 +7436,38 @@ mod tests {
 
     fn today() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 10, 3).unwrap()
+    }
+
+    /// One list for the cabinet's inputs and the server (owner 2026-10-24);
+    /// the frontend pins the same string in `lead-request-model.test.ts`.
+    #[test]
+    fn the_accept_list_is_the_allowed_types() {
+        assert_eq!(LEAD_UPLOAD_ACCEPT, ".pdf,.jpg,.jpeg,.png");
+        let by_extension = |extension: &str| match extension {
+            ".pdf" => "application/pdf",
+            ".jpg" | ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            other => panic!("unexpected {other}"),
+        };
+        let mut mime: Vec<&str> = LEAD_UPLOAD_ACCEPT.split(',').map(by_extension).collect();
+        mime.dedup();
+        assert_eq!(mime, IDENTITY_DOCUMENT_MIME_TYPES.to_vec());
+    }
+
+    #[test]
+    fn heic_photos_are_recognised_by_name_type_or_content() {
+        assert!(is_heic_upload("IMG_0001.HEIC", None, b""));
+        assert!(is_heic_upload("photo", Some("image/heif"), b""));
+        assert!(is_heic_upload(
+            "photo.jpg",
+            Some("image/jpeg"),
+            b"\0\0\0\x18ftypheic\0\0"
+        ));
+        assert!(!is_heic_upload(
+            "scan.pdf",
+            Some("application/pdf"),
+            b"%PDF-1.7"
+        ));
     }
 
     #[test]
