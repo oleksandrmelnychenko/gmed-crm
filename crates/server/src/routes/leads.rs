@@ -11090,8 +11090,10 @@ async fn purge_unqualified_lead(
     Ok(UnqualifiedLeadPurge::Purged)
 }
 
-/// Staff who hear about the retention of a lead: its creator, or every
-/// patient manager and CEO when the lead came from the website.
+/// Staff who hear about the retention of a lead: its creator while that
+/// staff login is active, otherwise (a website lead, or a creator who was
+/// deactivated meanwhile) every patient manager and CEO, so the one-time
+/// warning never goes to nobody.
 async fn unqualified_lead_recipients(
     pool: &gmed_db::DbPool,
     created_by: Option<Uuid>,
@@ -11099,7 +11101,18 @@ async fn unqualified_lead_recipients(
     sqlx::query_scalar(
         r#"SELECT id FROM users
            WHERE is_active = true
-             AND (id = $1 OR ($1::uuid IS NULL AND role IN ('patient_manager', 'ceo')))
+             AND role <> 'patient'
+             AND (
+                 id = $1
+                 OR (
+                     role IN ('patient_manager', 'ceo')
+                     AND NOT EXISTS (
+                         SELECT 1 FROM users creator
+                         WHERE creator.id = $1 AND creator.is_active
+                           AND creator.role <> 'patient'
+                     )
+                 )
+             )
            ORDER BY created_at"#,
     )
     .bind(created_by)
@@ -11181,7 +11194,8 @@ async fn warn_about_unqualified_lead_deadlines(
             "Lead will be deleted automatically",
             &format!(
                 "Not qualified and no signed consent; deletion on {}.",
-                deadline.format("%Y-%m-%d")
+                // The German calendar day of the deletion, not the UTC one.
+                crate::app_time::date_of(deadline).format("%Y-%m-%d")
             ),
             lead_id,
         )

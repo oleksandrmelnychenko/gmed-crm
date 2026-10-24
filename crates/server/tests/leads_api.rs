@@ -4310,6 +4310,77 @@ async fn an_unqualified_lead_without_consent_is_purged_with_everything_it_owns()
     assert!(detail["retention_deadline_at"].is_null(), "{detail}");
 }
 
+/// The one-time deletion warning of a lead whose creator was deactivated goes
+/// to the patient managers and the CEO, not to nobody; the date in it is the
+/// German calendar day of the deadline.
+#[tokio::test]
+async fn a_retention_warning_reaches_staff_when_the_creator_left() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let policy = gmed_server::routes::leads::UnqualifiedLeadRetention {
+        days: 14,
+        effective_at: chrono::Utc::now() - chrono::Duration::days(90),
+    };
+    let former = seed_user(pool, &format!("retention-left-{tag}"), "sales").await;
+    sqlx::query("UPDATE users SET is_active = false WHERE id = $1")
+        .bind(former)
+        .execute(pool)
+        .await
+        .unwrap();
+    let lead = insert_unqualified_lead(&app, &format!("{tag}-left"), 12).await;
+    sqlx::query("UPDATE leads SET created_by = $2 WHERE id = $1")
+        .bind(lead)
+        .bind(former)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let report = gmed_server::routes::leads::purge_unqualified_leads(
+        &app.suite.state,
+        policy,
+        chrono::Utc::now(),
+        Some(&[lead]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.warned, 1, "{report:?}");
+    let warned: Vec<(Uuid, Option<String>)> = sqlx::query_as(
+        r#"SELECT user_id, body FROM user_notifications
+           WHERE kind = 'lead_retention_warning' AND entity_id = $1"#,
+    )
+    .bind(lead)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let recipients: Vec<Uuid> = warned.iter().map(|(user, _)| *user).collect();
+    assert!(!recipients.contains(&former), "{recipients:?}");
+    assert!(
+        recipients.contains(&app.patient_manager_id),
+        "{recipients:?}"
+    );
+    assert!(recipients.contains(&app.ceo_id), "{recipients:?}");
+    assert!(!recipients.contains(&app.billing_id), "{recipients:?}");
+    assert!(!recipients.contains(&app.sales_id), "{recipients:?}");
+    let created_at: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT created_at FROM leads WHERE id = $1")
+            .bind(lead)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let day = gmed_server::app_time::date_of(created_at + chrono::Duration::days(14))
+        .format("%Y-%m-%d")
+        .to_string();
+    assert!(
+        warned
+            .iter()
+            .all(|(_, body)| body.as_deref().is_some_and(|body| body.contains(&day))),
+        "{warned:?} {day}"
+    );
+}
+
 /// QA B-18 a (decision 2026-10-11): a repeat intake of an existing patient
 /// with a valid signed DSGVO consent is not purged after 14 days and shows no
 /// deadline; without such a consent (never signed, or withdrawn) the rule

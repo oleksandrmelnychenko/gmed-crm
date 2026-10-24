@@ -198,6 +198,17 @@ fn greeting_name(account_name: &str) -> String {
     }
 }
 
+/// The wording of an e-mail about the lead's own login: once the request is
+/// converted the login is the patient's portal account (appointments,
+/// documents, invoices), so it is not asked to fill in a request any more.
+fn own_login_audience(converted: bool) -> LoginAudience {
+    if converted {
+        LoginAudience::Patient
+    } else {
+        LoginAudience::Lead
+    }
+}
+
 /// The first language of a patient that has an e-mail template.
 fn patient_language(languages: &[String]) -> Option<String> {
     languages
@@ -409,7 +420,12 @@ async fn send_login_email(
         LoginTarget {
             subject: Subject::Lead(lead_id),
             audience: if own_login {
-                LoginAudience::Lead
+                own_login_audience(
+                    row.try_get::<Option<Uuid>, _>("converted_patient_id")
+                        .ok()
+                        .flatten()
+                        .is_some(),
+                )
             } else {
                 LoginAudience::Guardian
             },
@@ -588,8 +604,21 @@ async fn deliver(
         Subject::Lead(id) => (Some(id), None),
         Subject::Patient(id) => (None, Some(id)),
     };
-    // A repeat of an already accepted message is not logged twice.
-    let logged = if replayed {
+    // A repeat of an already accepted message is not logged twice. A replay
+    // whose first attempt is not on record as sent (Mittaro took the message,
+    // but its answer never arrived and the try was logged as failed) is
+    // logged now, so the history shows it and the delivery check follows it.
+    let replay_logged = match (&message_id, replayed) {
+        (Some(message_id), true) => sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM portal_login_emails WHERE provider_message_id = $1)",
+        )
+        .bind(message_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(true),
+        _ => false,
+    };
+    let logged = if replay_logged {
         Ok(None)
     } else {
         sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
@@ -694,6 +723,12 @@ mod tests {
         assert_eq!(greeting_name(" Sofia Muster "), "Sofia Muster");
         assert_eq!(greeting_name("sofia.muster@example.com"), "");
         assert_eq!(greeting_name(""), "");
+    }
+
+    #[test]
+    fn the_own_login_of_a_converted_request_gets_the_patient_wording() {
+        assert_eq!(own_login_audience(false), LoginAudience::Lead);
+        assert_eq!(own_login_audience(true), LoginAudience::Patient);
     }
 
     #[test]

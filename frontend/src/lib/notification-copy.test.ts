@@ -66,6 +66,28 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
     });
   });
 
+  it("translates the custody and consent-choice notices of a lead", () => {
+    for (const item of [
+      notice(
+        "lead_guardian_access_custody_ended",
+        "Parent's access ended",
+        "A custody change ended a parent's access to this request.",
+      ),
+      notice(
+        "lead_consent_choice_changed",
+        "Consent choice changed",
+        "The patient changed the consent choice. Create a new consent document and signature invitation.",
+      ),
+    ]) {
+      const ru = notificationCopyFromFacts(item, "ru");
+      const de = notificationCopyFromFacts(item, "de");
+      expect(ru?.title).toMatch(CYRILLIC);
+      expect(ru?.body).toMatch(CYRILLIC);
+      expect(de?.title).not.toBe(item.title);
+      expect(de?.body).not.toBe(item.body);
+    }
+  });
+
   it("words a security incident with the Berlin deadline", () => {
     const item = notice(
       "security_incident",

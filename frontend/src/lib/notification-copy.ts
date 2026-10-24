@@ -124,6 +124,24 @@ const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
       de: "Den Vorschlag bestätigen oder ablehnen (Vier-Augen-Prinzip).",
     },
   },
+  // A custody change ended a parent's access to the request
+  // (crates/server/src/routes/lead_representatives.rs, 2026-10-23).
+  lead_guardian_access_custody_ended: {
+    title: { ru: "Доступ родителя закрыт", de: "Zugang eines Elternteils beendet" },
+    body: {
+      ru: "Изменение опеки закрыло доступ одного из родителей к заявке.",
+      de: "Eine Änderung des Sorgerechts hat den Zugang eines Elternteils zur Anfrage beendet.",
+    },
+  },
+  // The cabinet changed the consent choice or the trusted persons
+  // (crates/server/src/routes/lead_portal_intake.rs).
+  lead_consent_choice_changed: {
+    title: { ru: "Пациент изменил выбор согласия", de: "Einwilligungsauswahl geändert" },
+    body: {
+      ru: "Создайте новый документ согласия и новое приглашение на подпись.",
+      de: "Bitte ein neues Einwilligungsdokument und eine neue Signatureinladung erstellen.",
+    },
+  },
   lead_portal_follow_up_submitted: {
     title: { ru: "Пациент отправил дополнительные сведения", de: "Patient hat die zusätzlichen Angaben gesendet" },
     body: {

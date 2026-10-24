@@ -725,3 +725,84 @@ async fn the_api_connections_page_saves_the_key_encrypted_over_the_environment()
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["code"], "mail_not_configured");
 }
+
+/// Mittaro took the first message but its answer was lost, so that try is on
+/// record as failed. The repeat click is a replay of the accepted message: it
+/// is logged as sent then, so staff see it went out and its delivery is
+/// followed. A replay of a message already on record stays a single row.
+#[tokio::test]
+async fn a_replay_of_a_message_logged_as_failed_is_logged_as_sent() {
+    let Some(suite) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let manager_id = seed_user(pool, &format!("login-replay-{tag}"), "patient_manager").await;
+    let manager = bearer(manager_id, "patient_manager");
+    let (api_url, _fake) = start_fake_mittaro().await;
+    let state = suite.state.clone().with_mailer(MailConfig {
+        mittaro_api_key: Some(SecretString::from("tx_live_test")),
+        mittaro_api_url: Some(api_url),
+        from: Some("zugang@gmed-health.test".into()),
+        reply_to: None,
+        console_url: Some("https://console.gmed-health.test".into()),
+    });
+    let app = gmed_server::build_app_for_role_contract_tests(state).layer(Extension(ConnectInfo(
+        SocketAddr::from(([127, 0, 0, 1], 41003)),
+    )));
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &manager,
+        Some(json!({
+            "first_name": "Iryna",
+            "last_name": "Replaytest",
+            "email": format!("iryna.replay.{tag}@example.com"),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let send = json!({
+        "user_id": created["portal_account"]["user_id"],
+        "password": created["portal_account"]["one_time_password"],
+        "language": "de",
+    });
+    let path = format!("/api/v1/leads/{lead_id}/portal-login-email");
+    let (status, first) = json_request(&app, "POST", &path, &manager, Some(send.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    // As if the answer of that first try had been lost.
+    sqlx::query(
+        r#"UPDATE portal_login_emails
+           SET status = 'failed', provider_message_id = NULL, error_code = 'mail_request'
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let (status, again) = json_request(&app, "POST", &path, &manager, Some(send.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["replayed"], true);
+    let (status, third) = json_request(&app, "POST", &path, &manager, Some(send)).await;
+    assert_eq!(status, StatusCode::OK, "{third}");
+    assert_eq!(third["replayed"], true);
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        r#"SELECT status, provider_message_id FROM portal_login_emails
+           WHERE lead_id = $1 ORDER BY created_at, status"#,
+    )
+    .bind(lead_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let sent: Vec<_> = rows.iter().filter(|(status, _)| status == "sent").collect();
+    assert_eq!(sent.len(), 1, "{rows:?}");
+    assert_eq!(
+        sent[0].1.as_deref(),
+        first["message_id"].as_str(),
+        "{rows:?}"
+    );
+    assert_eq!(rows.len(), 2, "{rows:?}");
+}
