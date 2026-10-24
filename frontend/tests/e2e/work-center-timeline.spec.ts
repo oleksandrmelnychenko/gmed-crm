@@ -410,6 +410,9 @@ for (const type of ["realtime.connected", "realtime.resync_required"]) {
     await expect(dialog).toContainText("Подзадач и событий пока нет");
     state.tasks[0].note = "Recovered detail";
     state.tasks.push({ ...state.tasks[0], id: "missed-child", parent_task_id: parentId, title: "Missed child" });
+    // A socket that (re)connects right after the view loaded repeats nothing
+    // (QA C-33, PASSIVE_REFRESH_MIN_GAP_MS); the catch-up is due after that gap.
+    if (type === "realtime.connected") await page.waitForTimeout(3_100);
     state.emit(type, "tester");
     await expect(dialog).toContainText("Recovered detail");
     await expect(dialog.getByRole("button", { name: /Missed child/ })).toBeVisible();

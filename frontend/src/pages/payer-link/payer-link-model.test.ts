@@ -17,6 +17,7 @@ import {
   parseShare,
   payerSteps,
   reconcileDraft,
+  industryRequired,
   occupationRequired,
   refusedField,
   relationshipKindsFor,
@@ -423,6 +424,14 @@ describe("what is missing", () => {
     expect(occupationRequired({ ...questionnaire(), funds_required: false })).toBe(false);
     expect(occupationRequired({ ...questionnaire(), funds_required: false, missing_for_submit: ["occupation"] })).toBe(true);
     expect(occupationRequired({ ...questionnaire(), funds_required: false, missing_for_submit: null })).toBe(false);
+  });
+
+  it("requires an organisation's industry by the same rule (owner 2026-10-07, applied 2026-10-24)", () => {
+    expect(industryRequired(questionnaire("company"))).toBe(true);
+    expect(industryRequired({ ...questionnaire("company"), funds_required: true })).toBe(true);
+    expect(industryRequired({ ...questionnaire("company"), funds_required: false })).toBe(false);
+    expect(industryRequired({ ...questionnaire("company"), funds_required: false, missing_for_submit: ["industry"] })).toBe(true);
+    expect(industryRequired({ ...questionnaire("company"), funds_required: false, missing_for_submit: null })).toBe(false);
   });
 
   it("offers an organisation its own relationships, not the family (QA 2026-10-11 A-36c)", () => {

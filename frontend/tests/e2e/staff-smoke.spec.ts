@@ -54,6 +54,15 @@ async function loginAsStaff(page: Page, email: string) {
 }
 
 /**
+ * Since 2026-10-23 the release step lists no "confirm the intake" blocker: «Patient
+ * anlegen» completes the intake and qualifies the lead itself (owner decision).
+ */
+async function confirmIntakeFromRelease(wizard: Locator) {
+  await wizard.getByRole("checkbox", { name: /Ich habe die Angaben geprüft/ }).check();
+  await wizard.getByRole("button", { name: "Patient anlegen", exact: true }).click();
+}
+
+/**
  * A lead whose only release blocker is the unconfirmed intake, with signed consents and a verified
  * identity document. With demoAccepted specified, consent PDFs have no legal signatures and
  * only the true case supplies server-authorized DEV credit. Confirming the intake posts /qualify, which answers
@@ -79,7 +88,9 @@ async function mockLeadAwaitingIntakeConfirmation(page: Page, leadId: string, qu
     failed_outcome: { status: "none", reason: null, processed_at: null },
     readiness: {
       qualification_ready: true, conversion_ready: false, qualification_reasons: [],
-      blocking_reasons: ["Lead must be qualified before conversion"], checks: [],
+      blocking_reasons: ["Lead must be qualified before conversion"],
+      // «Patient anlegen» (which qualifies the lead) is enabled only with the accepted quote.
+      checks: [{ key: "quote_accepted", passed: true }],
       ...(demoAccepted ? { demo_onboarding: {
         enabled: true, applied: true,
         credited_checks: ["dsgvo_document_signed", "confidentiality_release_signed"],
@@ -3374,8 +3385,7 @@ test.describe("lead onboarding wizard", () => {
       await page.goto(`/leads?lead=${leadId}&view=wizard`);
       const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
       await wizard.getByRole("tab", { name: /Freigabe/i }).click();
-      await wizard.getByTestId("completion-blockers")
-        .getByRole("button", { name: "Angaben zum Anliegen bestätigen", exact: true }).click();
+      await confirmIntakeFromRelease(wizard);
       if (demoAccepted) {
         await expect.poll(() => qualifyRequests).toEqual([{ status: "qualified" }]);
       } else {
@@ -3403,7 +3413,7 @@ test.describe("lead onboarding wizard", () => {
     const intakeCompletion = page.waitForRequest((request) =>
       request.method() === "POST" && request.url().endsWith("/intake-completion"),
     );
-    await wizard.getByTestId("completion-blockers").getByRole("button", { name: "Angaben zum Anliegen bestätigen", exact: true }).click();
+    await confirmIntakeFromRelease(wizard);
     // Confirming the intake completes the prospect case first, then asks the server to qualify.
     expect((await intakeCompletion).postDataJSON()).toEqual({ completed: true, hauptanfragegrund: "Orthopedic consultation" });
     await expect.poll(() => qualifyRequests).toEqual([{ status: "qualified" }]);
@@ -3644,7 +3654,8 @@ test.describe("lead onboarding wizard", () => {
     );
     await expect(orderStep).toHaveAccessibleName(/erledigt/);
     await navigation.getByRole("tab", { name: /Vertrag & Angebot/i }).click();
-    await expect(wizard.getByText("Vertrag, Auftrag und Kostenvoranschlag")).toBeVisible();
+    await expect(navigation.getByRole("tab", { name: /Vertrag & Angebot/i })).toHaveAttribute("aria-current", "step");
+    await expect(wizard.getByRole("heading", { name: /^Rahmenvertrag/ })).toBeVisible();
     await expect(
       wizard.getByText("Diese Unterlagen gehören bis zur Freigabe dem Lead."),
     ).toHaveCount(0);
@@ -3818,9 +3829,7 @@ test.describe("lead onboarding wizard", () => {
 
     await releaseStep.click();
     await expect(releaseStep).toHaveAttribute("aria-current", "step");
-    await wizard.getByTestId("completion-blockers")
-      .getByRole("button", { name: "Angaben zum Anliegen bestätigen", exact: true })
-      .click();
+    await confirmIntakeFromRelease(wizard);
     await expect(documentsStep).toHaveAttribute("aria-current", "step");
     await expect(
       wizard.getByRole("button", {
@@ -4224,7 +4233,7 @@ test.describe("lead onboarding wizard", () => {
       .click();
 
     await expect(wizard.getByText("Was noch fehlt")).toBeVisible();
-    await expect(wizard.getByText("Einwilligungsdokument erstellen und bestätigen")).toBeVisible();
+    await expect(wizard.getByText("Unterschriebenes DSGVO-Paket fehlt (Einverständniserklärung, Anlage 1)")).toBeVisible();
     await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toBeDisabled();
   });
 });

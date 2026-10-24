@@ -1829,6 +1829,15 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
         json!(["business_revenue", "loan"]),
         "{body}"
     );
+    // The industry is asked only with the enhanced check (owner 2026-10-07,
+    // applied 2026-10-24); the seat in Germany keeps level 1.
+    assert!(
+        !body["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("industry")),
+        "{body}"
+    );
     assert_eq!(
         body["funds_source_options"],
         json!([
@@ -1869,7 +1878,6 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
             "representative_first_name": "Viktor",
             "representative_last_name": "Zahler",
             "representative_role": "Geschäftsführer",
-            "industry": "Handel",
             "country": "IR"
         }),
     )
@@ -1891,6 +1899,8 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
     assert_eq!(missing[1], "street", "{body}");
     assert!(missing.contains(&json!("payment_reason")));
     assert!(missing.contains(&json!("register_court")));
+    // Level 2 now: the industry is asked.
+    assert!(missing.contains(&json!("industry")), "{body}");
     assert!(!missing.contains(&json!("beneficial_owners")));
     assert!(!missing.contains(&json!("first_name")));
     // A seat in a black-list country requires the enhanced check: level 2.

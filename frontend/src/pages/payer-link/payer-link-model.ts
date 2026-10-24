@@ -732,6 +732,15 @@ export function occupationRequired(questionnaire: Pick<PayerQuestionnaire, "fund
   return questionnaire.funds_required !== false || (questionnaire.missing_for_submit ?? []).includes("occupation");
 }
 
+/**
+ * Whether an organisation's industry is required (owner 2026-10-07, applied 2026-10-24): the same
+ * rule as a person's profession — only with the enhanced check, or while the server still names it
+ * missing. The name, register, seat and contact person stay required.
+ */
+export function industryRequired(questionnaire: Pick<PayerQuestionnaire, "funds_required" | "missing_for_submit">): boolean {
+  return questionnaire.funds_required !== false || (questionnaire.missing_for_submit ?? []).includes("industry");
+}
+
 /** Whether the beneficial owners are required: a company or an organisation, not an insurer or a person. */
 export function beneficialOwnersRequired(payerType: PayerType): boolean {
   return payerType === "company" || payerType === "organisation";

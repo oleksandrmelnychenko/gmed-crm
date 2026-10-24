@@ -2,9 +2,13 @@ import type { ReactNode } from "react";
 
 import { CommandPalette } from "@/components/command-palette";
 import { Toaster } from "@/components/ui/toast";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useNavState } from "@/lib/nav-state";
+import { isLeadPortalUser } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
+import { useLeadCabinetLang } from "@/pages/patient-lead/lead-cabinet-language";
+import { leadShellText } from "@/pages/patient-lead/lead-shell-text";
 
 import { NavPanel } from "../nav-panel";
 import { Topbar } from "../topbar";
@@ -18,7 +22,12 @@ type AppShellFrameProps = {
 export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProps) {
   const { collapsed, toggle } = useNavState();
   const { lang, t } = useLang();
-  const skipToContentLabel = lang === "de" ? "Zum Inhalt springen" : "Перейти к содержанию";
+  const { user } = useAuth();
+  // The lead cabinet speaks DE, EN, UA and RU; its shell follows (QA 2026-10-24, A-7).
+  const cabinetLang = useLeadCabinetLang(user, lang);
+  const leadShell = isLeadPortalUser(user) ? leadShellText(cabinetLang) : null;
+  const skipToContentLabel = leadShell?.skipToContent ?? (lang === "de" ? "Zum Inhalt springen" : "Перейти к содержанию");
+  const toggleSidebarLabel = leadShell?.toggleSidebar ?? t.ui_toggle_sidebar;
 
   return (
     <div className="h-dvh overflow-hidden bg-background">
@@ -36,7 +45,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
             <button
               type="button"
               className="fixed inset-x-0 bottom-0 top-12 z-30 bg-foreground/20 lg:hidden"
-              aria-label={t.ui_toggle_sidebar}
+              aria-label={toggleSidebarLabel}
               onClick={toggle}
             />
           ) : null}

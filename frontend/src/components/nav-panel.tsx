@@ -51,6 +51,8 @@ import { useNavCounters } from "@/lib/use-nav-counters";
 import { useNavState } from "@/lib/nav-state";
 import { usePortalAccountLabel } from "@/lib/portal-account-label";
 import { useLeadPortalClosed } from "@/pages/patient-lead/lead-portal-closed";
+import { useLeadCabinetLang } from "@/pages/patient-lead/lead-cabinet-language";
+import { leadShellNavLabel, leadShellText } from "@/pages/patient-lead/lead-shell-text";
 import {
   canAccessStaffRoute,
   isLeadPortalUser,
@@ -71,6 +73,8 @@ interface NavItem {
   id: string;
   to: string;
   labelKey: string;
+  /** Said instead of the catalog text (the lead cabinet's shell in its own language). */
+  label?: string;
   locked?: boolean;
 }
 
@@ -162,6 +166,12 @@ export function NavPanel() {
   const { collapsed, toggle } = useNavState();
   const isPatientPortal = user?.role === "patient";
   const isLeadPortal = isLeadPortalUser(user);
+  // The lead cabinet speaks DE, EN, UA and RU; its shell follows (QA 2026-10-24, A-7).
+  const cabinetLang = useLeadCabinetLang(user, lang);
+  const shellText = isLeadPortal ? leadShellText(cabinetLang) : null;
+  const withShellLabel = (item: NavItem): NavItem =>
+    shellText ? { ...item, label: leadShellNavLabel(shellText, item.id, tr[item.labelKey] ?? item.labelKey) } : item;
+  const logoutLabel = shellText?.signOut ?? tr.nav_logout;
   const patientId = usePortalPatientId(user?.id);
   const subscribed = hasPortalSubscription(user, patientId);
   // An ambiguous family login first opens the patient chooser in the shell;
@@ -187,7 +197,7 @@ export function NavPanel() {
             : listPatientPortalNavItems().filter((item) => !["services", "account", "legal"].includes(item.id))
               .map((item) => ({ ...toPatientNavItem(item), locked: true }))),
           ...listLeadPortalNavItems().filter((item) => item.id === "account" || item.id === "legal").map(toPatientNavItem),
-        ]
+        ].map(withShellLabel)
       : listPatientPortalNavItems({ leadRequests: Boolean(user?.lead_portal?.requests) })
         .map((item) => ({ ...toPatientNavItem(item), locked: !needsPatientSelection && !subscribed && !isBasicPortalRoute(item.to) }))
     : [];
@@ -224,7 +234,7 @@ export function NavPanel() {
           <UserCard
             name={user.name}
             role={user.role}
-            roleText={portalAccountLabel || (isLeadPortal ? (lang === "de" ? "Anfrageportal" : "Кабинет заявки") : null)}
+            roleText={portalAccountLabel || shellText?.accountCaption || null}
             tr={tr}
             translations={t}
             collapsed={collapsed}
@@ -239,7 +249,7 @@ export function NavPanel() {
             translations={t}
             collapsed={collapsed}
             onNavigate={closeOnCompactViewport}
-            lockedLabel={lang === "de" ? "Gesperrt" : "Закрыто"}
+            lockedLabel={shellText?.locked ?? (lang === "de" ? "Gesperrt" : "Закрыто")}
             onLocked={(id, label) => {
               setLockedModule({ id, label });
               closeOnCompactViewport();
@@ -261,20 +271,21 @@ export function NavPanel() {
         <button
           type="button"
           onClick={logout}
-          title={collapsed ? tr.nav_logout : undefined}
-          aria-label={collapsed ? tr.nav_logout : undefined}
+          title={collapsed ? logoutLabel : undefined}
+          aria-label={collapsed ? logoutLabel : undefined}
           className={cn(
             "flex items-center rounded-lg text-sidebar-foreground/85 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring motion-reduce:transition-none",
             collapsed ? "justify-center size-11 mx-auto" : "gap-3 w-full px-3 py-2.5 text-sm",
           )}
         >
           <LogOut aria-hidden="true" className={cn("shrink-0", collapsed ? "size-5" : "size-[18px]")} />
-          {!collapsed && <span className="whitespace-nowrap overflow-hidden">{tr.nav_logout}</span>}
+          {!collapsed && <span className="whitespace-nowrap overflow-hidden">{logoutLabel}</span>}
         </button>
       </div>
     </nav>
     {isLeadPortal && lockedModule ? <LeadPortalPlanDialog
       key={lockedModule.id}
+      lang={cabinetLang}
       moduleId={lockedModule.id}
       moduleLabel={lockedModule.label}
       onClose={() => setLockedModule(null)}
@@ -458,7 +469,7 @@ function navItemLabel(
   dictionary: Record<string, string>,
   translations: UnknownTranslations,
 ): string {
-  return dictionary[item.labelKey] ?? formatUnknownValue(item.labelKey, translations);
+  return item.label ?? dictionary[item.labelKey] ?? formatUnknownValue(item.labelKey, translations);
 }
 
 function roleLabel(role: string, dictionary: Record<string, string>, translations: UnknownTranslations): string {

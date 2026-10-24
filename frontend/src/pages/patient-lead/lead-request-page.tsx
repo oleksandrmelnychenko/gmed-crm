@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { setPortalAccountLabel } from "@/lib/portal-account-label";
+import { publishLeadCabinetLang, readStoredLeadCabinetLang, storeLeadCabinetLang } from "./lead-cabinet-language";
 import { setLeadPortalClosed } from "./lead-portal-closed";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
@@ -73,16 +74,6 @@ import {
  * Since the trigger flow (2026-10-07) the form is a stepper of short steps in
  * a wider layout, with the follow-up blocks as a step of their own.
  */
-const CABINET_LANG_STORAGE_KEY = "gmed_lead_cabinet_lang";
-
-function storedCabinetLang(): LeadCabinetLang | null {
-  try {
-    return asLeadCabinetLang(window.localStorage.getItem(CABINET_LANG_STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
-
 export function LeadRequestPage() {
   const [, setSearchParams] = useSearchParams();
   const { lang: portalLang, setLang: setPortalLang } = useLang();
@@ -93,7 +84,7 @@ export function LeadRequestPage() {
   // The cabinet also speaks UA and EN (owner request 2026-10-04): an explicit
   // choice is remembered, otherwise the language the person entered for the
   // request is used, then the portal language.
-  const [chosenLang, setChosenLang] = useState<LeadCabinetLang | null>(storedCabinetLang);
+  const [chosenLang, setChosenLang] = useState<LeadCabinetLang | null>(readStoredLeadCabinetLang);
   const [requestLang, setRequestLang] = useState<LeadCabinetLang | null>(null);
   // A UA/EN choice saved on the account also holds on another device.
   const lang = resolveLeadCabinetLang(chosenLang ?? asLeadCabinetLang(accountLang), requestLang, portalLang);
@@ -150,12 +141,9 @@ export function LeadRequestPage() {
   const chooseLang = useCallback(
     (next: LeadCabinetLang) => {
       setChosenLang(next);
-      try {
-        window.localStorage.setItem(CABINET_LANG_STORAGE_KEY, next);
-      } catch {
-        // The choice then lasts for this visit only.
-      }
-      // The rest of the portal (menu, account) speaks DE and RU.
+      storeLeadCabinetLang(next);
+      // The app's own catalogs (account page, legal notice) speak DE and RU; the shell around
+      // the cabinet follows the cabinet language itself (`publishLeadCabinetLang`).
       if (next === "de" || next === "ru") setPortalLang(next);
       // Kept on the account for the e-mails to this person (owner decision
       // 2026-10-24); best effort, the cabinet works without it.
@@ -206,6 +194,11 @@ export function LeadRequestPage() {
       !ownPatient && requests.length > 0 && requests.every((request) => request.access_kind === "guardian");
     setPortalAccountLabel(userId, guardianOnly ? text.accountLabelGuardian : null);
   }, [ownPatient, requests, text, userId]);
+  // The shell around the cabinet (side bar, top bar) speaks the cabinet language, UA and EN
+  // included (QA 2026-10-24, A-7).
+  useEffect(() => {
+    if (userId && leadMode) publishLeadCabinetLang(userId, lang);
+  }, [lang, leadMode, userId]);
   // No request left for a parent: the side bar shows no locked patient-portal entries, only
   // the neutral notice stays (QA 2026-10-24, B-2/D-4).
   useEffect(() => {

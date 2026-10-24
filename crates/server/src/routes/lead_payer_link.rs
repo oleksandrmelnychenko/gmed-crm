@@ -1239,7 +1239,12 @@ fn missing_for_submit(answers: &Answers, required: &Requirements<'_>) -> Vec<&'s
         if required.organisation_follow_up {
             checks.push(("payment_reason", filled(&answers.payment_reason)));
         }
-        checks.push(("industry", filled(&answers.industry)));
+        // The industry only with the enhanced check, like a person's
+        // occupation (owner 2026-10-07, applied 2026-10-24): the name, the
+        // register, the seat and the contact person stay required.
+        if required.funds_required {
+            checks.push(("industry", filled(&answers.industry)));
+        }
     } else {
         checks.extend([
             ("first_name", filled(&answers.first_name)),
@@ -6282,15 +6287,29 @@ mod tests {
         );
         assert!(missing.contains(&"representative_first_name"));
         assert!(missing.contains(&"beneficial_owners"));
-        assert!(missing.contains(&"industry"));
+        // The industry only with the enhanced check, like the occupation
+        // (owner 2026-10-07, applied 2026-10-24).
+        assert!(!missing.contains(&"industry"));
+        assert!(
+            missing_for_submit(
+                &answers,
+                &Requirements {
+                    funds_required: true,
+                    ..required
+                },
+            )
+            .contains(&"industry")
+        );
         assert!(!missing.contains(&"first_name"));
         assert!(!missing.contains(&"payment_method"), "not asked here");
         assert!(!missing.contains(&"legal_form"), "only with block E");
-        // Block E open: the legal form after the name, why it pays after the relationship.
+        // Block E open: the legal form after the name, why it pays after the
+        // relationship and before the industry (asked here: level 2).
         let missing = missing_for_submit(
             &answers,
             &Requirements {
                 organisation_follow_up: true,
+                funds_required: true,
                 ..required
             },
         );

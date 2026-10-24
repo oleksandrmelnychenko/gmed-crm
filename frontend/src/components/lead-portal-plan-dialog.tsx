@@ -5,7 +5,6 @@ import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { useLang } from "@/lib/i18n";
 import {
   fetchLeadPortalPlanCatalogue,
   requestLeadPortalPlan,
@@ -13,59 +12,19 @@ import {
 } from "@/lib/lead-portal-plan-requests";
 import { cn } from "@/lib/utils";
 import { fetchMyLeadRequests } from "@/pages/patient-lead/lead-request-api";
-
-const TEXT = {
-  de: {
-    title: "Patientenbereich",
-    locked: "Dieser Bereich ist noch gesperrt.",
-    explanation: "Er wird nach der Aufnahme als Patient und der Freigabe des Zugangs verfügbar. Sie können GMED jetzt Ihr Interesse an einem Paket mitteilen.",
-    disclaimer: "Die Anfrage aktiviert kein Paket und schaltet diesen Bereich nicht frei.",
-    request: "Anfrage auswählen",
-    forRequest: "Für die Anfrage",
-    unnamed: "Anfrage ohne Namen",
-    packages: "Paket auswählen",
-    empty: "Zurzeit sind keine Pakete verfügbar. Bitte wenden Sie sich an GMED.",
-    unavailable: "Keine zugängliche Anfrage gefunden. Bitte wenden Sie sich an GMED.",
-    loading: "Pakete werden geladen…",
-    error: "Die Pakete konnten nicht geladen werden. Bitte versuchen Sie es erneut.",
-    submitError: "Die Anfrage konnte nicht gesendet werden. Bitte versuchen Sie es erneut.",
-    retry: "Erneut versuchen",
-    submit: "Interesse senden",
-    pending: "Bereits angefragt",
-    sent: "Ihr Interesse wurde an GMED übermittelt.",
-    existing: "Ihr Interesse an diesem Paket liegt GMED bereits vor.",
-  },
-  ru: {
-    title: "Раздел пациента",
-    locked: "Этот раздел пока закрыт.",
-    explanation: "Он станет доступен после оформления пациента и подтверждения доступа. Сейчас можно сообщить GMED о желании оформить пакет.",
-    disclaimer: "Запрос не активирует пакет и не открывает этот раздел.",
-    request: "Выберите заявку",
-    forRequest: "Для заявки",
-    unnamed: "Заявка без имени",
-    packages: "Выберите пакет",
-    empty: "Сейчас нет доступных пакетов. Обратитесь в GMED.",
-    unavailable: "Доступная заявка не найдена. Обратитесь в GMED.",
-    loading: "Загружаем пакеты…",
-    error: "Не удалось загрузить пакеты. Попробуйте ещё раз.",
-    submitError: "Не удалось отправить запрос. Попробуйте ещё раз.",
-    retry: "Повторить",
-    submit: "Запросить пакет",
-    pending: "Уже запрошен",
-    sent: "Ваш запрос отправлен в GMED.",
-    existing: "GMED уже получил ваш запрос на этот пакет.",
-  },
-} as const;
+import type { LeadCabinetLang } from "@/pages/patient-lead/lead-request-text";
+import { leadShellText } from "@/pages/patient-lead/lead-shell-text";
 
 type RequestChoice = { id: string; name: string };
 
-export function LeadPortalPlanDialog({ moduleId, moduleLabel, onClose }: {
+/** The dialog speaks the cabinet language (DE, EN, UA, RU), like the side bar that opens it. */
+export function LeadPortalPlanDialog({ lang, moduleId, moduleLabel, onClose }: {
+  lang: LeadCabinetLang;
   moduleId: string;
   moduleLabel: string;
   onClose: () => void;
 }) {
-  const { lang, t } = useLang();
-  const text = TEXT[lang];
+  const text = leadShellText(lang).planDialog;
   const generation = useRef(0);
   const [choices, setChoices] = useState<RequestChoice[]>([]);
   const [leadId, setLeadId] = useState("");
@@ -156,7 +115,7 @@ export function LeadPortalPlanDialog({ moduleId, moduleLabel, onClose }: {
         description={text.locked}
         maxWidthClassName="sm:max-w-[680px]"
         footer={<div className="flex flex-wrap justify-end gap-2 p-3">
-          <Button type="button" variant="outline" onClick={onClose}>{t.common_close}</Button>
+          <Button type="button" variant="outline" onClick={onClose}>{text.close}</Button>
           <Button type="button" data-testid="lead-portal-plan-submit" onClick={() => void submit()}
             disabled={loading || saving || !packageId || pending || !catalogue?.packages.length}>
             {saving ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : null}

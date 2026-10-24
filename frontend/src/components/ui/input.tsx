@@ -424,12 +424,21 @@ function Input({
     // The anchor finds the field's visible label; `contents` keeps it out of
     // the layout. The nested provider only adds the UI-language texts; a picker
     // in its own language also gets its own calendar names.
+    // Inside a wrapping <label> (no htmlFor) the browser forwards a click on a
+    // date/time section to the label's first control, MUI's "open" button: the
+    // calendar opens and takes the focus from the section being typed into.
+    // Keep the click where it landed; the buttons themselves still work.
+    const handlePickerAnchorClick = (event: React.MouseEvent<HTMLSpanElement>) => {
+      const target = event.target instanceof Element ? event.target : null
+      if (target && !target.closest("button, input, a, select, textarea")) event.preventDefault()
+    }
+
     const wrapPicker = (picker: React.ReactNode) => (
       <LocalizationProvider
         {...(pickerLang ? { dateAdapter: AppAdapterDayjs, adapterLocale: PICKER_ADAPTER_LOCALE[pickerLang] } : {})}
         localeText={PICKER_LOCALE_TEXT[pickerLang ?? lang]}
       >
-        <span ref={pickerAnchorRef} data-picker-anchor="" className="contents" onPasteCapture={handlePickerPaste}>
+        <span ref={pickerAnchorRef} data-picker-anchor="" className="contents" onPasteCapture={handlePickerPaste} onClick={handlePickerAnchorClick}>
           {picker}
         </span>
       </LocalizationProvider>

@@ -752,7 +752,8 @@ test("uncertain creation stays disabled through failed reconciliation, then allo
   await expect(page.getByText("Unterschriften ausstehend", { exact: true })).toBeVisible({ timeout: 20_000 });
   await page.getByRole("button", { name: "Status prüfen", exact: true }).click();
   await page.getByRole("button", { name: "Anfrage zurückziehen", exact: true }).click();
-  await expect(page.getByText("Anfrage zurückgezogen", { exact: true })).toBeVisible();
+  // The request's own badge: each signer row repeats the withdrawn state (2026-10-15).
+  await expect(page.locator('[data-slot="badge"]', { hasText: "Anfrage zurückgezogen" })).toBeVisible();
   await expect(send).toBeDisabled();
   expect(actions).toEqual(["refresh", "withdraw"]);
   expect(postAttempts).toBe(1);

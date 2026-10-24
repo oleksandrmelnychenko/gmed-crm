@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
+// A session token shaped like the server's: `refreshUser` takes /me only when
+// the token's subject is the account that answered.
+const accessToken = `synthetic.${Buffer.from(JSON.stringify({ sub: "actor" })).toString("base64")}.signature`;
+
 type MockOptions = {
   role?: string;
   lang?: "ru" | "de";
@@ -58,10 +62,10 @@ async function setup(page: Page, options: MockOptions = {}) {
     ],
   };
 
-  await page.addInitScript(({ lang, anonymous }) => {
+  await page.addInitScript(({ lang, anonymous, accessToken }) => {
     localStorage.setItem("gmed_lang", lang);
-    if (!anonymous) localStorage.setItem("gmed_access_token", "account-test-token");
-  }, { lang, anonymous: options.anonymous ?? false });
+    if (!anonymous) localStorage.setItem("gmed_access_token", accessToken);
+  }, { lang, anonymous: options.anonymous ?? false, accessToken });
   await page.routeWebSocket("**/api/**", (socket) => socket.close());
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -76,7 +80,7 @@ async function setup(page: Page, options: MockOptions = {}) {
       state.sessionExpired = false;
       return route.fulfill({
         json: {
-          access_token: "account-test-token",
+          access_token: accessToken,
           refresh_token: "account-test-refresh",
           token_type: "Bearer",
           expires_in: 900,
@@ -92,7 +96,7 @@ async function setup(page: Page, options: MockOptions = {}) {
       state.refreshed += 1;
       return route.fulfill({
         json: {
-          access_token: "account-test-token",
+          access_token: accessToken,
           refresh_token: "account-test-refresh",
           token_type: "Bearer",
           expires_in: 900,

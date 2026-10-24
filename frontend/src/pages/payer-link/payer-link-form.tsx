@@ -16,6 +16,7 @@ import {
   missingByStep,
   payerSteps,
   refusedField,
+  industryRequired,
   occupationRequired,
   requiredFields,
   stillRejected,
@@ -439,8 +440,9 @@ function DraftForm({
   const required = (field: PayerField) => {
     if (!base.has(field)) return false;
     if (field === "funds_description") return form.draft.funds_sources.includes("other");
-    // The profession only with the enhanced check (owner 2026-10-24); the relationship stays required.
+    // The profession and the industry only with the enhanced check (owner 2026-10-24); the relationship stays required.
     if (field === "occupation") return occupationRequired(questionnaire);
+    if (field === "industry") return industryRequired(questionnaire);
     if (field === "bank_name") return form.draft.payment_method === "bank_transfer";
     return true;
   };

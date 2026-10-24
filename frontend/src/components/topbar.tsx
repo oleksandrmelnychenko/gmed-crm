@@ -18,6 +18,8 @@ import { usePortalPatientId } from "@/lib/portal-patient-context";
 import { clearApiCache } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
 import { canAccessStaffRoute, isLeadPortalUser, staffHrefIfAllowed } from "@/lib/staff-route-access";
+import { useLeadCabinetLang } from "@/pages/patient-lead/lead-cabinet-language";
+import { leadShellText } from "@/pages/patient-lead/lead-shell-text";
 import { useNewLeadCounter } from "@/lib/use-nav-counters";
 import { cn } from "@/lib/utils";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
@@ -166,6 +168,10 @@ export function Topbar() {
   const isPatientPortal = user?.role === "patient";
   // The lead cabinet has no notifications (owner decision 2026-10-03).
   const leadCabinet = isLeadPortalUser(user);
+  // The lead cabinet speaks DE, EN, UA and RU; its shell follows (QA 2026-10-24, A-7).
+  const cabinetLang = useLeadCabinetLang(user, lang);
+  const leadShell = leadCabinet ? leadShellText(cabinetLang) : null;
+  const portalName = leadShell?.portalName ?? t.portal_dashboard_patient_portal;
   const portalPatientId = usePortalPatientId(user?.id);
   const notificationsLocked = leadCabinet || !hasPortalSubscription(user, portalPatientId);
   const showLeadShortcut = Boolean(
@@ -354,21 +360,21 @@ export function Topbar() {
         )}
       >
         <div className="flex min-w-0 items-center gap-1">
-          <TopbarIconButton onClick={toggleNav} title={t.ui_toggle_sidebar}>
+          <TopbarIconButton onClick={toggleNav} title={leadShell?.toggleSidebar ?? t.ui_toggle_sidebar}>
             <PanelLeft className="size-[17px]" />
           </TopbarIconButton>
           <div aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
           <div className="flex min-w-0 items-center gap-2 px-1.5 sm:px-2">
             {/* "CONSOLE" is the staff workspace; patients see their portal. */}
             <span className="sr-only">
-              {isPatientPortal ? `GMED ${t.portal_dashboard_patient_portal}` : t.app_name}
+              {isPatientPortal ? `GMED ${portalName}` : t.app_name}
             </span>
             <GmedWordmark className="h-6 w-auto shrink-0 text-[#04060c]" />
             <span
               aria-hidden="true"
               className="hidden self-end truncate text-[12px] font-semibold leading-none tracking-normal text-foreground sm:inline"
             >
-              {isPatientPortal ? t.portal_dashboard_patient_portal : "CONSOLE"}
+              {isPatientPortal ? portalName : "CONSOLE"}
             </span>
           </div>
         </div>
