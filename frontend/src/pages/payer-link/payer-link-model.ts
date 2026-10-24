@@ -723,6 +723,15 @@ export function requiredFields(payerType: PayerType): ReadonlySet<string> {
   return required;
 }
 
+/**
+ * Whether a private person's profession is required (owner 2026-10-24): only
+ * with the enhanced check, which asks the source of funds too — or while the
+ * server still names it missing. An older server (no `funds_required`) asks it as before.
+ */
+export function occupationRequired(questionnaire: Pick<PayerQuestionnaire, "funds_required" | "missing_for_submit">): boolean {
+  return questionnaire.funds_required !== false || (questionnaire.missing_for_submit ?? []).includes("occupation");
+}
+
 /** Whether the beneficial owners are required: a company or an organisation, not an insurer or a person. */
 export function beneficialOwnersRequired(payerType: PayerType): boolean {
   return payerType === "company" || payerType === "organisation";

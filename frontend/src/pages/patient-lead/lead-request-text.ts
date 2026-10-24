@@ -142,8 +142,10 @@ export type LeadRequestText = {
   guardianOnly: string;
   /** A parent's login after the child came of age: the access ended (QA 2026-10-23). */
   guardianAccessEnded: string;
-  /** A parent's access ended for another reason (a custody change): neutral, names nothing (owner 2026-10-23). */
+  /** A parent's access ended for another reason (a custody change, removed by staff …): neutral, names nothing (owner 2026-10-23). */
   guardianAccessEndedNeutral: string;
+  /** The only action left on that page (QA 2026-10-24, B-2). */
+  signOut: string;
   requestFor: string;
   language: string;
   sectionPerson: string;
@@ -307,6 +309,8 @@ export type LeadRequestText = {
   followUpSending: string;
   followUpIncomplete: string;
   followUpAnsweredAt: (dateTime: string) => string;
+  /** GMED asked for more after an answer (`follow_up.requested_at`, the answer cleared): check and send again. */
+  followUpRequestedAgain: (date: string) => string;
   /** In step "send" while blocks are open: a pointer to the step. */
   followUpOpen: string;
   followUpGo: string;
@@ -1089,6 +1093,7 @@ const de: LeadRequestText = {
     "Die Person, für die Sie die Anfrage ausgefüllt haben, ist inzwischen volljährig. Ihr Zugang als Elternteil bzw. gesetzlicher Vertreter ist damit beendet. Bei Fragen wenden Sie sich bitte an GMED.",
   guardianAccessEndedNeutral:
     "Ihr Zugang zu dieser Anfrage ist beendet. Bei Fragen wenden Sie sich bitte an GMED.",
+  signOut: "Abmelden",
   requestFor: "Anfrage für",
   language: "Sprache",
   sectionPerson: "Persönliche Daten",
@@ -1249,6 +1254,7 @@ const de: LeadRequestText = {
   followUpSending: "Wird gesendet…",
   followUpIncomplete: "Bitte ergänzen Sie zuerst die noch offenen Angaben.",
   followUpAnsweredAt: (dateTime) => `Ihre ergänzenden Angaben wurden am ${dateTime} gesendet. Ihre Angaben werden geprüft.`,
+  followUpRequestedAgain: (date) => `GMED hat am ${date} ergänzende Angaben angefragt – bitte prüfen Sie Ihre Antworten und senden Sie sie erneut.`,
   followUpOpen: "Bitte ergänzen Sie noch einige Angaben.",
   followUpGo: "Zu den ergänzenden Angaben",
   extraFields: {
@@ -1661,6 +1667,7 @@ const ru: LeadRequestText = {
     "Человек, для которого вы заполняли заявку, стал совершеннолетним. Поэтому ваш доступ как родителя или законного представителя закрыт. Если у вас есть вопросы, обратитесь в GMED.",
   guardianAccessEndedNeutral:
     "Ваш доступ к этой заявке закрыт. Если у вас есть вопросы, обратитесь в GMED.",
+  signOut: "Выйти",
   requestFor: "Заявка для",
   language: "Язык",
   sectionPerson: "Личные данные",
@@ -1817,6 +1824,7 @@ const ru: LeadRequestText = {
   followUpSending: "Отправляется…",
   followUpIncomplete: "Пожалуйста, сначала дополните недостающие сведения.",
   followUpAnsweredAt: (dateTime) => `Ваши дополнительные сведения отправлены ${dateTime}. Ваши данные проверяются.`,
+  followUpRequestedAgain: (date) => `GMED запросил дополнительные сведения ${date} — проверьте ответы и отправьте ещё раз.`,
   followUpOpen: "Пожалуйста, дополните ещё некоторые сведения.",
   followUpGo: "К дополнительным сведениям",
   extraFields: {
@@ -2228,6 +2236,7 @@ const uk: LeadRequestText = {
     "Людина, для якої ви заповнювали заявку, стала повнолітньою. Тому ваш доступ як батька, матері або законного представника закрито. Якщо у вас є запитання, зверніться до GMED.",
   guardianAccessEndedNeutral:
     "Ваш доступ до цієї заявки закрито. Якщо у вас є запитання, зверніться до GMED.",
+  signOut: "Вийти",
   requestFor: "Заявка для",
   language: "Мова",
   sectionPerson: "Особисті дані",
@@ -2384,6 +2393,7 @@ const uk: LeadRequestText = {
   followUpSending: "Надсилається…",
   followUpIncomplete: "Будь ласка, спершу доповніть відомості, яких бракує.",
   followUpAnsweredAt: (dateTime) => `Ваші додаткові відомості надіслано ${dateTime}. Ваші дані перевіряються.`,
+  followUpRequestedAgain: (date) => `GMED запросив додаткові відомості ${date} — перевірте відповіді й надішліть їх ще раз.`,
   followUpOpen: "Будь ласка, доповніть ще деякі відомості.",
   followUpGo: "До додаткових відомостей",
   extraFields: {
@@ -2795,6 +2805,7 @@ const en: LeadRequestText = {
     "The person you filled in the request for has come of age. Your access as a parent or legal representative has therefore ended. If you have any questions, please contact GMED.",
   guardianAccessEndedNeutral:
     "Your access to this request has ended. If you have any questions, please contact GMED.",
+  signOut: "Sign out",
   requestFor: "Request for",
   language: "Language",
   sectionPerson: "Personal details",
@@ -2951,6 +2962,7 @@ const en: LeadRequestText = {
   followUpSending: "Sending…",
   followUpIncomplete: "Please first complete the details that are still open.",
   followUpAnsweredAt: (dateTime) => `Your additional details were sent on ${dateTime}. Your details are being reviewed.`,
+  followUpRequestedAgain: (date) => `GMED requested additional details on ${date} – please check your answers and send them again.`,
   followUpOpen: "Please complete a few more details.",
   followUpGo: "To the additional information",
   extraFields: {

@@ -5,6 +5,8 @@ import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api"
 import { CabinetGoToContext, MissingList } from "./lead-request-parts";
 import { PayerMissingLists } from "./lead-request-payer-questionnaire";
 import { payerMissingParts } from "./lead-request-payer-questionnaire-model";
+import { LegalQuestionsSection, type IdentificationForm } from "./lead-request-identification";
+import { draftFromIdentification } from "./lead-request-model";
 import { IdentityStep, type StepNav } from "./lead-request-step-forms";
 import { leadRequestText, submitFieldLabel } from "./lead-request-text";
 
@@ -193,5 +195,24 @@ describe("the missing lists and the summary name the child's document alike", ()
     const ru = leadRequestText("ru");
     expect(submitFieldLabel(ru, "id_document_upload", true, null, true)).toBe(ru.childIdentityFiles);
     expect(submitFieldLabel(ru, "id_document_upload")).toBe(`${ru.sectionIdentity}: ${ru.identityFiles}`);
+  });
+});
+
+describe("the legal questions of a minor", () => {
+  const form: IdentificationForm = {
+    draft: draftFromIdentification(null),
+    set: () => undefined,
+    update: () => undefined,
+    errorFor: () => undefined,
+  };
+  const legal = (minor: boolean) => renderToStaticMarkup(<LegalQuestionsSection form={form} text={leadRequestText("de")} guardian={minor} minor={minor} />);
+
+  it("asks a child no own public office (owner 2026-10-24), an adult all three questions", () => {
+    const child = legal(true);
+    expect(child).not.toContain("lead-request-legal-pep_self");
+    expect(child).toContain("lead-request-legal-pep_related");
+    expect(child).toContain("lead-request-legal-sanctions_links");
+    const adult = legal(false);
+    for (const question of ["pep_self", "pep_related", "sanctions_links"]) expect(adult).toContain(`lead-request-legal-${question}`);
   });
 });

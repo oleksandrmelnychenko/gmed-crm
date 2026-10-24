@@ -30,7 +30,7 @@ import { ApiRequestError } from "@/lib/api";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { isValidPersonPhone } from "@/lib/person-fields";
 import { isKnownNoMailEmail } from "@/lib/email-domain-check";
-import { EmailDomainWarning } from "@/components/email-domain-warning";
+import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
 import { useAuth } from "@/lib/auth";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
@@ -440,6 +440,12 @@ export function LeadPayerDeclarationSection({
     && autosave.error instanceof ApiRequestError
     && autosave.error.body?.error === "payer_phone_invalid";
   const phoneInvalid = payerPhoneInvalid(form) || phoneRefused;
+  // A new or changed e-mail address whose domain accepts no mail (422
+  // `payer_email_domain_no_mail`, field `email`): the domain warning's words
+  // at the field, as the client-side check gives them.
+  const emailDomainRefused = autosave.status === "error"
+    && autosave.error instanceof ApiRequestError
+    && autosave.error.body?.error === "payer_email_domain_no_mail";
   // Format hints only: the values are saved as typed (owner decision 2026-10-22).
   const vatIdWarning = vatIdFormatWarning(form.invoiceVatId, tx);
   const taxNumberWarning = taxNumberFormatWarning(form.invoiceTaxNumber, tx);
@@ -1029,13 +1035,17 @@ export function LeadPayerDeclarationSection({
                 </PayerField>
               ) : null}
               <PayerField label={tx("Электронная почта", "E-Mail")}>
-                <Input className={inputClass} type="email" value={form.email} disabled={readOnly} aria-invalid={emailInvalid || undefined} onChange={(event) => patch("email", event.target.value)} />
+                <Input className={inputClass} type="email" value={form.email} disabled={readOnly} aria-invalid={emailInvalid || emailDomainRefused || undefined} onChange={(event) => patch("email", event.target.value)} />
                 {emailInvalid ? (
                   <span role="alert" className="block text-xs text-destructive">
                     {tx("Электронная почта указана неверно, изменения не сохраняются. Пример: name@example.de.", "Die E-Mail-Adresse ist ungültig, Änderungen werden nicht gespeichert. Beispiel: name@example.de.")}
                   </span>
+                ) : emailDomainRefused ? (
+                  <span role="alert" className="block text-xs text-destructive" data-testid="lead-payer-email-domain-error">
+                    {emailDomainWarningText(form.email, lang)}
+                  </span>
                 ) : null}
-                <EmailDomainWarning email={form.email} lang={lang} enabled={form.kind === "third_party" && !emailInvalid} />
+                <EmailDomainWarning email={form.email} lang={lang} enabled={form.kind === "third_party" && !emailInvalid && !emailDomainRefused} />
               </PayerField>
               <PayerField label={tx("Телефон", "Telefon")}>
                 <Input className={inputClass} type="tel" value={form.phone} disabled={readOnly} aria-invalid={phoneInvalid || undefined} onChange={(event) => patch("phone", event.target.value)} />

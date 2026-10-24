@@ -588,11 +588,12 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       })) : [],
     });
   } else if (disclosureDefaultsToNo(request)) {
-    // Not answered counts as "no" (owner decision 2026-10-22): no information to third parties.
+    // Not answered counts as "no" (owner decision 2026-10-22): no information to third parties;
+    // printed as the default, not as an answer the person gave (QA 2026-10-24, A-1).
     const wording = trustedPersonsText(lang);
     groups.push({
       id: "disclosure", title: wording.title, empty: text.summaryEmpty,
-      rows: entered([[wording.question, yesNo(false)]]),
+      rows: entered([[wording.question, `${yesNo(false)} (${wording.byDefault})`]]),
       parts: [],
     });
   }

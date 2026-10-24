@@ -901,11 +901,9 @@ async fn reset_guardian_password(
         return err(StatusCode::CONFLICT, "The login is deactivated");
     }
     let one_time_password = password_policy::generate_one_time_password();
-    // The audit row and the rejection of open sign-ins are one transaction,
-    // committed only once the new password is stored (a refused or failed
-    // reset leaves no audit row). The password itself goes through the shared
-    // policy helper on the pool, which has no in-transaction variant, so the
-    // row and the change are coupled up to a failed commit after the change.
+    // The rejection of open sign-ins, the audit row, the new password and the
+    // end of the old sessions are one transaction: a refused or failed reset
+    // leaves no audit row, and a failed audit row leaves the old password.
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin password reset"),
@@ -930,7 +928,8 @@ async fn reset_guardian_password(
     if let Err(error) = audit::write_in_transaction(&mut tx, &audit_event).await {
         return internal(error, "audit password reset");
     }
-    match password_policy::replace_password(&state.db, user_id, &one_time_password, false).await {
+    match password_policy::replace_password_in_tx(&mut tx, user_id, &one_time_password, false).await
+    {
         Ok(()) => {}
         Err(password_policy::PasswordChangeError::Rejected(message)) => {
             return err(StatusCode::UNPROCESSABLE_ENTITY, message);
@@ -942,10 +941,14 @@ async fn reset_guardian_password(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    if let Err(error) =
+        crate::auth::tokens::revoke_all_families_in_tx(&mut tx, user_id, "password_reset").await
+    {
+        return internal(error, "revoke sessions");
+    }
     if let Err(error) = tx.commit().await {
         return internal(error, "commit password reset");
     }
-    crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
     Json(json!({
         "access_id": access_id,
         "user_id": user_id,

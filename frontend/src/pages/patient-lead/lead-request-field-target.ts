@@ -47,6 +47,21 @@ export function recipientIsPayer(request: Pick<LeadRequest, "billing">): boolean
 }
 
 /**
+ * The keys a step's missing list shows, in order: when the recipient pays, a
+ * payer key the recipient's field answers (`payer_country`) is shown as that
+ * field (`recipient_country`) and only once, next to the recipient's own keys
+ * (QA 2026-10-24, C-1). The server's list itself stays as it is.
+ */
+export function missingListKeys(keys: readonly string[], recipientPays: boolean): string[] {
+  const result: string[] = [];
+  for (const key of keys) {
+    const shown = (recipientPays ? recipientKeyOfPayerKey(key) : null) ?? key;
+    if (!result.includes(shown)) result.push(shown);
+  }
+  return result;
+}
+
+/**
  * The keys a step's missing list marks at the fields: each key itself and,
  * when the recipient pays, the recipient's field for a payer key.
  */
@@ -73,6 +88,21 @@ function byTestId(scope: ParentNode, id: string): HTMLElement | null {
   return scope.querySelector<HTMLElement>(`[data-testid="${id}"]`);
 }
 
+/** The element with the id, label or test id the cabinet gives the field of `key` (a safe key). */
+function directFieldElement(scope: ParentNode, key: string): HTMLElement | null {
+  const dashed = key.replace(/_/g, "-");
+  const label = scope.querySelector<HTMLElement>(`label[for="lead-request-${key}"]`);
+  const groupLabel = byId(scope, `lead-request-${key}-label`);
+  return (
+    byId(scope, `lead-request-${key}`) ??
+    (label ? label.parentElement : null) ??
+    (groupLabel ? groupLabel.parentElement : null) ??
+    byTestId(scope, `lead-request-${key}`) ??
+    byTestId(scope, `lead-request-${dashed}`) ??
+    byId(scope, `lead-request-${dashed}`)
+  );
+}
+
 /** The element that answers one form key, searched by the ids and labels the cabinet gives its fields. */
 export function fieldElement(scope: ParentNode, key: string): HTMLElement | null {
   // Block R: a representative's answer, else the person's box.
@@ -81,16 +111,7 @@ export function fieldElement(scope: ParentNode, key: string): HTMLElement | null
     return byId(scope, representativeQuestion.id) ?? byTestId(scope, `lead-request-representative-questions-${representativeQuestion.person}`);
   }
   if (!SAFE_KEY.test(key)) return null;
-  const dashed = key.replace(/_/g, "-");
-  const label = scope.querySelector<HTMLElement>(`label[for="lead-request-${key}"]`);
-  const groupLabel = byId(scope, `lead-request-${key}-label`);
-  const direct =
-    byId(scope, `lead-request-${key}`) ??
-    (label ? label.parentElement : null) ??
-    (groupLabel ? groupLabel.parentElement : null) ??
-    byTestId(scope, `lead-request-${key}`) ??
-    byTestId(scope, `lead-request-${dashed}`) ??
-    byId(scope, `lead-request-${dashed}`);
+  const direct = directFieldElement(scope, key);
   if (direct) return direct;
   if (key === "inquiry_consent") return byTestId(scope, "lead-request-inquiry-consent");
   if (key === "id_document_upload" || key.startsWith("id_")) return byTestId(scope, "lead-request-identity-upload");
@@ -112,9 +133,10 @@ export function fieldElement(scope: ParentNode, key: string): HTMLElement | null
   }
   if (key === "has_insurance" || key.startsWith("insurance_")) return byTestId(scope, "lead-request-insurance");
   if (isRecipientField(key)) return byTestId(scope, "lead-request-invoice-recipient");
-  // The recipient who pays answers the payer's e-mail, phone or residence in the recipient's fields.
+  // The recipient who pays answers the payer's e-mail, phone or residence in the recipient's
+  // fields; a field without an input id of its own (the country select) is found by its label.
   const recipientTwin = recipientKeyOfPayerKey(key);
-  const twinElement = recipientTwin ? byId(scope, `lead-request-${recipientTwin}`) : null;
+  const twinElement = recipientTwin ? directFieldElement(scope, recipientTwin) : null;
   if (twinElement) return twinElement;
   if (key.startsWith("payer_")) return byId(scope, SECTION_ANCHORS.payer) ?? byTestId(scope, "lead-request-payer");
   if (isBillingField(key)) return byTestId(scope, "lead-request-billing");
@@ -150,8 +172,13 @@ export function revealCabinetTarget({ element, field }: FoundCabinetTarget) {
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   element.scrollIntoView?.({ block: field ? "center" : "start", behavior: reduced ? "auto" : "smooth" });
   if (!field) return;
-  const control = element.matches(FOCUSABLE) ? element : element.querySelector<HTMLElement>(FOCUSABLE);
-  control?.focus({ preventScroll: true });
+  const controls = element.matches(FOCUSABLE) ? [element] : Array.from(element.querySelectorAll<HTMLElement>(FOCUSABLE));
+  // A file input hides behind its button (`sr-only`): the button takes the cursor, so the
+  // person sees where the link led (QA 2026-10-24, A-5).
+  const visible = controls.find(
+    (control) => !control.classList.contains("sr-only") && !(control instanceof HTMLInputElement && control.type === "file"),
+  );
+  (visible ?? controls[0])?.focus({ preventScroll: true });
   element.classList.add(...RING);
   window.setTimeout(() => element.classList.remove(...RING), 1600);
 }

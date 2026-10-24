@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use rand::RngExt;
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{PgConnection, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use super::{blacklist, jwt};
@@ -611,44 +611,65 @@ pub async fn revoke_family(pool: &PgPool, family_id: Uuid, reason: &str) {
     }
 }
 
+/// Revoke every session of `user_id` in one transaction of its own; errors
+/// are logged, as the callers (password resets, deactivation) have already
+/// made their change. A caller that couples the revocation with its own
+/// change uses [`revoke_all_families_in_tx`].
 pub async fn revoke_all_families(pool: &PgPool, user_id: Uuid, reason: &str) {
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(user_id = %user_id, error = %e, "Failed to begin the revocation of all families");
+            return;
+        }
+    };
+    if let Err(e) = revoke_all_families_in_tx(&mut tx, user_id, reason).await {
+        tracing::error!(user_id = %user_id, error = %e, "Failed to revoke all families");
+        return;
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(user_id = %user_id, error = %e, "Failed to commit the revocation of all families");
+    }
+}
+
+/// [`revoke_all_families`] on the caller's connection or transaction: the
+/// families, their access-token blacklist markers and the audit row become
+/// final with the caller's commit, so a password change and the end of the
+/// old sessions are one unit.
+pub async fn revoke_all_families_in_tx(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    reason: &str,
+) -> Result<(), sqlx::Error> {
     let families: Vec<Uuid> = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM token_families WHERE user_id = $1 AND NOT is_revoked",
     )
     .bind(user_id)
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
+    .fetch_all(&mut *conn)
+    .await?;
 
-    if let Err(e) = sqlx::query!(
+    sqlx::query!(
         "UPDATE token_families SET is_revoked = true, revoked_reason = $2
          WHERE user_id = $1 AND NOT is_revoked",
         user_id,
         reason
     )
-    .execute(pool)
-    .await
-    {
-        tracing::error!(user_id = %user_id, error = %e, "Failed to revoke all families");
-    }
+    .execute(&mut *conn)
+    .await?;
 
     for family_id in families {
-        if let Err(e) = blacklist::blacklist_family(pool, family_id, reason).await {
-            tracing::error!(family_id = %family_id, error = %e, "Failed to add family to access-token blacklist");
-        }
+        blacklist::blacklist_family(&mut *conn, family_id, reason).await?;
     }
 
-    if let Err(e) = sqlx::query!(
+    sqlx::query!(
         "INSERT INTO audit_log (user_id, action, entity_type, context)
          VALUES ($1, 'revoke_all_sessions', 'token_family', $2)",
         user_id,
         serde_json::json!({ "reason": reason })
     )
-    .execute(pool)
-    .await
-    {
-        tracing::warn!(error = %e, "Failed to write revoke-all audit log");
-    }
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 /// Revoke every active session of `user_id` except `keep_family_id` (the one

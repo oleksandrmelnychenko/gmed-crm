@@ -28,7 +28,7 @@ pub(crate) async fn current_documents(
                         OR o.id IS DISTINCT FROM (
                             SELECT latest.id FROM orders latest WHERE latest.source_lead_id = $1
                             ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1)
-                        OR d.created_at <= o.client_terms_changed_at)
+                        OR d.created_at < o.client_terms_changed_at)
              )
            ORDER BY r.created_at DESC, r.id DESC"#,
     )

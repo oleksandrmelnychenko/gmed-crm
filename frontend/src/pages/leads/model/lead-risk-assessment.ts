@@ -77,6 +77,15 @@ export type RiskTrigger = {
    * the third-party invoice recipient has a confirmed hit (QA 2026-10-12, round 3); else null.
    */
   variant: "list_1" | "list_2" | "recipient" | null;
+  /**
+   * Of a `representative` trigger: the trusted-contact id of the representative it fired on and
+   * that person's name (QA 2026-10-24, B-6); null for the other subjects and for a trigger a server
+   * stored before the id existed.
+   */
+  representative_id: string | null;
+  representative_name: string | null;
+  points: number;
+  /** Still true in the latest live evaluation| "list_2" | "recipient" | null;
   points: number;
   /** Still true in the latest live evaluation; a fired trigger stays (sticky) either way. */
   active: boolean;
@@ -158,6 +167,8 @@ export type LeadRiskAssessment = RiskScore & {
   blocks: RiskBlockState[];
   requested_blocks: string[];
   follow_up_answered_at: string | null;
+  /** When staff last requested cabinet blocks the lead has not sent again; null on an older server. */
+  follow_up_requested_at: string | null;
   review_notice: boolean;
   /** The live scoring before the start; never stored. */
   preview: RiskScore | null;
@@ -220,6 +231,8 @@ function normalizeTrigger(value: unknown): RiskTrigger | null {
     key: key.toUpperCase(),
     subject: text(raw.subject) ?? "patient",
     variant,
+    representative_id: text(raw.representative_id),
+    representative_name: text(raw.representative_name),
     points: count(raw.points),
     active: raw.active !== false,
     first_fired_at: text(raw.first_fired_at),
@@ -352,6 +365,7 @@ export function normalizeLeadRiskAssessment(value: unknown): LeadRiskAssessment 
     blocks: normalizeBlocks(raw.blocks),
     requested_blocks: letters(raw.requested_blocks),
     follow_up_answered_at: text(raw.follow_up_answered_at),
+    follow_up_requested_at: text(raw.follow_up_requested_at),
     review_notice: raw.review_notice === true,
     preview,
     before_submit: raw.before_submit === true,
@@ -546,11 +560,40 @@ export function riskTriggerStateLabel(
  * Whom a trigger concerns. A confirmed hit of the third-party invoice recipient alone adds to the
  * payer's side but names the recipient (QA 2026-10-12, round 3: the T16 row said «плательщик»).
  */
-export function riskSubjectLabel(subject: string, tx: Tx, variant: RiskTrigger["variant"] = null): string {
+export function riskSubjectLabel(
+  subject: string,
+  tx: Tx,
+  variant: RiskTrigger["variant"] = null,
+  /**
+   * The persons who act for the lead, as the assessment lists them (those with
+   * country questions): the representative a trigger names by id is looked up
+   * here; without an id a trigger of the one representative on file is named
+   * after that person (QA 2026-10-24, B-6), with several the row says
+   * "представитель" only.
+   */
+  representatives: readonly Pick<RepresentativeCountryQuestions, "id" | "name">[] = [],
+  /**
+   * The representative the trigger names (`representative_id` /
+   * `representative_name` of the trigger; a server stored the id only since
+   * 2026-10-24). The name is the server's fallback for a representative the
+   * assessment does not list (e.g. a PEP "yes" without a listed country).
+   */
+  person: Pick<RiskTrigger, "representative_id" | "representative_name"> | null = null,
+): string {
   if (subject === "payer" && variant === "recipient") return tx("получатель счёта", "Rechnungsempfänger");
   if (subject === "patient") return tx("пациент", "Patient");
   if (subject === "payer") return tx("плательщик", "Zahler/in");
-  if (subject === "representative") return tx("представитель", "Vertreter");
+  if (subject === "representative") {
+    const label = tx("представитель", "Vertreter");
+    // With an id the row names that person or nobody: the one listed
+    // representative may be another person (a PEP "yes" of a parent without a
+    // listed country, say).
+    const name = person?.representative_id
+      ? representatives.find((candidate) => candidate.id === person.representative_id)?.name.trim()
+        || person.representative_name?.trim()
+      : representatives.length === 1 ? representatives[0]?.name.trim() : "";
+    return name ? `${label}: ${name}` : label;
+  }
   return subject;
 }
 
@@ -596,6 +639,8 @@ export function riskBlockLabel(key: string, tx: Tx): string {
 
 /** What a follow-up block still misses, in words; an unknown key stays as the server names it. */
 const RISK_MISSING_LABELS: Record<string, [ru: string, de: string]> = {
+  // A requested cabinet block lists this until the lead sends the follow-up again.
+  follow_up_submit: ["пациент ещё не отправил ответ", "Patient hat noch nicht gesendet"],
   funds_source: ["источник средств", "Herkunft der Mittel"],
   funds_description: ["описание источника средств", "Beschreibung der Herkunft"],
   payer_funds_source: ["источник средств плательщика", "Herkunft der Mittel des Zahlers"],

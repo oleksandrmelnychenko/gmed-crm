@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { setPortalAccountLabel } from "@/lib/portal-account-label";
+import { setLeadPortalClosed } from "./lead-portal-closed";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
 
@@ -85,7 +86,7 @@ function storedCabinetLang(): LeadCabinetLang | null {
 export function LeadRequestPage() {
   const [, setSearchParams] = useSearchParams();
   const { lang: portalLang, setLang: setPortalLang } = useLang();
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const accountLang = user?.preferred_language ?? null;
   const userId = user?.id ?? null;
   const leadMode = isLeadPortalUser(user);
@@ -100,9 +101,10 @@ export function LeadRequestPage() {
   const [requests, setRequests] = useState<LeadRequest[] | null>(null);
   // The own login of a minor whose parents have access reaches no request (QA 2026-10-12, A3-01).
   const [ownAccessClosed, setOwnAccessClosed] = useState(false);
-  // A parent's access ended because the child came of age (QA 2026-10-23).
+  // A parent's access to every request ended (QA 2026-10-23): the child came of age, or for a
+  // reason the page does not name (a custody change, removed by staff …; QA 2026-10-24, B-2).
   const [guardianAccessEnded, setGuardianAccessEnded] = useState(false);
-  const [guardianAccessEndedByCustody, setGuardianAccessEndedByCustody] = useState(false);
+  const [guardianAccessEndedNeutral, setGuardianAccessEndedNeutral] = useState(false);
   const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.search).get("lead"));
   const [error, setError] = useState("");
   // Switching requests must not replace a queue whose uploads are still running.
@@ -174,7 +176,8 @@ export function LeadRequestPage() {
       setRequestLang(asLeadCabinetLang(loaded[0]?.personal_data.primary_language));
       setOwnAccessClosed(closed);
       setGuardianAccessEnded(ended);
-      setGuardianAccessEndedByCustody(endedReason === "custody_changed");
+      // An older server names no reason and ended the access only when the child came of age.
+      setGuardianAccessEndedNeutral(endedReason !== null && endedReason !== "came_of_age");
       setRequests(loaded);
       setSelected((current) =>
         current && loaded.some((request) => request.lead_id === current) ? current : loaded[0]?.lead_id ?? null,
@@ -203,6 +206,12 @@ export function LeadRequestPage() {
       !ownPatient && requests.length > 0 && requests.every((request) => request.access_kind === "guardian");
     setPortalAccountLabel(userId, guardianOnly ? text.accountLabelGuardian : null);
   }, [ownPatient, requests, text, userId]);
+  // No request left for a parent: the side bar shows no locked patient-portal entries, only
+  // the neutral notice stays (QA 2026-10-24, B-2/D-4).
+  useEffect(() => {
+    if (!userId || !requests) return;
+    setLeadPortalClosed(userId, leadMode && requests.length === 0 && guardianAccessEnded);
+  }, [guardianAccessEnded, leadMode, requests, userId]);
 
   // First visit of a request in German or Russian: the whole portal takes that
   // language once, unless the account already has a language of its own (a
@@ -249,11 +258,17 @@ export function LeadRequestPage() {
           {ownAccessClosed
             ? text.guardianOnly
             : guardianAccessEnded
-              ? guardianAccessEndedByCustody
+              ? guardianAccessEndedNeutral
                 ? text.guardianAccessEndedNeutral
                 : text.guardianAccessEnded
               : text.noRequest}
         </p>
+        {/* The access ended: nothing to do here but to sign out (QA 2026-10-24, B-2). */}
+        {guardianAccessEnded && !ownAccessClosed ? (
+          <Button type="button" variant="outline" onClick={() => void logout()} data-testid="lead-request-sign-out">
+            {text.signOut}
+          </Button>
+        ) : null}
         {/* The account has the patient portal (the request became a patient record): the way there. */}
         {!ownAccessClosed && !leadMode && user?.role === "patient" ? (
           <div className="space-y-3" data-testid="lead-request-patient-portal">

@@ -280,6 +280,27 @@ export function leadErrorMessage(
   // A server code with its own translation (e.g. a prepayment above the order
   // total) says more than the generic "check your input".
   if (isLocalizedApiError(error) && error.message.trim()) return error.message.trim();
+  // A staff upload of a file already on record (409 `duplicate_document`,
+  // lead_portal_intake.rs): the server's English text reached the wizard
+  // (QA 2026-10-24, B-5).
+  if (leadErrorBody(error)?.error === "duplicate_document") {
+    return tx("Этот файл уже загружен.", "Diese Datei ist bereits hochgeladen.");
+  }
+  // A new or changed address whose domain accepts no mail (422
+  // `email_domain_no_mail`, field `email`; email_address.rs): the same words
+  // as the client-side domain warning (B-1a).
+  if (leadErrorBody(error)?.error === "email_domain_no_mail") {
+    const body = leadErrorBody(error);
+    const named = [body?.domain, body?.email]
+      .find((value): value is string => typeof value === "string" && value.trim() !== "");
+    const domain = named ? named.trim().slice(named.trim().lastIndexOf("@") + 1).toLowerCase() : "";
+    return domain
+      ? tx(`Домен «${domain}» не принимает почту — проверьте адрес`, `Die Domain „${domain}“ empfängt keine E-Mails – bitte Adresse prüfen`)
+      : tx(
+          "Домен этого адреса электронной почты не принимает почту — проверьте адрес",
+          "Die Domain dieser E-Mail-Adresse empfängt keine E-Mails – bitte Adresse prüfen",
+        );
+  }
   const message = error instanceof Error
     ? error.message.trim()
     : error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string"

@@ -38,6 +38,34 @@ pub fn normalize_email(value: &str) -> Option<String> {
     is_valid_email(value).then(|| value.trim().to_lowercase())
 }
 
+/// The trimmed, lower-cased address when it is well-formed; no DNS. For an
+/// address already on file: a stored address is never judged by its domain
+/// again (QA 2026-10-24), so a domain rated `no_mail` today neither hides the
+/// address nor blocks saving another field. Sending to it reports a delivery
+/// failure if the domain really is dead (`crate::mail`).
+pub fn normalize_stored_email(value: &str) -> Option<String> {
+    has_valid_format(value).then(|| value.trim().to_lowercase())
+}
+
+/// The domain of `next` when the address is set or changed in this request
+/// (it differs from `current`, case and surrounding whitespace aside) and the
+/// domain is known to accept no mail (`crate::email_domain`). An unchanged
+/// address passes whatever its domain's rating is now; so does a domain with
+/// no recent answer (it is looked up in the background).
+pub fn no_mail_domain_of_change(current: Option<&str>, next: &str) -> Option<String> {
+    let next = next.trim();
+    if current.is_some_and(|current| current.trim().eq_ignore_ascii_case(next)) {
+        return None;
+    }
+    let domain = crate::email_domain::domain_of(next)?;
+    crate::email_domain::known_no_mail(&domain).then_some(domain)
+}
+
+/// The code of the refusal of a new or changed address whose domain accepts
+/// no mail: the cabinet and the wizard show "the domain … accepts no mail" at
+/// the field (`field` names it) instead of "invalid address".
+pub const EMAIL_DOMAIN_NO_MAIL: &str = "email_domain_no_mail";
+
 fn valid_local_part(local: &str) -> bool {
     !local.is_empty()
         && local.len() <= MAX_LOCAL_LENGTH
@@ -69,7 +97,9 @@ fn valid_label(label: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_email, normalize_email};
+    use super::{
+        is_valid_email, no_mail_domain_of_change, normalize_email, normalize_stored_email,
+    };
 
     #[test]
     fn accepts_real_addresses() {
@@ -132,5 +162,26 @@ mod tests {
             Some("max.muster@example.de".to_string())
         );
         assert_eq!(normalize_email("max@example"), None);
+        assert_eq!(
+            normalize_stored_email("  Max.Muster@Example.DE "),
+            Some("max.muster@example.de".to_string())
+        );
+        assert_eq!(normalize_stored_email("max@example"), None);
+    }
+
+    #[test]
+    fn an_unchanged_address_is_never_judged_by_its_domain() {
+        // The same address again, however it is written: nothing to judge.
+        assert_eq!(
+            no_mail_domain_of_change(Some("max@example.de"), " Max@Example.DE "),
+            None
+        );
+        // A set or changed address: judged, and the check is off here.
+        assert_eq!(no_mail_domain_of_change(None, "max@example.de"), None);
+        assert_eq!(
+            no_mail_domain_of_change(Some("old@example.de"), "max@example.de"),
+            None
+        );
+        assert_eq!(no_mail_domain_of_change(None, "max"), None);
     }
 }

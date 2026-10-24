@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { inputClass, selectClass, textareaClass } from "@/components/record-workspace/primitives/design-tokens";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { formatAppDateTime } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import {
@@ -37,6 +37,7 @@ import {
   followUpAnswered,
   followUpBeforeSubmit,
   followUpMissing,
+  followUpRequestedAgainAt,
   fundsDescriptionRequired,
   fundsSourceOptions,
   missingOfRefusal,
@@ -165,6 +166,7 @@ export function FollowUpStep({
   const [error, setError] = useState("");
   const answered = followUpAnswered(request);
   const answeredAt = request.follow_up?.answered_at ?? null;
+  const requestedAgainAt = followUpRequestedAgainAt(request);
   const beforeSubmit = followUpBeforeSubmit(request);
   const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);
 
@@ -265,8 +267,9 @@ export function FollowUpStep({
       case "L":
         return (
           <div className="space-y-5">
-            <LegalQuestionsSection form={identification} text={text} guardian={guardian} bare />
-            {request.payer ? (
+            <LegalQuestionsSection form={identification} text={text} guardian={guardian} minor={request.minor} bare />
+            {/* The paying parent's own questions live in the payer questionnaire, not in the child's block L. */}
+            {request.payer && !request.minor ? (
               <PayerSection
                 request={request}
                 text={text}
@@ -285,6 +288,12 @@ export function FollowUpStep({
 
   return (
     <section className="space-y-6" data-testid="lead-request-follow-up">
+      {/* GMED asked once more after an answer: check and send again (no reason named). */}
+      {requestedAgainAt ? (
+        <p role="status" className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-relaxed text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200" data-testid="lead-request-follow-up-requested-again">
+          {text.followUpRequestedAgain(formatAppDate(requestedAgainAt))}
+        </p>
+      ) : null}
       {/* Answered and unchanged: "please complete and send" would contradict the confirmation below. */}
       {answered && answeredAt && !beforeSubmit ? null : (
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-follow-up-explanation">{beforeSubmit ? text.followUpBeforeSubmitIntro : text.followUpIntro}</p>

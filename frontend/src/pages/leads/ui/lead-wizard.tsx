@@ -127,6 +127,7 @@ import {
 import { custodyLabel, representativeName } from "../model/lead-gwg-statements";
 import {
   TRUSTED_CONTACT_RELATIONS,
+  emailChangedOnSave,
   isLegalGuardianRelation,
   isParentOrGuardianRelation,
   leadUpdateWithChangedContacts,
@@ -305,6 +306,8 @@ import {
 import {
   LeadWizardDocumentMetadata,
   sortWizardDocumentsNewestFirst,
+  wizardArchivedDocumentTitle,
+  wizardDocumentIsArchived,
 } from "./lead-wizard-document-metadata";
 import { LeadGwgStatements } from "./lead-gwg-statements";
 import { LeadAmlPepReviews } from "./lead-aml-pep-reviews";
@@ -2833,7 +2836,7 @@ function minorEmailOptional(draft: Pick<Draft, "birthDate">): boolean {
 }
 
 /** The stored names, city and phone of the lead (shared rules: a change only). */
-type StoredPersonFields = { firstName?: string | null; lastName?: string | null; city?: string | null; phone?: string | null };
+type StoredPersonFields = { firstName?: string | null; lastName?: string | null; city?: string | null; phone?: string | null; email?: string | null };
 
 function validateMasterDraft(
   draft: Draft | null,
@@ -2920,7 +2923,9 @@ function validateMasterDraft(
         "Введите корректный адрес электронной почты",
         "Gültige E-Mail-Adresse eingeben",
       );
-    } else if (email && emailNoMail) {
+    } else if (email && emailNoMail && emailChangedOnSave(email, stored.email)) {
+      // Only an address set or changed now is judged by its domain, as on the
+      // server: the stored one never blocks saving another field (B-1a).
       errors.email = emailDomainWarningText(email, tx("ru", "de"));
     }
     if (phone && changedValue(phone, stored.phone) && !isValidPersonPhone(phone)) {
@@ -3089,30 +3094,41 @@ function WizardDocumentRows({
     return emptyLabel ? <p className="text-xs text-muted-foreground">{emptyLabel}</p> : null;
   }
   const sortedDocuments = sortWizardDocumentsNewestFirst(documents);
-  const latestDocuments = sortedDocuments.filter((document) => document.is_latest_version);
-  const archivedDocuments = sortedDocuments.filter((document) => !document.is_latest_version);
+  // An old version, or a document the server put aside (status `archived`,
+  // e.g. the previous payer's identity copy after a payer change; QA
+  // 2026-10-24, C-7): both go to the archive group, and a put-aside document
+  // is listed by the name the server gave it ("Früherer Zahler – …").
+  const latestDocuments = sortedDocuments.filter((document) => document.is_latest_version && !wizardDocumentIsArchived(document));
+  const archivedDocuments = sortedDocuments.filter((document) => !document.is_latest_version || wizardDocumentIsArchived(document));
+  const archiveHasPutAside = archivedDocuments.some(wizardDocumentIsArchived);
 
   const renderDocument = (document: DocumentItem, archived: boolean) => {
     const signed = documentSignedFor(document, complianceKind);
+    const putAside = wizardDocumentIsArchived(document);
+    const title = putAside ? wizardArchivedDocumentTitle(document) : wizardDocumentFilename(document);
     return (
-      <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+      <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5" data-document-archived={putAside ? "true" : undefined}>
         {archived
           ? <History aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
           : <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
         <div className="min-w-0 flex-1">
           <button
             type="button"
-            title={wizardDocumentFilename(document)}
+            title={title}
             disabled={disabled}
             className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
             onClick={() => onOpen(document)}
           >
-            {wizardDocumentFilename(document)}
+            {title}
           </button>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <LeadWizardDocumentMetadata document={document} lang={lang} />
             {documentNote?.(document)}
-            {archived ? (
+            {putAside ? (
+              <Badge variant="outline" className="border-border/70 bg-muted/40 text-[11px] font-normal text-muted-foreground" data-testid={`lead-document-archived-${document.id}`}>
+                {tx("архив", "Archiv")}
+              </Badge>
+            ) : archived ? (
               <Badge variant="outline" className="font-mono text-[11px]">
                 {tx("Версия", "Version")} {document.version_number}
               </Badge>
@@ -3216,7 +3232,7 @@ function WizardDocumentRows({
           >
             <span className="flex items-center gap-2">
               <Archive aria-hidden="true" className="size-3.5" />
-              {tx("Архив версий", "Versionsarchiv")}
+              {archiveHasPutAside ? tx("Архив", "Archiv") : tx("Архив версий", "Versionsarchiv")}
             </span>
             <CountBadge>{archivedDocuments.length}</CountBadge>
           </button>
@@ -4840,8 +4856,8 @@ export function LeadWizard({
   const masterEmailNoMail = useEmailDomainStatus(draft?.email ?? "") === "no_mail";
   const cabinetConsents = useMemo(() => cabinetConsentsOf(lead?.readiness), [lead?.readiness]);
   const storedPerson = useMemo<StoredPersonFields>(
-    () => ({ firstName: lead?.first_name, lastName: lead?.last_name, city: lead?.city, phone: lead?.phone }),
-    [lead?.first_name, lead?.last_name, lead?.city, lead?.phone],
+    () => ({ firstName: lead?.first_name, lastName: lead?.last_name, city: lead?.city, phone: lead?.phone, email: lead?.email }),
+    [lead?.first_name, lead?.last_name, lead?.city, lead?.phone, lead?.email],
   );
   const strictMasterErrors = useMemo(
     () => validateMasterDraft(draft, tx, isRepeatIntake, masterEmailNoMail, cabinetConsents.healthcare, storedPerson),
@@ -4856,6 +4872,14 @@ export function LeadWizard({
     [draft, step1Portal.mode, strictMasterErrors],
   );
   const waitingForPatientData = patientDataPending(step1Portal.mode, draft);
+  // What keeps step 1 of a saved lead open, by field. The cabinet can leave a
+  // field empty that the stepper counts while the server's release list does
+  // not (QA 2026-10-24, A-4: "Данные клиента — не завершено" with no marker
+  // in the step); the step names these fields itself.
+  const masterOpenIssues = useMemo(
+    () => (leadId ? masterValidationIssues(masterErrors, tx) : []),
+    [leadId, masterErrors, tx],
+  );
   const orderIssues = useMemo(() => orderValidationIssues(draft, tx), [draft, tx]);
   const validationIssues = useMemo<ValidationIssue[]>(() => {
     if (!validationContext) return [];
@@ -5761,7 +5785,11 @@ export function LeadWizard({
       setTrustedContactEmailError(tx("Введите корректный адрес электронной почты", "Gültige E-Mail-Adresse eingeben"));
       return;
     }
-    const trustedContactNoMail = knownNoMailEmailError(trustedContactEditor.email, lang);
+    // Only an address set or changed on this card is judged by its domain, as
+    // on the server (B-1a): the stored one never blocks saving another field.
+    const trustedContactNoMail = emailChangedOnSave(trustedContactEditor.email, storedContact?.email)
+      ? knownNoMailEmailError(trustedContactEditor.email, lang)
+      : null;
     if (trustedContactNoMail) {
       setTrustedContactEmailError(trustedContactNoMail);
       return;
@@ -8008,6 +8036,40 @@ ${serviceCommentLines.join("\n")}`
                 <PatientUpdatedBanner at={step1Portal.patientUpdatedAt} onClose={step1Portal.dismissPatientUpdate} tx={tx} />
               ) : null}
               {isRepeatIntake ? null : <Step1PortalSummary intake={step1Portal.intake} mode={step1Portal.mode} tx={tx} />}
+              {masterOpenIssues.length > 0 && validationContext?.kind !== "master" && !masterValidationAttempted ? (
+                // The fields the stepper counts as open, named here (A-4); "Показать
+                // поля" marks each of them and leads to the first.
+                <div
+                  role="status"
+                  data-testid="lead-master-data-open-fields"
+                  className="mb-4 flex flex-wrap items-start gap-x-3 gap-y-1.5 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs leading-5 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+                >
+                  <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <span className="min-w-0 flex-1">
+                    <span className="font-medium">{tx("Шаг не завершён. ", "Schritt noch offen. ")}</span>
+                    {masterOpenIssues.map((issue) => issue.message).join(" · ")}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    className="shrink-0"
+                    disabled={isBusy}
+                    onClick={() => {
+                      setValidationContext({ kind: "master" });
+                      setMasterValidationAttempted(true);
+                      const firstFieldId = masterOpenIssues.find((issue) => issue.fieldId)?.fieldId;
+                      if (firstFieldId) {
+                        window.requestAnimationFrame(() => {
+                          document.getElementById(firstFieldId)?.focus();
+                        });
+                      }
+                    }}
+                  >
+                    {tx("Показать поля", "Felder anzeigen")}
+                  </Button>
+                </div>
+              ) : null}
               <div className="grid gap-4 md:grid-cols-2">
                 {intakeAsksDiscoverySource(isRepeatIntake) ? (
                 // A row of its own: the person's fields below pair up (first | last name, street | postal code).
@@ -11136,8 +11198,10 @@ ${serviceCommentLines.join("\n")}`
                   <Field
                     className="sm:col-span-2"
                     label={tx("Выбрать из пациентов или лидов", "Aus Patienten oder Leads auswählen")}
+                    htmlFor="trusted-contact-candidate"
                   >
                     <NativeComboboxSelect
+                      id="trusted-contact-candidate"
                       value={selectedGuardianCandidate || (trustedContactEditor.relatedPatientId ? `patient:${trustedContactEditor.relatedPatientId}` : "")}
                       className={selectClass}
                       searchPlaceholder={tx("Найти по имени, e-mail или PID", "Nach Name, E-Mail oder PID suchen")}
@@ -11167,8 +11231,12 @@ ${serviceCommentLines.join("\n")}`
                     label={tx("Имя и фамилия", "Vor- und Nachname")}
                     error={trustedContactEditorError || undefined}
                     errorId="trusted-contact-name-error"
+                    htmlFor="trusted-contact-name"
                   >
                     <Input
+                      id="trusted-contact-name"
+                      name="name"
+                      autoComplete="off"
                       className={inputClass}
                       autoFocus
                       required
@@ -11178,8 +11246,10 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchTrustedContactEditor("name", event.target.value)}
                     />
                   </Field>
-                  <Field label="E-Mail" error={trustedContactEmailError || undefined} errorId="trusted-contact-email-error">
+                  <Field label="E-Mail" error={trustedContactEmailError || undefined} errorId="trusted-contact-email-error" htmlFor="trusted-contact-email">
                     <Input
+                      id="trusted-contact-email"
+                      name="email"
                       className={inputClass}
                       type="email"
                       value={trustedContactEditor.email}
@@ -11189,8 +11259,10 @@ ${serviceCommentLines.join("\n")}`
                     />
                     {trustedContactEmailError ? null : <EmailDomainWarning email={trustedContactEditor.email} lang={lang} />}
                   </Field>
-                  <Field label={tx("Телефон", "Telefon")} error={trustedContactPhoneError || undefined} errorId="trusted-contact-phone-error">
+                  <Field label={tx("Телефон", "Telefon")} error={trustedContactPhoneError || undefined} errorId="trusted-contact-phone-error" htmlFor="trusted-contact-phone">
                     <Input
+                      id="trusted-contact-phone"
+                      name="phone"
                       className={inputClass}
                       type="tel"
                       value={trustedContactEditor.phone}
@@ -11202,8 +11274,10 @@ ${serviceCommentLines.join("\n")}`
                   <Field
                     className={trustedContactEditorGuardian ? "sm:col-span-2" : undefined}
                     label={trustedContactEditorGuardian ? tx("Кем приходится ребёнку", "Beziehung zum Kind") : tx("Кем приходится клиенту", "Beziehung zur Person")}
-                    required={trustedContactEditorGuardian} error={trustedContactRelationError || undefined} errorId="trusted-contact-relation-error">
+                    required={trustedContactEditorGuardian} error={trustedContactRelationError || undefined} errorId="trusted-contact-relation-error"
+                    htmlFor="trusted-contact-relation">
                     <NativeComboboxSelect
+                      id="trusted-contact-relation"
                       className={selectClass}
                       value={trustedContactEditor.relation}
                       aria-invalid={Boolean(trustedContactRelationError)}
@@ -11253,6 +11327,7 @@ ${serviceCommentLines.join("\n")}`
                   <Field label={tx("Дата рождения", "Geburtsdatum")} error={trustedContactBirthDateError || undefined} errorId="trusted-contact-birth-date-error" htmlFor="trusted-contact-birth-date">
                     <Input
                       id="trusted-contact-birth-date"
+                      name="birthDate"
                       className={inputClass}
                       type="date"
                       min={EARLIEST_BIRTH_DATE}
@@ -11277,8 +11352,10 @@ ${serviceCommentLines.join("\n")}`
                     // (walk-through 2026-10-24).
                     if (!cabinetAddress && (onFile || trustedContactEditorGuardian)) return null;
                     return (
-                      <Field className="sm:col-span-2" label={tx("Адрес", "Adresse")}>
+                      <Field className="sm:col-span-2" label={tx("Адрес", "Adresse")} htmlFor="trusted-contact-address">
                         <Input
+                          id="trusted-contact-address"
+                          name="address"
                           className={cn(inputClass, cabinetAddress && "bg-muted/40 text-muted-foreground")}
                           value={cabinetAddress ?? trustedContactEditor.address}
                           readOnly={Boolean(cabinetAddress)}

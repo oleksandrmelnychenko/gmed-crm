@@ -44,10 +44,15 @@ pub(crate) fn may_issue_portal_password(role: Role) -> bool {
     matches!(role, Role::Ceo | Role::PatientManager)
 }
 
-/// Lower-cased, trimmed e-mail when it is a valid address
-/// (`crate::email_address`).
+/// Lower-cased, trimmed e-mail when it is a well-formed address
+/// (`crate::email_address`). Its callers read an address already on file
+/// (a trusted contact, a login, a lead) to link, issue or send to it: such an
+/// address is never judged by its domain's current rating (QA 2026-10-24:
+/// a domain rated `no_mail` for an hour hid a parent's e-mail from the access
+/// panel and blocked re-issuing the access). A new or changed address is
+/// judged where it is entered.
 pub(crate) fn normalize_portal_email(raw: Option<&str>) -> Option<String> {
-    crate::email_address::normalize_email(raw?)
+    crate::email_address::normalize_stored_email(raw?)
 }
 
 /// The account that already uses `email`, described for the conflict message:
@@ -1050,12 +1055,10 @@ async fn issue_lead_portal_access(
             return internal(error, lead_id, "commit lookup");
         }
         let one_time_password = password_policy::generate_one_time_password();
-        // The audit row and the rejection of open sign-ins are one
-        // transaction, committed only once the new password is stored (a
-        // refused or failed reset leaves no audit row). The password itself
-        // goes through the shared policy helper on the pool, which has no
-        // in-transaction variant, so the row and the change are coupled up to
-        // a failed commit after the change.
+        // The rejection of open sign-ins, the audit row, the new password and
+        // the end of the old sessions are one transaction: a refused or failed
+        // reset leaves no audit row, and a failed audit row leaves the old
+        // password.
         let mut reset_tx = match state.db.begin().await {
             Ok(tx) => tx,
             Err(error) => return internal(error, lead_id, "begin password reset"),
@@ -1080,7 +1083,13 @@ async fn issue_lead_portal_access(
         if let Err(error) = audit::write_in_transaction(&mut reset_tx, &audit_event).await {
             return internal(error, lead_id, "audit password reset");
         }
-        match password_policy::replace_password(&state.db, user_id, &one_time_password, false).await
+        match password_policy::replace_password_in_tx(
+            &mut reset_tx,
+            user_id,
+            &one_time_password,
+            false,
+        )
+        .await
         {
             Ok(()) => {}
             Err(password_policy::PasswordChangeError::Rejected(message)) => {
@@ -1093,10 +1102,15 @@ async fn issue_lead_portal_access(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         }
+        if let Err(error) =
+            crate::auth::tokens::revoke_all_families_in_tx(&mut reset_tx, user_id, "password_reset")
+                .await
+        {
+            return internal(error, lead_id, "revoke sessions");
+        }
         if let Err(error) = reset_tx.commit().await {
             return internal(error, lead_id, "commit password reset");
         }
-        crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
         let email: Option<String> = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_optional(&state.db)

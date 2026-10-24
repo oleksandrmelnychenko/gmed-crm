@@ -303,7 +303,9 @@ async fn store_signed_version(
     }
     // QA C3-01: an order document made before the last change of the order's
     // services or period shows terms the order no longer has; the client
-    // signs a new version instead.
+    // signs a new version instead. One made in the same instant as the change
+    // is current: generation dates an order document no earlier than the
+    // change (see the document insert).
     if template_of(&source).as_deref() == Some("single_order")
         && let Some(order_id) = source.get::<Option<Uuid>, _>("order_id")
     {

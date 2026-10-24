@@ -144,7 +144,16 @@ async fn lock_identity_lead(conn: &mut PgConnection, lead_id: Uuid) -> Result<bo
 // The assessment
 // ----------------------------------------------------------------------------
 
-fn trigger_json(trigger: &Sticky) -> Value {
+/// `representatives`: the lead's current representatives, to name the one a
+/// representative trigger concerns (QA 2026-10-24, B-6) even when it has no
+/// country questions and so is not under `representatives` of the assessment.
+fn trigger_json(trigger: &Sticky, representatives: &[risk::RepresentativeInputs]) -> Value {
+    let representative_name = trigger.representative_id.and_then(|id| {
+        representatives
+            .iter()
+            .find(|person| person.id == id)
+            .map(|person| person.name.clone())
+    });
     let blocks: Vec<&str> = if trigger.subject == risk::SUBJECT_REPRESENTATIVE {
         vec!["R"]
     } else {
@@ -159,6 +168,8 @@ fn trigger_json(trigger: &Sticky) -> Value {
     json!({
         "key": trigger.key,
         "subject": trigger.subject,
+        "representative_id": trigger.representative_id,
+        "representative_name": representative_name,
         "variant": trigger.variant,
         "points": trigger.points,
         "knockout": trigger.knockout,
@@ -289,7 +300,7 @@ async fn assessment_json(
             "patient_points": score.patient_points,
             "payer_points": score.payer_points,
             "knockout": score.knockout,
-            "triggers": triggers.iter().map(trigger_json).collect::<Vec<_>>(),
+            "triggers": triggers.iter().map(|trigger| trigger_json(trigger, &inputs.representatives)).collect::<Vec<_>>(),
         })
     };
     let answers = store::load_block_answers(conn, lead_id, &inputs, None).await?;
@@ -360,6 +371,7 @@ async fn assessment_json(
         .as_ref()
         .map(|assessment| assessment.score)
         .unwrap_or_default();
+    let follow_up_requested_at = store::follow_up_requested_at(conn, lead_id).await?;
     Ok(json!({
         "lead_id": lead_id,
         "started_at": stored.as_ref().and_then(|assessment| assessment.started_at),
@@ -369,12 +381,16 @@ async fn assessment_json(
         "patient_points": started.then_some(score.patient_points),
         "payer_points": started.then_some(score.payer_points),
         "knockout": started && score.knockout,
-        "triggers": triggers.iter().map(trigger_json).collect::<Vec<_>>(),
+        "triggers": triggers.iter().map(|trigger| trigger_json(trigger, &inputs.representatives)).collect::<Vec<_>>(),
         "blocks": blocks,
         "before_submit": before_submit,
         "representatives": answers.representatives.iter().filter(|person| person.country_questions).collect::<Vec<_>>(),
         "requested_blocks": requested,
+        // Null after a "request more" of a cabinet block until the lead sends
+        // again (QA 2026-10-24, C-8); `follow_up_requested_at` dates that
+        // request, so "requested" and "answered" are told by the later one.
         "follow_up_answered_at": stored.as_ref().and_then(|assessment| assessment.follow_up_answered_at),
+        "follow_up_requested_at": follow_up_requested_at,
         "review_notice": review_notice,
         "preview": preview,
         "decisions": decisions,
@@ -964,7 +980,16 @@ async fn put_identity_data(
                    id_valid_until = CASE WHEN $12 THEN $13 ELSE id_valid_until END,
                    id_document_unreadable = COALESCE($14, id_document_unreadable),
                    id_data_entered_by = $15,
-                   id_data_entered_at = clock_timestamp()
+                   -- The data were taken from the copies uploaded so far, so
+                   -- the entry is never dated before the latest of them: the
+                   -- cabinet keeps a copy that is in use (`created_at <=
+                   -- id_data_entered_at`), and the uploads' times run on the
+                   -- portal's monotonic clock, which may be a step ahead.
+                   id_data_entered_at = GREATEST(
+                       clock_timestamp(),
+                       (SELECT max(u.created_at) FROM lead_portal_uploads u
+                        WHERE u.lead_id = $1 AND u.kind = 'identity'
+                          AND u.withdrawn_at IS NULL))
                WHERE lead_id = $1"#,
         )
         .bind(lead_id)
@@ -1128,7 +1153,13 @@ async fn put_representative_identity_data(
                    id_valid_until = CASE WHEN $13 THEN $14 ELSE id_valid_until END,
                    id_document_unreadable = COALESCE($15, id_document_unreadable),
                    id_data_entered_by = $16,
-                   id_data_entered_at = clock_timestamp(),
+                   -- Never before the latest copy of this representative's
+                   -- document (see the patient's variant above).
+                   id_data_entered_at = GREATEST(
+                       clock_timestamp(),
+                       (SELECT max(u.created_at) FROM lead_portal_uploads u
+                        WHERE u.lead_id = $1 AND u.kind = 'representative_identity'
+                          AND u.representative_id = $2 AND u.withdrawn_at IS NULL)),
                    updated_by = $16,
                    updated_at = now()
                WHERE lead_id = $1 AND contact_id = $2"#,

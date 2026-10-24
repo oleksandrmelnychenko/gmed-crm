@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { LeadRequestBilling } from "./lead-request-api";
-import { missingFieldKeys, recipientIsPayer, recipientKeyOfPayerKey, representativeQuestionId } from "./lead-request-field-target";
+import { missingFieldKeys, missingListKeys, recipientIsPayer, recipientKeyOfPayerKey, representativeQuestionId } from "./lead-request-field-target";
 
 describe("links of missing items to their fields", () => {
   it("parses block R's keys to the input id of the representative's answer", () => {
@@ -23,6 +23,15 @@ describe("links of missing items to their fields", () => {
     expect(recipientKeyOfPayerKey("first_name")).toBeNull();
     expect([...missingFieldKeys(["payer_email", "payer_citizenships"], true)]).toEqual(["payer_email", "recipient_email", "payer_citizenships"]);
     expect([...missingFieldKeys(["payer_email"], false)]).toEqual(["payer_email"]);
+  });
+
+  it("lists a payer key of the paying recipient as the recipient's field, once (QA 2026-10-24, C-1)", () => {
+    const keys = ["recipient_country", "recipient_email", "payer_country", "payer_email", "payer_citizenships"];
+    expect(missingListKeys(keys, true)).toEqual(["recipient_country", "recipient_email", "payer_citizenships"]);
+    // The recipient's field also when the server lists only the payer's key.
+    expect(missingListKeys(["payer_country"], true)).toEqual(["recipient_country"]);
+    // Another payer keeps the payer's own fields.
+    expect(missingListKeys(keys, false)).toEqual(keys);
   });
 
   it("knows a paying third-party recipient from the request", () => {

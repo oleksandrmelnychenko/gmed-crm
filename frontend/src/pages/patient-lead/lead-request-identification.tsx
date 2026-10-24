@@ -488,17 +488,20 @@ export function LegalQuestionsSection({
   form,
   text,
   guardian,
+  minor = false,
   bare = false,
 }: {
   form: IdentificationForm;
   text: LeadRequestText;
   guardian: boolean;
+  /** A child is not asked about an own public office (owner 2026-10-24): only the related and the sanctions question. */
+  minor?: boolean;
   /** Without its own card (inside follow-up block L). */
   bare?: boolean;
 }) {
   const questions = (
       <div className="space-y-5" data-testid="lead-request-legal">
-        {LEGAL_QUESTIONS.map((question) => (
+        {LEGAL_QUESTIONS.filter((question) => !(minor && question === "pep_self")).map((question) => (
           <div key={question} className="space-y-3" data-testid={`lead-request-legal-${question}`}>
             <IdentificationFormField form={form} field={question} text={text} guardian={guardian} required question>
               <YesNoSelect

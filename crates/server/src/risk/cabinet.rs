@@ -248,9 +248,13 @@ pub async fn follow_up_json(
     caller: Uuid,
 ) -> Result<Value, sqlx::Error> {
     let assessment = store::load(conn, lead_id).await?;
+    // `answered_at` is cleared by a "request more" of a cabinet block after
+    // the answer (QA 2026-10-24, C-8): null means "waiting for your send",
+    // filled or not; `requested_at` dates that request for the cabinet.
     let answered_at = assessment
         .as_ref()
         .and_then(|assessment| assessment.follow_up_answered_at);
+    let requested_at = store::follow_up_requested_at(conn, lead_id).await?;
     let changed_since_answer: bool = if let Some(answered_at) = answered_at {
         sqlx::query_scalar(r#"SELECT EXISTS (
             SELECT 1 FROM leads l, jsonb_each(CASE WHEN jsonb_typeof(l.portal_field_updates) = 'object' THEN l.portal_field_updates ELSE '{}'::jsonb END) f
@@ -273,6 +277,7 @@ pub async fn follow_up_json(
         "missing": {},
         "representatives": [],
         "answered_at": answered_at,
+        "requested_at": requested_at,
         "changed_since_answer": changed_since_answer,
     });
     if assessment.as_ref().is_some_and(|assessment| {
@@ -330,7 +335,18 @@ pub async fn follow_up_json(
             && state.party == PARTY_CABINET
         {
             blocks.push(block);
-            missing.insert(block.to_string(), json!(state.missing));
+            // The send itself is not a field of the block: the cabinet shows
+            // the block as waiting through `answered_at` (QA 2026-10-24, C-8).
+            missing.insert(
+                block.to_string(),
+                json!(
+                    state
+                        .missing
+                        .iter()
+                        .filter(|key| key.as_str() != store::FOLLOW_UP_SUBMIT)
+                        .collect::<Vec<_>>()
+                ),
+            );
         }
     }
     // Block I is answered by a copy uploaded after staff entered the identity
@@ -347,6 +363,7 @@ pub async fn follow_up_json(
         "missing": missing,
         "funds_asked": blocks.contains(&"A") && funds_asked,
         "answered_at": answered_at,
+        "requested_at": requested_at,
         "changed_since_answer": changed_since_answer,
         "identity_since": identity_since,
         "representatives": answers.representatives.iter().filter(|person| person.country_questions).collect::<Vec<_>>(),

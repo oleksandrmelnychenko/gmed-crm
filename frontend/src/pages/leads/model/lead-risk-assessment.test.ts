@@ -361,10 +361,36 @@ describe("T16 of the invoice recipient (QA 2026-10-12, round 3)", () => {
     const [recipient, patient] = assessment.triggers;
     expect(recipient.variant).toBe("recipient");
     expect(patient.variant).toBeNull();
+    expect(patient.representative_id).toBeNull();
+    expect(patient.representative_name).toBeNull();
     expect(riskSubjectLabel(recipient.subject, ru, recipient.variant)).toBe("получатель счёта");
     expect(riskSubjectLabel(recipient.subject, de, recipient.variant)).toBe("Rechnungsempfänger");
     expect(riskSubjectLabel("payer", ru)).toBe("плательщик");
     expect(riskVariantLabel("recipient", ru)).toBe("");
+  });
+
+  it("names the representative a trigger concerns", () => {
+    // The trigger names the representative by id (QA 2026-10-24, B-6); a trigger stored before
+    // the id existed names the one representative on file and with several stays "представитель".
+    const anna = { id: "rep-1", name: "Anna Muster" };
+    const otto = { id: "rep-2", name: "Otto Muster" };
+    const of = (representative_id: string | null, representative_name: string | null = null) => ({ representative_id, representative_name });
+    expect(riskSubjectLabel("representative", ru, null, [anna, otto], of("rep-2"))).toBe("представитель: Otto Muster");
+    expect(riskSubjectLabel("representative", de, null, [anna, otto], of("rep-2"))).toBe("Vertreter: Otto Muster");
+    // The assessment lists only the representatives with country questions: a PEP "yes" of a
+    // parent without a listed country is named by the name the trigger carries.
+    expect(riskSubjectLabel("representative", ru, null, [anna], of("rep-2", "Otto Muster"))).toBe("представитель: Otto Muster");
+    // An id nobody answers to does not borrow the one listed person's name.
+    expect(riskSubjectLabel("representative", ru, null, [anna], of("rep-9"))).toBe("представитель");
+    expect(riskSubjectLabel("representative", ru, null, [], of("rep-9", " "))).toBe("представитель");
+    // Without an id (stored before 2026-10-24): the single-representative heuristic.
+    expect(riskSubjectLabel("representative", ru, null, [anna], of(null))).toBe("представитель: Anna Muster");
+    expect(riskSubjectLabel("representative", ru, null, [anna])).toBe("представитель: Anna Muster");
+    expect(riskSubjectLabel("representative", de, null, [anna])).toBe("Vertreter: Anna Muster");
+    expect(riskSubjectLabel("representative", ru, null, [anna, otto])).toBe("представитель");
+    expect(riskSubjectLabel("representative", ru, null, [{ id: "rep-3", name: " " }])).toBe("представитель");
+    expect(riskSubjectLabel("representative", ru)).toBe("представитель");
+    expect(riskSubjectLabel("patient", ru, null, [anna])).toBe("пациент");
   });
 });
 

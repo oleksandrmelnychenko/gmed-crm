@@ -481,6 +481,10 @@ pub struct Fired {
     pub variant: Option<&'static str>,
     pub points: i32,
     pub knockout: bool,
+    /// Of a [`SUBJECT_REPRESENTATIVE`] trigger: the trusted-contact id of the
+    /// representative it fired on (the first one, when several would); staff
+    /// see which parent a row concerns (QA 2026-10-24, B-6). `None` otherwise.
+    pub representative_id: Option<Uuid>,
 }
 
 /// The highest list among `values`.
@@ -501,22 +505,35 @@ fn highest_list(config: &RiskConfig, values: &[String]) -> Option<&'static str> 
 /// The rule (pure): every trigger that fires on `inputs`, in key order.
 pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
     let mut fired: Vec<Fired> = Vec::new();
-    let mut fire = |key: &'static str, subject: &'static str, variant: Option<&'static str>| {
+    let mut fire = |key: &'static str,
+                    subject: &'static str,
+                    variant: Option<&'static str>,
+                    representative_id: Option<Uuid>| {
         fired.push(Fired {
             key,
             subject,
             variant,
             points: config.points_for(key, variant),
             knockout: config.is_knockout(key),
+            representative_id,
         });
+    };
+    // The representative a representative trigger names: the first one whose
+    // data fire it.
+    let representative = |fires: &dyn Fn(&RepresentativeInputs) -> bool| -> Option<Uuid> {
+        inputs
+            .representatives
+            .iter()
+            .find(|person| fires(person))
+            .map(|person| person.id)
     };
     // T1: a patient citizenship in list 1 / 2.
     if let Some(list) = highest_list(config, &inputs.patient_citizenships) {
-        fire("T1", SUBJECT_PATIENT, Some(list));
+        fire("T1", SUBJECT_PATIENT, Some(list), None);
     }
     // T2: the patient's residence in list 1 / 2.
     if let Some(list) = highest_list(config, &inputs.patient_residences) {
-        fire("T2", SUBJECT_PATIENT, Some(list));
+        fire("T2", SUBJECT_PATIENT, Some(list), None);
     }
     let representative_citizenships: Vec<String> = inputs
         .representatives
@@ -529,10 +546,14 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
         .flat_map(|person| person.residences.iter().cloned())
         .collect();
     if let Some(list) = highest_list(config, &representative_citizenships) {
-        fire("T1", SUBJECT_REPRESENTATIVE, Some(list));
+        let person =
+            representative(&|person| highest_list(config, &person.citizenships) == Some(list));
+        fire("T1", SUBJECT_REPRESENTATIVE, Some(list), person);
     }
     if let Some(list) = highest_list(config, &representative_residences) {
-        fire("T2", SUBJECT_REPRESENTATIVE, Some(list));
+        let person =
+            representative(&|person| highest_list(config, &person.residences) == Some(list));
+        fire("T2", SUBJECT_REPRESENTATIVE, Some(list), person);
     }
     // T3: two or more citizenships (incl. former ones), one in a list.
     let mut all_citizenships: Vec<String> = Vec::new();
@@ -547,7 +568,7 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
         }
     }
     if all_citizenships.len() >= 2 && highest_list(config, &all_citizenships).is_some() {
-        fire("T3", SUBJECT_PATIENT, None);
+        fire("T3", SUBJECT_PATIENT, None, None);
     }
     if inputs.third_party {
         // T4: a third party pays. A mother or father paying for the child is no
@@ -555,7 +576,7 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
         let parent_pays =
             inputs.payer_is_person() && inputs.relationship_kind.as_deref() == Some("parent");
         if !parent_pays {
-            fire("T4", SUBJECT_PAYER, None);
+            fire("T4", SUBJECT_PAYER, None, None);
         }
         // T5: a person outside the close family.
         if inputs.payer_is_person()
@@ -564,7 +585,7 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
                 .as_deref()
                 .is_some_and(|kind| !FAMILY_RELATIONSHIP_KINDS.contains(&kind))
         {
-            fire("T5", SUBJECT_PAYER, None);
+            fire("T5", SUBJECT_PAYER, None, None);
         }
         // T6: the payer's citizenship (a person) or residence / seat.
         let mut payer_countries = inputs.payer_residences.clone();
@@ -572,68 +593,63 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
             payer_countries.extend(inputs.payer_citizenships.iter().cloned());
         }
         if let Some(list) = highest_list(config, &payer_countries) {
-            fire("T6", SUBJECT_PAYER, Some(list));
+            fire("T6", SUBJECT_PAYER, Some(list), None);
         }
         // T7: a company, an organisation or an insurer.
         if !inputs.payer_is_person() {
-            fire("T7", SUBJECT_PAYER, None);
+            fire("T7", SUBJECT_PAYER, None, None);
         }
     }
     let who_pays = inputs.who_pays();
     // T8: more than one payer.
     if inputs.via_third_party_person || inputs.order_payers >= 2 {
-        fire("T8", who_pays, None);
+        fire("T8", who_pays, None, None);
     }
     // T9: cash or crypto.
     if matches!(inputs.payment_method.as_deref(), Some("cash" | "crypto")) {
-        fire("T9", who_pays, None);
+        fire("T9", who_pays, None, None);
     }
     // T10 / T11 (amounts) are retired (owner 2026-10-12, [`RETIRED_TRIGGERS`]).
     // T12: identity.
     if inputs.identity_issue() {
-        fire("T12", SUBJECT_PATIENT, None);
+        fire("T12", SUBJECT_PATIENT, None, None);
     }
     // T13: a minor, a representative or a guardianship.
     if inputs.minor || inputs.has_representative || inputs.under_guardianship {
-        fire("T13", SUBJECT_PATIENT, None);
+        fire("T13", SUBJECT_PATIENT, None, None);
     }
     // T14 / T15: the answers, per subject.
     if inputs.patient_pep {
-        fire("T14", SUBJECT_PATIENT, None);
+        fire("T14", SUBJECT_PATIENT, None, None);
     }
     if inputs.payer_pep {
-        fire("T14", SUBJECT_PAYER, None);
+        fire("T14", SUBJECT_PAYER, None, None);
     }
-    if inputs
-        .representatives
-        .iter()
-        .any(|person| person.fields["pep_self"] == true || person.fields["pep_related"] == true)
-    {
-        fire("T14", SUBJECT_REPRESENTATIVE, None);
+    if let Some(person) = representative(&|person| {
+        person.fields["pep_self"] == true || person.fields["pep_related"] == true
+    }) {
+        fire("T14", SUBJECT_REPRESENTATIVE, None, Some(person));
     }
     if inputs.patient_sanctions_links {
-        fire("T15", SUBJECT_PATIENT, None);
+        fire("T15", SUBJECT_PATIENT, None, None);
     }
     if inputs.payer_sanctions_links {
-        fire("T15", SUBJECT_PAYER, None);
+        fire("T15", SUBJECT_PAYER, None, None);
     }
-    if inputs
-        .representatives
-        .iter()
-        .any(|person| person.fields["sanctions_links"] == true)
-    {
-        fire("T15", SUBJECT_REPRESENTATIVE, None);
+    if let Some(person) = representative(&|person| person.fields["sanctions_links"] == true) {
+        fire("T15", SUBJECT_REPRESENTATIVE, None, Some(person));
     }
     // T16: a confirmed sanctions hit (an open one is only the internal hold
     // of the sanctions gate).
     if inputs.patient_hit {
-        fire("T16", SUBJECT_PATIENT, None);
+        fire("T16", SUBJECT_PATIENT, None, None);
     }
     if inputs.payer_hit {
         fire(
             "T16",
             SUBJECT_PAYER,
             inputs.recipient_hit_only.then_some(VARIANT_RECIPIENT),
+            None,
         );
     }
     fired
@@ -662,6 +678,13 @@ pub struct Sticky {
     /// fires, and for a trigger that went inactive before this was recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inactive_since: Option<DateTime<Utc>>,
+    /// Of a representative trigger: the trusted-contact id of the
+    /// representative it fired on, so staff see which parent a row concerns
+    /// (QA 2026-10-24, B-6). Information only: a trigger is the same one by
+    /// key and subject, so a row stored before this field existed (`None`)
+    /// takes the id of its re-evaluation. `None` for the other subjects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub representative_id: Option<Uuid>,
 }
 
 impl Sticky {
@@ -718,6 +741,9 @@ pub fn merge(
                 entry.inactive_since = None;
                 entry.last_fired_at = now;
                 entry.knockout = entry.knockout || fired.knockout;
+                if fired.representative_id.is_some() {
+                    entry.representative_id = fired.representative_id;
+                }
                 if fired.points > entry.points {
                     entry.points = fired.points;
                     entry.variant = fired.variant.map(str::to_string);
@@ -759,6 +785,7 @@ pub fn merge(
             last_fired_at: now,
             active: true,
             inactive_since: None,
+            representative_id: fired.representative_id,
         });
         merged.raised = true;
     }
@@ -1208,6 +1235,7 @@ mod tests {
                 last_fired_at: now,
                 active: true,
                 inactive_since: None,
+                representative_id: None,
             };
             score(
                 &[
@@ -1417,6 +1445,92 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(stored.inactive_since, None);
+    }
+
+    /// B-6 (QA 2026-10-24): a representative trigger names the representative
+    /// it fired on; a row stored before the id existed is the same trigger
+    /// (key + subject) and takes the id at its re-evaluation.
+    #[test]
+    fn representative_triggers_name_the_representative() {
+        let config = config();
+        let anna = Uuid::new_v4();
+        let otto = Uuid::new_v4();
+        let person =
+            |id: Uuid, name: &str, citizenships: Vec<&str>, pep: bool| RepresentativeInputs {
+                id,
+                name: name.into(),
+                citizenships: citizenships.into_iter().map(String::from).collect(),
+                residences: vec!["DE".into()],
+                fields: serde_json::json!({ "pep_self": pep }),
+                identity_fingerprint: String::new(),
+            };
+        let inputs = Inputs {
+            minor: true,
+            has_representative: true,
+            representatives: vec![
+                person(anna, "Anna", vec!["DE"], false),
+                person(otto, "Otto", vec!["RU"], true),
+            ],
+            ..clean()
+        };
+        let fired = evaluate(&inputs, &config);
+        let of = |key: &str| {
+            fired
+                .iter()
+                .find(|fired| fired.key == key && fired.subject == SUBJECT_REPRESENTATIVE)
+                .unwrap_or_else(|| panic!("{key} representative"))
+        };
+        assert_eq!(of("T1").representative_id, Some(otto));
+        assert_eq!(of("T14").representative_id, Some(otto));
+        assert!(
+            fired
+                .iter()
+                .filter(|fired| fired.subject != SUBJECT_REPRESENTATIVE)
+                .all(|fired| fired.representative_id.is_none())
+        );
+
+        // Stored before the field existed (no `representative_id` in the JSON).
+        let t0 = Utc::now();
+        let stored: Vec<Sticky> = serde_json::from_value(serde_json::json!([{
+            "key": "T1", "subject": "representative", "variant": "list_1", "points": 2,
+            "knockout": false, "first_fired_at": t0, "last_fired_at": t0, "active": true
+        }, {
+            "key": "T14", "subject": "representative", "variant": null, "points": 0,
+            "knockout": true, "first_fired_at": t0, "last_fired_at": t0, "active": true
+        }]))
+        .unwrap();
+        assert!(stored.iter().all(|entry| entry.representative_id.is_none()));
+        let merged = merge(&stored, &fired, Utc::now(), &[]);
+        let representative: Vec<&Sticky> = merged
+            .triggers
+            .iter()
+            .filter(|entry| entry.subject == SUBJECT_REPRESENTATIVE)
+            .collect();
+        // One T1 and one T14 of the representative, not two of each.
+        assert_eq!(representative.len(), 2);
+        assert!(
+            representative
+                .iter()
+                .all(|entry| entry.representative_id == Some(otto))
+        );
+        assert_eq!(
+            fingerprint(&merged.triggers),
+            fingerprint(&merge(&[], &fired, t0, &[]).triggers)
+        );
+        let json = serde_json::to_value(representative[0]).unwrap();
+        assert_eq!(json["representative_id"], serde_json::json!(otto));
+        // A patient trigger serialises without the field.
+        let patient = merged
+            .triggers
+            .iter()
+            .find(|entry| entry.subject == SUBJECT_PATIENT)
+            .unwrap();
+        assert!(
+            serde_json::to_value(patient)
+                .unwrap()
+                .get("representative_id")
+                .is_none()
+        );
     }
 
     #[test]

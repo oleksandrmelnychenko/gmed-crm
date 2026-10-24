@@ -50,6 +50,7 @@ import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import { useNavCounters } from "@/lib/use-nav-counters";
 import { useNavState } from "@/lib/nav-state";
 import { usePortalAccountLabel } from "@/lib/portal-account-label";
+import { useLeadPortalClosed } from "@/pages/patient-lead/lead-portal-closed";
 import {
   canAccessStaffRoute,
   isLeadPortalUser,
@@ -170,6 +171,9 @@ export function NavPanel() {
   const [lockedModule, setLockedModule] = useState<{ id: string; label: string } | null>(null);
   // A parent's login in the lead cabinet is no patient: the cabinet names it.
   const portalAccountLabel = usePortalAccountLabel(isPatientPortal ? user?.id : null);
+  // A parent whose access to every request ended sees the cabinet's notice alone, without the
+  // locked entries of the patient portal (QA 2026-10-24, B-2/D-4).
+  const leadPortalClosed = useLeadPortalClosed(isLeadPortal ? user?.id : null);
   const counters = useNavCounters(
     Boolean(user) && !isPatientPortal,
     Boolean(user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities)),
@@ -178,8 +182,10 @@ export function NavPanel() {
     ? isLeadPortal
       ? [
           ...listLeadPortalNavItems().filter((item) => item.id !== "account" && item.id !== "legal").map(toPatientNavItem),
-          ...listPatientPortalNavItems().filter((item) => !["services", "account", "legal"].includes(item.id))
-            .map((item) => ({ ...toPatientNavItem(item), locked: true })),
+          ...(leadPortalClosed
+            ? []
+            : listPatientPortalNavItems().filter((item) => !["services", "account", "legal"].includes(item.id))
+              .map((item) => ({ ...toPatientNavItem(item), locked: true }))),
           ...listLeadPortalNavItems().filter((item) => item.id === "account" || item.id === "legal").map(toPatientNavItem),
         ]
       : listPatientPortalNavItems({ leadRequests: Boolean(user?.lead_portal?.requests) })

@@ -1151,9 +1151,17 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     }
 
     // The answers, with section 8 on the declaration; the server clears what
-    // does not apply.
-    let (status, body) = patch(&app, &token, &session, person_answers()).await;
+    // does not apply. Without the enhanced check the occupation is optional
+    // (owner rule 2026-10-07; QA 2026-10-24, C-3): the relationship stays
+    // required, and the answers are complete without the occupation.
+    let mut without_occupation = person_answers();
+    without_occupation
+        .as_object_mut()
+        .unwrap()
+        .remove("occupation");
+    let (status, body) = patch(&app, &token, &session, without_occupation).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["answers"]["occupation"].is_null(), "{body}");
     assert!(
         body["answers"]["habitual_residence_country"].is_null(),
         "equal to the residence: {body}"
@@ -1192,14 +1200,18 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
         declaration["declaration"]["place_of_birth"].is_null(),
         "the declaration waits for the submit: {declaration}"
     );
-    // The same values again change nothing.
+    // An occupation given all the same is kept; the same values again change
+    // nothing.
+    let (status, body) = patch(&app, &token, &session, json!({ "occupation": "Kaufmann" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["answers"]["occupation"], "Kaufmann", "{body}");
     let (status, _) = patch(&app, &token, &session, json!({ "occupation": "Kaufmann" })).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         audit_contexts(pool, "payer_questionnaire_update", lead_id)
             .await
             .len(),
-        1
+        2
     );
 
     // The identity document; a second citizenship on the black list asks for the proof of funds (the

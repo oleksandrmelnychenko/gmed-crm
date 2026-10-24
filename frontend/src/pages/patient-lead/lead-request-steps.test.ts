@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { LeadRequest, LeadRequestFollowUp } from "./lead-request-api";
 import {
   STEP_IDS,
+  documentsTouched,
   firstIncompleteStep,
   hasBaseFormInput,
   initialStep,
@@ -41,15 +42,32 @@ const followUp = (overrides: Partial<LeadRequestFollowUp>): LeadRequestFollowUp 
 });
 
 describe("lead cabinet steps", () => {
-  it("marks disclosure complete with a valid decision, an unanswered step counting as no", () => {
+  it("marks disclosure complete with an own valid decision only, not with the default no", () => {
     const current = { ...request(), disclosure: { allow_disclosure: false, consent_given: false, version: "2026-10-14", language: "de", chosen_at: "2026-10-15T08:00:00Z", chosen_by: "viewer", access_kind: "self", company_name: "GMED" } } as LeadRequest;
-    // Not answered is "no" (owner decision 2026-10-22) ...
-    expect(stepDone(request(), "disclosure")).toBe(true);
-    // ... unless an older choice named recipients without a disclosure decision.
+    // Not answered is "no" (owner decision 2026-10-22) for the sending, but no answer the person gave (QA 2026-10-24, A-1) ...
+    expect(stepDone(request(), "disclosure")).toBe(false);
+    expect(firstIncompleteStep(request())).toBeNull();
+    // ... and an older choice that named recipients without a disclosure decision asks for it.
     const legacy = { ...request(), consent_form: { version: "1", choices: { named_recipients: true }, chosen_at: null } } as unknown as LeadRequest;
     expect(stepDone(legacy, "disclosure")).toBe(false);
     expect(stepDone(current, "disclosure")).toBe(true);
     expect(stepDone({ ...current, disclosure: { ...current.disclosure!, allow_disclosure: true } }, "disclosure")).toBe(false);
+  });
+
+  it("marks the documents step complete only once the person gave the consent, a reason or a file", () => {
+    const untouched = request();
+    expect(stepDone(untouched, "documents")).toBe(false);
+    expect(documentsTouched(untouched)).toBe(false);
+    // The server requires nothing there: the step never holds the sending back.
+    expect(stepMissingCount(untouched, "documents")).toBe(0);
+    expect(firstIncompleteStep(untouched)).toBeNull();
+    const consented = request({ consents: { ...untouched.consents, health_data_processing: { type: "health_data_processing", version: "1", texts: {}, given_at: "2026-10-07T08:00:00Z" } } });
+    expect(stepDone(consented, "documents")).toBe(true);
+    expect(stepDone({ ...untouched, identification: { request_reason: "Zweitmeinung" } } as unknown as LeadRequest, "documents")).toBe(true);
+    expect(stepDone({ ...untouched, identification: { request_reason: "  " } } as unknown as LeadRequest, "documents")).toBe(false);
+    expect(stepDone(request({ documents: [{ id: "d1", file_name: "befund.pdf" } as unknown as LeadRequest["documents"][number]] }), "documents")).toBe(true);
+    // Something the server still misses there keeps it incomplete.
+    expect(stepDone(request({ ...consented, progress: { filled: 0, total: 1, missing_for_submit: ["request_reason"] } }), "documents")).toBe(false);
   });
   it("inserts a live country step before first submission and completes it by autosaved answers", () => {
     const preview = request({ follow_up: followUp({ before_submit: true, blocks: ["A", "L", "I"], missing: { A: ["funds_source"], L: ["pep_self"], I: ["id_document_upload"] } }) });

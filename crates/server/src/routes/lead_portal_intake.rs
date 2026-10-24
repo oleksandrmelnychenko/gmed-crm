@@ -539,7 +539,12 @@ where
 
 /// Whether a patient login reaches only requests (leads) and no patient
 /// active patient record: a prospective placeholder is still only a request
-/// (owner decisions 2026-10-03 and 2026-10-14).
+/// (owner decisions 2026-10-03 and 2026-10-14). A parent's or guardian's
+/// access counts in any state: a login whose only link was an access that
+/// ended — the child came of age, the custody changed, staff removed the
+/// contact or revoked the access — stays in the lead cabinet, which says so
+/// ([`guardian_access_ended`]), instead of landing on the patient portal of
+/// a patient that does not exist (QA 2026-10-24, B-2).
 pub(crate) async fn is_lead_only_login(
     db: &gmed_db::DbPool,
     user_id: Uuid,
@@ -557,12 +562,9 @@ pub(crate) async fn is_lead_only_login(
                        SELECT 1 FROM lead_portal_access a
                        JOIN leads l ON l.id = a.lead_id
                        WHERE a.user_id = $1 AND a.kind = 'guardian'
-                         AND ({GUARDIAN_ACCESS_OR_CAME_OF_AGE_SQL}
-                              OR a.revoked_reason = '{custody}')
                          AND {PORTAL_LEAD_SQL}
                    )
-               )"#,
-        custody = crate::routes::lead_representatives::ACCESS_REVOKED_CUSTODY_CHANGED,
+               )"#
     ))
     .bind(user_id)
     .fetch_one(db)
@@ -1993,6 +1995,17 @@ impl ExtraQuestions {
         }
     }
 
+    /// A minor's request (QA 2026-10-24, B-4): a child has no occupation or
+    /// sector; the paying parent states the own ones in the payer section
+    /// (`lead_payer_link`, cabinet mode) when the enhanced check requires it.
+    pub(crate) fn for_minor(mut self, minor: bool) -> Self {
+        if minor {
+            self.occupation = false;
+            self.sector = false;
+        }
+        self
+    }
+
     /// The cabinet's view: whether the step is shown and which questions it
     /// asks; nothing about why (the triggers are `enhanced_check.required`
     /// of the request, without reasons).
@@ -2166,11 +2179,20 @@ fn missing_for_submit(
     }
     let mut missing = missing.into_iter().map(str::to_string).collect::<Vec<_>>();
     missing.extend(representation);
+    // A child is no PEP himself (QA 2026-10-24, B-4): the legal questions
+    // about a minor are whether a PEP's family member and the sanctions
+    // links; the paying parent's own PEP status is the payer section's.
+    let minor = crate::routes::leads::is_minor_on(data.date_of_birth, today);
     missing.extend(
         lead_payer::portal_missing_own_account(payer)
             .into_iter()
             .chain(lead_payer::portal_missing_billing(payer, payment_route_by))
-            .chain(identification.missing_legal())
+            .chain(
+                identification
+                    .missing_legal()
+                    .into_iter()
+                    .filter(|key| !(minor && matches!(*key, "pep_self" | "pep_self_details"))),
+            )
             .map(str::to_string),
     );
     // The trigger flow (2026-10-07): staff's identity data, the follow-up
@@ -2328,7 +2350,8 @@ pub(crate) async fn extra_state(
     .await?;
     let route_by = payment_route_by(payer, representation, caller);
     Ok(ExtraState {
-        questions: ExtraQuestions::of(check_required, payer, route_by, answered_by_payer),
+        questions: ExtraQuestions::of(check_required, payer, route_by, answered_by_payer)
+            .for_minor(representation.minor),
         funds_proof_uploaded,
         payer_contact_known: answered_by_payer
             || !lead_payer::contact_consent_required(payer, representation),
@@ -2358,17 +2381,11 @@ fn payer_not_self() -> axum::response::Response {
 // ----------------------------------------------------------------------------
 
 /// When the unqualified-lead rule deletes the lead, if the sweep would (not
-/// for a consented repeat intake, an invoiced or a converted lead).
-async fn retention_deadline(state: &AppState, row: &PgRow, lead_id: Uuid) -> Option<DateTime<Utc>> {
-    let policy = crate::routes::leads::load_unqualified_lead_retention(&state.db).await?;
-    if crate::routes::leads::is_outside_unqualified_purge(&state.db, lead_id).await {
-        return None;
-    }
-    policy.deadline(
-        &row.try_get::<String, _>("qualification_status").ok()?,
-        &row.try_get::<String, _>("compliance_status").ok()?,
-        row.try_get::<DateTime<Utc>, _>("created_at").ok()?,
-    )
+/// for a consented repeat intake, an invoiced or a converted lead): the one
+/// effective deletion instant the staff notice, the reminder and the sweep
+/// use (never earlier than three days after the staff warning).
+async fn retention_deadline(state: &AppState, lead_id: Uuid) -> Option<DateTime<Utc>> {
+    crate::routes::leads::unqualified_lead_deletion_at(&state.db, lead_id).await
 }
 
 /// The caller's consent of the current version for this lead, if given.
@@ -2798,7 +2815,7 @@ pub(crate) async fn request_payload(
             }),
         );
     }
-    let deadline = retention_deadline(state, &row, lead_id).await;
+    let deadline = retention_deadline(state, lead_id).await;
     let consent_choice = consent_choices::current_for(&state.db, Some(lead_id), None).await?;
     let trusted_persons = load_trusted_persons(&state.db, lead_id).await?;
     Ok(json!({
@@ -2954,10 +2971,13 @@ async fn list_my_lead_requests(
 /// ([`crate::services::coming_of_age`]) revokes such an access on the 18th
 /// birthday; the revoked access still counts here.
 ///
-/// Since 2026-10-23 also an access a custody change ended (the parent has no
-/// place in the form any more, `revoked_reason = 'custody_changed'`) while
-/// the login reaches the request in no other way. Returns why: `came_of_age`
-/// or `custody_changed` (the cabinet words a neutral notice for the latter).
+/// Since 2026-10-23 also an access that was revoked (a custody change left
+/// the parent without a place in the form, `custody_changed`; staff removed
+/// the contact, `contact_removed`; staff revoked the access) while the login
+/// reaches that request in no other way (QA 2026-10-24, B-2: a removed
+/// parent landed on the patient portal). Returns why: `came_of_age`, else
+/// the `revoked_reason` of the latest such access; the cabinet words a
+/// neutral notice for every reason but `came_of_age`.
 async fn guardian_access_ended(
     db: &gmed_db::DbPool,
     user_id: Uuid,
@@ -2974,21 +2994,22 @@ async fn guardian_access_ended(
                      AND {PORTAL_LEAD_SQL}
                      AND NOT {OWN_LOGIN_CLOSED_SQL}
                ) THEN 'came_of_age'
-               WHEN EXISTS (
-                   SELECT 1 FROM lead_portal_access a
+               ELSE (
+                   SELECT a.revoked_reason FROM lead_portal_access a
                    JOIN leads l ON l.id = a.lead_id
                    WHERE a.user_id = $1
                      AND a.kind = 'guardian'
-                     AND a.revoked_reason = '{custody}'
+                     AND a.revoked_at IS NOT NULL
                      AND {PORTAL_LEAD_SQL}
                      AND NOT EXISTS (
                          SELECT 1 FROM lead_portal_access other
                          WHERE other.user_id = a.user_id AND other.lead_id = a.lead_id
                            AND other.revoked_at IS NULL
                      )
-               ) THEN 'custody_changed'
-           END"#,
-        custody = crate::routes::lead_representatives::ACCESS_REVOKED_CUSTODY_CHANGED,
+                   ORDER BY a.revoked_at DESC
+                   LIMIT 1
+               )
+           END"#
     ))
     .bind(user_id)
     .fetch_one(db)

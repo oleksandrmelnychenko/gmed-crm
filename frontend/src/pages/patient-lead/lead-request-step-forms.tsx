@@ -73,7 +73,7 @@ import {
 import { InvoiceRecipientSection } from "./lead-request-invoice-recipient";
 import { PayerSection } from "./lead-request-payer-section";
 import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
-import { missingFieldKeys, recipientIsPayer } from "./lead-request-field-target";
+import { missingFieldKeys, missingListKeys, recipientIsPayer } from "./lead-request-field-target";
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
 import { useServerDraftSync } from "./lead-request-server-sync";
@@ -159,12 +159,16 @@ function StepFrame({
     mineSlot: request.representation?.representatives.find((person) => person.mine)?.slot ?? null,
     custody: request.representation?.custody ?? null,
   };
+  // A payer key of the recipient who pays (`payer_country`) is shown as the recipient's field, and
+  // only once next to it (QA 2026-10-24, C-1).
+  const recipientPays = recipientIsPayer(request);
+  const shownMissing = missingListKeys(missing, recipientPays);
   const labels = [
     ...extraMissing.map((item) => item.label),
-    ...missing.map((key) => submitFieldLabel(text, key as SubmitField, guardian, request.payer?.payer_type, request.minor, who)),
+    ...shownMissing.map((key) => submitFieldLabel(text, key as SubmitField, guardian, request.payer?.payer_type, request.minor, who)),
   ];
   // Every item leads to its field (owner report 2026-10-21).
-  const fields = [...extraMissing.map((item) => item.field), ...missing];
+  const fields = [...extraMissing.map((item) => item.field), ...shownMissing];
   // The yellow list of what is missing appears only after "Next" (owner 2026-10-09): the first
   // press with something missing shows it and stays, the next press goes on. The page keeps
   // which steps showed it, for the badges of the step bar.
@@ -172,7 +176,6 @@ function StepFrame({
   // The empty required fields say so below themselves too, once "Next" was pressed. A payer key
   // of the recipient who pays (`payer_email`) marks the recipient's field, where it is answered.
   const missingKey = fields.filter(Boolean).join("|");
-  const recipientPays = recipientIsPayer(request);
   const stepMissing = useMemo(
     () => (showMissing ? { keys: missingFieldKeys(missingKey.split("|").filter(Boolean), recipientPays), message: text.required } : null),
     [showMissing, missingKey, recipientPays, text.required],
@@ -1060,7 +1063,7 @@ export function DeclarationsStep({ request, text, enqueue, onChange, missing, na
   return (
     <StepFrame testId="lead-request-step-declarations" step="declarations" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
       {request.identification !== undefined ? (
-        <LegalQuestionsSection form={identification} text={text} guardian={request.access_kind === "guardian"} />
+        <LegalQuestionsSection form={identification} text={text} guardian={request.access_kind === "guardian"} minor={request.minor} />
       ) : null}
     </StepFrame>
   );
@@ -1117,6 +1120,8 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
 
   return (
     <StepFrame testId="lead-request-documents" step="documents" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
+      {/* Nothing here is required before the contract (QA 2026-10-24, A-1): said once, neutrally. */}
+      <p className="text-sm text-muted-foreground" data-testid="lead-request-documents-optional">{text.documentsOptional}</p>
       <Section title={text.healthConsentTitle}>
         <p className="whitespace-pre-line rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
           {consentText(request, HEALTH_CONSENT, lang)}

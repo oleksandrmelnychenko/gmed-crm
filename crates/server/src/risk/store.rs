@@ -253,7 +253,24 @@ pub struct BlockAnswers {
     pub statement_submitted: bool,
     pub statement_legal_form: Option<String>,
     pub statement_payment_reason: Option<String>,
+    /// The lead is a minor (by the date of birth, [`Inputs::minor`]): block
+    /// A asks no occupation or sector of the child and block L no PEP status
+    /// or own economic interest of the child (QA 2026-10-24, B-4) — the
+    /// paying parent answers those for himself in the payer section.
+    pub minor: bool,
+    /// The lead sent the request and the follow-up waits for the lead's
+    /// send: no answer is recorded (`follow_up_answered_at`, which a
+    /// "request more" of a cabinet block clears again). A requested cabinet
+    /// block then misses [`FOLLOW_UP_SUBMIT`] until the lead sends the
+    /// follow-up, filled or not (QA 2026-10-24, C-8).
+    pub follow_up_unsent: bool,
 }
+
+/// The key a requested cabinet block misses while the lead has not sent the
+/// follow-up (the cabinet's `payer_link_submit`): the status stays
+/// `awaiting_answers` and staff see "open", not "answered", until the lead
+/// sends. The cabinet never lists it (`follow_up_json` drops it).
+pub const FOLLOW_UP_SUBMIT: &str = "follow_up_submit";
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RepresentativeQuestions {
@@ -340,6 +357,10 @@ pub async fn load_block_answers(
         .filter(|assessment| submitted && assessment.started())
         .map(|assessment| assessment.representative_country_ids.as_slice())
         .unwrap_or(&[]);
+    let follow_up_unsent = submitted
+        && stored.as_ref().is_some_and(|assessment| {
+            assessment.started() && assessment.follow_up_answered_at.is_none()
+        });
     let representatives =
         representative_questions(inputs, &representative_ids(inputs, &config, stored_ids));
     let representation_missing: Vec<String> = (if representation.representation.minor {
@@ -450,6 +471,8 @@ pub async fn load_block_answers(
             .is_some(),
         statement_legal_form: text("statement_legal_form"),
         statement_payment_reason: text("statement_payment_reason"),
+        minor: inputs.minor,
+        follow_up_unsent,
     })
 }
 
@@ -514,10 +537,12 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
                     missing.push("funds_description");
                 }
             }
-            if !paying_parent && blank(&answers.occupation) {
+            // A child has no occupation or sector (QA 2026-10-24, B-4): the
+            // paying parent states the own ones in the payer section.
+            if !paying_parent && !answers.minor && blank(&answers.occupation) {
                 missing.push("occupation");
             }
-            if blank(&answers.sector) {
+            if !answers.minor && blank(&answers.sector) {
                 missing.push("sector");
             }
             // The proof is required while A is open (PDF).
@@ -638,19 +663,26 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
             PARTY_CABINET
         }
         "L" => {
+            // A child is no PEP himself and acts in nobody's economic
+            // interest (QA 2026-10-24, B-4): only whether a PEP's family
+            // member and the sanctions links are asked about a minor; the
+            // paying parent's own PEP status and economic interest are the
+            // payer section's.
             for (key, answer) in [
                 ("pep_self", answers.pep_self_answer),
                 ("pep_related", answers.pep_related_answer),
                 ("sanctions_links", answers.sanctions_links_answer),
             ] {
-                if answer.is_none() {
+                if answer.is_none() && !(answers.minor && key == "pep_self") {
                     missing.push(key);
                 }
             }
             // The own economic interest is asked here too (owner 2026-10-09).
-            missing.extend(lead_payer::portal_missing_own_account(
-                answers.payer.as_ref(),
-            ));
+            if !answers.minor {
+                missing.extend(lead_payer::portal_missing_own_account(
+                    answers.payer.as_ref(),
+                ));
+            }
             PARTY_CABINET
         }
         "K" => {
@@ -669,13 +701,35 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
 
 /// Whether a "request more" of `blocks` asks the lead's cabinet for an
 /// answer: one of them is answered there and still misses something. The
-/// payer link's blocks and complete cabinet blocks leave the lead's sent
-/// follow-up as it is.
+/// payer link's blocks leave the lead's sent follow-up as it is. A cabinet
+/// block the lead already filled is asked again all the same (QA
+/// 2026-10-24, C-8: the request after the answer was invisible): the lead
+/// must look at the block and send the follow-up once more.
 fn requests_cabinet_answer(blocks: &[String], answers: &BlockAnswers) -> bool {
-    blocks.iter().any(|block| {
-        let (party, missing) = block_missing(block, answers);
-        party == PARTY_CABINET && !missing.is_empty()
-    })
+    blocks
+        .iter()
+        .any(|block| block_missing(block, answers).0 == PARTY_CABINET)
+}
+
+/// When staff last requested a block of the cabinet (`request_more`), if
+/// ever: with `follow_up_answered_at` the cabinet and staff tell "requested"
+/// from "answered" by the later of the two.
+pub async fn follow_up_requested_at(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+    let cabinet: Vec<String> = super::cabinet::CABINET_BLOCKS
+        .iter()
+        .map(|block| block.to_string())
+        .collect();
+    sqlx::query_scalar(
+        r#"SELECT max(decided_at) FROM lead_risk_decisions
+           WHERE lead_id = $1 AND decision = 'request_more' AND blocks && $2::text[]"#,
+    )
+    .bind(lead_id)
+    .bind(&cabinet)
+    .fetch_one(&mut *conn)
+    .await
 }
 
 /// One block for staff.
@@ -737,6 +791,11 @@ pub fn block_states(
             missing.retain(|key| !FUNDS_KEYS.contains(&key.as_str()));
         }
         let requested = requested.iter().any(|known| known == block);
+        // A requested cabinet block waits for the lead's send, filled or not
+        // (QA 2026-10-24, C-8): "request more" after the answer asks again.
+        if requested && party == PARTY_CABINET && answers.follow_up_unsent {
+            missing.push(FOLLOW_UP_SUBMIT.to_string());
+        }
         let open = match block {
             "G" => {
                 requested
@@ -1791,6 +1850,111 @@ pub async fn staff_id_valid_until(
 mod tests {
     use super::*;
 
+    /// Two list-1 countries of a representative: level 2 of the lead.
+    fn level_two_triggers() -> Vec<Sticky> {
+        let now = Utc::now();
+        ["T1", "T2"]
+            .iter()
+            .map(|key| Sticky {
+                key: (*key).to_string(),
+                subject: super::super::SUBJECT_REPRESENTATIVE.to_string(),
+                variant: Some(super::super::VARIANT_LIST_1.to_string()),
+                points: 2,
+                knockout: false,
+                first_fired_at: now,
+                last_fired_at: now,
+                active: true,
+                inactive_since: None,
+                representative_id: None,
+            })
+            .collect()
+    }
+
+    /// QA 2026-10-24, C-8: staff requesting a cabinet block the lead already
+    /// filled re-opens it — the block misses the lead's send, the status
+    /// waits for the answers — until the lead sends the follow-up again. The
+    /// payer link's blocks are untouched.
+    #[test]
+    fn a_requested_cabinet_block_waits_for_the_leads_send() {
+        let config = RiskConfig::default();
+        let triggers = level_two_triggers();
+        let level = score(&triggers, &config).level;
+        assert_eq!(level, 2);
+        let filled = BlockAnswers {
+            payer: Some(Declaration {
+                payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.to_string(),
+                own_account_answered: true,
+                acts_on_own_account: true,
+                ..Declaration::default()
+            }),
+            occupation: Some("Lehrerin".into()),
+            sector: Some("Bildung".into()),
+            birth_place: Some("Berlin".into()),
+            birth_country: Some("DE".into()),
+            pep_self_answer: Some(false),
+            pep_related_answer: Some(false),
+            sanctions_links_answer: Some(false),
+            ..Default::default()
+        };
+        let complete = block_states(&triggers, level, &[], &config, &filled);
+        assert!(complete["A"].answered && complete["K"].answered && complete["L"].answered);
+        assert_eq!(computed_status(level, &complete), STATUS_REVIEW);
+        // Requested while the answer stands: nothing more to send.
+        let requested = vec!["A".to_string(), "D".to_string()];
+        let sent = block_states(&triggers, level, &requested, &config, &filled);
+        assert!(sent["A"].answered, "{:?}", sent["A"]);
+        // Requested after the answer (the request cleared `follow_up_answered_at`).
+        let unsent = BlockAnswers {
+            follow_up_unsent: true,
+            ..filled.clone()
+        };
+        let waiting = block_states(&triggers, level, &requested, &config, &unsent);
+        assert_eq!(waiting["A"].missing, [FOLLOW_UP_SUBMIT]);
+        assert!(!waiting["A"].answered);
+        assert_eq!(computed_status(level, &waiting), STATUS_AWAITING);
+        // Only the requested cabinet blocks: K and L stay answered, D is the
+        // payer link's and misses only the payer's own send.
+        assert!(waiting["K"].answered && waiting["L"].answered);
+        assert_eq!(waiting["D"].missing, ["payer_link_submit"]);
+        // The request itself asks a filled cabinet block again, never the
+        // payer link's blocks (QA 2026-10-10, V2-a).
+        assert!(requests_cabinet_answer(&["A".to_string()], &filled));
+        assert!(!requests_cabinet_answer(
+            &["D".to_string(), "E".to_string()],
+            &filled
+        ));
+    }
+
+    /// QA 2026-10-24, B-4: a child has no occupation or sector, is no PEP
+    /// himself and acts in nobody's economic interest — block A and L ask
+    /// none of that about a minor; an adult is asked all of it.
+    #[test]
+    fn a_minor_is_asked_no_occupation_sector_pep_status_or_economic_interest() {
+        let config = RiskConfig::default();
+        let triggers = level_two_triggers();
+        let level = score(&triggers, &config).level;
+        let child = BlockAnswers {
+            minor: true,
+            ..Default::default()
+        };
+        let states = block_states(&triggers, level, &[], &config, &child);
+        assert!(states["A"].open && states["L"].open);
+        assert!(states["A"].missing.is_empty(), "{:?}", states["A"]);
+        assert_eq!(states["L"].missing, ["pep_related", "sanctions_links"]);
+        let adult = BlockAnswers::default();
+        let states = block_states(&triggers, level, &[], &config, &adult);
+        assert_eq!(states["A"].missing, ["occupation", "sector"]);
+        assert_eq!(
+            states["L"].missing,
+            [
+                "pep_self",
+                "pep_related",
+                "sanctions_links",
+                "payer_own_account"
+            ]
+        );
+    }
+
     #[test]
     fn representatives_countries_at_level_two_open_their_block_and_the_enhanced_check_blocks() {
         // One level per lead (owner 2026-10-24): the parents' points count,
@@ -1811,6 +1975,7 @@ mod tests {
                 last_fired_at: now,
                 active: true,
                 inactive_since: None,
+                representative_id: None,
             })
             .collect();
         let level = score(&triggers, &config).level;
@@ -1842,6 +2007,7 @@ mod tests {
             last_fired_at: now,
             active: true,
             inactive_since: None,
+            representative_id: None,
         }];
         let score = score(&triggers, &config);
         assert_eq!((score.knockout, score.level), (true, 3));
@@ -1897,6 +2063,7 @@ mod tests {
             last_fired_at: now,
             active: true,
             inactive_since: None,
+            representative_id: None,
         }];
         let score = score(&triggers, &config);
         assert_eq!(score.level, 1);
@@ -1971,6 +2138,7 @@ mod tests {
             last_fired_at: now,
             active,
             inactive_since: None,
+            representative_id: None,
         };
         let mut assessment = Assessment {
             lead_id: Uuid::nil(),
@@ -2030,6 +2198,7 @@ mod tests {
             last_fired_at: now,
             active: true,
             inactive_since: None,
+            representative_id: None,
         };
         assert!(
             !assessment.holds(),
@@ -2100,6 +2269,7 @@ mod tests {
                 last_fired_at: now,
                 active: true,
                 inactive_since: None,
+                representative_id: None,
             };
             let answers = BlockAnswers {
                 identity_issue: true,
@@ -2281,6 +2451,7 @@ mod tests {
             last_fired_at: now,
             active: true,
             inactive_since: None,
+            representative_id: None,
         };
         let config = RiskConfig {
             level_2_blocks_automatic: false,
@@ -2310,7 +2481,7 @@ mod tests {
     }
 
     #[test]
-    fn only_an_open_cabinet_block_asks_the_lead_to_answer_again() {
+    fn a_requested_cabinet_block_asks_the_lead_to_answer_again_the_payer_links_do_not() {
         // A company pays through its own link (QA 2026-10-10, V2-a): C, D and E
         // are the payer link's, the lead's sent follow-up stays sent.
         let answers = BlockAnswers {
@@ -2323,8 +2494,9 @@ mod tests {
             &blocks(&["C", "D", "E"]),
             &answers
         ));
-        // A complete cabinet block asks nothing either.
-        assert!(!requests_cabinet_answer(&blocks(&["K"]), &answers));
+        // A complete cabinet block is asked again all the same (QA 2026-10-24,
+        // C-8): the lead looks at it and sends the follow-up once more.
+        assert!(requests_cabinet_answer(&blocks(&["K"]), &answers));
         // A cabinet block that still misses something does.
         assert!(requests_cabinet_answer(&blocks(&["D", "F"]), &answers));
         // The self-payer answers the payment route (C) in the cabinet.

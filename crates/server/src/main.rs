@@ -440,12 +440,18 @@ fn spawn_lead_purger(state: state::AppState) {
             // Leads that did not qualify within their window and have no
             // signed consent (docs/engineering/03_lead-retention-policy_ua.md).
             match gmed_server::routes::leads::auto_purge_unqualified_leads(&state).await {
-                Ok(report) if report.scanned > 0 || report.warned > 0 => {
+                Ok(report)
+                    if report.scanned > 0
+                        || report.warned > 0
+                        || report.reminded > 0
+                        || report.purged > 0 =>
+                {
                     tracing::info!(
                         scanned = report.scanned,
                         purged = report.purged,
                         blocked = report.blocked,
                         warned = report.warned,
+                        reminded = report.reminded,
                         errors = report.errors,
                         "Unqualified lead sweep complete"
                     );

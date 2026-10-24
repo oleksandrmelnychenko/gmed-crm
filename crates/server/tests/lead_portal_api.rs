@@ -6044,26 +6044,103 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     .unwrap();
     assert_eq!(events, 1, "unchanged follow-up is idempotent");
 
+    // Staff ask for block A once more, though the lead filled it (QA
+    // 2026-10-24, C-8): the follow-up waits for the lead's send again — the
+    // cabinet shows the block open with nothing missing in it and no answer
+    // recorded, staff see the block as open and the assessment waits — until
+    // the lead sends the follow-up once more.
+    let risk_assessment = format!("/api/v1/leads/{lead_id}/risk-assessment");
+    let (status, decided) = json_request(
+        router,
+        "POST",
+        &format!("{risk_assessment}/decisions"),
+        &ceo,
+        Some(json!({
+            "decision": "request_more",
+            "reason": "Please check the source of the funds once more",
+            "blocks": ["A"]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{decided}");
+    let (status, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["follow_up"]["required"], true, "{body}");
+    assert!(body["follow_up"]["answered_at"].is_null(), "{body}");
+    assert!(body["follow_up"]["requested_at"].is_string(), "{body}");
+    assert!(
+        body["follow_up"]["blocks"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("A")),
+        "{body}"
+    );
+    assert_eq!(follow_up_missing(&body)["A"], json!([]), "{body}");
+    assert!(!body.to_string().contains("follow_up_submit"), "{body}");
+    let (status, assessment) = json_request(router, "GET", &risk_assessment, &ceo, None).await;
+    assert_eq!(status, StatusCode::OK, "{assessment}");
+    assert_eq!(assessment["status"], "awaiting_answers", "{assessment}");
+    assert!(
+        assessment["follow_up_answered_at"].is_null(),
+        "{assessment}"
+    );
+    assert!(
+        assessment["follow_up_requested_at"].is_string(),
+        "{assessment}"
+    );
+    assert_eq!(assessment["blocks"]["A"]["answered"], false, "{assessment}");
+    assert_eq!(
+        assessment["blocks"]["A"]["missing"],
+        json!(["follow_up_submit"]),
+        "{assessment}"
+    );
+    // The lead sends again: the request is answered, the review is staff's.
+    let (status, body) = json_request(router, "POST", &follow_up_submit, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["follow_up"]["answered_at"].is_string(), "{body}");
+    let (_, assessment) = json_request(router, "GET", &risk_assessment, &ceo, None).await;
+    assert_eq!(assessment["status"], "review_required", "{assessment}");
+    assert_eq!(assessment["blocks"]["A"]["answered"], true, "{assessment}");
+    assert!(
+        assessment["follow_up_answered_at"].is_string(),
+        "{assessment}"
+    );
+    let (status, queue) =
+        json_request(router, "GET", "/api/v1/compliance/risk-reviews", &ceo, None).await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    assert!(queue.to_string().contains(&lead_id.to_string()), "{queue}");
+
     let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // The audit is written asynchronously: wait for the second send's row.
-    let mut counted = Value::Null;
+    // Two sends, two audit rows; the second one counts the two proofs. The
+    // rows are not told apart by `created_at` (two transactions can share an
+    // instant under load), so look for the row with the count.
+    let mut counted: Vec<Value> = Vec::new();
     for _ in 0..50 {
         counted = sqlx::query_scalar(
             r#"SELECT context FROM audit_log
-               WHERE action = 'lead_portal_submit' AND entity_id = $1
-               ORDER BY created_at DESC LIMIT 1"#,
+               WHERE action = 'lead_portal_submit' AND entity_id = $1"#,
         )
         .bind(lead_id)
-        .fetch_one(pool)
+        .fetch_all(pool)
         .await
         .unwrap();
-        if counted["self_funds_documents"] == 2 {
+        if counted.len() >= 2
+            && counted
+                .iter()
+                .any(|context| context["self_funds_documents"] == 2)
+        {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    assert_eq!(counted["self_funds_documents"], 2, "{counted}");
+    assert_eq!(counted.len(), 2, "{counted:?}");
+    assert!(
+        counted
+            .iter()
+            .any(|context| context["self_funds_documents"] == 2),
+        "{counted:?}"
+    );
 
     // A third party pays after all: the own source goes.
     let (status, body) = json_request(

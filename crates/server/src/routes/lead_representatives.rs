@@ -53,7 +53,6 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::documents::StagedDocumentDelete;
-use crate::routes::invoices::payer::is_plausible_email;
 use crate::routes::lead_payer;
 use crate::routes::lead_portal_guardians::same_person_name;
 use crate::routes::lead_portal_intake::{
@@ -1822,11 +1821,22 @@ fn apply_person_patch(
     }
     if let Some(value) = patch.text("email") {
         let email = intake::clean_text(value, "email", 254)?.map(|email| email.to_lowercase());
-        if email
-            .as_deref()
-            .is_some_and(|email| !is_plausible_email(email))
-        {
-            return Err(field_error("email", "Invalid e-mail address"));
+        if let Some(email) = email.as_deref() {
+            if !crate::email_address::has_valid_format(email) {
+                return Err(field_error("email", "Invalid e-mail address"));
+            }
+            // Only an address set or changed now is judged by its domain: the
+            // stored one, sent back unchanged with the whole card, never
+            // blocks saving another field (QA 2026-10-24, B-1).
+            if crate::email_address::no_mail_domain_of_change(current.email.as_deref(), email)
+                .is_some()
+            {
+                return Err(FieldError {
+                    code: crate::email_address::EMAIL_DOMAIN_NO_MAIL,
+                    field: "email",
+                    message: "The domain of this e-mail address accepts no mail",
+                });
+            }
         }
         next.email = email;
     }

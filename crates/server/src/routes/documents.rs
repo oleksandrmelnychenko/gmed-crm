@@ -15196,7 +15196,8 @@ pub(crate) async fn persist_document_file(
                 document_date, source_person, source_institution, addressee_person,
                 addressee_institution, financial_status, payment_due_date, payment_date,
                 payment_method, version_root_document_id, replaces_document_id,
-                version_number, uploaded_by, document_number, order_intake_context
+                version_number, uploaded_by, document_number, order_intake_context,
+                created_at
            ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7,
                 $8, $9, $10, $11, $12, $13, $14,
@@ -15205,7 +15206,17 @@ pub(crate) async fn persist_document_file(
                 $22, $23, $24, $25,
                 $26, $27, $28, $29,
                 $30, $31, $32, $33,
-                $34, $35, $36, $37, $38, $39, $40
+                $34, $35, $36, $37, $38, $39, $40,
+                -- A document generated for an order shows the order's current
+                -- terms, so it is never dated before the last change of them
+                -- (`client_terms_changed_at`, written by an earlier request's
+                -- clock_timestamp()): the signature paths compare the two, and
+                -- a clock that steps back between the change and the
+                -- generation must not make the fresh document look outdated.
+                CASE WHEN $19 IS NOT NULL AND $4 IS NOT NULL
+                     THEN GREATEST(now(), (SELECT o.client_terms_changed_at
+                                           FROM orders o WHERE o.id = $4))
+                     ELSE now() END
            )"#,
     )
     .bind(document_id)

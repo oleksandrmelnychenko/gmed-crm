@@ -84,6 +84,9 @@ import { asLeadCabinetLang, payerFieldLabel, recipientFieldLabel, recipientOptio
 
 type Refused = Partial<Record<keyof RecipientDraft, string>>;
 
+/** The server's refusal of an address whose domain accepts no mail (`email_address::EMAIL_DOMAIN_NO_MAIL`). */
+const EMAIL_DOMAIN_NO_MAIL = "email_domain_no_mail";
+
 /**
  * Step 3 "Versicherung & Rechnung" (owner spec 2026-10-11): the invoice
  * recipient first and "who pays" with it.
@@ -145,6 +148,9 @@ export function InvoiceRecipientSection({
   const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<Refused>({});
   const [refused, setRefused] = useState<Refused>({});
+  // The code of each refusal, for the message at the field ("" when the server named none).
+  const refusedCodesRef = useRef<Refused>({});
+  const [refusedCodes, setRefusedCodes] = useState<Refused>({});
 
   const save = useCallback(
     (snapshot: RecipientDraft) => {
@@ -156,6 +162,7 @@ export function InvoiceRecipientSection({
         const rejected = Object.fromEntries(Object.entries(refusedRef.current).filter(
           ([field, value]) => recipientValue(field as keyof RecipientDraft, snapshot) === value,
         )) as Refused;
+        const codes: Refused = Object.fromEntries(Object.keys(rejected).map((field) => [field, refusedCodesRef.current[field as keyof RecipientDraft] ?? ""]));
         let saved = false;
         let failed = false;
         // A refused value stays visible while the other changed fields save.
@@ -167,6 +174,7 @@ export function InvoiceRecipientSection({
           // So is one whose domain is known to receive no mail.
           if (typeof typedEmail === "string" && typedEmail.trim() && (!isValidEmailAddress(typedEmail) || isKnownNoMailEmail(typedEmail)) && rejected.email === undefined) {
             rejected.email = recipientValue("email", snapshot);
+            codes.email = isKnownNoMailEmail(typedEmail) ? EMAIL_DOMAIN_NO_MAIL : "email_invalid";
             continue;
           }
           onRecipientState("saving");
@@ -182,10 +190,13 @@ export function InvoiceRecipientSection({
             saved = true;
             break;
           } catch (cause) {
-            const key = errorBody(cause)?.field;
+            const body = errorBody(cause);
+            const key = body?.field;
             const field = typeof key === "string" ? recipientFieldOf(key) : null;
             if (cause instanceof ApiRequestError && cause.status === 422 && field && typeof key === "string" && key in patch && rejected[field] === undefined) {
               rejected[field] = recipientValue(field, snapshot);
+              // Tolerant: a refusal without a code reads as "invalid".
+              codes[field] = typeof body?.code === "string" ? body.code : "";
               continue;
             }
             failed = true;
@@ -193,7 +204,9 @@ export function InvoiceRecipientSection({
           }
         }
         refusedRef.current = rejected;
+        refusedCodesRef.current = codes;
         setRefused(rejected);
+        setRefusedCodes(codes);
         if (failed || Object.keys(rejected).length > 0) onRecipientState("error");
         else if (saved || hadRefusal) onRecipientState("saved");
         return !failed && Object.keys(rejected).length === 0;
@@ -232,12 +245,14 @@ export function InvoiceRecipientSection({
 
   const update = (change: (current: RecipientDraft) => RecipientDraft) => setDraft(change);
   const set = (field: RecipientField, value: string) => update((current) => ({ ...current, [field]: value }));
-  const errorFor = (field: keyof RecipientDraft) =>
-    refused[field] !== undefined && refused[field] === recipientValue(field, draft)
-      ? (field === "email"
-        ? (isKnownNoMailEmail(draft.email) ? emailDomainWarningText(draft.email, lang) : text.invalidEmail)
-        : text.invalidField)
-      : undefined;
+  const errorFor = (field: keyof RecipientDraft) => {
+    if (refused[field] === undefined || refused[field] !== recipientValue(field, draft)) return undefined;
+    if (field !== "email") return text.invalidField;
+    // "The domain … accepts no mail" when the server (or the known list) says so (QA 2026-10-24, B-3).
+    return refusedCodes.email === EMAIL_DOMAIN_NO_MAIL || isKnownNoMailEmail(draft.email)
+      ? emailDomainWarningText(draft.email, lang)
+      : text.invalidEmail;
+  };
   const control = (field: keyof RecipientDraft) => ({
     id: `lead-request-recipient_${field}`,
     "aria-invalid": Boolean(errorFor(field)) || undefined,

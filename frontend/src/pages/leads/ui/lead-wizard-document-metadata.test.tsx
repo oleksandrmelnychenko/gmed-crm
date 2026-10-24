@@ -9,7 +9,25 @@ import {
   leadWizardDocumentTotal,
   leadWizardDocumentTotalLabel,
   sortWizardDocumentsNewestFirst,
+  wizardArchivedDocumentTitle,
+  wizardDocumentIsArchived,
 } from "./lead-wizard-document-metadata";
+
+describe("a document the server put aside", () => {
+  it("is archived by its status, whatever its version", () => {
+    expect(wizardDocumentIsArchived({ status: "archived" })).toBe(true);
+    expect(wizardDocumentIsArchived({ status: "active" })).toBe(false);
+    expect(wizardDocumentIsArchived({ status: "draft" })).toBe(false);
+  });
+
+  it("is listed by the name the server gave it when archiving", () => {
+    // The previous payer's identity copy after a payer change (QA 2026-10-24, C-7).
+    expect(wizardArchivedDocumentTitle({ auto_name: "Früherer Zahler – Ausweisdokument – Max Muster", original_filename: "payer-id.pdf" }))
+      .toBe("Früherer Zahler – Ausweisdokument – Max Muster");
+    expect(wizardArchivedDocumentTitle({ auto_name: "  ", original_filename: "payer-id.pdf" })).toBe("payer-id.pdf");
+    expect(wizardArchivedDocumentTitle({ auto_name: "", original_filename: null })).toBe("document");
+  });
+});
 
 describe("leadWizardDocumentTotalLabel", () => {
   it("shows an older dotted or EUR total with a decimal comma and the euro sign", () => {

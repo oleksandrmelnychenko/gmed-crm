@@ -164,6 +164,7 @@ import {
 } from "./model/lead-portal-access";
 import { LeadPortalAccessDetail, PortalCredentialsDialog, type PortalCredentials } from "./ui/lead-portal-access";
 import { LeadConfirmDialog } from "./ui/lead-confirm-dialog";
+import { LeadIdentityDocumentsBlock } from "./ui/lead-identity-documents-block";
 import { deletedLeadLabel, isAnonymizedLead, leadDisplayName } from "./model/lead-display-name";
 import {
   LEAD_FAILURE_REASONS,
@@ -3107,6 +3108,23 @@ function useLeadsPageContent() {
                     </div>
                   </section>
                 ) : null}
+
+                {isAnonymizedLead(detail) ? null : (
+                  // The identity copies of the lead, its representatives and the
+                  // payer, for every role the server sends them to (owner decision
+                  // 2026-10-24: Sales opens the identity scans it uploads). A role
+                  // with leads.edit and no wizard enters the document data here.
+                  <section className={cardClass("p-4")} data-testid="lead-detail-identity-documents">
+                    <LeadIdentityDocumentsBlock
+                      key={detail.id}
+                      leadId={detail.id}
+                      showDataForm={permissions.canEdit && !permissions.canConvert && !detailOutOfWork && !detailIsConverted}
+                      tx={tx}
+                      lang={lang}
+                      title={(count) => <SectionTitle>{`${t.lead_identity_documents} (${count})`}</SectionTitle>}
+                    />
+                  </section>
+                )}
 
                 <section className={cardClass("p-4")}>
                   <SectionTitle>

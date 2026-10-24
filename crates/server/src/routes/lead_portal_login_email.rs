@@ -454,27 +454,11 @@ async fn send_login_email(
         greeting_name(&row.try_get::<String, _>("name").unwrap_or_default())
     };
     // The day the retention rule deletes an unqualified request, if it applies
-    // (not to a repeat intake of a patient with a signed DSGVO consent).
-    let outside_rule = row
-        .try_get::<Option<Uuid>, _>("converted_patient_id")
-        .ok()
-        .flatten()
-        .is_some()
-        || crate::routes::leads::is_outside_unqualified_purge(&state.db, lead_id).await;
-    let complete_by = match (
-        outside_rule,
-        row.try_get::<String, _>("compliance_status").ok(),
-        row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-            .ok(),
-    ) {
-        (false, Some(compliance_status), Some(created_at)) => {
-            crate::routes::leads::load_unqualified_lead_retention(&state.db)
-                .await
-                .and_then(|policy| policy.deadline(&status, &compliance_status, created_at))
-                .map(crate::app_time::date_of)
-        }
-        _ => None,
-    };
+    // (not to a repeat intake of a patient with a signed DSGVO consent): the
+    // same instant the sweep, the staff warning and the reminder use.
+    let complete_by = crate::routes::leads::unqualified_lead_deletion_at(&state.db, lead_id)
+        .await
+        .map(crate::app_time::date_of);
     let password_hash = match row.try_get::<String, _>("password_hash") {
         Ok(hash) => hash,
         Err(error) => return internal(error, lead_id, "read hash"),

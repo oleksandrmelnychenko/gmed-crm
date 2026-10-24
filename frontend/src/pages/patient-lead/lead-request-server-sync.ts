@@ -68,6 +68,13 @@ export function useServerConflictNotice(id: string): string | undefined {
   return registry?.conflicts.has(id) ? registry.notice : undefined;
 }
 
+/** Takes the notice of the field with this element id away: the person looked at the field (focused it). */
+export function useServerConflictDismiss(id: string): () => void {
+  const registry = useContext(ServerConflictContext);
+  const remove = registry?.remove;
+  return useCallback(() => remove?.([id]), [remove, id]);
+}
+
 /**
  * Keeps an autosaving form in step with newer server data of its section.
  * `incoming` is the draft built from the request as it is now; `savedRef` the
@@ -135,6 +142,17 @@ export function useServerConflicts<Draft extends object>(
     for (const field of fields) conflictValues.current.set(field, draftRef.current[field as keyof Draft]);
     add?.(fields.map((field) => idOfRef.current(field)));
   }, [add]);
+
+  // The form left the screen (another step was opened): its notices go with it, as the
+  // first step's do (QA 2026-10-24, B-7); a newer server change reports them afresh.
+  useEffect(() => {
+    const values = conflictValues.current;
+    return () => {
+      const ids = Array.from(values.keys(), (field) => idOfRef.current(field));
+      values.clear();
+      if (ids.length > 0) remove?.(ids);
+    };
+  }, [remove]);
 
   useEffect(() => {
     if (conflictValues.current.size === 0) return;

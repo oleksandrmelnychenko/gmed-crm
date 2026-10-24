@@ -11,7 +11,7 @@ import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, submitLeadRequest, type LeadRequ
 import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown, missingOfRefusal } from "./lead-request-follow-up-model";
 import { canSubmit, changedSinceSubmit, consentGiven, type SubmitField } from "./lead-request-model";
 import { CabinetSection as Section, MissingItemLink, RequiredMark, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
-import type { CabinetTarget } from "./lead-request-field-target";
+import { missingListKeys, recipientIsPayer, type CabinetTarget } from "./lead-request-field-target";
 import { hasBaseFormInput, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
 import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
 import { extraWorkSubject, followUpFieldLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -53,6 +53,9 @@ export function SendStep({
   );
   const shownKeys = new Set(missingSteps.flatMap((step) => byStep[step]));
   const otherMissing = request.progress.missing_for_submit.filter((key) => !shownKeys.has(key));
+  // A payer key the paying recipient's field answers is listed as that field, once (QA 2026-10-24, C-1).
+  const recipientPays = recipientIsPayer(request);
+  for (const step of missingSteps) byStep[step] = missingListKeys(byStep[step], recipientPays);
   const previewMissing = followUpBeforeSubmit(request) ? followUpMissingAll(request) : [];
   const missingCount = shownKeys.size + otherMissing.length + previewMissing.length;
   const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);

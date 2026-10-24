@@ -34,7 +34,6 @@ use serde_json::{Map, Value, json};
 use sqlx::{PgConnection, Row, postgres::PgRow};
 use uuid::Uuid;
 
-use crate::routes::invoices::payer::is_plausible_email;
 use crate::routes::lead_payer::{
     self, Declaration, INVOICE_TO_OTHER, INVOICE_TO_PAYER, INVOICE_TO_SELF, RELATIONSHIP_KINDS,
 };
@@ -459,11 +458,26 @@ pub(crate) fn apply(
                     "recipient_email",
                     254,
                 )?;
-                if email
-                    .as_deref()
-                    .is_some_and(|email| !is_plausible_email(email))
-                {
-                    return Err(field_error("recipient_email", "Invalid e-mail address"));
+                if let Some(email) = email.as_deref() {
+                    if !crate::email_address::has_valid_format(email) {
+                        return Err(field_error("recipient_email", "Invalid e-mail address"));
+                    }
+                    // A dead domain gets its own code, so the cabinet says
+                    // "the domain accepts no mail", not "invalid address"
+                    // (QA 2026-10-24, B-3); only a set or changed address
+                    // is judged, never the stored one sent back unchanged.
+                    if crate::email_address::no_mail_domain_of_change(
+                        current.email.as_deref(),
+                        email,
+                    )
+                    .is_some()
+                    {
+                        return Err(FieldError {
+                            code: crate::email_address::EMAIL_DOMAIN_NO_MAIL,
+                            field: "recipient_email",
+                            message: "The domain of this e-mail address accepts no mail",
+                        });
+                    }
                 }
                 next.email = email;
             }

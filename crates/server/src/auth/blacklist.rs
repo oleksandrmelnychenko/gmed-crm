@@ -46,8 +46,11 @@ pub async fn revoke_token(
 /// We do NOT know the individual access-token jtis here — we record a family
 /// marker by inserting a sentinel row keyed on the family. The middleware
 /// additionally checks `family_revoked` for the token's family id.
-pub async fn blacklist_family(
-    pool: &PgPool,
+///
+/// `executor` is the pool or the caller's connection, so a revocation can be
+/// part of the caller's transaction.
+pub async fn blacklist_family<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
     family_id: Uuid,
     reason: &str,
 ) -> Result<(), sqlx::Error> {
@@ -65,7 +68,7 @@ pub async fn blacklist_family(
     .bind(family_id)
     .bind(expires_at)
     .bind(reason)
-    .execute(pool)
+    .execute(executor)
     .await?;
     Ok(())
 }

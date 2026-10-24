@@ -87,8 +87,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::invoices::payer::{
-    PAYER_ROLE_CONTRACTING_PARTY, PAYER_ROLE_COST_BEARER, PayerRecord, is_plausible_email,
-    payer_columns,
+    PAYER_ROLE_CONTRACTING_PARTY, PAYER_ROLE_COST_BEARER, PayerRecord, payer_columns,
 };
 use crate::routes::lead_representatives;
 use crate::services::citizenships::{normalize_citizenships, normalize_country_code};
@@ -664,6 +663,7 @@ impl Declaration {
 
     /// The fields that name the payer: a change makes an earlier
     /// Kostenübernahmeerklärung name the wrong person or organisation.
+    /// Compared through [`same_identity`](Self::same_identity), never raw.
     fn identity_key(&self) -> Value {
         json!([
             self.payer_kind,
@@ -1055,11 +1055,22 @@ fn declaration_from_input(
             };
         }
         let email = text(&input.email, SHORT_TEXT_MAX)?;
-        if email
-            .as_deref()
-            .is_some_and(|email| !is_plausible_email(email))
-        {
-            return Err("payer_email_invalid");
+        if let Some(email) = email.as_deref() {
+            // The format always; the domain only when the address is set or
+            // changed in this save (QA 2026-10-24): a stored address whose
+            // domain the cache rates "no mail" today is not the staff's
+            // correction of another field.
+            if !crate::email_address::has_valid_format(email) {
+                return Err("payer_email_invalid");
+            }
+            if crate::email_address::no_mail_domain_of_change(
+                stored.and_then(|stored| stored.email.as_deref()),
+                email,
+            )
+            .is_some()
+            {
+                return Err("payer_email_domain_no_mail");
+            }
         }
         declaration.payer_type = Some(payer_type);
         declaration.street = text(&input.street, SHORT_TEXT_MAX)?;
@@ -2524,7 +2535,7 @@ async fn save_payer_declaration(
     }
     let identity_changed = previous
         .as_ref()
-        .is_none_or(|previous| previous.identity_key() != declaration.identity_key());
+        .is_none_or(|previous| !previous.same_identity(&declaration));
     if previous.as_ref() == Some(&declaration) {
         // Only the organisation's legal form or register number may have
         // changed: they live beside the declaration.
@@ -2916,7 +2927,7 @@ fn portal_field_of(code: &str) -> &'static str {
         "payer_organisation_name_too_long" => "payer_organisation_name",
         "payer_relationship_kind_invalid" => "payer_relationship_kind",
         "payer_date_of_birth_invalid" => "payer_date_of_birth",
-        "payer_email_invalid" => "payer_email",
+        "payer_email_invalid" | "payer_email_domain_no_mail" => "payer_email",
         "payer_phone_invalid" => "payer_phone",
         "payer_messenger_too_long" => "payer_messenger",
         "payer_country_invalid" => "payer_country",
@@ -3005,6 +3016,29 @@ impl Declaration {
     /// Whether `other` names the same payer ([`same_payer_key`]).
     pub(crate) fn same_payer(&self, other: &Self) -> bool {
         same_payer_key(&self.payer_key(), &other.payer_key())
+    }
+
+    /// Whether `other` names the same payer at the same address
+    /// ([`identity_key`](Self::identity_key)), the texts normalised like
+    /// [`same_payer_key`]: a cosmetic correction by staff — "Olga" to
+    /// "OLGA ", a doubled space in the street — dates no new identity
+    /// (`identity_changed_at`) and keeps the record that the payer was
+    /// informed (QA 2026-10-24, C-5). Another name, date of birth, type,
+    /// kind, representative or address is another identity.
+    pub(crate) fn same_identity(&self, other: &Self) -> bool {
+        let normalized = |declaration: &Self| match declaration.identity_key() {
+            Value::Array(parts) => Value::Array(
+                parts
+                    .into_iter()
+                    .map(|part| match part {
+                        Value::String(text) => Value::String(normalized_payer_name(&text)),
+                        other => other,
+                    })
+                    .collect(),
+            ),
+            other => other,
+        };
+        normalized(self) == normalized(other)
     }
 
     /// The part of the declaration the lead cabinet shows and edits.
@@ -3416,7 +3450,7 @@ pub(crate) async fn save_from_portal(
     }
     let identity_changed = previous
         .as_ref()
-        .is_none_or(|previous| previous.identity_key() != declaration.identity_key());
+        .is_none_or(|previous| !previous.same_identity(&declaration));
     store_declaration(conn, lead_id, &declaration, Some(actor), identity_changed).await?;
     // Another payer or another e-mail address: the payer's link stops
     // working, and another payer's answers go — with a link payer's
@@ -3491,7 +3525,7 @@ pub(crate) async fn adopt_payer_identity(
     }
     let identity_changed = previous
         .as_ref()
-        .is_none_or(|previous| previous.identity_key() != declaration.identity_key());
+        .is_none_or(|previous| !previous.same_identity(declaration));
     store_declaration(conn, lead_id, declaration, actor, identity_changed).await?;
     let changed_fields = changed_json_fields(
         &previous
@@ -4739,6 +4773,14 @@ mod tests {
         value = input("third_party");
         value.email = Some("no-at-sign".into());
         assert_eq!(from_input(&value), Err("payer_email_invalid"));
+        // A stored address is kept as it is, however its domain is rated
+        // today (QA 2026-10-24): the domain is judged on a change only.
+        let stored = from_input(&input("third_party")).unwrap();
+        value = input("third_party");
+        value.email = Some(" ERIKA@example.org ".into());
+        let kept = declaration_from_input(&value, Some(&stored), today()).unwrap();
+        assert_eq!(kept.email.as_deref(), Some("ERIKA@example.org"));
+        assert_eq!(portal_field_of("payer_email_domain_no_mail"), "payer_email");
         value = input("third_party");
         value.phone = Some("+49 12".into());
         assert_eq!(from_input(&value), Err("payer_phone_invalid"));
@@ -5042,6 +5084,35 @@ mod tests {
         assert_ne!(company.identity_key(), renamed.identity_key());
         assert_ne!(company.identity_key(), insurer.identity_key());
         assert_ne!(company.identity_key(), declaration.identity_key());
+    }
+
+    /// QA 2026-10-24, C-5: staff writing "OLGA " for "Olga" correct the
+    /// spelling of the same payer; the identity is dated anew only for
+    /// another payer or address.
+    #[test]
+    fn a_cosmetic_correction_keeps_the_identity() {
+        let stored = from_input(&input("third_party")).unwrap();
+        let mut corrected = stored.clone();
+        corrected.first_name = stored
+            .first_name
+            .as_deref()
+            .map(|name| format!("{} ", name.to_uppercase()));
+        corrected.street = stored
+            .street
+            .as_deref()
+            .map(|street| street.replace(' ', "  "));
+        assert_ne!(stored.identity_key(), corrected.identity_key());
+        assert!(stored.same_identity(&corrected));
+        let mut moved = stored.clone();
+        moved.city = Some("Graz".into());
+        assert!(!stored.same_identity(&moved));
+        let mut other = stored.clone();
+        other.last_name = Some("Anders".into());
+        assert!(!stored.same_identity(&other));
+        let company = from_input(&organisation("company", "Beispiel GmbH")).unwrap();
+        let spaced = from_input(&organisation("company", " beispiel  gmbh")).unwrap();
+        assert!(company.same_identity(&spaced));
+        assert!(!company.same_identity(&stored));
     }
 
     fn organisation(payer_type: &str, name: &str) -> DeclarationInput {

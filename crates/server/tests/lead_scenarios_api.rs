@@ -1455,15 +1455,9 @@ async fn scenario_enhanced_check_by_a_parents_citizenship() {
         json!([]),
         "{answered}"
     );
-    let answered = app
-        .ok(
-            StatusCode::OK,
-            "POST",
-            &format!("{base}/enhanced-details"),
-            &anna,
-            Some(json!({ "occupation": "Schülerin", "sector": "Bildung" })),
-        )
-        .await;
+    // A child has no occupation or sector (QA 2026-10-24, B-4): block A asks
+    // nothing of the child — the paying father states his own in the payer
+    // section — so A is complete without an answer about the child.
     assert_eq!(
         answered["follow_up"]["missing"]["A"],
         json!([]),
@@ -1629,10 +1623,12 @@ async fn scenario_enhanced_check_by_a_parents_citizenship() {
     assert!(texts[1].contains("Minister"), "father's sheet");
 }
 
-/// Block L of a minor's enhanced check (the own economic interest of the
-/// paying parent) is answered where the cabinet asks it: in the payer
-/// section, as `acts_on_own_account` with the payer — never as a statement
-/// (`/identification` refuses the key). Document review 2026-10-24.
+/// Block L of a minor's enhanced check asks nothing of the child about the
+/// own economic interest or the own PEP status (QA 2026-10-24, B-4). The
+/// paying parent's economic interest is answered where the cabinet asks it:
+/// in the payer section, as `acts_on_own_account` with the payer — never as
+/// a statement (`/identification` refuses the key). Document review
+/// 2026-10-24.
 #[tokio::test]
 async fn scenario_block_l_of_a_paying_parent_is_answered_with_the_payer() {
     let Some(app) = Scn::new().await else { return };
@@ -1662,12 +1658,32 @@ async fn scenario_block_l_of_a_paying_parent_is_answered_with_the_payer() {
     )
     .await;
     let view = app.cabinet(lead, &anna).await;
+    // Block L asks nothing of the child about the own economic interest or
+    // the own PEP status (QA 2026-10-24, B-4): a child acts in nobody's
+    // economic interest and is no PEP; the paying father answers for himself
+    // in the payer section. Whether the child is a PEP's family member and
+    // the sanctions links stay the child's questions.
+    let block_l = view["follow_up"]["missing"]["L"].as_array().cloned();
     assert!(
-        view["follow_up"]["missing"]["L"]
-            .as_array()
-            .is_some_and(|keys| keys.contains(&json!("payer_own_account"))),
+        block_l
+            .as_ref()
+            .is_some_and(|keys| !keys.contains(&json!("payer_own_account"))),
         "{}",
         view["follow_up"]
+    );
+    assert!(
+        block_l
+            .as_ref()
+            .is_some_and(|keys| !keys.contains(&json!("pep_self"))),
+        "{}",
+        view["follow_up"]
+    );
+    assert!(
+        !view["progress"]["missing_for_submit"]
+            .as_array()
+            .is_some_and(|keys| keys.contains(&json!("pep_self"))),
+        "{}",
+        view["progress"]
     );
     // The statement endpoint does not take it.
     let (code, refused) = app

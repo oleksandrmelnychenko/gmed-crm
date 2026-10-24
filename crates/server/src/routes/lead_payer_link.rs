@@ -1253,7 +1253,12 @@ fn missing_for_submit(answers: &Answers, required: &Requirements<'_>) -> Vec<&'s
         checks.extend(identity_document);
         checks.push(("relationship_kind", answers.relationship_kind.is_some()));
         checks.push(("relationship", relationship_described));
-        checks.push(("occupation", filled(&answers.occupation)));
+        // The occupation only with the enhanced check (owner 2026-10-07:
+        // funds, occupation and sector only when it fires; QA 2026-10-24,
+        // C-3); the relationship stays required. An answer given is kept.
+        if required.funds_required {
+            checks.push(("occupation", filled(&answers.occupation)));
+        }
     }
     if required.funds_required {
         checks.push(("funds_sources", !answers.funds_sources.is_empty()));
@@ -4924,27 +4929,32 @@ async fn staff_revoke(
 /// was ever mailed successfully for the lead (the invitation carries the
 /// notice), or the paying parent acknowledged the payer's notice in the
 /// cabinet. The staff save keeps the record either way.
+///
+/// The stored keys hold the raw names; they match through
+/// [`lead_payer::same_payer_key`], so a cosmetic correction of the name by
+/// staff ("Olga" to "OLGA ") keeps the record (QA 2026-10-24, C-5).
 pub(crate) async fn link_sent_for(
     conn: &mut PgConnection,
     lead_id: Uuid,
     payer_key: &Value,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
-        r#"SELECT EXISTS(
-               SELECT 1 FROM lead_payer_links k
-               JOIN lead_payer_link_emails e
-                 ON e.link_id = k.id AND e.kind = 'invitation' AND e.status = 'sent'
-               WHERE k.lead_id = $1 AND k.payer_key = $2
-           ) OR EXISTS(
-               SELECT 1 FROM lead_payer_statements s
-               WHERE s.lead_id = $1 AND s.source = 'cabinet'
-                 AND s.privacy_ack_at IS NOT NULL AND s.payer_key = $2
-           )"#,
+    let informed_keys: Vec<Option<Value>> = sqlx::query_scalar(
+        r#"SELECT k.payer_key FROM lead_payer_links k
+           JOIN lead_payer_link_emails e
+             ON e.link_id = k.id AND e.kind = 'invitation' AND e.status = 'sent'
+           WHERE k.lead_id = $1
+           UNION ALL
+           SELECT s.payer_key FROM lead_payer_statements s
+           WHERE s.lead_id = $1 AND s.source = 'cabinet'
+             AND s.privacy_ack_at IS NOT NULL"#,
     )
     .bind(lead_id)
-    .bind(payer_key)
-    .fetch_one(&mut *conn)
-    .await
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(informed_keys
+        .iter()
+        .flatten()
+        .any(|key| lead_payer::same_payer_key(key, payer_key)))
 }
 
 /// Whether the payer named in `declaration` answered through its own link
@@ -6170,6 +6180,10 @@ mod tests {
         // The source of funds is asked only by a trigger (2026-10-19).
         assert!(!missing_for_submit(&answers, &required(1)).contains(&"funds_sources"));
         assert!(missing_for_submit(&answers, &required(2)).contains(&"funds_sources"));
+        // The occupation too (owner 2026-10-07; QA 2026-10-24, C-3).
+        assert!(answers.occupation.is_none());
+        assert!(!missing_for_submit(&answers, &required(1)).contains(&"occupation"));
+        assert!(missing_for_submit(&answers, &required(2)).contains(&"occupation"));
     }
 
     #[test]

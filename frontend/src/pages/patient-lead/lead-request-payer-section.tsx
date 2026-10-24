@@ -13,10 +13,15 @@ import {
 import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
-import { EmailDomainWarning } from "@/components/email-domain-warning";
+import { EmailDomainWarning, emailDomainWarningText } from "@/components/email-domain-warning";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { payerPhoneAcceptable } from "@/lib/payer-phone";
+
+/** The server's refusal of an address whose domain accepts no mail (`email_address::EMAIL_DOMAIN_NO_MAIL`). */
+const EMAIL_DOMAIN_NO_MAIL = "email_domain_no_mail";
+/** The same refusal named for the payer's address (`payer_email_domain_no_mail`). */
+const PAYER_EMAIL_DOMAIN_NO_MAIL = "payer_email_domain_no_mail";
 import { PERSON_CITY_MAX, PERSON_NAME_MAX } from "@/lib/person-fields";
 
 import {
@@ -95,6 +100,8 @@ export function usePayerAutosave({
   onSaveState: (state: SaveState) => void;
 }): {
   fieldError: string | null;
+  /** The server's code of the refusal at `fieldError` (null without one). */
+  fieldErrorCode: string | null;
   /** The last server state the autosave knows and the last queued draft: the baseline of a server sync. */
   savedRef: MutableRefObject<PayerDraft>;
   queuedDraftRef: MutableRefObject<PayerDraft>;
@@ -108,6 +115,7 @@ export function usePayerAutosave({
   const queuedDraftRef = useRef(savedRef.current);
   const rejectedRef = useRef<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
+  const [fieldErrorCode, setFieldErrorCode] = useState<string | null>(null);
   // A parent who pays is not asked to agree that GMED contacts them (the
   // parent is the payer); a server that still lists the consent as missing
   // (an older one) gets the box, or the request could not be sent.
@@ -194,6 +202,8 @@ export function usePayerAutosave({
           }
           const field = body?.field;
           setFieldError(PAYER_FIELDS.includes(field as PayerField) ? (field as PayerField) : "payer");
+          // Tolerant: a refusal without a code reads as "invalid" (QA 2026-10-24, B-3).
+          setFieldErrorCode(typeof body?.code === "string" ? body.code : null);
           onSaveState("error");
           return false;
         }
@@ -203,7 +213,7 @@ export function usePayerAutosave({
   );
 
   useAutosave(draft, save);
-  return { fieldError, savedRef, queuedDraftRef };
+  return { fieldError, fieldErrorCode: fieldError ? fieldErrorCode : null, savedRef, queuedDraftRef };
 }
 
 /**
@@ -270,7 +280,7 @@ export function PayerSection({
     const choice = payerChoiceOf(stored);
     return ownAccountOnly || !choice || choices.includes(choice) ? stored : unansweredPayerDraft(request.payer);
   });
-  const { fieldError, savedRef, queuedDraftRef } = usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
+  const { fieldError, fieldErrorCode, savedRef, queuedDraftRef } = usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
   // The other parent saved the payer meanwhile (the request was re-read): the untouched fields
   // follow, a field being typed in keeps its value and says so. Not once the payer answered.
   useServerDraftSync({
@@ -340,7 +350,9 @@ export function PayerSection({
   const errorFor = (field: PayerField) =>
     fieldError === field
       ? field === "payer_email"
-        ? text.invalidEmail
+        ? fieldErrorCode === EMAIL_DOMAIN_NO_MAIL || fieldErrorCode === PAYER_EMAIL_DOMAIN_NO_MAIL
+          ? emailDomainWarningText(draft.email, lang)
+          : text.invalidEmail
         : field === "payer_phone"
           ? text.invalidPhone
           : text.invalidField

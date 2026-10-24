@@ -2488,6 +2488,91 @@ async fn staff_remove_a_parent_with_portal_data_and_access_only_from_this_child(
     assert!(name.is_none());
 }
 
+/// A parent staff removed ("Удалить представителя") keeps the lead cabinet
+/// and reads there, neutrally, that the access ended: the login's only link
+/// was a parent's access, so it never lands on the patient portal of a
+/// patient that does not exist (QA 2026-10-24, B-2). The other parent stays
+/// a candidate with the e-mail on file.
+#[tokio::test]
+async fn a_removed_parent_keeps_the_lead_cabinet_and_learns_the_access_ended() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+    let mother = Uuid::new_v4();
+    let father = Uuid::new_v4();
+    let father_email = address("ben.removed.parent");
+    let child = minor_lead(
+        &app,
+        json!([
+            {"id":mother,"name":"Anna Muster","email":address("anna.removed.parent"),"relation":"parent"},
+            {"id":father,"name":"Ben Muster","email":father_email,"relation":"parent"},
+        ]),
+    )
+    .await;
+    let (_, parent) = guardian_login(&app, child, mother).await;
+    let (status, me) = json_request(router, "GET", "/api/v1/me", &parent, None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["portal_mode"], "lead", "{me}");
+    let (status, list) =
+        json_request(router, "GET", "/api/v1/me/lead-requests", &parent, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["requests"].as_array().map(Vec::len), Some(1), "{list}");
+    assert_eq!(list["guardian_access_ended"], false, "{list}");
+
+    let (status, body) = json_request(
+        router,
+        "DELETE",
+        &format!("/api/v1/leads/{child}/trusted-contacts/{mother}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Still the lead cabinet, with the neutral notice and its reason.
+    let (status, me) = json_request(router, "GET", "/api/v1/me", &parent, None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["portal_mode"], "lead", "{me}");
+    assert!(me["lead_portal"].is_null(), "{me}");
+    let (status, list) =
+        json_request(router, "GET", "/api/v1/me/lead-requests", &parent, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["requests"], json!([]), "{list}");
+    assert_eq!(list["guardian_access_ended"], true, "{list}");
+    assert_eq!(
+        list["guardian_access_ended_reason"], "contact_removed",
+        "{list}"
+    );
+    // The patient portal stays closed to the login.
+    let (status, refused) =
+        json_request(router, "GET", "/api/v1/me/documents", &parent, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    assert_eq!(refused["code"], "lead_portal_only", "{refused}");
+
+    // The access panel keeps the other parent with the e-mail on file, so
+    // staff can issue his access (B-1: a stored address is never hidden).
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{child}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    let candidates = intake["guardians"]["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 1, "{intake}");
+    assert_eq!(
+        candidates[0]["trusted_contact_id"],
+        json!(father),
+        "{intake}"
+    );
+    assert_eq!(candidates[0]["email"], json!(father_email), "{intake}");
+    assert!(candidates[0]["access_id"].is_null(), "{intake}");
+}
+
 #[tokio::test]
 async fn a_paying_parent_snapshot_follows_representation_corrections_and_cannot_be_minor_self() {
     let Some(app) = test_app().await else {

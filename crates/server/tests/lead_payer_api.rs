@@ -1810,7 +1810,7 @@ async fn a_staff_save_keeps_the_payer_informed_by_the_payers_link() {
     // A correction without the checkbox keeps it.
     let mut corrected = unticked.clone();
     corrected["street"] = json!("Ringstr. 11");
-    let (status, body) = json_request(&app, "POST", &path, &manager, Some(corrected)).await;
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(corrected.clone())).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["declaration"]["street"], "Ringstr. 11", "{body}");
     assert_eq!(payer_informed(pool, lead_id).await, informed);
@@ -1821,6 +1821,54 @@ async fn a_staff_save_keeps_the_payer_informed_by_the_payers_link() {
             .await
             .unwrap();
     assert!(revoked.is_none(), "the same payer keeps the link");
+
+    // A cosmetic correction of the name (case, a trailing space) is the same
+    // payer too (QA 2026-10-24, C-5): the record stays, the identity is not
+    // dated anew, the readiness does not ask to inform the payer again.
+    let identity_changed_at = async |pool: &PgPool| -> Option<chrono::DateTime<chrono::Utc>> {
+        sqlx::query_scalar(
+            "SELECT identity_changed_at FROM lead_payer_declarations WHERE lead_id = $1",
+        )
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+    let dated = identity_changed_at(pool).await;
+    // Built on the corrected form: the street stays "Ringstr. 11", so only
+    // the spelling of the name differs from what is stored.
+    let mut cosmetic = corrected.clone();
+    cosmetic["first_name"] = json!("ERIKA ");
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(cosmetic)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["declaration"]["first_name"], "ERIKA", "{body}");
+    assert_eq!(payer_informed(pool, lead_id).await, informed, "{body}");
+    assert!(
+        body["declaration"]["payer_informed_at"].is_string(),
+        "{body}"
+    );
+    assert!(
+        !body["status"]["missing"]
+            .as_array()
+            .is_some_and(|missing| missing.contains(&json!("payer_not_informed"))),
+        "{body}"
+    );
+    assert_eq!(identity_changed_at(pool).await, dated, "{body}");
+    let context: Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'update_lead_payer_declaration' AND entity_id = $1
+           ORDER BY created_at DESC, id DESC LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(context["identity_changed"], false, "{context}");
+    assert_eq!(
+        context["changed_fields"],
+        json!(["first_name"]),
+        "{context}"
+    );
 
     // Staff reviewed this payer's PEP status.
     sqlx::query(

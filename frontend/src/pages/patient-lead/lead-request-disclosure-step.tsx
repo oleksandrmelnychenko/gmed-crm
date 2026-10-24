@@ -31,6 +31,9 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   const companyName = request.disclosure_company_name?.trim() || request.disclosure?.company_name?.trim() || "GMED";
   const personName = [request.personal_data.first_name, request.personal_data.last_name].filter(Boolean).join(" ");
   const [attempted, setAttempted] = useState(false);
+  // The consent refers to the final list: a change of the list unticks it, and the step says so
+  // once, until the box is ticked again (QA 2026-10-24, A-8).
+  const [consentReset, setConsentReset] = useState(false);
   // A blank row is there already: "add a person" would be wrong, what is missing in it is meant.
   const problemMessage = (current: NonNullable<typeof problem>) =>
     current === "consent" ? text.consentRequired
@@ -128,11 +131,12 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
 
   if (ownMinor) return <p className="text-sm text-muted-foreground" data-testid="lead-request-guardian-only">{common.guardianOnly}</p>;
 
-  // Not answered counts as "no" (owner decision 2026-10-22): no information to third parties.
+  // Not answered counts as "no" (owner decision 2026-10-22): no information to third parties. The
+  // chip says so neutrally, as a default, not as an answer given (QA 2026-10-24, A-1).
   const defaultNo = disclosureDefaultsToNo(request);
-  const state = <StatusChip tone={changed ? "warning" : request.disclosure || defaultNo ? "success" : "neutral"} role="status" data-testid="trusted-persons-save-state">
-    {!changed && (request.disclosure || defaultNo) ? <Check aria-hidden="true" /> : null}
-    {busy ? common.saving : changed ? text.unsaved : request.disclosure ? text.saved : defaultNo ? text.denied : text.unanswered}
+  const state = <StatusChip tone={changed ? "warning" : request.disclosure ? "success" : "neutral"} role="status" data-testid="trusted-persons-save-state">
+    {!changed && request.disclosure ? <Check aria-hidden="true" /> : null}
+    {busy ? common.saving : changed ? text.unsaved : request.disclosure ? text.saved : defaultNo ? `${text.denied} (${text.byDefault})` : text.unanswered}
   </StatusChip>;
 
   return <section className="space-y-4" data-testid="lead-request-disclosure-step">
@@ -151,7 +155,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
               draft.allowDisclosure === allow ? "border-[var(--brand)] bg-[var(--brand)] font-medium text-white" : "border-border bg-card hover:border-[var(--brand)]",
               busy && "cursor-wait",
             )}>
-              <input type="radio" name={`disclosure-${request.lead_id}`} className="mt-1 size-4 shrink-0 accent-current" checked={draft.allowDisclosure === allow} data-testid={allow ? "disclosure-yes" : "disclosure-no"} onChange={() => update({ allowDisclosure: allow, consentGiven: false })} />
+              <input type="radio" name={`disclosure-${request.lead_id}`} className="mt-1 size-4 shrink-0 accent-current" checked={draft.allowDisclosure === allow} data-testid={allow ? "disclosure-yes" : "disclosure-no"} onChange={() => { setConsentReset(false); update({ allowDisclosure: allow, consentGiven: false }); }} />
               <span>{allow ? text.yes : wording.no}</span>
             </label>)}
           </div>
@@ -161,13 +165,17 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
 
     {draft.allowDisclosure === true ? <>
       <CabinetSection title={text.personsHeading}>
-        <TrustedPersonsEditor persons={draft.persons} lang={lang} disabled={busy} showErrors={attempted} onChange={(persons) => update({ persons, consentGiven: false })} />
+        <TrustedPersonsEditor persons={draft.persons} lang={lang} disabled={busy} showErrors={attempted} onChange={(persons) => {
+          if (draftRef.current.consentGiven) setConsentReset(true);
+          update({ persons, consentGiven: false });
+        }} />
       </CabinetSection>
       <CabinetSection title={text.consentHeading}>
         <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/25 p-3.5 text-sm leading-6">
-          <input type="checkbox" className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} disabled={busy} data-testid="disclosure-consent" onChange={(event) => update({ consentGiven: event.currentTarget.checked })} />
+          <input type="checkbox" className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} disabled={busy} data-testid="disclosure-consent" onChange={(event) => { setConsentReset(false); update({ consentGiven: event.currentTarget.checked }); }} />
           <span>{disclosureConsentText(lang, companyName, disclosureSubject(request))}</span>
         </label>
+        {consentReset && !draft.consentGiven ? <p role="status" className="px-1 text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="disclosure-consent-reset">{text.consentReset}</p> : null}
         <a className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--brand)] underline underline-offset-4" href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer"><ShieldCheck aria-hidden="true" className="size-3.5" />{text.privacy}</a>
       </CabinetSection>
     </> : null}

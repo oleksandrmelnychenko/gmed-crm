@@ -37,6 +37,28 @@ export function sortWizardDocumentsNewestFirst<
     .map(({ document }) => document);
 }
 
+/**
+ * The server put the document aside (status `archived`): e.g. the previous
+ * payer's identity copy after a payer change (lead_payer_link.rs renames it
+ * "Früherer Zahler – …"). Not an old version: the latest version can be archived.
+ */
+export function wizardDocumentIsArchived(document: Pick<DocumentItem, "status">): boolean {
+  return document.status === "archived";
+}
+
+/**
+ * The name of a put-aside document as listed: the name the server gave it
+ * when archiving (QA 2026-10-24, C-7: the previous payer's scan was listed as
+ * a plain "payer-id.pdf"), the file name only when there is none.
+ */
+export function wizardArchivedDocumentTitle(
+  document: Pick<DocumentItem, "auto_name" | "original_filename">,
+): string {
+  const autoName = document.auto_name?.trim();
+  if (autoName) return autoName;
+  return document.original_filename?.trim() || "document";
+}
+
 function formatFileSize(size: number | null, lang: Lang) {
   if (!size || size <= 0) return "";
   // The unit in the language of the UI (QA 2026-10-10: "<1 KB" in Russian).

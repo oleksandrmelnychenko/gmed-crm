@@ -4,7 +4,7 @@
 //! policy check, the recent-history check and the column update live here.
 
 use rand::RngExt;
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 use super::password;
@@ -89,7 +89,10 @@ pub fn validate_password_policy(password: &str) -> Result<(), &'static str> {
 }
 
 /// The current hash plus the most recent history entries, newest first.
-async fn recent_password_hashes(db: &PgPool, user_id: Uuid) -> Result<Vec<String>, sqlx::Error> {
+async fn recent_password_hashes(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar(
         r#"SELECT hash FROM (
                SELECT password_hash AS hash, 2147483647 AS age FROM users WHERE id = $1
@@ -106,7 +109,7 @@ async fn recent_password_hashes(db: &PgPool, user_id: Uuid) -> Result<Vec<String
     )
     .bind(user_id)
     .bind(PASSWORD_HISTORY_LIMIT)
-    .fetch_all(db)
+    .fetch_all(&mut *conn)
     .await
 }
 
@@ -118,8 +121,33 @@ async fn recent_password_hashes(db: &PgPool, user_id: Uuid) -> Result<Vec<String
 /// replace at the first login, a self-service change clears the flag. Session
 /// revocation and auditing are left to the caller because they differ between
 /// the two paths.
+///
+/// Runs on a connection of the pool outside a transaction; a caller that
+/// couples the change with its audit row uses [`replace_password_in_tx`].
 pub async fn replace_password(
     db: &PgPool,
+    user_id: Uuid,
+    new_password: &str,
+    require_change_at_next_login: bool,
+) -> Result<(), PasswordChangeError> {
+    let mut conn = db.acquire().await.map_err(|error| {
+        tracing::error!(%error, %user_id, "Failed to acquire a connection for the password change");
+        PasswordChangeError::Internal
+    })?;
+    replace_password_in_tx(
+        &mut conn,
+        user_id,
+        new_password,
+        require_change_at_next_login,
+    )
+    .await
+}
+
+/// [`replace_password`] on the caller's connection or transaction: the new
+/// hash is stored by `conn` and becomes final with the caller's commit, so a
+/// failed audit row or session revocation after it leaves the old password.
+pub async fn replace_password_in_tx(
+    conn: &mut PgConnection,
     user_id: Uuid,
     new_password: &str,
     require_change_at_next_login: bool,
@@ -128,10 +156,12 @@ pub async fn replace_password(
 
     // The history was recorded on every reset but never consulted, so the 90-day
     // expiry could be satisfied by setting the same password again.
-    let previous_hashes = recent_password_hashes(db, user_id).await.map_err(|error| {
-        tracing::error!(%error, %user_id, "Failed to load password history");
-        PasswordChangeError::Internal
-    })?;
+    let previous_hashes = recent_password_hashes(conn, user_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %user_id, "Failed to load password history");
+            PasswordChangeError::Internal
+        })?;
     if previous_hashes
         .iter()
         .any(|hash| password::verify_password(new_password, hash).unwrap_or(false))
@@ -159,7 +189,7 @@ pub async fn replace_password(
     .bind(user_id)
     .bind(hash)
     .bind(require_change_at_next_login)
-    .execute(db)
+    .execute(&mut *conn)
     .await
     .map_err(|error| {
         tracing::error!(%error, %user_id, "Failed to store new password");

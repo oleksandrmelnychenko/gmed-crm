@@ -132,6 +132,20 @@ export function representativeMinorOnSave(
   return changed && !isAdultOn(birthDate, today);
 }
 
+/**
+ * Whether an e-mail address is new or changed in this edit (case and
+ * whitespace do not count), as the server judges it
+ * (`email_address::no_mail_domain_of_change`): only such an address is judged
+ * by its domain. A stored address whose domain the browser rates "no_mail"
+ * never blocks saving another field (QA 2026-10-24, B-1a: the phone change
+ * of a parent was lost).
+ */
+export function emailChangedOnSave(next: string, stored: string | null | undefined): boolean {
+  const nextValue = next.trim().toLowerCase();
+  if (!nextValue) return false;
+  return nextValue !== (stored ?? "").trim().toLowerCase();
+}
+
 /** The address parts a representative stated in the cabinet (`lead_representatives`). */
 export type RepresentativeAddressParts = {
   street: string | null;

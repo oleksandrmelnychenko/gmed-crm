@@ -931,9 +931,14 @@ async fn the_lead_is_reminded_once_before_the_deletion() {
     .await
     .unwrap();
     assert_eq!(report.reminded, 2, "{report:?}");
+    // The date in the e-mail is the day the sweep really deletes: created 12
+    // days ago, the lead was warned by this sweep, so three days after the
+    // warning — the same day the staff notice names (QA 2026-10-24, D-2).
     let day = gmed_server::app_time::date_of(
         sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
-            "SELECT created_at + interval '14 days' FROM leads WHERE id = $1",
+            "SELECT GREATEST(created_at + interval '14 days',
+                             retention_warning_sent_at + interval '3 days')
+             FROM leads WHERE id = $1",
         )
         .bind(adult)
         .fetch_one(pool)

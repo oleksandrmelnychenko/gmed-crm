@@ -289,6 +289,26 @@ describe("lead errors", () => {
     expect(leadErrorMessage(new Error("Lead master data is incomplete for a prospect patient"), ru)).toContain("имя, фамилию, дату рождения и пол согласно документам");
   });
 
+  it("says in the user's language that the uploaded file is already on record", () => {
+    const duplicate = Object.assign(new Error("This file is already uploaded"), {
+      status: 409, body: { error: "duplicate_document", message: "This file is already uploaded" },
+    });
+    expect(leadErrorMessage(duplicate, ru)).toBe("Этот файл уже загружен.");
+    expect(leadErrorMessage(duplicate, de)).toBe("Diese Datei ist bereits hochgeladen.");
+  });
+
+  it("words a refused dead-domain address like the client-side domain warning", () => {
+    const refused = Object.assign(new Error("The domain of this e-mail address accepts no mail"), {
+      status: 422, body: { error: "email_domain_no_mail", field: "email" },
+    });
+    expect(leadErrorMessage(refused, ru)).toBe("Домен этого адреса электронной почты не принимает почту — проверьте адрес");
+    expect(leadErrorMessage(refused, de)).toContain("empfängt keine E-Mails");
+    const named = Object.assign(new Error("The domain of this e-mail address accepts no mail"), {
+      status: 422, body: { error: "email_domain_no_mail", field: "email", email: "Anna@Dead.example" },
+    });
+    expect(leadErrorMessage(named, ru)).toBe("Домен «dead.example» не принимает почту — проверьте адрес");
+  });
+
   it("names the real reason when a converted lead rejects intake work", () => {
     // The backend answers 409, whose generic text ("data changed, reload") would mislead.
     const conflict = Object.assign(new Error("Converted lead must use its patient context"), { status: 409 });

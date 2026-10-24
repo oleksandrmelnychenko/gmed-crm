@@ -19,7 +19,7 @@ import { LEAD_UPLOAD_ACCEPT, consentGiven, formatFileSize, type PersonalField, t
 import type { CabinetTarget } from "./lead-request-field-target";
 import { SECTION_ANCHORS, type SectionAnchor, type StepId } from "./lead-request-steps";
 import type { LeadRequestText } from "./lead-request-text";
-import { useServerConflictNotice } from "./lead-request-server-sync";
+import { useServerConflictDismiss, useServerConflictNotice } from "./lead-request-server-sync";
 
 // Building blocks the steps and sections of the lead cabinet share.
 
@@ -431,6 +431,8 @@ export function LabeledField({
   const stepMissing = useStepMissingError(id);
   // Another parent (or GMED) changed this field while it was being typed in (owner 2026-10-23).
   const serverChanged = useServerConflictNotice(id);
+  // Seen: the notice goes as soon as the person is in the field (QA 2026-10-24, B-7).
+  const dismissServerChanged = useServerConflictDismiss(id);
   const shownError = error ?? (required ? stepMissing : undefined);
   const labelElement = (
     <label htmlFor={id} className={cn(question ? "text-sm leading-snug text-foreground" : tokens.text.label, "block")}>
@@ -439,7 +441,7 @@ export function LabeledField({
     </label>
   );
   return (
-    <div className={cn("min-w-0 space-y-1.5", className)}>
+    <div className={cn("min-w-0 space-y-1.5", className)} onFocusCapture={serverChanged ? dismissServerChanged : undefined}>
       {aside ? (
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
           {labelElement}

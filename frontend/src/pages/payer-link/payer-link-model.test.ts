@@ -17,6 +17,7 @@ import {
   parseShare,
   payerSteps,
   reconcileDraft,
+  occupationRequired,
   refusedField,
   relationshipKindsFor,
   requiredFields,
@@ -414,6 +415,14 @@ describe("what is missing", () => {
     // The cabinet names every company an organisation (QA 2026-10-11 A-36b).
     expect(requiredFields("organisation").has("beneficial_owners")).toBe(true);
     expect(requiredFields("insurance").has("beneficial_owners")).toBe(false);
+  });
+
+  it("requires a person's profession only with the enhanced check, or while the server misses it (owner 2026-10-24)", () => {
+    expect(occupationRequired(questionnaire())).toBe(true);
+    expect(occupationRequired({ ...questionnaire(), funds_required: true })).toBe(true);
+    expect(occupationRequired({ ...questionnaire(), funds_required: false })).toBe(false);
+    expect(occupationRequired({ ...questionnaire(), funds_required: false, missing_for_submit: ["occupation"] })).toBe(true);
+    expect(occupationRequired({ ...questionnaire(), funds_required: false, missing_for_submit: null })).toBe(false);
   });
 
   it("offers an organisation its own relationships, not the family (QA 2026-10-11 A-36c)", () => {

@@ -56,6 +56,18 @@ export function followUpMissingAll(request: Pick<LeadRequest, "follow_up"> & Par
   return openFollowUpBlocks(request).flatMap((block) => followUpMissing(request, block).map((key) => ({ block, key })));
 }
 
+/**
+ * GMED asked for more after the lead had answered (`requested_at` set, the
+ * answer cleared): the date of the request, so the step can say "please check
+ * your answers and send again". Null while nothing is requested anew or the
+ * answers are already sent.
+ */
+export function followUpRequestedAgainAt(request: Pick<LeadRequest, "follow_up">): string | null {
+  const followUp = request.follow_up;
+  if (!followUp?.requested_at || followUp.answered_at) return null;
+  return followUp.requested_at;
+}
+
 /** The answers were sent and nothing is missing: GMED reviews them. */
 export function followUpAnswered(request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "identification">>): boolean {
   return Boolean(request.follow_up?.answered_at) && request.follow_up?.changed_since_answer !== true && followUpMissingAll(request).length === 0;
@@ -131,20 +143,24 @@ const NO_ASKS: ExtraQuestionAsks = {
  * states funds through the own link. A parent who pays answers the funds
  * and the profession in the own payer section, the sector here.
  */
-export function blockAAsks(request: Pick<LeadRequest, "follow_up" | "payer" | "payer_questionnaire">): ExtraQuestionAsks {
-  if (request.payer_questionnaire) return { ...NO_ASKS, sector: true, payer_states_funds: true };
+export function blockAAsks(request: Pick<LeadRequest, "follow_up" | "payer" | "payer_questionnaire"> & Partial<Pick<LeadRequest, "minor">>): ExtraQuestionAsks {
+  // A child has no profession or sector to state (owner 2026-10-24): the server
+  // asks neither of a minor; the paying parent's own questions live in the payer section.
+  const work: Partial<ExtraQuestionAsks> = request.minor ? {} : { occupation: true, sector: true };
+  const sectorOnly: Partial<ExtraQuestionAsks> = request.minor ? {} : { sector: true };
+  if (request.payer_questionnaire) return { ...NO_ASKS, ...sectorOnly, payer_states_funds: true };
   // The paying person must be known before collecting personal financial details.
-  if (!request.payer) return { ...NO_ASKS, occupation: true, sector: true };
+  if (!request.payer) return { ...NO_ASKS, ...work };
   if (request.payer?.payer_kind === "third_party") {
-    return { ...NO_ASKS, occupation: true, sector: true, payer_states_funds: true };
+    return { ...NO_ASKS, ...work, payer_states_funds: true };
   }
   // A paying parent / legal representative states the funds (and the own
   // profession) in the payer questionnaire, never here: the cabinet stores a
   // source and a proof only for a self-paying patient.
-  if (request.payer?.payer_kind === "representative") return { ...NO_ASKS, sector: true };
+  if (request.payer?.payer_kind === "representative") return { ...NO_ASKS, ...sectorOnly };
   // The own source of funds only with the enhanced check (owner 2026-10-19).
-  if (request.follow_up?.funds_asked === false) return { ...NO_ASKS, occupation: true, sector: true };
-  return { ...NO_ASKS, funds: true, occupation: true, sector: true, funds_proof: true };
+  if (request.follow_up?.funds_asked === false) return { ...NO_ASKS, ...work };
+  return { ...NO_ASKS, funds: true, ...work, funds_proof: true };
 }
 
 /** The keys of block A, in the order of the form. */

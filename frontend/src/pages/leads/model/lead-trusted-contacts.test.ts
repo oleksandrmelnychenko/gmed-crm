@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   TRUSTED_CONTACT_RELATIONS,
+  emailChangedOnSave,
   guardianRelationOptionLabel,
   isParentOrGuardianRelation,
   leadUpdateWithChangedContacts,
@@ -310,5 +311,17 @@ describe("the address a representative stated in the cabinet", () => {
   it("is null without any part, so staff keep editing the contact's address", () => {
     expect(representativeCabinetAddress({ street: " ", zip: null, city: "", country: null }, name)).toBeNull();
     expect(representativeCabinetAddress(null, name)).toBeNull();
+  });
+});
+
+describe("whether an e-mail address is judged by its domain on save", () => {
+  it("judges only an address new or changed in this edit, as the server does", () => {
+    // QA 2026-10-24, B-1a: a stored parent address rated "no_mail" blocked the phone change.
+    expect(emailChangedOnSave("anna@dead.example", "anna@dead.example")).toBe(false);
+    expect(emailChangedOnSave("  Anna@Dead.example ", "anna@dead.example")).toBe(false);
+    expect(emailChangedOnSave("anna@dead.example", null)).toBe(true);
+    expect(emailChangedOnSave("anna@dead.example", undefined)).toBe(true);
+    expect(emailChangedOnSave("anna@other.example", "anna@dead.example")).toBe(true);
+    expect(emailChangedOnSave("", "anna@dead.example")).toBe(false);
   });
 });

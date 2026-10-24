@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { LeadCustody, LeadIdentityDocument, LeadRepresentative } from "../data/lead-portal-intake-api";
 import { uploadRepresentativeDocument, type RepresentativeUploadKind } from "../data/lead-risk-api";
 import type { Tx } from "../model/lead-payer";
+import { leadErrorMessage } from "../model/leads-model";
 import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
 
 const MAX_REPRESENTATIVE_FILE_SIZE = 25 * 1024 * 1024;
@@ -70,7 +71,8 @@ function UploadBlock({
       await uploadRepresentativeDocument(leadId, person.id, kind, file);
       onUploaded();
     } catch (uploadError) {
-      setError(uploadError instanceof Error && uploadError.message ? uploadError.message : tx("Не удалось загрузить файл", "Hochladen fehlgeschlagen"));
+      // The server's code in the user's language (a duplicate, a refused type, …).
+      setError(leadErrorMessage(uploadError, tx, tx("Не удалось загрузить файл", "Hochladen fehlgeschlagen")));
     } finally {
       setBusy(false);
     }

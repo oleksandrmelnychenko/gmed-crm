@@ -443,10 +443,13 @@ fn normalize_trusted_contacts(contacts: &[TrustedContactRequest]) -> Result<Valu
             None => None,
         };
 
+        // Format only: a stored address is never judged by its domain again;
+        // a new or changed address with a dead domain is refused at the
+        // contact by `changed_trusted_contact_issue` (QA 2026-10-24).
         let email = normalized_contact_text(contact.email.as_deref());
         if email
             .as_deref()
-            .is_some_and(|value| !crate::email_address::is_valid_email(value))
+            .is_some_and(|value| !crate::email_address::has_valid_format(value))
         {
             return Err("Invalid trusted contact email");
         }
@@ -486,6 +489,13 @@ enum TrustedContactIssue {
     /// A parent, guardian or representative newly born less than 18 years
     /// ago: a representative is of full age, as in the cabinet.
     MinorRepresentative {
+        index: usize,
+        id: String,
+        name: String,
+    },
+    /// A new or changed e-mail address whose domain accepts no mail; a stored
+    /// address is never judged by its domain again (QA 2026-10-24).
+    EmailNoMail {
         index: usize,
         id: String,
         name: String,
@@ -540,6 +550,15 @@ fn changed_trusted_contact_issue(
             && !crate::services::person_fields::is_valid_phone(phone)
         {
             return Some(TrustedContactIssue::InvalidPhone { index, id, name });
+        }
+        if let Some(email) = contact_text(contact, "email")
+            && crate::email_address::no_mail_domain_of_change(
+                previous.and_then(|entry| contact_text(entry, "email")),
+                email,
+            )
+            .is_some()
+        {
+            return Some(TrustedContactIssue::EmailNoMail { index, id, name });
         }
         let relation = contact_text(contact, "relation");
         if minor
@@ -601,6 +620,14 @@ fn trusted_contact_issue_response(issue: &TrustedContactIssue) -> axum::response
             id,
             name,
             "birth_date",
+        ),
+        TrustedContactIssue::EmailNoMail { index, id, name } => (
+            "trusted_contact_email_no_mail",
+            "The domain of this e-mail address accepts no mail",
+            index,
+            id,
+            name,
+            "email",
         ),
     };
     (
@@ -1214,7 +1241,7 @@ async fn list_leads(
                   intake_source, flow, qualification_status, compliance_status,
                   submitted_at, created_at, console_promoted_at, console_promoted_by,
                   failed_outcome_status, failed_reason, failed_processed_at, status_changed_at,
-                  repeat_patient_id, portal_user_id,
+                  repeat_patient_id, portal_user_id, retention_warning_sent_at,
                   (SELECT u.is_active FROM users u WHERE u.id = leads.portal_user_id) AS portal_active,
                   (SELECT u.password_reset_required FROM users u WHERE u.id = leads.portal_user_id)
                       AS portal_password_change_pending,
@@ -4194,7 +4221,7 @@ async fn get_lead(
                   notes, user_agent, created_at, updated_at,
                   requested_specialties, wizard_state, status_changed_at,
                   intake_model, prospect_patient_id, referrer_patient_id,
-                  repeat_patient_id,
+                  repeat_patient_id, retention_warning_sent_at,
                   (
                       SELECT p.patient_id FROM patients p
                       WHERE p.id = leads.repeat_patient_id
@@ -5442,12 +5469,28 @@ async fn update_lead(
             .is_some_and(|value| !value.is_empty() && Some(value) != current.map(str::trim))
     };
     if typed_change(body.email.as_deref(), current_email.as_deref())
-        && body
-            .email
-            .as_deref()
-            .is_some_and(|email| !crate::email_address::is_valid_email(email.trim()))
+        && let Some(email) = body.email.as_deref().map(str::trim)
     {
-        return field_err("email", "Invalid email");
+        if !crate::email_address::has_valid_format(email) {
+            return field_err("email", "Invalid email");
+        }
+        // A dead domain on a changed address is refused with its own code so
+        // the wizard says "the domain accepts no mail" at the field.
+        if let Some(domain) =
+            crate::email_address::no_mail_domain_of_change(current_email.as_deref(), email)
+        {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": crate::email_address::EMAIL_DOMAIN_NO_MAIL,
+                    "code": crate::email_address::EMAIL_DOMAIN_NO_MAIL,
+                    "message": "The domain of this e-mail address accepts no mail",
+                    "field": "email",
+                    "domain": domain,
+                })),
+            )
+                .into_response();
+        }
     }
     if typed_change(body.phone.as_deref(), current_phone.as_deref())
         && body
@@ -11205,6 +11248,21 @@ impl UnqualifiedLeadRetention {
         (unqualified && compliance_status != "signed")
             .then(|| created_at.max(self.effective_at) + chrono::Duration::days(self.days))
     }
+
+    /// When the sweep really deletes the lead ([`effective_deletion_at`] of
+    /// its [`deadline`](Self::deadline)), or `None` while the rule does not
+    /// apply to it. This is the date everyone is told.
+    pub fn deletion_at(
+        &self,
+        qualification_status: &str,
+        compliance_status: &str,
+        created_at: chrono::DateTime<chrono::Utc>,
+        warning_sent_at: Option<chrono::DateTime<chrono::Utc>>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.deadline(qualification_status, compliance_status, created_at)
+            .map(|deadline| effective_deletion_at(deadline, warning_sent_at, now))
+    }
 }
 
 /// A repeat intake (alias `l`) whose patient has a valid signed DSGVO
@@ -11305,13 +11363,44 @@ pub(crate) async fn is_outside_unqualified_purge(pool: &gmed_db::DbPool, lead_id
 const UNQUALIFIED_LEAD_DEADLINE_SQL: &str =
     "GREATEST(l.created_at, $2) + make_interval(days => $1::int)";
 
-/// The staff warning of a lead (alias `l`) was issued at least the warning
-/// lead time (`$6` days, [`UNQUALIFIED_LEAD_WARNING_DAYS`]) before `$3`: the
-/// sweep never deletes silently. A lead that re-enters the rule after its
-/// deadline (qualified → in progress, consent revoked) is warned first and
-/// deleted no earlier than that many days after the warning.
-const UNQUALIFIED_LEAD_WARNED_SQL: &str = "(l.retention_warning_sent_at IS NOT NULL \
-     AND l.retention_warning_sent_at + make_interval(days => $6::int) <= $3)";
+/// When the sweep deletes a lead (alias `l`): the deadline, but never earlier
+/// than the warning lead time (`$6` days, [`UNQUALIFIED_LEAD_WARNING_DAYS`])
+/// after the staff warning — or, while the lead is not warned yet, after `$3`
+/// (now), the earliest the warning can go out. The SQL twin of
+/// [`effective_deletion_at`]; every reader of the date (the purge, the staff
+/// warning, the reminder e-mail, the API, the cabinet, the sign-in e-mail)
+/// goes through one of the two, so they cannot drift. A lead that re-enters
+/// the rule after its deadline (qualified → in progress, consent revoked) is
+/// warned first and deleted no earlier than that many days after the warning.
+const UNQUALIFIED_LEAD_DELETION_SQL: &str = concat!(
+    "GREATEST(GREATEST(l.created_at, $2) + make_interval(days => $1::int), ",
+    "COALESCE(l.retention_warning_sent_at, $3) + make_interval(days => $6::int))"
+);
+
+/// The sweep may delete the lead (alias `l`) now: it was warned, and its
+/// deletion instant ([`UNQUALIFIED_LEAD_DELETION_SQL`]) has come. The sweep
+/// never deletes silently.
+const UNQUALIFIED_LEAD_DUE_SQL: &str = concat!(
+    "(l.retention_warning_sent_at IS NOT NULL AND ",
+    "GREATEST(GREATEST(l.created_at, $2) + make_interval(days => $1::int), ",
+    "COALESCE(l.retention_warning_sent_at, $3) + make_interval(days => $6::int)) <= $3)"
+);
+
+/// The instant the sweep deletes a lead whose deadline is `deadline`: the
+/// deadline, but never earlier than [`UNQUALIFIED_LEAD_WARNING_DAYS`] after
+/// the staff warning — or, while the lead is not warned yet, after `now`, the
+/// earliest the warning can go out. One date for everyone: the staff notice,
+/// the reminder e-mail to the lead, the API countdown, the cabinet and the
+/// sign-in e-mail all name this instant, and the purge waits for it
+/// ([`UNQUALIFIED_LEAD_DELETION_SQL`] is the SQL twin).
+pub fn effective_deletion_at(
+    deadline: chrono::DateTime<chrono::Utc>,
+    warning_sent_at: Option<chrono::DateTime<chrono::Utc>>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> chrono::DateTime<chrono::Utc> {
+    deadline
+        .max(warning_sent_at.unwrap_or(now) + chrono::Duration::days(UNQUALIFIED_LEAD_WARNING_DAYS))
+}
 
 /// The rule from `system_settings`, or `None` when it is switched off (window
 /// of 0 days) or was never started in this environment.
@@ -11343,10 +11432,11 @@ pub async fn load_unqualified_lead_retention(
     (days > 0).then_some(UnqualifiedLeadRetention { days, effective_at })
 }
 
-/// The deadline of a lead row for the API (`retention_deadline_at`): RFC 3339,
-/// or null while the rule does not apply to the lead. The same rule as the
-/// sweep: a lead the sweep never deletes ([`leads_outside_unqualified_purge`])
-/// has none.
+/// The deletion instant of a lead row for the API (`retention_deadline_at`):
+/// RFC 3339, or null while the rule does not apply to the lead. The same
+/// instant the sweep acts on ([`UnqualifiedLeadRetention::deletion_at`]; the
+/// row carries `retention_warning_sent_at`): a lead the sweep never deletes
+/// ([`leads_outside_unqualified_purge`]) has none.
 fn lead_retention_deadline_json(
     policy: Option<&UnqualifiedLeadRetention>,
     row: &sqlx::postgres::PgRow,
@@ -11355,15 +11445,54 @@ fn lead_retention_deadline_json(
     if outside_purge {
         return Value::Null;
     }
-    let deadline = policy.and_then(|policy| {
-        policy.deadline(
+    let deletion_at = policy.and_then(|policy| {
+        policy.deletion_at(
             &row.try_get::<String, _>("qualification_status").ok()?,
             &row.try_get::<String, _>("compliance_status").ok()?,
             row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
                 .ok()?,
+            row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("retention_warning_sent_at")
+                .ok()
+                .flatten(),
+            chrono::Utc::now(),
         )
     });
-    json!(deadline.map(|value| value.to_rfc3339()))
+    json!(deletion_at.map(|value| value.to_rfc3339()))
+}
+
+/// When the unqualified-lead rule deletes the lead, if the sweep would — the
+/// same instant the API, the staff warning and the reminder name
+/// ([`UnqualifiedLeadRetention::deletion_at`]). `None` while the rule is off,
+/// does not apply to the lead, or the sweep never deletes it
+/// ([`is_outside_unqualified_purge`]). For the cabinet and the sign-in
+/// e-mail, which hold no lead row of their own.
+pub(crate) async fn unqualified_lead_deletion_at(
+    pool: &gmed_db::DbPool,
+    lead_id: Uuid,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    let policy = load_unqualified_lead_retention(pool).await?;
+    if is_outside_unqualified_purge(pool, lead_id).await {
+        return None;
+    }
+    let row = sqlx::query(
+        "SELECT qualification_status, compliance_status, created_at, retention_warning_sent_at
+         FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()?;
+    policy.deletion_at(
+        &row.try_get::<String, _>("qualification_status").ok()?,
+        &row.try_get::<String, _>("compliance_status").ok()?,
+        row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+            .ok()?,
+        row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("retention_warning_sent_at")
+            .ok()
+            .flatten(),
+        chrono::Utc::now(),
+    )
 }
 
 /// Summary of one sweep of the unqualified-lead rule.
@@ -11422,8 +11551,7 @@ pub async fn purge_unqualified_leads(
     let candidates: Vec<Uuid> = sqlx::query_scalar(&format!(
         r#"SELECT l.id FROM leads l
            WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
-             AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3
-             AND {UNQUALIFIED_LEAD_WARNED_SQL}
+             AND {UNQUALIFIED_LEAD_DUE_SQL}
              AND ($5::uuid[] IS NULL OR l.id = ANY($5))
            ORDER BY l.created_at, l.id"#
     ))
@@ -11473,8 +11601,7 @@ async fn purge_unqualified_lead(
            FROM leads l
            WHERE l.id = $5
              AND {UNQUALIFIED_LEAD_SUBJECT_SQL}
-             AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3
-             AND {UNQUALIFIED_LEAD_WARNED_SQL}
+             AND {UNQUALIFIED_LEAD_DUE_SQL}
            FOR UPDATE OF l"#
     ))
     .bind(policy.days as i32)
@@ -11691,7 +11818,7 @@ async fn publish_lead_retention_notices(
 /// Warn once, [`UNQUALIFIED_LEAD_WARNING_DAYS`] before the deadline — or at
 /// once for a lead that is overdue and was never warned (it re-entered the
 /// rule after its deadline): the sweep deletes only a lead warned at least
-/// that many days ago ([`UNQUALIFIED_LEAD_WARNED_SQL`]). A lead an invoice
+/// that many days ago ([`UNQUALIFIED_LEAD_DUE_SQL`]). A lead an invoice
 /// keeps is not warned: the sweep never deletes it. Each lead in its own
 /// transaction: the warning marker is set together with the notifications,
 /// so a failed insert leaves the lead to be warned on the next sweep instead
@@ -11712,7 +11839,7 @@ async fn warn_about_unqualified_lead_deadlines(
                  AND l.retention_warning_sent_at IS NULL
                  AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3 + make_interval(days => $6::int)
                  AND {lead_filter}
-               RETURNING l.id, l.created_by, {UNQUALIFIED_LEAD_DEADLINE_SQL} AS deadline"#
+               RETURNING l.id, l.created_by, {UNQUALIFIED_LEAD_DELETION_SQL} AS delete_at"#
         )
     };
     // The candidates without a change; each is re-checked under its update.
@@ -11750,10 +11877,10 @@ async fn warn_about_unqualified_lead_deadlines(
             continue;
         };
         let lead_id: Uuid = row.try_get("id")?;
-        let deadline: chrono::DateTime<chrono::Utc> = row.try_get("deadline")?;
-        // An overdue lead is deleted no earlier than the lead time after this
-        // warning ([`UNQUALIFIED_LEAD_WARNED_SQL`]): the notice names that day.
-        let delete_at = deadline.max(now + chrono::Duration::days(UNQUALIFIED_LEAD_WARNING_DAYS));
+        // The warning marker is set in the same statement, so the instant is
+        // the deadline or the lead time after this warning
+        // ([`UNQUALIFIED_LEAD_DELETION_SQL`]): the notice names that day.
+        let delete_at: chrono::DateTime<chrono::Utc> = row.try_get("delete_at")?;
         let recipients = unqualified_lead_recipients(&mut tx, row.try_get("created_by")?).await?;
         // The frontend shows these facts in RU/DE (topbar-data.ts).
         let stored = store_lead_retention_notices(
@@ -11780,14 +11907,17 @@ async fn warn_about_unqualified_lead_deadlines(
 /// window ([`UNQUALIFIED_LEAD_WARNING_DAYS`]) and that got no accepted
 /// reminder yet (`retention_reminder_sent_at` is set only once the provider
 /// accepted an e-mail, so a lead whose e-mails all failed stays due): the
-/// rule covers them, no invoice keeps them, the deadline is still ahead.
+/// rule covers them, no invoice keeps them, the deletion instant
+/// ([`UNQUALIFIED_LEAD_DELETION_SQL`]) is still ahead. The instant, not the
+/// deadline: an overdue lead that was just warned is reminded too, the lead
+/// time before the sweep deletes it (QA 2026-10-24, D-1).
 fn retention_reminder_due_sql(lead_filter: &str) -> String {
     format!(
         r#"{UNQUALIFIED_LEAD_SUBJECT_SQL}
            AND NOT {UNQUALIFIED_LEAD_INVOICED_SQL}
            AND l.retention_reminder_sent_at IS NULL
-           AND {UNQUALIFIED_LEAD_DEADLINE_SQL} > $3
-           AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3 + make_interval(days => $6::int)
+           AND {UNQUALIFIED_LEAD_DELETION_SQL} > $3
+           AND {UNQUALIFIED_LEAD_DELETION_SQL} <= $3 + make_interval(days => $6::int)
            AND {lead_filter}"#
     )
 }
@@ -11871,7 +12001,7 @@ async fn remind_lead_before_purge(
     let mut tx = state.db.begin().await?;
     // Locked and decided again: the lead may have been signed or qualified.
     let Some(lead) = sqlx::query(&format!(
-        r#"SELECT {UNQUALIFIED_LEAD_DEADLINE_SQL} AS deadline, l.primary_language,
+        r#"SELECT {UNQUALIFIED_LEAD_DELETION_SQL} AS delete_at, l.primary_language,
                   l.first_name, l.last_name, l.email AS lead_email, l.portal_user_id,
                   u.email AS login_email, u.is_active AS login_active,
                   {closed} AS minor
@@ -11893,8 +12023,9 @@ async fn remind_lead_before_purge(
     else {
         return Ok(false);
     };
-    let deadline: chrono::DateTime<chrono::Utc> = lead.try_get("deadline")?;
-    let delete_on = crate::app_time::date_of(deadline);
+    // The same instant the staff notice and the sweep use (QA 2026-10-24, D-2).
+    let delete_at: chrono::DateTime<chrono::Utc> = lead.try_get("delete_at")?;
+    let delete_on = crate::app_time::date_of(delete_at);
     let lead_language: Option<String> = lead.try_get("primary_language")?;
     let mut planned: Vec<(Option<Uuid>, LoginAudience, String, String, MailLanguage)> = Vec::new();
     if lead.try_get::<bool, _>("minor").unwrap_or(false) {
@@ -12201,6 +12332,33 @@ mod unqualified_lead_retention_tests {
         assert_eq!(
             policy.deadline("not_qualified", "pending", at(1)),
             Some(at(15))
+        );
+    }
+
+    /// One date for everyone: the deadline, but never earlier than the lead
+    /// time after the staff warning — or after now while nobody was warned.
+    #[test]
+    fn the_deletion_instant_waits_for_the_warning_lead_time() {
+        let now = at(20);
+        // Overdue, never warned: the warning goes out now, deletion in 3 days.
+        assert_eq!(effective_deletion_at(at(14), None, now), at(23));
+        // Warned 1 day before the deadline: 3 days after the warning.
+        assert_eq!(effective_deletion_at(at(14), Some(at(13)), now), at(16));
+        // Warned 5 days before the deadline: the deadline itself.
+        assert_eq!(effective_deletion_at(at(14), Some(at(9)), now), at(14));
+        // Not yet warned and the deadline more than 3 days ahead: the deadline.
+        assert_eq!(effective_deletion_at(at(30), None, now), at(30));
+        let policy = UnqualifiedLeadRetention {
+            days: 14,
+            effective_at: at(0),
+        };
+        assert_eq!(
+            policy.deletion_at("in_progress", "pending", at(0), None, now),
+            Some(at(23))
+        );
+        assert_eq!(
+            policy.deletion_at("in_progress", "signed", at(0), None, now),
+            None
         );
     }
 

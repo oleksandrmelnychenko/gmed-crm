@@ -1,4 +1,4 @@
-import { INQUIRY_CONSENT, type LeadRequest } from "./lead-request-api";
+import { HEALTH_CONSENT, INQUIRY_CONSENT, type LeadRequest } from "./lead-request-api";
 import { isBillingField } from "./lead-request-billing-model";
 import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown } from "./lead-request-follow-up-model";
 import { SUBMIT_FIELDS, changedSinceSubmit, consentGiven } from "./lead-request-model";
@@ -204,17 +204,42 @@ export function stepMissingCount(
   return missing[step].length + consent;
 }
 
-/** Whether a step is complete: nothing missing, and for "send" sent and unchanged since. */
+/**
+ * Whether step "documents" was touched: the server requires nothing there
+ * before the contract (the consent, the reason and the files are voluntary),
+ * so the step counts as filled in only once the person gave the health
+ * consent, a reason or a file (QA 2026-10-24, A-1).
+ */
+export function documentsTouched(
+  request: Pick<LeadRequest, "consents" | "documents"> & Partial<Pick<LeadRequest, "identification">>,
+): boolean {
+  return (
+    consentGiven(request, HEALTH_CONSENT) ||
+    Boolean(request.identification?.request_reason?.trim()) ||
+    request.documents.length > 0
+  );
+}
+
+/**
+ * Whether a step is complete: nothing missing, and for "send" sent and
+ * unchanged since. A step whose answer only defaults ("no information to
+ * third parties" while nobody answered) or that asks for nothing is not
+ * marked as filled in until the person touched it (QA 2026-10-24, A-1);
+ * `firstIncompleteStep` and the sending do not depend on this.
+ */
 export function stepDone(
-  request: Pick<LeadRequest, "progress" | "follow_up" | "consents" | "submitted_at" | "changed_since_submit" | "documents" | "disclosure" | "consent_form">,
+  request: Pick<LeadRequest, "progress" | "follow_up" | "consents" | "submitted_at" | "changed_since_submit" | "documents" | "disclosure" | "consent_form"> &
+    Partial<Pick<LeadRequest, "identification">>,
   step: StepId,
   missing: Record<StepId, string[]> = missingByStep(request),
 ): boolean {
   if (step === "send") return Boolean(request.submitted_at) && !changedSinceSubmit(request);
-  // Not answered counts as "no" (owner decision 2026-10-22): done unless an older choice asks for it.
-  if (step === "disclosure") return disclosureProblem(disclosureDraft(request)) === null;
+  // Not answered counts as "no" (owner decision 2026-10-22) for the sending; the step is
+  // "filled in" only with an own, valid decision.
+  if (step === "disclosure") return Boolean(request.disclosure) && disclosureProblem(disclosureDraft(request)) === null;
   if (step === "follow_up") return followUpBeforeSubmit(request) ? followUpMissingAll(request).length === 0 : followUpAnswered(request);
-  return stepMissingCount(request, step, missing) === 0;
+  if (stepMissingCount(request, step, missing) > 0) return false;
+  return step === "documents" ? documentsTouched(request) : true;
 }
 
 /** The first step that still misses something (not "send"); null when everything is there. */

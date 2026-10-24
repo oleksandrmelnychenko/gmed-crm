@@ -191,7 +191,8 @@ describe("lead request summary", () => {
       "Auskunft an Dritte",
       "Ihre Unterlagen",
     ]);
-    expect(rows(groups, "disclosure")).toEqual({ "Soll eine weitere Person Auskunft erhalten dürfen?": "Nein" });
+    // The default, not an answer the person gave (QA 2026-10-24, A-1).
+    expect(rows(groups, "disclosure")).toEqual({ "Soll eine weitere Person Auskunft erhalten dürfen?": "Nein (Voreinstellung)" });
 
     // Codes are shown as the person chose them: names, dates as DD.MM.YYYY.
     expect(rows(groups, "person")).toEqual({

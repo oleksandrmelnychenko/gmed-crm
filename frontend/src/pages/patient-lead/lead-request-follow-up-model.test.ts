@@ -14,6 +14,7 @@ import {
   followUpBeforeSubmit,
   followUpMissing,
   followUpMissingAll,
+  followUpRequestedAgainAt,
   followUpShown,
   fundsDescriptionRequired,
   fundsSourceOptions,
@@ -37,8 +38,13 @@ const payer = (payer_kind: LeadRequestPayer["payer_kind"]): LeadRequestPayer => 
   phone: null,
 });
 
+const NO_ASKS = { payer_funds: false, funds: false, occupation: false, sector: false, funds_proof: false, payer_states_funds: false };
+
 describe("follow-up blocks", () => {
   it("shows only live country questions before sending, keeping staff requests and conditional yes details out", () => {
+    // A level-2 preview (black-list country, owner 2026-10-24): the server opens A, F, K and L before
+    // sending; I and G are staff blocks that wait for the submission. Which blocks open is the
+    // server's call — the model only filters what it is given.
     const request = {
       submitted_at: null,
       identification: { pep_self: null, pep_related: false, sanctions_links: false } as import("./lead-request-api").LeadRequest["identification"],
@@ -47,6 +53,10 @@ describe("follow-up blocks", () => {
     expect(followUpBeforeSubmit(request)).toBe(true);
     expect(followUpShown(request)).toBe(true);
     expect(openFollowUpBlocks(request)).toEqual(["K", "L", "A", "F"]);
+    // A level-1 preview (list-1 country alone) opens only the residence block F.
+    const levelOne = { ...request, follow_up: { ...request.follow_up, blocks: ["F"], missing: { F: ["residence_since"] } } };
+    expect(openFollowUpBlocks(levelOne)).toEqual(["F"]);
+    expect(followUpMissingAll(levelOne)).toEqual([{ block: "F", key: "residence_since" }]);
     expect(followUpMissingAll(request)).toEqual([{ block: "A", key: "sector" }]);
     expect(openFollowUpBlocks({ ...request, identification: { ...request.identification!, pep_self: true, sanctions_links: true } })).toEqual(["K", "L", "A", "F", "H", "J"]);
     expect(followUpShown({ ...request, follow_up: { ...request.follow_up, before_submit: undefined } })).toBe(false);
@@ -75,6 +85,17 @@ describe("follow-up blocks", () => {
     expect(followUpAnswered({ follow_up: { ...follow_up, changed_since_answer: true } })).toBe(false);
   });
 
+  it("names the date GMED asked again only while the renewed answer is not sent", () => {
+    const followUp = { required: true, blocks: ["A"], missing: { A: ["sector"] }, answered_at: null };
+    expect(followUpRequestedAgainAt({ follow_up: { ...followUp, requested_at: "2026-10-24T09:00:00Z" } })).toBe("2026-10-24T09:00:00Z");
+    expect(followUpRequestedAgainAt({ follow_up: { ...followUp, requested_at: "2026-10-24T09:00:00Z", answered_at: "2026-10-24T10:00:00Z" } })).toBeNull();
+    expect(followUpRequestedAgainAt({ follow_up: { ...followUp, requested_at: null } })).toBeNull();
+    expect(followUpRequestedAgainAt({ follow_up: followUp })).toBeNull();
+    expect(followUpRequestedAgainAt({ follow_up: undefined })).toBeNull();
+    // A renewed request leaves the answer unsent until the lead sends again.
+    expect(followUpAnswered({ follow_up: { ...followUp, missing: {}, requested_at: "2026-10-24T09:00:00Z" } })).toBe(false);
+  });
+
   it("reads what a refusal names as missing, by block", () => {
     expect(missingOfRefusal({ code: "follow_up_incomplete", missing: { A: ["funds_source", 3], B: "x" } })).toEqual({
       A: ["funds_source"],
@@ -95,6 +116,13 @@ describe("follow-up blocks", () => {
     expect(blockAAsks({ payer: payer("representative"), follow_up: { ...noFunds, funds_asked: true } })).toEqual({
       funds: false, funds_proof: false, payer_funds: false, payer_states_funds: false, occupation: false, sector: true,
     });
+    // A child states no profession or sector (owner 2026-10-24), whoever pays; the payer notes stay.
+    expect(blockAAsks({ payer: null, minor: true })).toEqual({ ...NO_ASKS });
+    expect(blockAAsks({ payer: payer("self"), minor: true, follow_up: { ...noFunds, funds_asked: true } })).toEqual({ ...NO_ASKS, funds: true, funds_proof: true });
+    expect(blockAAsks({ payer: payer("representative"), minor: true })).toEqual({ ...NO_ASKS });
+    expect(blockAAsks({ payer: payer("third_party"), minor: true })).toEqual({ ...NO_ASKS, payer_states_funds: true });
+    expect(blockAAsks({ payer: payer("representative"), payer_questionnaire: { available: true } as never, minor: true })).toEqual({ ...NO_ASKS, payer_states_funds: true });
+    expect([...askedExtraFields(blockAAsks({ payer: payer("representative"), minor: true }))]).toEqual([]);
     // Even stale server missing keys never ask the lead for a third party's funds.
     const asked = { required: true, blocks: ["A"], missing: { A: ["payer_funds_source", "sector"] }, answered_at: null };
     expect(blockAAsks({ payer: payer("third_party"), follow_up: asked })).toMatchObject({ payer_funds: false, payer_states_funds: true, funds: false, funds_proof: false });

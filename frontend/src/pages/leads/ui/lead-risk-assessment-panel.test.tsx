@@ -144,6 +144,20 @@ describe("LeadRiskAssessmentPanel", () => {
     expect(html).not.toContain("lead-risk-decide-");
   });
 
+  it("names the parent a representative trigger concerns", () => {
+    // QA 2026-10-24, B-6: the row said "представитель" only; the trigger now carries the
+    // representative's id, and the one the assessment does not list comes with its name.
+    const html = render(assessment({
+      triggers: [
+        { key: "T1", subject: "representative", variant: "list_1", points: 2, active: true, first_fired_at: "2026-10-07T08:00:00Z", blocks: ["R"], representative_id: "rep-1" },
+        { key: "T14", subject: "representative", variant: null, points: 0, active: true, first_fired_at: "2026-10-07T08:00:00Z", blocks: ["R"], representative_id: "rep-2", representative_name: "Otto Muster" },
+      ],
+      representatives: [{ id: "rep-1", name: "Anna Muster", country_questions: true, missing: [], fields: {} }],
+    }));
+    expect(html).toContain("представитель: Anna Muster");
+    expect(html).toContain("представитель: Otto Muster");
+  });
+
   it("renders nothing without an assessment", () => {
     expect(renderToStaticMarkup(<LeadRiskAssessmentPanel assessment={null} controller={controller} tx={ru} />)).toBe("");
   });

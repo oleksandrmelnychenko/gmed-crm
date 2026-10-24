@@ -734,6 +734,11 @@ export type LeadRequestFollowUp = {
   blocks: string[];
   missing: Record<string, string[]>;
   answered_at: string | null;
+  /**
+   * When GMED last asked for (more) details; `answered_at` is null again after
+   * a renewed request. Absent on an older server.
+   */
+  requested_at?: string | null;
   /** Block A's answers as saved through `…/enhanced-details`. */
   answers?: Partial<ExtraAnswers>;
   /**
@@ -890,13 +895,15 @@ export async function saveCabinetLanguage(lang: "de" | "ru" | "uk" | "en"): Prom
 export async function fetchMyLeadRequestList(): Promise<{
   requests: LeadRequest[];
   ownAccessClosed: boolean;
-  /** A parent's access reaches a request no more: the child is of age now (QA 2026-10-23). */
+  /** A parent's access reaches a request no more (QA 2026-10-23). */
   guardianAccessEnded: boolean;
   /**
-   * Why it ended: the child came of age, or a custody change left the parent
-   * without a place in the form (owner 2026-10-23); null on an older server.
+   * Why it ended, as the server names it: `came_of_age`, `custody_changed`,
+   * `contact_removed`, `relation_changed`, `revoked_by_staff` … (QA
+   * 2026-10-24, B-2); null on an older server, which ended the access only
+   * when the child came of age.
    */
-  guardianAccessEndedReason: "came_of_age" | "custody_changed" | null;
+  guardianAccessEndedReason: string | null;
 }> {
   const result = await apiFetch<{
     requests?: LeadRequest[];
@@ -911,7 +918,7 @@ export async function fetchMyLeadRequestList(): Promise<{
     requests: result.requests ?? [],
     ownAccessClosed: result.own_access_closed === true,
     guardianAccessEnded: result.guardian_access_ended === true,
-    guardianAccessEndedReason: reason === "came_of_age" || reason === "custody_changed" ? reason : null,
+    guardianAccessEndedReason: typeof reason === "string" && reason.trim() ? reason : null,
   };
 }
 

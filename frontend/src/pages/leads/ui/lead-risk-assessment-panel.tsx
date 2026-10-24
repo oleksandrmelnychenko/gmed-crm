@@ -64,6 +64,7 @@ function Caption({ children }: { children: string }) {
 
 function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: Tx }) {
   const score = riskDisplayedScore(assessment);
+  const representatives = assessment.representatives ?? [];
   if (score.triggers.length === 0) {
     return (
       <p className="text-xs text-muted-foreground" data-testid="lead-risk-no-triggers">
@@ -89,7 +90,7 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
         );
       },
     },
-    { id: "subject", label: tx("Кого касается", "Betrifft"), accessor: (trigger) => riskSubjectLabel(trigger.subject, tx, trigger.variant), width: 150 },
+    { id: "subject", label: tx("Кого касается", "Betrifft"), accessor: (trigger) => riskSubjectLabel(trigger.subject, tx, trigger.variant, representatives, trigger), width: 150, cellClassName: "whitespace-normal break-words leading-4" },
     {
       id: "points",
       label: tx("Баллы", "Punkte"),
@@ -143,7 +144,8 @@ function BlockRow({ block, requested, beforeSubmit = false, tx, representatives 
       <span className="font-mono text-[11px] font-semibold text-foreground">{block.key}</span>
       <span className="font-medium text-foreground">{riskBlockLabel(block.key, tx)}</span>
       <span className="text-muted-foreground">· {riskPartyLabel(block.party, tx)}</span>
-      {requested ? <span className="text-muted-foreground">· {tx("запрошено", "angefordert")}</span> : null}
+      {/* "запрошено · ждём ответ" or "ответ получен", never both. */}
+      {requested && !block.answered ? <span className="text-muted-foreground">· {tx("запрошено", "angefordert")}</span> : null}
       <span className={block.answered ? "text-emerald-700 dark:text-emerald-300" : WARNING_TEXT}>
         · {beforeSubmit
           ? block.answered ? tx("заполнено", "ausgefüllt") : tx("нужен ответ", "Antwort erforderlich")
