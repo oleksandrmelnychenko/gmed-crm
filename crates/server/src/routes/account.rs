@@ -24,7 +24,10 @@ pub fn router() -> Router<AppState> {
 
 pub const PROFILE_NAME_MAX: usize = 200;
 pub const PROFILE_PHONE_MAX: usize = 40;
-pub const SUPPORTED_LANGUAGES: &[&str] = &["ru", "de"];
+/// The staff console speaks RU and DE; the lead cabinet and the e-mails also
+/// UA and EN (owner decision 2026-10-24: a parent's own language is kept on
+/// the account and used for the e-mails).
+pub const SUPPORTED_LANGUAGES: &[&str] = &["ru", "de", "uk", "en"];
 
 #[derive(Deserialize)]
 struct ChangePasswordRequest {
@@ -90,7 +93,7 @@ pub fn validate_profile(
             } else if SUPPORTED_LANGUAGES.contains(&trimmed.as_str()) {
                 Some(Some(trimmed))
             } else {
-                return Err("Language must be ru or de");
+                return Err("Language must be de, ru, uk or en");
             }
         }
     };
@@ -392,6 +395,17 @@ mod tests {
         assert!(validate_profile(Some(&"x".repeat(PROFILE_NAME_MAX + 1)), None, None).is_err());
         assert!(validate_profile(None, Some("call me maybe"), None).is_err());
         assert!(validate_profile(None, Some(&"1".repeat(PROFILE_PHONE_MAX + 1)), None).is_err());
-        assert!(validate_profile(None, None, Some("en")).is_err());
+        assert!(validate_profile(None, None, Some("fr")).is_err());
+    }
+
+    #[test]
+    fn the_four_mail_languages_are_accepted() {
+        for code in ["de", "ru", "uk", "en", " UK "] {
+            let input = validate_profile(None, None, Some(code)).unwrap();
+            assert_eq!(
+                input.preferred_language,
+                Some(Some(code.trim().to_ascii_lowercase()))
+            );
+        }
     }
 }

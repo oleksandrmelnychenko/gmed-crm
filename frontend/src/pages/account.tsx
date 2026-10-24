@@ -9,12 +9,14 @@ import { StatusChip } from "@/components/ui/status-chip";
 import { Banner, Field, PageHeader, SuccessBanner } from "@/components/ui-shell";
 import {
   describeSessionDevice,
+  isConsoleLang,
   mapPasswordChangeError,
   sortSessions,
   validatePasswordForm,
   validateProfileForm,
   type AccountProfile,
   type AccountSession,
+  type ProfileLanguage,
 } from "@/lib/account";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
@@ -85,6 +87,8 @@ function ProfileSection() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [language, setLanguage] = useState<Lang>(lang);
+  // A UA/EN language from the lead cabinet is kept unless the select is used.
+  const [keptLanguage, setKeptLanguage] = useState<ProfileLanguage | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -97,7 +101,11 @@ function ProfileSection() {
         setProfile(loaded);
         setName(loaded.name ?? "");
         setPhone(loaded.phone ?? "");
-        setLanguage(loaded.preferred_language ?? lang);
+        if (isConsoleLang(loaded.preferred_language)) {
+          setLanguage(loaded.preferred_language);
+        } else {
+          setKeptLanguage(loaded.preferred_language ?? null);
+        }
       })
       .catch((cause) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
@@ -133,7 +141,7 @@ function ProfileSection() {
     try {
       const saved = await apiFetch<AccountProfile>("/me/profile", {
         method: "PUT",
-        body: JSON.stringify({ name: name.trim(), phone: phone.trim(), preferred_language: language }),
+        body: JSON.stringify({ name: name.trim(), phone: phone.trim(), preferred_language: keptLanguage ?? language }),
       });
       setProfile(saved);
       setLangFromProfile(saved.preferred_language);
@@ -191,7 +199,10 @@ function ProfileSection() {
                 { value: "ru", label: l("account_language_ru") },
                 { value: "de", label: l("account_language_de") },
               ]}
-              onValueChange={(value) => setLanguage(value === "de" ? "de" : "ru")}
+              onValueChange={(value) => {
+                setKeptLanguage(null);
+                setLanguage(value === "de" ? "de" : "ru");
+              }}
             />
           </Field>
         </div>
@@ -210,8 +221,8 @@ function useProfileLanguage() {
   const { l, lang } = useUiText();
   const { setLang } = useLang();
   const setLangFromProfile = useCallback(
-    (preferred: Lang | null | undefined) => {
-      if ((preferred === "ru" || preferred === "de") && preferred !== lang) {
+    (preferred: ProfileLanguage | null | undefined) => {
+      if (isConsoleLang(preferred) && preferred !== lang) {
         setLang(preferred);
       }
     },

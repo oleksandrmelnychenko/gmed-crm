@@ -2589,6 +2589,23 @@ async fn an_undelivered_payer_e_mail_is_told_once_to_who_sent_the_link() {
         notices[0].3,
         Some(json!({ "email": "code", "delivery_status": "bounced" }))
     );
+    // The wizard's payer panel shows both e-mails with their delivery.
+    let (status, panel) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-link"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{panel}");
+    let emails = panel["link"]["emails"].as_array().unwrap();
+    assert_eq!(emails.len(), 2, "{panel}");
+    assert_eq!(emails[0]["kind"], "invitation");
+    assert_eq!(emails[0]["delivery_status"], "delivered");
+    assert!(emails[0]["delivery_updated_at"].is_string(), "{panel}");
+    assert_eq!(emails[1]["kind"], "code");
+    assert_eq!(emails[1]["delivery_status"], "bounced");
     let shown = format!("{} {:?}", notices[0].1, notices[0].2);
     assert!(
         !shown.contains("viktor") && !shown.contains("Zahler"),

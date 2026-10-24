@@ -830,6 +830,226 @@ async fn a_replay_of_a_message_logged_as_failed_is_logged_as_sent() {
     assert_eq!(rows.len(), 2, "{rows:?}");
 }
 
+/// The reminder to the lead three days before the 14-day deletion (owner
+/// decision 2026-10-24): once, in the lead's language, to the own login; for
+/// a minor to the parent with access in the parent's language; never for a
+/// lead the sweep would not delete; a bounce is told to the lead's staff.
+#[tokio::test]
+async fn the_lead_is_reminded_once_before_the_deletion() {
+    let Some(suite) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let manager_id = seed_user(pool, &format!("reminder-{tag}"), "patient_manager").await;
+    let manager = bearer(manager_id, "patient_manager");
+    let (api_url, fake) = start_fake_mittaro().await;
+    let state = suite.state.clone().with_mailer(MailConfig {
+        mittaro_api_key: Some(SecretString::from("tx_live_test")),
+        mittaro_api_url: Some(api_url),
+        from: Some("zugang@gmed-health.test".into()),
+        reply_to: None,
+        console_url: Some("https://console.gmed-health.test".into()),
+    });
+    let app = gmed_server::build_app_for_role_contract_tests(state.clone()).layer(Extension(
+        ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 41005))),
+    ));
+    let policy = gmed_server::routes::leads::UnqualifiedLeadRetention {
+        days: 14,
+        effective_at: chrono::Utc::now() - chrono::Duration::days(90),
+    };
+    let create = |first: &'static str| {
+        let app = app.clone();
+        let manager = manager.clone();
+        let email = format!("{}.{tag}@example.com", first.to_lowercase());
+        async move {
+            let (status, created) = json_request(
+                &app,
+                "POST",
+                "/api/v1/leads",
+                &manager,
+                Some(json!({ "first_name": first, "last_name": "Remindertest", "email": email })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED, "{created}");
+            let lead_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+            (lead_id, email)
+        }
+    };
+    let (adult, adult_email) = create("Olha").await;
+    let (signed, _) = create("Petra").await;
+    let (minor, minor_email) = create("Mila").await;
+    sqlx::query(
+        "UPDATE leads SET created_at = now() - interval '12 days', primary_language = 'ru'
+         WHERE id = ANY($1)",
+    )
+    .bind(vec![adult, signed, minor])
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE leads SET compliance_status = 'signed' WHERE id = $1")
+        .bind(signed)
+        .execute(pool)
+        .await
+        .unwrap();
+    // The minor's request: the mother has access and chose English.
+    let contact_id = Uuid::new_v4();
+    let parent_email = format!("mother.{tag}@example.com");
+    sqlx::query(
+        "UPDATE leads SET date_of_birth = (CURRENT_DATE - INTERVAL '10 years')::date,
+                trusted_contacts = $2
+         WHERE id = $1",
+    )
+    .bind(minor)
+    .bind(json!([{ "id": contact_id, "name": "Maria Remindertest", "relation": "mother", "email": parent_email }]))
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, issued) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{minor}/portal-guardians"),
+        &manager,
+        Some(json!({ "trusted_contact_id": contact_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let parent_id: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    sqlx::query("UPDATE users SET preferred_language = 'en' WHERE id = $1")
+        .bind(parent_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let leads = [adult, signed, minor];
+    let report = gmed_server::routes::leads::purge_unqualified_leads(
+        &state,
+        policy,
+        chrono::Utc::now(),
+        Some(&leads),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.reminded, 2, "{report:?}");
+    let day = gmed_server::app_time::date_of(
+        sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
+            "SELECT created_at + interval '14 days' FROM leads WHERE id = $1",
+        )
+        .bind(adult)
+        .fetch_one(pool)
+        .await
+        .unwrap(),
+    )
+    .format("%d.%m.%Y")
+    .to_string();
+    let sent: Vec<Value> = fake
+        .received
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, message)| message.clone())
+        .collect();
+    let to = |address: &str| {
+        sent.iter()
+            .filter(|message| message["to"] == address)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let lead_mail = to(&adult_email);
+    assert_eq!(lead_mail.len(), 1, "{sent:?}");
+    assert_eq!(lead_mail[0]["subject"], "Напоминание: ваша заявка в GMED");
+    let text = lead_mail[0]["text"].as_str().unwrap();
+    assert!(text.contains(&day), "{text}");
+    assert!(
+        text.contains("https://console.gmed-health.test/login"),
+        "{text}"
+    );
+    assert!(text.contains("Olha Remindertest"), "{text}");
+    // The minor gets nothing; the mother gets it in English.
+    assert!(to(&minor_email).is_empty(), "{sent:?}");
+    let parent_mail = to(&parent_email);
+    assert_eq!(parent_mail.len(), 1, "{sent:?}");
+    assert_eq!(parent_mail[0]["subject"], "Reminder: your request to GMED");
+    assert!(
+        parent_mail[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("for your child")
+    );
+    // Nothing for the signed request.
+    let rows: Vec<(Uuid, String, String, String)> = sqlx::query_as(
+        "SELECT lead_id, audience, language, status FROM lead_retention_reminder_emails
+         WHERE lead_id = ANY($1) ORDER BY audience",
+    )
+    .bind(leads.to_vec())
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (minor, "guardian".into(), "en".into(), "sent".into()),
+            (adult, "lead".into(), "ru".into(), "sent".into()),
+        ]
+    );
+    let marked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM leads WHERE id = ANY($1) AND retention_reminder_sent_at IS NOT NULL",
+    )
+    .bind(leads.to_vec())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(marked, 2);
+
+    // A second sweep sends nothing again.
+    let before = fake.received.lock().unwrap().len();
+    let again = gmed_server::routes::leads::purge_unqualified_leads(
+        &state,
+        policy,
+        chrono::Utc::now(),
+        Some(&leads),
+    )
+    .await
+    .unwrap();
+    assert_eq!(again.reminded, 0);
+    assert_eq!(fake.received.lock().unwrap().len(), before);
+
+    // The lead's reminder bounces: the lead's staff are told once.
+    let message_id: String = sqlx::query_scalar(
+        "SELECT provider_message_id FROM lead_retention_reminder_emails WHERE lead_id = $1",
+    )
+    .bind(adult)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    fake.statuses.lock().unwrap().insert(
+        message_id.clone(),
+        json!({ "id": message_id, "status": "bounced", "smtp_code": "550" }),
+    );
+    for _ in 0..20 {
+        gmed_server::mail::delivery::sync_due(&state).await;
+        let status: Option<String> = sqlx::query_scalar(
+            "SELECT delivery_status FROM lead_retention_reminder_emails WHERE lead_id = $1",
+        )
+        .bind(adult)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        if status.as_deref() == Some("bounced") {
+            break;
+        }
+    }
+    let told: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT user_id FROM user_notifications
+         WHERE kind = 'retention_reminder_email_undelivered' AND entity_id = $1",
+    )
+    .bind(adult)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(told.contains(&manager_id), "{told:?}");
+}
+
 /// A parent's sign-in e-mail uses the parent's own language when known (the
 /// portal language the parent chose), else the child's request language.
 #[tokio::test]

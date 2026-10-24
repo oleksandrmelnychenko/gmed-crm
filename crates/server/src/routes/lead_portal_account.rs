@@ -471,6 +471,11 @@ pub(crate) async fn disable_for_lead_in_tx(
         .bind(lead_id)
         .execute(&mut **tx)
         .await?;
+    // So does the log of the deletion reminders (owner decision 2026-10-24).
+    sqlx::query("DELETE FROM lead_retention_reminder_emails WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(&mut **tx)
+        .await?;
     crate::routes::lead_portal_intake::purge_portal_intake_in_tx(tx, lead_id).await?;
     crate::routes::lead_portal_guardians::revoke_for_purged_lead_in_tx(tx, lead_id, processed_by)
         .await?;

@@ -17,6 +17,7 @@ import { payerPackageSummaryText } from "../model/lead-payer-package";
 import {
   payerLinkActions,
   payerLinkCabinetNote,
+  payerLinkEmailLines,
   payerLinkErrorText,
   payerLinkResendAsksFirst,
   payerLinkResendQuestion,
@@ -157,6 +158,20 @@ export function LeadPayerLinkPanel({
               {tx("Ссылка ещё не отправлялась", "Noch kein Link gesendet")}
             </StatusChip>
           )}
+          {link && link.emails.length > 0 ? (
+            <ul className="space-y-0.5 text-xs leading-5" data-testid="lead-payer-link-emails">
+              {payerLinkEmailLines(link.emails, tx).map((line) => (
+                <li
+                  key={line.kind}
+                  data-testid={`lead-payer-link-email-${line.kind}`}
+                  data-problem={line.problem ? "true" : undefined}
+                  className={cn("break-words", line.problem ? "text-destructive" : "text-muted-foreground")}
+                >
+                  {line.text}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {actions.highlight ? (
             <StatusChip tone="success" className="rounded-lg" data-testid="lead-payer-link-ready">
               {tx(

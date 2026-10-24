@@ -142,6 +142,15 @@ const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
       de: "Bitte ein neues Einwilligungsdokument und eine neue Signatureinladung erstellen.",
     },
   },
+  // The reminder to the lead before the automatic deletion did not arrive
+  // (crates/server/src/mail/delivery.rs, owner decision 2026-10-24).
+  retention_reminder_email_undelivered: {
+    title: { ru: "Напоминание об удалении не доставлено", de: "Erinnerung vor der Löschung nicht zugestellt" },
+    body: {
+      ru: "Письмо пациенту перед автоматическим удалением заявки не дошло. Свяжитесь с пациентом другим способом, если заявку нужно продолжить.",
+      de: "Die E-Mail an den Patienten vor der automatischen Löschung ist nicht angekommen. Bitte den Patienten auf anderem Weg kontaktieren, wenn die Anfrage weitergehen soll.",
+    },
+  },
   lead_portal_follow_up_submitted: {
     title: { ru: "Пациент отправил дополнительные сведения", de: "Patient hat die zusätzlichen Angaben gesendet" },
     body: {

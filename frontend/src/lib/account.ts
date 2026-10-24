@@ -9,13 +9,23 @@ export const PROFILE_PHONE_MAX = 40;
 
 export const PASSWORD_CHANGE_REQUIRED_CODE = "password_change_required";
 
+/**
+ * A person's own language on the account: RU/DE for the console, plus UA/EN
+ * chosen in the lead cabinet (owner decision 2026-10-24); e-mails use it.
+ */
+export type ProfileLanguage = Lang | "uk" | "en";
+
+export function isConsoleLang(value: string | null | undefined): value is Lang {
+  return value === "ru" || value === "de";
+}
+
 export type AccountProfile = {
   id: string;
   email: string;
   name: string;
   role: string;
   phone: string | null;
-  preferred_language: Lang | null;
+  preferred_language: ProfileLanguage | null;
   password_changed_at?: string | null;
 };
 

@@ -4391,6 +4391,41 @@ async fn mail_available(state: &AppState) -> bool {
         .is_ok_and(|mailer| mailer.capability().available && mailer.console_url().is_some())
 }
 
+/// The newest invitation and code e-mail of a link with what Mittaro
+/// reported about their delivery (owner request 2026-10-24), for the wizard's
+/// payer panel. Metadata only: no address, no content.
+async fn link_emails(conn: &mut PgConnection, link_id: Uuid) -> Result<Vec<Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT DISTINCT ON (kind) kind, status, error_code, created_at,
+                  delivery_status, delivery_updated_at
+           FROM lead_payer_link_emails
+           WHERE link_id = $1
+           ORDER BY kind, created_at DESC"#,
+    )
+    .bind(link_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut emails: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            json!({
+                "kind": row.try_get::<String, _>("kind").ok(),
+                "status": row.try_get::<String, _>("status").ok(),
+                "error_code": row.try_get::<Option<String>, _>("error_code").ok().flatten(),
+                "sent_at": row.try_get::<DateTime<Utc>, _>("created_at").ok(),
+                "delivery_status": row.try_get::<Option<String>, _>("delivery_status").ok().flatten(),
+                "delivery_updated_at": row
+                    .try_get::<Option<DateTime<Utc>>, _>("delivery_updated_at")
+                    .ok()
+                    .flatten(),
+            })
+        })
+        .collect();
+    // The invitation first, then the code.
+    emails.sort_by_key(|email| email["kind"] != json!("invitation"));
+    Ok(emails)
+}
+
 /// The newest link of a lead (revoked or not), who sent it and how its last
 /// invitation went.
 async fn newest_link(
@@ -4433,13 +4468,17 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
             return Ok(None);
         };
         let link = newest_link(&mut conn, lead_id).await?;
+        let emails = match &link {
+            Some((link, _, _)) => link_emails(&mut conn, link.id).await?,
+            None => Vec::new(),
+        };
         let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
         // The stored assessment only (the send itself reassesses in the gate).
         let risk = crate::risk::store::load(&mut conn, lead_id).await?;
-        Ok::<_, sqlx::Error>(Some((context, link, check, risk)))
+        Ok::<_, sqlx::Error>(Some((context, link, emails, check, risk)))
     }
     .await;
-    let (context, link, check, risk) = match loaded {
+    let (context, link, emails, check, risk) = match loaded {
         Ok(Some(found)) => found,
         Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
         Err(error) => return intake::internal(error, "load payer link"),
@@ -4472,6 +4511,8 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
             "revoked_at": link.revoked_at,
             "revoked_reason": link.revoked_reason,
             "last_email_status": last_email_status,
+            // The newest invitation and code with their delivery.
+            "emails": emails,
         })
     });
     let questionnaire_value = context.statement.as_ref().map(|_| {

@@ -12,7 +12,13 @@ import { setPortalAccountLabel } from "@/lib/portal-account-label";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
 
-import { LEAD_REQUEST_ACCESS_CHANGED, fetchMyLeadRequest, fetchMyLeadRequestList, type LeadRequest } from "./lead-request-api";
+import {
+  LEAD_REQUEST_ACCESS_CHANGED,
+  fetchMyLeadRequest,
+  fetchMyLeadRequestList,
+  saveCabinetLanguage,
+  type LeadRequest,
+} from "./lead-request-api";
 import { ServerConflictContext, useServerConflictRegistry } from "./lead-request-server-sync";
 import { FollowUpStep } from "./lead-request-follow-up";
 import { DisclosureStep } from "./lead-request-disclosure-step";
@@ -83,7 +89,8 @@ export function LeadRequestPage() {
   // request is used, then the portal language.
   const [chosenLang, setChosenLang] = useState<LeadCabinetLang | null>(storedCabinetLang);
   const [requestLang, setRequestLang] = useState<LeadCabinetLang | null>(null);
-  const lang = resolveLeadCabinetLang(chosenLang, requestLang, portalLang);
+  // A UA/EN choice saved on the account also holds on another device.
+  const lang = resolveLeadCabinetLang(chosenLang ?? asLeadCabinetLang(accountLang), requestLang, portalLang);
   const text = leadRequestText(lang);
   const [requests, setRequests] = useState<LeadRequest[] | null>(null);
   // The own login of a minor whose parents have access reaches no request (QA 2026-10-12, A3-01).
@@ -143,6 +150,9 @@ export function LeadRequestPage() {
       }
       // The rest of the portal (menu, account) speaks DE and RU.
       if (next === "de" || next === "ru") setPortalLang(next);
+      // Kept on the account for the e-mails to this person (owner decision
+      // 2026-10-24); best effort, the cabinet works without it.
+      void saveCabinetLanguage(next).catch(() => undefined);
     },
     [setPortalLang],
   );

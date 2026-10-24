@@ -19,6 +19,7 @@ import {
   payerLinkActive,
   payerLinkBlockedReasonText,
   payerLinkChanged,
+  payerLinkEmailLines,
   payerLinkErrorText,
   payerLinkResendAsksFirst,
   payerLinkResendQuestion,
@@ -47,9 +48,48 @@ function link(patch: Partial<PayerLinkInfo> = {}): PayerLinkInfo {
     revoked_at: null,
     revoked_reason: null,
     last_email_status: "sent",
+    emails: [],
     ...patch,
   };
 }
+
+describe("payer link: delivery of its e-mails (2026-10-24)", () => {
+  it("shows the invitation and the code with what Mittaro reported and when", () => {
+    const state = normalizeLeadPayerLinkState({
+      mode: "link",
+      can_send: true,
+      mail_available: true,
+      link: {
+        ...link(),
+        emails: [
+          {
+            kind: "invitation",
+            status: "sent",
+            sent_at: "2026-10-06T10:00:00Z",
+            delivery_status: "delivered",
+            delivery_updated_at: "2026-10-06T10:05:00Z",
+          },
+          { kind: "code", status: "sent", sent_at: "2026-10-06T11:00:00Z", delivery_status: "bounced", delivery_updated_at: null },
+          { kind: "other", status: "sent" },
+        ],
+      },
+    });
+    const emails = state.link?.emails ?? [];
+    expect(emails.map((email) => email.kind)).toEqual(["invitation", "code"]);
+    expect(payerLinkEmailLines(emails, de)).toEqual([
+      { kind: "invitation", text: "Einladung: zugestellt · 06.10.2026 12:05", problem: false },
+      { kind: "code", text: "Bestätigungscode: nicht zugestellt: Adresse abgewiesen · 06.10.2026 13:00", problem: true },
+    ]);
+    expect(payerLinkEmailLines([{ ...emails[0], status: "failed" }], ru)[0]).toEqual({
+      kind: "invitation",
+      text: "Приглашение: не отправлено",
+      problem: true,
+    });
+    // Not checked yet: queued.
+    expect(payerLinkEmailLines([{ ...emails[0], delivery_status: null, delivery_updated_at: null }], ru)[0].text)
+      .toBe("Приглашение: в очереди · 06.10.2026 12:00");
+  });
+});
 
 function questionnaire(patch: Record<string, unknown> = {}, answers: Record<string, unknown> = {}): StaffPayerQuestionnaire {
   return normalizeStaffPayerQuestionnaire({

@@ -6,7 +6,8 @@
 //! asks. Every minute the scheduler claims the messages that are due — the
 //! first hour every minute, then every 15 minutes, after a day hourly, for
 //! three days — and stores the status in `portal_login_emails` and, since
-//! 2026-10-24, in `lead_payer_link_emails` (the payer's invitation and code).
+//! 2026-10-24, in `lead_payer_link_emails` (the payer's invitation and code)
+//! and `lead_retention_reminder_emails` (the reminder before the deletion).
 //! A message stops being checked once it is delivered, bounced, failed,
 //! suppressed or reported as spam, or when the provider does not know it.
 //! The first problem state of a message (bounced, failed, suppressed,
@@ -116,15 +117,18 @@ impl DeliveryStatus {
 enum Log {
     Login,
     PayerLink,
+    /// The reminder to the lead before the deletion (owner decision 2026-10-24).
+    RetentionReminder,
 }
 
 impl Log {
-    const ALL: [Self; 2] = [Self::Login, Self::PayerLink];
+    const ALL: [Self; 3] = [Self::Login, Self::PayerLink, Self::RetentionReminder];
 
     fn table(self) -> &'static str {
         match self {
             Self::Login => "portal_login_emails",
             Self::PayerLink => "lead_payer_link_emails",
+            Self::RetentionReminder => "lead_retention_reminder_emails",
         }
     }
 
@@ -145,6 +149,13 @@ impl Log {
                 "COALESCE(x.sent_by, k.sent_by)",
                 "x.lead_id, NULL::uuid AS patient_id",
                 "x.kind",
+            ),
+            // Sent by the sweep: the lead's staff hear of a bounce.
+            Self::RetentionReminder => (
+                "lead_retention_reminder_emails x",
+                "NULL::uuid",
+                "x.lead_id, NULL::uuid AS patient_id",
+                "'retention_reminder'::text",
             ),
         };
         let table = self.table();
@@ -208,6 +219,7 @@ impl Log {
         match self {
             Self::Login => "portal_login_email_undelivered",
             Self::PayerLink => "payer_link_email_undelivered",
+            Self::RetentionReminder => "lead_retention_reminder_undelivered",
         }
     }
 
@@ -216,6 +228,7 @@ impl Log {
         match self {
             Self::Login => LOGIN_UNDELIVERED_KIND,
             Self::PayerLink => PAYER_LINK_UNDELIVERED_KIND,
+            Self::RetentionReminder => RETENTION_REMINDER_UNDELIVERED_KIND,
         }
     }
 }
@@ -224,6 +237,8 @@ impl Log {
 pub const LOGIN_UNDELIVERED_KIND: &str = "login_email_undelivered";
 /// `user_notifications.kind`: an e-mail of a payer's link did not arrive.
 pub const PAYER_LINK_UNDELIVERED_KIND: &str = "payer_link_email_undelivered";
+/// `user_notifications.kind`: the deletion reminder to the lead did not arrive.
+pub const RETENTION_REMINDER_UNDELIVERED_KIND: &str = "retention_reminder_email_undelivered";
 
 /// Who hears that a message did not arrive: the staff member who sent it
 /// while that login is active; otherwise the lead's staff
@@ -428,6 +443,10 @@ async fn notify_undelivered(
         Log::PayerLink => (
             "E-mail to the payer not delivered",
             "The e-mail of the payer's link did not arrive. Check the payer's address and send the link again.",
+        ),
+        Log::RetentionReminder => (
+            "Deletion reminder not delivered",
+            "The reminder before the automatic deletion did not reach the patient. Contact the patient another way if the request should continue.",
         ),
     };
     let params = json!({ "email": email_kind, "delivery_status": status.as_str() });

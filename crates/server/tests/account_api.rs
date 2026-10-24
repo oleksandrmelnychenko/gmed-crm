@@ -357,7 +357,7 @@ async fn own_profile_is_read_and_updated_and_reflected_in_me() {
         "PUT",
         "/api/v1/me/profile",
         Some(&bearer),
-        Some(json!({ "preferred_language": "en" })),
+        Some(json!({ "preferred_language": "fr" })),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");

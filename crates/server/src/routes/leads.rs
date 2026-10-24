@@ -10869,6 +10869,8 @@ pub struct UnqualifiedLeadPurgeReport {
     /// could not be withdrawn.
     pub blocked: u64,
     pub warned: u64,
+    /// Leads whose own login (or parents) got the deletion reminder e-mail.
+    pub reminded: u64,
     pub errors: u64,
 }
 
@@ -10902,6 +10904,14 @@ pub async fn purge_unqualified_leads(
     let mut report = UnqualifiedLeadPurgeReport {
         warned: warn_about_unqualified_lead_deadlines(state, policy, now, only).await?,
         ..Default::default()
+    };
+    // The lead hears of the deadline too (owner decision 2026-10-24).
+    report.reminded = match remind_leads_before_purge(state, policy, now, only).await {
+        Ok(reminded) => reminded,
+        Err(error) => {
+            tracing::warn!(%error, "deletion reminder e-mails");
+            0
+        }
     };
     let candidates: Vec<Uuid> = sqlx::query_scalar(&format!(
         r#"SELECT l.id FROM leads l
@@ -11247,6 +11257,314 @@ async fn warn_about_unqualified_lead_deadlines(
         warned += 1;
     }
     Ok(warned)
+}
+
+/// The leads (alias `l`) the sweep would really delete within the warning
+/// window ([`UNQUALIFIED_LEAD_WARNING_DAYS`]) and that got no reminder yet:
+/// the rule covers them, no invoice keeps them, the deadline is still ahead.
+fn retention_reminder_due_sql(lead_filter: &str) -> String {
+    format!(
+        r#"{UNQUALIFIED_LEAD_SUBJECT_SQL}
+           AND NOT {UNQUALIFIED_LEAD_INVOICED_SQL}
+           AND l.retention_reminder_sent_at IS NULL
+           AND {UNQUALIFIED_LEAD_DEADLINE_SQL} > $3
+           AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3 + make_interval(days => $6::int)
+           AND {lead_filter}"#
+    )
+}
+
+/// One reminder of a lead, stored before it is sent.
+struct ReminderRecipient {
+    id: Uuid,
+    user_id: Option<Uuid>,
+    audience: crate::mail::templates::LoginAudience,
+    recipient: String,
+    name: String,
+    language: crate::mail::templates::MailLanguage,
+}
+
+/// The reminder e-mail to the lead before the deletion (owner decision
+/// 2026-10-24): [`UNQUALIFIED_LEAD_WARNING_DAYS`] before the deadline, while
+/// the DSGVO package is unsigned and the sweep would really delete the
+/// request, the lead's own login gets one neutral e-mail through Mittaro; a
+/// minor's request goes to each parent with active access instead, each in
+/// the parent's language. No e-mail without an address. Nothing is marked
+/// while e-mail cannot be sent, so the reminder follows once it can (if the
+/// deadline is still ahead). Returns the number of leads reminded.
+async fn remind_leads_before_purge(
+    state: &crate::state::AppState,
+    policy: UnqualifiedLeadRetention,
+    now: chrono::DateTime<chrono::Utc>,
+    only: Option<&[Uuid]>,
+) -> Result<u64, sqlx::Error> {
+    let Ok(mailer) = crate::mail::connection::current_mailer(state).await else {
+        return Ok(0);
+    };
+    if !mailer.capability().available {
+        return Ok(0);
+    }
+    let Some(console_url) = mailer.console_url().map(str::to_string) else {
+        return Ok(0);
+    };
+    let candidates: Vec<Uuid> = sqlx::query_scalar(&format!(
+        "SELECT l.id FROM leads l WHERE {} ORDER BY l.id",
+        retention_reminder_due_sql("($5::uuid[] IS NULL OR l.id = ANY($5))")
+    ))
+    .bind(policy.days as i32)
+    .bind(policy.effective_at)
+    .bind(now)
+    .bind(ANONYMIZED_FIRST_NAME)
+    .bind(only)
+    .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
+    .fetch_all(&state.db)
+    .await?;
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+    let agency = crate::mail::agency_identity(&state.db).await;
+    let mut reminded = 0;
+    for lead_id in candidates {
+        match remind_lead_before_purge(state, &mailer, &console_url, &agency, policy, now, lead_id)
+            .await
+        {
+            Ok(true) => reminded += 1,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(%lead_id, %error, "deletion reminder e-mail");
+            }
+        }
+    }
+    Ok(reminded)
+}
+
+async fn remind_lead_before_purge(
+    state: &crate::state::AppState,
+    mailer: &crate::mail::Mailer,
+    console_url: &str,
+    agency: &crate::mail::templates::AgencyIdentity,
+    policy: UnqualifiedLeadRetention,
+    now: chrono::DateTime<chrono::Utc>,
+    lead_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    use crate::mail::templates::{LoginAudience, MailLanguage};
+    use crate::routes::lead_portal_account::normalize_portal_email;
+
+    let mut tx = state.db.begin().await?;
+    // Locked and decided again: the lead may have been signed or qualified.
+    let Some(lead) = sqlx::query(&format!(
+        r#"SELECT {UNQUALIFIED_LEAD_DEADLINE_SQL} AS deadline, l.primary_language,
+                  l.first_name, l.last_name, l.email AS lead_email, l.portal_user_id,
+                  u.email AS login_email, u.is_active AS login_active,
+                  {closed} AS minor
+           FROM leads l
+           LEFT JOIN users u ON u.id = l.portal_user_id
+           WHERE {due}
+           FOR UPDATE OF l"#,
+        closed = crate::routes::lead_portal_intake::OWN_LOGIN_CLOSED_SQL,
+        due = retention_reminder_due_sql("l.id = $5"),
+    ))
+    .bind(policy.days as i32)
+    .bind(policy.effective_at)
+    .bind(now)
+    .bind(ANONYMIZED_FIRST_NAME)
+    .bind(lead_id)
+    .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(false);
+    };
+    let deadline: chrono::DateTime<chrono::Utc> = lead.try_get("deadline")?;
+    let delete_on = crate::app_time::date_of(deadline);
+    let lead_language: Option<String> = lead.try_get("primary_language")?;
+    let mut planned: Vec<(Option<Uuid>, LoginAudience, String, String, MailLanguage)> = Vec::new();
+    if lead.try_get::<bool, _>("minor").unwrap_or(false) {
+        // A minor has no login of its own: each parent with access.
+        let parents = sqlx::query(
+            r#"SELECT DISTINCT u.id, u.email, u.name
+               FROM lead_portal_access a
+               JOIN users u ON u.id = a.user_id
+               WHERE a.lead_id = $1 AND a.kind = 'guardian' AND a.revoked_at IS NULL
+                 AND u.is_active"#,
+        )
+        .bind(lead_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        for parent in parents {
+            let user_id: Uuid = parent.try_get("id")?;
+            let Some(email) =
+                normalize_portal_email(parent.try_get::<String, _>("email").ok().as_deref())
+            else {
+                continue;
+            };
+            let language =
+                crate::routes::lead_portal_login_email::guardian_language(&state.db, user_id)
+                    .await?
+                    .or_else(|| lead_language.clone());
+            planned.push((
+                Some(user_id),
+                LoginAudience::Guardian,
+                email,
+                crate::routes::lead_portal_login_email::greeting_name(
+                    &parent.try_get::<String, _>("name").unwrap_or_default(),
+                ),
+                MailLanguage::from_code(language.as_deref()),
+            ));
+        }
+    } else {
+        // The lead's own login, else the address on the request.
+        let text = |column: &str| lead.try_get::<Option<String>, _>(column).ok().flatten();
+        let login = lead
+            .try_get::<Option<bool>, _>("login_active")?
+            .unwrap_or(false)
+            .then(|| normalize_portal_email(text("login_email").as_deref()))
+            .flatten();
+        let (user_id, email) = match login {
+            Some(email) => (
+                lead.try_get::<Option<Uuid>, _>("portal_user_id")?,
+                Some(email),
+            ),
+            None => (None, normalize_portal_email(text("lead_email").as_deref())),
+        };
+        if let Some(email) = email {
+            let name = format!(
+                "{} {}",
+                lead.try_get::<String, _>("first_name").unwrap_or_default(),
+                lead.try_get::<String, _>("last_name").unwrap_or_default()
+            );
+            planned.push((
+                user_id,
+                LoginAudience::Lead,
+                email,
+                name.trim().to_string(),
+                MailLanguage::from_code(lead_language.as_deref()),
+            ));
+        }
+    }
+    // One e-mail per address (two parents may share one).
+    let mut seen = HashSet::new();
+    planned.retain(|(_, _, recipient, _, _)| seen.insert(recipient.clone()));
+    if planned.is_empty() {
+        // Nobody to write to: nothing marked, a later address is used.
+        return Ok(false);
+    }
+    sqlx::query("UPDATE leads SET retention_reminder_sent_at = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+    let mut recipients = Vec::with_capacity(planned.len());
+    for (user_id, audience, recipient, name, language) in planned {
+        let id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO lead_retention_reminder_emails
+                   (lead_id, user_id, audience, recipient, language, deadline_on)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING id"#,
+        )
+        .bind(lead_id)
+        .bind(user_id)
+        .bind(match audience {
+            LoginAudience::Guardian => "guardian",
+            _ => "lead",
+        })
+        .bind(&recipient)
+        .bind(language.code())
+        .bind(delete_on)
+        .fetch_one(&mut *tx)
+        .await?;
+        recipients.push(ReminderRecipient {
+            id,
+            user_id,
+            audience,
+            recipient,
+            name,
+            language,
+        });
+    }
+    audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "lead_retention_reminder_queued",
+            None,
+            "lead",
+            Some(lead_id),
+            json!({
+                "emails": recipients.len(),
+                "deadline_on": delete_on.to_string(),
+            }),
+        ),
+    )
+    .await?;
+    tx.commit().await?;
+
+    let login_url = format!("{console_url}/login");
+    let logo_url = crate::mail::templates::logo_url(console_url);
+    for target in &recipients {
+        let rendered = crate::mail::templates::retention_reminder(
+            &crate::mail::templates::RetentionReminderEmail {
+                language: target.language,
+                audience: target.audience,
+                recipient_name: &target.name,
+                delete_on,
+                login_url: &login_url,
+                agency,
+                logo_url: Some(&logo_url),
+            },
+        );
+        let result = mailer
+            .send(&crate::mail::OutgoingEmail {
+                to: target.recipient.clone(),
+                subject: rendered.subject,
+                text: rendered.text,
+                html: rendered.html,
+                idempotency_key: format!("gmed-lead-retention-reminder-{}", target.id),
+            })
+            .await;
+        let (status, message_id, error_code) = match &result {
+            Ok(sent) => ("sent", Some(sent.message_id.clone()), None),
+            Err(error) => ("failed", None, Some(error.code())),
+        };
+        let mut conn = state.db.acquire().await?;
+        sqlx::query(
+            r#"UPDATE lead_retention_reminder_emails
+               SET status = $2, provider_message_id = $3, error_code = $4,
+                   sent_at = CASE WHEN $2 = 'sent' THEN now() END
+               WHERE id = $1"#,
+        )
+        .bind(target.id)
+        .bind(status)
+        .bind(&message_id)
+        .bind(error_code)
+        .execute(&mut *conn)
+        .await?;
+        audit::write_in_transaction(
+            &mut conn,
+            &audit::domain_event(
+                if result.is_ok() {
+                    "lead_retention_reminder_sent"
+                } else {
+                    "lead_retention_reminder_failed"
+                },
+                None,
+                "lead",
+                Some(lead_id),
+                json!({
+                    "reminder_id": target.id,
+                    "portal_user_id": target.user_id,
+                    "audience": match target.audience {
+                        LoginAudience::Guardian => "guardian",
+                        _ => "lead",
+                    },
+                    "language": target.language.code(),
+                    "provider": crate::mail::PROVIDER_ID,
+                    "provider_message_id": message_id,
+                    "error_code": error_code,
+                }),
+            ),
+        )
+        .await?;
+    }
+    Ok(true)
 }
 
 /// A due lead that cannot be deleted automatically needs a manual decision.

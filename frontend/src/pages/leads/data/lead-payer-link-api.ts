@@ -57,6 +57,31 @@ export type PayerLinkInfo = {
   revoked_reason: string | null;
   /** How the last e-mail of the link went out (invitation or code). */
   last_email_status: "sent" | "failed" | null;
+  /** The newest invitation and code e-mail with their delivery (2026-10-24). */
+  emails: PayerLinkEmail[];
+};
+
+export const PAYER_LINK_DELIVERY_STATUSES = [
+  "queued",
+  "sending",
+  "sent",
+  "delivered",
+  "deferred",
+  "bounced",
+  "failed",
+  "suppressed",
+  "complained",
+  "unknown",
+] as const;
+export type PayerLinkDeliveryStatus = (typeof PAYER_LINK_DELIVERY_STATUSES)[number];
+
+/** One e-mail of the link: whether Mittaro took it and what it reported later. */
+export type PayerLinkEmail = {
+  kind: "invitation" | "code";
+  status: "sent" | "failed";
+  sent_at: string | null;
+  delivery_status: PayerLinkDeliveryStatus | null;
+  delivery_updated_at: string | null;
 };
 
 /** A beneficial owner of a company payer (share in percent as a decimal string). */
@@ -256,6 +281,22 @@ function normalizeLink(value: unknown): PayerLinkInfo | null {
     revoked_at: textOrNull(raw.revoked_at),
     revoked_reason: textOrNull(raw.revoked_reason),
     last_email_status: raw.last_email_status === "sent" || raw.last_email_status === "failed" ? raw.last_email_status : null,
+    emails: Array.isArray(raw.emails) ? raw.emails.map(normalizeLinkEmail).filter((email) => email !== null) : [],
+  };
+}
+
+function normalizeLinkEmail(value: unknown): PayerLinkEmail | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const kind = raw.kind === "invitation" || raw.kind === "code" ? raw.kind : null;
+  const status = raw.status === "sent" || raw.status === "failed" ? raw.status : null;
+  if (!kind || !status) return null;
+  return {
+    kind,
+    status,
+    sent_at: textOrNull(raw.sent_at),
+    delivery_status: oneOf(PAYER_LINK_DELIVERY_STATUSES, raw.delivery_status),
+    delivery_updated_at: textOrNull(raw.delivery_updated_at),
   };
 }
 

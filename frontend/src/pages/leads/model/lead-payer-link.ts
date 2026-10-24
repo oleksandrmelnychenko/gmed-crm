@@ -11,6 +11,8 @@ import {
   PAYER_LINK_BLOCKED_REASONS,
   type LeadPayerLinkState,
   type PayerBeneficialOwner,
+  type PayerLinkDeliveryStatus,
+  type PayerLinkEmail,
   type PayerLinkInfo,
   type PayerLinkRiskHold,
   type PayerQuestionnaireDocument,
@@ -189,6 +191,42 @@ export function payerLinkStatusLine(
   }
   const text = facts.filter(Boolean).join(" · ");
   return { label, tone, text: capitalised(text) };
+}
+
+const DELIVERY_LABELS: Record<PayerLinkDeliveryStatus, [string, string]> = {
+  queued: ["в очереди", "in der Warteschlange"],
+  sending: ["отправляется", "wird gesendet"],
+  sent: ["передано почтовому серверу", "an den Mailserver übergeben"],
+  delivered: ["доставлено", "zugestellt"],
+  deferred: ["доставка отложена", "Zustellung verzögert"],
+  bounced: ["не доставлено: адрес не принял письмо", "nicht zugestellt: Adresse abgewiesen"],
+  failed: ["не доставлено: ошибка отправки", "nicht zugestellt: Versandfehler"],
+  suppressed: ["не доставлено: адрес заблокирован", "nicht zugestellt: Adresse gesperrt"],
+  complained: ["отмечено как спам", "als Spam gemeldet"],
+  unknown: ["статус неизвестен", "Status unbekannt"],
+};
+
+const PROBLEM_DELIVERY: readonly PayerLinkDeliveryStatus[] = ["bounced", "failed", "suppressed", "complained"];
+
+/**
+ * One line per e-mail of the link (invitation, code): what Mittaro reported
+ * and when (owner request 2026-10-24). `problem` marks a line to highlight.
+ */
+export function payerLinkEmailLines(
+  emails: readonly PayerLinkEmail[],
+  tx: Tx,
+): { kind: PayerLinkEmail["kind"]; text: string; problem: boolean }[] {
+  return emails.map((email) => {
+    const what = email.kind === "invitation" ? tx("Приглашение", "Einladung") : tx("Код подтверждения", "Bestätigungscode");
+    if (email.status === "failed") {
+      return { kind: email.kind, text: `${what}: ${tx("не отправлено", "nicht gesendet")}`, problem: true };
+    }
+    const delivery = email.delivery_status ?? "queued";
+    const [ru, de] = DELIVERY_LABELS[delivery];
+    const when = email.delivery_updated_at ?? email.sent_at;
+    const date = when ? ` · ${formatAppDateTime(when)}` : "";
+    return { kind: email.kind, text: `${what}: ${tx(ru, de)}${date}`, problem: PROBLEM_DELIVERY.includes(delivery) };
+  });
 }
 
 /** Why the link cannot be sent now, as a sentence. */

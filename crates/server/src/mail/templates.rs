@@ -896,6 +896,134 @@ pub fn payer_code(email: &PayerCodeEmail<'_>) -> RenderedEmail {
     }
 }
 
+/// The reminder before the deletion of an unqualified request (owner decision
+/// 2026-10-24): three days before the deadline, to the lead's own login or,
+/// for a minor, to each parent with access. Neutral: the date, that signing
+/// the consent documents keeps the request, the sign-in link. No medical or
+/// risk wording, no name of the request's content.
+#[derive(Debug, Clone)]
+pub struct RetentionReminderEmail<'a> {
+    pub language: MailLanguage,
+    /// `Lead` or `Guardian` (a parent of a minor); `Patient` reads as `Lead`.
+    pub audience: LoginAudience,
+    pub recipient_name: &'a str,
+    /// The German calendar day of the deletion.
+    pub delete_on: NaiveDate,
+    /// `{console_url}/login`.
+    pub login_url: &'a str,
+    pub agency: &'a AgencyIdentity,
+    pub logo_url: Option<&'a str>,
+}
+
+struct ReminderCopy {
+    subject: &'static str,
+    preheader: &'static str,
+    intro: &'static str,
+    intro_guardian: &'static str,
+    action: &'static str,
+}
+
+fn reminder_copy(language: MailLanguage) -> ReminderCopy {
+    match language {
+        MailLanguage::De => ReminderCopy {
+            subject: "Erinnerung: Ihre Anfrage bei GMED",
+            preheader: "Ihre Anfrage wird bald gelöscht, wenn die Einwilligungsunterlagen fehlen",
+            intro: "Ihre Anfrage bei GMED wird am {date} gelöscht, wenn die Einwilligungsunterlagen bis dahin nicht unterschrieben sind.",
+            intro_guardian: "Die Anfrage für Ihr Kind bei GMED wird am {date} gelöscht, wenn die Einwilligungsunterlagen bis dahin nicht unterschrieben sind.",
+            action: "Um fortzufahren, melden Sie sich im Patientenportal an oder wenden Sie sich an GMED.",
+        },
+        MailLanguage::En => ReminderCopy {
+            subject: "Reminder: your request to GMED",
+            preheader: "Your request will be deleted soon unless the consent documents are signed",
+            intro: "Your request to GMED will be deleted on {date} unless the consent documents are signed by then.",
+            intro_guardian: "The request for your child to GMED will be deleted on {date} unless the consent documents are signed by then.",
+            action: "To continue, sign in to the patient portal or contact GMED.",
+        },
+        MailLanguage::Ru => ReminderCopy {
+            subject: "Напоминание: ваша заявка в GMED",
+            preheader: "Заявка скоро будет удалена, если документы согласия не подписаны",
+            intro: "Ваша заявка в GMED будет удалена {date}, если к этому дню документы согласия не будут подписаны.",
+            intro_guardian: "Заявка для вашего ребёнка в GMED будет удалена {date}, если к этому дню документы согласия не будут подписаны.",
+            action: "Чтобы продолжить, войдите в портал пациента или свяжитесь с GMED.",
+        },
+        MailLanguage::Uk => ReminderCopy {
+            subject: "Нагадування: ваша заявка до GMED",
+            preheader: "Заявку незабаром буде видалено, якщо документи згоди не підписано",
+            intro: "Вашу заявку до GMED буде видалено {date}, якщо до цього дня документи згоди не буде підписано.",
+            intro_guardian: "Заявку для вашої дитини до GMED буде видалено {date}, якщо до цього дня документи згоди не буде підписано.",
+            action: "Щоб продовжити, увійдіть до порталу пацієнта або зверніться до GMED.",
+        },
+    }
+}
+
+pub fn retention_reminder(email: &RetentionReminderEmail<'_>) -> RenderedEmail {
+    let copy = reminder_copy(email.language);
+    let login = login_copy(email.language);
+    let name = email.recipient_name.trim();
+    let greeting = if name.is_empty() {
+        login.greeting.to_string()
+    } else {
+        login.greeting_named.replace("{name}", name)
+    };
+    let intro = match email.audience {
+        LoginAudience::Guardian => copy.intro_guardian,
+        LoginAudience::Lead | LoginAudience::Patient => copy.intro,
+    }
+    .replace("{date}", &email.delete_on.format("%d.%m.%Y").to_string());
+    let footer = email.agency.lines();
+    let mut text = vec![
+        greeting.clone(),
+        String::new(),
+        intro.clone(),
+        String::new(),
+        copy.action.to_string(),
+        format!("{}: {}", login.button, email.login_url),
+        String::new(),
+        login.not_you.to_string(),
+        String::new(),
+        "-- ".to_string(),
+    ];
+    text.extend(footer.iter().cloned());
+    text.push(login.automatic.to_string());
+
+    let url = escape_html(email.login_url);
+    let body = format!(
+        r#"<p style="margin:0 0 16px;font:600 17px/1.5 {FONT};color:{INK};">{greeting}</p>
+{intro}
+{action}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 20px;"><tr>
+<td style="border-radius:8px;background:{BRAND};">
+<a href="{url}" target="_blank" rel="noopener" style="display:inline-block;padding:13px 24px;font:600 15px/1.2 {FONT};color:#ffffff;text-decoration:none;border-radius:8px;">{button}</a>
+</td>
+</tr></table>
+<p style="margin:0 0 20px;font:13px/1.5 {FONT};color:{MUTED};">{link_hint}<br><a href="{url}" target="_blank" rel="noopener" style="color:{BRAND};word-break:break-all;">{url}</a></p>
+{not_you}"#,
+        greeting = escape_html(&greeting),
+        intro = note(&intro),
+        action = paragraph(copy.action),
+        button = escape_html(login.button),
+        link_hint = escape_html(login.link_hint),
+        not_you = small(login.not_you, 24),
+    );
+    let html = shell(
+        &Shell {
+            language: email.language,
+            subject: copy.subject,
+            preheader: copy.preheader,
+            label: login.portal,
+            logo_url: email.logo_url,
+            footer: &footer,
+            automatic: login.automatic,
+        },
+        &body,
+    );
+    RenderedEmail {
+        subject: copy.subject.to_string(),
+        text: text.join("\n"),
+        html,
+    }
+}
+
 pub fn connection_test(email: &ConnectionTestEmail<'_>) -> RenderedEmail {
     let copy = test_copy(email.language);
     let requested = copy
@@ -972,6 +1100,54 @@ mod tests {
             agency: &agency,
             logo_url: Some("https://console.gmed-health.com/gmed-logo.png"),
         })
+    }
+
+    #[test]
+    fn the_deletion_reminder_names_the_date_and_the_portal_in_every_language() {
+        let agency = agency();
+        let delete_on = NaiveDate::from_ymd_opt(2026, 11, 7).unwrap();
+        for language in [
+            MailLanguage::De,
+            MailLanguage::En,
+            MailLanguage::Ru,
+            MailLanguage::Uk,
+        ] {
+            for audience in [LoginAudience::Lead, LoginAudience::Guardian] {
+                let rendered = retention_reminder(&RetentionReminderEmail {
+                    language,
+                    audience,
+                    recipient_name: "Anna <Muster>",
+                    delete_on,
+                    login_url: "https://console.gmed-health.test/login",
+                    agency: &agency,
+                    logo_url: None,
+                });
+                for part in [&rendered.text, &rendered.html] {
+                    assert!(part.contains("07.11.2026"), "{language:?} {part}");
+                    assert!(part.contains("https://console.gmed-health.test/login"));
+                    assert!(!part.contains('{'), "{language:?}: placeholder left");
+                }
+                assert!(rendered.html.contains("Anna &lt;Muster&gt;"));
+                // The subject names neither the person nor a date.
+                assert!(!rendered.subject.contains("Anna"));
+                assert!(!rendered.subject.contains("2026"));
+                for word in ["risk", "Risiko", "риск", "ризик", "diagnos", "медицин"]
+                {
+                    assert!(!rendered.text.to_lowercase().contains(&word.to_lowercase()));
+                }
+            }
+        }
+        let guardian = retention_reminder(&RetentionReminderEmail {
+            language: MailLanguage::De,
+            audience: LoginAudience::Guardian,
+            recipient_name: "",
+            delete_on,
+            login_url: "https://console.gmed-health.test/login",
+            agency: &agency,
+            logo_url: None,
+        });
+        assert!(guardian.text.starts_with("Guten Tag,\n"));
+        assert!(guardian.text.contains("für Ihr Kind"));
     }
 
     #[test]

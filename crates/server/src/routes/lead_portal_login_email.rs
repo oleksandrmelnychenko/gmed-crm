@@ -176,7 +176,7 @@ struct LoginEmailQuery {
 /// The language of a parent's login, when known: the language the parent
 /// chose for the portal, else the language of the parent's own most recent
 /// request. `None` falls back to the child's request language.
-async fn guardian_language(
+pub(crate) async fn guardian_language(
     db: &gmed_db::DbPool,
     user_id: Uuid,
 ) -> Result<Option<String>, sqlx::Error> {
@@ -254,7 +254,7 @@ async fn get_login_emails(
 
 /// The name a login e-mail greets: the account's name, none when the account
 /// was created without one and holds the e-mail address instead.
-fn greeting_name(account_name: &str) -> String {
+pub(crate) fn greeting_name(account_name: &str) -> String {
     let name = account_name.trim();
     if name.contains('@') {
         String::new()

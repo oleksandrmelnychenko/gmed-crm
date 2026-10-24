@@ -74,6 +74,11 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
         "A custody change ended a parent's access to this request.",
       ),
       notice(
+        "retention_reminder_email_undelivered",
+        "Deletion reminder not delivered",
+        "The reminder before the automatic deletion did not reach the patient.",
+      ),
+      notice(
         "lead_consent_choice_changed",
         "Consent choice changed",
         "The patient changed the consent choice. Create a new consent document and signature invitation.",

@@ -875,6 +875,14 @@ export async function fetchMyLeadRequests(): Promise<LeadRequest[]> {
 }
 
 /**
+ * Keeps the cabinet language on the account (owner decision 2026-10-24): the
+ * e-mails to this person (sign-in data, deletion reminder) use it.
+ */
+export async function saveCabinetLanguage(lang: "de" | "ru" | "uk" | "en"): Promise<void> {
+  await request("/me/profile", { method: "PUT", body: JSON.stringify({ preferred_language: lang }) });
+}
+
+/**
  * The requests of the login and whether it is the own login of a minor whose parents have access
  * (QA 2026-10-12, A3-01): such a login reaches no request; the cabinet then says, neutrally, that
  * the parents or the legal representative fill it in. `ownAccessClosed` is false on an older server.

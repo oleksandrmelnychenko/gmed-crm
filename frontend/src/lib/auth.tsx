@@ -32,7 +32,8 @@ export interface User {
   capabilities?: string[];
   created_at: string;
   phone?: string | null;
-  preferred_language?: Lang | null;
+  /** RU/DE apply to the console; UA/EN come from the lead cabinet. */
+  preferred_language?: Lang | "uk" | "en" | null;
   /// Set after an admin-forced reset or password expiry: only /account/password-required is usable.
   password_change_required?: boolean;
   /**
