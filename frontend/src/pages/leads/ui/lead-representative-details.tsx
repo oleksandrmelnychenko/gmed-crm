@@ -11,7 +11,13 @@ import { PERSON_CITY_MAX } from "@/lib/person-fields";
 import type { LeadRepresentation, LeadRepresentative } from "../data/lead-portal-intake-api";
 import { updateLeadRepresentativeDetails, type RepresentativeDetails } from "../data/lead-representation-api";
 import type { Tx } from "../model/lead-payer";
-import { mergeRepresentativeDetails, representativeDetailsChanged, representativeDetailsErrors, representativeDetailsOf } from "../model/lead-representative-details";
+import {
+  EMPTY_REPRESENTATIVE_DETAILS,
+  mergeRepresentativeDetails,
+  representativeDetailsChanged,
+  representativeDetailsErrors,
+  representativeDetailsOf,
+} from "../model/lead-representative-details";
 import { leadErrorMessage } from "../model/leads-model";
 
 /**
@@ -35,7 +41,6 @@ export function LeadRepresentativeDetailsForm({
   disabled: boolean;
   onSaved: (representation: LeadRepresentation | null) => void;
 }) {
-  const id = useId();
   const stored = representativeDetailsOf(person);
   const storedKey = JSON.stringify(stored);
   // What the draft was built from, per field: a save writes only what differs from it.
@@ -68,7 +73,6 @@ export function LeadRepresentativeDetailsForm({
   const changed = representativeDetailsChanged(draft, loadedRef.current);
   const errors = representativeDetailsErrors(draft, loadedRef.current);
   const canSave = !disabled && !busy && changed && Object.keys(errors).length === 0;
-  const tooLong = tx("Слишком длинное значение", "Zu lang");
   const set = <K extends keyof RepresentativeDetails>(key: K, value: RepresentativeDetails[K]) => {
     setSaved(false);
     setDraft({ ...draftRef.current, [key]: value });
@@ -94,76 +98,22 @@ export function LeadRepresentativeDetailsForm({
       setBusy(false);
     }
   };
-  const field = (key: keyof RepresentativeDetails) => `${id}-${key}`;
-  const text = (key: "street" | "zip" | "city" | "birth_place", label: string, maxLength: number, className?: string) => (
-    <label className={className} htmlFor={field(key)}>
-      <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
-      <Input
-        id={field(key)}
-        name={key}
-        className={inputClass}
-        maxLength={maxLength}
-        value={draft[key]}
-        disabled={disabled || busy}
-        aria-invalid={errors[key] ? true : undefined}
-        onChange={(event) => set(key, event.target.value)}
-        onKeyDown={(event) => {
-          // Enter stores these details, never the contact form around them
-          // (DEV 2026-10-24: the dialog closed and the typed details were lost).
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          if (canSave) void save();
-        }}
-      />
-      {errors[key] ? <span className="mt-1 block text-xs text-destructive">{tooLong}</span> : null}
-    </label>
-  );
   return (
     <div className="space-y-3" data-testid={`lead-representative-details-${person.id}`}>
       <h4 className="text-xs font-semibold text-foreground">
         {tx("Адрес и данные для анкеты GwG", "Anschrift und Angaben für den GwG-Bogen")}
       </h4>
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-        {text("street", tx("Улица и дом", "Straße und Hausnummer"), 200, "sm:col-span-2")}
-        {text("zip", tx("Индекс", "PLZ"), 20)}
-        {text("city", tx("Город", "Ort"), PERSON_CITY_MAX)}
-        <div>
-          <span className="mb-1 block text-xs font-medium text-muted-foreground">{tx("Страна", "Land")}</span>
-          <CountrySelect
-            value={draft.country || null}
-            lang={lang}
-            className={selectClass}
-            aria-label={tx("Страна проживания", "Wohnsitzland")}
-            disabled={disabled || busy}
-            onChange={(code) => set("country", code ?? "")}
-          />
-        </div>
-        {text("birth_place", tx("Место рождения", "Geburtsort"), 200)}
-        <div>
-          <span className="mb-1 block text-xs font-medium text-muted-foreground">{tx("Страна рождения", "Geburtsland")}</span>
-          <CountrySelect
-            value={draft.birth_country || null}
-            lang={lang}
-            className={selectClass}
-            aria-label={tx("Страна рождения", "Geburtsland")}
-            disabled={disabled || busy}
-            onChange={(code) => set("birth_country", code ?? "")}
-          />
-        </div>
-        <div className="sm:col-span-2">
-          <span className="mb-1 block text-xs font-medium text-muted-foreground" id={field("citizenships")}>
-            {tx("Гражданства", "Staatsangehörigkeiten")}
-          </span>
-          <CitizenshipMultiSelect
-            maxItems={5}
-            value={draft.citizenships}
-            lang={lang}
-            disabled={disabled || busy}
-            placeholder={tx("Выберите страны", "Länder auswählen")}
-            onChange={(next) => set("citizenships", next)}
-          />
-        </div>
-      </div>
+      <RepresentativeDetailsFields
+        draft={draft}
+        errors={errors}
+        tx={tx}
+        lang={lang}
+        disabled={disabled || busy}
+        onChange={set}
+        onEnter={() => {
+          if (canSave) void save();
+        }}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -195,6 +145,142 @@ export function LeadRepresentativeDetailsForm({
           </span>
         ) : null}
         {error ? <span role="alert" className="text-xs text-destructive">{error}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The same fields for a parent the server does not know yet (a new card, or
+ * a lead not created yet, mode «Заполняю сам»): kept with the card and
+ * written once the saved card is on file (walk-through 2026-10-24: the
+ * contract asked for citizenship and address the card could not take).
+ */
+export function PendingRepresentativeDetailsForm({
+  value,
+  tx,
+  lang,
+  disabled,
+  onChange,
+}: {
+  value: RepresentativeDetails;
+  tx: Tx;
+  lang: string;
+  disabled: boolean;
+  onChange: (next: RepresentativeDetails) => void;
+}) {
+  const errors = representativeDetailsErrors(value, EMPTY_REPRESENTATIVE_DETAILS);
+  return (
+    <div className="space-y-3" data-testid="lead-representative-details-pending">
+      <h4 className="text-xs font-semibold text-foreground">
+        {tx("Адрес и данные для анкеты GwG", "Anschrift und Angaben für den GwG-Bogen")}
+      </h4>
+      <p className="text-[11.5px] leading-tight text-muted-foreground">
+        {tx(
+          "Нужны для договора и анкеты GwG родителя. Сохраняются вместе с карточкой.",
+          "Nötig für den Vertrag und den GwG-Bogen des Elternteils. Werden mit der Karte gespeichert.",
+        )}
+      </p>
+      <RepresentativeDetailsFields
+        draft={value}
+        errors={errors}
+        tx={tx}
+        lang={lang}
+        disabled={disabled}
+        onChange={(key, next) => onChange({ ...value, [key]: next })}
+      />
+    </div>
+  );
+}
+
+/**
+ * The address, birth data and citizenship fields of a representative, shared
+ * by the saved form and the form of a parent not yet on file.
+ */
+export function RepresentativeDetailsFields({
+  draft,
+  errors,
+  tx,
+  lang,
+  disabled,
+  onChange,
+  onEnter,
+}: {
+  draft: RepresentativeDetails;
+  errors: Partial<Record<keyof RepresentativeDetails, "too_long">>;
+  tx: Tx;
+  lang: string;
+  disabled: boolean;
+  onChange: <K extends keyof RepresentativeDetails>(key: K, value: RepresentativeDetails[K]) => void;
+  /** Enter in a text field; the saved form stores the details. */
+  onEnter?: () => void;
+}) {
+  const id = useId();
+  const tooLong = tx("Слишком длинное значение", "Zu lang");
+  const field = (key: keyof RepresentativeDetails) => `${id}-${key}`;
+  const text = (key: "street" | "zip" | "city" | "birth_place", label: string, maxLength: number, className?: string) => (
+    <label className={className} htmlFor={field(key)}>
+      <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
+      <Input
+        id={field(key)}
+        name={key}
+        className={inputClass}
+        maxLength={maxLength}
+        value={draft[key]}
+        disabled={disabled}
+        aria-invalid={errors[key] ? true : undefined}
+        onChange={(event) => onChange(key, event.target.value)}
+        onKeyDown={(event) => {
+          // Enter stores these details, never the contact form around them
+          // (DEV 2026-10-24: the dialog closed and the typed details were lost).
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          onEnter?.();
+        }}
+      />
+      {errors[key] ? <span className="mt-1 block text-xs text-destructive">{tooLong}</span> : null}
+    </label>
+  );
+  return (
+    <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+      {text("street", tx("Улица и дом", "Straße und Hausnummer"), 200, "sm:col-span-2")}
+      {text("zip", tx("Индекс", "PLZ"), 20)}
+      {text("city", tx("Город", "Ort"), PERSON_CITY_MAX)}
+      <div>
+        <span className="mb-1 block text-xs font-medium text-muted-foreground">{tx("Страна", "Land")}</span>
+        <CountrySelect
+          value={draft.country || null}
+          lang={lang}
+          className={selectClass}
+          aria-label={tx("Страна проживания", "Wohnsitzland")}
+          disabled={disabled}
+          onChange={(code) => onChange("country", code ?? "")}
+        />
+      </div>
+      {text("birth_place", tx("Место рождения", "Geburtsort"), 200)}
+      <div>
+        <span className="mb-1 block text-xs font-medium text-muted-foreground">{tx("Страна рождения", "Geburtsland")}</span>
+        <CountrySelect
+          value={draft.birth_country || null}
+          lang={lang}
+          className={selectClass}
+          aria-label={tx("Страна рождения", "Geburtsland")}
+          disabled={disabled}
+          onChange={(code) => onChange("birth_country", code ?? "")}
+        />
+      </div>
+      <div className="sm:col-span-2">
+        <span className="mb-1 block text-xs font-medium text-muted-foreground" id={field("citizenships")}>
+          {tx("Гражданства", "Staatsangehörigkeiten")}
+        </span>
+        <CitizenshipMultiSelect
+          maxItems={5}
+          value={draft.citizenships}
+          lang={lang}
+          disabled={disabled}
+          placeholder={tx("Выберите страны", "Länder auswählen")}
+          onChange={(next) => onChange("citizenships", next)}
+        />
       </div>
     </div>
   );

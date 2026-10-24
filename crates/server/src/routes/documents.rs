@@ -16320,6 +16320,51 @@ async fn generate_document(
     } else {
         None
     };
+    // A lead's form that exists once per lead (the consent form, the release
+    // from confidentiality, the privacy notice, the patient form): a new
+    // document while one is current would be a second v1 beside it (DEV
+    // 2026-10-24: a click after a network error made two consents for a
+    // child). A new version names the one it replaces; concurrent requests
+    // wait here until the first document is stored.
+    let _lead_form_guard = match (
+        lead_id,
+        body.replace_document_id,
+        lead_single_form_group(template.id),
+    ) {
+        (Some(lead), None, Some(group)) => {
+            let mut guard = match state.db.begin().await {
+                Ok(guard) => guard,
+                Err(_) => {
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to prepare document generation",
+                    );
+                }
+            };
+            if sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+                .bind(format!("lead-form-pdf:{lead}:{}", group[0]))
+                .execute(&mut *guard)
+                .await
+                .is_err()
+            {
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to prepare document generation",
+                );
+            }
+            match current_lead_form_document(&mut guard, lead, group).await {
+                Ok(Some(existing)) => return lead_form_version_exists(existing),
+                Ok(None) => Some(guard),
+                Err(_) => {
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to check existing document version",
+                    );
+                }
+            }
+        }
+        _ => None,
+    };
     let intake_context = match super::order_intakes::document_context(&state, order_id).await {
         Ok(value) => value,
         Err(response) => return response,
@@ -26133,6 +26178,65 @@ fn self_disclosure_source_ready(submitted: bool, fill_mode: Option<&str>) -> boo
 
 /// 409 `lead_request_not_sent`: while the patient fills the cabinet, the
 /// patient form exists only once the lead sent the request.
+/// The templates of a lead's form that exists once per lead, with the
+/// variants that are versions of the same form (the consent form for an
+/// adult, a child under joint custody or under one custodian).
+pub(crate) fn lead_single_form_group(template_id: &str) -> Option<&'static [&'static str]> {
+    const CONSENT_FORMS: [&str; 3] = [
+        "privacy_consents",
+        "consent_data_release_child",
+        "consent_data_release_single",
+    ];
+    match template_id {
+        "privacy_consents" | "consent_data_release_child" | "consent_data_release_single" => {
+            Some(&CONSENT_FORMS)
+        }
+        "confidentiality_release" => Some(&["confidentiality_release"]),
+        "privacy_information" => Some(&["privacy_information"]),
+        "lead_self_disclosure" => Some(&["lead_self_disclosure"]),
+        _ => None,
+    }
+}
+
+/// The current document of a lead's single form: kept, not replaced by a
+/// newer version, its file not deleted.
+async fn current_lead_form_document(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    group: &[&str],
+) -> Result<Option<(Uuid, i32)>, sqlx::Error> {
+    sqlx::query_as::<_, (Uuid, i32)>(
+        r#"SELECT d.id, d.version_number FROM documents d
+           WHERE d.lead_id = $1 AND d.generated_template_id = ANY($2)
+             AND d.status <> 'archived' AND d.file_deleted_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM documents n WHERE n.replaces_document_id = d.id)
+           ORDER BY d.created_at DESC, d.id DESC
+           LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .bind(group.iter().map(|id| id.to_string()).collect::<Vec<_>>())
+    .fetch_optional(&mut *conn)
+    .await
+}
+
+/// 409 `document_version_exists`: the form is there already; a new version
+/// names it as the one it replaces.
+fn lead_form_version_exists(
+    (document_id, version_number): (Uuid, i32),
+) -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "document_version_exists",
+            "code": "document_version_exists",
+            "message": "The document exists already; create a new version of it instead",
+            "document_id": document_id,
+            "version_number": version_number,
+        })),
+    )
+        .into_response()
+}
+
 fn lead_request_not_sent() -> axum::response::Response {
     (
         StatusCode::CONFLICT,

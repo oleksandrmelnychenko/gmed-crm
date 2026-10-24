@@ -17,6 +17,7 @@ import {
   riskEventLabel,
   riskGateErrorText,
   representativeDocumentFieldsMissing,
+  representativeCardPlace,
   representativeDocumentSlot,
   gwgSheetSignatureNotice,
   representativeMissingText,
@@ -392,7 +393,7 @@ describe("the contract gate names the missing parent details (staff report 2026-
     const notice = gwgSheetSignatureNotice({ missing: ["legal_form", "seat_address", "id_upload"], scope: "payer" }, ru);
     expect(notice).toBe(
       "Лист создан, но подпись на нём пока нельзя будет подтвердить. Не хватает данных организации-плательщика: правовая форма, юридический адрес, скан документа представителя. "
-      + "Данные вносит плательщик по своей ссылке или сотрудники в разделе «Кто платит»; затем сформируйте лист заново.",
+      + "Эти данные организация-плательщик вносит сама по своей ссылке — отправьте или повторите ссылку в разделе «Кто платит»; затем сформируйте лист заново.",
     );
     expect(notice).not.toContain("представители —");
   });
@@ -404,6 +405,11 @@ describe("the contract gate names the missing parent details (staff report 2026-
       body: { code: "representative_details_incomplete", missing: ["rep1_citizenships"] },
     });
     expect(riskGateErrorText(error, ru)).toContain("Не хватает: первый родитель / представитель — гражданство.");
+    // Walk-through 2026-10-24: the text names the parent's card, not only «Данные клиента».
+    expect(riskGateErrorText(error, ru)).toContain("блок «Родитель или законный представитель» — кнопка ✎ у родителя, раздел «Адрес и данные для анкеты GwG»");
+    expect(riskGateErrorText(error, de)).toContain("Block „Elternteil oder gesetzlicher Vertreter“");
+    expect(representativeCardPlace(["agent_street"], ru)).toContain("«Контакты и представители»");
+    expect(representativeCardPlace(["patient_id_valid_until"], ru)).toBe("шаг «Данные клиента»");
   });
 
   it("names only the person of a per-person document (DEV 2026-10-19)", () => {

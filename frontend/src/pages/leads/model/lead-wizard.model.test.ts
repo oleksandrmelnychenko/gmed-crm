@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { LeadDetail } from "@/lib/api/types";
 
 import {
+  agencyOrderConfirmationBlocked,
   blankClinicalIntake,
   blankGuardian,
   blankOrderLine,
@@ -652,5 +653,15 @@ describe("preferred language options", () => {
     ];
     expect(namedLanguageOptions(options, "de").map((option) => option.value)).toEqual(["de", "ab"]);
     expect(namedLanguageOptions(options, "ru").map((option) => option.value)).toEqual(["de"]);
+  });
+});
+
+describe("the agency's confirmation of the order (walk-through 2026-10-24)", () => {
+  it("waits for the client's signature, which the server asks first", () => {
+    expect(agencyOrderConfirmationBlocked(false, false)).toBe(true);
+    expect(agencyOrderConfirmationBlocked(true, false)).toBe(false);
+    // A confirmation already made can be taken back.
+    expect(agencyOrderConfirmationBlocked(false, true)).toBe(false);
+    expect(agencyOrderConfirmationBlocked(true, true)).toBe(false);
   });
 });

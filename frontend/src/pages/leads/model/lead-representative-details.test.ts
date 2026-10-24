@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeRepresentativeDetails, representativeDetailsChanged, representativeDetailsErrors, representativeDetailsOf } from "./lead-representative-details";
+import {
+  EMPTY_REPRESENTATIVE_DETAILS,
+  mergeRepresentativeDetails,
+  pendingRepresentativeDetailsReady,
+  representativeDetailsChanged,
+  representativeDetailsErrors,
+  representativeDetailsOf,
+} from "./lead-representative-details";
 
 const anna = {
   birth_place: "Kyiv",
@@ -29,6 +36,20 @@ describe("a representative's details staff edit", () => {
     const loaded = representativeDetailsOf(anna);
     expect(representativeDetailsErrors({ ...loaded, city: "y".repeat(121) }, loaded)).toEqual({ city: "too_long" });
     expect(representativeDetailsErrors({ ...loaded, city: "y".repeat(121) }, { ...loaded, city: "y".repeat(121) })).toEqual({});
+  });
+
+  // Walk-through 2026-10-24: a parent entered in mode «Заполняю сам» had no
+  // citizenship and structured address, so the framework contract was refused.
+  it("write the details of a new card once its parent is on file", () => {
+    const entered = { ...EMPTY_REPRESENTATIVE_DETAILS, citizenships: ["UA"], street: "Musterweg 1", zip: "10115", city: "Berlin", country: "DE" };
+    const pending = new Map([["mother", entered], ["father", EMPTY_REPRESENTATIVE_DETAILS]]);
+    const onFile = (id: string) => ({ id, birth_place: null, birth_country: null, citizenships: [], street: null, zip: null, city: null, country: null });
+    // Not on file yet: nothing is written.
+    expect(pendingRepresentativeDetailsReady(pending, [])).toEqual([]);
+    const ready = pendingRepresentativeDetailsReady(pending, [onFile("mother"), onFile("father")] as never);
+    expect(ready).toEqual([{ id: "mother", values: entered, base: EMPTY_REPRESENTATIVE_DETAILS }]);
+    // Already stored the same: no write.
+    expect(pendingRepresentativeDetailsReady(new Map([["mother", entered]]), [{ ...onFile("mother"), ...entered }] as never)).toEqual([]);
   });
 });
 

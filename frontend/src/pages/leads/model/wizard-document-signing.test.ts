@@ -1,12 +1,36 @@
 import { describe, expect, it } from "vitest";
+import { ApiRequestError } from "@/lib/api";
 import {
   canSignWizardDocument,
   documentSignedFor,
+  documentVersionExistsErrorText,
   leadConsentFormTemplate,
   orderClientSignatureState,
+  shouldReloadDocumentsAfterGenerationError,
   signatureNeedsProof,
   versionsSameForm,
 } from "./wizard-document-signing";
+
+// DEV 2026-10-24: after a network error "Создать документ" made a second v1.
+describe("a failed document generation", () => {
+  const refusal = (status: number, code: string) => new ApiRequestError("x", { status, code, body: { code } });
+  const ru = (text: string) => text;
+  it("reloads the list when the document may have been stored", () => {
+    expect(shouldReloadDocumentsAfterGenerationError(new TypeError("Failed to fetch"))).toBe(true);
+    expect(shouldReloadDocumentsAfterGenerationError(new ApiRequestError("x", {}))).toBe(true);
+    expect(shouldReloadDocumentsAfterGenerationError(refusal(502, "bad_gateway"))).toBe(true);
+    expect(shouldReloadDocumentsAfterGenerationError(refusal(409, "document_version_exists"))).toBe(true);
+    // A refusal before anything was stored: nothing to reload.
+    expect(shouldReloadDocumentsAfterGenerationError(refusal(422, "minor_consent_form_required"))).toBe(false);
+    expect(shouldReloadDocumentsAfterGenerationError(refusal(409, "lead_request_not_sent"))).toBe(false);
+  });
+
+  it("says that the form exists and a new version changes it", () => {
+    expect(documentVersionExistsErrorText(refusal(409, "document_version_exists"), ru)).toContain("создайте новую версию");
+    expect(documentVersionExistsErrorText(refusal(409, "lead_request_not_sent"), ru)).toBeNull();
+    expect(documentVersionExistsErrorText(new Error("x"), ru)).toBeNull();
+  });
+});
 
 describe("the consent form the wizard creates (QA 2026-10-12, A2-06)", () => {
   it("creates the adult form for an adult whatever the custody says", () => {

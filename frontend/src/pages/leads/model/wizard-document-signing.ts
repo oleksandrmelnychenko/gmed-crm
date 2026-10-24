@@ -1,3 +1,4 @@
+import { ApiRequestError } from "@/lib/api";
 import type { DocumentItem } from "@/pages/documents/model/types";
 
 const SIGNABLE_DOCUMENT_TYPES = new Set([
@@ -119,5 +120,30 @@ export function canSignWizardDocument(document: SigningDocument): boolean {
   // rather than a generated template.
   return ["confidentiality_release", "dsgvo", "framework_contract"].includes(
     document.compliance_kind?.trim().toLowerCase() ?? "",
+  );
+}
+
+function errorCodes(error: ApiRequestError): unknown[] {
+  return [error.body?.code, error.body?.error, error.code];
+}
+
+/**
+ * Whether a failed "Создать документ" may still have stored the document: a
+ * lost answer (network, gateway, server error) or the server's word that the
+ * form exists already. The wizard then reloads the list, so the next click
+ * makes a new version instead of a second v1 (DEV 2026-10-24).
+ */
+export function shouldReloadDocumentsAfterGenerationError(error: unknown): boolean {
+  if (!(error instanceof ApiRequestError)) return true;
+  if (errorCodes(error).includes("document_version_exists")) return true;
+  return error.status === undefined || error.status === 0 || error.status >= 500;
+}
+
+/** 409 `document_version_exists` in words; `null` for other errors. */
+export function documentVersionExistsErrorText(error: unknown, tx: (ru: string, de: string) => string): string | null {
+  if (!(error instanceof ApiRequestError) || !errorCodes(error).includes("document_version_exists")) return null;
+  return tx(
+    "Этот документ уже создан — список обновлён. Чтобы изменить его, создайте новую версию.",
+    "Dieses Dokument ist bereits erstellt – die Liste wurde aktualisiert. Für Änderungen eine neue Version erstellen.",
   );
 }

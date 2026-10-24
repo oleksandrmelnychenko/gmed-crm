@@ -768,6 +768,15 @@ export function namedLanguageOptions<Option extends { value: string; labelDe: st
   });
 }
 
+/**
+ * "Агентство подтвердило заказ" waits for the client's signature of the order:
+ * the server refuses it before (409, `client_order_signature_missing`;
+ * walk-through 2026-10-24). A confirmation already made stays removable.
+ */
+export function agencyOrderConfirmationBlocked(signedPatient: boolean, signedAgency: boolean): boolean {
+  return !signedPatient && !signedAgency;
+}
+
 export function clinicalWarningFingerprint(item: ClinicalWarningLike): string {
   return normalizedFingerprint([
     item.kind,

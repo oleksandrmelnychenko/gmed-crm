@@ -20,6 +20,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -142,7 +143,8 @@ import { medicalStepHasContent } from "../model/medical-step-content";
 import { uploadEach } from "../model/upload-each";
 import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
-import { removeLeadRepresentativeData, removeLeadTrustedContact } from "../data/lead-representation-api";
+import { removeLeadRepresentativeData, removeLeadTrustedContact, updateLeadRepresentativeDetails, type RepresentativeDetails } from "../data/lead-representation-api";
+import { EMPTY_REPRESENTATIVE_DETAILS, pendingRepresentativeDetailsReady, representativeDetailsChanged } from "../model/lead-representative-details";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import { LeadCustodySelect } from "./lead-custody-select";
 import { LeadGwgSheetActions, gwgSheetBusyKey } from "./lead-gwg-sheet-actions";
@@ -231,8 +233,10 @@ import { SignatureDocumentPreview } from "@/pages/documents/ui/signature-documen
 import {
   canSignWizardDocument,
   documentSignedFor,
+  documentVersionExistsErrorText,
   leadConsentFormTemplate,
   orderClientSignatureState,
+  shouldReloadDocumentsAfterGenerationError,
   signatureNeedsProof,
   versionsSameForm,
 } from "../model/wizard-document-signing";
@@ -316,7 +320,7 @@ import { enhancedFundsProofOutstanding } from "../model/lead-gwg-statements";
 import { LeadRiskAssessmentPanel } from "./lead-risk-assessment-panel";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { LeadIdentityDocumentData } from "./lead-identity-document-data";
-import { LeadRepresentativeDetailsForm } from "./lead-representative-details";
+import { LeadRepresentativeDetailsForm, PendingRepresentativeDetailsForm } from "./lead-representative-details";
 import { LeadRepresentativeUploads, representativeFileOrigin } from "./lead-representative-uploads";
 import { LeadPatientConcern } from "./lead-patient-concern";
 import { useLeadRiskAssessment } from "../model/use-lead-risk-assessment";
@@ -367,6 +371,7 @@ import {
 } from "./wizard-document-row-error";
 import { WizardLoadError } from "./wizard-load-error";
 import {
+  agencyOrderConfirmationBlocked,
   discoveryReferrerMissing,
   intakeAsksDiscoverySource,
   isMinor,
@@ -2366,7 +2371,8 @@ function errorText(error: unknown, tx: Tx): string {
   if (payerGate) return payerGate;
   const representation = gwgSheetErrorText(error, tx)
     ?? identificationErrorText(error, tx)
-    ?? leadSelfDisclosureErrorText(error, tx);
+    ?? leadSelfDisclosureErrorText(error, tx)
+    ?? documentVersionExistsErrorText(error, tx);
   if (representation) return representation;
   if (error instanceof Error && error.message === "Generate the current order document before confirming its signatures") {
     return tx("Сначала создайте актуальную версию документа заказа, затем подтвердите подписи", "Erstellen Sie zuerst die aktuelle Auftragsversion und bestätigen Sie anschließend die Unterschriften");
@@ -3016,6 +3022,8 @@ function ToggleRow({
   onChange,
   disabled,
   withDivider = true,
+  hint,
+  hintTestId,
 }: {
   id?: string;
   checked: boolean;
@@ -3023,14 +3031,22 @@ function ToggleRow({
   onChange: (checked: boolean) => void;
   disabled?: boolean;
   withDivider?: boolean;
+  /** Why the box cannot be ticked yet, under the label. */
+  hint?: string;
+  hintTestId?: string;
 }) {
+  const hintId = useId();
   return (
     <label className={cn(
-      "flex cursor-pointer items-center gap-3 py-3",
+      "flex items-center gap-3 py-3",
+      disabled ? "cursor-not-allowed" : "cursor-pointer",
       withDivider && "border-b border-border/70 last:border-b-0",
     )}>
-      <input id={id} type="checkbox" aria-label={label} checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className={checkboxClass} />
-      <span className="text-sm text-foreground">{label}</span>
+      <input id={id} type="checkbox" aria-label={label} aria-describedby={hint ? hintId : undefined} checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className={checkboxClass} />
+      <span className="min-w-0">
+        <span className="block text-sm text-foreground">{label}</span>
+        {hint ? <span id={hintId} data-testid={hintTestId} className="mt-0.5 block text-xs text-muted-foreground">{hint}</span> : null}
+      </span>
     </label>
   );
 }
@@ -3426,6 +3442,14 @@ export function LeadWizard({
   const [trustedContactBirthDateError, setTrustedContactBirthDateError] = useState("");
   // Whether the editor was opened from the minor's parent / legal representative block.
   const [trustedContactEditorGuardian, setTrustedContactEditorGuardian] = useState(false);
+  // Address, birth data and citizenships of a parent the server does not know
+  // yet (a new card): kept per contact id and written once the parent is on
+  // file (walk-through 2026-10-24, mode «Заполняю сам»).
+  const [trustedContactPendingDetails, setTrustedContactPendingDetails] = useState<RepresentativeDetails>(EMPTY_REPRESENTATIVE_DETAILS);
+  const pendingRepresentativeDetailsRef = useRef(new Map<string, RepresentativeDetails>());
+  // A document generation in flight (the busy state shows a render later).
+  const documentGenerationRef = useRef(false);
+  const [pendingRepresentativeDetailsVersion, setPendingRepresentativeDetailsVersion] = useState(0);
   // The trusted contacts as the server stores them, as far as this wizard
   // knows. A save sends the contacts only when staff changed them: a parent
   // added in the lead cabinet meanwhile must not be overwritten by an older list.
@@ -4185,6 +4209,25 @@ export function LeadWizard({
   useEffect(() => {
     if (representationVersion > 0) void reloadStep1PortalState();
   }, [representationVersion, reloadStep1PortalState]);
+  // A new parent's card is on file after the autosave: its address, birth data
+  // and citizenships are written then, as the saved card's form would.
+  const pendingDetailsRepresentation = step1Portal.intake && step1Portal.intake.lead_id === leadId
+    ? step1Portal.intake.representation
+    : null;
+  const applyStep1Representation = step1Portal.applyRepresentation;
+  const autosaveSettled = autosaveStatus !== "dirty" && autosaveStatus !== "saving";
+  useEffect(() => {
+    const pending = pendingRepresentativeDetailsRef.current;
+    if (!leadId || !pendingDetailsRepresentation || !autosaveSettled || pending.size === 0) return;
+    const ready = pendingRepresentativeDetailsReady(pending, pendingDetailsRepresentation.representatives);
+    for (const person of pendingDetailsRepresentation.representatives) pending.delete(person.id);
+    for (const item of ready) {
+      void updateLeadRepresentativeDetails(leadId, item.id, item.values, item.base).then(
+        (representation) => applyStep1Representation(representation),
+        (cause) => setError(errorText(cause, tx)),
+      );
+    }
+  }, [leadId, pendingDetailsRepresentation, autosaveSettled, pendingRepresentativeDetailsVersion, applyStep1Representation, tx]);
   useEffect(() => {
     wizardStateBaseRef.current = { ...wizardStateBaseRef.current, step1_fill_mode: step1Portal.mode };
   }, [step1Portal.mode]);
@@ -5628,6 +5671,7 @@ export function LeadWizard({
     setTrustedContactBirthDateError("");
     setGuardianSearch("");
     setTrustedContactEditorGuardian(guardian);
+    setTrustedContactPendingDetails(EMPTY_REPRESENTATIVE_DETAILS);
     setTrustedContactEditor(emptyTrustedContact());
   };
 
@@ -5639,8 +5683,16 @@ export function LeadWizard({
     setTrustedContactBirthDateError("");
     setGuardianSearch("");
     setTrustedContactEditorGuardian(guardian);
+    setTrustedContactPendingDetails(pendingRepresentativeDetailsRef.current.get(contact.id) ?? EMPTY_REPRESENTATIVE_DETAILS);
     setTrustedContactEditor({ ...contact });
   };
+
+  // Whether the server knows the contact as a representative of this lead.
+  const representativeOnFile = (contactId: string) => Boolean(
+    leadId
+    && step1Portal.intake?.lead_id === leadId
+    && step1Portal.intake.representation?.representatives.some((person) => person.id === contactId),
+  );
 
   const closeTrustedContactEditor = () => {
     setTrustedContactEditor(null);
@@ -5777,6 +5829,16 @@ export function LeadWizard({
       relation: trustedContactEditor.relation.trim(),
       address: trustedContactEditor.address.trim(),
     };
+    // A parent not on file yet: the address and citizenships entered on the
+    // card are written once the autosave has created the parent.
+    if (trustedContactEditorGuardian && !representativeOnFile(normalizedContact.id)) {
+      if (representativeDetailsChanged(trustedContactPendingDetails, EMPTY_REPRESENTATIVE_DETAILS)) {
+        pendingRepresentativeDetailsRef.current.set(normalizedContact.id, trustedContactPendingDetails);
+      } else {
+        pendingRepresentativeDetailsRef.current.delete(normalizedContact.id);
+      }
+      setPendingRepresentativeDetailsVersion((version) => version + 1);
+    }
     setError("");
     clearServerValidation();
     setServerContactError((current) => current?.contactId === normalizedContact.id ? null : current);
@@ -6301,6 +6363,10 @@ export function LeadWizard({
       | typeof LEAD_SELF_DISCLOSURE_TEMPLATE,
   ): Promise<boolean> {
     if (!draft) return false;
+    // One generation at a time: a second click before the busy state shows
+    // (or after a network error) made a second v1 (DEV 2026-10-24).
+    if (documentGenerationRef.current) return false;
+    documentGenerationRef.current = true;
     setBusy(`generate-${templateId}`);
     setError("");
     try {
@@ -6363,8 +6429,12 @@ export function LeadWizard({
       return true;
     } catch (nextError) {
       showWizardError(nextError);
+      // The server may have stored the document although the answer was lost:
+      // the list shows it, so the next click makes a new version of it.
+      if (shouldReloadDocumentsAfterGenerationError(nextError)) void refreshDocumentsState();
       return false;
     } finally {
+      documentGenerationRef.current = false;
       setBusy(null);
     }
   }
@@ -9798,12 +9868,29 @@ ${serviceCommentLines.join("\n")}`
                     </span>
                   )}
                   accessory={(
-                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || inheritedContract || !lines.some(validLine)} onClick={() => void generateCommercialDocument("framework_contract")}>
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      className="h-8 rounded-lg"
+                      disabled={isBusy || inheritedContract || !lines.some(validLine)}
+                      aria-describedby={!inheritedContract && !lines.some(validLine) ? "lead-framework-contract-needs-position" : undefined}
+                      onClick={() => void generateCommercialDocument("framework_contract")}
+                    >
                       {busy === "generate-framework_contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.framework_contract.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>
                   )}
                 >
+                {!inheritedContract && !lines.some(validLine) ? (
+                  // Walk-through 2026-10-24: the button was disabled without a word.
+                  <p id="lead-framework-contract-needs-position" data-testid="lead-framework-contract-needs-position" className="mb-3 text-xs text-muted-foreground">
+                    {tx(
+                      "Договор создаётся после того, как в «Позиции заказа» ниже добавлена хотя бы одна услуга.",
+                      "Der Vertrag wird erstellt, sobald unter „Auftragspositionen“ unten mindestens eine Leistung erfasst ist.",
+                    )}
+                  </p>
+                ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={tx("Начало действия договора", "Vertragsbeginn")} htmlFor="lead-contract-valid-from">
                     <Input
@@ -10132,7 +10219,17 @@ ${serviceCommentLines.join("\n")}`
                   ? <StatusChip tone="info">{tx("DEV · GMED подписал тестовый заказ", "DEV · GMED hat den Testauftrag unterzeichnet")}</StatusChip>
                   : <ToggleRow
                   checked={signedAgency}
-                  disabled={isBusy}
+                  // The server confirms the agency's side only after the client
+                  // signed (409 before; walk-through 2026-10-24); a mark made
+                  // stays removable.
+                  disabled={isBusy || agencyOrderConfirmationBlocked(signedPatient, signedAgency)}
+                  hint={agencyOrderConfirmationBlocked(signedPatient, signedAgency)
+                    ? tx(
+                        "Доступно после подписи клиента: сначала подтвердите подпись заказа клиентом (выше).",
+                        "Verfügbar nach der Unterschrift des Kunden: zuerst die Auftragsunterschrift des Kunden bestätigen (oben).",
+                      )
+                    : undefined}
+                  hintTestId="lead-order-agency-confirmation-hint"
                   onChange={(checked) => {
                     setSignedAgency(checked);
                     void saveFlags(
@@ -11167,12 +11264,16 @@ ${serviceCommentLines.join("\n")}`
                   {(() => {
                     // A representative's address from the cabinet: the GwG sheet and the
                     // consent form print these parts, so the one-line address is not edited here.
-                    const cabinetAddress = leadId && editingTrustedContact
-                      ? representativeCabinetAddress(
-                          portalRepresentation?.representatives.find((item) => item.id === trustedContactEditor.id),
-                          (code) => countryLabel(code, lang),
-                        )
+                    const onFile = leadId && editingTrustedContact
+                      ? portalRepresentation?.representatives.find((item) => item.id === trustedContactEditor.id)
+                      : undefined;
+                    const cabinetAddress = onFile
+                      ? representativeCabinetAddress(onFile, (code) => countryLabel(code, lang))
                       : null;
+                    // A representative takes the address in parts (street, postcode, city,
+                    // country) below: a one-line address never reached the contract's check
+                    // (walk-through 2026-10-24).
+                    if (!cabinetAddress && (onFile || trustedContactEditorGuardian)) return null;
                     return (
                       <Field className="sm:col-span-2" label={tx("Адрес", "Adresse")}>
                         <Input
@@ -11201,7 +11302,22 @@ ${serviceCommentLines.join("\n")}`
                   const person = leadId && editingTrustedContact
                     ? portalRepresentation?.representatives.find((item) => item.id === trustedContactEditor.id)
                     : undefined;
-                  if (!leadId || !person) return null;
+                  if (!leadId || !person) {
+                    // A parent not on file yet (a new card): the same fields, written
+                    // once the card is saved and the parent exists on the server.
+                    if (!trustedContactEditorGuardian) return null;
+                    return (
+                      <div className="mt-4 border-t border-border/70 pt-3">
+                        <PendingRepresentativeDetailsForm
+                          value={trustedContactPendingDetails}
+                          tx={tx}
+                          lang={lang}
+                          disabled={isBusy}
+                          onChange={setTrustedContactPendingDetails}
+                        />
+                      </div>
+                    );
+                  }
                   return (
                     <>
                     <div className="mt-4 border-t border-border/70 pt-3">

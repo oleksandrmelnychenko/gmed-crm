@@ -948,6 +948,30 @@ export function gwgSheetSignatureNotice(details: unknown, tx: Tx): string | null
   return [base, representativeMissingText(missing, tx)].filter(Boolean).join(" ");
 }
 
+/**
+ * Where staff complete a person's missing data (walk-through 2026-10-24: the
+ * refusal sent staff to «Данные клиента» without naming the parent's card): a
+ * parent in the block «Родитель или законный представитель» of the client
+ * step, an adult's representative or Betreuer in «Контакты и представители»
+ * of the documents step — the card's form «Адрес и данные для анкеты GwG».
+ */
+export function representativeCardPlace(missing: unknown, tx: Tx): string {
+  const keys = Array.isArray(missing) ? missing.filter((key): key is string => typeof key === "string") : [];
+  if (keys.some((key) => key.startsWith("agent_") || key.startsWith("guardian_"))) {
+    return tx(
+      "шаг «Документы», блок «Контакты и представители» — кнопка ✎ у этого лица, раздел «Адрес и данные для анкеты GwG»",
+      "Schritt „Unterlagen“, Block „Kontakte und Vertretung“ – Stift bei dieser Person, Abschnitt „Anschrift und Angaben für den GwG-Bogen“",
+    );
+  }
+  if (keys.length > 0 && keys.every((key) => key.startsWith("patient_"))) {
+    return tx("шаг «Данные клиента»", "Schritt „Personendaten“");
+  }
+  return tx(
+    "шаг «Данные клиента», блок «Родитель или законный представитель» — кнопка ✎ у родителя, раздел «Адрес и данные для анкеты GwG»",
+    "Schritt „Personendaten“, Block „Elternteil oder gesetzlicher Vertreter“ – Stift beim Elternteil, Abschnitt „Anschrift und Angaben für den GwG-Bogen“",
+  );
+}
+
 /** 409 `risk_review_required` of the gated staff actions (qualify, convert, signatures …). */
 export function riskGateErrorText(error: unknown, tx: Tx): string | null {
   if (!(error instanceof ApiRequestError)) return null;
@@ -961,11 +985,11 @@ export function riskGateErrorText(error: unknown, tx: Tx): string | null {
       "Подтвердить идентификацию нельзя: документ, удостоверяющий личность, не годится.",
       "Die Identifizierung kann nicht bestätigt werden: Das Ausweisdokument genügt nicht.",
     ) : error.body?.scope === "person" ? tx(
-      "Перед подтверждением подписи дополните данные этого лица в разделе «Данные клиента».",
-      "Bitte vervollständigen Sie vor der Bestätigung der Unterschrift die Daten dieser Person unter „Personendaten“.",
+      `Перед подтверждением подписи дополните данные этого лица в его карточке: ${representativeCardPlace(error.body?.missing, tx)}.`,
+      `Bitte vervollständigen Sie vor der Bestätigung der Unterschrift die Daten dieser Person in ihrer Karte: ${representativeCardPlace(error.body?.missing, tx)}.`,
     ) : tx(
-      "Перед договором и подписью дополните данные родителей (законных представителей) в разделе «Данные клиента». В кабинете можно запросить блок «Представители».",
-      "Bitte vervollständigen Sie vor Vertrag und Unterschrift die Daten der Eltern bzw. gesetzlichen Vertreter unter „Personendaten“. Im Portal können Sie den Block „Vertretung“ anfordern.",
+      `Перед договором и подписью дополните данные родителей (законных представителей) в их карточках: ${representativeCardPlace(error.body?.missing, tx)}. В кабинете можно запросить блок «Представители».`,
+      `Bitte vervollständigen Sie vor Vertrag und Unterschrift die Daten der Eltern bzw. gesetzlichen Vertreter in ihren Karten: ${representativeCardPlace(error.body?.missing, tx)}. Im Portal können Sie den Block „Vertretung“ anfordern.`,
     );
     const missing = representativeMissingText(error.body?.missing, tx);
     const hint = representativeDocumentFieldsMissing(error.body?.missing) ? tx(

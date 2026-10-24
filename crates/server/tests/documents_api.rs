@@ -12595,6 +12595,19 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
     ] {
         assert!(!text.contains(absent), "{absent} in {text}");
     }
+    // DEV 2026-10-24: a second click after a network error made a second v1
+    // beside the first; another document of the form is a new version of it.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(json!({ "lead_id": lead_id }))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "document_version_exists", "{body}");
+    assert_eq!(body["document_id"], json!(document_id), "{body}");
     // A draft edited after submission must never be printed with the old
     // declaration timestamp. The API guard also applies to direct callers.
     sqlx::query(
@@ -12611,7 +12624,9 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
         "POST",
         "/api/v1/documents/generate",
         &admin_bearer,
-        Some(generate(json!({ "lead_id": lead_id }))),
+        Some(generate(
+            json!({ "lead_id": lead_id, "replace_document_id": document_id }),
+        )),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
@@ -12634,10 +12649,19 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
         "POST",
         "/api/v1/documents/generate",
         &admin_bearer,
-        Some(generate(json!({ "lead_id": lead_id }))),
+        Some(generate(
+            json!({ "lead_id": lead_id, "replace_document_id": document_id }),
+        )),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{fresh}");
+    let replaces: Option<Uuid> =
+        sqlx::query_scalar("SELECT replaces_document_id FROM documents WHERE id = $1")
+            .bind(Uuid::parse_str(fresh["id"].as_str().unwrap()).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(replaces, Some(document_id));
     let (status, bytes) = bytes_request(
         &app,
         "GET",

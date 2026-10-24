@@ -4695,9 +4695,15 @@ test.describe("responsive staff workspace", () => {
     const agencyConfirmationToggle = wizard.getByRole("checkbox", {
       name: "Auftrag von der Agentur bestätigt",
     });
+    // The agency confirms only after the client signed: the server answers
+    // 409 before (walk-through 2026-10-24), so the box waits with a hint.
+    await expect(agencyConfirmationToggle).toBeDisabled();
+    await expect(wizard.getByTestId("lead-order-agency-confirmation-hint")).toContainText(
+      "Verfügbar nach der Unterschrift des Kunden",
+    );
     await setDatePickerValue(wizard.locator("#lead-contract-valid-from"), "2026-08-20");
     // The first save creates the order.
-    await agencyConfirmationToggle.check();
+    await wizard.getByRole("checkbox", { name: "Vorauszahlung erforderlich" }).check();
     await expect.poll(() => commercialBasisRequests).toBe(1);
     expect(contractCreatePayload).toMatchObject({ valid_from: "2026-08-20" });
     expect(contractCreatePayload).not.toHaveProperty("valid_to");
@@ -4716,31 +4722,37 @@ test.describe("responsive staff workspace", () => {
     expect(commercialBasisPayloads[0]).toMatchObject({
       date_from: "2026-09-01",
       date_to: "2026-09-15",
-      signed_agency: true,
+      prepayment_required: true,
     });
     // A cached client signature is never sent: it would undo a scan recorded meanwhile.
     expect(commercialBasisPayloads[0]).not.toHaveProperty("signed_patient");
+    // The client's signature is recorded meanwhile (the scan of the signed order).
+    signedPatient = true;
     releaseCommercialBasis();
-    await expect(agencyConfirmationToggle).toBeEnabled();
-    await expect(agencyConfirmationToggle).toBeChecked();
     // After the service lines are saved, the order total is recalculated from what the server kept.
     await expect.poll(() => commercialBasisRequests).toBe(2);
     expect(commercialBasisPayloads[1]).toEqual({ total_estimated: "14875.00" });
-
-    await agencyConfirmationToggle.uncheck();
-    await expect.poll(() => commercialBasisRequests).toBe(3);
-    expect(commercialBasisPayloads[2]).toEqual({ signed_agency: false });
     await expect(agencyConfirmationToggle).toBeEnabled();
+    await expect(wizard.getByTestId("lead-order-agency-confirmation-hint")).toHaveCount(0);
+
     await agencyConfirmationToggle.check();
     // The confirmation shows at once; since 3cffe0f2 the wizard stays busy until it is saved.
     await expect(agencyConfirmationToggle).toBeChecked();
-    await expect.poll(() => commercialBasisRequests).toBe(4);
-    expect(commercialBasisPayloads[3]).toEqual({ signed_agency: true });
+    await expect.poll(() => commercialBasisRequests).toBe(3);
+    expect(commercialBasisPayloads[2]).toEqual({ signed_agency: true });
     await expect(agencyConfirmationToggle).toBeDisabled();
     await expect(wizard.locator("footer").getByText("Wird gespeichert…", { exact: true })).toBeVisible();
     releaseAgencyConfirmation();
     await expect(agencyConfirmationToggle).toBeEnabled();
     await expect(agencyConfirmationToggle).toBeChecked();
+    await agencyConfirmationToggle.uncheck();
+    await expect.poll(() => commercialBasisRequests).toBe(4);
+    expect(commercialBasisPayloads[3]).toEqual({ signed_agency: false });
+    await expect(agencyConfirmationToggle).toBeEnabled();
+    // Without an amount the prepayment would block the estimate.
+    await wizard.getByRole("checkbox", { name: "Vorauszahlung erforderlich" }).uncheck();
+    await expect.poll(() => commercialBasisRequests).toBe(5);
+    expect(commercialBasisPayloads[4]).toMatchObject({ prepayment_required: false });
     await expect(
       wizard.getByRole("button", { name: "Kostenvoranschlag erstellen" }),
     ).toBeEnabled();

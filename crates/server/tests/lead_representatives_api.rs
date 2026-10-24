@@ -2696,3 +2696,48 @@ async fn staff_upload_a_parents_identity_document_in_the_wizard() {
     assert_eq!(cabinet[0]["uploaded_by_staff"], true, "{request}");
     assert_eq!(cabinet[0]["can_delete"], false, "{request}");
 }
+
+/// Walk-through 2026-10-24: a minor's lead filled by staff ("Заполняю сам",
+/// no parent login) was refused the framework contract for the parent's
+/// citizenship and structured address, which the staff card could not take.
+/// The card's details reach the place the contract's check reads.
+#[tokio::test]
+async fn staff_enter_a_parents_citizenship_and_address_for_the_contract() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let mother = Uuid::new_v4();
+    let lead_id = minor_lead(
+        &app,
+        json!([{ "id": mother, "name": "Anna Muster", "relation": "mother",
+                 "email": address("anna.staff"), "phone": "+49 30 123456",
+                 "address": "Musterweg 1, Berlin" }]),
+    )
+    .await;
+    let structured = keys(
+        "rep1",
+        &["citizenships", "street", "zip", "city", "country"],
+    );
+    let before = contract_gate_missing(&app, lead_id).await;
+    for key in &structured {
+        assert!(before.contains(key), "{key} {before:?}");
+    }
+    let (status, body) = json_request(
+        router,
+        "PUT",
+        &format!("/api/v1/leads/{lead_id}/representatives/{mother}/details"),
+        &app.staff("patient_manager"),
+        Some(json!({
+            "values": { "citizenships": ["ua", "DE"], "street": "Musterweg 1",
+                        "zip": "10115", "city": "Berlin", "country": "DE" },
+            "base": { "citizenships": [], "street": "", "zip": "", "city": "", "country": "" },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let person = representative(&body, mother);
+    assert_eq!(person["citizenships"], json!(["UA", "DE"]), "{person}");
+    let after = contract_gate_missing(&app, lead_id).await;
+    for key in &structured {
+        assert!(!after.contains(key), "{key} {after:?}");
+    }
+}

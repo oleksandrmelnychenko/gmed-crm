@@ -74,3 +74,38 @@ export function representativeDetailsErrors(draft: RepresentativeDetails, loaded
   if (oneLine(draft.zip) !== oneLine(loaded.zip) && oneLine(draft.zip).length > 20) errors.zip = "too_long";
   return errors;
 }
+
+/** Nothing entered yet: the form of a parent who is not on file. */
+export const EMPTY_REPRESENTATIVE_DETAILS: RepresentativeDetails = {
+  birth_place: "",
+  birth_country: "",
+  citizenships: [],
+  street: "",
+  zip: "",
+  city: "",
+  country: "",
+};
+
+export type PendingRepresentativeDetails = { id: string; values: RepresentativeDetails; base: RepresentativeDetails };
+
+/**
+ * The details staff entered on a parent's card before the server knew the
+ * parent (a new card, mode «Заполняю сам»; walk-through 2026-10-24): those
+ * whose parent is now on file are written as a change against what the
+ * server has. A parent still missing stays pending; an entry without a
+ * change is nothing to write.
+ */
+export function pendingRepresentativeDetailsReady(
+  pending: ReadonlyMap<string, RepresentativeDetails>,
+  representatives: readonly LeadRepresentative[],
+): PendingRepresentativeDetails[] {
+  const ready: PendingRepresentativeDetails[] = [];
+  for (const [id, values] of pending) {
+    const person = representatives.find((item) => item.id === id);
+    if (!person) continue;
+    const base = representativeDetailsOf(person);
+    if (!representativeDetailsChanged(values, base)) continue;
+    ready.push({ id, values, base });
+  }
+  return ready;
+}
