@@ -395,7 +395,7 @@ export async function loginViaUi(page: Page, email: string, password: string) {
         page.getByRole("button", { name: /Anmelden|Войти/i }).click(),
       ]);
       await expect(
-        page.getByRole("button", { name: /Abmelden|Выйти|Logout/i }),
+        page.getByRole("button", { name: /Abmelden|Выйти|Выход|Logout/i }),
       ).toBeVisible({ timeout: 30_000 });
     } catch (error) {
       if (attempt >= 2) {
@@ -454,7 +454,7 @@ export async function loginViaApi(
         )
         .then(() => page.goto("/"));
       await expect(
-        page.getByRole("button", { name: /Abmelden|Выйти|Logout/i }),
+        page.getByRole("button", { name: /Abmelden|Выйти|Выход|Logout/i }),
       ).toBeVisible({ timeout: 30_000 });
     } catch (error) {
       if (attempt >= 2) {
