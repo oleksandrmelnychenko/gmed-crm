@@ -52,7 +52,7 @@ import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata"
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
 import {
-  PAYER_RELATIONSHIP_KINDS,
+  payerRelationshipKindsFor,
   PAYER_SECTION_ID,
   PAYER_TYPES,
   SOURCE_OF_FUNDS,
@@ -363,6 +363,11 @@ export function LeadPayerDeclarationSection({
     setMessage(null);
     setForm(next);
     if (payerEmailInvalid(next)) return;
+    // "A parent pays" is saved once the parent is chosen: without one the
+    // server refuses it (422 payer_representative_missing) and the section
+    // showed "Не сохранено · Повторить сохранение" right after the click
+    // (live QA 2026-10-24); the form already asks to choose the parent.
+    if (next.kind === "representative" && !next.representativeId) return;
     // Capture this lead's save callback: a later lead must never receive this draft.
     const queue = autosaveRef.current;
     queue?.schedule(next, async (snapshot) => {
@@ -971,11 +976,11 @@ export function LeadPayerDeclarationSection({
                     aria-label={tx("Кем приходится пациенту", "Beziehung zum Patienten")}
                     onChange={(event) => patch(
                       "relationshipKind",
-                      PAYER_RELATIONSHIP_KINDS.find((value) => value === event.target.value) ?? "",
+                      payerRelationshipKindsFor(form).find((value) => value === event.target.value) ?? "",
                     )}
                   >
                     <option value="">{tx("Выберите", "Auswählen")}</option>
-                    {PAYER_RELATIONSHIP_KINDS.map((value) => (
+                    {payerRelationshipKindsFor(form).map((value) => (
                       <option key={value} value={value}>{payerRelationshipKindLabel(value, tx)}</option>
                     ))}
                   </NativeComboboxSelect>

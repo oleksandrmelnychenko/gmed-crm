@@ -36,6 +36,16 @@ describe("daysUntilRetentionDeadline", () => {
     expect(daysUntilRetentionDeadline("2026-09-20T12:00:00Z", now)).toBe(0);
   });
 
+  it("counts the Berlin calendar days to the date the banner shows (live QA 2026-10-24)", () => {
+    // Created a moment ago, the browser clock 5 s behind the server: still 14 days to 07.11.
+    const created = new Date("2026-10-24T10:49:51Z");
+    expect(daysUntilRetentionDeadline("2026-11-07T10:49:56Z", created)).toBe(14);
+    // Deleted later today: "today", not "in 1 day".
+    expect(daysUntilRetentionDeadline("2026-10-24T20:00:00Z", created)).toBe(0);
+    // Late evening in Berlin is already the next calendar day in the deadline's date.
+    expect(daysUntilRetentionDeadline("2026-10-25T23:30:00Z", created)).toBe(2);
+  });
+
   it("names the day of deletion once the deadline is reached", () => {
     expect(retentionCountdownLabel(3, "ru")).toBe("Удаление через 3 дн");
     expect(retentionCountdownLabel(3, "de")).toBe("Löschung in 3 T.");

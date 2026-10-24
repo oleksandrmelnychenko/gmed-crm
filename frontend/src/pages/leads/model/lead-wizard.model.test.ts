@@ -40,6 +40,7 @@ import {
   prevStep,
   repeatIntakePatientId,
   repeatIntakePatientNumber,
+  patientInsuranceCoversGermany,
   resumeStep,
   stepIsComplete,
   wizardUpdatePayload,
@@ -171,6 +172,13 @@ describe("repeat intake mode", () => {
     expect(isRepeatIntakeLead("lead", repeatLead)).toBe(true);
     expect(repeatIntakePatientId(true, null, repeatLead)).toBe("patient-1");
     expect(repeatIntakePatientNumber(null, repeatLead)).toBe("PT-0001");
+  });
+
+  it("starts a repeat request with the coverage of the first request (live QA 2026-10-24)", () => {
+    expect(patientInsuranceCoversGermany({ insurance_covers_germany: "yes" })).toBe("yes");
+    expect(patientInsuranceCoversGermany({ insurance_covers_germany: "not_sure" })).toBe("not_sure");
+    expect(patientInsuranceCoversGermany({ insurance_covers_germany: "maybe" })).toBe("");
+    expect(patientInsuranceCoversGermany(null)).toBe("");
   });
 
   it("uses the patient card context while the lead is not loaded yet", () => {

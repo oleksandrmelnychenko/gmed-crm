@@ -1279,3 +1279,19 @@ export function leadConversionRunnable(
     && readiness.blocking_reasons.every((reason) => reason === LEAD_QUALIFICATION_REASON)
     && (qualificationStatus === "new" || qualificationStatus === "in_progress");
 }
+
+/**
+ * The server blockers the wizard lists as "what is left": without the
+ * qualification of a lead still in work, which the conversion does itself
+ * (owner decision 2026-10-23). Listing it asked staff for a step that has no
+ * control ("Что осталось заполнить: 1 — Подтвердите данные обращения" next to
+ * an enabled «Создать пациента»).
+ */
+export function leadOpenBlockingReasons(
+  readiness: { blocking_reasons: readonly string[] } | null | undefined,
+  qualificationStatus: string | null | undefined,
+): string[] {
+  const reasons = [...(readiness?.blocking_reasons ?? [])];
+  if (qualificationStatus !== "new" && qualificationStatus !== "in_progress") return reasons;
+  return reasons.filter((reason) => reason !== LEAD_QUALIFICATION_REASON);
+}

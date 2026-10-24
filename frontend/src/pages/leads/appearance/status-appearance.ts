@@ -1,5 +1,5 @@
 import type { StatusTone } from "@/components/ui-shell";
-import { formatAppDate } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 
 /** Whole days elapsed since the lead entered its current status; null when unknown. */
 export function daysInStatus(
@@ -19,8 +19,12 @@ export function daysInStatusLabel(days: number, lang: string): string {
 }
 
 /**
- * Whole days until the unqualified-lead rule deletes the lead (0 = today or
- * overdue); null while the rule does not apply to it.
+ * Calendar days (Europe/Berlin) until the unqualified-lead rule deletes the
+ * lead (0 = today or overdue); null while the rule does not apply to it.
+ * Counted between the dates, as the banner shows the date beside it: rounding
+ * up the hours said "07.11.2026 (через 15 дн.)" on 24.10 for a lead created
+ * a moment ago when the browser clock ran a few seconds behind the server,
+ * and "через 1 дн." for a deletion later today (live QA 2026-10-24).
  */
 export function daysUntilRetentionDeadline(
   deadline?: string | null,
@@ -29,7 +33,11 @@ export function daysUntilRetentionDeadline(
   if (!deadline) return null;
   const due = new Date(deadline);
   if (Number.isNaN(due.getTime())) return null;
-  return Math.max(0, Math.ceil((due.getTime() - now.getTime()) / 86_400_000));
+  const dayNumber = (key: string) => {
+    const [year, month, day] = key.split("-").map(Number);
+    return Date.UTC(year, month - 1, day) / 86_400_000;
+  };
+  return Math.max(0, dayNumber(appDateKey(due)) - dayNumber(appDateKey(now)));
 }
 
 /** "Удаление через N дн" / "Löschung in N T." for the retention countdown. */

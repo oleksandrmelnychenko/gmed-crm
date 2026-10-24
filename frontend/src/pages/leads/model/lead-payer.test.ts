@@ -24,6 +24,7 @@ import {
   payerReadinessReasonLabels,
   payerReasonLabel,
   payerRelationshipKindLabel,
+  payerRelationshipKindsFor,
   payerRelationshipTextShown,
   payerSignatureSequence,
   payerStatusBadge,
@@ -900,5 +901,23 @@ describe("an organisation payer's legal form and register number (staff, 2026-10
       organisationDetailsSupport: "supported",
       organisationDetailsLocked: true,
     });
+  });
+});
+
+describe("payer relationship of an organisation (live QA 2026-10-24)", () => {
+  const person = { ...EMPTY_PAYER_DECLARATION_FORM, kind: "third_party" as const, payerType: "person" as const };
+
+  it("offers an organisation only employer, business partner or other, as the payer's link does", () => {
+    expect(payerRelationshipKindsFor(person)).toEqual(PAYER_RELATIONSHIP_KINDS);
+    expect(payerRelationshipKindsFor({ ...person, payerType: "company" })).toEqual(["employer", "business_partner", "other"]);
+    expect(payerRelationshipKindsFor({ ...person, payerType: "insurance" })).toEqual(["employer", "business_partner", "other"]);
+  });
+
+  it("drops a person's relationship when the payer becomes an organisation", () => {
+    const spouse = withPayerDeclarationField(person, "relationshipKind", "spouse");
+    expect(spouse.relationshipKind).toBe("spouse");
+    expect(withPayerDeclarationField(spouse, "payerType", "company").relationshipKind).toBe("");
+    const employer = withPayerDeclarationField(person, "relationshipKind", "employer");
+    expect(withPayerDeclarationField(employer, "payerType", "company").relationshipKind).toBe("employer");
   });
 });

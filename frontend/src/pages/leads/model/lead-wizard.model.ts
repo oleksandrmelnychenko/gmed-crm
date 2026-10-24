@@ -109,6 +109,17 @@ export function repeatIntakePatientId(
   return existingPatientId || lead?.repeat_patient_id || lead?.prospect_patient_id || null;
 }
 
+/**
+ * Whether the insurance covers treatment in Germany, as the patient's first
+ * request stated it (`intake_profile.insurance_covers_germany`): the patient
+ * file has no field of its own, so a repeat request starts from it.
+ */
+export function patientInsuranceCoversGermany(intakeProfile: unknown): "" | "yes" | "no" | "not_sure" {
+  if (!intakeProfile || typeof intakeProfile !== "object") return "";
+  const value = (intakeProfile as Record<string, unknown>).insurance_covers_germany;
+  return value === "yes" || value === "no" || value === "not_sure" ? value : "";
+}
+
 /** The patient number shown next to "Повторное обращение". */
 export function repeatIntakePatientNumber(
   existingPatientNumber: string | null | undefined,

@@ -286,6 +286,7 @@ import {
 import {
   LEAD_WIZARD_SERVICE_OPTIONS,
   leadConversionRunnable,
+  leadOpenBlockingReasons,
   leadIntakeTypeFromLead,
   leadErrorBlockingReasons,
   leadErrorMessage,
@@ -370,6 +371,7 @@ import {
   isMinor,
   isRepeatIntakeLead,
   namedLanguageOptions,
+  patientInsuranceCoversGermany,
   prepaymentDueAtPatch,
   repeatIntakePatientId,
   repeatIntakePatientNumber,
@@ -1904,6 +1906,9 @@ function draftFromExistingPatient(patient: PatientDetail): Draft {
     passportExpiry: patient.passport_expiry?.trim() ?? "",
     language: normalizedLanguageCode(patient.languages?.[0]),
     hasInsurance: insuranceProvider || insuranceNumber || insuranceType ? "yes" : "",
+    // The patient file keeps the coverage only in the intake of the first
+    // request; a repeat request showed "Не указано" (live QA 2026-10-24).
+    insuranceCoversGermany: patientInsuranceCoversGermany(patient.intake_profile),
     privacyConsent: legal?.dsgvo_signed === true,
     insuranceType,
     insuranceProvider,
@@ -7319,7 +7324,7 @@ ${serviceCommentLines.join("\n")}`
         onClick: () => openValidationIssue({ key: "request-consents", step: "documents", message: readinessReasonLabel(missingConsentField === PRIVACY_CONSENT_ID ? consentReasons[0] : consentReasons[1], tx), fieldId: missingConsentField }),
       } : undefined,
     },
-    ...lead.readiness.blocking_reasons
+    ...leadOpenBlockingReasons(lead.readiness, lead.qualification_status)
       .filter((reason) => readinessReasonStep(reason) === "documents" && !consentReasons.includes(reason))
       .map((reason): RequestReviewRow => ({
         key: `request:${reason}`,
@@ -7444,7 +7449,9 @@ ${serviceCommentLines.join("\n")}`
   const visibleCommercialSaveFeedback = commercialSaveFeedback?.followsReadiness
     ? commercialReadinessFeedback(lead?.readiness, tx)
     : commercialSaveFeedback;
-  const completionBlockerCount = (lead?.readiness.blocking_reasons.length ?? 0)
+  // What staff still have to do: the qualification is no step of its own (the conversion does it).
+  const openBlockingReasons = leadOpenBlockingReasons(lead?.readiness, lead?.qualification_status);
+  const completionBlockerCount = openBlockingReasons.length
     + (!quoteAndPrepaymentReady && !(lead?.readiness.blocking_reasons ?? []).some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? 1 : 0);
   const isStepReady = (id: string) => {
     if (id === "master_data") return Boolean(draft && Object.keys(masterErrors).length === 0);
@@ -10475,12 +10482,12 @@ ${serviceCommentLines.join("\n")}`
                   })}
                 </div>
               </Section>
-              {lead.readiness.blocking_reasons.length > 0 || !quoteAndPrepaymentReady ? (
+              {openBlockingReasons.length > 0 || !quoteAndPrepaymentReady ? (
                 <Banner tone="warning">
                   <div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}: {completionBlockerCount}</div>
                   <div data-testid="completion-blockers" className="mt-2 space-y-2">
                     {STEPS.map((candidate) => {
-                      const reasons = lead.readiness.blocking_reasons.filter((reason) => readinessReasonStep(reason) === candidate.id);
+                      const reasons = openBlockingReasons.filter((reason) => readinessReasonStep(reason) === candidate.id);
                       const quoteMissing = candidate.id === "commercial" && !quoteAndPrepaymentReady
                         && !lead.readiness.blocking_reasons.some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason));
                       if (!reasons.length && !quoteMissing) return null;

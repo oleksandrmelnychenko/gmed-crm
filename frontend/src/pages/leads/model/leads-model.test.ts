@@ -9,6 +9,7 @@ import {
   formatDateTime,
   LEAD_QUALIFICATION_REASON,
   leadConversionRunnable,
+  leadOpenBlockingReasons,
   leadErrorBlockingReasons,
   leadErrorMessage,
   leadPermissions,
@@ -419,4 +420,14 @@ it("«Создать пациента» runs when only the qualification blocks:
   expect(leadConversionRunnable(blocked(LEAD_QUALIFICATION_REASON), "not_qualified")).toBe(false);
   expect(leadConversionRunnable(blocked(), "in_progress")).toBe(false);
   expect(leadConversionRunnable(null, "in_progress")).toBe(false);
+});
+
+it("the «what is left» list leaves out the qualification the conversion does itself (live QA 2026-10-24)", () => {
+  const readiness = (...reasons: string[]) => ({ blocking_reasons: reasons });
+  expect(leadOpenBlockingReasons(readiness(LEAD_QUALIFICATION_REASON), "in_progress")).toEqual([]);
+  expect(leadOpenBlockingReasons(readiness(LEAD_QUALIFICATION_REASON, "Patient form is not signed"), "new"))
+    .toEqual(["Patient form is not signed"]);
+  // A lead out of work is not qualified by the conversion: the blocker stays.
+  expect(leadOpenBlockingReasons(readiness(LEAD_QUALIFICATION_REASON), "not_qualified")).toEqual([LEAD_QUALIFICATION_REASON]);
+  expect(leadOpenBlockingReasons(null, "new")).toEqual([]);
 });

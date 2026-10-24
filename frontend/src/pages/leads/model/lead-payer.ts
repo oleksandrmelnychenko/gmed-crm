@@ -526,6 +526,20 @@ export function isOrganisationPayerForm(
     && form.payerType !== "person";
 }
 
+/** How an organisation can be related to the patient (as the payer's link asks it). */
+export const ORGANISATION_PAYER_RELATIONSHIP_KINDS = ["employer", "business_partner", "other"] as const satisfies readonly PayerRelationshipKind[];
+
+/**
+ * The relationships staff can choose for the payer: an organisation is no
+ * spouse, parent or friend (live QA 2026-10-24) — the same choice as on the
+ * payer's own link (`payer-link-model.ts` `relationshipKindsFor`).
+ */
+export function payerRelationshipKindsFor(
+  form: Pick<PayerDeclarationForm, "kind" | "payerType" | "payerTypeSupport">,
+): readonly PayerRelationshipKind[] {
+  return isOrganisationPayerForm(form) ? ORGANISATION_PAYER_RELATIONSHIP_KINDS : PAYER_RELATIONSHIP_KINDS;
+}
+
 /**
  * Whether the free-text relationship is asked beside the kind: for "other",
  * and without a kind as long as there is a text — one staff typed before the
@@ -831,6 +845,11 @@ export function withPayerDeclarationField<K extends keyof PayerDeclarationForm>(
   let next = { ...form, [field]: value };
   if ((field === "selfFundsSource" || field === "selfFundsDescription") && value !== form[field]) {
     next.selfFundsTouched = true;
+  }
+  // A company is no spouse or parent: a relationship of a person does not
+  // carry over to an organisation (the payer's own link offers only these).
+  if (!payerRelationshipKindsFor(next).includes(next.relationshipKind as PayerRelationshipKind)) {
+    next.relationshipKind = "";
   }
   // Another kind of payer: the funds entered for the person before belong
   // to that person (one source per person, 2026-10-23), never to the next.
