@@ -359,9 +359,10 @@ export function payerSelfOffered(request: Pick<LeadRequest, "minor" | "payer">):
 }
 
 /**
- * Whether the third party's e-mail, phone and residence are required to send
- * (owner request 2026-10-07): not of the parent who pays (the own data are
- * known), and a server that lists one as missing gets the mark in any case.
+ * Whether a third party's contact field is required to send: the e-mail its
+ * own link goes to and the country, not of the parent who pays (the own data
+ * are known). Phone and city the payer states on its own link (owner
+ * 2026-10-24); a server that lists a field as missing gets the mark in any case.
  */
 export function payerContactRequired(
   draft: Pick<PayerDraft, "guardian_pays">,
@@ -372,6 +373,7 @@ export function payerContactRequired(
   // A parent of the minor named as payer (also the other parent, seen from
   // this login) is the contracting party: the server never asks the contact
   // (owner decision 2026-10-19).
+  if (field === "payer_phone" || field === "payer_city") return false;
   return !draft.guardian_pays && request.payer?.payer_kind !== "representative";
 }
 

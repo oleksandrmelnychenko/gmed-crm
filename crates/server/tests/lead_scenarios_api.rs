@@ -1560,6 +1560,92 @@ async fn scenario_enhanced_check_by_a_parents_citizenship() {
     assert!(texts[1].contains("Minister"), "father's sheet");
 }
 
+/// Block L of a minor's enhanced check (the own economic interest of the
+/// paying parent) is answered where the cabinet asks it: in the payer
+/// section, as `acts_on_own_account` with the payer — never as a statement
+/// (`/identification` refuses the key). Document review 2026-10-24.
+#[tokio::test]
+async fn scenario_block_l_of_a_paying_parent_is_answered_with_the_payer() {
+    let Some(app) = Scn::new().await else { return };
+    let request = fill_joint_custody_request(&app, "IR").await;
+    let (lead, father) = (request.lead, request.father);
+    let base = request.base();
+    let anna = request.anna.clone();
+    // The child is an Iranian citizen too: block L joins the follow-up.
+    let mut child = child_personal_data();
+    child["citizenships"] = json!(["DE", "IR"]);
+    app.ok(
+        StatusCode::OK,
+        "POST",
+        &format!("{base}/personal-data"),
+        &anna,
+        Some(child),
+    )
+    .await;
+    app.ok(
+        StatusCode::OK,
+        "POST",
+        &format!("{base}/representatives/{father}/country-questions"),
+        &anna,
+        Some(json!({ "birth_place": "Teheran", "birth_country": "IR",
+            "residence_since": "2005", "stay_reason": "family",
+            "pep_self": false, "pep_related": false, "sanctions_links": false })),
+    )
+    .await;
+    let view = app.cabinet(lead, &anna).await;
+    assert!(
+        view["follow_up"]["missing"]["L"]
+            .as_array()
+            .is_some_and(|keys| keys.contains(&json!("payer_own_account"))),
+        "{}",
+        view["follow_up"]
+    );
+    // The statement endpoint does not take it.
+    let (code, refused) = app
+        .call(
+            "POST",
+            &format!("{base}/identification"),
+            &anna,
+            Some(json!({ "payer_own_account": true })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    // The payer section does, for the paying father (named as the cabinet
+    // names him: with his e-mail on file).
+    let father_email = view["representation"]["representatives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|person| person["id"] == json!(father))
+        .and_then(|person| person["email"].as_str())
+        .unwrap_or_else(|| panic!("no father e-mail: {view}"))
+        .to_string();
+    let body = app
+        .ok(
+            StatusCode::OK,
+            "POST",
+            &format!("{base}/payer"),
+            &anna,
+            Some(json!({
+                "payer_kind": "third_party", "payer_type": "person",
+                "relationship_kind": "parent",
+                "first_name": "Ben", "last_name": "Muster",
+                "date_of_birth": "1983-04-06", "email": father_email,
+                "citizenships": ["IR"], "country": "DE",
+                "acts_on_own_account": true
+            })),
+        )
+        .await;
+    assert_eq!(body["payer"]["payer_kind"], "representative", "{body}");
+    assert_eq!(body["payer"]["acts_on_own_account"], true, "{body}");
+    assert_eq!(
+        body["follow_up"]["missing"]["L"],
+        json!([]),
+        "{}",
+        body["follow_up"]
+    );
+}
+
 async fn document_text(app: &Scn, document: &str) -> String {
     let request = Request::builder()
         .method("GET")

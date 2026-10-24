@@ -3295,13 +3295,13 @@ struct GwgPaymentRoute {
 impl GwgPaymentRoute {
     /// The label of the line: where the answers come from. The patient form
     /// numbers only the sections it prints, so the line names the section
-    /// "Wer zahlt?" that carries the payment route (QA 2026-10-10 B5: it
+    /// "Rechnung und Zahlung" that carries the payment route (QA 2026-10-10 B5: it
     /// pointed to a section 8 the form does not have).
     fn label(&self) -> &'static str {
         if self.answered_by_payer {
             "Angaben zum Zahlungsweg (Angaben des Kostenübernehmers)"
         } else {
-            "Angaben zum Zahlungsweg (Patientenformular, Abschnitt „Wer zahlt?“)"
+            "Angaben zum Zahlungsweg (Patientenformular, Abschnitt „Rechnung und Zahlung“)"
         }
     }
 
@@ -10809,11 +10809,23 @@ fn build_framework_contract_pdf(
         &mut layout,
         "Die nachfolgenden Anlagen sind integraler Bestandteil des Vertrags:",
     );
-    for line in [
-        "Anlage 1:  Einverständnis zur Datenübermittlung",
-        "Anlage 2:  Schweigepflichtentbindung",
-        "Anlage 3:  Informationsblatt zum Datenschutz",
-    ] {
+    // A minor's parents or guardian sign one form that holds both the consent
+    // and the release (owner 2026-10-24): one annex entry; the Datenschutz
+    // sheet keeps its number "Anlage 3".
+    let minor = context.contracting.parents_contract() || context.contracting.represented();
+    let annexes: &[&str] = if minor {
+        &[
+            "Anlage 1 und 2:  Einverständniserklärung zur Datenübermittlung und Schweigepflichtsentbindung (eine gemeinsame Erklärung für das Kind)",
+            "Anlage 3:  Informationsblatt zum Datenschutz",
+        ]
+    } else {
+        &[
+            "Anlage 1:  Einverständnis zur Datenübermittlung",
+            "Anlage 2:  Schweigepflichtentbindung",
+            "Anlage 3:  Informationsblatt zum Datenschutz",
+        ]
+    };
+    for line in annexes {
         layout.text_block(
             line,
             11.0,
@@ -19670,11 +19682,11 @@ fn admin_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     // A heading never stands alone at the foot of a page (document review
     // 2026-10-24: "2. Für den Vertragspartner auftretende Person" ended page 1
     // of a GwG sheet, its content began page 2): it keeps the room of its own
-    // lines and two lines of what follows.
+    // lines and a labelled value (label and value) of what follows.
     let heading_lines = wrap_text_to_width_precise(text, 13.0, layout.available_width(0.0))
         .len()
         .max(1);
-    layout.ensure_space(5.0 + heading_lines as f32 * pdf_line_height_mm(13.0, 1.2) + 12.0);
+    layout.ensure_space(5.0 + heading_lines as f32 * pdf_line_height_mm(13.0, 1.2) + 18.0);
     layout.text_block(text, 13.0, true, 0.0, TreatmentPlanPdfColor::Body, 3.0, 2.0);
 }
 
@@ -22464,6 +22476,15 @@ fn build_appointment_confirmation_pdf(
 }
 
 /// Renders a small muted caption line (the parenthetical hints in the reference form).
+/// The fill-in hint under a field of the child's consent form, only while the
+/// field is printed blank for handwriting (owner 2026-10-24: no
+/// "(Vorname, Name) (TT.MM.JJJJ)" under data already printed).
+fn consent_caption_while_blank(layout: &mut TreatmentPlanPdfLayout, text: &str, filled: bool) {
+    if !filled {
+        consent_caption(layout, text);
+    }
+}
+
 fn consent_caption(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     layout.text_block(
         text,
@@ -23241,6 +23262,28 @@ fn build_adult_privacy_information_pdf(
     Ok(finalize_admin_pdf(document, layout))
 }
 
+/// The affected third country of the AML form: a list of ISO codes becomes
+/// the German country names, anything else is kept as typed.
+fn aml_affected_country_text(value: &str) -> String {
+    let parts = value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let names = parts
+        .iter()
+        .map(|part| {
+            (part.len() == 2 && part.bytes().all(|byte| byte.is_ascii_alphabetic()))
+                .then(|| german_iso_country_name(&part.to_ascii_uppercase()))
+                .flatten()
+        })
+        .collect::<Option<Vec<_>>>();
+    match names {
+        Some(names) if !names.is_empty() => names.join(", "),
+        _ => value.trim().to_string(),
+    }
+}
+
 /// The required fields of the AML form (binding keys) that are empty: always
 /// the reason, the approving manager, the monitoring, the reviewer and the
 /// date; the country fields for a country trigger; the PEP fields for a PEP.
@@ -23465,6 +23508,12 @@ fn build_enhanced_due_diligence_pdf(
 ) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    // ISO codes the form sends ("IR", "IR, AF") read as German names; free
+    // text stays as typed (owner 2026-10-24).
+    let affected_country = aml
+        .affected_third_country
+        .as_deref()
+        .map(aml_affected_country_text);
     let countries = aml
         .triggered_countries
         .iter()
@@ -23529,7 +23578,7 @@ fn build_enhanced_due_diligence_pdf(
         (
             "Auslösende Länder",
             if countries.is_empty() {
-                aml_binding_value(aml.affected_third_country.as_deref()).to_string()
+                aml_binding_value(affected_country.as_deref()).to_string()
             } else {
                 countries
             },
@@ -23624,7 +23673,7 @@ fn build_enhanced_due_diligence_pdf(
     aml_labeled_value(
         &mut layout,
         "a. Betroffener Drittstaat",
-        aml.affected_third_country.as_deref(),
+        affected_country.as_deref(),
     );
     aml_labeled_value(
         &mut layout,
@@ -26808,7 +26857,7 @@ fn build_lead_self_disclosure_pdf(
             }
         }
     }
-    lead_disclosure_section(&mut layout, &mut section, "Wer zahlt?", &rows);
+    lead_disclosure_section(&mut layout, &mut section, "Rechnung und Zahlung", &rows);
 
     // 5. The declarations, with the follow-up details where given.
     let (pep_self_label, pep_related_label, sanctions_label) = if minor {
@@ -27295,11 +27344,33 @@ fn append_third_party_disclosure_pdf(
 /// Institutionen"), printed right under its persons instead of repeating
 /// them in a separate "Auskunft an Dritte" block. Only while that item is
 /// ticked, persons are named and the receipt records the consent.
+/// Who declares the disclosure consent on the form, for its wording.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RecipientsConsentWording {
+    /// The adult's own form ("meine Daten").
+    Adult,
+    /// One parent with sole custody ("meines Kindes").
+    SoleParent,
+    /// The child's guardian, Vormund ("des von mir vertretenen Kindes").
+    Guardian,
+    /// Both parents on the joint-custody form ("Wir … unseres Kindes").
+    BothParents,
+}
+
+/// The disclosure consent of both parents (owner 2026-10-24: the form of
+/// both parents says "Wir … unseres Kindes" throughout, also here).
+fn both_parents_disclosure_consent_text(company: &str) -> String {
+    format!(
+        "Wir willigen ausdrücklich ein, dass {company} den genannten Personen im angegebenen Umfang Auskunft über die personenbezogenen Daten unseres Kindes, einschließlich seiner Gesundheitsdaten, erteilt und diese Daten an sie übermittelt. Soweit eine Schweigepflicht besteht, entbinden wir die an Organisation und Behandlung Beteiligten insoweit von dieser. Wir können diese Einwilligung jederzeit mit Wirkung für die Zukunft widerrufen. Die bis dahin erfolgte Verarbeitung bleibt davon unberührt. Weitere Informationen finden Sie im Datenschutzhinweis."
+    )
+}
+
 fn append_named_recipients_consent_pdf(
     layout: &mut TreatmentPlanPdfLayout,
     choice: Option<&crate::consent_choices::OwnConsentChoice>,
-    child_form: bool,
+    wording: RecipientsConsentWording,
 ) {
+    let child_form = wording != RecipientsConsentWording::Adult;
     let Some(choice) = choice else {
         return;
     };
@@ -27313,7 +27384,8 @@ fn append_named_recipients_consent_pdf(
     if choice.recipient_lines().is_empty() {
         return;
     }
-    if disclosure.access_kind == "guardian" {
+    // Both parents declare together in their own words; no intro line.
+    if disclosure.access_kind == "guardian" && wording != RecipientsConsentWording::BothParents {
         layout.text_block(
             "Die folgende Einwilligung erklärt die vertretende Person für die oben bezeichnete Person.",
             10.5,
@@ -27324,12 +27396,23 @@ fn append_named_recipients_consent_pdf(
             0.8,
         );
     }
-    let consent = crate::consent_choices::disclosure_consent_text_for(
-        "de",
-        &disclosure.company_name,
-        crate::consent_choices::DisclosureSubject::of(&disclosure.access_kind, child_form),
-    )
-    .replace("den oben genannten Personen", "den genannten Personen");
+    let consent = match wording {
+        RecipientsConsentWording::BothParents => {
+            both_parents_disclosure_consent_text(&disclosure.company_name)
+        }
+        _ => crate::consent_choices::disclosure_consent_text_for(
+            "de",
+            &disclosure.company_name,
+            crate::consent_choices::DisclosureSubject::of(&disclosure.access_kind, child_form),
+        )
+        .replace("den oben genannten Personen", "den genannten Personen"),
+    };
+    // A guardian (Vormund) declares for the child they represent.
+    let consent = if wording == RecipientsConsentWording::Guardian {
+        consent.replace("meines Kindes", "des von mir vertretenen Kindes")
+    } else {
+        consent
+    };
     layout.text_block(
         &consent,
         10.5,
@@ -27428,7 +27511,7 @@ fn build_adult_privacy_consents_pdf(
             0.8,
         );
     }
-    append_named_recipients_consent_pdf(&mut layout, own_choice, false);
+    append_named_recipients_consent_pdf(&mut layout, own_choice, RecipientsConsentWording::Adult);
     adult_legal_checkbox(
         &mut layout,
         chosen.any_channel(),
@@ -27485,6 +27568,7 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     let agency_identity = agency_legal_identity(&context.agency);
     let data_system_name = context.agency.data_system_name.trim();
 
+    let filled = |value: Option<&str>| value.is_some_and(|value| !value.trim().is_empty());
     // Grammar tokens differ between the sole-guardian and the two-guardian (child) variants.
     let we = if context.sole_guardian { "Ich" } else { "Wir" };
     let we_lower = if context.sole_guardian { "ich" } else { "wir" };
@@ -27547,9 +27631,10 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
             0.0,
             0.5,
         );
-        consent_caption(
+        consent_caption_while_blank(
             &mut layout,
             "(Vorname, Name)                        (TT.MM.JJJJ)",
+            filled(context.guardian_name.as_deref()) && context.guardian_birth_date.is_some(),
         );
         // Guardian address block (sole variant only).
         let width = layout.available_width(0.0);
@@ -27564,9 +27649,10 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
             0.0,
             0.5,
         );
-        consent_caption(
+        consent_caption_while_blank(
             &mut layout,
             "(Straße und Hausnummer, Adressenzusatz, Ort, PLZ, Land)",
+            filled(context.guardian_address.as_deref()),
         );
         admin_block(&mut layout, "– nachfolgend „Ich“ –", 0.5, 1.5);
     } else {
@@ -27603,9 +27689,10 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
         0.0,
         0.5,
     );
-    consent_caption(
+    consent_caption_while_blank(
         &mut layout,
         "(Vorname, Name)                        (TT.MM.JJJJ)",
+        filled(context.child_name.as_deref()) && context.child_birth_date.is_some(),
     );
     let width = layout.available_width(0.0);
     admin_block(
@@ -27624,9 +27711,10 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
         0.5,
     );
     if context.sole_guardian {
-        consent_caption(
+        consent_caption_while_blank(
             &mut layout,
             "(Straße und Hausnummer, Adressenzusatz, Ort, PLZ, Land)",
+            filled(context.child_address.as_deref()),
         );
     }
     layout.spacer(1.5);
@@ -27708,7 +27796,17 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
                     0.8,
                 );
             }
-            append_named_recipients_consent_pdf(&mut layout, own_choice, true);
+            append_named_recipients_consent_pdf(
+                &mut layout,
+                own_choice,
+                if !context.sole_guardian {
+                    RecipientsConsentWording::BothParents
+                } else if context.court_guardian {
+                    RecipientsConsentWording::Guardian
+                } else {
+                    RecipientsConsentWording::SoleParent
+                },
+            );
         }
         true => {
             layout.text_block(
@@ -37079,6 +37177,41 @@ mod tests {
             "{selected_text}"
         );
         assert_eq!(selected_text.matches("Chosen Clinic").count(), 1);
+        // Filled fields carry no fill-in hint; the empty address keeps its
+        // own (owner 2026-10-24).
+        assert!(
+            !selected_text.contains("(Vorname, Name)"),
+            "{selected_text}"
+        );
+        assert!(
+            selected_text.contains("(Straße und Hausnummer"),
+            "{selected_text}"
+        );
+        // Both parents: "Wir … unseres Kindes" also in the consent to the
+        // named persons (owner 2026-10-24).
+        context.sole_guardian = false;
+        context.guardian2_name = Some("Ben MusterAR".to_string());
+        context.guardian2_birth_date = NaiveDate::from_ymd_opt(1983, 4, 6);
+        let both = normalized_pdf_text(&build_consent_pdf(&context).unwrap());
+        context.sole_guardian = true;
+        context.guardian2_name = None;
+        context.guardian2_birth_date = None;
+        assert!(
+            both.contains(
+                "Wir willigen ausdrücklich ein, dass GMED Test den genannten Personen im angegebenen Umfang Auskunft über die personenbezogenen Daten unseres Kindes"
+            ),
+            "{both}"
+        );
+        for absent in [
+            "Ich willige",
+            "meines Kindes",
+            "meinem Kind",
+            "Ich kann diese Einwilligung",
+            "erklärt die vertretende Person",
+            "(Vorname, Name)",
+        ] {
+            assert!(!both.contains(absent), "{absent}: {both}");
+        }
         let disclosure = context
             .own_choice
             .as_mut()
@@ -38728,7 +38861,7 @@ mod tests {
             "Eine andere Person handelt in meinem Namen",
             "ja – Ben Muster",
             "(rechtliche Betreuung) nein",
-            "4. Wer zahlt?",
+            "4. Rechnung und Zahlung",
             "Wer ist Rechnungsempfänger? Ich selbst",
             "Der Rechnungsempfänger ist auch der Zahler nein",
             "E-Mail für Rechnungen rechnung.anna@example.com",
@@ -38968,7 +39101,7 @@ mod tests {
         }
         for absent in [
             "Vertretung",
-            "Wer zahlt?",
+            "Rechnung und Zahlung",
             ". Erklärungen",
             "Ergänzende Angaben",
             "Frühere Namen",
@@ -39063,7 +39196,7 @@ mod tests {
         .unwrap();
         let text = normalized_pdf_text(&generated);
         for expected in [
-            "4. Wer zahlt?",
+            "4. Rechnung und Zahlung",
             "Ich zahle selbst.",
             "Bevorzugte Zahlungsart für Rechnungen Barzahlung",
             "Zahlung über Dritte / Zahlungsdienstleister nein",
@@ -39506,6 +39639,21 @@ mod tests {
     }
 
     #[test]
+    fn the_affected_third_country_reads_as_a_german_name() {
+        assert_eq!(super::aml_affected_country_text("IR"), "Iran");
+        assert_eq!(
+            super::aml_affected_country_text("ir, AF"),
+            "Iran, Afghanistan"
+        );
+        // Free text stays as typed.
+        assert_eq!(super::aml_affected_country_text("Iran"), "Iran");
+        assert_eq!(
+            super::aml_affected_country_text("IR (Wohnsitz bis 2005)"),
+            "IR (Wohnsitz bis 2005)"
+        );
+    }
+
+    #[test]
     fn the_aml_refusal_names_the_missing_fields() {
         // Document review 2026-10-24: a 422 without the fields left the
         // caller guessing.
@@ -39944,7 +40092,9 @@ mod tests {
         // The patient form numbers only the sections it prints: the line names
         // the section, not a number (QA 2026-10-10 B5).
         assert!(
-            text.contains("Angaben zum Zahlungsweg (Patientenformular, Abschnitt „Wer zahlt?“)"),
+            text.contains(
+                "Angaben zum Zahlungsweg (Patientenformular, Abschnitt „Rechnung und Zahlung“)"
+            ),
             "{text}"
         );
         assert!(!text.contains("Abschnitt 8"), "{text}");
@@ -40575,6 +40725,19 @@ mod tests {
         assert!(text.contains("Nebenweg 2"), "{text}");
         assert!(text.contains("80331 München"), "{text}");
         assert!(!text.contains("Nebenweg 2 | 80331"), "{text}");
+        // A minor's consent and release are one form (owner 2026-10-24):
+        // § 11 lists it once, not as two annexes.
+        assert!(
+            text.contains(
+                "Anlage 1 und 2: Einverständniserklärung zur Datenübermittlung und Schweigepflichtsentbindung"
+            ),
+            "{text}"
+        );
+        assert!(
+            !text.contains("Anlage 2: Schweigepflichtentbindung"),
+            "{text}"
+        );
+        assert!(text.contains("Anlage 3: Informationsblatt zum Datenschutz"));
     }
 
     #[test]

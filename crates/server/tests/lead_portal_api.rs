@@ -3103,15 +3103,14 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     }
     assert_eq!(body["payer"]["citizenships"], json!([]), "{body}");
     assert!(body["payer"]["contact_consent_at"].is_null(), "{body}");
-    // An organisation states why the payment goes through it instead of a
-    // relationship (owner 2026-10-11, the lead's `payment_background`).
+    // An organisation needs no relationship; why it pays it states on its
+    // own link (owner 2026-10-24: no longer required of the lead).
     assert_eq!(
         missing_for_the_payer(&body),
         [
             "payer_country",
             "payer_contact_consent",
             "payer_cost_estimate_consent",
-            "payer_payment_reason"
         ],
         "{body}"
     );
@@ -3138,11 +3137,7 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     // An organisation's relationship is no question of the cabinet any more.
     assert_eq!(
         missing_for_the_payer(&body),
-        [
-            "payer_contact_consent",
-            "payer_cost_estimate_consent",
-            "payer_payment_reason"
-        ],
+        ["payer_contact_consent", "payer_cost_estimate_consent"],
         "{body}"
     );
     let (status, body) = json_request(
@@ -3381,8 +3376,9 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     assert!(body["payer"]["organisation_name"].is_null(), "{body}");
     assert!(body["payer"]["contact_consent_at"].is_null(), "{body}");
     // Both consents of the lead were given for the company, and so were
-    // the lead's words on its funds. A person needs e-mail, phone and
-    // residence (owner request 2026-10-07).
+    // the lead's words on its funds. A person needs the e-mail for its own
+    // link and the country; phone and city it states on that link (owner
+    // 2026-10-24).
     assert!(
         body["payer"]["cost_estimate_consent_at"].is_null(),
         "{body}"
@@ -3393,9 +3389,7 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
             "payer_contact_consent",
             "payer_cost_estimate_consent",
             "payer_email",
-            "payer_phone",
             "payer_country",
-            "payer_city"
         ],
         "{body}"
     );
@@ -4317,10 +4311,10 @@ async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven()
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["billing"]["invoice_to"], "payer", "{body}");
     assert!(body["billing"]["invoice_name"].is_null(), "{body}");
-    // An organisation states why it pays instead of a relationship.
+    // An organisation needs no relationship; its reason is optional.
     assert_eq!(
         missing_for_step_three(&body),
-        ["payer_cost_estimate_consent", "payer_payment_reason"],
+        ["payer_cost_estimate_consent"],
         "{body}"
     );
 

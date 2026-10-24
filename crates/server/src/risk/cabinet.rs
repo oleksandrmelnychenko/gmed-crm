@@ -219,35 +219,16 @@ pub async fn base_extra(
     lead_id: Uuid,
     payer: Option<&Declaration>,
 ) -> Result<BaseExtra, sqlx::Error> {
-    let row = sqlx::query(
-        r#"SELECT d.organisation_legal_form, d.organisation_contact_name
-           FROM leads l
-           LEFT JOIN lead_payer_declarations d ON d.lead_id = l.id
-           WHERE l.id = $1"#,
-    )
-    .bind(lead_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-    let text = |column: &str| {
-        row.as_ref()
-            .and_then(|row| row.try_get::<Option<String>, _>(column).ok().flatten())
-            .filter(|value| !value.trim().is_empty())
-    };
+    let _ = (conn, lead_id);
     let organisation = payer.is_some_and(Declaration::is_organisation);
-    let mut organisation_missing = Vec::new();
     // The organisation's e-mail is the generic `payer_email` (its own link
-    // goes there), the phone is optional.
-    if organisation {
-        if text("organisation_legal_form").is_none() {
-            organisation_missing.push("payer_legal_form");
-        }
-        if text("organisation_contact_name").is_none() {
-            organisation_missing.push("payer_contact_name");
-        }
-    }
+    // goes there), the phone is optional. Its legal form and the person who
+    // acts for it the organisation states on its own link: the lead is no
+    // longer asked them before sending (owner 2026-10-24); the fields stay
+    // in the cabinet, optional.
     Ok(BaseExtra {
         organisation,
-        organisation_missing,
+        organisation_missing: Vec::new(),
     })
 }
 

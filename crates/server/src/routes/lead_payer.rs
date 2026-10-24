@@ -3180,13 +3180,14 @@ pub(crate) fn portal_missing(declaration: Option<&Declaration>) -> Vec<&'static 
     missing
 }
 
-/// The basic contact data of a third party the cabinet needs before sending
-/// (owner request 2026-10-07), after the keys of [`portal_missing`]: a
-/// person's e-mail, phone and residence (country and city; street and ZIP
-/// stay optional, the patient may not know them), an organisation's e-mail
-/// and phone (its seat country is in [`portal_missing`]). The caller leaves
-/// them out where the payer's data are known otherwise: a paying parent with
-/// a cabinet login, or a payer who answered through its own link.
+/// The contact of a third party the cabinet needs before sending, after the
+/// keys of [`portal_missing`]: the e-mail its own link goes to and, of a
+/// person, the country of residence (the country policy). Phone, city,
+/// street and ZIP stay optional: the payer states them on its own link
+/// (owner 2026-10-24, before: phone and city were required of the lead,
+/// 2026-10-07). The caller leaves them out where the payer's data are known
+/// otherwise: a paying parent with a cabinet login, or a payer who answered
+/// through its own link.
 pub(crate) fn portal_missing_contact(declaration: Option<&Declaration>) -> Vec<&'static str> {
     let Some(declaration) = declaration.filter(|declaration| declaration.is_third_party()) else {
         return Vec::new();
@@ -3195,16 +3196,8 @@ pub(crate) fn portal_missing_contact(declaration: Option<&Declaration>) -> Vec<&
     if blank(&declaration.email) {
         missing.push("payer_email");
     }
-    if blank(&declaration.phone) {
-        missing.push("payer_phone");
-    }
-    if !declaration.is_organisation() {
-        if declaration.country.is_none() {
-            missing.push("payer_country");
-        }
-        if blank(&declaration.city) {
-            missing.push("payer_city");
-        }
+    if !declaration.is_organisation() && declaration.country.is_none() {
+        missing.push("payer_country");
     }
     missing
 }
@@ -5944,12 +5937,13 @@ mod tests {
 
     #[test]
     fn a_third_party_needs_its_contact_data_and_keeps_its_messenger() {
-        // Contact and residence of a person; e-mail and phone of an
-        // organisation (its seat country is asked with the name).
+        // The e-mail for the own link and a person's country; phone and
+        // city the payer states on its link (owner 2026-10-24). An
+        // organisation's seat country is asked with the name.
         let bare = from_portal(None, &portal_person()).unwrap();
         assert_eq!(
             portal_missing_contact(Some(&bare)),
-            ["payer_email", "payer_phone", "payer_country", "payer_city"]
+            ["payer_email", "payer_country"]
         );
         let mut answer = portal_person();
         answer.email = Some("viktor@example.com".into());
@@ -5969,7 +5963,7 @@ mod tests {
         };
         assert_eq!(
             portal_missing_contact(Some(&from_portal(None, &company).unwrap())),
-            ["payer_email", "payer_phone"]
+            ["payer_email"]
         );
         assert!(
             portal_missing_contact(Some(&from_portal(None, &portal("self")).unwrap())).is_empty()

@@ -438,7 +438,7 @@ export function PayerSection({
                   </LabeledField>
                   {orgMask ? (
                     <>
-                      <LabeledField {...field("payer_legal_form", true)}>
+                      <LabeledField {...field("payer_legal_form")}>
                         <Input
                           {...fieldProps("payer_legal_form")}
                           className={inputClass}
@@ -458,7 +458,7 @@ export function PayerSection({
                           onChange={(event) => set("organisation_register_number", event.target.value)}
                         />
                       </LabeledField>
-                      <LabeledField {...field("payer_contact_name", true)}>
+                      <LabeledField {...field("payer_contact_name")}>
                         <Input
                           {...fieldProps("payer_contact_name")}
                           className={inputClass}
@@ -699,7 +699,7 @@ export function PaymentReasonField({ identification, text }: { identification: I
       id="lead-request-payment_background"
       label={text.recipient.paymentReason}
       error={error}
-      required
+      // Optional since 2026-10-24 (owner): the organisation states it on its own link.
       className="sm:col-span-2 lg:col-span-3"
     >
       <IdentificationTextArea form={identification} field="payment_background" maxLength={2000} rows={3} />

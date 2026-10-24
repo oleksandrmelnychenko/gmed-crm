@@ -704,6 +704,10 @@ describe("lead request send step", () => {
   it("requires the contact data of a third party, not of the paying parent", () => {
     const progress = (missing: string[]) => ({ progress: { filled: 0, total: 0, missing_for_submit: missing } });
     expect(payerContactRequired({ guardian_pays: false }, progress([]), "payer_email")).toBe(true);
+    // Phone and city: the payer states them on its own link (owner 2026-10-24).
+    expect(payerContactRequired({ guardian_pays: false }, progress([]), "payer_phone")).toBe(false);
+    expect(payerContactRequired({ guardian_pays: false }, progress([]), "payer_city")).toBe(false);
+    expect(payerContactRequired({ guardian_pays: false }, progress([]), "payer_country")).toBe(true);
     expect(payerContactRequired({ guardian_pays: true }, progress([]), "payer_city")).toBe(false);
     // A server that lists it as missing gets the mark, or the request could not be sent.
     expect(payerContactRequired({ guardian_pays: true }, progress(["payer_phone"]), "payer_phone")).toBe(true);

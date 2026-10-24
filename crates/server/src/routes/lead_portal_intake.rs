@@ -2177,8 +2177,8 @@ fn missing_for_submit(
 /// payment method count only once the payer named fits the answers
 /// ([`lead_invoice_recipient::payer_fits`]) — until then the one key
 /// `payer_kind`, as soon as the payer question is shown. An organisation
-/// that pays states why the payment goes through it (`payer_payment_reason`,
-/// stored as `payment_background`) instead of a relationship.
+/// that pays needs no relationship; why it pays it may state (optional
+/// since 2026-10-24, its own link asks it).
 pub(crate) fn with_invoice_recipient(
     missing: Vec<String>,
     recipient: &lead_invoice_recipient::Recipient,
@@ -2236,14 +2236,10 @@ pub(crate) fn with_invoice_recipient(
     for (offset, key) in step_three.into_iter().enumerate() {
         reshaped.insert(at + offset, key);
     }
-    if organisation_pays && !payment_background_given {
-        let after = reshaped
-            .iter()
-            .rposition(|key| key.starts_with("payer_"))
-            .map(|index| index + 1)
-            .unwrap_or(reshaped.len());
-        reshaped.insert(after, "payer_payment_reason".to_string());
-    }
+    // Why the organisation pays it states on its own link (owner
+    // 2026-10-24): the reason stays optional in the cabinet and no longer
+    // blocks sending (before: `payer_payment_reason` was required).
+    let _ = payment_background_given;
     reshaped
 }
 
@@ -8179,10 +8175,9 @@ mod tests {
                 "payer_relationship_kind",
                 "payer_contact_consent",
                 "payer_cost_estimate_consent",
+                // Phone and city: on the payer's own link (owner 2026-10-24).
                 "payer_email",
-                "payer_phone",
                 "payer_country",
-                "payer_city"
             ]
         );
 
@@ -8982,7 +8977,7 @@ mod tests {
             with_invoice_recipient(base.clone(), &not_paying, Some(&own_payer), false, false)
                 .contains(&"payer_kind".to_string())
         );
-        // An organisation that pays states its reason instead of a relationship.
+        // An organisation that pays needs no relationship.
         let organisation = lead_payer::Declaration {
             payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.into(),
             payer_type: Some("organisation".into()),
@@ -9002,10 +8997,11 @@ mod tests {
                 false,
                 false
             ),
+            // The reason is the organisation's answer on its own link (owner
+            // 2026-10-24): no longer required of the lead.
             keys(&[
                 "payer_organisation_name",
                 "payer_contact_consent",
-                "payer_payment_reason",
                 "payment_method",
             ])
         );

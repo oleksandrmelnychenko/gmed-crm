@@ -1092,6 +1092,7 @@ async fn scenario_b_third_party_person_payer(app: &Scn) {
         Some(json!({ "invoice_recipient_is_payer": false })),
     )
     .await;
+    client_estimate_consent(app, &mut notes, lead, &auth).await;
     cabinet_missing(app, &mut notes, lead, &auth).await;
     app.soft(
         &mut notes,
@@ -1104,7 +1105,6 @@ async fn scenario_b_third_party_person_payer(app: &Scn) {
     mark_sent(app, lead).await;
     app.payer_answers(&mut notes, lead, person_payer_answers())
         .await;
-    client_estimate_consent(app, &mut notes, lead, &auth).await;
     app.identity_data(lead, None, "FB7654321").await;
     let order = app.commercial(lead).await;
     // The client's estimate first: the payer's copy is made from it.
@@ -1169,6 +1169,7 @@ async fn scenario_c_organisation_payer(app: &Scn) {
         Some(json!({ "invoice_recipient_is_payer": false })),
     )
     .await;
+    client_estimate_consent(app, &mut notes, lead, &auth).await;
     cabinet_missing(app, &mut notes, lead, &auth).await;
     app.soft(
         &mut notes,
@@ -1209,7 +1210,6 @@ async fn scenario_c_organisation_payer(app: &Scn) {
         }),
     )
     .await;
-    client_estimate_consent(app, &mut notes, lead, &auth).await;
     app.identity_data(lead, None, "C9K3M5P1Z").await;
     let order = app.commercial(lead).await;
     app.render(
@@ -1379,8 +1379,22 @@ async fn scenario_d_joint_custody_enhanced(app: &Scn) {
         "POST",
         &format!("{base}/identification"),
         &anna,
-        Some(json!({ "residence_since": "2015", "stay_reason": "family",
-            "payer_own_account": true })),
+        Some(json!({ "residence_since": "2015", "stay_reason": "family" })),
+    )
+    .await;
+    // Block L, as the cabinet sends it: the answer of the payer section
+    // (`acts_on_own_account` with the payer), not a statement.
+    app.soft(
+        &mut notes,
+        "POST",
+        &format!("{base}/payer"),
+        &anna,
+        Some(json!({
+            "payer_kind": "third_party", "payer_type": "person", "relationship_kind": "parent",
+            "first_name": "Dariush", "last_name": "Rahimi", "date_of_birth": "1981-04-06",
+            "email": father_email, "citizenships": ["IR"], "country": "DE",
+            "acts_on_own_account": true
+        })),
     )
     .await;
     let view = app
@@ -1442,7 +1456,9 @@ async fn scenario_d_joint_custody_enhanced(app: &Scn) {
         Some(json!({ "declared_correct": true })),
     )
     .await;
-    client_estimate_consent(app, &mut notes, lead, &anna).await;
+    // The father completed his own data after the mother sent: she sends
+    // the changed request again, as the cabinet asks.
+    app.submit(&mut notes, lead, &anna).await;
     app.identity_data(lead, Some(mother), "C01X00T47").await;
     app.identity_data(lead, Some(father), "C02X00T48").await;
     let enhanced = app
