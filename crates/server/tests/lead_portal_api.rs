@@ -3819,7 +3819,10 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     let (audited_by, context): (Option<Uuid>, Value) = sqlx::query_as(
         r#"SELECT user_id, context FROM audit_log
            WHERE action = 'lead_portal_update_billing' AND entity_id = $1
-           ORDER BY created_at DESC LIMIT 1"#,
+             -- The same save audits the invoice recipient apart, with the
+             -- same time: the billing event is the one without that source.
+             AND context->>'source' IS DISTINCT FROM 'invoice_recipient'
+           ORDER BY created_at DESC, id DESC LIMIT 1"#,
     )
     .bind(lead_id)
     .fetch_one(pool)

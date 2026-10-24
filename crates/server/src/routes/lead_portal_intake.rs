@@ -3469,12 +3469,42 @@ async fn update_my_payer(
 
 /// Portal changes and submission use the same database clock. Read it after
 /// the lead lock: transaction-start time can predate a preceding writer.
+///
+/// The times this server hands out never step back: a change, an upload, a
+/// send and the answer of the follow-up blocks are compared by these times
+/// ("changed since sending"), and a clock that steps back (an NTP or WSL
+/// correction of a few hundred milliseconds) once made a send look older
+/// than the change before it, or a change after a send look older than it.
 pub(crate) async fn portal_update_time(
     conn: &mut sqlx::PgConnection,
 ) -> Result<DateTime<Utc>, sqlx::Error> {
-    sqlx::query_scalar("SELECT clock_timestamp()")
+    let clock: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(conn)
-        .await
+        .await?;
+    Ok(monotonic_portal_time(clock))
+}
+
+static LAST_PORTAL_TIME_MICROS: std::sync::atomic::AtomicI64 =
+    std::sync::atomic::AtomicI64::new(i64::MIN);
+
+/// `clock`, or one microsecond after the last time handed out when the clock
+/// is not ahead of it.
+fn monotonic_portal_time(clock: DateTime<Utc>) -> DateTime<Utc> {
+    use std::sync::atomic::Ordering;
+    let micros = clock.timestamp_micros();
+    let mut previous = LAST_PORTAL_TIME_MICROS.load(Ordering::SeqCst);
+    loop {
+        let next = micros.max(previous.saturating_add(1));
+        match LAST_PORTAL_TIME_MICROS.compare_exchange(
+            previous,
+            next,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => return DateTime::from_timestamp_micros(next).unwrap_or(clock),
+            Err(current) => previous = current,
+        }
+    }
 }
 
 /// The "entered by the patient" marker of sections 7 and 8, made from the
@@ -7446,6 +7476,20 @@ pub(crate) async fn purge_portal_intake_in_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A clock that steps back (WSL, NTP) never makes a later portal time
+    /// older than an earlier one.
+    #[test]
+    fn portal_times_never_step_back() {
+        let at = |micros: i64| DateTime::from_timestamp_micros(micros).unwrap();
+        // Around now: the clock is shared with the other tests of the process.
+        let base = Utc::now().timestamp_micros();
+        let first = monotonic_portal_time(at(base));
+        let stepped_back = monotonic_portal_time(at(base - 600_000));
+        assert!(stepped_back > first, "{first} {stepped_back}");
+        let ahead = monotonic_portal_time(at(base + 5_000));
+        assert!(ahead >= at(base + 5_000), "{ahead}");
+    }
 
     fn today() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 10, 3).unwrap()

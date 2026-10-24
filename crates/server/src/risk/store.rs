@@ -1310,10 +1310,14 @@ pub async fn follow_up_answered(
     let Some(stored) = load_for_update(conn, lead_id).await? else {
         return Ok(None);
     };
+    // The portal's clock, which never steps back: the answer is compared with
+    // the cabinet's changes by these times.
+    let answered_at = crate::routes::lead_portal_intake::portal_update_time(&mut *conn).await?;
     sqlx::query(
-        "UPDATE lead_risk_assessments SET follow_up_answered_at = clock_timestamp(), updated_at = now() WHERE lead_id = $1",
+        "UPDATE lead_risk_assessments SET follow_up_answered_at = $2, updated_at = now() WHERE lead_id = $1",
     )
     .bind(lead_id)
+    .bind(answered_at)
     .execute(&mut *conn)
     .await?;
     write_event(
