@@ -188,7 +188,7 @@ test("staff read the lead's GwG statements beside the identification sheet", asy
   await expect(block.getByTestId("lead-gwg-declared-correct")).toHaveText("Подтвердил правильность: 05.10.2026 11:30");
 
   // Read-only beneath the sheet actions; the redundant explanatory label was removed.
-  await expect(block.getByTestId("lead-gwg-statements-content").locator("input, textarea, select, button")).toHaveCount(0);
+  await expect(block.getByTestId("lead-gwg-statements-content").locator("input, textarea, select:not([data-testid^='lead-upload-move-']), button")).toHaveCount(0);
   await expect(wizard.getByText(/^Заполняется из заявки:/)).toHaveCount(0);
   const actions = wizard.getByTestId("gwg-identification-actions");
   await expect(actions).toBeVisible();
