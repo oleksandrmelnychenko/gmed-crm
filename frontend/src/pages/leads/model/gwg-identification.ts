@@ -323,11 +323,16 @@ export function gwgPayerSheetMissingLabels(missing: unknown, tx: Tx): string[] {
   return labels;
 }
 
-/** Who enters the paying organisation's data, and that the sheet is made again afterwards. */
+/**
+ * Who enters the paying organisation's data, and that the sheet is made again
+ * afterwards. Beneficial owners, the representative, PEP answers and the
+ * reason of the payment come from the payer only (owner decision 2026-10-24):
+ * staff send the payer's link, they do not enter these.
+ */
 export function gwgPayerSheetHint(tx: Tx): string {
   return tx(
-    "Данные вносит плательщик по своей ссылке или сотрудники в разделе «Кто платит»; затем сформируйте лист заново.",
-    "Die Angaben macht der Kostenübernehmer über den eigenen Zugang oder das Team unter „Wer zahlt“; danach den Bogen neu erstellen.",
+    "Эти данные организация-плательщик вносит сама по своей ссылке — отправьте или повторите ссылку в разделе «Кто платит»; затем сформируйте лист заново.",
+    "Diese Angaben macht die zahlende Organisation selbst über ihren Link – den Link unter „Wer zahlt“ senden oder erneut senden; danach den Bogen neu erstellen.",
   );
 }
 
