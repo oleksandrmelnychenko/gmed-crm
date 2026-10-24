@@ -1411,10 +1411,19 @@ async fn scenario_enhanced_check_by_a_parents_citizenship() {
         "{enhanced}"
     );
 
-    // Block R of the father, before sending; the reason is never shown.
+    // Block R of the father, before sending; the reason is never shown. His
+    // black-list citizenship is level 2 of the lead (one level per lead, owner
+    // 2026-10-24), so the lead's A, K and L open with it — K and L were
+    // answered with the base form, A asks the sector, L the paying father's
+    // own economic interest.
     let hers = app.cabinet(lead, &anna).await;
     assert_eq!(hers["follow_up"]["before_submit"], true, "{hers}");
-    assert_eq!(hers["follow_up"]["blocks"], json!(["R"]), "{hers}");
+    assert_eq!(
+        hers["follow_up"]["blocks"],
+        json!(["A", "K", "L", "R"]),
+        "{hers}"
+    );
+    assert_eq!(hers["follow_up"]["missing"]["K"], json!([]), "{hers}");
     assert!(!hers.to_string().contains("blacklist"), "{hers}");
     assert!(hers["payer_questionnaire"].is_null(), "{hers}");
     let (code, refused) = app
@@ -1443,6 +1452,49 @@ async fn scenario_enhanced_check_by_a_parents_citizenship() {
         .await;
     assert_eq!(
         answered["follow_up"]["missing"]["R"],
+        json!([]),
+        "{answered}"
+    );
+    let answered = app
+        .ok(
+            StatusCode::OK,
+            "POST",
+            &format!("{base}/enhanced-details"),
+            &anna,
+            Some(json!({ "occupation": "Schülerin", "sector": "Bildung" })),
+        )
+        .await;
+    assert_eq!(
+        answered["follow_up"]["missing"]["A"],
+        json!([]),
+        "{answered}"
+    );
+    let father_email = hers["representation"]["representatives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|person| person["id"] == json!(father))
+        .and_then(|person| person["email"].as_str())
+        .unwrap_or_else(|| panic!("no father e-mail: {hers}"))
+        .to_string();
+    let answered = app
+        .ok(
+            StatusCode::OK,
+            "POST",
+            &format!("{base}/payer"),
+            &anna,
+            Some(json!({
+                "payer_kind": "third_party", "payer_type": "person",
+                "relationship_kind": "parent",
+                "first_name": "Ben", "last_name": "Muster",
+                "date_of_birth": "1983-04-06", "email": father_email,
+                "citizenships": ["IR"], "country": "DE",
+                "acts_on_own_account": true
+            })),
+        )
+        .await;
+    assert_eq!(
+        answered["follow_up"]["missing"]["L"],
         json!([]),
         "{answered}"
     );

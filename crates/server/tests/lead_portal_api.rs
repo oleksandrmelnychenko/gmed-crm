@@ -388,7 +388,8 @@ async fn cabinet_submission_protects_health_identity_and_base_changes() {
     )
     .await;
     // RBAC matrix (owner 2026-10-24): accepting a file needs leads.edit and
-    // patients.medical.view, and the right to open it; Sales has neither.
+    // patients.medical.view, and the right to open it; Sales may open an
+    // identity scan but has no patients.medical.view.
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
@@ -2443,7 +2444,8 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
         }]),
         "{intake}"
     );
-    // Sales sees the file listed but cannot open it (no identity documents).
+    // Sales sees the file listed and opens it: it uploads and corrects
+    // identity scans, so it reads them too (owner 2026-10-24).
     let (status, body) = json_request(
         router,
         "GET",
@@ -2452,7 +2454,7 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(status, StatusCode::OK, "{body}");
     let (_, intake) = json_request(
         router,
         "GET",
@@ -5220,22 +5222,19 @@ async fn assert_country_preview_has_no_stored_assessment(pool: &PgPool, lead: Uu
 fn assert_neutral_country_preview(body: &Value) {
     assert_eq!(body["follow_up"]["required"], true, "{body}");
     assert_eq!(body["follow_up"]["before_submit"], true, "{body}");
-    assert_eq!(
-        body["follow_up"]["blocks"],
-        json!(["A", "F", "K", "L"]),
-        "{body}"
-    );
+    // A list-1 country alone is level 1: F only; A, K and L open with the
+    // enhanced check (one level per lead, owner 2026-10-24).
+    assert_eq!(body["follow_up"]["blocks"], json!(["F"]), "{body}");
     for key in ["pep_self", "pep_related", "sanctions_links"] {
         assert!(
             body["identification"][key].is_null(),
             "a country is not a positive legal answer: {body}"
         );
+    }
+    for block in ["A", "K", "L"] {
         assert!(
-            body["follow_up"]["missing"]["L"]
-                .as_array()
-                .unwrap()
-                .contains(&json!(key)),
-            "{body}"
+            body["follow_up"]["missing"].get(block).is_none(),
+            "{block} waits for the enhanced check: {body}"
         );
     }
     for key in ["points", "level", "triggers", "reasons"] {
@@ -5270,12 +5269,9 @@ async fn a_listed_citizenship_or_residence_previews_questions_before_submission_
         let (status, body) = json_request(router, "POST", &personal, &patient, Some(patch)).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_neutral_country_preview(&body);
-        assert!(
-            !body["follow_up"]["missing"]["A"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("funds_source")),
-            "source waits for who pays: {body}"
+        assert_eq!(
+            body["follow_up"]["funds_asked"], false,
+            "no source of funds below level 2: {body}"
         );
         assert_country_preview_has_no_stored_assessment(pool, lead).await;
         let (status, read) = json_request(router, "GET", &request, &patient, None).await;
@@ -5299,10 +5295,9 @@ async fn a_listed_citizenship_or_residence_previews_questions_before_submission_
             );
         }
         assert_eq!(staff["triggers"], json!([]), "{staff}");
-        for block in ["A", "F", "K", "L"] {
-            assert_eq!(staff["blocks"][block]["open"], true, "{staff}");
-        }
-        for block in ["G", "H", "I", "J"] {
+        assert_eq!(staff["blocks"]["F"]["open"], true, "{staff}");
+        // A, K and L wait for level 2 (one level per lead, owner 2026-10-24).
+        for block in ["A", "G", "H", "I", "J", "K", "L"] {
             assert_eq!(staff["blocks"][block]["open"], false, "{staff}");
         }
         assert_country_preview_has_no_stored_assessment(pool, lead).await;
@@ -5399,9 +5394,11 @@ async fn country_preview_uses_configured_lists_and_opens_legal_details_only_afte
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{corrected}");
+    // Without the knock-out the list-1 country is level 1 again: F only
+    // (one level per lead, owner 2026-10-24).
     assert_eq!(
         corrected["follow_up"]["blocks"],
-        json!(["A", "F", "K", "L"]),
+        json!(["F"]),
         "{corrected}"
     );
     assert_country_preview_has_no_stored_assessment(pool, lead).await;
@@ -5431,14 +5428,12 @@ async fn country_preview_blocks_first_submission_until_answers_are_complete_with
     .await;
     assert_eq!(status, StatusCode::OK, "{preview}");
     assert_neutral_country_preview(&preview);
-    // A list-1 country alone stays below level 2: no source of funds is
-    // asked of the self-payer (owner 2026-10-19), only profession and sector.
+    // A list-1 country alone stays below level 2: no source of funds, no
+    // profession or sector (block A), no birth data (K) and no legal questions
+    // (L) — only the residence (F); one level per lead, owner 2026-10-24.
     assert!(
-        !preview["follow_up"]["missing"]["A"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("funds_source")),
-        "no source of funds without the enhanced check: {preview}"
+        preview["follow_up"]["missing"].get("A").is_none(),
+        "no block A without the enhanced check: {preview}"
     );
     assert_eq!(preview["follow_up"]["funds_asked"], false, "{preview}");
     let (status, refused) = json_request(
@@ -5453,11 +5448,15 @@ async fn country_preview_blocks_first_submission_until_answers_are_complete_with
     assert_eq!(refused["code"], "follow_up_incomplete", "{refused}");
     assert_eq!(refused["before_submit"], true, "{refused}");
     assert!(
-        refused["missing"]["L"]
+        refused["missing"]["F"]
             .as_array()
             .unwrap()
-            .contains(&json!("pep_self")),
+            .contains(&json!("residence_since")),
         "{refused}"
+    );
+    assert!(
+        refused["missing"].get("L").is_none(),
+        "the legal questions wait for level 2: {refused}"
     );
     assert_country_preview_has_no_stored_assessment(pool, lead).await;
     let (status, body) = json_request(
@@ -5544,9 +5543,10 @@ async fn country_preview_blocks_first_submission_until_answers_are_complete_with
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{changed}");
+    // F only at level 1 (one level per lead, owner 2026-10-24).
     assert_eq!(
         changed["follow_up"]["blocks"],
-        json!(["A", "F", "K", "L"]),
+        json!(["F"]),
         "after submission the stored ratchet stays: {changed}"
     );
     for key in ["pep_self", "pep_related", "sanctions_links"] {
@@ -5608,11 +5608,9 @@ async fn a_post_submission_country_change_holds_guarded_actions_only_until_its_a
     .await;
     assert_eq!(status, StatusCode::OK, "{pending}");
     assert_eq!(pending["follow_up"]["before_submit"], false, "{pending}");
-    assert_eq!(
-        pending["follow_up"]["blocks"],
-        json!(["A", "F", "K", "L"]),
-        "{pending}"
-    );
+    // A list-1 country is level 1: the residence (F) is asked, nothing of the
+    // enhanced check (A, K, L) — one level per lead, owner 2026-10-24.
+    assert_eq!(pending["follow_up"]["blocks"], json!(["F"]), "{pending}");
     let (points, level, risk_status): (i32, i16, String) =
         sqlx::query_as("SELECT points,level,status FROM lead_risk_assessments WHERE lead_id=$1")
             .bind(lead)
@@ -5637,40 +5635,22 @@ async fn a_post_submission_country_change_holds_guarded_actions_only_until_its_a
         held["code"], "risk_review_required",
         "new country answers cannot be bypassed by qualification: {held}"
     );
-    for (part, body) in [
-        (
-            "enhanced-details",
-            json!({ "funds_source": "income", "funds_description": "Synthetic salary",
-            "occupation": "Engineer", "sector": "Manufacturing" }),
-        ),
-        (
-            "identification",
-            json!({ "residence_since": "2010", "stay_reason": "work" }),
-        ),
-    ] {
-        let (status, saved) = json_request(
-            router,
-            "POST",
-            &format!("{request}/{part}"),
-            &patient,
-            Some(body),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{saved}");
-    }
-    let (status, complete) = upload_file(
+    // The residence alone completes the follow-up: no source of funds, no
+    // proof, no birth data and no legal questions at level 1.
+    let (status, complete) = json_request(
         router,
-        &format!("{request}/funds-proof"),
+        "POST",
+        &format!("{request}/identification"),
         &patient,
-        "synthetic-income.pdf",
-        "application/pdf",
-        PDF,
+        Some(json!({ "residence_since": "2010", "stay_reason": "work" })),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{complete}");
-    for (block, missing) in complete["follow_up"]["missing"].as_object().unwrap() {
-        assert_eq!(missing, &json!([]), "{block}: {complete}");
-    }
+    assert_eq!(status, StatusCode::OK, "{complete}");
+    assert_eq!(
+        complete["follow_up"]["missing"],
+        json!({ "F": [] }),
+        "{complete}"
+    );
     let (points, level, risk_status): (i32, i16, String) =
         sqlx::query_as("SELECT points,level,status FROM lead_risk_assessments WHERE lead_id=$1")
             .bind(lead)
@@ -9446,11 +9426,12 @@ async fn duplicates_are_refused_files_move_between_slots_and_downloads_name_the_
     assert_eq!(status, StatusCode::CREATED, "{body}");
 
     let move_path = format!("/api/v1/leads/{lead_id}/portal-intake/documents/{document_id}/move");
+    // Concierge has no leads.edit: it cannot move a file.
     let (status, body) = json_request(
         router,
         "POST",
         &move_path,
-        &app.staff("sales"),
+        &app.staff("concierge"),
         Some(json!({ "kind": "relationship_proof" })),
     )
     .await;
@@ -9475,11 +9456,13 @@ async fn duplicates_are_refused_files_move_between_slots_and_downloads_name_the_
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    // Sales edits leads and opens identity scans (owner 2026-10-24): it may
+    // move the file to another slot.
     let (status, body) = json_request(
         router,
         "POST",
         &move_path,
-        &pm,
+        &app.staff("sales"),
         Some(json!({ "kind": "relationship_proof" })),
     )
     .await;

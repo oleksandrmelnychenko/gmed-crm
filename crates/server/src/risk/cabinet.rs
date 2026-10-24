@@ -302,8 +302,10 @@ pub async fn follow_up_json(
         // Only the country-related questions and details of an explicit PEP /
         // sanctions-links answer are previewed. No duplicate identity step,
         // staff-only request, payer trigger, stored score or automated
-        // declaration. The preview's own level decides only whether block A
-        // asks the source of funds (a black-list country reaches level 2).
+        // declaration. The preview's level is scored as the stored one is
+        // (one level per lead, owner 2026-10-24: the patient's and the
+        // representatives' country and legal triggers together); level 2 — a
+        // black-list country — opens A, K and L and asks the source of funds.
         let level = super::score(&preview, &config).level;
         (preview, level, Vec::new(), true)
     } else {
@@ -319,7 +321,7 @@ pub async fn follow_up_json(
     };
     let states = store::block_states(&triggers, level, &requested, &config, &answers);
     // Neutral: whether block A asks the source of funds (never why).
-    let funds_asked = store::funds_asked(&triggers, level, &requested, &config);
+    let funds_asked = store::funds_asked(level, &requested);
     let mut blocks = Vec::new();
     let mut missing = Map::new();
     for block in CABINET_BLOCKS {

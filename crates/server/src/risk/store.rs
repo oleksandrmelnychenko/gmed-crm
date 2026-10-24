@@ -93,16 +93,27 @@ impl Assessment {
         self.started_at.is_some() && self.status != STATUS_GRANDFATHERED
     }
 
+    /// The one level of the lead (owner 2026-10-24): the stored [`score`] of
+    /// all sticky triggers — the patient's, every representative's and the
+    /// payer's. Every reader (the gate, the follow-up blocks, the enhanced
+    /// check, the payer link) decides by this level and nothing else; who
+    /// fired which trigger is shown to staff and changes no decision.
+    pub fn level(&self) -> i16 {
+        self.score.level
+    }
+
     /// Whether the guarded staff actions wait for a decision: a rejected
     /// lead, level ≥ 2 that nobody released, or a country-triggered request
-    /// whose mandatory answers are still pending. Not started and
-    /// grandfathered leads are not held here (the gate starts them).
+    /// whose mandatory answers are still pending (block F of the patient or
+    /// block R of a representative; K and L open only with the enhanced
+    /// check, owner 2026-10-24). Not started and grandfathered leads are not
+    /// held here (the gate starts them).
     pub fn holds(&self) -> bool {
         if !self.started() {
             return false;
         }
         self.status == STATUS_REJECTED
-            || (self.score.level >= 2 && self.status != STATUS_RELEASED)
+            || (self.level() >= 2 && self.status != STATUS_RELEASED)
             || (self.status == STATUS_AWAITING
                 && self
                     .triggers
@@ -124,7 +135,7 @@ impl Assessment {
     pub fn holds_payer_link(&self) -> bool {
         self.started()
             && (self.status == STATUS_REJECTED
-                || (self.score.level >= 3
+                || (self.level() >= 3
                     && self.status != STATUS_RELEASED
                     && !self.requested_blocks.iter().any(|block| block == "D")))
     }
@@ -679,45 +690,27 @@ pub struct BlockState {
 /// The keys of block A about the source of the funds and its proof.
 const FUNDS_KEYS: [&str; 3] = ["funds_source", "funds_description", "funds_proof_upload"];
 
-/// The level of the lead's own triggers: a representative's country opens
-/// that representative's R, never the child's questions (their combined
-/// points may rise).
-fn own_level(triggers: &[Sticky], level: i16, config: &RiskConfig) -> i16 {
-    if triggers
-        .iter()
-        .any(|trigger| trigger.subject == super::SUBJECT_REPRESENTATIVE)
-    {
-        let own: Vec<Sticky> = triggers
-            .iter()
-            .filter(|trigger| trigger.subject != super::SUBJECT_REPRESENTATIVE)
-            .cloned()
-            .collect();
-        score(&own, config).level
-    } else {
-        level
-    }
-}
-
 /// Whether block A asks the source of the funds and its proof: only with the
-/// enhanced check (level 2 or 3, the level `lead_enhanced_check` reads) or
-/// when staff requested A. A country of the lists below level 2 opens A for
-/// the profession and the sector only (owner 2026-10-19: the source of funds
-/// is asked only by a trigger of the enhanced check).
-pub fn funds_asked(
-    triggers: &[Sticky],
-    level: i16,
-    requested: &[String],
-    config: &RiskConfig,
-) -> bool {
-    requested.iter().any(|block| block == "A") || own_level(triggers, level, config) >= 2
+/// enhanced check (the lead's one level 2 or 3, [`Assessment::level`] — the
+/// level `lead_enhanced_check` reads too) or when staff requested A (owner
+/// 2026-10-19: the source of funds is asked only by a trigger of the
+/// enhanced check).
+pub fn funds_asked(level: i16, requested: &[String]) -> bool {
+    requested.iter().any(|block| block == "A") || level >= 2
 }
 
 /// Which blocks are open (contract 3.3) and what each still misses: G and I
 /// whenever T13 / T12 is sticky and their data are missing; the others at
 /// level 2 from the sticky triggers (when `level_2_blocks_automatic`) and,
-/// at any level, the ones staff requested. Patient country triggers also
-/// open A/F/K/L below level two; their configured points are unchanged, and
-/// A then asks no source of funds ([`funds_asked`]).
+/// at any level, the ones staff requested. A patient country trigger also
+/// opens F below level two (its configured points are unchanged); A, K and
+/// L open only with the enhanced check — the one level per lead ≥ 2, whoever
+/// fired it: the patient, a representative or the payer (owner 2026-10-24) —
+/// or on request.
+///
+/// `level` is the lead's one level ([`Assessment::level`], the stored
+/// [`score`] of `triggers`, or the preview's score before the start): this
+/// function never recomputes it or filters `triggers` by subject.
 pub fn block_states(
     triggers: &[Sticky],
     level: i16,
@@ -727,11 +720,8 @@ pub fn block_states(
 ) -> BTreeMap<&'static str, BlockState> {
     // Level 3 too (owner 2026-10-10): staff decide on level 3 with the details the
     // triggers ask for; the halt and the four-eyes decision stay.
-    // A parent's country opens that parent's R, without asking the child's
-    // birth/PEP/residence questions merely because their combined points rose.
-    let child_level = own_level(triggers, level, config);
-    let funds = funds_asked(triggers, level, requested, config);
-    let automatic = if child_level >= 2 && config.level_2_blocks_automatic {
+    let funds = funds_asked(level, requested);
+    let automatic = if level >= 2 && config.level_2_blocks_automatic {
         blocks_of(triggers)
     } else {
         Vec::new()
@@ -770,8 +760,9 @@ pub fn block_states(
             // The enhanced check (level 2 or 3) asks the birth data and the legal
             // questions; the base form does not. A (source of funds, occupation,
             // sector, proof) too: the § 15 GwG check needs it whatever fired
-            // (QA 2026-10-10, two-stage form 2026-10-07).
-            "A" | "K" | "L" => requested || child_level >= 2 || patient_country,
+            // (QA 2026-10-10, two-stage form 2026-10-07). A list-1 country alone
+            // (level 1) opens none of them (owner 2026-10-24).
+            "A" | "K" | "L" => requested || level >= 2,
             "F" => requested || automatic.contains(&block) || patient_country,
             "R" => {
                 requested
@@ -798,9 +789,11 @@ pub fn block_states(
     states
 }
 
-/// Whether one block is open now (as [`block_states`] decides it, without
-/// the answers: E and the other answer-independent blocks), for the payer
-/// link. Nothing before the assessment started or after staff decided.
+/// Whether one block is open now, for the payer link: the very
+/// [`block_states`] of the staff wizard and the cabinet, read without the
+/// answers (E and the other answer-independent blocks; owner 2026-10-24: the
+/// payer link and the wizard never disagree). Nothing before the assessment
+/// started or after staff decided.
 pub async fn block_open(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -815,19 +808,15 @@ pub async fn block_open(
     }) else {
         return Ok(false);
     };
-    if assessment
-        .requested_blocks
-        .iter()
-        .any(|known| known == block)
-    {
-        return Ok(true);
-    }
     let config = load_config(conn).await?;
-    // Level 3 too, as in `block_states` (owner 2026-10-10): the payer link
-    // asks what the staff wizard and the cabinet already show as open.
-    Ok(assessment.score.level >= 2
-        && config.level_2_blocks_automatic
-        && blocks_of(&assessment.triggers).contains(&block))
+    let states = block_states(
+        &assessment.triggers,
+        assessment.level(),
+        &assessment.requested_blocks,
+        &config,
+        &BlockAnswers::default(),
+    );
+    Ok(states.get(block).is_some_and(|state| state.open))
 }
 
 /// The status a started, non-final assessment has (contract 4.3).
@@ -1803,7 +1792,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn representatives_have_their_own_block_even_when_their_country_score_reaches_level_two() {
+    fn representatives_countries_at_level_two_open_their_block_and_the_enhanced_check_blocks() {
+        // One level per lead (owner 2026-10-24): the parents' points count,
+        // so level 2 from their countries opens A/K/L for the lead as any
+        // level 2 does — besides the parents' own R. F, H and J stay the
+        // patient's own.
         let config = RiskConfig::default();
         let now = Utc::now();
         let triggers: Vec<Sticky> = ["T1", "T2"]
@@ -1820,11 +1813,145 @@ mod tests {
                 inactive_since: None,
             })
             .collect();
-        let states = block_states(&triggers, 2, &[], &config, &BlockAnswers::default());
-        assert!(states["R"].open);
-        for block in ["A", "F", "H", "J", "K", "L"] {
+        let level = score(&triggers, &config).level;
+        assert_eq!(level, 2);
+        let states = block_states(&triggers, level, &[], &config, &BlockAnswers::default());
+        for block in ["A", "K", "L", "R"] {
+            assert!(states[block].open, "{block}");
+        }
+        for block in ["F", "H", "J"] {
             assert!(!states[block].open, "{block}");
         }
+        assert!(funds_asked(level, &[]));
+    }
+
+    #[test]
+    fn a_representatives_pep_is_the_leads_level_three_with_the_enhanced_check_and_its_blocks() {
+        // One level per lead (owner 2026-10-24): a non-paying parent's PEP
+        // "yes" (T14, a knock-out) is level 3 of the lead, the enhanced check
+        // is required and A/K/L open — the same level the gate holds on.
+        let config = RiskConfig::default();
+        let now = Utc::now();
+        let triggers = vec![Sticky {
+            key: "T14".into(),
+            subject: super::super::SUBJECT_REPRESENTATIVE.into(),
+            variant: None,
+            points: 0,
+            knockout: true,
+            first_fired_at: now,
+            last_fired_at: now,
+            active: true,
+            inactive_since: None,
+        }];
+        let score = score(&triggers, &config);
+        assert_eq!((score.knockout, score.level), (true, 3));
+        let assessment = Assessment {
+            lead_id: Uuid::nil(),
+            started_at: Some(now),
+            config_version: 1,
+            score,
+            triggers: triggers.clone(),
+            fingerprint: String::new(),
+            requested_blocks: Vec::new(),
+            follow_up_answered_at: None,
+            status: STATUS_REVIEW.into(),
+            released_fingerprint: None,
+            representative_country_ids: Vec::new(),
+        };
+        assert_eq!(assessment.level(), 3);
+        assert!(assessment.holds());
+        let check = crate::routes::lead_enhanced_check::with_risk_level(
+            Default::default(),
+            assessment.level(),
+        );
+        assert!(check.required);
+        let states = block_states(
+            &triggers,
+            assessment.level(),
+            &[],
+            &config,
+            &BlockAnswers::default(),
+        );
+        for block in ["A", "K", "L", "R"] {
+            assert!(states[block].open, "{block}");
+        }
+        assert!(funds_asked(assessment.level(), &[]));
+        // H is the patient's own PEP details: the parent details theirs in R.
+        assert!(!states["H"].open);
+    }
+
+    #[test]
+    fn a_patients_list_one_country_alone_opens_only_f_and_holds_nothing_once_answered() {
+        // One level per lead (owner 2026-10-24): a list-1 country is level 1
+        // — no enhanced check, so no A, K or L; F alone asks the residence,
+        // and qualification is free once F is answered.
+        let config = RiskConfig::default();
+        let now = Utc::now();
+        let triggers = vec![Sticky {
+            key: "T1".into(),
+            subject: super::super::SUBJECT_PATIENT.into(),
+            variant: Some(super::super::VARIANT_LIST_1.into()),
+            points: 2,
+            knockout: false,
+            first_fired_at: now,
+            last_fired_at: now,
+            active: true,
+            inactive_since: None,
+        }];
+        let score = score(&triggers, &config);
+        assert_eq!(score.level, 1);
+        let open = |answers: &BlockAnswers| -> Vec<&'static str> {
+            block_states(&triggers, score.level, &[], &config, answers)
+                .iter()
+                .filter(|(_, state)| state.open)
+                .map(|(key, _)| *key)
+                .collect()
+        };
+        assert_eq!(open(&BlockAnswers::default()), vec!["F"]);
+        assert!(!funds_asked(score.level, &[]));
+        assert!(
+            !crate::routes::lead_enhanced_check::with_risk_level(Default::default(), score.level)
+                .required
+        );
+        let pending = block_states(
+            &triggers,
+            score.level,
+            &[],
+            &config,
+            &BlockAnswers::default(),
+        );
+        assert_eq!(computed_status(score.level, &pending), STATUS_AWAITING);
+        let answered = BlockAnswers {
+            residence_since: Some("2010".into()),
+            stay_reason: Some("work".into()),
+            ..Default::default()
+        };
+        let complete = block_states(&triggers, score.level, &[], &config, &answered);
+        assert_eq!(computed_status(score.level, &complete), STATUS_CLEAR);
+        let assessment = Assessment {
+            lead_id: Uuid::nil(),
+            started_at: Some(now),
+            config_version: 1,
+            score,
+            triggers,
+            fingerprint: String::new(),
+            requested_blocks: Vec::new(),
+            follow_up_answered_at: None,
+            status: STATUS_CLEAR.into(),
+            released_fingerprint: None,
+            representative_country_ids: Vec::new(),
+        };
+        assert!(!assessment.holds());
+        // Staff may still ask: a requested A, K or L opens on any level.
+        let requested = blocks(&["K"]);
+        let asked = block_states(
+            &assessment.triggers,
+            assessment.level(),
+            &requested,
+            &config,
+            &answered,
+        );
+        assert!(asked["K"].open && !asked["A"].open && !asked["L"].open);
     }
 
     fn blocks(keys: &[&str]) -> Vec<String> {
@@ -1956,7 +2083,7 @@ mod tests {
     }
 
     #[test]
-    fn patient_country_questions_open_at_level_one_without_inventing_legal_answers() {
+    fn patient_country_questions_open_only_f_at_level_one_without_inventing_legal_answers() {
         let now = Utc::now();
         let config = RiskConfig {
             level_2_blocks_automatic: false,
@@ -1984,15 +2111,21 @@ mod tests {
                 .filter(|(_, state)| state.open)
                 .map(|(key, _)| *key)
                 .collect();
-            assert_eq!(open, vec!["A", "F", "K", "L"], "{key}");
+            // A list-1 country alone is level 1: F only; A, K and L need the
+            // enhanced check (one level per lead, owner 2026-10-24).
+            assert_eq!(open, vec!["F"], "{key}");
             assert_eq!(
-                states["A"].missing,
-                vec!["occupation", "sector"],
-                "source waits for who pays"
+                states["F"].missing,
+                vec!["residence_since", "stay_reason"],
+                "{key}"
             );
             for field in ["pep_self", "pep_related", "sanctions_links"] {
-                assert!(states["L"].missing.contains(&field.to_string()));
+                assert!(
+                    states["L"].missing.contains(&field.to_string()),
+                    "a country is no legal answer: {key}"
+                );
             }
+            assert!(!states["L"].open, "{key}");
             // A self-payer below level 2 is not asked the source of funds
             // (owner 2026-10-19); level 2 or a staff request asks it.
             let self_payer = BlockAnswers {
@@ -2004,17 +2137,13 @@ mod tests {
             };
             let level_one =
                 block_states(std::slice::from_ref(&trigger), 1, &[], &config, &self_payer);
+            assert!(!level_one["A"].open, "{key}");
             assert_eq!(
                 level_one["A"].missing,
                 vec!["occupation", "sector"],
-                "{key}"
+                "{key}: the source waits for the enhanced check"
             );
-            assert!(!funds_asked(
-                std::slice::from_ref(&trigger),
-                1,
-                &[],
-                &config
-            ));
+            assert!(!funds_asked(1, &[]));
             for (level, requested) in [(2, blocks(&[])), (1, blocks(&["A"]))] {
                 let asked = block_states(
                     std::slice::from_ref(&trigger),

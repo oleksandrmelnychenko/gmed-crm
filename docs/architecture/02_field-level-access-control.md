@@ -28,7 +28,7 @@
 ```
 Concierge + Medical → DENY (завжди)
 Billing + Medical → DENY (завжди)
-Sales + PatientIdentity → DENY (завжди)
+Sales + Medical → DENY (завжди); PatientIdentity для Sales відкрито з 2026-10-24 (рішення власника: роль сама завантажує скани)
 Patient + InternalOnly → DENY (завжди)
 Unassigned + будь-що → DENY (завжди, крім CEO)
 ```

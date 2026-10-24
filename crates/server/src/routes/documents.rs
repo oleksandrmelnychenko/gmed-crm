@@ -32570,6 +32570,9 @@ async fn download_document(
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
+    // Sales opens the identity scans of a lead it uploads and corrects (owner
+    // 2026-10-24): only this route, only a lead's documents (checked below),
+    // and the data-class policy keeps medical and financial files closed.
     if let Err(resp) = auth.require_any_role(&[
         Role::Ceo,
         Role::CeoAssistant,
@@ -32578,6 +32581,7 @@ async fn download_document(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
+        Role::Sales,
     ]) {
         return resp;
     }
@@ -32591,6 +32595,16 @@ async fn download_document(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(resp) => return resp,
     };
+    // Sales has no documents workspace: it reaches a file only through a
+    // lead (the scans of the lead, its parents and representatives).
+    if auth.role == Role::Sales
+        && row
+            .try_get::<Option<Uuid>, _>("lead_id")
+            .unwrap_or_default()
+            .is_none()
+    {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
 
     let receipt_access = match concierge_expense_receipt_access(&state, &auth, id).await {
         Ok(value) => value,

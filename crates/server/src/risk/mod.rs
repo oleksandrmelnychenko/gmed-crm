@@ -63,6 +63,11 @@ pub const RETIRED_TRIGGERS: [&str; 2] = ["T10", "T11"];
 /// L (owner 2026-10-09): the three legal questions (PEP, PEP relatives, links to
 /// sanctioned persons), asked only with the enhanced check; staff confirm the PEP
 /// status of the other leads in the wizard.
+/// A, K and L (owner 2026-10-24): the lead has one level — [`score`] of all
+/// sticky triggers, the patient's, every representative's and the payer's —
+/// and these three open when that level is 2 or 3 or staff requested them,
+/// never by a list-1 country alone (level 1); a patient country trigger
+/// below level 2 opens F only (`store::block_states`).
 pub const BLOCKS: [&str; 13] = [
     "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "R",
 ];
@@ -71,9 +76,11 @@ pub const BLOCKS: [&str; 13] = [
 /// of any other kind — sibling, grandparent, relative, friend … — fires.
 pub const FAMILY_RELATIONSHIP_KINDS: [&str; 3] = ["spouse", "parent", "child"];
 
-/// Country answers request the patient's neutral follow-up questions even
-/// when their configured points remain below the level-two threshold.
-/// A listed country is never itself a PEP or sanctions declaration.
+/// Country answers request the patient's neutral follow-up questions (block
+/// F: residence since, reason of the stay) even when their configured points
+/// remain below the level-two threshold; K and L need level 2 (owner
+/// 2026-10-24). A listed country is never itself a PEP or sanctions
+/// declaration.
 pub fn patient_country_follow_up(key: &str, subject: &str) -> bool {
     subject == SUBJECT_PATIENT && matches!(key, "T1" | "T2" | "T3")
 }
@@ -771,10 +778,18 @@ pub struct Score {
     pub level: i16,
 }
 
-/// Subject points = sum of its sticky triggers; points = the higher of
+/// Subject points = sum of its sticky triggers — the representatives'
+/// (parents') triggers count on the patient's side; points = the higher of
 /// patient and payer; level 3 with a K.o. or points ≥ `level_3_from`, level
 /// 2 with points ≥ `level_2_from`, else 1. A trigger the configuration now
 /// counts as K.o. is one (raises apply at the next reassessment).
+///
+/// This is the one function that answers what the lead's level is and why
+/// (owner 2026-10-24): its result is stored as the assessment
+/// (`store::Assessment::level`), and the gate, the follow-up blocks, the
+/// enhanced check and the payer link all read that stored level. Nobody
+/// recomputes a level from a subset of the triggers; who fired a trigger
+/// (`Sticky::subject`) is staff information only.
 pub fn score(triggers: &[Sticky], config: &RiskConfig) -> Score {
     let mut score = Score::default();
     for trigger in triggers {

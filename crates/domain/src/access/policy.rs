@@ -110,9 +110,12 @@ pub fn check_access(ctx: &AccessContext) -> AccessDecision {
             DataSensitivity::Service => false,
         },
 
+        // Sales uploads and corrects the identity scans of a lead and of a
+        // minor's parents, so it opens them too (owner 2026-10-24); medical,
+        // financial and internal data stay closed.
         Role::Sales => match data_sensitivity {
             DataSensitivity::General => true,
-            DataSensitivity::PatientIdentity => false,
+            DataSensitivity::PatientIdentity => true,
             DataSensitivity::Medical => false,
             DataSensitivity::Financial => false,
             DataSensitivity::Internal => false,
@@ -345,8 +348,10 @@ mod tests {
     }
 
     #[test]
-    fn sales_cannot_see_patient_data() {
+    fn sales_opens_identity_documents_but_no_medical_data() {
         let c = ctx(Role::Sales, false, DataSensitivity::PatientIdentity, None);
+        assert!(check_access(&c).allowed);
+        let c = ctx(Role::Sales, false, DataSensitivity::Medical, None);
         assert!(!check_access(&c).allowed);
     }
 
@@ -547,12 +552,15 @@ mod tests {
     }
 
     #[test]
-    fn rbac_matrix_sales_only_general_when_assigned_or_not() {
+    fn rbac_matrix_sales_general_and_identity_when_assigned_or_not() {
         for assigned in [false, true] {
             for sens in ALL_SENSITIVITIES {
                 for share in ALL_SHARES {
                     let got = check_access(&ctx(Role::Sales, assigned, sens, share)).allowed;
-                    let exp = sens == DataSensitivity::General;
+                    let exp = matches!(
+                        sens,
+                        DataSensitivity::General | DataSensitivity::PatientIdentity
+                    );
                     assert_eq!(
                         got, exp,
                         "sales assigned={assigned} sens={sens:?} share={share:?}"

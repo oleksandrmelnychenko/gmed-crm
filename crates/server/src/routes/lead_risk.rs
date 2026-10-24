@@ -314,8 +314,9 @@ async fn assessment_json(
     } else {
         &question_preview
     };
-    // The preview's own level, as the cabinet reads it: it only decides
-    // whether block A asks the source of funds.
+    // The preview's level, scored as the cabinet scores it (one level per
+    // lead, owner 2026-10-24): from level 2 it opens A, K and L and asks the
+    // source of funds.
     let question_level = if started {
         level
     } else {
