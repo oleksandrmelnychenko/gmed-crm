@@ -4,6 +4,7 @@ import { Navigate, useLocation } from "react-router-dom";
 
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { Button } from "@/components/ui/button";
+import { ComboboxTextContext, comboboxTextFor } from "@/components/ui/combobox-text";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { payerSignaturePackageOf } from "@/pages/patient-lead/lead-request-payer-questionnaire-model";
@@ -361,7 +362,7 @@ export function PayerLinkPage() {
   }
 
   return (
-    <>
+    <ComboboxTextContext.Provider value={comboboxTextFor(lang)}>
       {destination && location.pathname !== destination ? <Navigate to={destination} replace /> : null}
       <div lang={lang} className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground" data-testid="payer-link-page">
         <header className="shrink-0 border-b border-border bg-card">
@@ -382,7 +383,7 @@ export function PayerLinkPage() {
           </div>
         </main>
       </div>
-    </>
+    </ComboboxTextContext.Provider>
   );
 }
 

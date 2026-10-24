@@ -3,6 +3,7 @@ import { Check, Clock, LoaderCircle } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
 import { Banner } from "@/components/ui-shell";
+import { ComboboxTextContext, comboboxTextFor } from "@/components/ui/combobox-text";
 import { Button } from "@/components/ui/button";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
@@ -326,6 +327,7 @@ export function LeadCabinetFrame({
   const switchContext = useMemo(() => ({ lang, onLang, claim }), [lang, onLang, claim]);
   return (
     <CabinetLanguageContext.Provider value={switchContext}>
+      <ComboboxTextContext.Provider value={comboboxTextFor(lang)}>
       <div className="mx-auto w-full max-w-[96rem] space-y-5 pb-16" data-testid="lead-cabinet">
         {claimed === 0 ? (
           <div className="flex justify-end">
@@ -334,6 +336,7 @@ export function LeadCabinetFrame({
         ) : null}
         {children}
       </div>
+      </ComboboxTextContext.Provider>
     </CabinetLanguageContext.Provider>
   );
 }

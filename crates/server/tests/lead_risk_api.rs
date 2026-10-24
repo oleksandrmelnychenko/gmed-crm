@@ -993,6 +993,16 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
             .contains(&json!("id_document_upload")),
         "{preview}"
     );
+    // Who pays is part of the base form.
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("{path}/payer"),
+        &patient,
+        Some(json!({ "payer_kind": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     // From here this fixture represents an already submitted base form and
     // tests the stored assessment, including its identity follow-up.
     sqlx::query("UPDATE leads SET portal_submitted_at = clock_timestamp() WHERE id = $1")
@@ -1124,6 +1134,20 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     .await;
     assert_eq!(status, StatusCode::OK, "{sent}");
     assert!(sent["follow_up"]["answered_at"].is_string(), "{sent}");
+    // The answers of the blocks (birth data, legal questions, own economic
+    // interest) went with them: none marks the base form as changed after
+    // the submit (live check 2026-10-24: block B's answers asked to send the
+    // whole request again).
+    let changed_after_submit: Vec<String> = sqlx::query_scalar(
+        "SELECT f.key FROM leads l, jsonb_each(l.portal_field_updates) f
+         WHERE l.id = $1 AND (f.value->>'at')::timestamptz > l.portal_submitted_at
+         ORDER BY f.key",
+    )
+    .bind(lead_id)
+    .fetch_all(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(changed_after_submit, vec!["enhanced_details", "statements"]);
 
     // Staff: the blocks are answered, the lead waits for the review.
     let staff = assessment(&app, lead_id).await;

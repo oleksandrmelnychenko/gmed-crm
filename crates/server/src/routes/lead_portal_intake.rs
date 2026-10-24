@@ -1297,6 +1297,10 @@ const IDENTIFICATION_FIELDS: [&str; 21] = [
     "payment_background",
 ];
 
+/// The identification fields the base form of the cabinet asks; every other
+/// one belongs to the follow-up blocks or to staff (`risk::cabinet::DROPPED_KEYS`).
+const BASE_FORM_IDENTIFICATION_FIELDS: [&str; 2] = ["salutation", "contact_channels"];
+
 /// What the lead states himself for the GwG identification sheet (owner spec
 /// "Patientenformular (Lead-Link)", 2026-10-05): place of birth, identity
 /// document, the legal questions and why a third person pays. One row per
@@ -3421,19 +3425,51 @@ async fn update_my_payer(
         Ok(now) => now,
         Err(error) => return internal(error, "read portal update time"),
     };
-    markers.insert(
-        PAYER_MARKER.to_string(),
-        json!({
-            "at": now,
-            "by": auth.user_id,
-            "kind": kind.as_str(),
-            "hash": value_marker(
-                lead_id,
-                PAYER_MARKER,
-                Some(&lead_payer::portal_marker_value(&declaration)),
-            ),
-        }),
+    // The own economic interest is a question of follow-up block L: alone it
+    // counts like the other answers of the blocks, which are sent with them
+    // (live check 2026-10-24). The payer keeps its time, with the new value.
+    let own_interest_only = declared
+        .as_ref()
+        .is_some_and(|before| only_own_interest_changed(before, &declaration));
+    let previous_payer_update = if own_interest_only {
+        match previous_marker(&mut tx, lead_id, PAYER_MARKER).await {
+            Ok(previous) => previous,
+            Err(error) => return internal(error, "load payer marker"),
+        }
+    } else {
+        None
+    };
+    let payer_hash = value_marker(
+        lead_id,
+        PAYER_MARKER,
+        Some(&lead_payer::portal_marker_value(&declaration)),
     );
+    match previous_payer_update {
+        Some(mut previous) => {
+            previous["hash"] = json!(payer_hash);
+            markers.insert(PAYER_MARKER.to_string(), previous);
+            markers.insert(
+                STATEMENTS_MARKER.to_string(),
+                json!({
+                    "at": now,
+                    "by": auth.user_id,
+                    "kind": kind.as_str(),
+                    "hash": value_marker(lead_id, STATEMENTS_MARKER, Some(&format!("own_account|{now}"))),
+                }),
+            );
+        }
+        None => {
+            markers.insert(
+                PAYER_MARKER.to_string(),
+                json!({
+                    "at": now,
+                    "by": auth.user_id,
+                    "kind": kind.as_str(),
+                    "hash": payer_hash,
+                }),
+            );
+        }
+    }
     if let Err(error) = sqlx::query(
         r#"UPDATE leads
            SET portal_field_updates = portal_field_updates || $2::jsonb, updated_at = now()
@@ -3505,6 +3541,40 @@ fn monotonic_portal_time(clock: DateTime<Utc>) -> DateTime<Utc> {
 
 /// The "entered by the patient" marker of sections 7 and 8, made from the
 /// stored declaration (`None` without one).
+/// Whether the payer the cabinet saved differs from the stored one in the own
+/// economic interest only (follow-up block L), not in who pays.
+fn only_own_interest_changed(
+    before: &lead_payer::Declaration,
+    after: &lead_payer::Declaration,
+) -> bool {
+    let strip = |declaration: &lead_payer::Declaration| {
+        let mut value: Value = serde_json::from_str(&lead_payer::portal_marker_value(declaration))
+            .unwrap_or(Value::Null);
+        if let Some(object) = value.as_object_mut() {
+            object.remove("acts_on_own_account");
+            object.remove("beneficial_owner");
+        }
+        value
+    };
+    strip(before) == strip(after)
+}
+
+/// The stored change marker `key` of a lead, if any.
+async fn previous_marker(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    key: &str,
+) -> Result<Option<Value>, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<Value>>(
+        "SELECT portal_field_updates -> $2 FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .bind(key)
+    .fetch_one(conn)
+    .await
+    .map(|value| value.filter(Value::is_object))
+}
+
 async fn billing_marker(
     conn: &mut sqlx::PgConnection,
     lead_id: Uuid,
@@ -4154,7 +4224,28 @@ async fn update_my_identification(
         Err(error) => return internal(error, "read portal update time"),
     };
     let mut marker = json!({});
-    if !changed.is_empty() {
+    // Only the salutation and the contact channels belong to the base form,
+    // and the payment background while an organisation pays (step 3 asks
+    // why); the rest the lead answers in the follow-up blocks (birth data,
+    // legal questions, why a person pays) and sends with them: those count
+    // like the statements, so sending the blocks does not ask to send the
+    // whole request again (live check 2026-10-24).
+    let organisation_pays = if changed.contains(&"payment_background") {
+        match lead_payer::load_declaration(&mut tx, lead_id).await {
+            Ok(declaration) => declaration
+                .as_ref()
+                .is_some_and(lead_payer::Declaration::is_organisation),
+            Err(error) => return internal(error, "load payer"),
+        }
+    } else {
+        false
+    };
+    let (base_changed, follow_up_changed): (Vec<&str>, Vec<&str>) =
+        changed.iter().copied().partition(|field| {
+            BASE_FORM_IDENTIFICATION_FIELDS.contains(field)
+                || (*field == "payment_background" && organisation_pays)
+        });
+    if !base_changed.is_empty() {
         marker[IDENTIFICATION_MARKER] = json!({
             "at": now,
             "by": auth.user_id,
@@ -4165,10 +4256,17 @@ async fn update_my_identification(
     if statements_changed.contains(&"request_reason") {
         marker["request_reason"] = json!({ "at": now, "by": auth.user_id, "kind": kind.as_str() });
     }
-    if statements_changed
+    let follow_up_keys: Vec<&str> = follow_up_changed
         .iter()
-        .any(|key| *key != "request_reason")
-    {
+        .copied()
+        .chain(
+            statements_changed
+                .iter()
+                .copied()
+                .filter(|key| *key != "request_reason"),
+        )
+        .collect();
+    if !follow_up_keys.is_empty() {
         marker[STATEMENTS_MARKER] = json!({
             "at": now,
             "by": auth.user_id,
@@ -4176,7 +4274,7 @@ async fn update_my_identification(
             "hash": value_marker(
                 lead_id,
                 STATEMENTS_MARKER,
-                Some(&format!("{}|{}", statements_changed.join(","), now)),
+                Some(&format!("{}|{}", follow_up_keys.join(","), now)),
             ),
         });
     }

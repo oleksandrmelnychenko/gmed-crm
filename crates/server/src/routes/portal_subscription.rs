@@ -95,6 +95,9 @@ fn basic_path(path: &str) -> bool {
         "/me/account-statement",
         "/me/document-alerts",
         "/me/translation-requests",
+        // The address check of the forms (a lead's payer, a contact): no paid
+        // module, any signed-in user may ask (`email_check.rs`).
+        "/me/email-check",
     ]
     .contains(&path)
         || [
@@ -137,6 +140,7 @@ mod tests {
             "/me/invoices/a/payments",
             "/me/lead-requests/a",
             "/me/account-statement",
+            "/me/email-check",
         ] {
             assert!(basic_path(path), "{path}");
             assert!(basic_path(&format!("/api/v1{path}")), "{path}");

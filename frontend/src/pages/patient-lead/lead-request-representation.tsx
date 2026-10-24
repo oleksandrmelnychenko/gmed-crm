@@ -352,6 +352,8 @@ function useRepresentativeForm({
         // A representative born after the adult limit: say why, not only "check this field".
         if (field === "date_of_birth" && draft.date_of_birth && draft.date_of_birth > adultBirthDateLimit()) return text.representativeMinor;
         if (refused.codes[field] === EMAIL_DOMAIN_NO_MAIL) return emailDomainWarningText(draft.email, lang);
+        // Say what a phone number needs, as at the payer's phone (live check 2026-10-24).
+        if (field === "phone" && refused.codes[field] === "invalid_field") return text.invalidPhone;
         return refusalText(text, refused.codes[field]);
       }
       // Nothing about a person is saved before the last name is there: said once "next" (or

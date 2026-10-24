@@ -923,6 +923,13 @@ pub(crate) fn payer_fits(
     // A minor's representative named as payer (owner decision 2026-10-19):
     // the parent chosen as recipient pays, or the other one does.
     if declaration.is_representative() {
+        // The parent named as payer is no representative any more (sole
+        // custody of the other parent, a removed guardian): the cabinet asks
+        // who pays again instead of reporting the step as complete (live
+        // check 2026-10-24).
+        if !paying_parent {
+            return false;
+        }
         return match (
             recipient.recipient.as_deref(),
             recipient.representative_contact_id,

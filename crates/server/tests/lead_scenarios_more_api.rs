@@ -1944,6 +1944,13 @@ async fn scenario_joint_then_sole_custody_does_not_keep_the_other_parent_as_paye
     assert_eq!(view["representation"]["custody"], "sole_parent");
     assert_eq!(representative(&view, mother)["slot"], "rep1", "{view}");
     assert!(representative(&view, father)["slot"].is_null(), "{view}");
+    // The mother's cabinet asks who pays again (live check 2026-10-24: step
+    // 3 was "complete" with an empty payer).
+    assert!(
+        missing(&view).contains(&"payer_kind".to_string()),
+        "{}",
+        view["progress"]
+    );
 
     // The father paid: without custody he is no paying representative any
     // more; staff are told, the father is not silently kept as payer.

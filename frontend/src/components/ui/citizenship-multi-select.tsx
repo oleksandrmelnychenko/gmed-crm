@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { useComboboxText } from "@/components/ui/combobox-text";
 import { COUNTRY_CODES, countryLabel, countrySearchText } from "@/components/ui/country-select";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,7 @@ export function CitizenshipMultiSelect({
   maxItems?: number;
 }) {
   const { t, lang: uiLang } = useLang();
+  const removeLabel = useComboboxText()?.remove ?? t.common_remove;
   const lang = displayLang ?? uiLang;
   const selected = normalizeCitizenships(value);
   const options = COUNTRY_CODES.map((code) => ({ value: code, label: `${countryLabel(code, lang)} (${code})` }))
@@ -82,7 +84,7 @@ export function CitizenshipMultiSelect({
             disabled && "cursor-default hover:border-border hover:bg-card",
           )}
           title={countryLabel(code, lang)}
-          aria-label={`${t.common_remove}: ${countryLabel(code, lang)}`}
+          aria-label={`${removeLabel}: ${countryLabel(code, lang)}`}
         >
           <span className="font-mono text-[11px] text-muted-foreground">{code}</span>
           <span className="min-w-0 truncate">{countryLabel(code, lang)}</span>

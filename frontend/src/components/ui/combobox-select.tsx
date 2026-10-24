@@ -7,6 +7,7 @@ import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react"
 import { readOnlyDisables, useReadOnly, type ReadOnlyExemptProps } from "@/components/read-only-scope"
 import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
 import { useLang } from "@/lib/i18n"
+import { useComboboxText } from "@/components/ui/combobox-text"
 import { cn } from "@/lib/utils"
 
 type PrimitiveValue = string | number
@@ -222,6 +223,7 @@ function ComboboxSelect({
 }: ComboboxSelectProps) {
   const [query, setQuery] = React.useState("")
   const { t } = useLang()
+  const pageText = useComboboxText()
   const readOnly = useReadOnly()
   const disabled =
     disabledProp || readOnlyDisables(readOnly, { "data-readonly": readOnlyExempt })
@@ -235,9 +237,9 @@ function ComboboxSelect({
   const resolvedSearchPlaceholder =
     searchPlaceholder
       ? searchPlaceholder
-      : t.common_search_placeholder
+      : pageText?.search ?? t.common_search_placeholder
   const resolvedEmptyLabel =
-    emptyLabel ?? t.common_no_results
+    emptyLabel ?? pageText?.empty ?? t.common_no_results
 
   const displayOptions = React.useMemo(() => {
     if (!selectedValue || options.some((option) => option.value === selectedValue)) {
