@@ -111,6 +111,9 @@ async fn upload(app: &TestApp, path: &str, bearer: &str) -> (StatusCode, Value) 
         b"Content-Disposition: form-data; name=\"file\"; filename=\"pass.pdf\"\r\nContent-Type: application/pdf\r\n\r\n",
     );
     body.extend_from_slice(PDF);
+    // Every upload is another scan: identical content is refused as a
+    // duplicate since 2026-10-24.
+    body.extend_from_slice(format!("\n%{}\n", Uuid::new_v4().simple()).as_bytes());
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
     let req = Request::builder()
         .method("POST")
