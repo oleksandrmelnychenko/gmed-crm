@@ -309,6 +309,7 @@ export interface OperationsTranslations {
   lead_source_agent: string;
   lead_source_website: string;
   lead_source_website_wizard: string;
+  lead_source_website_questionnaire: string;
   lead_source_visitor_facade: string;
   lead_source_referral: string;
   lead_source_phone: string;
@@ -931,6 +932,7 @@ export const operationsRu: OperationsTranslations = {
   lead_source_agent: "Агент",
   lead_source_website: "Сайт",
   lead_source_website_wizard: "Мастер на сайте",
+  lead_source_website_questionnaire: "Анкета на сайте",
   lead_source_visitor_facade: "Форма сайта",
   lead_source_referral: "Рекомендация",
   lead_source_phone: "Телефон",
@@ -1587,6 +1589,7 @@ export const operationsDe: OperationsTranslations = {
   lead_source_agent: "Agent",
   lead_source_website: "Website",
   lead_source_website_wizard: "Website-Assistent",
+  lead_source_website_questionnaire: "Website-Fragebogen",
   lead_source_visitor_facade: "Website-Formular",
   lead_source_referral: "Empfehlung",
   lead_source_phone: "Telefon",

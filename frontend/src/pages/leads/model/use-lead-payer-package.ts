@@ -55,6 +55,13 @@ export function useLeadPayerPackage(
   leadId: string | null | undefined,
   enabled = true,
   onChanged?: () => void,
+  /**
+   * What the package is built from, as the wizard knows it (the estimate's
+   * id and status, the prepayment, the lead's update time): another value
+   * loads the state afresh, so a Kostenvoranschlag created or confirmed in
+   * this session reaches the panel without a page reload (QA 2026-10-25).
+   */
+  refreshKey?: string,
 ): LeadPayerPackageController {
   const [data, setData] = useState<LeadPayerPackageState | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,6 +69,7 @@ export function useLeadPayerPackage(
   const requestRef = useRef(0);
   const onChangedRef = useRef(onChanged);
   const fingerprintRef = useRef<string | null>(null);
+  const refreshKeyRef = useRef(refreshKey);
 
   useEffect(() => {
     onChangedRef.current = onChanged;
@@ -126,6 +134,14 @@ export function useLeadPayerPackage(
     fingerprintRef.current = null;
     void reload();
   }, [reload]);
+
+  // The facts behind the package changed in this session (estimate, prepayment, order): look again.
+  useEffect(() => {
+    if (refreshKeyRef.current === refreshKey) return;
+    refreshKeyRef.current = refreshKey;
+    if (!leadId || !enabled) return;
+    void reload();
+  }, [enabled, leadId, refreshKey, reload]);
 
   // Skribble's result reaches the server by its worker: look again when staff come back.
   useEffect(() => {

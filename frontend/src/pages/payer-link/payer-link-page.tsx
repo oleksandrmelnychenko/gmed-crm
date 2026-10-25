@@ -23,11 +23,15 @@ import {
   LINK_STORAGE_KEY,
   PayerSecrets,
   SESSION_STORAGE_KEY,
+  browserLocalStorage,
   browserSessionStorage,
   captureLinkToken,
+  fatalPageLang,
   isFatalKind,
   payerErrorKind,
   payerErrorMessage,
+  readPayerPageLang,
+  storePayerPageLang,
   type FatalKind,
   type PayerErrorKind,
 } from "./payer-link-session";
@@ -111,10 +115,18 @@ export function PayerLinkPage() {
   useEffect(() => {
     if (completed) mainRef.current?.scrollTo({ top: 0 });
   }, [completed]);
-  const [chosenLang, setChosenLang] = useState<LeadCabinetLang | null>(null);
+  // The choice of the switch is kept in the browser: the link opened again, also once it is
+  // dead, reads in that language (QA 2026-10-25, H-13).
+  const [chosenLang, setChosenLang] = useState<LeadCabinetLang | null>(() => readPayerPageLang(browserLocalStorage()));
+  const chooseLang = useCallback((next: LeadCabinetLang) => {
+    setChosenLang(next);
+    storePayerPageLang(browserLocalStorage(), next);
+  }, []);
   const [linkLang, setLinkLang] = useState<LeadCabinetLang | null>(null);
   const [fallbackLang] = useState(browserLang);
-  const lang = chosenLang ?? linkLang ?? fallbackLang;
+  // A dead link (revoked, expired, locked) is shown in the language chosen before or sent with
+  // the link, else in German; the browser language is no promise the e-mail made.
+  const lang = view.kind === "fatal" ? fatalPageLang(chosenLang, linkLang) : chosenLang ?? linkLang ?? fallbackLang;
   const text = payerLinkText(lang);
   // The shared controls (search in the select lists) speak the app language: DE or RU
   // like the page (QA 2026-10-10: "Поиск..." on the German page).
@@ -371,7 +383,7 @@ export function PayerLinkPage() {
               <GmedWordmark className="h-6 w-auto text-[#04060c] dark:text-foreground" />
               <span className="sr-only">GMED</span>
             </span>
-            <LanguageSwitch lang={lang} label={text.language} onChange={setChosenLang} />
+            <LanguageSwitch lang={lang} label={text.language} onChange={chooseLang} />
           </div>
         </header>
         <main ref={mainRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain">

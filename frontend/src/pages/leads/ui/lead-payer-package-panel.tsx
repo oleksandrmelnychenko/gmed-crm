@@ -77,6 +77,14 @@ export function LeadPayerPackagePanel({
   const signer = payerPackageSignerText(state.signer, tx);
   const identification = payerPackageIdentificationText(state.payer_identification, tx);
   const outdated = pkg?.outdated_reasons ?? [];
+  // Why the QES button is off, said beside it (QA 2026-10-25).
+  const sendDisabledHint = !state.signature_enabled
+    ? payerPackageSignatureDisabledText(tx)
+    : pkg && outdated.length > 0
+      ? tx("Пакет устарел — пересоздайте документы", "Paket veraltet – Unterlagen neu erstellen")
+      : state.blocked_reason
+        ? payerPackageBlockedReasonText(state.blocked_reason, tx, state.missing)
+        : null;
   const locked = disabled || busy !== null;
   const firstDocument = rows[0]?.document ?? null;
   const message = (cause: unknown) => payerPackageErrorText(cause, tx) ?? errorText(cause);
@@ -216,7 +224,7 @@ export function LeadPayerPackagePanel({
           </ul>
         </div>
       ) : null}
-      {!state.signature_enabled ? (
+      {!state.signature_enabled && !actions.sendShown ? (
         <p className="text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-payer-package-signature-disabled">
           {payerPackageSignatureDisabledText(tx)}
         </p>
@@ -290,11 +298,23 @@ export function LeadPayerPackagePanel({
                 size="sm"
                 className="h-8 rounded-lg"
                 disabled={locked || !actions.sendEnabled}
+                aria-describedby={!actions.sendEnabled && sendDisabledHint ? `lead-payer-package-send-hint-${leadId}` : undefined}
                 onClick={() => setConfirm(true)}
               >
                 {busy === "send" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
                 {tx("Отправить плательщику на подпись", "An den Zahler zur Unterschrift senden")}
               </Button>
+            ) : null}
+            {actions.sendShown && !actions.sendEnabled && sendDisabledHint ? (
+              // Why the QES button is off, next to it (QA 2026-10-25): the
+              // signature is not connected, or the package has to be remade.
+              <span
+                id={`lead-payer-package-send-hint-${leadId}`}
+                className="text-xs leading-5 text-amber-700 dark:text-amber-300"
+                data-testid="lead-payer-package-send-hint"
+              >
+                {sendDisabledHint}
+              </span>
             ) : null}
             {actions.details && firstDocument && renderDetails ? (
               <span className="inline-flex" data-testid="lead-payer-package-details">

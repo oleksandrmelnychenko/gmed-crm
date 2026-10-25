@@ -858,7 +858,9 @@ async fn a_renamed_lead_is_renamed_in_its_login() {
         Some(json!({ "first_name": "Zara", "last_name": "Portal-Meyer" })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
+    // The converted lead is frozen (QA 2026-10-25): the patient card renames.
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "lead_converted", "{body}");
     assert_eq!(login_name(pool, user_id).await, "Rita Portal-Meyer");
     assert_eq!(login_events(pool, user_id).await, 3);
 }

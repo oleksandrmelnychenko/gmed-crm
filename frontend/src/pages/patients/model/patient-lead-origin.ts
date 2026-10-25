@@ -55,6 +55,15 @@ function numberFromUnknown(value: unknown) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
+// Consents given (true = granted); the opt-out is a refusal and keeps the plain precedence.
+const CONSENT_KEYS = new Set([
+  "consent_privacy_practices",
+  "consent_healthcare",
+  "consent_automated_contact",
+  "email_consent",
+  "whatsapp_consent",
+]);
+
 export function createPatientLeadOrigin(detail: PatientDetail) {
   const profile = recordFromUnknown(detail.intake_profile);
   const snapshot = recordFromUnknown(detail.lead_snapshot);
@@ -65,6 +74,16 @@ export function createPatientLeadOrigin(detail: PatientDetail) {
   );
   const string = (key: string) => stringFromUnknown(value(key));
   const boolean = (key: string) => {
+    // A consent is on record when either source says so: the conversion
+    // wrote the staff toggle (a paper consent) into the profile, the cabinet's
+    // consent reaches the profile since 2026-10-25 and the lead row (the
+    // snapshot) carries both. A stale `false` of one copy never hides the
+    // other's `true` (QA 2026-10-25, patient card «Данные первичного обращения»).
+    if (CONSENT_KEYS.has(key)) {
+      const recorded = [profile[key], snapshot[key]].filter((item): item is boolean => typeof item === "boolean");
+      if (recorded.length === 0) return null;
+      return recorded.some(Boolean);
+    }
     const candidate = value(key);
     return typeof candidate === "boolean" ? candidate : null;
   };

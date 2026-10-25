@@ -226,8 +226,11 @@ export function promoteLeadToConsole(leadId: string) {
   return postJson<void>(`/leads/${leadId}/promote-console`, {});
 }
 
+/** A questionnaire file the import refused (`import_refusal_code` on the attachment). */
+export type LeadAttachmentImportRefusal = { id: string; file_name: string; code: string | null };
+
 export function importLeadAttachments(leadId: string) {
-  return postJson<{ imported: number }>(`/leads/${leadId}/import-attachments`, {});
+  return postJson<{ imported: number; refused?: LeadAttachmentImportRefusal[] }>(`/leads/${leadId}/import-attachments`, {});
 }
 
 export function resolveFailedLead(leadId: string, payload: JsonPayload) {

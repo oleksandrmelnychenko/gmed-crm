@@ -15,6 +15,21 @@ function patient(overrides: Partial<PatientDetail> = {}): PatientDetail {
 }
 
 describe("createPatientLeadOrigin", () => {
+  it("shows a consent given in either copy: the profile's paper record or the lead row's cabinet consent", () => {
+    // The conversion wrote the wizard toggle (false) into the profile while the
+    // lead row carries the cabinet's consent (QA 2026-10-25).
+    const origin = createPatientLeadOrigin(patient({
+      intake_profile: { consent_privacy_practices: false, consent_healthcare: false },
+      lead_snapshot: { consent_privacy_practices: true, consent_healthcare: false, consent_opt_out: false },
+    }));
+    expect(origin.boolean("consent_privacy_practices")).toBe(true);
+    expect(origin.boolean("consent_healthcare")).toBe(false);
+    expect(origin.boolean("consent_opt_out")).toBe(false);
+    expect(origin.boolean("consent_automated_contact")).toBeNull();
+    // The profile alone (the backfilled cabinet consent) is enough.
+    expect(createPatientLeadOrigin(patient({ intake_profile: { consent_healthcare: true } })).boolean("consent_healthcare")).toBe(true);
+  });
+
   it("uses the immutable snapshot as a fallback for legacy converted patients", () => {
     const origin = createPatientLeadOrigin(patient({
       source_lead_id: "lead-1",

@@ -268,6 +268,29 @@ export function leadServerContactError(error: unknown): { contactId: string; fie
   return { contactId, field: typeof body?.contact_field === "string" ? body.contact_field : "" };
 }
 
+/** The server's code of an error body (`error` or `code`), or the ApiRequestError code. */
+export function leadErrorCode(error: unknown): string | null {
+  const body = leadErrorBody(error);
+  const candidates = [body?.error, body?.code, (error as { code?: unknown } | null)?.code];
+  const code = candidates.find((value): value is string => typeof value === "string" && value.trim() !== "");
+  return code ?? null;
+}
+
+/** 409 `lead_converted`: the lead has its patient; its data are edited in the patient card. */
+export function isLeadConvertedError(error: unknown): boolean {
+  return leadErrorStatus(error) === 409 && leadErrorCode(error) === "lead_converted";
+}
+
+/** 422 `trusted_contact_name_invalid` (contact_field "name"): the cabinet's passport-name rule. */
+export function isTrustedContactNameInvalidError(error: unknown): boolean {
+  return leadErrorStatus(error) === 422 && leadErrorCode(error) === "trusted_contact_name_invalid";
+}
+
+/** The passport-name rule of the lead cabinet, in the wizard's words. */
+export function passportNameRuleText(tx: LeadErrorTranslator): string {
+  return tx("Только латинские буквы, как в загранпаспорте.", "Nur lateinische Buchstaben wie im Reisepass.");
+}
+
 export function leadErrorMessage(
   error: unknown,
   tx: LeadErrorTranslator,
@@ -277,6 +300,10 @@ export function leadErrorMessage(
     "Не удалось выполнить действие. Повторите попытку",
     "Aktion konnte nicht abgeschlossen werden. Bitte erneut versuchen",
   );
+  // The lead has its patient: nothing is edited here any more.
+  if (isLeadConvertedError(error)) return tx("Пациент по этому лиду уже создан", "Für diesen Lead wurde bereits ein Patient angelegt");
+  // The same rule as the cabinet's, so staff read the same words (QA 2026-10-25).
+  if (isTrustedContactNameInvalidError(error)) return passportNameRuleText(tx);
   // A server code with its own translation (e.g. a prepayment above the order
   // total) says more than the generic "check your input".
   if (isLocalizedApiError(error) && error.message.trim()) return error.message.trim();
@@ -379,9 +406,16 @@ export const STATUS_OPTIONS = [
   "in_progress",
   "qualified",
   "not_qualified",
+  // Converted leads are listed on request only (the filter, «С архивом» or a search).
+  "converted",
   "archived",
   "deleted",
 ] as const;
+
+/** Whether the list shows converted leads for these filters (the server returns them then). */
+export function leadListShowsConverted(filters: Pick<LeadFilters, "status" | "search" | "includeArchived">): boolean {
+  return filters.status === "converted" || filters.includeArchived === "true" || filters.search.trim() !== "";
+}
 
 export const COMPLIANCE_OPTIONS = [
   "pending",
@@ -461,6 +495,11 @@ const LEAD_SOURCE_LABEL_KEYS = {
   website: "lead_source_website",
   apply: "lead_source_website_wizard",
   website_wizard: "lead_source_website_wizard",
+  wizard: "lead_source_website_wizard",
+  // The public questionnaire (website_questionnaire; older rows: questionnaire, oprosnik).
+  website_questionnaire: "lead_source_website_questionnaire",
+  questionnaire: "lead_source_website_questionnaire",
+  oprosnik: "lead_source_website_questionnaire",
   website_contact: "lead_source_visitor_facade",
   website_contact_form: "lead_source_visitor_facade",
   website_form: "lead_source_visitor_facade",

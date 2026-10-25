@@ -674,7 +674,11 @@ async fn create_agency_service_catalog_item(
     )
     .bind(service_key)
     .bind(service_name)
-    .bind(format!("{service_name} live E2E seeded catalog item"))
+    // The description is printed in Einzelauftrag § I as the public scope of
+    // the service: keep it client-facing, never an internal note.
+    .bind(format!(
+        "{service_name}: Organisation und Begleitung der medizinischen Leistung durch GMED."
+    ))
     .bind(created_by)
     .fetch_one(&state.db)
     .await

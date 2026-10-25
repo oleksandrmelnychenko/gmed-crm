@@ -402,6 +402,12 @@ DEMO-підпису (`GMED_DEV_DEMO_ONBOARDING=true`, лише для налаш
   з `source = paper_signature` і SHA-256 скана, статус compliance ліда.
 - Відмови: `document_already_signed`, `document_superseded`,
   `document_unavailable`, `informational_document_not_signable`,
+  `order_document_outdated` (Einzelauftrag зроблено до останньої зміни
+  послуг чи періоду замовлення), `estimate_document_outdated`
+  (Kostenvoranschlag зроблено до останньої зміни послуг, періоду чи
+  передоплати — `orders.prepayment_terms_changed_at`, функція
+  `document_terms_current`; список документів показує `terms_current`,
+  QA 2026-10-25),
   `signature_already_pending` (документ у відкритому е-запиті — спершу
   відкликати), `paper_signature_scan_required` / `_scan_type` /
   `_scan_too_large` / `_date_invalid`, `signature_scan_failed` (антивірус).

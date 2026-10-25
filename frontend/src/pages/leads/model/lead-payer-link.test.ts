@@ -249,6 +249,14 @@ describe("payer link: what may be done", () => {
     });
   });
 
+  it("says 'now send the link' only once the lead has sent the request", () => {
+    // Before the submission the link may go out, but the sentence about the request waits (QA 2026-10-25).
+    const notYet = payerLinkActions(state(), false, ru, false);
+    expect(notYet.highlight).toBe(false);
+    expect(notYet.sendEnabled).toBe(true);
+    expect(payerLinkActions(state(), false, ru, true).highlight).toBe(true);
+  });
+
   it("holds the send while the risk assessment waits at level 3, naming the real button", () => {
     const held = payerLinkActions({ ...state(), risk_hold: "review" }, false, ru);
     expect(held.sendEnabled).toBe(false);

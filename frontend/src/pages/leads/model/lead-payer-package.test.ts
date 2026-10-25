@@ -286,7 +286,7 @@ describe("payer package errors", () => {
       "Пациент ещё не согласился на передачу сметы плательщику",
     );
     expect(payerPackageErrorText(error("payer_package_pending"), de)).toBe("Das Paket ist bereits gesendet und wartet auf Unterschrift");
-    expect(payerPackageErrorText(error("signature_not_configured"), ru)).toBe("Электронная подпись не подключена");
+    expect(payerPackageErrorText(error("signature_not_configured"), ru)).toBe("Электронная подпись отключена — используйте бумажную подпись");
     expect(payerPackageErrorText(error("payer_package_signers_required"), de)).toBe(
       "Die Unterlagen des Zahlers unterschreiben nur der Zahler und die GMED-Vertretung – ohne Patientenseite.",
     );

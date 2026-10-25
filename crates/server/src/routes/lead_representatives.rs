@@ -4040,6 +4040,17 @@ pub(crate) async fn update_lead_representative_details(
     };
     let mut contacts = loaded.contacts.clone();
     let relation = person.relation.clone().unwrap_or_default();
+    // The parent's login carries the contact's name: a rename here renames it
+    // in the same transaction (QA 2026-10-25). The name before is the stored
+    // entry's — the one the login was issued with.
+    let contact_name_before = contacts
+        .iter()
+        .find(|entry| entry_id(entry) == Some(representative_id))
+        .and_then(|entry| entry.get("name"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| current.name());
+    let mut renamed_logins = Vec::new();
     write_entry(
         &mut contacts,
         representative_id,
@@ -4073,6 +4084,14 @@ pub(crate) async fn update_lead_representative_details(
         )
         .await?;
         store_lead(&mut tx, lead_id, Some(contacts.as_slice()), &json!({})).await?;
+        if fields.contains(&"first_name") || fields.contains(&"last_name") {
+            renamed_logins = crate::routes::lead_portal_account::sync_guardian_names_in_tx(
+                &mut tx,
+                lead_id,
+                &[(representative_id, contact_name_before.clone(), next.name())],
+            )
+            .await?;
+        }
         audit::write_in_transaction(
             &mut tx,
             &audit::domain_event(
@@ -4110,6 +4129,15 @@ pub(crate) async fn update_lead_representative_details(
         return intake::internal(error, "commit representative details");
     }
     crate::document_signatures::withdraw_invalidated_consents(&state, &invalidated).await;
+    for user_id in renamed_logins {
+        crate::realtime::publish_user_profile_event(
+            &state,
+            Some(auth.user_id),
+            user_id,
+            json!({ "change": "name", "source": "lead_representative", "lead_id": lead_id }),
+        )
+        .await;
+    }
     publish_staff_change(&state, lead_id, auth.user_id).await;
     Json(json!({ "representation": staff_payload(&loaded) })).into_response()
 }

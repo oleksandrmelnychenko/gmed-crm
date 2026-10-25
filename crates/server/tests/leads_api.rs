@@ -2462,6 +2462,8 @@ async fn converted_lead_is_absent_from_registry_but_detail_remains_auditable() {
     assert_eq!(status, StatusCode::OK);
     assert!(convert_body["patient_id"].is_string());
 
+    let patient_id = convert_body["patient_id"].as_str().unwrap().to_string();
+
     let (status, list) = json_request(&app, "GET", "/api/v1/leads", &pm, None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(
@@ -2472,6 +2474,67 @@ async fn converted_lead_is_absent_from_registry_but_detail_remains_auditable() {
             .any(|lead| lead["id"] == lead_id),
         "converted lead must leave the operational lead registry"
     );
+    // QA 2026-10-25: the converted lead is found again with its status, the
+    // archive switch or a search, labelled and linked to the patient.
+    for query in [
+        "status=converted",
+        "include_archived=true",
+        "search=Already%20Converted",
+    ] {
+        let (status, list) =
+            json_request(&app, "GET", &format!("/api/v1/leads?{query}"), &pm, None).await;
+        assert_eq!(status, StatusCode::OK, "{query}: {list}");
+        let row = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|lead| lead["id"] == lead_id)
+            .unwrap_or_else(|| panic!("converted lead listed for ?{query}: {list}"));
+        assert_eq!(row["qualification_status"], "converted", "{query}: {row}");
+        assert_eq!(row["converted_patient_id"], patient_id, "{query}: {row}");
+    }
+
+    // The lead is frozen with the conversion: a staff write answers 409
+    // `lead_converted` and changes nothing (the wizard autosaves).
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "middle_name": "Drift" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "lead_converted", "{refused}");
+    assert_eq!(refused["converted_patient_id"], patient_id, "{refused}");
+    let middle_name: Option<String> =
+        sqlx::query_scalar("SELECT middle_name FROM leads WHERE id = $1")
+            .bind(Uuid::parse_str(&lead_id).unwrap())
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(middle_name.as_deref().unwrap_or_default(), "");
+    for (path, body) in [
+        ("qualify", json!({ "status": "in_progress" })),
+        ("promote-console", json!({})),
+        ("import-attachments", json!({})),
+        ("prospect", json!({})),
+        (
+            "failed-flow",
+            json!({ "resolution": "archive", "reason": "no_response" }),
+        ),
+    ] {
+        let (status, refused) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/leads/{lead_id}/{path}"),
+            &pm,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{path}: {refused}");
+        assert_eq!(refused["code"], "lead_converted", "{path}: {refused}");
+    }
 
     let (status, detail) =
         json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
@@ -2652,6 +2715,13 @@ async fn lead_can_convert_with_the_newest_accepted_quote_while_awaiting_prepayme
         .unwrap();
     sqlx::query("UPDATE orders SET total_estimated=119,prepayment_due_at=now()+interval '3 days' WHERE id=$1")
         .bind(artifacts.order_id).execute(&app.suite.pool).await.unwrap();
+    // The wizard would print a fresh estimate after the terms changed; the
+    // terms were set by SQL here, so the staleness stamp is cleared instead.
+    sqlx::query("UPDATE orders SET prepayment_terms_changed_at=NULL WHERE id=$1")
+        .bind(artifacts.order_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
     let (status, converted) = json_request(
         &app,
         "POST",
@@ -2732,6 +2802,13 @@ async fn lead_readiness_normalizes_cost_passthrough_vat() {
     .await
     .unwrap();
     sqlx::query("UPDATE orders SET total_estimated = 100, prepayment_amount = 100 WHERE id = $1")
+        .bind(artifacts.order_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    // Terms set by SQL, not through the wizard (which would print a fresh
+    // estimate): clear the staleness stamp so the estimate counts as current.
+    sqlx::query("UPDATE orders SET prepayment_terms_changed_at = NULL WHERE id = $1")
         .bind(artifacts.order_id)
         .execute(&app.suite.pool)
         .await
@@ -3354,6 +3431,13 @@ async fn returning_patient_attach_reuses_identity_without_overwriting_master_dat
         .bind(artifacts.order_id).execute(pool).await.unwrap();
     sqlx::query("UPDATE documents SET order_intake_context=repeat_order_document_context(order_id) WHERE order_id=$1")
         .bind(artifacts.order_id).execute(pool).await.unwrap();
+    // The scan of the new version stands for fresh documents here: the moved
+    // period would otherwise leave the estimate outdated (document_terms_current).
+    sqlx::query("UPDATE orders SET client_terms_changed_at=NULL WHERE id=$1")
+        .bind(artifacts.order_id)
+        .execute(pool)
+        .await
+        .unwrap();
     let other_patient: Uuid = sqlx::query_scalar("INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, lifecycle_status, created_by) VALUES ($1, 'Other', 'Patient', DATE '1985-01-01', 'female', 'active', $2) RETURNING id")
         .bind(format!("P-OTHER-{tag}")).bind(app.patient_manager_id).fetch_one(pool).await.unwrap();
     let other_contract: Uuid = sqlx::query_scalar("INSERT INTO framework_contracts (patient_id, contract_number, signed_at, status, created_by) VALUES ($1, $2, now(), 'signed', $3) RETURNING id")
@@ -5298,6 +5382,47 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .await
     .unwrap();
     let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    // The identity document staff recorded on the GwG statement reaches the
+    // patient card whole (QA 2026-10-25: only the validity did).
+    sqlx::query(
+        r#"INSERT INTO lead_gwg_declarations (
+               lead_id, id_document_type, id_document_number, id_issuing_authority,
+               id_issuing_country, id_issued_on, id_valid_until
+           ) VALUES ($1, 'passport', 'FX1234567', 'Kyiv 8001', 'UA', DATE '2024-06-01', DATE '2034-05-31')
+           ON CONFLICT (lead_id) DO UPDATE SET
+               id_document_type = EXCLUDED.id_document_type,
+               id_document_number = EXCLUDED.id_document_number,
+               id_issuing_authority = EXCLUDED.id_issuing_authority,
+               id_issuing_country = EXCLUDED.id_issuing_country,
+               id_issued_on = EXCLUDED.id_issued_on,
+               id_valid_until = EXCLUDED.id_valid_until"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    // The lead's own portal login: after the conversion the cabinet lists the
+    // released documents (QA 2026-10-25: nothing was shared with the login).
+    let portal_user = seed_user(
+        pool,
+        &format!("atomic-portal-{}", lead_id.simple()),
+        "patient",
+    )
+    .await;
+    sqlx::query("UPDATE leads SET portal_user_id = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(portal_user)
+        .execute(pool)
+        .await
+        .unwrap();
+    // The signed DSGVO consent is released to the patient; the ID scan stays internal.
+    sqlx::query(
+        "UPDATE documents SET visibility = 'patient_visible' WHERE lead_id = $1 AND compliance_kind = 'dsgvo'",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
     // A previous payer's archived ID copy stays in the lead's archive; it is
     // not the patient's (owner 2026-10-24).
     let previous_payer_copy = Uuid::new_v4();
@@ -5676,6 +5801,78 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
             .await
             .unwrap();
     assert_eq!(converted_patient_id, Some(patient_id));
+
+    // The GwG statement's identity document is the patient's (QA 2026-10-25).
+    let identity: String = sqlx::query_scalar(
+        r#"SELECT concat_ws('|', passport_number, passport_expiry::text, id_document_type,
+                            id_issuing_authority, id_issuing_country, id_issued_on::text)
+           FROM patients WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        identity,
+        "FX1234567|2034-05-31|passport|Kyiv 8001|UA|2024-06-01"
+    );
+    assert_eq!(patient_detail["passport_number"], "FX1234567");
+    assert_eq!(patient_detail["id_document_type"], "passport");
+    assert_eq!(patient_detail["id_issuing_authority"], "Kyiv 8001");
+    assert_eq!(patient_detail["id_issuing_country"], "UA");
+    assert_eq!(patient_detail["id_issued_on"], "2024-06-01");
+    assert_eq!(patient.13["passport_number"], "FX1234567");
+
+    // The patient's login lists what was released: the signed consent and
+    // the contract, not the internal ID scan (QA 2026-10-25).
+    let portal = format!(
+        "Bearer {}",
+        jwt::issue_access_token(TEST_SECRET, portal_user, "patient", Uuid::new_v4()).unwrap()
+    );
+    let (status, my_documents) =
+        json_request(&app, "GET", "/api/v1/me/documents", &portal, None).await;
+    assert_eq!(status, StatusCode::OK, "{my_documents}");
+    let released: Vec<String> = my_documents
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|document| {
+            document["auto_name"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    let tag = lead_id.simple().to_string();
+    assert!(released.contains(&format!("dsgvo {tag}")), "{released:?}");
+    assert!(
+        released.contains(&format!("framework_contract {tag}")),
+        "{released:?}"
+    );
+    assert!(
+        released.contains(&format!("cost_estimate {tag}")),
+        "{released:?}"
+    );
+    assert!(
+        !released.contains(&format!("identity {tag}")),
+        "{released:?}"
+    );
+    for document in my_documents.as_array().unwrap() {
+        assert_eq!(document["channel"], "patient_portal", "{document}");
+        assert_eq!(document["requires_confirmation"], false, "{document}");
+    }
+    // Sharing is idempotent per login and document.
+    let shares: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM document_shares ds
+           JOIN documents d ON d.id = ds.document_id
+           WHERE d.patient_id = $1 AND ds.shared_with_user_id = $2 AND ds.revoked_at IS NULL"#,
+    )
+    .bind(patient_id)
+    .bind(portal_user)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(shares as usize, my_documents.as_array().unwrap().len());
 
     let legacy_clinical_rows: i64 = sqlx::query_scalar(
         r#"SELECT
@@ -9349,4 +9546,244 @@ async fn lead_update_audit_names_identity_fields_without_values() {
     for payload in payloads {
         assert!(!payload.to_string().contains("1977-06-05"), "{payload}");
     }
+}
+
+/// QA 2026-10-25: the patient card said "Медицинское согласие: Нет" although
+/// the consent was given in the cabinet. The conversion writes the consent
+/// as the readiness counts it: the wizard's record or the cabinet's.
+#[tokio::test]
+async fn cabinet_consents_reach_the_patient_card_at_conversion() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Cabinet",
+            "last_name": "Consent",
+            "email": format!("cabinet-consent-{tag}@example.com"),
+            "phone": "+49111000777",
+            "source": "Test",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    sqlx::query("UPDATE leads SET intake_model = 'legacy' WHERE id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    record_dsgvo_signature(pool, &lead_id.to_string()).await;
+    let (status, updated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({
+            "primary_language": "de",
+            "date_of_birth": "1990-01-01",
+            "legal_sex": "female"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    // The consents were given in the cabinet, not ticked by staff.
+    let portal_user = seed_user(pool, &format!("cabinet-consent-{tag}"), "patient").await;
+    sqlx::query("UPDATE leads SET portal_user_id = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(portal_user)
+        .execute(pool)
+        .await
+        .unwrap();
+    for consent_type in ["lead_inquiry_processing", "health_data_processing"] {
+        sqlx::query(
+            r#"INSERT INTO consent_records (user_id, lead_id, consent_type, granted, granted_at, context)
+               VALUES ($1, $2, $3, true, now(), '{"access_kind":"self","source":"lead_portal"}'::jsonb)"#,
+        )
+        .bind(portal_user)
+        .bind(lead_id)
+        .bind(consent_type)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    let (status, qualified) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/qualify"),
+        &pm,
+        Some(json!({ "status": "qualified" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{qualified}");
+    seed_complete_lead_onboarding(&app, lead_id).await;
+    // The seed ticks the staff toggles; this card has the cabinet's consents only.
+    sqlx::query(
+        "UPDATE leads SET consent_healthcare = false, consent_privacy_practices = false WHERE id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(
+        detail["readiness"]["cabinet_consents"]["healthcare"], true,
+        "{detail}"
+    );
+    assert_eq!(detail["readiness"]["conversion_ready"], true, "{detail}");
+
+    let (status, converted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/convert"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    let patient_id = Uuid::parse_str(converted["patient_id"].as_str().unwrap()).unwrap();
+    let intake_profile: Value =
+        sqlx::query_scalar("SELECT intake_profile FROM patients WHERE id = $1")
+            .bind(patient_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        intake_profile["consent_healthcare"], true,
+        "{intake_profile}"
+    );
+    assert_eq!(
+        intake_profile["consent_privacy_practices"], true,
+        "{intake_profile}"
+    );
+    // The patient card reads the same profile.
+    let (status, patient) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{patient}");
+    assert_eq!(
+        patient["intake_profile"]["consent_healthcare"], true,
+        "{patient}"
+    );
+    assert_eq!(
+        patient["intake_profile"]["consent_privacy_practices"], true,
+        "{patient}"
+    );
+}
+
+/// QA 2026-10-25: a parent renamed by staff kept the old name on the
+/// parent's login; and a parent's name with digits ("Kindermann-H1") was
+/// saved although the cabinet refuses it, so the mother could not edit it.
+#[tokio::test]
+async fn renaming_a_parent_in_the_wizard_renames_the_parents_login_and_follows_the_passport_rule() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_email = format!("mia-rename-{}@example.com", Uuid::new_v4().simple());
+    let lead_id = seed_minor_lead_with_parents(&app, &lead_email, anna, ben, None).await;
+    // Anna's login was issued for her contact; Ben's login carries a name of
+    // its own (a patient account of his), so it is not renamed.
+    let mut logins = Vec::new();
+    for (contact, email, name) in [
+        (anna, "anna.rename@example.com", "Anna Muster"),
+        (ben, "ben.rename@example.com", "Benjamin Muster"),
+    ] {
+        let user: Uuid = sqlx::query_scalar(
+            "INSERT INTO users(email,password_hash,name,role) VALUES($1,'synthetic',$2,'patient') RETURNING id",
+        )
+        .bind(format!("{}-{email}", lead_id.simple()))
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO lead_portal_access(lead_id,user_id,kind,trusted_contact_id,created_by) VALUES($1,$2,'guardian',$3,$4)")
+            .bind(lead_id).bind(user).bind(contact).bind(app.patient_manager_id).execute(pool).await.unwrap();
+        logins.push(user);
+    }
+    let contacts = |anna_name: &str, ben_name: &str| {
+        json!([
+            { "id": anna, "name": anna_name, "relation": "mother",
+              "email": "anna.muster@example.com", "phone": "+49 30 000000",
+              "birth_date": "1985-03-02" },
+            { "id": ben, "name": ben_name, "relation": "father",
+              "email": "ben.muster@example.com" },
+        ])
+    };
+
+    // A parent's name is spelled as in the passport (the cabinet's rule).
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "trusted_contacts": contacts("Anna Kindermann-H1", "Ben Muster") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "trusted_contact_name_invalid", "{refused}");
+    assert_eq!(refused["field"], "trusted_contacts", "{refused}");
+    assert_eq!(refused["contact_index"], 0, "{refused}");
+    assert_eq!(refused["contact_id"], anna.to_string(), "{refused}");
+    assert_eq!(refused["contact_field"], "name", "{refused}");
+    let stored: Value = sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(stored[0]["name"], "Anna Muster", "{stored}");
+
+    // A rename reaches the login issued for the contact; the other login stays.
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "trusted_contacts": contacts("Anna Mustermann", "Ben Mustermann") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let names: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM users WHERE id = ANY($1) ORDER BY array_position($1, id)",
+    )
+    .bind(&logins)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(names, vec!["Anna Mustermann", "Benjamin Muster"]);
+
+    // The representative details route does not take names (staff change
+    // them in the wizard's contact list): the login keeps its name.
+    let (status, details) = json_request(
+        &app,
+        "PUT",
+        &format!("/api/v1/leads/{lead_id}/representatives/{anna}/details"),
+        &pm,
+        Some(json!({
+            "values": { "last_name": "Musterfrau" },
+            "base": { "last_name": "Mustermann" },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{details}");
+    assert_eq!(details["field"], "last_name", "{details}");
+    let anna_login: String = sqlx::query_scalar("SELECT name FROM users WHERE id = $1")
+        .bind(logins[0])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(anna_login, "Anna Mustermann");
 }

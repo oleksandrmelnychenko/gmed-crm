@@ -60,6 +60,7 @@ export function LeadPayerLinkPanel({
   errorText,
   onSent,
   packageSummary,
+  leadSubmitted = true,
 }: {
   leadId: string;
   state: LeadPayerLinkState;
@@ -78,6 +79,8 @@ export function LeadPayerLinkPanel({
    * (undefined) on an older server — then nothing is shown.
    */
   packageSummary?: PayerPackageSummary | null;
+  /** The lead has sent the request; before that "теперь можно отправить ссылку" is not said (QA 2026-10-25). */
+  leadSubmitted?: boolean;
 }) {
   const [language, setLanguage] = useState<PayerLinkLanguage | null>(null);
   const [reopen, setReopen] = useState(false);
@@ -88,7 +91,7 @@ export function LeadPayerLinkPanel({
   const [confirm, setConfirm] = useState<"revoke" | "resend" | null>(null);
 
   const link = state.link;
-  const actions = payerLinkActions(state, reopen, tx);
+  const actions = payerLinkActions(state, reopen, tx, leadSubmitted);
   const chosenLanguage = language ?? link?.language ?? payerLinkLanguageOf(leadLanguage);
   const status = link ? payerLinkStatusLine(link, state.questionnaire?.submitted_at, tx) : null;
   const locked = disabled || busy !== null;
@@ -173,12 +176,15 @@ export function LeadPayerLinkPanel({
             </ul>
           ) : null}
           {actions.highlight ? (
-            <StatusChip tone="success" className="rounded-lg" data-testid="lead-payer-link-ready">
-              {tx(
-                "Пациент отправил заявку: теперь можно отправить ссылку плательщику",
-                "Die Anfrage ist eingegangen: Der Zahler-Link kann jetzt gesendet werden",
-              )}
-            </StatusChip>
+            // Its own line, not glued to the "no link yet" chip (QA 2026-10-25).
+            <div>
+              <StatusChip tone="success" className="rounded-lg" data-testid="lead-payer-link-ready">
+                {tx(
+                  "Пациент отправил заявку: теперь можно отправить ссылку плательщику",
+                  "Die Anfrage ist eingegangen: Der Zahler-Link kann jetzt gesendet werden",
+                )}
+              </StatusChip>
+            </div>
           ) : null}
           {canEdit ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

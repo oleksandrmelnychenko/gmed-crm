@@ -82,8 +82,9 @@ export function LeadCustodySelect({
             if (next && next !== value) void change(next);
           }}
         >
-          {/* Without an answer both parents represent the child. */}
-          {stated ? null : <option value="">{tx("Не указано — оба родителя", "Nicht angegeben – beide Eltern")}</option>}
+          {/* Without an answer the sheets assume both parents, but the default is no answer:
+              the release list keeps asking until staff or the cabinet choose (QA 2026-10-25). */}
+          {stated ? null : <option value="">{tx("Выберите", "Bitte wählen")}</option>}
           {LEAD_CUSTODY_VALUES.map((item) => (
             <option key={item} value={item}>{custodyLabel(item, tx)}</option>
           ))}

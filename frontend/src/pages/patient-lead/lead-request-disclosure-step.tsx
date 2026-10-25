@@ -155,7 +155,10 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
               draft.allowDisclosure === allow ? "border-[var(--brand)] bg-[var(--brand)] font-medium text-white" : "border-border bg-card hover:border-[var(--brand)]",
               busy && "cursor-wait",
             )}>
-              <input type="radio" name={`disclosure-${request.lead_id}`} className="mt-1 size-4 shrink-0 accent-current" checked={draft.allowDisclosure === allow} data-testid={allow ? "disclosure-yes" : "disclosure-no"} onChange={() => { setConsentReset(false); update({ allowDisclosure: allow, consentGiven: false }); }} />
+              <input type="radio" name={`disclosure-${request.lead_id}`} className="mt-1 size-4 shrink-0 accent-current" checked={draft.allowDisclosure === allow} data-testid={allow ? "disclosure-yes" : "disclosure-no"} onChange={() => { setConsentReset(false); update({ allowDisclosure: allow, consentGiven: false, answered: true }); }}
+                // The default "no" is shown as chosen already: a click on it changes nothing, yet
+                // it is the person's own answer and is saved as such (QA 2026-10-25, E-13).
+                onClick={() => { if (draftRef.current.allowDisclosure === allow && !draftRef.current.answered) update({ answered: true }); }} />
               <span>{allow ? text.yes : wording.no}</span>
             </label>)}
           </div>

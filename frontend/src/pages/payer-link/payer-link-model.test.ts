@@ -33,6 +33,7 @@ import {
   type PayerDraft,
 } from "./payer-link-model";
 import {
+  LANG_STORAGE_KEY,
   LINK_STORAGE_KEY,
   PayerSecrets,
   SESSION_STORAGE_KEY,
@@ -40,12 +41,15 @@ import {
   codeDigits,
   codeErrorMessage,
   codeProblemMessage,
+  fatalPageLang,
   isFatalKind,
   linkTokenFromHash,
   payerErrorKind,
   payerErrorMessage,
+  readPayerPageLang,
   resendAllowedAt,
   secondsLeft,
+  storePayerPageLang,
   type CodeProblem,
   type StorageLike,
 } from "./payer-link-session";
@@ -216,6 +220,27 @@ describe("link token and session in the tab", () => {
     const secrets = new PayerSecrets({ ...storage, removeItem: () => { throw new Error("blocked"); } });
     secrets.set(SESSION_STORAGE_KEY, null);
     expect(secrets.get(SESSION_STORAGE_KEY)).toBeNull();
+  });
+});
+
+describe("the language chosen on the page", () => {
+  it("is kept in the browser and read again, invalid values ignored", () => {
+    const storage = memoryStorage();
+    expect(readPayerPageLang(storage)).toBeNull();
+    storePayerPageLang(storage, "ru");
+    expect(storage.data.get(LANG_STORAGE_KEY)).toBe("ru");
+    expect(readPayerPageLang(storage)).toBe("ru");
+    storage.data.set(LANG_STORAGE_KEY, "fr");
+    expect(readPayerPageLang(storage)).toBeNull();
+    expect(readPayerPageLang(null)).toBeNull();
+    expect(() => storePayerPageLang(throwingStorage, "de")).not.toThrow();
+    expect(readPayerPageLang(throwingStorage)).toBeNull();
+  });
+
+  it("shows a dead link in the language chosen before, else the link language, else German (QA 2026-10-25, H-13)", () => {
+    expect(fatalPageLang("ru", "uk")).toBe("ru");
+    expect(fatalPageLang(null, "uk")).toBe("uk");
+    expect(fatalPageLang(null, null)).toBe("de");
   });
 });
 

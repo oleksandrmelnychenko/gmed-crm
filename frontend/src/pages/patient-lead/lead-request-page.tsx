@@ -195,10 +195,14 @@ export function LeadRequestPage() {
     setPortalAccountLabel(userId, guardianOnly ? text.accountLabelGuardian : null);
   }, [ownPatient, requests, text, userId]);
   // The shell around the cabinet (side bar, top bar) speaks the cabinet language, UA and EN
-  // included (QA 2026-10-24, A-7).
+  // included (QA 2026-10-24, A-7). Published once the language is final: not before the requests
+  // are loaded while their language may still be taken over (the effect below), so the shell
+  // never shows the portal language for a moment first (QA 2026-10-25, E-13).
+  const languageSettled =
+    Boolean(chosenLang || accountLang || error) || (requests !== null && requestLang !== "de" && requestLang !== "ru");
   useEffect(() => {
-    if (userId && leadMode) publishLeadCabinetLang(userId, lang);
-  }, [lang, leadMode, userId]);
+    if (userId && leadMode && languageSettled) publishLeadCabinetLang(userId, lang);
+  }, [lang, languageSettled, leadMode, userId]);
   // No request left for a parent: the side bar shows no locked patient-portal entries, only
   // the neutral notice stays (QA 2026-10-24, B-2/D-4).
   useEffect(() => {
@@ -492,7 +496,10 @@ function LeadRequestView({
   // Base-step badges appear after "next" or opening the summary. Live country
   // questions expose their pending count as soon as the server opens them.
   const [missingShownSteps, setMissingShownSteps] = useState<ReadonlySet<StepId>>(() => new Set());
-  const [sendOpened, setSendOpened] = useState(() => initialStep(request) === "send");
+  // The summary opened from the address (`?step=send`, a reload or a link) counts as opened
+  // too: its list and the badges of the steps say the same (QA 2026-10-25, G-1: step 6 listed
+  // the cost-estimate consent, step 3 carried no badge).
+  const [sendOpened, setSendOpened] = useState(() => step === "send");
   // The first "next" on any step shows the badges of every step (owner decision 2026-10-22):
   // on step 1 the lead already sees that step 2 still needs its documents.
   const [nextPressed, setNextPressed] = useState(false);

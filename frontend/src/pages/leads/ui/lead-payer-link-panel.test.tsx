@@ -30,7 +30,7 @@ function state(patch: Record<string, unknown> = {}): LeadPayerLinkState {
   })!;
 }
 
-function render(value: LeadPayerLinkState, options: { canEdit?: boolean; tx?: typeof ru; leadLanguage?: string } = {}) {
+function render(value: LeadPayerLinkState, options: { canEdit?: boolean; tx?: typeof ru; leadLanguage?: string; leadSubmitted?: boolean } = {}) {
   return renderToStaticMarkup(
     <LeadPayerLinkPanel
       leadId="lead-1"
@@ -40,11 +40,20 @@ function render(value: LeadPayerLinkState, options: { canEdit?: boolean; tx?: ty
       leadLanguage={options.leadLanguage ?? "uk"}
       tx={options.tx ?? ru}
       errorText={() => "error"}
+      leadSubmitted={options.leadSubmitted}
     />,
   );
 }
 
 describe("LeadPayerLinkPanel", () => {
+  it("keeps 'the patient sent the request' for a lead who has not submitted yet", () => {
+    // Only "no link yet" and the send button; the sentence about the request waits (QA 2026-10-25).
+    const html = render(state(), { leadSubmitted: false });
+    expect(html).toContain("Ссылка ещё не отправлялась");
+    expect(html).not.toContain("Пациент отправил заявку");
+    expect(html).toContain("Отправить ссылку плательщику");
+  });
+
   it("offers the first link in the lead's language, without a separate amount", () => {
     const html = render(state());
     expect(html).toContain("Ссылка для плательщика");

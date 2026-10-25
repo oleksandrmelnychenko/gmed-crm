@@ -385,9 +385,13 @@ export function standaloneCostAssumptionKept(state: Pick<LeadPayerPackageState, 
   return state.blocked_reason === "payer_not_submitted" || state.blocked_reason === "no_third_party";
 }
 
-/** "Электронная подпись не подключена". */
+/** "Электронная подпись отключена — используйте бумажную подпись". */
 export function payerPackageSignatureDisabledText(tx: Tx): string {
-  return tx("Электронная подпись не подключена", "Elektronische Signatur ist nicht verbunden");
+  // Beside the disabled QES button: what is off and what to do instead (QA 2026-10-25).
+  return tx(
+    "Электронная подпись отключена — используйте бумажную подпись",
+    "Elektronische Signatur ist deaktiviert – bitte die Unterschrift auf Papier verwenden",
+  );
 }
 
 /** "TEST (DEMO): ohne Rechtswirkung": a package of Skribble's demo mode. */

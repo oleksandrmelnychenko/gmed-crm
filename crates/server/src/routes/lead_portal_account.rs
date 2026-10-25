@@ -635,7 +635,95 @@ pub(crate) async fn link_to_patient_in_tx(
     .bind(patient_id)
     .execute(&mut **tx)
     .await?;
+    share_released_documents_in_tx(tx, patient_id, assigned_by).await?;
     Ok(())
+}
+
+/// Releases the patient's `patient_visible` documents to the patient's
+/// portal logins (QA 2026-10-25): the signed consents, the contract, the
+/// order and the estimate moved from the lead carry the visibility, but the
+/// portal (`GET /me/documents`) lists `document_shares` only, so the cabinet
+/// stayed empty after the conversion. Same recipients and share as the
+/// staff's "release to the portal" (`documents.rs`): every active patient
+/// login assigned to the patient — the lead's own login, or the parents'
+/// of a minor — on the channel `patient_portal`, without a confirmation; an
+/// archived version, a deleted file and a document already shared with the
+/// login are left out. Returns the ids of the shares made.
+pub(crate) async fn share_released_documents_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    shared_by: Uuid,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"INSERT INTO document_shares (
+               document_id, shared_with_user_id, shared_by, channel, requires_confirmation
+           )
+           SELECT d.id, u.id, $2, 'patient_portal', false
+           FROM documents d
+           JOIN patient_assignments pa ON pa.patient_id = d.patient_id AND pa.revoked_at IS NULL
+           JOIN users u ON u.id = pa.user_id AND u.role = 'patient' AND u.is_active
+           WHERE d.patient_id = $1
+             AND d.visibility = 'patient_visible'
+             AND d.status <> 'archived'
+             AND d.file_deleted_at IS NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM document_shares existing
+                 WHERE existing.document_id = d.id
+                   AND existing.shared_with_user_id = u.id
+                   AND existing.revoked_at IS NULL
+             )
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(shared_by)
+    .fetch_all(&mut **tx)
+    .await
+}
+
+/// A parent's or representative's login carries the contact's name
+/// (`users.name`): when staff rename the trusted contact — in the wizard or
+/// through the representative details — the login follows in the same
+/// transaction (QA 2026-10-25). `renames` are `(contact id, name before,
+/// name after)`. Only a login issued for that contact
+/// (`lead_portal_access.trusted_contact_id`, active or ended) whose name is
+/// still the old contact name is renamed; a login with a name of its own — a
+/// patient account matched by e-mail, a login renamed elsewhere — stays.
+/// Returns the renamed logins.
+pub(crate) async fn sync_guardian_names_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    renames: &[(Uuid, String, String)],
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let mut renamed = Vec::new();
+    for (contact_id, before, after) in renames {
+        let before = crate::services::person_fields::one_line(before);
+        let after = crate::services::person_fields::one_line(after);
+        if after.is_empty() || before == after {
+            continue;
+        }
+        let users: Vec<Uuid> = sqlx::query_scalar(
+            r#"UPDATE users u
+               SET name = $4, updated_at = now()
+               FROM lead_portal_access a
+               WHERE a.lead_id = $1
+                 AND a.trusted_contact_id = $2
+                 AND a.kind = 'guardian'
+                 AND u.id = a.user_id
+                 AND u.role = 'patient'
+                 AND lower(regexp_replace(btrim(u.name), '\s+', ' ', 'g')) = lower($3)
+               RETURNING u.id"#,
+        )
+        .bind(lead_id)
+        .bind(contact_id)
+        .bind(&before)
+        .bind(&after)
+        .fetch_all(&mut **tx)
+        .await?;
+        renamed.extend(users);
+    }
+    renamed.sort_unstable();
+    renamed.dedup();
+    Ok(renamed)
 }
 
 /// The own login of a converted request whose patient is of age now and was

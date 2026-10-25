@@ -20,13 +20,16 @@
 //! one signature request with the payer and GMED's default signers, level
 //! QES). The package goes out only after the payer sent its answers (phase
 //! 3a), with the patient's consent to pass the cost estimate on, a lead order
-//! and the client's current cost estimate. A later change makes the package
-//! `outdated`; nothing is withdrawn automatically. Completion needs no write
-//! of its own: the Kostenübernahmeerklärung is marked signed by the signature
-//! effects, the identification is derived, the status is read from the
-//! request. The payer sees one status line (`payer_view`). See
-//! docs/architecture/lead-payer-declaration_ua.md («Пакет підписів платника
-//! (фаза 3b)»).
+//! and the client's current cost estimate (one made after the last change of
+//! the order's services, period and prepayment terms). A later change makes
+//! the package `outdated`; nothing is withdrawn automatically. Completion
+//! needs no write of its own: the Kostenübernahmeerklärung is marked signed
+//! by the signature effects, the identification is derived, the status is
+//! read from the request. A signed version of a package document (a paper
+//! scan, a QES copy) is the same document: the package shows it and counts
+//! as signed, not as replaced (QA 2026-10-25). The payer sees one status
+//! line (`payer_view`). See docs/architecture/lead-payer-declaration_ua.md
+//! («Пакет підписів платника (фаза 3b)»).
 
 use axum::{
     Json, Router,
@@ -120,6 +123,9 @@ fn blocked_message(reason: &str) -> &'static str {
         }
         "order_missing" => "The lead has no order",
         "cost_estimate_missing" => "The order has no current cost estimate",
+        "cost_estimate_outdated" => {
+            "The client's cost estimate was made before the last change of the order's terms or prepayment; create it again"
+        }
         "payer_signer_incomplete" => "The signer's name or e-mail address is missing",
         "payer_documents_pending" => "A document of the package is out for signature elsewhere",
         _ => "The package cannot be prepared now",
@@ -276,35 +282,62 @@ fn package_status(request: Option<&RequestFacts>) -> &'static str {
     }
 }
 
-/// One document of the package as stored now.
+/// One document of the package as it stands now: the newest version of the
+/// document the package recorded.
 struct SlotDocument {
+    /// The version the package recorded when it was prepared.
+    recorded_id: Uuid,
+    /// The newest version: the recorded one, or the signed version made from
+    /// it (a paper scan or a QES copy is the same document, QA 2026-10-25).
     id: Uuid,
     title: String,
     version: i32,
     signed_at: Option<DateTime<Utc>>,
-    /// Still the latest version, not archived, the file not deleted.
+    /// The newest version is the recorded one or its signed version, not
+    /// archived, the file not deleted. False when another document replaced
+    /// it (a new unsigned version) or it is gone.
     current: bool,
 }
+
+/// `documents.ursprung` of the versions a signature adds to a document.
+const SIGNED_VERSION_ORIGINS: [&str; 2] = ["paper_signature", "electronic_signature"];
 
 async fn load_slot_documents(
     conn: &mut PgConnection,
     ids: &[Option<Uuid>; 4],
 ) -> Result<Vec<SlotDocument>, sqlx::Error> {
     let ids: Vec<Uuid> = ids.iter().flatten().copied().collect();
+    // The newest version of each recorded document along its replacement
+    // chain, with whether every step of the chain was a signature.
     let rows = sqlx::query(
-        r#"SELECT d.id, d.auto_name, d.version_number, d.signed_at,
-                  (d.status <> 'archived' AND d.file_deleted_at IS NULL
-                   AND NOT EXISTS (SELECT 1 FROM documents n WHERE n.replaces_document_id = d.id))
+        r#"WITH RECURSIVE chain AS (
+               SELECT d.id, d.id AS recorded_id, 0 AS depth, true AS only_signatures
+               FROM documents d
+               WHERE d.id = ANY($1)
+               UNION ALL
+               SELECT n.id, chain.recorded_id, chain.depth + 1,
+                      chain.only_signatures
+                      AND n.signed_at IS NOT NULL
+                      AND n.ursprung = ANY($2)
+               FROM documents n
+               JOIN chain ON n.replaces_document_id = chain.id
+           )
+           SELECT DISTINCT ON (c.recorded_id)
+                  c.recorded_id, d.id, d.auto_name, d.version_number, d.signed_at,
+                  (c.only_signatures AND d.status <> 'archived' AND d.file_deleted_at IS NULL)
                       AS current
-           FROM documents d
-           WHERE d.id = ANY($1)"#,
+           FROM chain c
+           JOIN documents d ON d.id = c.id
+           ORDER BY c.recorded_id, c.depth DESC, d.created_at DESC, d.id DESC"#,
     )
     .bind(&ids)
+    .bind(&SIGNED_VERSION_ORIGINS[..])
     .fetch_all(&mut *conn)
     .await?;
     rows.iter()
         .map(|row| {
             Ok(SlotDocument {
+                recorded_id: row.try_get("recorded_id")?,
                 id: row.try_get("id")?,
                 title: row.try_get("auto_name")?,
                 version: row.try_get("version_number")?,
@@ -313,6 +346,21 @@ async fn load_slot_documents(
             })
         })
         .collect()
+}
+
+/// Whether the client's estimate still shows the order's terms (services,
+/// period, prepayment): `document_terms_current`. `None` without an estimate.
+async fn client_cost_estimate_current(
+    conn: &mut PgConnection,
+    estimate: Option<Uuid>,
+) -> Result<Option<bool>, sqlx::Error> {
+    let Some(estimate) = estimate else {
+        return Ok(None);
+    };
+    sqlx::query_scalar("SELECT document_terms_current($1)")
+        .bind(estimate)
+        .fetch_one(&mut *conn)
+        .await
 }
 
 /// The newest document of a slot template in the lead's scope (the lead or
@@ -473,6 +521,9 @@ struct Facts {
     payer: PayerState,
     consent_required: bool,
     client_estimate: Option<Uuid>,
+    /// `Some(false)`: the client's estimate was made before the last change
+    /// of the order's terms or prepayment and has to be created again.
+    client_estimate_current: Option<bool>,
     fingerprint: Option<String>,
     package: Option<PackageRow>,
     request: Option<RequestFacts>,
@@ -510,6 +561,7 @@ async fn load_facts(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Fac
             patient_statement_fingerprint(declaration, statements.payment_background.as_deref())
         });
     let client_estimate = client_cost_estimate(conn, payer.order_id).await?;
+    let client_estimate_current = client_cost_estimate_current(conn, client_estimate).await?;
     let package = load_package(conn, lead_id).await?;
     let request = load_request(conn, package.as_ref().and_then(|p| p.request_id)).await?;
     let documents = match &package {
@@ -524,6 +576,7 @@ async fn load_facts(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Fac
         payer,
         consent_required,
         client_estimate,
+        client_estimate_current,
         fingerprint,
         package,
         request,
@@ -605,6 +658,12 @@ impl Facts {
         if self.client_estimate.is_none() {
             return Some("cost_estimate_missing");
         }
+        // The payer's copy carries the client's lines, totals and prepayment:
+        // an estimate made before the last change of them is created again
+        // first (QA 2026-10-25).
+        if self.client_estimate_current == Some(false) {
+            return Some("cost_estimate_outdated");
+        }
         if !self.signer().is_some_and(|signer| signer.complete()) {
             return Some("payer_signer_incomplete");
         }
@@ -618,10 +677,25 @@ impl Facts {
         None
     }
 
+    /// The package's status: from its request once sent; before, `signed`
+    /// when the Kostenübernahmeerklärung was signed outside the request (a
+    /// scan of the paper signature), else `prepared`.
     fn status(&self) -> Option<&'static str> {
-        self.package
-            .as_ref()
-            .map(|_| package_status(self.request.as_ref()))
+        let package = self.package.as_ref()?;
+        if self.request.is_none() && self.cost_coverage_signed(package) {
+            return Some("signed");
+        }
+        Some(package_status(self.request.as_ref()))
+    }
+
+    /// The package's Kostenübernahmeerklärung (slot 2) stands in a signed
+    /// version.
+    fn cost_coverage_signed(&self, package: &PackageRow) -> bool {
+        package.documents[1].is_some_and(|recorded| {
+            self.documents.iter().any(|document| {
+                document.recorded_id == recorded && document.current && document.signed_at.is_some()
+            })
+        })
     }
 
     /// Why the prepared documents no longer say what holds now.
@@ -646,6 +720,9 @@ impl Facts {
         if self.client_estimate != package.cost_estimate_document_id {
             reasons.push("cost_estimate_changed");
         }
+        if self.client_estimate_current == Some(false) {
+            reasons.push("cost_estimate_outdated");
+        }
         if self.fingerprint.as_deref() != Some(package.patient_statement_fingerprint.as_str()) {
             reasons.push("patient_statement_changed");
         }
@@ -659,11 +736,13 @@ impl Facts {
         {
             reasons.push("cost_estimate_consent_withdrawn");
         }
+        // A signed version of a package document is the same document, not a
+        // replacement (QA 2026-10-25).
         let replaced = package.documents.iter().any(|id| {
             !id.is_some_and(|id| {
                 self.documents
                     .iter()
-                    .any(|document| document.id == id && document.current)
+                    .any(|document| document.recorded_id == id && document.current)
             })
         });
         if replaced {
@@ -736,10 +815,15 @@ async fn view(
             .iter()
             .zip(package.documents.iter())
             .map(|((slot, _), id)| {
-                let document = id.and_then(|id| facts.documents.iter().find(|doc| doc.id == id));
+                // The newest version of the recorded document: a signed scan
+                // or QES copy shows as "Version 2 · signed", not as a
+                // replacement (QA 2026-10-25).
+                let document =
+                    id.and_then(|id| facts.documents.iter().find(|doc| doc.recorded_id == id));
                 json!({
                     "slot": slot,
-                    "document_id": id,
+                    "document_id": document.map(|document| document.id).or(*id),
+                    "recorded_document_id": id,
                     "title": document.map(|document| document.title.clone()),
                     "version": document.map(|document| document.version),
                     "signed_at": document.and_then(|document| document.signed_at),

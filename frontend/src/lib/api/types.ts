@@ -107,6 +107,10 @@ interface LeadAttachment {
   uploaded_at: string;
   imported_document_id?: string | null;
   imported_at?: string | null;
+  /** The import refused the file (set with the code); it stays downloadable for staff with medical access. */
+  import_refused_at?: string | null;
+  /** `unsupported_file_type`, `file_rejected`, … (crates/server/src/routes/leads.rs). */
+  import_refusal_code?: string | null;
 }
 
 interface LeadReadinessCheck {

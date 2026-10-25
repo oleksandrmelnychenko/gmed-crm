@@ -257,13 +257,14 @@ test("the service and order tabs and the release checklist follow what each step
   const { wizard } = await mount(page, adultLead());
 
   // No specialty yet: that is the order step's gap, not the service step's
-  // (which holds only the optional program period and wishes).
-  await expect(wizard.getByRole("tab", { name: /Сервисная история — выполнено/ })).toBeVisible();
+  // (which holds only the optional program period and wishes); without data the
+  // service step is "optional, not filled", never "done" (QA 2026-10-25).
+  await expect(wizard.getByRole("tab", { name: /Сервисная история — необязательно, не заполнено/ })).toBeVisible();
   await expect(wizard.getByRole("tab", { name: /Оформление заказа — не завершено/ })).toBeVisible();
 
   await wizard.getByRole("tab", { name: /Создание пациента/ }).click();
   const checklist = wizard.locator("section").filter({ has: page.getByText("Проверьте все этапы.", { exact: false }) }).first();
-  await expect(checklist.getByRole("button", { name: /Сервисная история\s*Выполнено/ })).toBeVisible();
+  await expect(checklist.getByRole("button", { name: /Сервисная история\s*Необязательно, не заполнено/ })).toBeVisible();
   // The empty optional medical step reads as the tab bar says it, not as done.
   await expect(wizard.getByRole("tab", { name: /Медицинская характеристика — необязательно, не заполнено/ })).toBeVisible();
   await expect(checklist.getByRole("button", { name: /Медицинская характеристика\s*Необязательно, не заполнено/ })).toBeVisible();

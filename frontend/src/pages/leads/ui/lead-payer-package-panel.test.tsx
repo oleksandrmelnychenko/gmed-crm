@@ -151,7 +151,9 @@ describe("LeadPayerPackagePanel", () => {
     expect(blocked).toContain("Пациент ещё не согласился на передачу сметы плательщику");
     expect(blocked).not.toContain("Подготовить документы");
     const disconnected = render(state({ signature_enabled: false }, {}), { tx: de });
-    expect(disconnected).toContain("Elektronische Signatur ist nicht verbunden");
+    // The hint stands beside the disabled QES button (QA 2026-10-25).
+    expect(disconnected).toContain("Elektronische Signatur ist deaktiviert – bitte die Unterschrift auf Papier verwenden");
+    expect(disconnected).toContain('data-testid="lead-payer-package-send-hint"');
     expect(sendButton(disconnected)).toContain('disabled=""');
   });
 

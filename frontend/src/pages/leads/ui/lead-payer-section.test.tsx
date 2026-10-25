@@ -78,7 +78,7 @@ describe("LeadPayerSignatureFlow", () => {
       const html = renderToStaticMarkup(<LeadPayerSignatureFlow leadId="synthetic-lead" signatureDocumentId="current-order" status={value}
         documents={[]} disabled={false} canGenerate={false} tx={lang === "de" ? de : tx} renderDocuments={() => null} onChanged={() => {}} errorText={() => "error"} />);
       expect(html).toContain(lang === "ru" ? "DEMO · Тестовый пакет подписан" : "DEMO · Testpaket unterzeichnet");
-      expect(html).toContain(lang === "ru" ? "Для создания пациента нужны юридически действительные подписи" : "Für die Patientenanlage sind rechtswirksame Unterschriften erforderlich");
+      expect(html).toContain(lang === "ru" ? "Для создания пациента нужны настоящие подписи" : "Für die Patientenanlage sind echte Unterschriften nötig");
       expect(html).not.toContain(lang === "ru" ? "Ожидается подпись клиента" : "Unterschrift des Kunden ausstehend");
       expect(html).not.toContain(lang === "ru" ? "Сначала клиент подписывает заказ" : "Zuerst unterschreibt der Kunde");
       expect(html).not.toContain(lang === "ru" ? "Создайте заявление о принятии расходов" : "Kostenübernahmeerklärung erstellen");
@@ -93,7 +93,7 @@ describe("LeadPayerSignatureFlow", () => {
       const html = renderToStaticMarkup(<LeadPayerSignatureFlow leadId="synthetic-lead" signatureDocumentId="current-order" status={value}
         documents={[]} disabled={false} canGenerate={false} tx={lang === "de" ? de : tx} renderDocuments={() => null} onChanged={() => {}} errorText={() => "error"} />);
       expect(html).toContain(lang === "ru" ? "Клиент подписал · ожидается GMED" : "Kunde hat unterschrieben · GMED steht aus");
-      expect(html).toContain(lang === "ru" ? "DEMO не подтверждает юридическую подпись заказа" : "DEMO bestätigt keine rechtswirksame Auftragsunterschrift");
+      expect(html).toContain(lang === "ru" ? "Тестовая подпись (DEMO) подписью заказа не считается" : "Eine Testunterschrift (DEMO) gilt nicht als Auftragsunterschrift");
       expect(html).not.toContain(lang === "ru" ? "Ожидается подпись клиента" : "Unterschrift des Kunden ausstehend");
       expect(html).not.toContain(lang === "ru" ? "Сначала клиент подписывает заказ" : "Zuerst unterschreibt der Kunde");
       expect(value.client_signed_order).toBe(false);

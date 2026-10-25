@@ -45,6 +45,7 @@ import { createPayerAutosave, type PayerAutosave, type PayerAutosaveState } from
 import { costCoveragePurpose, standaloneCostAssumptionKept } from "../model/lead-payer-package";
 import { payerFundsSourceLabel } from "../model/lead-payer-link";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
+import type { LeadPayerPackageState } from "../data/lead-payer-package-api";
 import { useLeadPayerPackage } from "../model/use-lead-payer-package";
 import { LeadPayerLinkPanel } from "./lead-payer-link-panel";
 import { LeadPayerPackagePanel } from "./lead-payer-package-panel";
@@ -1205,6 +1206,7 @@ export function LeadPayerDeclarationSection({
                 errorText={errorText}
                 onSent={onPayerLinkSent}
                 packageSummary={data?.status.payer_package}
+                leadSubmitted={Boolean(portalIntake?.submitted_at)}
               />
             ) : payerLink?.error ? (
               <p className="text-xs text-rose-700" data-testid="lead-payer-link-error">
@@ -1322,6 +1324,10 @@ export type LeadPayerSignatureFlowPackage = {
   onOpenDocument?: (documentId: string, title: string) => void;
   /** The package changed (prepared, sent, signed): the declaration and the documents are read afresh. */
   onChanged?: () => void;
+  /** The facts the package is built from (estimate, prepayment, order); another value reloads the state. */
+  refreshKey?: string;
+  /** Every loaded state (the wizard reads `signature_enabled` from it for its own signature controls). */
+  onState?: (state: LeadPayerPackageState) => void;
 };
 
 /**
@@ -1363,8 +1369,13 @@ export function LeadPayerSignatureFlow({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const packageController = useLeadPayerPackage(leadId, Boolean(payerPackage), payerPackage?.onChanged);
+  const packageController = useLeadPayerPackage(leadId, Boolean(payerPackage), payerPackage?.onChanged, payerPackage?.refreshKey);
   const packageState = packageController.data;
+  const onPackageStateRef = useRef(payerPackage?.onState);
+  onPackageStateRef.current = payerPackage?.onState;
+  useEffect(() => {
+    if (packageState) onPackageStateRef.current?.(packageState);
+  }, [packageState]);
   // No package for a minor's paying parent (the contracting party, 2026-10-19).
   const packagePanelShown = Boolean(payerPackage?.panel && packageState?.mode && packageState.blocked_reason !== "payer_is_representative");
   const sequence = payerSignatureSequence(status);
@@ -1434,9 +1445,10 @@ export function LeadPayerSignatureFlow({
         <StatusChip tone="neutral">{demoAccepted
           ? tx("DEV · Тестовые подписи зачтены для оформления. Выполните остальные проверки готовности.", "DEV · Testunterschriften für die Aufnahme angerechnet. Die übrigen Bereitschaftsprüfungen abschließen.")
           : completedDemo
-          ? tx("Для создания пациента нужны юридически действительные подписи. DEMO не подтверждает договор, заказ и согласия.", "Für die Patientenanlage sind rechtswirksame Unterschriften erforderlich. DEMO bestätigt Vertrag, Auftrag und Einwilligungen nicht.")
+          ? tx("Для создания пациента нужны настоящие подписи: тестовая подпись (DEMO) не заменяет подписи договора, заказа и согласий.", "Für die Patientenanlage sind echte Unterschriften nötig: Eine Testunterschrift (DEMO) ersetzt die Unterschriften unter Vertrag, Auftrag und Einwilligungen nicht.")
           : summary.test_mode
-            ? tx("DEMO не подтверждает юридическую подпись заказа", "DEMO bestätigt keine rechtswirksame Auftragsunterschrift")
+            // Plain words instead of "DEMO не подтверждает юридическую подпись" (QA 2026-10-25).
+            ? tx("Тестовая подпись (DEMO) подписью заказа не считается", "Eine Testunterschrift (DEMO) gilt nicht als Auftragsunterschrift")
             : tx("Заказ: подписание пакета ещё не завершено", "Auftrag: Paketunterzeichnung noch nicht abgeschlossen")}</StatusChip>
       </div> : <div className="flex flex-wrap items-center gap-x-2 gap-y-1" aria-label={tx("Порядок подписания", "Reihenfolge der Unterschriften")}>
         <SequenceStep state={sequence.client} actor="client" tx={tx} />

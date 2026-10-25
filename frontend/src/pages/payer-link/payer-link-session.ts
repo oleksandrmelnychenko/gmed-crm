@@ -79,6 +79,60 @@ export function captureLinkToken(hash: string, secrets: PayerSecrets): string | 
 }
 
 // ---------------------------------------------------------------------------
+// The language chosen on the page
+// ---------------------------------------------------------------------------
+
+/**
+ * The language the payer picked with the switch, kept in the browser (not per
+ * tab): the link opened again — also once it is revoked, expired or locked,
+ * when the server no longer says which language it was sent in — reads in
+ * that language (QA 2026-10-25, H-13).
+ */
+export const LANG_STORAGE_KEY = "gmed-payer-link-lang";
+
+const PAGE_LANGS = ["de", "en", "uk", "ru"] as const;
+
+export type PayerPageLang = (typeof PAGE_LANGS)[number];
+
+/** The browser's local storage, or null where it refuses (private mode, blocked site data). */
+export function browserLocalStorage(): StorageLike | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** The language chosen on this page before, if the storage still holds a valid one. */
+export function readPayerPageLang(storage: StorageLike | null): PayerPageLang | null {
+  try {
+    const stored = storage?.getItem(LANG_STORAGE_KEY);
+    return (PAGE_LANGS as readonly string[]).includes(stored ?? "") ? (stored as PayerPageLang) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remembers the choice; without storage it lasts for the visit only. */
+export function storePayerPageLang(storage: StorageLike | null, lang: PayerPageLang): void {
+  try {
+    storage?.setItem(LANG_STORAGE_KEY, lang);
+  } catch {
+    // The choice then lasts for this page only.
+  }
+}
+
+/**
+ * The language of a page that shows only the message of a dead link: the
+ * choice made on the page before, else the language the link was sent in
+ * (known only while the server still answers for the link), else German —
+ * never the browser's language, which the lead's e-mail did not promise.
+ */
+export function fatalPageLang(chosen: PayerPageLang | null, linkLang: PayerPageLang | null): PayerPageLang {
+  return chosen ?? linkLang ?? "de";
+}
+
+// ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
 

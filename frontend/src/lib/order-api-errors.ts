@@ -19,6 +19,8 @@ export const ORDER_API_ERROR_KEYS: Record<string, string> = {
   order_signed_terms_change: "api_orders_signed_terms_change",
   // An order document older than the last change of the order (paper signature).
   order_document_outdated: "api_orders_document_outdated",
+  // An estimate PDF older than the last change of the amounts or the prepayment terms.
+  estimate_document_outdated: "api_orders_estimate_outdated",
   // Framework contracts, quotes and the agency catalogue (contracts.rs)
   quote_valid_until_past: "api_quotes_valid_until_past",
   prepayment_exceeds_quote_total: "api_quotes_prepayment_exceeds_total",

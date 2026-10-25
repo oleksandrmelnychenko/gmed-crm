@@ -162,6 +162,118 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         .into_response()
 }
 
+/// The code of a write to a lead that became a patient.
+pub(crate) const LEAD_CONVERTED: &str = "lead_converted";
+
+/// The 409 of a write to a converted lead (QA 2026-10-25): the lead's data
+/// is frozen with the conversion so it does not drift from the patient
+/// record; the wizard reads the code and links the patient.
+pub(crate) fn lead_converted_response(patient_id: Uuid) -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": LEAD_CONVERTED,
+            "code": LEAD_CONVERTED,
+            "message": "Lead already converted",
+            "converted_patient_id": patient_id,
+        })),
+    )
+        .into_response()
+}
+
+/// Refuses a staff write with [`lead_converted_response`] once the lead is
+/// converted. `Ok(())` for an unconverted or unknown lead (the caller's own
+/// lookup answers 404); a database error is a 500.
+pub(crate) async fn refuse_if_converted<'e, E>(
+    executor: E,
+    lead_id: Uuid,
+) -> Result<(), axum::response::Response>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    match sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT converted_patient_id FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(executor)
+    .await
+    {
+        Ok(Some(Some(patient_id))) => Err(lead_converted_response(patient_id)),
+        Ok(_) => Ok(()),
+        Err(error) => {
+            tracing::error!(%error, %lead_id, "check lead conversion before write");
+            Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))
+        }
+    }
+}
+
+/// The identity document staff recorded for the lead on the GwG statements
+/// (`lead_gwg_declarations.id_*`), the one source since 2026-10-07; the
+/// wizard fields of older leads are the fallback for the number and validity.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct StaffIdentityDocument {
+    document_type: Option<String>,
+    number: Option<String>,
+    issuing_authority: Option<String>,
+    issuing_country: Option<String>,
+    issued_on: Option<NaiveDate>,
+    valid_until: Option<NaiveDate>,
+}
+
+impl StaffIdentityDocument {
+    /// The number of a passport card, as the card stores it: trimmed, at most
+    /// 60 characters (the GwG sheet's own bound).
+    fn card_number(value: Option<&str>) -> Option<String> {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && value.chars().count() <= 60)
+            .map(str::to_string)
+    }
+}
+
+/// Loads [`StaffIdentityDocument`] for the conversion of `lead_id`: the GwG
+/// statement first, the wizard's `passport_number` / `passport_expiry` where
+/// the statement has none (QA 2026-10-25: the card got only the validity).
+async fn load_staff_identity_document(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    wizard_state: &Value,
+) -> Result<StaffIdentityDocument, sqlx::Error> {
+    let row = sqlx::query(
+        r#"SELECT id_document_type, id_document_number, id_issuing_authority,
+                  id_issuing_country, id_issued_on, id_valid_until
+           FROM lead_gwg_declarations WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let text = |key: &str| {
+        row.as_ref()
+            .and_then(|row| row.try_get::<Option<String>, _>(key).ok().flatten())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let date = |key: &str| {
+        row.as_ref()
+            .and_then(|row| row.try_get::<Option<NaiveDate>, _>(key).ok().flatten())
+    };
+    let number =
+        StaffIdentityDocument::card_number(text("id_document_number").as_deref()).or_else(|| {
+            StaffIdentityDocument::card_number(
+                lead_wizard_text(wizard_state, "passport_number").as_deref(),
+            )
+        });
+    Ok(StaffIdentityDocument {
+        document_type: text("id_document_type"),
+        number,
+        issuing_authority: text("id_issuing_authority"),
+        issuing_country: text("id_issuing_country"),
+        issued_on: date("id_issued_on"),
+        valid_until: date("id_valid_until")
+            .or_else(|| lead_wizard_date(wizard_state, "passport_expiry")),
+    })
+}
+
 fn normalized_language_code(value: &str) -> Option<&'static str> {
     let normalized = value.trim().to_lowercase().replace('_', "-");
     let base = normalized.split('-').next().unwrap_or_default();
@@ -500,6 +612,14 @@ enum TrustedContactIssue {
         id: String,
         name: String,
     },
+    /// A parent's, guardian's or representative's new or changed name that
+    /// is not spelled as in the passport (the cabinet's rule, QA 2026-10-25:
+    /// "Kindermann-H1" saved by staff left the mother unable to edit it).
+    InvalidName {
+        index: usize,
+        id: String,
+        name: String,
+    },
 }
 
 fn contact_text<'a>(contact: &'a Value, key: &str) -> Option<&'a str> {
@@ -527,6 +647,24 @@ fn stored_trusted_contact<'a>(stored: &'a Value, contact: &Value) -> Option<&'a 
         contact_text(entry, "id").is_none()
             && contact_text(entry, "name").is_some_and(|value| value.to_lowercase() == name)
     })
+}
+
+/// The contacts a write renames: `(contact id, stored name, new name)` for
+/// every submitted entry with an id whose stored entry carries another name.
+/// A parent's login takes the new name ([`lead_portal_account::sync_guardian_names_in_tx`]).
+fn renamed_trusted_contacts(stored: &Value, contacts: &Value) -> Vec<(Uuid, String, String)> {
+    contacts
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|contact| {
+            let id = contact_text(contact, "id").and_then(|id| Uuid::parse_str(id).ok())?;
+            let name = contact_text(contact, "name")?;
+            let previous = contact_text(stored_trusted_contact(stored, contact)?, "name")?;
+            crate::services::person_fields::changed(name, Some(previous))
+                .then(|| (id, previous.to_string(), name.to_string()))
+        })
+        .collect()
 }
 
 /// What a write of trusted contacts adds or changes against the stored list:
@@ -588,6 +726,20 @@ fn changed_trusted_contact_issue(
         {
             return Some(TrustedContactIssue::MinorRepresentative { index, id, name });
         }
+        // The name of a person who acts for the lead is spelled as in the
+        // passport (the cabinet's rule, QA 2026-10-25): checked when the
+        // name is new or changed, or the person newly acts for the lead; a
+        // stored name is never re-judged.
+        let name_changed = previous.is_none_or(|entry| {
+            crate::services::person_fields::changed(&name, contact_text(entry, "name"))
+                || !acts_for(contact_text(entry, "relation"))
+        });
+        if name_changed
+            && acts_for(relation)
+            && crate::routes::lead_portal_intake::name_needs_latin_spelling(&name)
+        {
+            return Some(TrustedContactIssue::InvalidName { index, id, name });
+        }
     }
     None
 }
@@ -628,6 +780,14 @@ fn trusted_contact_issue_response(issue: &TrustedContactIssue) -> axum::response
             id,
             name,
             "email",
+        ),
+        TrustedContactIssue::InvalidName { index, id, name } => (
+            "trusted_contact_name_invalid",
+            "Latin letters only, as in the passport",
+            index,
+            id,
+            name,
+            "name",
         ),
     };
     (
@@ -790,6 +950,93 @@ mod changed_trusted_contact_tests {
             None
         );
         assert_eq!(changed_trusted_contact_issue(&child, &child, true), None);
+    }
+
+    /// QA 2026-10-25: a parent's or representative's name is spelled as in
+    /// the passport (the cabinet's rule); a stored name is never re-judged, a
+    /// friend's name is not judged.
+    #[test]
+    fn a_representatives_new_or_changed_name_is_spelled_as_in_the_passport() {
+        let digits = json!([contact(ID, "Kindermann-H1", "+49 170 1234567", "mother")]);
+        assert_eq!(
+            changed_trusted_contact_issue(&digits, &json!([]), true),
+            Some(TrustedContactIssue::InvalidName {
+                index: 0,
+                id: ID.into(),
+                name: "Kindermann-H1".into()
+            })
+        );
+        let cyrillic = json!([contact(
+            ID,
+            "Анна Кіндерманн",
+            "+49 170 1234567",
+            "representative"
+        )]);
+        assert!(matches!(
+            changed_trusted_contact_issue(&cyrillic, &json!([]), false),
+            Some(TrustedContactIssue::InvalidName { .. })
+        ));
+        // Latin letters with marks, hyphens and apostrophes pass.
+        let latin = json!([contact(
+            ID,
+            "Zoë-Élise O'Neill",
+            "+49 170 1234567",
+            "mother"
+        )]);
+        assert_eq!(
+            changed_trusted_contact_issue(&latin, &json!([]), true),
+            None
+        );
+        // A friend is not identified: the name is free.
+        let friend = json!([contact(ID, "Друг 1", "+49 170 1234567", "friend")]);
+        assert_eq!(
+            changed_trusted_contact_issue(&friend, &json!([]), true),
+            None
+        );
+        // A stored name keeps saving; a changed name is judged again.
+        assert_eq!(changed_trusted_contact_issue(&digits, &digits, true), None);
+        let renamed = json!([contact(ID, "Kindermann-H2", "+49 170 1234567", "mother")]);
+        assert!(matches!(
+            changed_trusted_contact_issue(&renamed, &digits, true),
+            Some(TrustedContactIssue::InvalidName { .. })
+        ));
+        // A stored friend who newly acts for the lead is judged.
+        let stored_friend = json!([contact(ID, "Freund 2", "+49 170 1234567", "friend")]);
+        let now_parent = json!([contact(ID, "Freund 2", "+49 170 1234567", "father")]);
+        assert!(matches!(
+            changed_trusted_contact_issue(&now_parent, &stored_friend, true),
+            Some(TrustedContactIssue::InvalidName { .. })
+        ));
+        let response = trusted_contact_issue_response(&TrustedContactIssue::InvalidName {
+            index: 0,
+            id: ID.into(),
+            name: "Kindermann-H1".into(),
+        });
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    /// The contacts a write renames, by id, for the login sync.
+    #[test]
+    fn renamed_contacts_are_listed_with_the_stored_and_the_new_name() {
+        let stored = json!([
+            contact(ID, "Anna Muster", "+49 170 1234567", "mother"),
+            contact("7a4c2f1e-0000-4000-8000-000000000002", "Ben Muster", "", "father"),
+            { "name": "Legacy Entry", "relation": "friend" },
+        ]);
+        let sent = json!([
+            contact(ID, "Anna  Mustermann", "+49 170 1234567", "mother"),
+            contact("7a4c2f1e-0000-4000-8000-000000000002", "Ben   Muster", "", "father"),
+            { "name": "Legacy Renamed", "relation": "friend" },
+            contact("7a4c2f1e-0000-4000-8000-000000000003", "New Contact", "", "friend"),
+        ]);
+        assert_eq!(
+            renamed_trusted_contacts(&stored, &sent),
+            vec![(
+                Uuid::parse_str(ID).unwrap(),
+                "Anna Muster".to_string(),
+                "Anna  Mustermann".to_string()
+            )]
+        );
     }
 
     #[test]
@@ -1257,11 +1504,18 @@ async fn list_leads(
                     ORDER BY e.created_at DESC
                     LIMIT 1)
                       AS portal_login_email_delivery,
-                  (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
+                  (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count,
+                  (SELECT COUNT(*) FROM lead_attachments a
+                    WHERE a.lead_id = leads.id AND a.import_refused_at IS NOT NULL)
+                      AS refused_attachment_count,
+                  converted_patient_id
            FROM leads
            WHERE ($1::bool = true OR $2::text IS NOT NULL
                   OR qualification_status NOT IN ('archived', 'deleted'))
-             AND converted_patient_id IS NULL
+             -- A converted lead leaves the working list; it is found again
+             -- with its status, the archive switch or a search (QA 2026-10-25).
+             AND (converted_patient_id IS NULL
+                  OR $1::bool = true OR $2::text = 'converted' OR $3::text <> '%%')
              AND ($2::text IS NULL OR qualification_status = $2)
              AND (
                 $3::text = '%%'
@@ -1427,6 +1681,10 @@ async fn list_leads(
                         .map(|v| v.to_rfc3339())
                         .unwrap_or_default(),
                     "attachment_count": r.try_get::<i64, _>("attachment_count").unwrap_or(0),
+                    // Questionnaire files the import refused (QA 2026-10-25).
+                    "refused_attachment_count": r.try_get::<i64, _>("refused_attachment_count").unwrap_or(0),
+                    // A converted lead in the list links its patient record.
+                    "converted_patient_id": r.try_get::<Option<Uuid>, _>("converted_patient_id").unwrap_or_default(),
                 });
                 let mut lead = lead;
                 if !lead_medical_visible(&auth)
@@ -2845,6 +3103,8 @@ async fn load_lead_conversion_readiness(
                         AND d.generated_template_id = 'order_cost_estimate'
                         AND d.status = 'active'
                         AND d.file_deleted_at IS NULL
+                        -- an estimate printed before the prepayment terms changed is stale
+                        AND document_terms_current(d.id) IS NOT FALSE
                   ) AS order_cost_estimate_document_generated,
                   COALESCE((
                       SELECT o.signed_patient
@@ -3195,7 +3455,7 @@ async fn apply_repeat_patient_readiness(
     input.contract_terminated = (inherited || own_contract) && contract_status == "terminated";
     let document_state: (bool, bool) = sqlx::query_as(
         "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='single_order' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)),
-                EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='order_cost_estimate' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id))
+                EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='order_cost_estimate' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND document_terms_current(d.id) IS NOT FALSE AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id))
          FROM orders o WHERE o.source_lead_id=$1
          ORDER BY o.created_at DESC, o.id DESC LIMIT 1")
         .bind(lead_id).fetch_optional(&state.db).await
@@ -4264,6 +4524,7 @@ async fn get_lead(
         r#"SELECT attachment.id, attachment.file_name, attachment.content_type,
                   attachment.size_bytes, attachment.uploaded_at,
                   attachment.imported_document_id, attachment.imported_at,
+                  attachment.import_refused_at, attachment.import_refusal_code,
                   imported.category, imported.art, imported.generated_template_id,
                   imported.compliance_kind
            FROM lead_attachments attachment
@@ -4300,6 +4561,16 @@ async fn get_lead(
                         .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("imported_at")
                         .unwrap_or_default()
                         .map(|value| value.to_rfc3339()),
+                    // A file the import refused for its content (QA
+                    // 2026-10-25): staff see which one and why, instead of a
+                    // questionnaire upload that never becomes a document.
+                    "import_refused_at": r
+                        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("import_refused_at")
+                        .unwrap_or_default()
+                        .map(|value| value.to_rfc3339()),
+                    "import_refusal_code": r
+                        .try_get::<Option<String>, _>("import_refusal_code")
+                        .unwrap_or_default(),
                 })
             })
             .collect::<Vec<_>>(),
@@ -5385,6 +5656,15 @@ async fn update_lead(
             "A deleted lead is anonymised and cannot be edited",
         );
     }
+    // A converted lead is frozen: the patient record is edited instead, so
+    // the two do not drift (QA 2026-10-25; the wizard autosaves).
+    if let Some(patient_id) = current_identity
+        .try_get::<Option<Uuid>, _>("converted_patient_id")
+        .ok()
+        .flatten()
+    {
+        return lead_converted_response(patient_id);
+    }
     let current_compliance_status = current_identity
         .try_get::<String, _>("compliance_status")
         .unwrap_or_default();
@@ -5867,6 +6147,29 @@ async fn update_lead(
     } else {
         None
     };
+    // A parent's or representative's login carries the contact's name too:
+    // a contact renamed in the wizard renames its login (QA 2026-10-25).
+    let renamed_guardian_logins = match trusted_contacts.as_ref() {
+        Some(contacts) => {
+            let renames = renamed_trusted_contacts(&current_guardians, contacts);
+            if renames.is_empty() {
+                Vec::new()
+            } else {
+                match crate::routes::lead_portal_account::sync_guardian_names_in_tx(
+                    &mut tx, lead_id, &renames,
+                )
+                .await
+                {
+                    Ok(renamed) => renamed,
+                    Err(error) => {
+                        tracing::error!(%error, lead_id = %lead_id, "sync guardian login names");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                    }
+                }
+            }
+        }
+        None => Vec::new(),
+    };
     // The audit row commits with the change (a compliance change is a status
     // change of the lead). Personal data are named, never copied: the
     // append-only log outlives the lead's anonymisation (audit policy).
@@ -6015,6 +6318,15 @@ async fn update_lead(
         )
         .await;
     }
+    for user_id in renamed_guardian_logins {
+        crate::realtime::publish_user_profile_event(
+            &state,
+            Some(auth.user_id),
+            user_id,
+            json!({ "change": "name", "source": "lead_trusted_contact", "lead_id": lead_id }),
+        )
+        .await;
+    }
 
     let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
         Ok(Some(value)) => value,
@@ -6084,15 +6396,11 @@ async fn promote_lead_to_console(
         );
     }
 
-    if current
+    if let Some(patient_id) = current
         .try_get::<Option<Uuid>, _>("converted_patient_id")
         .unwrap_or_default()
-        .is_some()
     {
-        return err(
-            StatusCode::CONFLICT,
-            "Converted leads cannot be promoted to console",
-        );
+        return lead_converted_response(patient_id);
     }
 
     let previous_type = lead_type_from_origin(
@@ -6256,8 +6564,8 @@ async fn qualify_lead(
         .try_get("failed_outcome_status")
         .unwrap_or_else(|_| "none".to_string());
 
-    if converted_patient_id.is_some() {
-        return err(StatusCode::CONFLICT, "Lead is already converted");
+    if let Some(patient_id) = converted_patient_id {
+        return lead_converted_response(patient_id);
     }
     if failed_outcome_status == "delete_anonymized" {
         return err(
@@ -6886,6 +7194,10 @@ async fn import_lead_attachments(
     if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
         return response;
     }
+    // The imported files would belong to a lead that is a patient already.
+    if let Err(response) = refuse_if_converted(&state.db, lead_id).await {
+        return response;
+    }
 
     match import_lead_attachments_internal(&state, lead_id, auth.user_id).await {
         Ok(summary) => Json(summary.payload()).into_response(),
@@ -7092,12 +7404,11 @@ async fn create_prospect_patient(
         }
     };
 
-    if lead
+    if let Some(patient_id) = lead
         .try_get::<Option<Uuid>, _>("converted_patient_id")
         .unwrap_or_default()
-        .is_some()
     {
-        return err(StatusCode::CONFLICT, "Lead already converted");
+        return lead_converted_response(patient_id);
     }
     let failed_outcome_status: String = lead
         .try_get("failed_outcome_status")
@@ -7453,14 +7764,16 @@ async fn create_prospect_patient(
     let nationality = lead_nationality(&lead, &wizard_state);
     // Staff's identity data on the GwG statements are the one source; the
     // wizard field of older leads is the fallback (trigger flow 2026-10-07).
-    let passport_expiry = match crate::risk::store::staff_id_valid_until(&mut tx, lead_id).await {
-        Ok(Some(valid_until)) => Some(valid_until),
-        Ok(None) => lead_wizard_date(&wizard_state, "passport_expiry"),
+    let identity_document = match load_staff_identity_document(&mut tx, lead_id, &wizard_state)
+        .await
+    {
+        Ok(document) => document,
         Err(error) => {
-            tracing::error!(error = %error, lead_id = %lead_id, "load identity document validity");
+            tracing::error!(error = %error, lead_id = %lead_id, "load identity document for prospect");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    let passport_expiry = identity_document.valid_until;
     let lead_snapshot: Value = lead.try_get("lead_snapshot").unwrap_or_else(|_| json!({}));
     let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
 
@@ -7513,10 +7826,12 @@ async fn create_prospect_patient(
                                  emergency_contact_name, emergency_contact_phone,
                                  emergency_contact_relation, intake_profile, legal_status,
                                  notes, source_lead_id, lead_snapshot, created_by,
-                                 nationality, passport_expiry, lifecycle_status, is_active)
+                                 nationality, passport_expiry, passport_number,
+                                 id_document_type, id_issuing_authority, id_issuing_country,
+                                 id_issued_on, lifecycle_status, is_active)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
-                   $26, $27, 'prospective', false)
+                   $26, $27, $28, $29, $30, $31, $32, 'prospective', false)
            RETURNING id"#,
     )
     .bind(&pid)
@@ -7571,6 +7886,11 @@ async fn create_prospect_patient(
     .bind(auth.user_id)
     .bind(nationality)
     .bind(passport_expiry)
+    .bind(identity_document.number.as_deref())
+    .bind(identity_document.document_type.as_deref())
+    .bind(identity_document.issuing_authority.as_deref())
+    .bind(identity_document.issuing_country.as_deref())
+    .bind(identity_document.issued_on)
     .fetch_one(&mut *tx)
     .await
     {
@@ -8072,14 +8392,18 @@ async fn convert_lead(
     let nationality = lead_nationality(&lead, &wizard_state);
     // Staff's identity data on the GwG statements are the one source; the
     // wizard field of older leads is the fallback (trigger flow 2026-10-07).
-    let passport_expiry = match crate::risk::store::staff_id_valid_until(&mut tx, lead_id).await {
-        Ok(Some(valid_until)) => Some(valid_until),
-        Ok(None) => lead_wizard_date(&wizard_state, "passport_expiry"),
+    // The whole document — number, type, issuer, dates — reaches the patient
+    // card (QA 2026-10-25: only the validity did).
+    let identity_document = match load_staff_identity_document(&mut tx, lead_id, &wizard_state)
+        .await
+    {
+        Ok(document) => document,
         Err(error) => {
-            tracing::error!(error = %error, lead_id = %lead_id, "load identity document validity");
+            tracing::error!(error = %error, lead_id = %lead_id, "load identity document for conversion");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    let passport_expiry = identity_document.valid_until;
     let selected_work_type_ids = wizard_state
         .get("selected_specialization_work_type_ids")
         .and_then(Value::as_array)
@@ -8137,6 +8461,15 @@ async fn convert_lead(
         .map(str::to_owned);
     let lead_snapshot: Value = lead.try_get("lead_snapshot").unwrap_or_else(|_| json!({}));
     let snapshot_value = |key: &str| lead_snapshot.get(key).cloned().unwrap_or(Value::Null);
+    // The wizard's record of a consent, or the consent given in the cabinet
+    // (`readiness.cabinet_consents`, the readiness rule).
+    let consent_given = |column: &str, cabinet_key: &str| -> Value {
+        let staff = snapshot_value(column).as_bool().unwrap_or(false);
+        let cabinet = readiness.payload["cabinet_consents"][cabinet_key]
+            .as_bool()
+            .unwrap_or(false);
+        json!(staff || cabinet)
+    };
     let source: Option<String> = lead.try_get("source").ok().flatten();
     let intake_source: Option<String> = lead.try_get("intake_source").ok().flatten();
     let flow: Option<String> = lead.try_get("flow").ok().flatten();
@@ -8190,14 +8523,22 @@ async fn convert_lead(
         "program_date_to": wizard_state.get("program_date_to").cloned().unwrap_or(Value::Null),
         "nationality": nationality.clone(),
         "passport_expiry": passport_expiry.map(|value| value.to_string()),
+        "passport_number": identity_document.number.clone(),
+        "id_document_type": identity_document.document_type.clone(),
+        "id_issuing_authority": identity_document.issuing_authority.clone(),
+        "id_issuing_country": identity_document.issuing_country.clone(),
+        "id_issued_on": identity_document.issued_on.map(|value| value.to_string()),
         "notes": lead_notes.clone(),
         "has_insurance": has_insurance,
         "insurance_covers_germany": lead.try_get::<Option<String>, _>("insurance_covers_germany").unwrap_or_default(),
         "message": lead.try_get::<Option<String>, _>("message").unwrap_or_default(),
         "consent_automated_contact": snapshot_value("consent_automated_contact"),
-        "consent_healthcare": snapshot_value("consent_healthcare"),
+        // A consent given in the cabinet counts like the staff's record of a
+        // paper consent — the readiness rule; the card showed "Нет" for a
+        // consent the cabinet holds (QA 2026-10-25).
+        "consent_healthcare": consent_given("consent_healthcare", "healthcare"),
         "consent_opt_out": snapshot_value("consent_opt_out"),
-        "consent_privacy_practices": snapshot_value("consent_privacy_practices"),
+        "consent_privacy_practices": consent_given("consent_privacy_practices", "privacy_practices"),
         "discovery_source": wizard_state.get("discovery_source").cloned().unwrap_or(Value::Null),
         "discovery_source_other": wizard_state.get("discovery_source_other").cloned().unwrap_or(Value::Null),
         "referrer": wizard_state.get("referrer").cloned().unwrap_or(Value::Null),
@@ -8304,6 +8645,11 @@ async fn convert_lead(
                            notes = COALESCE(NULLIF(btrim(notes), ''), $23),
                            source_lead_id = $24, lead_snapshot = $25,
                            nationality = $26, passport_expiry = $27,
+                           passport_number = COALESCE($28, passport_number),
+                           id_document_type = COALESCE($29, id_document_type),
+                           id_issuing_authority = COALESCE($30, id_issuing_authority),
+                           id_issuing_country = COALESCE($31, id_issuing_country),
+                           id_issued_on = COALESCE($32, id_issued_on),
                            lifecycle_status = 'active', is_active = true, updated_at = now()
                        WHERE id = $1 AND lifecycle_status = 'prospective'
                        RETURNING patient_id"#,
@@ -8335,6 +8681,11 @@ async fn convert_lead(
                 .bind(&lead_snapshot)
                 .bind(nationality.as_deref())
                 .bind(passport_expiry)
+                .bind(identity_document.number.as_deref())
+                .bind(identity_document.document_type.as_deref())
+                .bind(identity_document.issuing_authority.as_deref())
+                .bind(identity_document.issuing_country.as_deref())
+                .bind(identity_document.issued_on)
                 .fetch_optional(&mut *tx)
                 .await
                 {
@@ -8383,6 +8734,11 @@ async fn convert_lead(
                            notes = COALESCE(NULLIF(btrim(notes), ''), $6),
                            nationality = COALESCE($7, nationality),
                            passport_expiry = COALESCE($8, passport_expiry),
+                           passport_number = COALESCE($9, passport_number),
+                           id_document_type = COALESCE($10, id_document_type),
+                           id_issuing_authority = COALESCE($11, id_issuing_authority),
+                           id_issuing_country = COALESCE($12, id_issuing_country),
+                           id_issued_on = COALESCE($13, id_issued_on),
                            updated_at = now()
                        WHERE id = $1 AND lifecycle_status IN ('active', 'inactive')
                        RETURNING patient_id"#,
@@ -8395,6 +8751,11 @@ async fn convert_lead(
                 .bind(lead_notes.as_deref())
                 .bind(nationality.as_deref())
                 .bind(passport_expiry)
+                .bind(identity_document.number.as_deref())
+                .bind(identity_document.document_type.as_deref())
+                .bind(identity_document.issuing_authority.as_deref())
+                .bind(identity_document.issuing_country.as_deref())
+                .bind(identity_document.issued_on)
                 .fetch_optional(&mut *tx)
                 .await
                 {
@@ -8438,10 +8799,12 @@ async fn convert_lead(
                                          insurance_type, emergency_contact_name, emergency_contact_phone,
                                          emergency_contact_relation, intake_profile, legal_status, notes,
                                          source_lead_id, lead_snapshot, created_by,
-                                         nationality, passport_expiry)
+                                         nationality, passport_expiry, passport_number,
+                                         id_document_type, id_issuing_authority,
+                                         id_issuing_country, id_issued_on)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                            $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-                           $27, $28)
+                           $27, $28, $29, $30, $31, $32, $33)
                    RETURNING id"#,
             )
             .bind(&pid)
@@ -8472,6 +8835,11 @@ async fn convert_lead(
             .bind(auth.user_id)
             .bind(nationality)
             .bind(passport_expiry)
+            .bind(identity_document.number.as_deref())
+            .bind(identity_document.document_type.as_deref())
+            .bind(identity_document.issuing_authority.as_deref())
+            .bind(identity_document.issuing_country.as_deref())
+            .bind(identity_document.issued_on)
             .fetch_one(&mut *tx)
             .await
             {
@@ -9431,11 +9799,8 @@ async fn resolve_failed_lead(
         .try_get("failed_outcome_status")
         .unwrap_or_else(|_| "none".to_string());
 
-    if converted_patient_id.is_some() {
-        return err(
-            StatusCode::CONFLICT,
-            "Converted leads cannot enter the failed-lead workflow",
-        );
+    if let Some(patient_id) = converted_patient_id {
+        return lead_converted_response(patient_id);
     }
     if failed_outcome_status != "none" {
         return err(

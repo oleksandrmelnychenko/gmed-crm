@@ -109,6 +109,7 @@ import {
   updateLeadGate,
   updateLeadStatus,
 } from "./data/leads-api";
+import { attachmentImportRefusalLabel } from "./model/lead-attachment-import";
 import {
   COMPLIANCE_OPTIONS,
   DEFAULT_FILTERS,
@@ -123,6 +124,7 @@ import {
   filterLeadsByContact,
   formatSize,
   leadErrorMessage,
+  leadListShowsConverted,
   leadTypeFromLead,
   leadPermissions,
   leadServerFieldError,
@@ -1301,7 +1303,9 @@ function useLeadsPageContent() {
         .filter((event) => event.type === "lead.converted" && event.entity_type === "lead")
         .map((event) => event.entity_id),
     );
-    if (convertedLeadIds.size > 0) {
+    // A converted lead leaves the active list; a list that shows converted
+    // leads (the filter, «С архивом», a search) keeps the row and reloads it.
+    if (convertedLeadIds.size > 0 && !leadListShowsConverted(filters)) {
       dispatchListState((current) => ({
         leads: current.leads.filter((lead) => !convertedLeadIds.has(lead.id)),
       }));
@@ -2010,6 +2014,9 @@ function useLeadsPageContent() {
                             <div className="text-xs text-slate-500">
                               {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes, lang)}
                             </div>
+                            {attachmentImportRefusalLabel(file, tx) ? (
+                              <div className="text-xs text-amber-700" data-attachment-refused={file.id}>{attachmentImportRefusalLabel(file, tx)}</div>
+                            ) : null}
                           </div>
                           <Button
                             size="sm"
@@ -3144,6 +3151,9 @@ function useLeadsPageContent() {
                             <div className="text-xs text-slate-500">
                               {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes, lang)}
                             </div>
+                            {attachmentImportRefusalLabel(file, tx) ? (
+                              <div className="text-xs text-amber-700" data-attachment-refused={file.id}>{attachmentImportRefusalLabel(file, tx)}</div>
+                            ) : null}
                           </div>
                           <Button
                             size="sm"

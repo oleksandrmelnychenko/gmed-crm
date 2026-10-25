@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sqlx::{PgConnection, Row};
@@ -1828,22 +1828,6 @@ pub async fn readiness_held(conn: &mut PgConnection, lead_id: Uuid) -> Result<bo
             .await?
             .is_some_and(|(_, score, _)| score.level >= 2)),
     }
-}
-
-/// The validity date staff entered for the patient's identity document
-/// (`lead_gwg_declarations.id_valid_until`); the conversion prefers it to
-/// the wizard's `passport_expiry`.
-pub async fn staff_id_valid_until(
-    conn: &mut PgConnection,
-    lead_id: Uuid,
-) -> Result<Option<NaiveDate>, sqlx::Error> {
-    Ok(sqlx::query_scalar::<_, Option<NaiveDate>>(
-        "SELECT id_valid_until FROM lead_gwg_declarations WHERE lead_id = $1",
-    )
-    .bind(lead_id)
-    .fetch_optional(&mut *conn)
-    .await?
-    .flatten())
 }
 
 #[cfg(test)]

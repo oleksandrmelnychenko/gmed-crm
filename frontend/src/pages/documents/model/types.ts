@@ -79,6 +79,12 @@ export type DocumentItem = {
   payment_date: string | null;
   payment_method: DocumentPaymentMethod | null;
   generated_template_id: string | null;
+  /**
+   * Generated order documents only: `false` when the order's client terms (or
+   * the prepayment terms of an estimate) changed after this PDF was made, so a
+   * signature would cover stale terms; `null`/absent for other documents.
+   */
+  terms_current?: boolean | null;
   generated_bindings?: Record<string, unknown> | null;
   generated_manual_text?: string | null;
   notes: string | null;

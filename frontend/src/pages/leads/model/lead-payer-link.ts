@@ -382,6 +382,8 @@ export function payerLinkActions(
     Partial<Pick<LeadPayerLinkState, "risk_hold">>,
   reopen: boolean,
   tx: Tx,
+  /** The lead has sent the request (`submitted_at` of the cabinet intake); the "now send the link" note waits for it. */
+  leadSubmitted = true,
 ): PayerLinkActions {
   // A paying parent (also one stored as a third party before) gets no link:
   // the note alone, no language buttons and no disabled send button (DEV 2026-10-24).
@@ -413,7 +415,7 @@ export function payerLinkActions(
     sendBlockedText: cabinet ? null : sendBlockedText,
     reopenOffered,
     revokeEnabled: !cabinet && active,
-    highlight: !cabinet && state.can_send && !state.link && !riskHold,
+    highlight: !cabinet && leadSubmitted && state.can_send && !state.link && !riskHold,
   };
 }
 

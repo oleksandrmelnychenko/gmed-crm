@@ -321,6 +321,23 @@ async fn store_signed_version(
             return Err(error(StatusCode::CONFLICT, "order_document_outdated"));
         }
     }
+    // QA 2026-10-25: the same for the Kostenvoranschlag, whose terms also
+    // include the order's prepayment ("Eine Vorauszahlung … ist nicht
+    // vereinbart" while one is required now). `document_terms_current`
+    // compares the generated version's age with the last change of the
+    // services, the period and the prepayment terms, `>=`-safe like above.
+    if template_of(&source).as_deref() == Some("order_cost_estimate")
+        && source.get::<Option<Uuid>, _>("order_id").is_some()
+    {
+        let current: Option<bool> = sqlx::query_scalar("SELECT document_terms_current($1)")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        if current == Some(false) {
+            return Err(error(StatusCode::CONFLICT, "estimate_document_outdated"));
+        }
+    }
 
     let signed_id = Uuid::new_v4();
     // The signed scan is the same document: it keeps the document's unified

@@ -939,6 +939,10 @@ async fn put_identity_data(
         Ok(data) => data,
         Err(response) => return response,
     };
+    // A converted lead is frozen: the patient card owns the document data now.
+    if let Err(response) = super::leads::refuse_if_converted(&state.db, lead_id).await {
+        return response;
+    }
     let fields = changed_identity_keys(&data);
     let result = async {
         let mut tx = state.db.begin().await?;
@@ -1093,6 +1097,10 @@ async fn put_representative_identity_data(
         Ok(data) => data,
         Err(response) => return response,
     };
+    // A converted lead is frozen: the patient card owns the document data now.
+    if let Err(response) = super::leads::refuse_if_converted(&state.db, lead_id).await {
+        return response;
+    }
     let fields = changed_identity_keys(&data);
     let result = async {
         let mut tx = state.db.begin().await?;

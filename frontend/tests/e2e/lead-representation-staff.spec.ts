@@ -358,7 +358,7 @@ async function mount(page: Page, mock: Mock) {
     } else if (contactRemoval && method === "DELETE") {
       calls.removedContacts.push(contactRemoval[1]);
       if (mock.refuseContactRemoval) {
-        await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ message: "The lead is converted", code: "lead_converted" }) });
+        await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ message: "The contact is still in use", code: "contact_in_use" }) });
         return;
       }
       state.lead.trusted_contacts = (state.lead.trusted_contacts as Json[]).filter((item) => item.id !== contactRemoval[1]);
@@ -778,7 +778,7 @@ test("staff state who represents the child, and the block warns when it does not
 
   const custody = wizard.getByTestId("lead-custody");
   const select = custody.getByRole("combobox", { name: "Кто представляет ребёнка", exact: true });
-  await expect(select).toContainText("Не указано — оба родителя");
+  await expect(select).toContainText("Выберите");
   await custody.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-representation-custody-ru-desktop.png"), animations: "disabled" });
   await select.click();

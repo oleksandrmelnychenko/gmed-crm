@@ -293,12 +293,14 @@ import {
   leadConversionRunnable,
   leadOpenBlockingReasons,
   leadIntakeTypeFromLead,
+  isLeadConvertedError,
   leadErrorBlockingReasons,
   leadErrorMessage,
   leadServerContactError,
   leadServerFieldError,
   normalizeLeadServiceSelection,
   normalizeLeadServiceValue,
+  passportNameRuleText,
   updateLeadServiceSelection,
   useLeadLabels,
 } from "@/pages/leads/model/leads-model";
@@ -390,9 +392,11 @@ import {
 import {
   createLead,
   createLeadProspect,
+  downloadLeadAttachment,
   fetchLeadDetail,
   fetchLeadReferrerPatients,
   fetchLeadGuardianCandidates,
+  type LeadAttachmentImportRefusal,
   type LeadGuardianCandidate,
   importLeadAttachments,
   resolveFailedLead,
@@ -402,6 +406,9 @@ import {
   type ProspectDuplicateCandidate,
   type LeadReferrerPatientOption,
 } from "../data/leads-api";
+import { refusedLeadAttachments } from "../model/lead-attachment-import";
+import { LeadAttachmentImportNotice } from "./lead-attachment-import-notice";
+import { nameNeedsLatinSpelling } from "@/pages/patient-lead/name-transliteration";
 
 type Tx = (ru: string, de: string) => string;
 type StepId = "master_data" | "medical" | "service" | "documents" | "order" | "commercial" | "release";
@@ -2324,6 +2331,8 @@ function wizardDocumentFilename(document: DocumentItem) {
 
 function wizardDocumentComplianceKind(document: DocumentItem): DocumentComplianceKind | null {
   if (document.generated_template_id === "framework_contract") return "framework_contract";
+  // The payer's Kostenübernahmeerklärung is confirmed (paper scan) like every other signed document (QA 2026-10-25).
+  if (document.generated_template_id === "cost_coverage_declaration") return "cost_coverage_declaration";
   const kind = wizardDocumentKind(document);
   if (kind === "privacy_consents") return "dsgvo";
   // An internal GwG record or the lead's patient form touches no compliance flag of the lead.
@@ -2338,6 +2347,59 @@ function wizardDocumentPreviewKind(document: DocumentItem): "image" | "pdf" | nu
     return "image";
   }
   if (mimeType === "application/pdf" || filename.endsWith(".pdf")) return "pdf";
+  return null;
+}
+
+/** The lead has its patient: the wizard shows its data and changes nothing (QA 2026-10-25). */
+function isConvertedLead(lead: Pick<LeadDetail, "converted_patient_id" | "qualification_status"> | null | undefined): boolean {
+  return Boolean(lead && (lead.converted_patient_id || lead.qualification_status === "converted"));
+}
+
+/** Whether the optional service step holds anything: a program period, a requested service, a note. */
+function serviceStepHasContent(
+  draft: Pick<Draft, "programDateFrom" | "programDateTo" | "serviceNeeds" | "serviceComments" | "serviceNotes">,
+): boolean {
+  return Boolean(
+    draft.programDateFrom
+    || draft.programDateTo
+    || draft.serviceNeeds.length > 0
+    || draft.serviceNotes.trim()
+    || Object.values(draft.serviceComments).some((comment) => comment.trim()),
+  );
+}
+
+/** Saves a downloaded file under its name (a refused questionnaire upload). */
+function saveBlobAs(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * 409 of a paper signature: the order document or the estimate is older than
+ * the order (`order_document_outdated`, `estimate_document_outdated`), in
+ * words; `null` for other errors.
+ */
+function outdatedDocumentSignErrorText(error: unknown, tx: Tx): string | null {
+  if (!(error instanceof ApiRequestError)) return null;
+  const code = error.body?.error ?? error.body?.code ?? error.code;
+  if (code === "order_document_outdated") {
+    return tx(
+      "Документ заказа устарел: заказ изменился после его создания. Создайте новую версию документа заказа и подпишите её.",
+      "Der Einzelauftrag ist veraltet: Der Auftrag wurde nach seiner Erstellung geändert. Erstellen Sie eine neue Version des Einzelauftrags und lassen Sie diese unterschreiben.",
+    );
+  }
+  if (code === "estimate_document_outdated") {
+    return tx(
+      "Смета устарела: заказ изменился после её создания. Пересчитайте смету, создайте новую версию документа и подпишите её.",
+      "Der Kostenvoranschlag ist veraltet: Der Auftrag wurde nach seiner Erstellung geändert. Berechnen Sie ihn neu, erstellen Sie eine neue Version und lassen Sie diese unterschreiben.",
+    );
+  }
   return null;
 }
 
@@ -2366,11 +2428,12 @@ function frameworkContractSignErrorText(error: unknown, tx: Tx): string | null {
 function wizardSignatureErrorText(error: unknown, tx: Tx): string | null {
   return frameworkContractSignErrorText(error, tx)
     ?? payerGateErrorText(error, tx)
-    ?? riskGateErrorText(error, tx);
+    ?? riskGateErrorText(error, tx)
+    ?? outdatedDocumentSignErrorText(error, tx);
 }
 
 function errorText(error: unknown, tx: Tx): string {
-  const payerGate = payerGateErrorText(error, tx) ?? riskGateErrorText(error, tx);
+  const payerGate = payerGateErrorText(error, tx) ?? riskGateErrorText(error, tx) ?? outdatedDocumentSignErrorText(error, tx);
   if (payerGate) return payerGate;
   const representation = gwgSheetErrorText(error, tx)
     ?? identificationErrorText(error, tx)
@@ -3290,6 +3353,48 @@ export function LeadWizard({
   const activePayerLeadIdRef = useRef(leadId);
   activePayerLeadIdRef.current = leadId;
   const [lead, setLead] = useState<LeadDetail | null>(null);
+  // A converted lead is read, not edited: the server answers 409
+  // `lead_converted` to every change, the wizard shows the patient instead
+  // (QA 2026-10-25). `convertedByServer` holds such an answer until the
+  // reloaded lead carries `converted_patient_id`.
+  const [convertedByServer, setConvertedByServer] = useState(false);
+  const leadConverted = convertedByServer || isConvertedLead(lead);
+  const [convertedPatient, setConvertedPatient] = useState<{ id: string; name: string; number: string } | null>(null);
+  // The questionnaire files the import refused on this load (the lead's attachments carry the stored ones).
+  const [attachmentImportRefused, setAttachmentImportRefused] = useState<LeadAttachmentImportRefusal[]>([]);
+  const refusedAttachments = useMemo(
+    () => refusedLeadAttachments(lead?.attachments, attachmentImportRefused),
+    [attachmentImportRefused, lead?.attachments],
+  );
+  // Whether the electronic signature (Skribble) is connected, as the payer package state says; null until known.
+  const [signatureEnabled, setSignatureEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    setConvertedByServer(false);
+    setAttachmentImportRefused([]);
+  }, [leadId]);
+  useEffect(() => {
+    const patientId = lead?.converted_patient_id ?? null;
+    if (!open || !patientId) {
+      setConvertedPatient(null);
+      return;
+    }
+    let cancelled = false;
+    void apiFetch<PatientDetail>(`/patients/${encodeURIComponent(patientId)}`)
+      .then((patient) => {
+        if (cancelled) return;
+        setConvertedPatient({
+          id: patientId,
+          name: [patient.first_name, patient.last_name].filter(Boolean).join(" "),
+          number: patient.patient_id ?? "",
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setConvertedPatient({ id: patientId, name: "", number: "" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lead?.converted_patient_id, open]);
   // "Кто платит": the payer declaration feeds the AML country risk, the
   // documents step and the signing order of the commercial step. It follows
   // every lead refresh (order signatures, documents, readiness).
@@ -3843,6 +3948,14 @@ export function LeadWizard({
   const orderPositionCount = orderServiceLines.length + selectedCostEstimateWorkTypes.length;
 
   const showWizardError = useCallback((nextError: unknown) => {
+    if (isLeadConvertedError(nextError)) {
+      // 409 `lead_converted`: the banner says it instead of a generic error.
+      setConvertedByServer(true);
+      setError("");
+      setValidationContext(null);
+      if (leadId) void fetchLeadDetail(leadId).then(setLead).catch(() => undefined);
+      return;
+    }
     const reasons = leadErrorBlockingReasons(nextError);
     if (reasons.length > 0) {
       const firstReason = reasons[0];
@@ -3858,7 +3971,7 @@ export function LeadWizard({
     }
     setValidationContext(null);
     setError(errorText(nextError, tx));
-  }, [tx]);
+  }, [leadId, tx]);
 
   const clearServerValidation = useCallback(() => {
     setValidationContext((current) => current?.kind === "server" ? null : current);
@@ -3904,10 +4017,17 @@ export function LeadWizard({
       ).catch(() => []);
       const documentsPromise = leadPromise.then(async (nextLead) => {
         let attachmentImportError: unknown = null;
+        let refused: LeadAttachmentImportRefusal[] = [];
         let nextDocuments = await initialDocumentsPromise;
-        if (!readOnly && nextLead.attachments?.some((attachment) => !attachment.imported_at)) {
+        // A converted lead imports nothing more; a file the import refused is not tried again on every load.
+        if (
+          !readOnly
+          && !isConvertedLead(nextLead)
+          && nextLead.attachments?.some((attachment) => !attachment.imported_at && !attachment.import_refused_at)
+        ) {
           try {
-            await importLeadAttachments(leadId);
+            const imported = await importLeadAttachments(leadId);
+            refused = imported?.refused ?? [];
             nextDocuments = await fetchDocuments(
               "/documents?lead_id=" + encodeURIComponent(leadId) + "&include_archived_versions=true",
             ).catch(() => nextDocuments);
@@ -3915,7 +4035,7 @@ export function LeadWizard({
             attachmentImportError = nextError;
           }
         }
-        return { attachmentImportError, documents: nextDocuments };
+        return { attachmentImportError, documents: nextDocuments, refused };
       });
       const leadOrdersPath = "/orders?lead_id=" + encodeURIComponent(leadId);
       const ordersPromise = Promise.all([
@@ -3961,6 +4081,7 @@ export function LeadWizard({
       if (!isCurrentReload()) return;
       const nextOrders = nextOrderState.orders;
       setDocuments(nextDocumentState.documents);
+      setAttachmentImportRefused(nextDocumentState.refused);
       if (nextDocumentState.attachmentImportError) {
         setError(
           `${tx("Не удалось импортировать файлы опросника", "Fragebogendateien konnten nicht importiert werden")}: ${errorText(nextDocumentState.attachmentImportError, tx)}`,
@@ -5341,6 +5462,14 @@ export function LeadWizard({
           (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__")) &&
           currentAutosaveSignatureRef.current === signature
         ) {
+          if (isLeadConvertedError(nextError)) {
+            // The lead got its patient meanwhile: nothing to save here any more (QA 2026-10-25).
+            setConvertedByServer(true);
+            setAutosaveError("");
+            setAutosaveStatus("saved");
+            if (targetLeadId) void fetchLeadDetail(targetLeadId).then(setLead).catch(() => undefined);
+            throw nextError;
+          }
           setExistingParentPatientId(existingParentPatientFromError(nextError)?.patientId ?? null);
           const refusedField = SERVER_MASTER_FIELDS[leadServerFieldError(nextError) ?? ""];
           setServerMasterError(refusedField ? { field: refusedField, message: errorText(nextError, tx) } : null);
@@ -5364,6 +5493,8 @@ export function LeadWizard({
 
   useEffect(() => {
     if (!open || !autosaveSnapshot || loading) return;
+    // Nothing is saved for a converted lead (the server would answer 409 `lead_converted`).
+    if (leadConverted) return;
 
     const signature = autosaveSnapshotSignature(autosaveSnapshot);
     currentAutosaveSignatureRef.current = signature;
@@ -5772,6 +5903,11 @@ export function LeadWizard({
     const name = trustedContactEditor.name.trim();
     if (!name) {
       setTrustedContactEditorError(tx("Укажите имя контактного лица", "Name der Kontaktperson angeben"));
+      return;
+    }
+    // The cabinet's passport-name rule, here too: the server refuses the same (422 `trusted_contact_name_invalid`).
+    if (nameNeedsLatinSpelling(name)) {
+      setTrustedContactEditorError(passportNameRuleText(tx));
       return;
     }
     if (trustedContactEditorGuardian && !["mother", "father", "guardian"].includes(trustedContactEditor.relation)) {
@@ -7555,6 +7691,16 @@ ${serviceCommentLines.join("\n")}`
       }}
     />
   ) : null;
+  // The estimate, the prepayment and the lead's update time: the payer package
+  // is loaded again when they change in this session (QA 2026-10-25).
+  const payerPackageRefreshKey = [
+    quote?.id ?? "",
+    quote?.status ?? "",
+    quote?.updated_at ?? "",
+    String(order?.prepayment_required ?? ""),
+    order?.prepayment_amount ?? "",
+    lead?.updated_at ?? "",
+  ].join("|");
   // Client → payer → GMED, with the payer's Kostenübernahmeerklärung; the
   // payer's signature package (phase 3b) has its panel in the commercial step.
   const renderPayerSignatureFlow = (packagePanel: boolean) => leadId ? (
@@ -7573,6 +7719,8 @@ ${serviceCommentLines.join("\n")}`
       payerPackage={{
         panel: packagePanel,
         canEdit: canEditPayerLink,
+        refreshKey: payerPackageRefreshKey,
+        onState: (state) => setSignatureEnabled(state.signature_enabled),
         onOpenDocument: (documentId, title) => {
           const document = documents.find((item) => item.id === documentId);
           if (document) void openOrDownloadDocument(document);
@@ -7639,9 +7787,36 @@ ${serviceCommentLines.join("\n")}`
     hasMedicalRecords,
     medicalDocumentCount: medicalDocuments.length,
   }));
+  // The service step is optional too: its tick needs data (a program period,
+  // a requested service, a note); a new lead shows it open (QA 2026-10-25).
+  const serviceTabFilled = Boolean(draft && serviceStepHasContent(draft));
   const isStepTicked = (id: StepId) => (
-    id === "medical" ? medicalTabFilled && isStepReady(id) : isStepReady(id)
+    id === "medical"
+      ? medicalTabFilled && isStepReady(id)
+      : id === "service"
+        ? serviceTabFilled && isStepReady(id)
+        : isStepReady(id)
   );
+  // Why «Подписано на бумаге» would be refused now (409 `*_document_outdated`
+  // of the paper signature): the button waits and the reason stands beside
+  // it instead of a refusal after the scan (QA 2026-10-25).
+  // The server tells per document whether its terms are still current
+  // (`terms_current`, documents.rs); a readiness check of the same name is
+  // honoured too should one appear. A stale PDF cannot be signed on paper
+  // (409 order_document_outdated / estimate_document_outdated).
+  const paperSignatureBlocker = (document: Pick<DocumentItem, "generated_template_id" | "terms_current">): string | null => {
+    const checks = lead?.readiness.checks ?? [];
+    const failing = (key: string) => document.terms_current === false
+      || checks.some((check) => check.key === key && !check.passed);
+    const template = document.generated_template_id ?? "";
+    if (template === "single_order" && failing("order_document_outdated")) {
+      return tx("Документ заказа устарел — создайте новую версию и подпишите её", "Einzelauftrag veraltet – neue Version erstellen und unterschreiben lassen");
+    }
+    if (template === "order_cost_estimate" && failing("estimate_document_outdated")) {
+      return tx("Смета устарела — пересчитайте и создайте новую версию", "Kostenvoranschlag veraltet – neu berechnen und neue Version erstellen");
+    }
+    return null;
+  };
 
   if (!leadId && !createMode) return null;
   const autosaveIsDirty = autosaveStatus === "dirty"
@@ -7743,7 +7918,8 @@ ${serviceCommentLines.join("\n")}`
       <Dialog
         open={open}
         modal={!documentPreview}
-        dirty={!saveInProgress && autosaveIsDirty}
+        // Pending edits are saved on close (below); only a save that failed asks before discarding.
+        dirty={!saveInProgress && autosaveStatus === "error"}
         onOpenChange={(nextOpen, details) => {
           if (!nextOpen && saveInProgress) {
             details.cancel();
@@ -7752,12 +7928,17 @@ ${serviceCommentLines.join("\n")}`
           if (!nextOpen) {
             details.cancel();
             const targetLeadId = leadId;
-            void flushPayerAutosave().then((saved) => {
-              if (saved && activePayerLeadIdRef.current === targetLeadId
+            // A pick made just before Escape (a second specialisation, a
+            // checkbox) is saved first, not lost with the close (QA 2026-10-25).
+            const pendingDraft = Boolean(targetLeadId) && !leadConverted && autosaveIsDirty;
+            void (async () => {
+              if (!(await flushPayerAutosave())) return;
+              if (pendingDraft && !(await save(step, false))) return;
+              if (activePayerLeadIdRef.current === targetLeadId
                 && (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__"))) {
                 onOpenChange(false);
               }
-            });
+            })();
             return;
           }
           onOpenChange(nextOpen);
@@ -7837,6 +8018,7 @@ ${serviceCommentLines.join("\n")}`
             {leadId && !(lead && (
               ["archived", "deleted"].includes(lead.qualification_status)
               || (lead.failed_outcome?.status ?? "none") !== "none"
+              || isConvertedLead(lead)
             )) ? (
               <Button
                 type="button"
@@ -7884,7 +8066,7 @@ ${serviceCommentLines.join("\n")}`
               {STEPS.map((item, itemIndex) => {
                 const selected = item.id === step;
                 const done = isStepTicked(item.id);
-                const optionalEmpty = item.id === "medical" && !done && isStepReady(item.id);
+                const optionalEmpty = (item.id === "medical" || item.id === "service") && !done && isStepReady(item.id);
                 const StepIcon = STEP_ICONS[item.id];
                 return (
                   <button
@@ -7943,6 +8125,39 @@ ${serviceCommentLines.join("\n")}`
 
         <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain bg-muted px-3 py-4 outline-none [scrollbar-gutter:stable] sm:px-5 sm:py-5">
           <SanctionsLeadBanner leadId={leadId} refreshKey={lead} className="mb-5" />
+          {leadConverted ? (
+            <div
+              role="status"
+              data-testid="lead-converted-banner"
+              className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-950 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-100"
+            >
+              <UserRoundCheck aria-hidden="true" className="size-4 shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="font-medium">{tx("Пациент создан", "Patient angelegt")}</span>
+                {convertedPatient && (convertedPatient.name || convertedPatient.number)
+                  ? `: ${[convertedPatient.name, convertedPatient.number].filter(Boolean).join(", ")}`
+                  : ""}
+                {" — "}
+                {tx(
+                  "данные обращения только для чтения; изменения вносятся в карточке пациента.",
+                  "die Angaben sind nur noch lesbar; Änderungen erfolgen in der Patientenakte.",
+                )}
+              </span>
+              {lead?.converted_patient_id ? (
+                <StaffLink
+                  to={`/patients/${encodeURIComponent(lead.converted_patient_id)}`}
+                  className={cn(buttonVariants({ size: "sm" }), "shrink-0")}
+                  data-testid="lead-converted-open-patient"
+                  onClick={() => onOpenChange(false)}
+                >
+                  {tx("Открыть карточку пациента", "Patientenakte öffnen")}
+                  <ArrowRight aria-hidden="true" className="size-3.5" />
+                </StaffLink>
+              ) : null}
+            </div>
+          ) : null}
+          {/* Read-only for a converted lead: every control inside is off, the tabs above stay (QA 2026-10-25). */}
+          <fieldset disabled={leadConverted} aria-readonly={leadConverted || undefined} data-readonly={leadConverted ? "true" : undefined} className="m-0 min-w-0 border-0 p-0">
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5">
               <Banner tone="error">
@@ -8571,7 +8786,7 @@ ${serviceCommentLines.join("\n")}`
                           aria-label={tx("Кто представляет ребёнка", "Wer vertritt das Kind")}
                           onChange={(event) => setNewLeadCustody(LEAD_CUSTODY_VALUES.find((item) => item === event.target.value) ?? "")}
                         >
-                          <option value="">{tx("Не указано — оба родителя", "Nicht angegeben – beide Eltern")}</option>
+                          <option value="">{tx("Выберите", "Bitte wählen")}</option>
                           {LEAD_CUSTODY_VALUES.map((item) => (
                             <option key={item} value={item}>{custodyLabel(item, tx)}</option>
                           ))}
@@ -9018,6 +9233,17 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && step === "documents" ? (
             <section className="space-y-5">
+              <LeadAttachmentImportNotice
+                refused={refusedAttachments}
+                tx={tx}
+                canDownload={Boolean(leadId) && lead?.medical_fields_hidden !== true}
+                onDownload={(file) => {
+                  if (!leadId) return;
+                  void downloadLeadAttachment(leadId, file.id)
+                    .then((blob) => saveBlobAs(blob, file.file_name))
+                    .catch(showWizardError);
+                }}
+              />
               {patientDocumentReview}
               {patientContractReview}
               {renderPayerDeclarationSection(false)}
@@ -9929,7 +10155,7 @@ ${serviceCommentLines.join("\n")}`
                       </StatusBadge>
                     </span>
                   )}
-                  accessory={(
+                  accessory={leadConverted ? null : (
                     <Button
                       type="button"
                       variant="default"
@@ -10168,7 +10394,7 @@ ${serviceCommentLines.join("\n")}`
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Документ заказа", "Einzelauftrag")}
-                  accessory={(
+                  accessory={leadConverted ? null : (
                     <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
                       {busy === "generate-single_order" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.single_order.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
@@ -10244,8 +10470,8 @@ ${serviceCommentLines.join("\n")}`
                                     "Erstellen Sie zuerst den Einzelauftrag. Als rechtswirksamer Nachweis gilt die abgeschlossene elektronische Paketunterzeichnung oder der Scan des unterschriebenen Exemplars.",
                                   )
                                 : tx(
-                                    "Юридическое подтверждение — завершённое электронное подписание пакета или скан подписанного экземпляра («Подписано на бумаге»). DEMO не подтверждает подпись заказа.",
-                                    "Als rechtswirksamer Nachweis gilt die abgeschlossene elektronische Paketunterzeichnung oder der Scan des unterschriebenen Exemplars („Auf Papier unterschrieben“). DEMO bestätigt keine rechtswirksame Auftragsunterschrift.",
+                                    "Юридическое подтверждение — завершённое электронное подписание пакета или скан подписанного экземпляра («Подписано на бумаге»). Тестовая подпись (DEMO) подписью заказа не считается.",
+                                    "Als rechtswirksamer Nachweis gilt die abgeschlossene elektronische Paketunterzeichnung oder der Scan des unterschriebenen Exemplars („Auf Papier unterschrieben“). Eine Testunterschrift (DEMO) gilt nicht als Auftragsunterschrift.",
                                   )}
                         </p>
                         {signedVersionNote ? (
@@ -10263,16 +10489,24 @@ ${serviceCommentLines.join("\n")}`
                         ) : null}
                       </div>
                       {documentToSign && !demoSignatureChecks.includes("order_signed_patient") ? (
-                        <PaperSignatureConfirmButton
-                          documentId={documentToSign.id}
-                          title={wizardDocumentFilename(documentToSign)}
-                          lang={lang}
-                          size="sm"
-                          label={tx("Подписано на бумаге", "Auf Papier unterschrieben")}
-                          disabled={isBusy}
-                          errorText={(error) => wizardSignatureErrorText(error, tx)}
-                          onDone={() => { void refreshDocumentsState(); }}
-                        />
+                        <span className="inline-flex flex-wrap items-center gap-2">
+                          <PaperSignatureConfirmButton
+                            documentId={documentToSign.id}
+                            title={wizardDocumentFilename(documentToSign)}
+                            lang={lang}
+                            size="sm"
+                            label={tx("Подписано на бумаге", "Auf Papier unterschrieben")}
+                            // Off while the server would refuse it (the document is older than the order).
+                            disabled={isBusy || Boolean(paperSignatureBlocker(documentToSign))}
+                            errorText={(error) => wizardSignatureErrorText(error, tx)}
+                            onDone={() => { void refreshDocumentsState(); }}
+                          />
+                          {paperSignatureBlocker(documentToSign) ? (
+                            <span className="text-xs text-amber-800 dark:text-amber-300" data-testid="lead-order-paper-signature-blocked">
+                              {paperSignatureBlocker(documentToSign)}
+                            </span>
+                          ) : null}
+                        </span>
                       ) : null}
                     </div>
                   );
@@ -10614,7 +10848,7 @@ ${serviceCommentLines.join("\n")}`
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag")}
-                  accessory={(
+                  accessory={leadConverted ? null : (
                     <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("order_cost_estimate")}>
                       {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.order_cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
@@ -10641,7 +10875,7 @@ ${serviceCommentLines.join("\n")}`
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation")}
-                  accessory={(
+                  accessory={leadConverted ? null : (
                     <Button
                       type="button"
                       size="sm"
@@ -10738,7 +10972,7 @@ ${serviceCommentLines.join("\n")}`
                         <span className="text-sm text-foreground">{readinessStepLabel(item.key, tx, isRepeatIntake)}</span>
                         <span className="inline-flex shrink-0 items-center gap-2">
                           {/* As the tab bar says it: the optional medical step left empty is no "done" (owner 2026-10-22). */}
-                          {item.key === "medical" && ready && !medicalTabFilled
+                          {ready && ((item.key === "medical" && !medicalTabFilled) || (item.key === "service" && !serviceTabFilled))
                             ? <StateMark done={false} label={tx("Необязательно, не заполнено", "Optional, nicht ausgefüllt")} />
                             : <StateMark done={ready} label={ready ? tx("Выполнено", "Erledigt") : tx("Не завершено", "Noch offen")} />}
                           <ArrowRight aria-hidden="true" className="size-3.5 text-muted-foreground" />
@@ -10748,7 +10982,7 @@ ${serviceCommentLines.join("\n")}`
                   })}
                 </div>
               </Section>
-              {openBlockingReasons.length > 0 || !quoteAndPrepaymentReady ? (
+              {!leadConverted && (openBlockingReasons.length > 0 || !quoteAndPrepaymentReady) ? (
                 <Banner tone="warning">
                   <div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}: {completionBlockerCount}</div>
                   <div data-testid="completion-blockers" className="mt-2 space-y-2">
@@ -10794,6 +11028,7 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 </Banner>
               ) : null}
+              {leadConverted ? null : (
               <label className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
                 <input
                   type="checkbox"
@@ -10812,8 +11047,10 @@ ${serviceCommentLines.join("\n")}`
                   )}
                 </span>
               </label>
+              )}
             </section>
           ) : null}
+          </fieldset>
         </main>
         {draft ? (
           <footer className="shrink-0 border-t border-border bg-card px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
@@ -10857,7 +11094,7 @@ ${serviceCommentLines.join("\n")}`
             <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
               <span className="inline-flex flex-wrap items-center gap-x-3">
                 <span>{tx("Этап", "Schritt")} {stepIndex + 1} {tx("из", "von")} {STEPS.length}</span>
-                {lead && step !== "release" && completionBlockerCount > 0 ? (
+                {lead && !leadConverted && step !== "release" && completionBlockerCount > 0 ? (
                   <button
                     type="button"
                     data-testid="completion-blocker-count"
@@ -10867,7 +11104,7 @@ ${serviceCommentLines.join("\n")}`
                   >
                     {isRepeatIntake ? tx("До завершения обращения осталось", "Bis zum Abschluss offen") : tx("До создания пациента осталось", "Bis zur Patientenanlage offen")}: {completionBlockerCount}
                   </button>
-                ) : lead && step !== "release" && conversionReady ? (
+                ) : lead && !leadConverted && step !== "release" && conversionReady ? (
                   <span className="font-medium text-emerald-700">{isRepeatIntake ? tx("Обращение можно завершить", "Anfrage kann abgeschlossen werden") : tx("Пациента можно создать", "Patient kann angelegt werden")}</span>
                 ) : null}
               </span>
@@ -10892,7 +11129,7 @@ ${serviceCommentLines.join("\n")}`
                     {tx("Требуют внимания", "Bitte prüfen")}: {validationIssues.length}
                   </Button>
                 ) : null}
-                {step === "commercial" ? (
+                {step === "commercial" && !leadConverted ? (
                   <Button type="button" className="h-9" aria-label={tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")} disabled={loading || isBusy} onClick={() => void prepareCommercial()}>
                     {busy === "commercial" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ShieldCheck aria-hidden="true" className="size-3.5" />}
                     <span className="sm:hidden">{tx("Сохранить", "Speichern")}</span>
@@ -10905,6 +11142,16 @@ ${serviceCommentLines.join("\n")}`
                     {step === "commercial" ? tx("Проверить готовность", "Bereitschaft prüfen") : tx("Далее", "Weiter")}
                     <ArrowRight aria-hidden="true" className="size-3.5" />
                   </Button>
+                ) : leadConverted && lead?.converted_patient_id ? (
+                  <StaffLink
+                    to={`/patients/${encodeURIComponent(lead.converted_patient_id)}`}
+                    className={cn(buttonVariants({ size: "sm" }), "h-9")}
+                    data-testid="lead-wizard-open-patient"
+                    onClick={() => onOpenChange(false)}
+                  >
+                    <UserRoundCheck aria-hidden="true" className="size-4" />
+                    {tx("Открыть карточку пациента", "Patientenakte öffnen")}
+                  </StaffLink>
                 ) : (
                   <Button type="button" className="h-9" disabled={loading || isBusy || !conversionReady || !conversionConfirmed} onClick={() => void convert()}>
                     {busy === "convert" ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <UserRoundCheck aria-hidden="true" className="size-4" />}
@@ -11798,7 +12045,14 @@ ${serviceCommentLines.join("\n")}`
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/30">
             {previewedDocument && canSignWizardDocument(previewedDocument) && documentPreview?.kind !== "image" ? (
               <div className="shrink-0 px-3 pt-3">
-                <DocumentSignatureAction documentId={previewedDocument.id} title={wizardDocumentFilename(previewedDocument)} signed={previewDocumentSigned} onDone={() => { void refreshDocumentsState(); }} />
+                {signatureEnabled === false ? (
+                  // Skribble is off: no electronic signature to offer; the paper signature below stands (QA 2026-10-25).
+                  <p className="text-xs leading-5 text-amber-800 dark:text-amber-300" data-testid="lead-wizard-esign-disabled">
+                    {tx("Электронная подпись отключена — используйте бумажную подпись", "Elektronische Signatur ist deaktiviert – bitte die Unterschrift auf Papier verwenden")}
+                  </p>
+                ) : (
+                  <DocumentSignatureAction documentId={previewedDocument.id} title={wizardDocumentFilename(previewedDocument)} signed={previewDocumentSigned} onDone={() => { void refreshDocumentsState(); }} />
+                )}
               </div>
             ) : null}
             {documentPreview?.kind === "image" ? (
@@ -11873,7 +12127,7 @@ ${serviceCommentLines.join("\n")}`
                   title={wizardDocumentFilename(previewedDocument)}
                   lang={lang}
                   size="sm"
-                  disabled={isBusy}
+                  disabled={isBusy || Boolean(paperSignatureBlocker(previewedDocument))}
                   errorText={(error) => wizardSignatureErrorText(error, tx)}
                   onDone={() => {
                     // The scan is a new version of the document: back to the list.

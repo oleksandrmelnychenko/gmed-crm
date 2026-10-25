@@ -52,6 +52,19 @@ describe("explicit disclosure decision", () => {
   it("No sends an explicit negative decision without stale persons or consent", () => {
     expect(disclosureToSend({ allowDisclosure: false, consentGiven: true, persons: [friend] }, "de")).toEqual({ persons: [], allow_disclosure: false, consent_given: false, version: "2026-10-14", language: "de" });
   });
+  it("saves an explicit No that equals the default while nothing is stored, and not the default itself (QA 2026-10-25, E-13)", () => {
+    const unanswered = { trusted_persons: [], consent_form: undefined, disclosure: null };
+    const shown = disclosureDraft(unanswered);
+    expect(shown.allowDisclosure).toBe(false);
+    expect(disclosureChanged(shown, unanswered)).toBe(false);
+    expect(disclosureChanged({ ...shown, answered: true }, unanswered)).toBe(true);
+    expect(disclosureProblem({ ...shown, answered: true })).toBeNull();
+    // Once the decision is stored, the answered flag changes nothing by itself.
+    const decided = { ...unanswered, disclosure: { allow_disclosure: false, consent_given: false, version: "2026-10-14", language: "de", chosen_at: "2026-10-25T08:00:00Z", chosen_by: "lead-1", access_kind: "self" as const, company_name: "GMED" } };
+    expect(disclosureChanged({ ...disclosureDraft(decided), answered: true }, decided)).toBe(false);
+    // An answer that is still open is no decision to save.
+    expect(disclosureProblem({ ...shown, allowDisclosure: null, answered: true })).toBe("decision");
+  });
   it("does not preselect another guardian's consent and allows that guardian to confirm", () => {
     const request = { ...legacy, disclosure: { allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "en", chosen_at: "2026-10-14T08:00:00Z", chosen_by: "parent-a", access_kind: "guardian" as const, company_name: "Example Clinic" } };
     const draft = disclosureDraft(request, "parent-b");

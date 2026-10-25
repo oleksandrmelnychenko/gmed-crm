@@ -61,12 +61,27 @@ function subscribe(listener: () => void) {
 /**
  * The language the shell of the lead cabinet speaks for the login `user`: what the request page
  * published, else the same starting value the page computes before its requests are loaded.
+ *
+ * `settled`: whether that language is final. It is not while nothing was published, nothing is
+ * remembered and the account has no language of its own: the page then takes the language of the
+ * request over once it is loaded (a German request on a Russian portal), and the shell would
+ * show the portal language for a moment first (QA 2026-10-25, E-13: the Russian side bar before
+ * the German cabinet). The side bar shows a neutral skeleton until then.
  */
+export function useLeadCabinetLangState(
+  user: { id?: string | null; preferred_language?: string | null } | null | undefined,
+  portalLang: Lang,
+): { lang: LeadCabinetLang; settled: boolean } {
+  const current = useSyncExternalStore(subscribe, currentEntry, currentEntry);
+  if (user?.id && current?.userId === user.id) return { lang: current.lang, settled: true };
+  const chosen = readStoredLeadCabinetLang() ?? asLeadCabinetLang(user?.preferred_language);
+  return { lang: resolveLeadCabinetLang(chosen, null, portalLang), settled: chosen !== null };
+}
+
+/** The language alone (`useLeadCabinetLangState`). */
 export function useLeadCabinetLang(
   user: { id?: string | null; preferred_language?: string | null } | null | undefined,
   portalLang: Lang,
 ): LeadCabinetLang {
-  const current = useSyncExternalStore(subscribe, currentEntry, currentEntry);
-  if (user?.id && current?.userId === user.id) return current.lang;
-  return resolveLeadCabinetLang(readStoredLeadCabinetLang() ?? asLeadCabinetLang(user?.preferred_language), null, portalLang);
+  return useLeadCabinetLangState(user, portalLang).lang;
 }

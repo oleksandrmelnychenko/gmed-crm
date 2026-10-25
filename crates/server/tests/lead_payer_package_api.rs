@@ -2268,3 +2268,244 @@ async fn a_paying_parent_signs_the_same_package_and_is_identified_on_the_own_lin
     );
     let _ = ben;
 }
+
+/// `POST /documents/{id}/paper-signature` by the CEO with a synthetic scan.
+async fn sign_on_paper(app: &App, document_id: Uuid) -> (StatusCode, Value) {
+    let boundary = format!("----gmed-boundary-{}", Uuid::new_v4().simple());
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"signed-scan.pdf\"\r\nContent-Type: application/pdf\r\n\r\n").as_bytes());
+    body.extend_from_slice(PDF);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/documents/{document_id}/paper-signature"))
+        .header("Authorization", app.ceo())
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let (status, bytes) = call(app, request).await;
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
+}
+
+async fn document_number(pool: &PgPool, id: Uuid) -> String {
+    sqlx::query_scalar("SELECT document_number FROM documents WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+fn document_uuid(value: &Value) -> Uuid {
+    Uuid::parse_str(value.as_str().unwrap()).unwrap()
+}
+
+/// QA 2026-10-25: the Kostenübernahmeerklärung signed on paper is a signed
+/// version of the package's document, not a replacement — the package shows
+/// it and counts as signed; and the payer's copy of the estimate carries its
+/// own number in the quote's series.
+#[tokio::test]
+async fn a_paper_signed_declaration_is_the_same_package_document() {
+    let Some(app) = app(false).await else { return };
+    let pool = app.pool();
+    let ready = ready_lead(&app, "paper").await;
+    let lead_id = ready.lead_id;
+    agency_signer(&app).await;
+    let prepared = prepare(&app, lead_id).await;
+
+    // The payer's copy is numbered in the client's quote series with the
+    // suffix `-Z`; the client's estimate keeps its own number.
+    // (This fixture's order has no quote, so the client's estimate carries a
+    // plain document number; the copy still gets a number of its own.)
+    let client_number = document_number(pool, document_uuid(&ready.estimate)).await;
+    let copy_number = document_number(
+        pool,
+        document_uuid(&slot(&prepared, "cost_estimate")["document_id"]),
+    )
+    .await;
+    assert_ne!(copy_number, client_number, "{copy_number}");
+    if let Some(client_base) = client_number.strip_suffix("-V01") {
+        assert!(client_base.starts_with("KV-"), "{client_number}");
+        assert_eq!(copy_number, format!("{client_base}-Z-V01"));
+    } else {
+        assert!(client_number.starts_with("DOC-"), "{client_number}");
+        assert!(copy_number.starts_with("DOC-"), "{copy_number}");
+    }
+    let form_number = document_number(
+        pool,
+        document_uuid(&slot(&prepared, "self_disclosure")["document_id"]),
+    )
+    .await;
+    assert!(form_number.starts_with("DOC-"), "{form_number}");
+
+    // The payer signed the Kostenübernahmeerklärung on paper; staff upload
+    // the scan: version 2 of the same document.
+    let declaration = slot(&prepared, "cost_coverage");
+    let recorded = document_uuid(&declaration["document_id"]);
+    assert_eq!(declaration["version"], 1);
+    let (status, signed) = sign_on_paper(&app, recorded).await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+    let signed_version = document_uuid(&signed["document_id"]);
+    assert_ne!(signed_version, recorded);
+
+    let body = package(&app, lead_id).await;
+    let declaration = slot(&body, "cost_coverage");
+    assert_eq!(declaration["version"], 2, "{body}");
+    assert!(declaration["signed_at"].is_string(), "{body}");
+    assert_eq!(document_uuid(&declaration["document_id"]), signed_version);
+    assert_eq!(
+        document_uuid(&declaration["recorded_document_id"]),
+        recorded
+    );
+    assert_eq!(
+        body["package"]["outdated_reasons"],
+        json!([]),
+        "a signed version is not a replacement: {body}"
+    );
+    assert_eq!(body["package"]["status"], "signed", "{body}");
+    assert_eq!(body["can_prepare"], false, "{body}");
+    assert_eq!(body["can_send"], false, "{body}");
+    for slot_name in ["self_disclosure", "patient_statement", "cost_estimate"] {
+        assert_eq!(slot(&body, slot_name)["version"], 1, "{body}");
+    }
+    let (status, refused) = with_login(
+        &app,
+        "POST",
+        &format!("{}/prepare", package_path(lead_id)),
+        &app.ceo(),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "payer_package_signed");
+    let (_, declaration) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(declaration["status"]["payer_package"]["status"], "signed");
+    assert_eq!(declaration["status"]["payer_package"]["outdated"], false);
+
+    // A new unsigned version of a package document is still a replacement.
+    let statement = document_uuid(&slot(&body, "patient_statement")["document_id"]);
+    let (status, generated) = with_login(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &app.ceo(),
+        Some(json!({
+            "template_id": "patient_payer_statement",
+            "lead_id": lead_id,
+            "replace_document_id": statement,
+            "language": "de",
+            "document_language": "de",
+            "status": "active",
+        })),
+    )
+    .await;
+    assert!(
+        status == StatusCode::OK || status == StatusCode::CREATED,
+        "{status} {generated}"
+    );
+    let body = package(&app, lead_id).await;
+    assert!(
+        body["package"]["outdated_reasons"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("document_replaced")),
+        "{body}"
+    );
+}
+
+/// QA 2026-10-25: a Kostenvoranschlag made before the last change of the
+/// order's prepayment terms is outdated — the document says so, it cannot be
+/// signed on paper, and the payer's package waits for a fresh estimate.
+#[tokio::test]
+async fn an_estimate_made_before_the_prepayment_changed_is_outdated() {
+    let Some(app) = app(false).await else { return };
+    let pool = app.pool();
+    let ready = ready_lead(&app, "prepayment").await;
+    let lead_id = ready.lead_id;
+    agency_signer(&app).await;
+    let estimate_id = document_uuid(&ready.estimate);
+    let document_path = |id: Uuid| format!("/api/v1/documents/{id}");
+
+    let (status, document) =
+        with_login(&app, "GET", &document_path(estimate_id), &app.ceo(), None).await;
+    assert_eq!(status, StatusCode::OK, "{document}");
+    assert_eq!(document["terms_current"], true, "{document}");
+    assert!(package(&app, lead_id).await["blocked_reason"].is_null());
+
+    // Staff require a prepayment after the estimate was generated.
+    sqlx::query(
+        "UPDATE orders SET prepayment_required = true, prepayment_amount = 200.00 WHERE id = $1",
+    )
+    .bind(ready.order_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let changed_at: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT prepayment_terms_changed_at FROM orders WHERE id = $1")
+            .bind(ready.order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(changed_at.is_some());
+
+    let (_, document) =
+        with_login(&app, "GET", &document_path(estimate_id), &app.ceo(), None).await;
+    assert_eq!(document["terms_current"], false, "{document}");
+    let (status, refused) = sign_on_paper(&app, estimate_id).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "estimate_document_outdated");
+    let body = package(&app, lead_id).await;
+    assert_eq!(body["blocked_reason"], "cost_estimate_outdated", "{body}");
+    assert_eq!(body["can_prepare"], false, "{body}");
+    let (status, refused) = with_login(
+        &app,
+        "POST",
+        &format!("{}/prepare", package_path(lead_id)),
+        &app.ceo(),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "cost_estimate_outdated");
+
+    // A fresh estimate shows the prepayment and is current again.
+    let fresh = client_estimate(&app, lead_id, ready.order_id, Some(&ready.estimate)).await;
+    let fresh_id = document_uuid(&fresh);
+    let (_, document) = with_login(&app, "GET", &document_path(fresh_id), &app.ceo(), None).await;
+    assert_eq!(document["terms_current"], true, "{document}");
+    let text = pdf_text(&app, &fresh).await;
+    assert!(text.contains("Vorauszahlung"), "{text}");
+    assert!(!text.contains("ist nicht vereinbart"), "{text}");
+    let body = package(&app, lead_id).await;
+    assert!(body["blocked_reason"].is_null(), "{body}");
+    let prepared = prepare(&app, lead_id).await;
+    assert_eq!(
+        prepared["package"]["outdated_reasons"],
+        json!([]),
+        "{prepared}"
+    );
+    // Unrelated documents say nothing about terms.
+    let (_, document) = with_login(
+        &app,
+        "GET",
+        &document_path(document_uuid(
+            &slot(&prepared, "self_disclosure")["document_id"],
+        )),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert!(document["terms_current"].is_null(), "{document}");
+}

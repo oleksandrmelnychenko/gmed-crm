@@ -2794,6 +2794,7 @@ async fn get_patient(
                   insurance_provider, insurance_number, insurance_type,
                   emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
                   passport_number, passport_expiry,
+                  id_document_type, id_issuing_authority, id_issuing_country, id_issued_on,
                   intake_profile, source_lead_id, lead_snapshot,
                   legal_status, clinical_warnings, notes, is_active, lifecycle_status,
                   created_at, updated_at
@@ -2967,6 +2968,10 @@ async fn get_patient(
                     )?,
                     passport_number: r.try_get("passport_number").unwrap_or_default(),
                     passport_expiry: r.try_get("passport_expiry").unwrap_or_default(),
+                    id_document_type: r.try_get("id_document_type").unwrap_or_default(),
+                    id_issuing_authority: r.try_get("id_issuing_authority").unwrap_or_default(),
+                    id_issuing_country: r.try_get("id_issuing_country").unwrap_or_default(),
+                    id_issued_on: r.try_get("id_issued_on").unwrap_or_default(),
                     intake_profile: r.try_get("intake_profile").unwrap_or_else(|_| json!({})),
                     source_lead_id: r.try_get("source_lead_id").unwrap_or_default(),
                     lead_snapshot: r.try_get("lead_snapshot").unwrap_or_else(|_| json!({})),
@@ -12430,6 +12435,12 @@ struct PatientDetailInput {
     emergency_contact_relation: Option<String>,
     passport_number: Option<String>,
     passport_expiry: Option<chrono::NaiveDate>,
+    // The identity document the conversion copied from the lead's GwG
+    // statement (QA 2026-10-25); shown with the passport number.
+    id_document_type: Option<String>,
+    id_issuing_authority: Option<String>,
+    id_issuing_country: Option<String>,
+    id_issued_on: Option<chrono::NaiveDate>,
     intake_profile: serde_json::Value,
     source_lead_id: Option<Uuid>,
     lead_snapshot: serde_json::Value,
@@ -12627,6 +12638,16 @@ fn build_patient_detail_json(
             insert_optional_string(map, "address_zip", patient.address_zip);
             insert_optional_string(map, "address_country", patient.address_country);
             insert_optional_string(map, "passport_number", patient.passport_number);
+            insert_optional_string(map, "id_document_type", patient.id_document_type);
+            insert_optional_string(map, "id_issuing_authority", patient.id_issuing_authority);
+            insert_optional_string(map, "id_issuing_country", patient.id_issuing_country);
+            map.insert(
+                "id_issued_on".to_string(),
+                patient
+                    .id_issued_on
+                    .map(|date| Value::String(date.to_string()))
+                    .unwrap_or(Value::Null),
+            );
             {
                 let (status, days) =
                     passport_compliance_status(patient.passport_expiry, crate::app_time::today());

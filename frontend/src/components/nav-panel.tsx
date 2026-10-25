@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   BadgeCheck,
   BellRing,
@@ -51,7 +51,7 @@ import { useNavCounters } from "@/lib/use-nav-counters";
 import { useNavState } from "@/lib/nav-state";
 import { usePortalAccountLabel } from "@/lib/portal-account-label";
 import { useLeadPortalClosed } from "@/pages/patient-lead/lead-portal-closed";
-import { useLeadCabinetLang } from "@/pages/patient-lead/lead-cabinet-language";
+import { useLeadCabinetLangState } from "@/pages/patient-lead/lead-cabinet-language";
 import { leadShellNavLabel, leadShellText } from "@/pages/patient-lead/lead-shell-text";
 import {
   canAccessStaffRoute,
@@ -167,8 +167,14 @@ export function NavPanel() {
   const isPatientPortal = user?.role === "patient";
   const isLeadPortal = isLeadPortalUser(user);
   // The lead cabinet speaks DE, EN, UA and RU; its shell follows (QA 2026-10-24, A-7).
-  const cabinetLang = useLeadCabinetLang(user, lang);
+  const { lang: cabinetLang, settled: cabinetLangSettled } = useLeadCabinetLangState(user, lang);
   const shellText = isLeadPortal ? leadShellText(cabinetLang) : null;
+  // On the request page the cabinet may still take the language of the request over once it is
+  // loaded: until then the side bar shows a neutral skeleton, not the portal language for a
+  // moment first (QA 2026-10-25, E-13). Every other page keeps the fallback language.
+  const { pathname } = useLocation();
+  const requestRoute = pathname.replace(/\/+$/, "") === "" || pathname.replace(/\/+$/, "") === "/request";
+  const shellPending = isLeadPortal && !cabinetLangSettled && requestRoute;
   const withShellLabel = (item: NavItem): NavItem =>
     shellText ? { ...item, label: leadShellNavLabel(shellText, item.id, tr[item.labelKey] ?? item.labelKey) } : item;
   const logoutLabel = shellText?.signOut ?? tr.nav_logout;
@@ -234,7 +240,7 @@ export function NavPanel() {
           <UserCard
             name={user.name}
             role={user.role}
-            roleText={portalAccountLabel || shellText?.accountCaption || null}
+            roleText={shellPending ? null : portalAccountLabel || shellText?.accountCaption || null}
             tr={tr}
             translations={t}
             collapsed={collapsed}
@@ -242,7 +248,9 @@ export function NavPanel() {
         </div>
       )}
       <div className={cn("flex-1 py-4", collapsed ? "px-2" : "px-3")}>
-        {isPatientPortal ? (
+        {shellPending ? (
+          <NavSkeleton collapsed={collapsed} />
+        ) : isPatientPortal ? (
           <NavGroup
             items={patientPortalNav}
             tr={tr}
@@ -271,15 +279,18 @@ export function NavPanel() {
         <button
           type="button"
           onClick={logout}
-          title={collapsed ? logoutLabel : undefined}
-          aria-label={collapsed ? logoutLabel : undefined}
+          title={collapsed && !shellPending ? logoutLabel : undefined}
+          aria-label={collapsed && !shellPending ? logoutLabel : undefined}
+          aria-busy={shellPending || undefined}
           className={cn(
             "flex items-center rounded-lg text-sidebar-foreground/85 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring motion-reduce:transition-none",
             collapsed ? "justify-center size-11 mx-auto" : "gap-3 w-full px-3 py-2.5 text-sm",
           )}
         >
           <LogOut aria-hidden="true" className={cn("shrink-0", collapsed ? "size-5" : "size-[18px]")} />
-          {!collapsed && <span className="whitespace-nowrap overflow-hidden">{logoutLabel}</span>}
+          {!collapsed && (shellPending
+            ? <span aria-hidden="true" className="h-3.5 w-20 animate-pulse rounded bg-sidebar-foreground/15 motion-reduce:animate-none" />
+            : <span className="whitespace-nowrap overflow-hidden">{logoutLabel}</span>)}
         </button>
       </div>
     </nav>
@@ -347,6 +358,28 @@ function groupStaffNavItems(items: StaffNavItem[]): Map<StaffNavSection, NavItem
 }
 
 type NavCounterMap = Partial<Record<string, number>>;
+
+/**
+ * The side bar of the lead cabinet before its language is known: the rows of the entries
+ * without their names, in no language. Shown for a moment after sign-in at most.
+ */
+function NavSkeleton({ collapsed }: { collapsed: boolean }) {
+  const widths = ["w-24", "w-20", "w-32", "w-16", "w-28", "w-24", "w-28", "w-20"];
+  return (
+    <div className="flex flex-col gap-0.5" aria-busy="true" data-testid="nav-panel-skeleton">
+      {widths.map((width, index) => (
+        <div
+          key={index}
+          aria-hidden="true"
+          className={cn("flex items-center", collapsed ? "mx-auto size-10 justify-center" : "h-9 gap-3 px-3")}
+        >
+          <span className={cn("shrink-0 animate-pulse rounded-md bg-sidebar-foreground/10 motion-reduce:animate-none", collapsed ? "size-5" : "size-[18px]")} />
+          {!collapsed ? <span className={cn("h-3.5 animate-pulse rounded bg-sidebar-foreground/10 motion-reduce:animate-none", width)} /> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function NavGroup({
   items,

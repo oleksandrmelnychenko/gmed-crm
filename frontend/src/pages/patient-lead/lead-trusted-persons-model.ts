@@ -5,7 +5,13 @@ import { mergeSavedDraft } from "./lead-request-autosave";
 
 /** `scope` is the read-only free text of a person named before 2026-10-19; `scopeCodes` the choice. */
 export type RecipientDraft = { name: string; relation: ConsentRecipientRelation | ""; contact: string; scope: string; scopeCodes: ConsentRecipientScope[] };
-export type DisclosureDraft = { allowDisclosure: boolean | null; consentGiven: boolean; persons: RecipientDraft[] };
+/**
+ * `answered`: the person chose an answer on this page. Only then does a "no"
+ * that equals the default (nothing stored, "no information to third parties")
+ * count as a decision of its own and get saved (QA 2026-10-25, E-13: the step
+ * never read "complete" after an explicit "no").
+ */
+export type DisclosureDraft = { allowDisclosure: boolean | null; consentGiven: boolean; persons: RecipientDraft[]; answered?: boolean };
 
 export function recipientDrafts(saved: readonly ConsentRecipient[] | undefined): RecipientDraft[] {
   return (saved ?? []).map((person) => ({ name: person.name, relation: person.relation, contact: person.contact ?? "", scope: person.scope ?? "", scopeCodes: normalizeScopeCodes(person.scope_codes) }));
@@ -108,6 +114,9 @@ export function disclosureProblem(draft: DisclosureDraft): "decision" | "require
 
 export function disclosureChanged(draft: DisclosureDraft, request: Pick<LeadRequest, "disclosure" | "disclosure_company_name" | "trusted_persons" | "consent_form">, viewerId?: string): boolean {
   const saved = disclosureDraft(request, viewerId);
+  // An answer given on the page while nothing is stored is a decision to save, also the "no"
+  // the default already shows.
+  if (draft.answered && !request.disclosure && draft.allowDisclosure !== null) return true;
   return draft.allowDisclosure !== saved.allowDisclosure || draft.consentGiven !== saved.consentGiven ||
     (draft.allowDisclosure !== false && !samePersons(recipientsToSend(draft.persons), recipientsToSend(saved.persons)));
 }

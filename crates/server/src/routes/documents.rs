@@ -1075,6 +1075,10 @@ struct GeneratedSingleOrderContext {
     contract_number: Option<String>,
     order_sequence: i64,
     order_date: Option<NaiveDate>,
+    /// The Kostenvoranschlag's own date ("Datum:"): the document date, else
+    /// the German day of generation — never the order's date, which may be
+    /// an earlier day.
+    document_date: Option<NaiveDate>,
     contract_date: Option<NaiveDate>,
     specialties: Option<String>,
     examination_purpose: Option<String>,
@@ -1107,6 +1111,9 @@ struct GeneratedCostCoverageContext {
     order_number: String,
     order_sequence: i64,
     order_date: Option<NaiveDate>,
+    /// The declaration's own date ("Datum:"); the order's date stays in
+    /// "Einzelauftrag … vom".
+    document_date: Option<NaiveDate>,
     contract_date: Option<NaiveDate>,
     quote_number: Option<String>,
     line_items: Vec<GeneratedContractLineItem>,
@@ -1616,7 +1623,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     DocumentTemplateDefinition {
         id: "payer_self_disclosure",
         label: "Selbstauskunft der zahlenden Person",
-        description: "Angaben der zahlenden Person (Kostenübernehmer/in) nach dem Geldwäschegesetz, aus ihrem gesendeten Fragebogen; unterschreibt die zahlende Person.",
+        description: "Angaben der zahlenden Person (Kostenübernehmer/in) für die freiwilligen GwG-Sorgfaltsmaßnahmen von GMED, aus ihrem gesendeten Fragebogen; unterschreibt die zahlende Person.",
         art: "payer_self_disclosure",
         category: "compliance_aml",
         default_auto_name: "Selbstauskunft der zahlenden Person",
@@ -3472,8 +3479,47 @@ struct GwgIdentificationSheet {
     person_answers: crate::services::pep_review::PersonAnswers,
     /// Staff's review of this person's PEP status.
     pep_review: crate::services::pep_review::PepReview,
+    /// The lead's one risk level (owner 2026-10-24) once the risk assessment
+    /// ran; `None` before.
+    risk_level: Option<i16>,
+    /// The enhanced check is required or a sanctions match waits for the
+    /// CEO: the assessment is not complete.
+    review_open: bool,
     reviewer_name: String,
     review_date: NaiveDate,
+}
+
+impl GwgIdentificationSheet {
+    /// "Prüfung durch GMED" of question 5 b): staff's PEP review when there
+    /// is one; else the outcome of the completed risk assessment ("Risikostufe
+    /// 1 – keine erhöhten Risiken") when the level is known, nothing waits for
+    /// a decision and the person claims no PEP or sanctions link; else "noch
+    /// nicht geprüft" (QA 2026-10-25: a level-1 lead without triggers printed
+    /// "noch nicht geprüft" although nothing was pending).
+    fn gmed_review_line(&self) -> String {
+        if self.pep_review.reviewed() {
+            return self.pep_review.line();
+        }
+        let claims = self.person_answers.pep_self == Some(true)
+            || self.person_answers.pep_related == Some(true)
+            || self.person_answers.sanctions_links == Some(true);
+        match self.risk_level {
+            Some(level)
+                if !self.review_open
+                    && !claims
+                    && !self.increased_risk
+                    && !self.politically_exposed
+                    && !self.high_risk_third_country
+                    && !self.unusual_transaction =>
+            {
+                format!(
+                    "Risikostufe {level} – keine erhöhten Risiken (Risikobewertung, Stand {})",
+                    self.review_date.format("%d.%m.%Y")
+                )
+            }
+            _ => "noch nicht geprüft".to_string(),
+        }
+    }
 }
 
 /// Whose PEP and sanctions answers a sheet shows (owner decision
@@ -3712,7 +3758,7 @@ async fn load_gwg_identification_sheet(
     .await
     .map_err(|error| failed(error, "lead"))?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Lead not found"))?;
-    let (declaration, identification, represented, enhanced_check_required, risk_config) = {
+    let (declaration, identification, represented, enhanced_check, risk_level, risk_config) = {
         let mut conn = state
             .db
             .acquire()
@@ -3721,11 +3767,16 @@ async fn load_gwg_identification_sheet(
         let declaration = super::lead_payer::load_declaration(&mut conn, lead_id)
             .await
             .map_err(|error| failed(error, "payer declaration"))?;
-        let enhanced_check_required =
+        let enhanced_check =
             super::lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id)
                 .await
-                .map_err(|error| failed(error, "enhanced check"))?
-                .required;
+                .map_err(|error| failed(error, "enhanced check"))?;
+        // The lead's one risk level, once the assessment ran.
+        let risk_level = crate::risk::store::load(&mut conn, lead_id)
+            .await
+            .map_err(|error| failed(error, "risk assessment"))?
+            .filter(crate::risk::store::Assessment::started)
+            .map(|assessment| assessment.level());
         // The lists of high-risk third countries live only in the risk
         // configuration (owner rule 2026-10-22); the sheet reads them there.
         let risk_config = crate::risk::store::load_config(&mut conn)
@@ -3743,10 +3794,12 @@ async fn load_gwg_identification_sheet(
             declaration,
             identification,
             represented,
-            enhanced_check_required,
+            enhanced_check,
+            risk_level,
             risk_config,
         )
     };
+    let enhanced_check_required = enhanced_check.required;
     let representation = &represented.representation;
     // Whose sheet it is, before anything is read for it.
     let representative = match subject {
@@ -4110,6 +4163,14 @@ async fn load_gwg_identification_sheet(
             sheet.acts_on_own_account = Some(declaration.acts_on_own_account);
             sheet.beneficial_owner_name = declaration.beneficial_owner_name.clone();
             sheet.beneficial_owner_note = declaration.beneficial_owner_note.clone();
+        } else if declaration.as_ref().is_some_and(|declaration| {
+            !declaration.is_third_party() && !declaration.is_representative()
+        }) {
+            // The adult who pays himself and acts for himself (section 8 of
+            // the patient form): nobody else's economic interest is involved,
+            // the first box is ticked (QA 2026-10-25: neither box was).
+            sheet.acts_on_own_account = Some(true);
+            sheet.beneficial_owner_measures = Some(GWG_SELF_PAYER_MEASURES.to_string());
         }
         risk_countries.extend(lead_country);
         risk_countries.extend(statements.habitual_residence_country.clone());
@@ -4206,6 +4267,9 @@ async fn load_gwg_identification_sheet(
             .iter()
             .any(|country| risk_config.list_of(country).is_some());
     sheet.increased_risk = gwg_increased_risk(&aml, enhanced_check_required);
+    sheet.risk_level = risk_level;
+    sheet.review_open =
+        enhanced_check.required || enhanced_check.reasons.contains(&"sanctions_review_pending");
     Ok(sheet)
 }
 
@@ -4392,6 +4456,9 @@ fn gwg_represented_beneficial_owner(
 const GWG_PAYER_STATEMENT_SOURCE: &str = "Angaben des Kostenübernehmers über den eigenen Zugang";
 /// Section 3 of the sheet of a minor's paying parent who was not asked the
 /// payer's questions (no enhanced check required).
+/// Section 3 of the patient's sheet when the patient pays himself.
+const GWG_SELF_PAYER_MEASURES: &str = "Befragung des Vertragspartners: zahlt selbst und handelt im eigenen Namen (Erklärung zum Zahler in der Anfrage)";
+
 const GWG_PAYING_PARENT_MEASURES: &str = "Befragung des Vertragspartners: Vertragsschluss im eigenen Namen zugunsten des Kindes (§ 328 BGB), Zahlung als Zahler/in (Angaben im Patientenformular)";
 /// The same questions answered by a paying parent (or guardian) of a minor in
 /// the own section of the patient portal.
@@ -8538,6 +8605,8 @@ fn generated_typed_document_number(
         "privacy_information" => "DS",
         "enhanced_due_diligence" => "AML",
         "gwg_identification" => "GWG",
+        // The lead's patient form ("Patientenformular"), QA 2026-10-25.
+        "lead_self_disclosure" => "PF",
         // Staff instruction sheet in the personnel file, numbered by its record.
         GWG_STAFF_TRAINING_TEMPLATE_ID => "GWU",
         _ => return None,
@@ -8577,8 +8646,18 @@ fn generated_document_number_for_template(
 fn uses_business_document_number(template_id: &str) -> bool {
     matches!(
         template_id,
-        "framework_contract" | "single_order" | "order_cost_estimate"
+        "framework_contract" | "single_order" | "order_cost_estimate" | "payer_cost_estimate"
     )
+}
+
+/// The number the payer's copy of a Kostenvoranschlag prints and stores: the
+/// client's quote number with the suffix `-Z` (Zahler), so the copy is a
+/// document of its own in the quote's series (`KV-20261024-0002-Z`, stored
+/// with a version suffix by `assign_document_number`; QA 2026-10-25). None
+/// without a quote number: the generic number is printed.
+fn payer_cost_estimate_number(quote_number: Option<&str>) -> Option<String> {
+    let base = legal_document_reference(quote_number, "");
+    (!base.is_empty()).then(|| format!("{base}-Z"))
 }
 
 /// The number a generated document carries and prints, in the format of every
@@ -10250,11 +10329,6 @@ fn fc_bullet(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     );
 }
 
-/// A blank handwritten fill-in run of underscores (never a placeholder string).
-fn fc_underscores(len: usize) -> String {
-    "_".repeat(len)
-}
-
 /// Patient designation "Herr Max Mustermann" / "Frau …" / bare name.
 fn fc_patient_salutation_name(context: &GeneratedFrameworkContractContext) -> String {
     match context
@@ -10655,18 +10729,9 @@ fn build_framework_contract_pdf(
         &mut layout,
         "Die Vergütung für die erbrachten Leistungen richtet sich nach den tatsächlich angefallenen Kosten nach Maßgabe des in jedem neuen Auftrag (Einzelauftrag) zur Verfügung gestellten Vergütungsvereinbarungs und Kostenvoranschlags.",
     );
-    let threshold = context
-        .cost_threshold
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(fmt_money_de)
-        .unwrap_or_else(|| fc_underscores(14));
     fc_body(
         &mut layout,
-        &format!(
-            "Zusätzliche Kosten, die im Kostenvoranschlag nicht aufgeführt waren, und {threshold} der Gesamtsumme übersteigen, bedürfen der schriftlichen Zustimmung des Auftraggebers. Schriftliche Zustimmung bedeutet, schriftlich gem. §126 BGB und Textform gem. §126 b BGB, sofern in dieser Vereinbarung nichts Abweichendes geregelt ist."
-        ),
+        &framework_contract_additional_costs_clause(context.cost_threshold.as_deref()),
     );
     fc_body(
         &mut layout,
@@ -13300,6 +13365,10 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "version_number": row.try_get::<i32, _>("version_number").unwrap_or(1),
         "version_count": row.try_get::<i64, _>("version_count").unwrap_or(1),
         "is_latest_version": row.try_get::<bool, _>("is_latest_version").unwrap_or(true),
+        // An order document or a Kostenvoranschlag made before the last change
+        // of the order's terms (services, period; for the estimate also the
+        // prepayment) is outdated: `false`. `null` for every other document.
+        "terms_current": row.try_get::<Option<bool>, _>("terms_current").ok().flatten(),
         "file_deleted_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at").unwrap_or_default(),
         "file_deleted_by": row.try_get::<Option<Uuid>, _>("file_deleted_by").unwrap_or_default(),
         "file_deleted_by_name": row.try_get::<Option<String>, _>("file_deleted_by_name").unwrap_or_default(),
@@ -13556,6 +13625,7 @@ async fn fetch_document_row(
                   NOT EXISTS(
                     SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
                   ) AS is_latest_version,
+                  document_terms_current(d.id) AS terms_current,
                   EXISTS(
                     SELECT 1
                     FROM document_shares ds
@@ -15214,7 +15284,8 @@ pub(crate) async fn persist_document_file(
                 -- a clock that steps back between the change and the
                 -- generation must not make the fresh document look outdated.
                 CASE WHEN $19 IS NOT NULL AND $4 IS NOT NULL
-                     THEN GREATEST(now(), (SELECT o.client_terms_changed_at
+                     THEN GREATEST(now(), (SELECT GREATEST(o.client_terms_changed_at,
+                                                           o.prepayment_terms_changed_at)
                                            FROM orders o WHERE o.id = $4))
                      ELSE now() END
            )"#,
@@ -18086,6 +18157,10 @@ async fn generate_document(
                 contract_number: order_metadata.contract_number.clone(),
                 order_sequence,
                 order_date: bindings.order_date.or(order_metadata.order_date),
+                document_date: bindings
+                    .sign_date
+                    .or(body.document_date)
+                    .or_else(|| Some(crate::app_time::date_of(generated_at))),
                 contract_date: bindings.contract_date.or(order_metadata.contract_date),
                 specialties: bindings
                     .specialties
@@ -18299,6 +18374,10 @@ async fn generate_document(
                     .order_sequence
                     .unwrap_or(order_metadata.order_sequence),
                 order_date: bindings.order_date.or(order_metadata.order_date),
+                document_date: bindings
+                    .sign_date
+                    .or(body.document_date)
+                    .or_else(|| Some(crate::app_time::date_of(generated_at))),
                 contract_date: bindings.contract_date.or(order_metadata.contract_date),
                 quote_number: quote
                     .as_ref()
@@ -21154,7 +21233,10 @@ fn build_order_cost_estimate_pdf_with_terms(
     };
     let mut meta_cells = vec![
         ("Kostenvoranschlag Nr. :", quote_number.to_string()),
-        ("Datum:", fmt_de_date(context.order_date)),
+        (
+            "Datum:",
+            fmt_de_date(context.document_date.or(context.order_date)),
+        ),
     ];
     meta_cells.extend(cost_estimate_contracting_cells(context));
     if context.contracting.parents_contract() {
@@ -21935,18 +22017,27 @@ fn build_cost_coverage_pdf(
          Daten des Kostenübernehmers – Name, Geburtsdatum, Anschrift, Staatsangehörigkeiten, \
          Kontaktdaten, Beziehung zum Auftraggeber und Angaben zur Herkunft der Mittel – vom \
          Auftraggeber oder dessen Vertretern erhalten.",
+        // Owner rule 2026-10-19/22: GMED is no obliged entity under § 2 GwG;
+        // the due-diligence measures are GMED's own voluntary compliance rule
+        // (legitimate interest), not a legal obligation. The sanctions-list
+        // check stays named as a purpose (transparency, Art. 14 DSGVO).
         "Er verarbeitet diese Daten zur Durchführung und Abrechnung des genannten Einzelauftrags \
-         (Art. 6 Abs. 1 lit. b DSGVO) sowie zur Erfüllung gesetzlicher Pflichten, insbesondere der \
-         Sorgfaltspflichten nach dem Geldwäschegesetz einschließlich des Abgleichs mit \
-         Sanktionslisten und der handels- und steuerrechtlichen Aufbewahrungspflichten (Art. 6 \
-         Abs. 1 lit. c DSGVO). Empfänger sind, soweit erforderlich, die mit der Leistung befassten \
+         (Art. 6 Abs. 1 lit. b DSGVO), zur Erfüllung der handels- und steuerrechtlichen \
+         Aufbewahrungspflichten (Art. 6 Abs. 1 lit. c DSGVO) sowie für die Sorgfaltsmaßnahmen \
+         zur Prüfung der Identität der zahlenden Person und der Herkunft der Zahlung einschließlich \
+         des Abgleichs mit Sanktionslisten, die der Auftragnehmer freiwillig nach seinen eigenen \
+         Compliance-Regeln anwendet – er ist kein Verpflichteter nach § 2 GwG – (Art. 6 Abs. 1 \
+         lit. f DSGVO, berechtigtes Interesse an der Vermeidung von Geldwäsche- und \
+         Sanktionsrisiken). Empfänger sind, soweit erforderlich, die mit der Leistung befassten \
          Leistungserbringer, die steuerliche Beratung sowie Dienstleister, die der Auftragnehmer \
          als Auftragsverarbeiter einsetzt.",
         "Die Daten werden gelöscht, sobald sie für diese Zwecke nicht mehr erforderlich sind und \
-         keine gesetzlichen Aufbewahrungsfristen (insbesondere § 8 Abs. 4 GwG, § 147 AO, § 257 \
-         HGB) entgegenstehen. Der Kostenübernehmer hat das Recht auf Auskunft, Berichtigung, \
-         Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht auf Beschwerde \
-         bei einer Datenschutz-Aufsichtsbehörde.",
+         keine gesetzlichen Aufbewahrungsfristen (insbesondere § 147 AO, § 257 HGB) \
+         entgegenstehen; die Unterlagen der freiwilligen Sorgfaltsmaßnahmen bewahrt der \
+         Auftragnehmer nach seinen Regeln fünf Jahre nach dem Ende der Geschäftsbeziehung auf. \
+         Der Kostenübernehmer hat das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung \
+         der Verarbeitung und Widerspruch sowie das Recht auf Beschwerde bei einer \
+         Datenschutz-Aufsichtsbehörde.",
         "Mit seiner Unterschrift bestätigt der Kostenübernehmer, diese Information erhalten zu \
          haben, und erklärt sich mit der beschriebenen Verarbeitung seiner Daten einverstanden.",
     ] {
@@ -22013,7 +22104,10 @@ fn build_cost_coverage_pdf(
     }
     admin_block(
         &mut layout,
-        &format!("Datum: {}", fmt_de_date(context.order_date)),
+        &format!(
+            "Datum: {}",
+            fmt_de_date(context.document_date.or(context.order_date))
+        ),
         0.0,
         0.5,
     );
@@ -24319,7 +24413,7 @@ fn build_gwg_identification_pdf(
     aml_labeled_value(
         &mut layout,
         "Prüfung durch GMED",
-        Some(sheet.pep_review.line().as_str()),
+        Some(sheet.gmed_review_line().as_str()),
     );
     aml_labeled_value(
         &mut layout,
@@ -24930,8 +25024,8 @@ fn build_payer_cost_estimate_pdf_with_terms(
     payment_terms: Option<&crate::order_document_texts::KvPaymentTerms>,
 ) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let document_reference =
-        legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
+    let document_reference = payer_cost_estimate_number(context.quote_number.as_deref())
+        .unwrap_or_else(|| legal_document_reference(None, fallback_document_reference));
     let mut layout = legal_document_pdf_layout(&document_reference, &context.agency, regular, bold);
 
     layout.text_block_centered(
@@ -24982,7 +25076,10 @@ fn build_payer_cost_estimate_pdf_with_terms(
                 "Kostenvoranschlag Nr. :",
                 filled(context.quote_number.as_deref()),
             ),
-            ("Datum:", fmt_de_date(context.order_date)),
+            (
+                "Datum:",
+                fmt_de_date(context.document_date.or(context.order_date)),
+            ),
             (
                 "Auftraggeber:",
                 context.contracting.debtor_name(&context.party),
@@ -25504,8 +25601,10 @@ fn build_payer_self_disclosure_pdf(
         0.0,
         1.0,
     );
+    // Owner rule 2026-10-19/22: GMED applies the GwG due-diligence measures
+    // voluntarily; the heading says so instead of claiming a legal duty.
     layout.text_block_centered(
-        "der zahlenden Person (Kostenübernehmer/in) nach dem Geldwäschegesetz (GwG)",
+        "der zahlenden Person (Kostenübernehmer/in) – freiwillige Anwendung der GwG-Sorgfaltsmaßnahmen durch GMED (kein Verpflichteter nach § 2 GwG)",
         10.0,
         false,
         TreatmentPlanPdfColor::Muted,
@@ -25869,9 +25968,9 @@ fn build_payer_self_disclosure_pdf(
     admin_block(
         &mut layout,
         if organisation {
-            "Wir versichern, dass die vorstehenden Angaben vollständig und richtig sind. Ändern sie sich während der Geschäftsbeziehung, teilen wir dies GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+            "Wir versichern, dass die vorstehenden Angaben vollständig und richtig sind. Ändern sie sich während der Geschäftsbeziehung, teilen wir dies GMED unverzüglich mit."
         } else {
-            "Ich versichere, dass die vorstehenden Angaben vollständig und richtig sind. Ändern sie sich während der Geschäftsbeziehung, teile ich dies GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+            "Ich versichere, dass die vorstehenden Angaben vollständig und richtig sind. Ändern sie sich während der Geschäftsbeziehung, teile ich dies GMED unverzüglich mit."
         },
         0.0,
         2.0,
@@ -25972,18 +26071,23 @@ fn build_patient_payer_statement_pdf(
         "Einverständnis zur Kontaktaufnahme mit der zahlenden Person",
         Some(consent.as_str()),
     );
-    aml_labeled_value(
-        &mut layout,
-        "Warum zahlt diese Person?",
-        Some(
-            statement
-                .payment_background
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("keine Angabe"),
-        ),
-    );
+    // The cabinet asks why the payer pays only for an organisation (block E
+    // of the risk assessment); a person's statement has no such line (QA
+    // 2026-10-25).
+    if statement.organisation {
+        aml_labeled_value(
+            &mut layout,
+            "Warum zahlt diese Person?",
+            Some(
+                statement
+                    .payment_background
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("keine Angabe"),
+            ),
+        );
+    }
     admin_heading(&mut layout, "2. Bestätigung der zahlenden Person");
     admin_block(
         &mut layout,
@@ -26672,7 +26776,7 @@ fn build_lead_self_disclosure_pdf(
         1.0,
     );
     layout.text_block_centered(
-        "Angaben und Erklärungen nach dem Geldwäschegesetz (GwG)",
+        "Angaben und Erklärungen – freiwillige GwG-Sorgfaltsmaßnahmen",
         10.0,
         false,
         TreatmentPlanPdfColor::Muted,
@@ -27306,11 +27410,11 @@ fn build_lead_self_disclosure_pdf(
         ]
     };
     let declaration = if !minor {
-        "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+        "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit."
     } else if signers.len() > 1 {
-        "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind. Änderungen teilen wir der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+        "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind. Änderungen teilen wir der GMED unverzüglich mit."
     } else {
-        "Ich versichere als gesetzliche/r Vertreter/in, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+        "Ich versichere als gesetzliche/r Vertreter/in, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit."
     };
     // The heading, the declaration and the signatures stay on one page: the
     // signature line never stands alone on the last page (QA 2026-10-12).
@@ -27325,7 +27429,9 @@ fn build_lead_self_disclosure_pdf(
         .iter()
         .enumerate()
         .map(|(index, name)| AdminSignatureParty {
-            place: None,
+            // The agency's place ("Berlin, den …") like the other forms;
+            // the day is written by hand (QA 2026-10-25).
+            place: Some(agency.sign_place.as_str()).filter(|place| !place.trim().is_empty()),
             date: None,
             name: name.as_str(),
             role: if minor {
@@ -28319,6 +28425,26 @@ fn parse_single_eur_amount(value: &str) -> Option<f64> {
     parse_eur_amount(&trimmed[..numeric_end])
 }
 
+/// § 2 of the framework contract on additional costs: with a budget
+/// threshold the costs above it need the client's written consent; without
+/// one every additional cost does — no blank "______ der Gesamtsumme" is
+/// printed (QA 2026-10-25).
+fn framework_contract_additional_costs_clause(cost_threshold: Option<&str>) -> String {
+    let threshold = cost_threshold
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(fmt_money_de);
+    let condition = match threshold {
+        Some(threshold) => format!(
+            "Zusätzliche Kosten, die im Kostenvoranschlag nicht aufgeführt waren, und {threshold} der Gesamtsumme übersteigen,"
+        ),
+        None => "Zusätzliche Kosten, die im Kostenvoranschlag nicht aufgeführt waren,".to_string(),
+    };
+    format!(
+        "{condition} bedürfen der schriftlichen Zustimmung des Auftraggebers. Schriftliche Zustimmung bedeutet, schriftlich gem. §126 BGB und Textform gem. §126 b BGB, sofern in dieser Vereinbarung nichts Abweichendes geregelt ist."
+    )
+}
+
 /// Gendered salutation ("Herr"/"Frau") for legal documents. Returns None for
 /// diverse/unknown gender so callers can omit it rather than print a placeholder.
 fn doc_salutation(gender: &str) -> Option<String> {
@@ -28688,6 +28814,17 @@ struct OrderQuoteSummary {
     line_items: Vec<GeneratedContractLineItem>,
 }
 
+/// The date a business document prints for an order or a contract: the day
+/// in Germany of the signature when it is signed, else of its creation. A
+/// record made at 00:06 Europe/Berlin (22:06 UTC the evening before) belongs
+/// to the German day (Berlin-date rule, `crate::app_time`).
+fn berlin_business_date(
+    signed_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> Option<NaiveDate> {
+    signed_at.or(created_at).map(crate::app_time::date_of)
+}
+
 #[derive(Default)]
 struct GeneratedOrderMetadata {
     order_date: Option<NaiveDate>,
@@ -28716,8 +28853,8 @@ async fn load_generated_order_metadata(
         });
     };
     let row = sqlx::query(
-        r#"SELECT COALESCE(o.signed_at::date, o.created_at::date) AS order_date,
-                  COALESCE(fc.signed_at::date, fc.valid_from) AS contract_date,
+        r#"SELECT o.signed_at AS order_signed_at, o.created_at AS order_created_at,
+                  fc.signed_at AS contract_signed_at, fc.valid_from AS contract_valid_from,
                   NULLIF(BTRIM(fc.contract_number), '') AS contract_number,
                   -- "N. Einzelauftrag" counts the single orders under this
                   -- framework contract. Drafts cancelled before confirmation
@@ -28752,14 +28889,27 @@ async fn load_generated_order_metadata(
 
     Ok(row
         .map(|row| GeneratedOrderMetadata {
-            order_date: row
-                .try_get::<Option<NaiveDate>, _>("order_date")
-                .ok()
-                .flatten(),
+            // The German calendar day of the instant (QA 2026-10-25: a
+            // document made at 00:06 Berlin time printed the UTC day), never
+            // a `::date` cast that depends on the session's time zone.
+            order_date: berlin_business_date(
+                row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("order_signed_at")
+                    .ok()
+                    .flatten(),
+                row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("order_created_at")
+                    .ok()
+                    .flatten(),
+            ),
             contract_date: row
-                .try_get::<Option<NaiveDate>, _>("contract_date")
+                .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("contract_signed_at")
                 .ok()
-                .flatten(),
+                .flatten()
+                .map(crate::app_time::date_of)
+                .or_else(|| {
+                    row.try_get::<Option<NaiveDate>, _>("contract_valid_from")
+                        .ok()
+                        .flatten()
+                }),
             contract_number: row
                 .try_get::<Option<String>, _>("contract_number")
                 .ok()
@@ -29285,6 +29435,7 @@ async fn list_documents(
                   NOT EXISTS(
                     SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
                   ) AS is_latest_version,
+                  document_terms_current(d.id) AS terms_current,
                   EXISTS(
                     SELECT 1 FROM document_shares ds
                     WHERE ds.document_id = d.id
@@ -29524,6 +29675,7 @@ async fn list_document_intake_queue(
                   NOT EXISTS(
                     SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
                   ) AS is_latest_version,
+                  document_terms_current(d.id) AS terms_current,
                   EXISTS(
                     SELECT 1 FROM document_shares ds
                     WHERE ds.document_id = d.id
@@ -29909,6 +30061,7 @@ async fn list_document_versions(
                   NOT EXISTS(
                     SELECT 1 FROM documents dv WHERE dv.replaces_document_id = d.id
                   ) AS is_latest_version,
+                  document_terms_current(d.id) AS terms_current,
                   EXISTS(
                     SELECT 1 FROM document_shares ds
                     WHERE ds.document_id = d.id
@@ -38497,7 +38650,7 @@ mod tests {
         assert_nothing_medical_or_assessed(&text);
         for expected in [
             "Selbstauskunft",
-            "der zahlenden Person (Kostenübernehmer/in) nach dem Geldwäschegesetz (GwG)",
+            "der zahlenden Person (Kostenübernehmer/in) – freiwillige Anwendung der GwG-Sorgfaltsmaßnahmen durch GMED (kein Verpflichteter nach § 2 GwG)",
             "Kostenübernahme für Mia Muster",
             "übermittelt am 06.10.2026 um 12:02 über den gesicherten Fragebogen (bestätigte E-Mail: viktor.zahler@example.com)",
             "A-20261006-0001",
@@ -38526,12 +38679,15 @@ mod tests {
             "E-Mail, Telefon",
             "8. Versicherung",
             "Ich versichere, dass die vorstehenden Angaben vollständig und richtig sind",
-            "(§ 11 Abs. 6 GwG)",
+            "teile ich dies GMED unverzüglich mit.",
             "Unterschrift Zahlende Person (Kostenübernehmer/in)",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }
         assert!(!text.contains("Wirtschaftlich Berechtigte"));
+        // Owner rule 2026-10-19/22: no legal GwG duty is claimed towards the payer.
+        assert!(!text.contains("§ 11 Abs. 6 GwG"), "{text}");
+        assert!(!text.contains("nach dem Geldwäschegesetz"), "{text}");
 
         // A company: its representative signs for it; the questions speak of
         // the representatives and beneficial owners.
@@ -38644,13 +38800,16 @@ mod tests {
             "Viktor Zahler",
             "Freund/in",
             "erteilt am 03.10.2026",
-            "Warum zahlt diese Person? Er unterstützt die Familie.",
             "2. Bestätigung der zahlenden Person",
             "Ich übernehme die Kosten aus eigenem Entschluss.",
             "Einzelheiten regelt die Kostenübernahmeerklärung.",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }
+        // The cabinet asks why the payer pays only for an organisation: a
+        // person's statement has no such line (QA 2026-10-25).
+        assert!(!text.contains("Warum zahlt diese Person?"), "{text}");
+        assert!(!text.contains("Er unterstützt die Familie."), "{text}");
         assert!(!text.contains("ignored"));
 
         let organisation = super::PatientPayerStatement {
@@ -38759,6 +38918,7 @@ mod tests {
             contract_number: Some("RV-2026-0042".to_string()),
             order_sequence: 1,
             order_date: NaiveDate::from_ymd_opt(2026, 10, 6),
+            document_date: NaiveDate::from_ymd_opt(2026, 10, 7),
             contract_date: None,
             specialties: Some("Kardiologie".to_string()),
             examination_purpose: Some("kardiologischen Untersuchung".to_string()),
@@ -38790,7 +38950,14 @@ mod tests {
             super::build_payer_cost_estimate_pdf(&context, &catalog, "DOC-PAYER-KV").unwrap();
         assert_eq!(recorded_roles(&generated), ["payer", "agency"]);
         assert_signature_frames_detected(&generated);
-        let text = assert_legal_pdf_chrome(&generated, "KV-2026-0042");
+        // The payer's copy is a document of its own: the quote number with
+        // the suffix `-Z`, the client's number only as the reference (QA
+        // 2026-10-25).
+        let text = assert_legal_pdf_chrome(&generated, "KV-2026-0042-Z");
+        assert!(text.contains("Kostenvoranschlag Nr. :"), "{text}");
+        assert!(text.contains("KV-2026-0042"), "{text}");
+        // Its own date, not the order's (Berlin-date rule).
+        assert!(text.contains("07.10.2026"), "{text}");
         for expected in [
             "Anlage zur Kostenübernahmeerklärung",
             "KOSTENVORANSCHLAG",
@@ -39102,7 +39269,7 @@ mod tests {
         assert_no_assessment_or_medical_data(&text);
         for expected in [
             "Patientenformular",
-            "Angaben und Erklärungen nach dem Geldwäschegesetz (GwG)",
+            "Angaben und Erklärungen – freiwillige GwG-Sorgfaltsmaßnahmen",
             "übermittelt am 07.10.2026 um 10:30 über das Patientenportal.",
             "A-20261007-0001",
             "1. Angaben zur Person",
@@ -39155,9 +39322,11 @@ mod tests {
             "Frühere Staatsangehörigkeiten Syrien",
             "7. Auskunft an Dritte",
             "8. Versicherung",
-            "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG).",
+            "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit.",
             "Anna Maria Muster",
             "Unterschrift Patient/in",
+            // The agency's place is prefilled, the day written by hand.
+            "Köln, den ____________",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }
@@ -41043,6 +41212,7 @@ mod tests {
             contract_number: Some("RV-2026-0003".to_string()),
             order_sequence: 1,
             order_date: NaiveDate::from_ymd_opt(2026, 10, 19),
+            document_date: None,
             contract_date: NaiveDate::from_ymd_opt(2026, 10, 19),
             specialties: None,
             examination_purpose: None,
@@ -41385,6 +41555,7 @@ mod tests {
             contract_number: Some("RV-2026-0042".to_string()),
             order_sequence: 2,
             order_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            document_date: None,
             contract_date: NaiveDate::from_ymd_opt(2026, 7, 1),
             specialties: Some("Kardiologie".to_string()),
             examination_purpose: Some("kardiologischen Untersuchung".to_string()),
@@ -41776,6 +41947,7 @@ mod tests {
             contract_number: Some("RV-2026-0002".to_string()),
             order_sequence: 1,
             order_date: NaiveDate::from_ymd_opt(2026, 9, 28),
+            document_date: None,
             contract_date: NaiveDate::from_ymd_opt(2026, 9, 28),
             specialties: None,
             examination_purpose: None,
@@ -41843,6 +42015,7 @@ mod tests {
             order_number: "EA-2026-0005".to_string(),
             order_sequence: 1,
             order_date: NaiveDate::from_ymd_opt(2026, 9, 28),
+            document_date: None,
             contract_date: NaiveDate::from_ymd_opt(2026, 9, 28),
             quote_number: Some("KV-2026-0010".to_string()),
             line_items: lines,
@@ -41998,6 +42171,115 @@ mod tests {
         assert!(german_body < russian_heading);
         assert!(russian_heading < russian_body);
         assert!(!text.contains("????????"));
+    }
+
+    #[test]
+    fn business_dates_follow_the_german_calendar_day() {
+        // 00:06 Europe/Berlin on 25.10.2026 is 22:06 UTC on 24.10.2026 (QA
+        // 2026-10-25: the PDFs printed the UTC day).
+        let created = Utc.with_ymd_and_hms(2026, 10, 24, 22, 6, 0).unwrap();
+        assert_eq!(
+            super::berlin_business_date(None, Some(created)),
+            NaiveDate::from_ymd_opt(2026, 10, 25)
+        );
+        // The signature day wins over the creation day.
+        let signed = Utc.with_ymd_and_hms(2026, 10, 20, 10, 0, 0).unwrap();
+        assert_eq!(
+            super::berlin_business_date(Some(signed), Some(created)),
+            NaiveDate::from_ymd_opt(2026, 10, 20)
+        );
+        assert_eq!(super::berlin_business_date(None, None), None);
+        assert_eq!(
+            crate::app_time::date_of(created),
+            NaiveDate::from_ymd_opt(2026, 10, 25).unwrap()
+        );
+    }
+
+    #[test]
+    fn framework_contract_additional_costs_clause_needs_no_threshold() {
+        let with = super::framework_contract_additional_costs_clause(Some("500"));
+        assert!(
+            with.contains("und 500,00 € der Gesamtsumme übersteigen,"),
+            "{with}"
+        );
+        for empty in [None, Some(""), Some("   ")] {
+            let without = super::framework_contract_additional_costs_clause(empty);
+            assert!(!without.contains("der Gesamtsumme"), "{without}");
+            assert!(!without.contains("____"), "{without}");
+            assert!(
+                without.starts_with(
+                    "Zusätzliche Kosten, die im Kostenvoranschlag nicht aufgeführt waren, bedürfen der schriftlichen Zustimmung"
+                ),
+                "{without}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_payers_estimate_copy_has_its_own_number_in_the_quotes_series() {
+        assert_eq!(
+            super::payer_cost_estimate_number(Some("KV-20261024-0002-V01")).as_deref(),
+            Some("KV-20261024-0002-Z")
+        );
+        assert_eq!(
+            super::payer_cost_estimate_number(Some(" KV-2026-0042 ")).as_deref(),
+            Some("KV-2026-0042-Z")
+        );
+        assert_eq!(super::payer_cost_estimate_number(Some("  ")), None);
+        assert_eq!(super::payer_cost_estimate_number(None), None);
+    }
+
+    #[test]
+    fn the_gwg_sheet_prints_the_assessment_outcome_when_nothing_is_pending() {
+        use crate::services::pep_review::{PepReview, PersonAnswers};
+        let complete = super::GwgIdentificationSheet {
+            risk_level: Some(1),
+            review_date: NaiveDate::from_ymd_opt(2026, 10, 25).unwrap(),
+            ..Default::default()
+        };
+        assert_eq!(
+            complete.gmed_review_line(),
+            "Risikostufe 1 – keine erhöhten Risiken (Risikobewertung, Stand 25.10.2026)"
+        );
+        // Before the assessment ran, while a decision waits, or when the
+        // person claims a PEP or a sanctions link: still open.
+        let open = super::GwgIdentificationSheet {
+            risk_level: None,
+            ..complete.clone()
+        };
+        assert_eq!(open.gmed_review_line(), "noch nicht geprüft");
+        let pending = super::GwgIdentificationSheet {
+            review_open: true,
+            ..complete.clone()
+        };
+        assert_eq!(pending.gmed_review_line(), "noch nicht geprüft");
+        let claimed = super::GwgIdentificationSheet {
+            person_answers: PersonAnswers {
+                pep_related: Some(true),
+                ..Default::default()
+            },
+            ..complete.clone()
+        };
+        assert_eq!(claimed.gmed_review_line(), "noch nicht geprüft");
+        let high_risk_country = super::GwgIdentificationSheet {
+            high_risk_third_country: true,
+            ..complete.clone()
+        };
+        assert_eq!(high_risk_country.gmed_review_line(), "noch nicht geprüft");
+        // Staff's review always wins.
+        let reviewed = super::GwgIdentificationSheet {
+            pep_review: PepReview {
+                checked: true,
+                is_pep: false,
+                checked_on: NaiveDate::from_ymd_opt(2026, 10, 23),
+                checked_by: Some("Anna Prüferin".to_string()),
+            },
+            ..complete
+        };
+        assert_eq!(
+            reviewed.gmed_review_line(),
+            "PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PeP"
+        );
     }
 
     #[test]
@@ -42368,6 +42650,7 @@ mod tests {
             contract_number: Some("RV-2026-0042".to_string()),
             order_sequence: 2,
             order_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            document_date: None,
             contract_date: NaiveDate::from_ymd_opt(2026, 7, 1),
             specialties: Some("Kardiologie".to_string()),
             examination_purpose: Some("kardiologischen Untersuchung".to_string()),
