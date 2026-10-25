@@ -4449,6 +4449,19 @@ impl Declaration {
             .collect::<Vec<_>>()
             .join("|")
     }
+
+    /// Stable text of section 8 alone (the payment route), for the marker of
+    /// the payer link's unsent route
+    /// ([`crate::routes::lead_payer_link::payment_route_marker`]): staff's
+    /// changes of section 7 leave the payer's route the payer's.
+    pub(crate) fn payment_route_marker_value(&self) -> String {
+        let answers = self.to_json();
+        BILLING_PORTAL_FIELDS[SECTION_SEVEN_FIELDS..]
+            .iter()
+            .map(|field| answers[*field].to_string())
+            .collect::<Vec<_>>()
+            .join("|")
+    }
 }
 
 /// `billing` of the request object; the sections as nobody answered them

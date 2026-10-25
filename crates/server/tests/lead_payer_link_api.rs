@@ -3244,3 +3244,187 @@ async fn a_submitted_payer_yes_is_sticky() {
         vec![("T14".to_string(), false)]
     );
 }
+
+/// Sends the payer's answers (`declared_correct`).
+async fn submit_answers(app: &PayerApp, token: &str, session: &str) -> (StatusCode, Value) {
+    as_payer(
+        app,
+        "POST",
+        SUBMIT,
+        &[("X-Payer-Link", token), ("X-Payer-Session", session)],
+        Some(json!({ "declared_correct": true })),
+    )
+    .await
+}
+
+/// Raised events of the payer's `key`.
+async fn payer_trigger_events(pool: &PgPool, lead_id: Uuid, key: &str) -> i64 {
+    sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM lead_risk_events
+           WHERE lead_id = $1
+             AND triggers @> jsonb_build_array(jsonb_build_object('key', $2::text, 'subject', 'payer'))"#,
+    )
+    .bind(lead_id)
+    .bind(key)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Owner decision 2026-10-26, extending «Рахувати лише відправлене» to the
+/// payment route of section 8: the payer's draft «cash» is kept on the
+/// declaration (the payer's form asks by it: the proof of funds) but fires no
+/// stored T9; changed to a bank transfer before the submit, nothing is left.
+#[tokio::test]
+async fn a_payer_draft_payment_route_counts_only_once_submitted() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, _) = lead_with_payer(&app, "route-draft").await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    assert!(assessment_started(pool, lead_id).await);
+    let mut answers = person_answers();
+    answers["payment_method"] = json!("cash");
+    let (status, body) = patch(&app, &token, &session, answers).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payment_route"]["payment_method"], "cash", "{body}");
+    // The form asks by the draft: cash raises the level (T4 + T5 + T9) …
+    assert_eq!(body["funds_proof_required"], true, "{body}");
+    // … but nothing is stored.
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T8", "T9"]).await,
+        vec![]
+    );
+    let (_, info) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-link"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert!(
+        info["questionnaire"]["check_level"].as_u64().unwrap() >= 2,
+        "{info}"
+    );
+
+    // Changed to a bank transfer and sent: nothing of the cash is left.
+    let (status, body) = patch(&app, &token, &session, bank_transfer()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["funds_proof_required"], false, "{body}");
+    let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["missing_for_submit"], json!([]), "{body}");
+    let (status, body) = submit_answers(&app, &token, &session).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T8", "T9"]).await,
+        vec![]
+    );
+    assert_eq!(payer_trigger_events(pool, lead_id, "T9").await, 0);
+}
+
+/// A sent «cash» counts at once and stays (the ratchet): reopened for
+/// corrections, a draft bank transfer withdraws nothing; sent, T9 stays,
+/// no longer active.
+#[tokio::test]
+async fn a_submitted_payer_cash_is_sticky() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, _) = lead_with_payer(&app, "route-sticky").await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    let mut answers = person_answers();
+    answers["payment_method"] = json!("cash");
+    let (status, body) = patch(&app, &token, &session, answers).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(stored_payer_triggers(pool, lead_id, &["T9"]).await, vec![]);
+    let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = payer_upload(&app, FUNDS, &token, &session, "konto.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["missing_for_submit"], json!([]), "{body}");
+    let (status, body) = submit_answers(&app, &token, &session).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), true)]
+    );
+
+    // Reopened: the draft bank transfer withdraws nothing yet.
+    let (token, _) = send_link(&app, lead_id, json!({ "reopen": true })).await;
+    let session = open_session(&app, &token).await;
+    let (status, body) = patch(&app, &token, &session, bank_transfer()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), true)]
+    );
+    // Sent: T9 stays (sticky), no longer active.
+    let (status, body) = submit_answers(&app, &token, &session).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), false)]
+    );
+}
+
+/// A payment route the link did not write counts at once, also while the
+/// payer's statement is a draft: staff's own route (no API of the wizard
+/// writes section 8 today, so the row is set directly, as staff's tools or a
+/// migration would) fires T9 on the next evaluation; a route the payer wrote
+/// and staff changed afterwards is staff's.
+#[tokio::test]
+async fn a_payment_route_not_written_by_the_link_counts_at_once() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, _) = lead_with_payer(&app, "route-staff").await;
+    // Before any link: staff's cash fires at once.
+    sqlx::query("UPDATE lead_payer_declarations SET payment_method = 'cash' WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), true)],
+        "staff's cash counts although the payer's statement is a draft"
+    );
+
+    // The payer drafts a bank transfer: the draft withdraws nothing …
+    let (status, body) = patch(&app, &token, &session, person_answers()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), true)]
+    );
+    // … and staff changing that route (to a card) make it theirs: it counts
+    // on the next evaluation, the statement still unsent.
+    sqlx::query("UPDATE lead_payer_declarations SET payment_method = 'card' WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, body) = patch(&app, &token, &session, json!({ "occupation": "Händler" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), false)],
+        "staff's card counts at once: T9 stays sticky, no longer active"
+    );
+}
+
+/// Section 8 changed to a bank transfer (cash cleared the account fields).
+fn bank_transfer() -> Value {
+    json!({
+        "payment_method": "bank_transfer",
+        "account_country": "AT",
+        "account_holder": "Viktor Zahler",
+        "bank_name": "Beispielbank"
+    })
+}

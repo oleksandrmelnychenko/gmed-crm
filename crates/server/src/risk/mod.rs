@@ -446,7 +446,8 @@ pub struct Inputs {
     /// [`merge_pending`] keeps their stored state as it was after the last
     /// send and ignores the live evaluation. [`inputs::load`] finds the
     /// cabinet's by its change markers and the send times, and the payer
-    /// link's (T6, T14, T15 of the payer) by a statement not submitted yet.
+    /// link's (T6, T14, T15 of the payer, and T8 / T9 of a payment route the
+    /// link wrote) by a statement not submitted yet.
     /// Staff's own entries are never pending. The payer form asks by its
     /// draft all the same ([`inputs::load_with_payer_draft`]).
     pub pending_unsent: Vec<(&'static str, &'static str)>,

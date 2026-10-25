@@ -2856,6 +2856,7 @@ async fn save_patch(
         lead_payer::store_payment_route(conn, lead_id, declaration)
             .await
             .map_err(database)?;
+        mark_payment_route(conn, lead_id).await.map_err(database)?;
     }
     audit::write_in_transaction(
         conn,
@@ -2869,12 +2870,44 @@ async fn save_patch(
     .await
     .map_err(database)?;
     // The payer's draft counts once submitted (owner decision 2026-10-25
-    // «Рахувати лише відправлене»): its T6 / T14 / T15 wait as pending; the
-    // payment route of section 8 is the declaration and counts at once.
+    // «Рахувати лише відправлене», extended 2026-10-26 to the payment
+    // route): its T6 / T14 / T15 and the route's T8 / T9 wait as pending.
     crate::risk::store::reassess(conn, lead_id, crate::risk::store::Cause::PayerLink, None)
         .await
         .map_err(database)?;
     Ok(true)
+}
+
+/// Key of the payer link's route marker in [`payment_route_marker`].
+const PAYMENT_ROUTE_MARKER_KEY: &str = "payer_link_payment_route";
+
+/// Digest of section 8 of `declaration` as the payer link wrote it
+/// (`lead_payer_statements.payment_route_marker`). Section 8 is kept on the
+/// declaration as the payer types it, yet counts only once the statement is
+/// sent (owner decision 2026-10-26, extending «Рахувати лише відправлене»):
+/// while the statement is unsent and the declaration's route still matches
+/// this digest, its T8 / T9 are pending ([`crate::risk::inputs::load`]). A
+/// route staff change afterwards no longer matches and counts at once.
+pub(crate) fn payment_route_marker(lead_id: Uuid, declaration: &Declaration) -> String {
+    intake::value_marker(
+        lead_id,
+        PAYMENT_ROUTE_MARKER_KEY,
+        Some(&declaration.payment_route_marker_value()),
+    )
+}
+
+/// Records that section 8 as now stored is the payer link's own.
+async fn mark_payment_route(conn: &mut PgConnection, lead_id: Uuid) -> Result<(), sqlx::Error> {
+    // The stored row, so the digest reads what the risk inputs read.
+    let Some(stored) = lead_payer::load_declaration(conn, lead_id).await? else {
+        return Ok(());
+    };
+    sqlx::query("UPDATE lead_payer_statements SET payment_route_marker = $2 WHERE lead_id = $1")
+        .bind(lead_id)
+        .bind(payment_route_marker(lead_id, &stored))
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
 }
 
 /// Why no upload is taken now.
@@ -5239,7 +5272,7 @@ async fn reset_statement(
                    sanctions_links = NULL, sanctions_links_details = NULL,
                    legal_form = NULL, vat_id = NULL, payment_reason = NULL,
                    declared_correct_at = NULL, submitted_at = NULL, adopted_at = NULL,
-                   updated_at = now()
+                   payment_route_marker = NULL, updated_at = now()
                WHERE lead_id = $1
                RETURNING true"#,
     )

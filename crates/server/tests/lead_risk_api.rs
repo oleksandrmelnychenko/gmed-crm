@@ -2079,6 +2079,51 @@ async fn only_sent_cabinet_answers_fire_triggers() {
     assert!(trigger(&staff, "T14", "patient").is_some(), "{staff}");
 }
 
+/// The cabinet's own payment route (section 8, the billing marker) follows
+/// the same rule (owner decision 2026-10-26): an unsent «cash» fires no T9,
+/// the send does.
+#[tokio::test]
+async fn the_cabinets_payment_route_counts_once_sent() {
+    let Some(app) = test_app().await else { return };
+    let (lead_id, patient) = cabinet_lead(&app, "Rita").await;
+    let (status, started) = request(
+        &app,
+        "POST",
+        &format!("/leads/{lead_id}/risk-assessment/restart"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/me/lead-requests/{lead_id}/payer"),
+        &patient,
+        Some(json!({ "payer_kind": "self", "acts_on_own_account": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    send_request(&app, lead_id).await;
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/me/lead-requests/{lead_id}/billing"),
+        &patient,
+        Some(json!({ "payment_method": "cash" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let staff = assessment(&app, lead_id).await;
+    assert!(trigger(&staff, "T9", "patient").is_none(), "{staff}");
+    send_request(&app, lead_id).await;
+    let staff = assessment(&app, lead_id).await;
+    let t9 = trigger(&staff, "T9", "patient")
+        .cloned()
+        .unwrap_or_else(|| panic!("a sent «cash» fires T9: {staff}"));
+    assert_eq!(t9["active"], true, "{staff}");
+}
+
 /// Before the rule (owner decision 2026-10-25), an autosaved «Ja» corrected
 /// before the send left a sticky T15 (DEV lead 7a7550cb…). The history shows
 /// it was never sent: the next evaluation withdraws it. A «Ja» that was sent

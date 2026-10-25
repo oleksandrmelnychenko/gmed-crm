@@ -119,6 +119,8 @@ async fn load_inner(
                   (s.lead_id IS NOT NULL AND s.submitted_at IS NULL) AS statement_draft,
                   (s.country IS NOT NULL OR s.habitual_residence_country IS NOT NULL
                    OR COALESCE(cardinality(s.citizenships), 0) > 0) AS statement_countries,
+                  -- Section 8 as the payer link last wrote it (a digest).
+                  s.payment_route_marker AS statement_route_marker,
                   -- What the cabinet sent last: the request's submit or the
                   -- follow-up's (`follow_up_answered_at`, cleared by a
                   -- "request more"; its history keeps the time).
@@ -269,8 +271,8 @@ async fn load_inner(
     };
     // The payer triggers the link's unsent draft answers (owner decision
     // 2026-10-25 «Рахувати лише відправлене»): T6 (the payer's citizenship,
-    // residence or seat), T14 (PEP) and T15 (sanctions links) wait for the
-    // submit like the cabinet's unsent sections — the stored state stays as
+    // residence or seat), T14 (PEP), T15 (sanctions links) and — extended
+    // 2026-10-26 — the payment route's T8 / T9 wait for the submit like the cabinet's unsent sections — the stored state stays as
     // after the last submit: a draft "yes" fires nothing, a draft "no"
     // withdraws nothing, and a "yes" corrected before the submit leaves no
     // trace. Only what the draft answers waits (a statement emptied for a new
@@ -299,6 +301,22 @@ async fn load_inner(
                 .any(|fired| fired.key == "T6" && fired.subject == PAYER)
             {
                 pending.push("T6");
+            }
+        }
+        // The payment route of section 8 (extended 2026-10-26): kept on the
+        // declaration as the payer types it, it waits too while the stored
+        // route is still the one the link wrote — a route staff changed
+        // afterwards is staff's and counts at once. T9 reads the route alone;
+        // T8 also reads the orders' payers staff keep, so it waits only while
+        // those alone do not fire it.
+        if let Some(marker) = text("statement_route_marker")
+            && let Some(declaration) =
+                crate::routes::lead_payer::load_declaration(conn, lead_id).await?
+            && crate::routes::lead_payer_link::payment_route_marker(lead_id, &declaration) == marker
+        {
+            pending.push("T9");
+            if inputs.order_payers < 2 {
+                pending.push("T8");
             }
         }
         for key in pending {
