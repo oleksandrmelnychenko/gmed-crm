@@ -49,6 +49,7 @@ pub mod lead_portal_login_email;
 pub mod lead_portal_plan_requests;
 pub mod lead_representatives;
 pub mod lead_risk;
+pub mod lead_source_person;
 pub mod leads;
 pub mod legal;
 pub mod me;

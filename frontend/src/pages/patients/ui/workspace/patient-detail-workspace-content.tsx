@@ -337,6 +337,8 @@ type PatientDetailWorkspaceContentProps = {
   onOpenAppointment: (appointmentId: string) => void;
   onOpenInvoice: (invoiceId: string) => void;
   onOpenOrder: (orderId: string) => void;
+  /** Relations tab: a relation without an own record becomes a lead prefilled from it. */
+  onNewRequestForPerson?: (relation: RelationItem) => void;
   onOpenPatient: (patientId: string) => void;
   onOpenProfileEditor: () => void;
   onOpenUpload: () => void;
@@ -503,6 +505,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     onOpenAppointment,
     onOpenInvoice,
     onOpenOrder,
+    onNewRequestForPerson,
     onOpenPatient,
     onOpenProfileEditor,
     onOpenUpload,
@@ -901,6 +904,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               onCreateRelation={onCreateRelation}
               onDeleteRelation={onDeleteRelation}
               onEditRelation={onEditRelation}
+              onNewRequestForPerson={onNewRequestForPerson}
               onOpenPatient={onOpenPatient}
               relationTypeLabel={relationTypeLabel}
               relations={relations}

@@ -6,6 +6,7 @@ import {
 import type {
   CreateLeadBody,
   LeadDetail,
+  LeadPrefilledFromSource,
   LeadsStats,
   LoginEmailDeliveryStatus,
 } from "@/lib/api/types";
@@ -96,6 +97,8 @@ export type CreateLeadResponse = {
   id: string;
   idempotent_replay?: boolean;
   portal_account?: LeadPortalAccountIssued;
+  /** Present when the body named a `source_person`. */
+  prefilled_from_source?: LeadPrefilledFromSource | null;
 };
 
 /** Owner of an e-mail address that a lead may not take (409 `portal_email_taken`). */

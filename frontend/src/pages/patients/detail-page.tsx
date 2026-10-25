@@ -37,6 +37,7 @@ import {
 } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
+import { newRequestForPersonHref } from "@/pages/leads/model/lead-source-person";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import {
   formatEnumLabel,
@@ -1165,6 +1166,8 @@ function usePatientDetailPageContent() {
   // Task creation follows the task-manager hierarchy (who may assign to concierge).
   const canCreateTasks = user?.role === "ceo" || user?.role === "concierge" || user?.role === "billing";
   const canManageRelations = hasCapability(user, "patients.edit");
+  // A relation becomes a lead through the staff wizard: the leads page opens it only with both rights.
+  const canCreateLeadForRelation = hasCapability(user, "leads.edit") && hasCapability(user, "leads.convert") && canStaffPath("/leads");
   const canViewOperationalSurface = canViewPatientOperationalSurface(user);
   const canViewCareHistory = canViewPatientCareHistorySurface(user);
   const canViewAppointments = canViewPatientAppointmentsSurface(user);
@@ -2121,6 +2124,9 @@ function usePatientDetailPageContent() {
           window.open(`/invoices?invoice=${invoiceId}`, "_blank", "noopener,noreferrer");
         }}
         onOpenOrder={(orderId) => { staffGo(`/orders/${orderId}?patient=${id}`); }}
+        onNewRequestForPerson={canCreateLeadForRelation && id
+          ? (relation) => { staffGo(newRequestForPersonHref({ patient_id: id, relation_id: relation.id })); }
+          : undefined}
         onOpenPatient={(patientId) => { staffGo(`/patients/${patientId}`); }}
         onOpenProfileEditor={openProfileEditor}
         onOpenUpload={openDocumentUpload}

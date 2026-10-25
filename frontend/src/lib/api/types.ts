@@ -279,9 +279,29 @@ export interface StatusCount {
   count: number;
 }
 
+/**
+ * The person a new lead is prefilled from: a relation recorded on a patient or
+ * a trusted contact of an open lead. The server copies identity data only
+ * (never answers, scans, consents or signatures) into the empty fields.
+ */
+export type LeadSourcePerson =
+  | { patient_id: string; relation_id: string }
+  | { lead_id: string; contact_id: string };
+
+/** What `POST /leads` filled from `source_person`; `hints` are read-only for staff. */
+export interface LeadPrefilledFromSource {
+  fields: string[];
+  hints?: {
+    pep_self?: "yes" | "no" | null;
+    sanctions_links?: unknown;
+    identity_document_id?: string | null;
+  } | null;
+}
+
 export interface CreateLeadBody {
   creation_key?: string;
   repeat_patient_id?: string;
+  source_person?: LeadSourcePerson;
   first_name: string;
   last_name: string;
   email?: string | null;

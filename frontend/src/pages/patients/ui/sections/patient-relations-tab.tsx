@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ExternalLink, Pencil, Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Pencil, Plus, Trash2, UserRoundPlus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,12 @@ type PatientRelationsTabProps = {
   onCreateRelation: () => void;
   onDeleteRelation: (relationId: string) => void;
   onEditRelation: (relation: RelationItem) => void;
+  /**
+   * «Новая заявка для этого человека» (owner 2026-10-25): a relation without an
+   * own patient record becomes a lead prefilled from what GMED holds. Given
+   * only when the user may create leads; a linked relation offers «Открыть пациента».
+   */
+  onNewRequestForPerson?: (relation: RelationItem) => void;
   onOpenPatient: (patientId: string) => void;
   relationTypeLabel: (value: string) => string;
   relations: RelationItem[];
@@ -52,12 +58,14 @@ export function PatientRelationsTab({
   onCreateRelation,
   onDeleteRelation,
   onEditRelation,
+  onNewRequestForPerson,
   onOpenPatient,
   relationTypeLabel,
   relations,
   tabLoading,
 }: PatientRelationsTabProps) {
   const { lang, t } = useLang();
+  const newRequestLabel = lang === "de" ? "Neue Anfrage für diese Person" : "Новая заявка для этого человека";
   const pagination = useDataTablePagination(
     relations,
     relations.map((item) => item.id).join(":"),
@@ -222,6 +230,19 @@ export function PatientRelationsTab({
                     title={l("patients_open_patient")}
                   >
                     <ExternalLink className="size-3.5" />
+                  </Button>
+                ) : onNewRequestForPerson ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => onNewRequestForPerson(relation)}
+                    aria-label={`${newRequestLabel}: ${relation.related_display_name || relation.related_name}`}
+                    title={newRequestLabel}
+                    data-testid="relation-new-request"
+                  >
+                    <UserRoundPlus className="size-3.5" />
                   </Button>
                 ) : null}
                 {canManageRelations ? (

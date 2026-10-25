@@ -1,4 +1,16 @@
 import { existingParentPatientFromError, fillMissingParentProfile } from "../model/parent-profile-reuse";
+import {
+  fillMissingFromSeed,
+  fillMissingIdentityNames,
+  newRequestForPersonLabel,
+  prefilledFromSourceNotice,
+  seedFromPatientRelation,
+  seedFromTrustedContact,
+  sourcePepHint,
+  sourcePepHintText,
+  type LeadSourcePerson,
+} from "../model/lead-source-person";
+import type { RelationItem } from "@/pages/patients/model/detail-tab-types";
 import { OrderPatientDocumentReview, OrderExistingContractsTable, type RequestReviewRow } from "@/pages/orders/ui/order-patient-document-review";
 import { isContractUsable } from "@/pages/orders/model/order-intake";
 import { useRepeatPatientReview } from "../model/use-repeat-patient-review";
@@ -54,6 +66,7 @@ import {
   Upload,
   UserRound,
   UserRoundCheck,
+  UserRoundPlus,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -421,6 +434,14 @@ type LeadWizardProps = {
   entryPoint: LeadWizardEntryPoint;
   creationKey?: string;
   existingPatient?: PatientDetail | null;
+  /**
+   * Create mode only: the relation / contact the new lead is prefilled from
+   * («Новая заявка для этого человека»). Sent as `source_person`; the server
+   * copies identity data into the empty fields and names them back.
+   */
+  sourcePerson?: LeadSourcePerson | null;
+  /** Offered on a representative of an open lead; the host opens a create-mode wizard with the source. */
+  onNewRequestForPerson?: (source: LeadSourcePerson) => void;
   onOpenChange: (open: boolean) => void;
   onCreated?: (leadId: string) => void;
   onContactsSaved?: () => void;
@@ -3327,6 +3348,8 @@ export function LeadWizard({
   entryPoint,
   creationKey,
   existingPatient = null,
+  sourcePerson = null,
+  onNewRequestForPerson,
   onOpenChange,
   onCreated,
   onContactsSaved,
@@ -3534,6 +3557,11 @@ export function LeadWizard({
   const [issuedPortalAccess, setIssuedPortalAccess] = useState<(PortalCredentials & { language: string }) | null>(null);
   const [autosaveError, setAutosaveError] = useState("");
   const [existingParentPatientId, setExistingParentPatientId] = useState<string | null>(null);
+  // What `POST /leads` copied from the source person, for the step-1 notice
+  // and the PEP hint (read-only; the cabinet asks PEP / sanctions again).
+  const [prefilledFromSource, setPrefilledFromSource] = useState<{ leadId: string; notice: string | null; pep: boolean } | null>(null);
+  // The child's name for the notice, known once the seed is loaded.
+  const sourcePersonNameRef = useRef<string | null>(null);
   const [autosaveErrorDetail, setAutosaveErrorDetail] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   // «Не подходит» asks for a reason first (QA 2026-10-11, A-39a); null while the dialog is closed.
@@ -4436,6 +4464,8 @@ export function LeadWizard({
     hydrated.current = "__new__";
     setLead(null);
     setDraft(nextDraft);
+    setPrefilledFromSource(null);
+    sourcePersonNameRef.current = null;
     setTrustedContactsBase([]);
     setNewLeadCustody("");
     lastSentTrustedContactsRef.current = null;
@@ -4485,6 +4515,42 @@ export function LeadWizard({
     setClinicalAccessDenied(false);
     initialServiceOptionsRef.current = [];
   }, [createMode, existingPatient, leadId, open]);
+
+  // «Новая заявка для этого человека»: the name and contact data the frontend
+  // already holds about the relation / contact seed the empty step-1 fields, so
+  // staff see whom the request is for before the first save; the server merges
+  // the rest (birth date, citizenships, identity document) at creation.
+  useEffect(() => {
+    if (!open || !createMode || leadId || !sourcePerson) return;
+    let active = true;
+    const run = async () => {
+      if ("patient_id" in sourcePerson) {
+        const [patient, relations] = await Promise.all([
+          apiFetch<PatientDetail>(`/patients/${sourcePerson.patient_id}`),
+          apiFetch<RelationItem[]>(`/patients/${sourcePerson.patient_id}/relations`),
+        ]);
+        const relation = relations.find((item) => item.id === sourcePerson.relation_id);
+        return {
+          name: [patient.first_name, patient.last_name].filter(Boolean).join(" ").trim(),
+          seed: relation ? seedFromPatientRelation(relation) : null,
+        };
+      }
+      const child = await fetchLeadDetail(sourcePerson.lead_id);
+      const contact = child.trusted_contacts?.find((item) => item.id === sourcePerson.contact_id);
+      return {
+        name: [child.first_name, child.last_name].filter(Boolean).join(" ").trim(),
+        seed: contact ? seedFromTrustedContact(contact) : null,
+      };
+    };
+    void run()
+      .then(({ name, seed }) => {
+        if (!active || hydrated.current !== "__new__") return;
+        sourcePersonNameRef.current = name || null;
+        if (seed) setDraft((current) => current ? fillMissingFromSeed(current, seed) : current);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [createMode, leadId, open, sourcePerson]);
 
   useEffect(() => {
     if (!open || !leadId) return;
@@ -5310,6 +5376,7 @@ export function LeadWizard({
           const created = await createLead({
             creation_key: creationKeyRef.current,
             ...(existingPatient?.id ? { repeat_patient_id: existingPatient.id } : {}),
+            ...(sourcePerson ? { source_person: sourcePerson } : {}),
             first_name: snapshot.draft.firstName.trim(),
             last_name: snapshot.draft.lastName.trim(),
             email: snapshot.draft.email.trim() || null,
@@ -5348,15 +5415,25 @@ export function LeadWizard({
               userId: created.portal_account.user_id,
             });
           }
+          if (created.prefilled_from_source) {
+            // The server filled the empty fields from the source person: the
+            // draft takes them before the first update (which sends every field).
+            pendingParentProfileLeadRef.current = created.id;
+            const notice = prefilledFromSourceNotice(created.prefilled_from_source, sourcePersonNameRef.current, tx);
+            setPrefilledFromSource({ leadId: created.id, notice, pep: sourcePepHint(created.prefilled_from_source) });
+            if (notice) toast.success(notice);
+          }
         }
 
         // Creation can succeed while the profile GET fails. Keep this boundary
         // pending across Retry so its first update cannot erase inherited data.
         if (pendingParentProfileLeadRef.current === targetLeadId) {
           const profile = await fetchLeadDetail(targetLeadId);
-          inheritedDraft = fillMissingParentProfile(snapshot.draft, profile);
+          inheritedDraft = fillMissingIdentityNames(fillMissingParentProfile(snapshot.draft, profile), profile);
           Object.assign(payload, autosavePayload({ ...snapshot, draft: inheritedDraft }, previousWizardState, !lead?.prospect_patient_id));
-          setDraft((current) => hydrated.current === targetLeadId && current ? fillMissingParentProfile(current, profile) : current);
+          setDraft((current) => hydrated.current === targetLeadId && current
+            ? fillMissingIdentityNames(fillMissingParentProfile(current, profile), profile)
+            : current);
         }
 
         lastPersistedLeadIdRef.current = targetLeadId;
@@ -5489,7 +5566,7 @@ export function LeadWizard({
       () => undefined,
     );
     return queued;
-  }, [existingPatient?.id, hydrateClinicalDraft, lead?.prospect_patient_id, leadId, loadPatientClinical, newLeadCustody, onCreated, trustedContactsBase, tx]);
+  }, [existingPatient?.id, hydrateClinicalDraft, lead?.prospect_patient_id, leadId, loadPatientClinical, newLeadCustody, onCreated, sourcePerson, trustedContactsBase, tx]);
 
   useEffect(() => {
     if (!open || !autosaveSnapshot || loading) return;
@@ -8193,6 +8270,26 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && step === "master_data" ? (
             <section className="min-w-0 space-y-5">
+              {prefilledFromSource && prefilledFromSource.leadId === (leadId ?? createdLeadId) && (prefilledFromSource.notice || prefilledFromSource.pep) ? (
+                <div
+                  data-testid="lead-prefilled-from-source"
+                  className="flex flex-col gap-2 rounded-xl border border-border/50 bg-muted/30 px-3.5 py-3 text-xs leading-5 text-muted-foreground"
+                >
+                  {prefilledFromSource.notice ? (
+                    <p className="text-foreground">
+                      {prefilledFromSource.notice}
+                      {" "}
+                      {tx("Проверьте и при необходимости исправьте.", "Bitte prüfen und bei Bedarf korrigieren.")}
+                    </p>
+                  ) : null}
+                  {prefilledFromSource.pep ? (
+                    <StatusChip tone="warning" data-testid="lead-source-pep-hint">
+                      <CircleAlert aria-hidden="true" />
+                      <span>{sourcePepHintText(tx)}</span>
+                    </StatusChip>
+                  ) : null}
+                </div>
+              ) : null}
               {lead ? (
                 <Section title={tx("Данные опросника", "Fragebogendaten")}>
                 <LeadQuestionnaireFacts
@@ -9640,6 +9737,22 @@ ${serviceCommentLines.join("\n")}`
                             ) : null}
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
+                            {leadId && onNewRequestForPerson && !contact.relatedPatientId ? (
+                              // The person becomes a lead of their own with the identity data
+                              // GMED already holds; documents are regenerated and re-signed.
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                title={newRequestForPersonLabel(tx)}
+                                aria-label={`${newRequestForPersonLabel(tx)}: ${contact.name}`}
+                                data-testid="trusted-contact-new-request"
+                                disabled={isBusy}
+                                onClick={() => onNewRequestForPerson({ lead_id: leadId, contact_id: contact.id })}
+                              >
+                                <UserRoundPlus aria-hidden="true" className="size-3.5" />
+                              </Button>
+                            ) : null}
                             <Button
                               type="button"
                               variant="ghost"

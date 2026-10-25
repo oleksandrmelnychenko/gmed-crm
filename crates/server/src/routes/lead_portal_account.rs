@@ -144,6 +144,45 @@ pub(crate) async fn reusable_guardian_in_tx(
     except_lead: Option<Uuid>,
     except_patient: Option<Uuid>,
 ) -> Result<Option<Uuid>, sqlx::Error> {
+    Ok(reusable_guardian_scoped_in_tx(
+        tx,
+        email,
+        name,
+        birth_date,
+        except_lead,
+        except_patient,
+        false,
+    )
+    .await?
+    .map(|guardian| guardian.user_id))
+}
+
+/// A guardian login that may become this adult's own login.
+pub(crate) struct ReusableGuardian {
+    pub user_id: Uuid,
+    /// The login was switched off by [`crate::services::coming_of_age`]
+    /// (every guardian link ended with `patient_came_of_age`, the parent
+    /// reached nothing else): it is reactivated for the own request.
+    pub deactivated_by_coming_of_age: bool,
+}
+
+/// [`reusable_guardian_in_tx`]; with `accept_came_of_age` also a login that
+/// [`crate::services::coming_of_age`] switched off because the child came of
+/// age and the parent reached nothing else (owner decision 2026-10-25, «Neue
+/// Anfrage für diese Person»): every guardian link of the login is revoked
+/// and the last one ended with `patient_came_of_age`. The same name and
+/// birth-date rules apply, read from those ended grants. A login switched
+/// off for any other reason, or with a guardian link still active, is never
+/// taken that way.
+pub(crate) async fn reusable_guardian_scoped_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    email: &str,
+    name: &str,
+    birth_date: Option<chrono::NaiveDate>,
+    except_lead: Option<Uuid>,
+    except_patient: Option<Uuid>,
+    accept_came_of_age: bool,
+) -> Result<Option<ReusableGuardian>, sqlx::Error> {
     let Some(user) = sqlx::query(
         "SELECT id, name, role, is_active FROM users WHERE lower(btrim(email)) = $1 FOR UPDATE",
     )
@@ -153,8 +192,9 @@ pub(crate) async fn reusable_guardian_in_tx(
     else {
         return Ok(None);
     };
+    let active: bool = user.try_get("is_active")?;
     if user.try_get::<String, _>("role")? != "patient"
-        || !user.try_get::<bool, _>("is_active")?
+        || (!active && !accept_came_of_age)
         || !super::lead_portal_guardians::compatible_person_name(
             &user.try_get::<String, _>("name")?,
             name,
@@ -178,12 +218,25 @@ pub(crate) async fn reusable_guardian_in_tx(
                      WHERE pa.user_id=$1 AND pa.source <> 'lead_guardian'
                        AND p.lifecycle_status <> 'deleted' AND ($3::uuid IS NULL OR p.id<>$3))"#,
     ).bind(user_id).bind(except_lead).bind(except_patient).fetch_one(&mut **tx).await?;
-    if !guardian || own_record {
+    if own_record {
         return Ok(None);
     }
+    let deactivated_by_coming_of_age = if active {
+        if !guardian {
+            return Ok(None);
+        }
+        false
+    } else {
+        // Switched off: only by the coming-of-age job — every guardian link
+        // ended, the last of them with its reason.
+        if guardian || !ended_by_coming_of_age_in_tx(tx, user_id).await? {
+            return Ok(None);
+        }
+        true
+    };
     // Known birth dates must agree too; a different adult with the same name
     // cannot acquire a guardian login by entering its address.
-    let profiles = guardian_profiles_in_tx(tx, user_id).await?;
+    let profiles = guardian_profiles_in_tx(tx, user_id, deactivated_by_coming_of_age).await?;
     let mut previous_birth_date = None;
     for profile in profiles {
         if !super::lead_portal_guardians::compatible_person_name(&profile.name, name) {
@@ -204,24 +257,68 @@ pub(crate) async fn reusable_guardian_in_tx(
             previous_birth_date = Some(known);
         }
     }
-    Ok(Some(user_id))
+    Ok(Some(ReusableGuardian {
+        user_id,
+        deactivated_by_coming_of_age,
+    }))
 }
 
-/// Only active guardian grants prove which contact belongs to this account.
-/// The shared canonical loader fills that contact's missing basic identity from
-/// its explicit patient link; unrelated contacts and e-mail matches are ignored.
+/// Whether a switched-off guardian login was ended by the coming-of-age job
+/// and by nothing else: it has guardian links, every one of them is revoked,
+/// and the one revoked last carries
+/// [`crate::services::coming_of_age::REVOKE_REASON`]. A login the purge
+/// anonymised, or one staff ended, does not qualify.
+async fn ended_by_coming_of_age_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"WITH links AS (
+               SELECT a.revoked_at, a.revoked_reason
+               FROM lead_portal_access a
+               WHERE a.user_id = $1 AND a.kind = 'guardian'
+               UNION ALL
+               SELECT pa.revoked_at, pa.revoked_reason
+               FROM patient_assignments pa
+               WHERE pa.user_id = $1 AND pa.source = 'lead_guardian'
+           )
+           SELECT COALESCE(
+               EXISTS (SELECT 1 FROM links)
+               AND NOT EXISTS (SELECT 1 FROM links WHERE revoked_at IS NULL)
+               AND (SELECT revoked_reason FROM links
+                    ORDER BY revoked_at DESC LIMIT 1) = $2,
+               false)"#,
+    )
+    .bind(user_id)
+    .bind(crate::services::coming_of_age::REVOKE_REASON)
+    .fetch_one(&mut **tx)
+    .await
+}
+
+/// Only active guardian grants prove which contact belongs to this account
+/// (with `ended_by_coming_of_age`: also the grants the coming-of-age job
+/// ended, for a login it switched off). The shared canonical loader fills that
+/// contact's missing basic identity from its explicit patient link; unrelated
+/// contacts and e-mail matches are ignored.
 async fn guardian_profiles_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user_id: Uuid,
+    ended_by_coming_of_age: bool,
 ) -> Result<Vec<crate::services::lead_guardian_identity::CanonicalGuardianIdentity>, sqlx::Error> {
     let grants: Vec<(Uuid, Uuid)> = sqlx::query_as(
         "SELECT a.lead_id,a.trusted_contact_id FROM lead_portal_access a
          JOIN leads child ON child.id=a.lead_id
          LEFT JOIN lead_representatives r ON r.lead_id=a.lead_id AND r.contact_id=a.trusted_contact_id
-         WHERE a.user_id=$1 AND a.kind='guardian' AND a.revoked_at IS NULL
+         WHERE a.user_id=$1 AND a.kind='guardian'
+           AND (a.revoked_at IS NULL OR ($2 AND a.revoked_reason = $3))
            AND a.trusted_contact_id IS NOT NULL AND child.qualification_status <> 'deleted'
          ORDER BY r.updated_at DESC NULLS LAST,a.created_at DESC,a.id",
-    ).bind(user_id).fetch_all(&mut **tx).await?;
+    )
+    .bind(user_id)
+    .bind(ended_by_coming_of_age)
+    .bind(crate::services::coming_of_age::REVOKE_REASON)
+    .fetch_all(&mut **tx)
+    .await?;
     let leads = grants.iter().map(|(lead, _)| *lead).collect::<Vec<_>>();
     let profiles = crate::services::lead_guardian_identity::load_many(tx, &leads).await?;
     Ok(grants
@@ -251,7 +348,7 @@ pub(crate) async fn existing_parent_patients_in_tx(
     else {
         return Ok(Vec::new());
     };
-    let ids = guardian_profiles_in_tx(tx, user_id)
+    let ids = guardian_profiles_in_tx(tx, user_id, false)
         .await?
         .into_iter()
         .filter_map(|person| person.related_patient_id)
@@ -266,8 +363,12 @@ async fn fill_guardian_profile_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
     user_id: Uuid,
+    ended_by_coming_of_age: bool,
 ) -> Result<(), sqlx::Error> {
-    if let Some(profile) = guardian_profiles_in_tx(tx, user_id).await?.first() {
+    if let Some(profile) = guardian_profiles_in_tx(tx, user_id, ended_by_coming_of_age)
+        .await?
+        .first()
+    {
         let contact = &profile.contact;
         let extras = &profile.extras;
         let text = |key: &str| extras.get(key).and_then(Value::as_str);
@@ -305,22 +406,54 @@ pub(crate) async fn create_for_lead_in_tx(
             .bind(lead_id)
             .fetch_one(&mut **tx)
             .await?;
-    if let Some(user_id) = reusable_guardian_in_tx(
+    if let Some(guardian) = reusable_guardian_scoped_in_tx(
         tx,
         email,
         name,
         birth_date,
         Some(lead_id),
         converted_patient,
+        true,
     )
     .await?
     {
+        let user_id = guardian.user_id;
+        if guardian.deactivated_by_coming_of_age {
+            // The child came of age and the parent reached nothing else, so
+            // the job switched the login off; the parent's own request
+            // switches it on again (owner decision 2026-10-25). Sessions and
+            // pending sign-ins the job ended stay ended: the parent signs in
+            // afresh with the password they have.
+            sqlx::query(
+                "UPDATE users SET is_active = true, updated_at = now()
+                 WHERE id = $1 AND role = 'patient' AND NOT is_active",
+            )
+            .bind(user_id)
+            .execute(&mut **tx)
+            .await?;
+            audit::write_in_transaction(
+                tx,
+                &audit::domain_event(
+                    "reactivate_guardian_for_own_lead",
+                    Some(created_by),
+                    "lead",
+                    Some(lead_id),
+                    json!({
+                        "portal_user_id": user_id,
+                        "deactivated_reason": crate::services::coming_of_age::REVOKE_REASON,
+                        "password_changed": false,
+                    }),
+                ),
+            )
+            .await?;
+        }
         sqlx::query("UPDATE leads SET portal_user_id=$2 WHERE id=$1")
             .bind(lead_id)
             .bind(user_id)
             .execute(&mut **tx)
             .await?;
-        fill_guardian_profile_in_tx(tx, lead_id, user_id).await?;
+        fill_guardian_profile_in_tx(tx, lead_id, user_id, guardian.deactivated_by_coming_of_age)
+            .await?;
         audit::write_in_transaction(tx, &audit::domain_event("reuse_guardian_for_own_lead",
             Some(created_by), "lead", Some(lead_id),
             json!({"portal_user_id":user_id,"password_changed":false,"child_access_preserved":true}))).await?;
@@ -564,7 +697,7 @@ pub(crate) async fn anonymize_and_disable_in_tx(
 /// Gives the converted patient record the lead's login, so the person keeps
 /// one account from the first contact on, and the consents given in the
 /// portal for the lead (Art. 9 consent to process uploaded health data).
-pub(crate) async fn link_to_patient_in_tx(
+pub async fn link_to_patient_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
     patient_id: Uuid,
@@ -628,6 +761,7 @@ pub(crate) async fn link_to_patient_in_tx(
         link_guardian_relationships_in_tx(tx, user_id, patient_id, assigned_by).await?;
     }
     link_parent_relations_by_email_in_tx(tx, patient_id, assigned_by).await?;
+    link_source_person_in_tx(tx, lead_id, patient_id, assigned_by).await?;
     sqlx::query(
         "UPDATE consent_records SET patient_id = $2 WHERE lead_id = $1 AND patient_id IS NULL",
     )
@@ -637,6 +771,155 @@ pub(crate) async fn link_to_patient_in_tx(
     .await?;
     share_released_documents_in_tx(tx, patient_id, assigned_by).await?;
     Ok(())
+}
+
+/// A lead pre-filled from a relation or a trusted contact («Neue Anfrage für
+/// diese Person», owner decision 2026-10-25; `leads.source_relation_id` /
+/// `source_contact_lead_id` + `source_contact_id`) becomes that person's own
+/// patient record at the conversion: the relation on the child's record and
+/// the child's trusted contact point to the new patient directly, without
+/// matching by e-mail. Nothing already linked to another record changes; no
+/// access is granted. Returns whether a link was made.
+pub async fn link_source_person_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    patient_id: Uuid,
+    actor: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let Some(source) = sqlx::query(
+        "SELECT source_relation_id, source_contact_lead_id, source_contact_id FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(false);
+    };
+    let relation_id: Option<Uuid> = source.try_get("source_relation_id")?;
+    let contact_lead_id: Option<Uuid> = source.try_get("source_contact_lead_id")?;
+    let contact_id: Option<Uuid> = source.try_get("source_contact_id")?;
+    let mut linked = false;
+
+    if let Some(relation_id) = relation_id {
+        // The relation on the child's record, and the entry on the child's
+        // requests it came from.
+        let relation: Option<(Uuid, Option<Uuid>)> = sqlx::query_as(
+            r#"UPDATE patient_relations
+               SET related_patient_id = $2
+               WHERE id = $1 AND patient_id <> $2 AND related_patient_id IS NULL
+               RETURNING patient_id, source_contact_id"#,
+        )
+        .bind(relation_id)
+        .bind(patient_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if let Some((child, source_contact_id)) = relation {
+            if let Some(source_contact_id) = source_contact_id {
+                mark_contact_linked_in_tx(tx, None, Some(child), source_contact_id, patient_id)
+                    .await?;
+            }
+            audit::write_in_transaction(
+                tx,
+                &audit::domain_event(
+                    "link_source_relation_to_patient",
+                    Some(actor),
+                    "patient",
+                    Some(child),
+                    json!({
+                        "relation_id": relation_id,
+                        "related_patient_id": patient_id,
+                        "lead_id": lead_id,
+                    }),
+                ),
+            )
+            .await?;
+            linked = true;
+        }
+    }
+
+    if let (Some(contact_lead_id), Some(contact_id)) = (contact_lead_id, contact_id) {
+        let marked =
+            mark_contact_linked_in_tx(tx, Some(contact_lead_id), None, contact_id, patient_id)
+                .await?;
+        // The source lead may have been converted meanwhile: its relation
+        // row remembers the entry (`patient_relations.source_contact_id`).
+        let relations: Vec<Uuid> = sqlx::query_scalar(
+            r#"UPDATE patient_relations r
+               SET related_patient_id = $3
+               FROM leads l
+               WHERE l.id = $1 AND r.patient_id = l.converted_patient_id
+                 AND r.source_contact_id = $2 AND r.patient_id <> $3
+                 AND (r.related_patient_id IS NULL OR r.related_patient_id = $3)
+               RETURNING r.id"#,
+        )
+        .bind(contact_lead_id)
+        .bind(contact_id)
+        .bind(patient_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        if marked || !relations.is_empty() {
+            audit::write_in_transaction(
+                tx,
+                &audit::domain_event(
+                    "link_source_contact_to_patient",
+                    Some(actor),
+                    "lead",
+                    Some(contact_lead_id),
+                    json!({
+                        "contact_id": contact_id,
+                        "related_patient_id": patient_id,
+                        "relation_ids": relations,
+                        "lead_id": lead_id,
+                    }),
+                ),
+            )
+            .await?;
+            linked = true;
+        }
+    }
+    Ok(linked)
+}
+
+/// Sets `trusted_contacts[].related_patient_id` of the entry `contact_id` on
+/// `lead_id`, or on every request converted to `child`, where the entry has no
+/// link yet. Returns whether any lead changed.
+async fn mark_contact_linked_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Option<Uuid>,
+    child: Option<Uuid>,
+    contact_id: Uuid,
+    patient_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let changed = sqlx::query(
+        r#"UPDATE leads l
+           SET trusted_contacts = (
+               SELECT jsonb_agg(
+                   CASE WHEN c ->> 'id' = $3::text
+                             AND NULLIF(btrim(COALESCE(c ->> 'related_patient_id', '')), '') IS NULL
+                        THEN c || jsonb_build_object('related_patient_id', $4::uuid)
+                        ELSE c END
+                   ORDER BY n)
+               FROM jsonb_array_elements(l.trusted_contacts) WITH ORDINALITY AS entries(c, n)
+           )
+           WHERE ($1::uuid IS NULL OR l.id = $1)
+             AND ($2::uuid IS NULL OR l.converted_patient_id = $2)
+             AND ($1::uuid IS NOT NULL OR $2::uuid IS NOT NULL)
+             AND l.converted_patient_id IS DISTINCT FROM $4
+             AND jsonb_typeof(l.trusted_contacts) = 'array'
+             AND EXISTS (
+                 SELECT 1 FROM jsonb_array_elements(l.trusted_contacts) c
+                 WHERE c ->> 'id' = $3::text
+                   AND NULLIF(btrim(COALESCE(c ->> 'related_patient_id', '')), '') IS NULL
+             )"#,
+    )
+    .bind(lead_id)
+    .bind(child)
+    .bind(contact_id)
+    .bind(patient_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    Ok(changed > 0)
 }
 
 /// Releases the patient's `patient_visible` documents to the patient's

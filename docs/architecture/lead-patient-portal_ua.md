@@ -560,3 +560,70 @@ phone, relationship_kind, relationship, payment_reason }`; персонал ще
   перевіряються знову; ім'я друга чи родича — вільне; власне ім'я ліда
   персонал і далі вводить будь-яким письмом (кабінет просить підтвердити
   паспортне написання при відправленні).
+
+## «Нова заявка для цієї особи» — лід із даних батьків чи контакту (2026-10-25)
+
+Батько/мати, опікун чи інша особа, записана в картці пацієнта
+(`patient_relations`) або у відкритому ліді (`leads.trusted_contacts[]`), стає
+власним лідом із уже відомими GMED даними особи. Лише повторне використання
+даних: кожний документ генерується й підписується знову.
+
+- **API.** `POST /leads` приймає необов'язкове `source_person`:
+  `{ "patient_id", "relation_id" }` або `{ "lead_id", "contact_id" }`
+  (`routes/lead_source_person.rs`). Потрібні `leads.create` як і раніше **та**
+  доступ на читання пацієнта-джерела (`patients::has_patient_access`); для
+  ліда-джерела — та сама здатність, що й для самої заявки. Неповна пара → 422
+  з `field = source_person`; відсутня релація/контакт → 404.
+- **Особа вже має власну картку** (`patient_relations.related_patient_id` або
+  `trusted_contacts[].related_patient_id`) → 409
+  `existing_parent_patient_use_repeat_intake` з `patient_id` /
+  `existing_patient_id` (ідентифікатор віддається, якщо актор бачить картку),
+  лід не створюється — як у чинному випадку з входом опікуна.
+- **Злиття особи** (перше непорожнє значення): рядок релації (`related_name` →
+  ім'я/прізвище через `name_parts`, телефон, e-mail, адреса, дата народження,
+  громадянства) або довірений контакт ліда (ім'я, e-mail, телефон, дата,
+  адреса одним рядком — розкладається на вулицю/індекс/місто/країну, якщо має
+  форму «вулиця, індекс місто, країна»), далі рядок `lead_representatives`
+  цього контакту (`lead_guardian_identity::load_contact`: місце й країна
+  народження, громадянства, адреса, `id_document_*`). Для релації пацієнта
+  рядок представника шукається на найновішому ліді, конвертованому в цього
+  пацієнта (`contact_id = relation.source_contact_id` або `relation.id`).
+- **Заповнюються лише порожні поля**, тіло запиту виграє: `first_name`,
+  `last_name`, `date_of_birth`, `phone`, `email` (пропускається, якщо дорівнює
+  власному e-mail дитини — ліда, пацієнта або її входу), `street_address`,
+  `zip_code`, `city`, `country`, `citizenships`; у `lead_gwg_declarations`
+  (COALESCE-upsert, як `prefill_repeat_identity_document`): `birth_place`,
+  `birth_country`, `id_document_*`, `id_data_entered_by` = актор,
+  `id_data_entered_at` = now. Аудит `lead_prefilled_from_relation` несе лише
+  назви полів і ідентифікатори джерела, без значень.
+- **Джерело пам'ятається на ліді**: `leads.source_relation_id` (FK
+  `patient_relations`, SET NULL), `leads.source_contact_lead_id` +
+  `leads.source_contact_id` (міграція `20261025140000_lead_source_person`).
+  При конвертації (`link_to_patient_in_tx` → `link_source_person_in_tx`)
+  релація дитини й запис `trusted_contacts[]` на її лідах отримують
+  `related_patient_id` нового пацієнта напряму, без зіставлення за e-mail;
+  аудит `link_source_relation_to_patient` / `link_source_contact_to_patient`.
+- **Вхід у портал.** Повторне використання входу опікуна без змін
+  (`create_for_lead_in_tx` → `reusable_guardian_scoped_in_tx`). Додатково
+  приймається вхід, який вимкнув `coming_of_age`: усі опікунські зв'язки
+  входу завершені й останній — із причиною `patient_came_of_age`, ім'я
+  сумісне, відомі дати народження збігаються. Тоді `users.is_active = true`,
+  аудит `reactivate_guardian_for_own_lead`; сесії й очікувані входи, завершені
+  джобом, не повертаються. Вхід, вимкнений з іншої причини, так не береться
+  (409 `portal_email_taken`).
+- **Перевірка тотожності** (`validate_lead_contact_identity_from`): якщо
+  єдиний власник e-mail/телефону — дитина-джерело (її лід або картка),
+  конфлікту немає: контактні дані батьків у картці дитини — їхні власні.
+- **Ніколи не копіюються**: відповіді PEP/санкції (`country_questions`), скани
+  (`lead_portal_uploads`/документи), тип зв'язку, опіка, згоди, підписи,
+  опікунські доступи, декларація платника / спосіб оплати / кошти дитини,
+  рішення щодо ризику, медичні дані, `legal_sex`. Кабінет питає PEP/санкції
+  знову.
+- **Відповідь** `POST /leads` додатково несе
+  `prefilled_from_source: { fields: [...], hints: { pep_self: "yes"|"no"|null,
+  sanctions_links: "yes"|"no"|null, identity_document_id: "<uuid>|null" } }`
+  — `hints` беруться з відповідей дитини про цю особу
+  (`lead_representatives.country_questions`, завантаження
+  `representative_identity`) і лише показуються персоналу, ніколи не
+  записуються.
+- Тести: `crates/server/tests/lead_source_person_api.rs`.

@@ -38,6 +38,11 @@ export function existingParentPatientFromError(error: unknown): { patientId: str
   const body = error.body;
   if (!body || typeof body !== "object" || !("code" in body)
     || body.code !== "existing_parent_patient_use_repeat_intake") return null;
-  return { patientId: "patient_id" in body && typeof body.patient_id === "string" && body.patient_id.trim()
-    ? body.patient_id : null };
+  // `patient_id` from the guardian-login case, `existing_patient_id` from a
+  // source person that already has an own patient record (2026-10-25).
+  for (const key of ["patient_id", "existing_patient_id"] as const) {
+    const value = (body as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.trim()) return { patientId: value };
+  }
+  return { patientId: null };
 }

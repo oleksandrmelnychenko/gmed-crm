@@ -289,6 +289,50 @@ pub async fn load_on(
         .unwrap_or_default())
 }
 
+/// One trusted contact of a lead merged with its `lead_representatives` row,
+/// whatever the relation ("Neue Anfrage für diese Person", owner decision
+/// 2026-10-25: a spouse or a friend named on the request becomes a lead of
+/// their own too). Same merge and country normalisation as [`load`]; a linked
+/// patient is not read (the caller refuses a contact that already has an own
+/// record). `None` when the lead or the contact does not exist.
+pub async fn load_contact(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    contact_id: Uuid,
+) -> Result<Option<CanonicalGuardianIdentity>, sqlx::Error> {
+    let contacts: Option<Option<Value>> =
+        sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    let Some((position, contact)) = contacts
+        .flatten()
+        .as_ref()
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .find(|(_, contact)| uuid(contact, "id") == Some(contact_id))
+        .map(|(position, contact)| (position, contact.clone()))
+    else {
+        return Ok(None);
+    };
+    let row: Option<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(r) FROM lead_representatives r WHERE lead_id = $1 AND contact_id = $2",
+    )
+    .bind(lead_id)
+    .bind(contact_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(Some(identity(
+        lead_id,
+        position,
+        &contact,
+        row.as_ref(),
+        None,
+    )))
+}
+
 /// Three batched reads, regardless of the number of leads or parents.
 pub async fn load_many(
     conn: &mut PgConnection,

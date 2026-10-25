@@ -23,6 +23,9 @@ describe("existing parent patient creation guidance", () => {
     expect(existingParentPatientFromError({ body: { code: "existing_parent_patient_use_repeat_intake", patient_id: "parent-patient" } })).toEqual({ patientId: "parent-patient" });
     expect(existingParentPatientFromError({ body: { code: "existing_parent_patient_use_repeat_intake", patient_id: null } })).toEqual({ patientId: null });
   });
+  it("reads the id of a source person's own patient record", () => {
+    expect(existingParentPatientFromError({ body: { code: "existing_parent_patient_use_repeat_intake", existing_patient_id: "own-record" } })).toEqual({ patientId: "own-record" });
+  });
   it("does not treat unrelated creation failures as an existing parent record", () => {
     expect(existingParentPatientFromError(new Error("Phone already used"))).toBeNull();
     expect(existingParentPatientFromError({ body: { code: "portal_email_taken", patient_id: "other-patient" } })).toBeNull();

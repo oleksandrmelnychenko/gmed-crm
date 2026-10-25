@@ -1,5 +1,11 @@
 import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { existingParentPatientFromError } from "./model/parent-profile-reuse";
+import {
+  leadSourcePersonFromSearchParams,
+  newRequestForPersonHref,
+  withoutLeadSourcePersonParams,
+  type LeadSourcePerson,
+} from "./model/lead-source-person";
 import { toast } from "@/components/ui/toast";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { EmailDomainWarning, knownNoMailEmailError } from "@/components/email-domain-warning";
@@ -504,6 +510,9 @@ function useLeadsPageContent() {
   // A fresh wizard per "Новый лид": an open lead's wizard state must never carry
   // over into the new person (QA 2026-10-10, the new data overwrote the open lead).
   const [newLeadWizardSession, setNewLeadWizardSession] = useState(0);
+  // «Новая заявка для этого человека»: the relation / contact the new lead is
+  // prefilled from, taken from the query the patient card or a wizard opened.
+  const [newLeadSourcePerson, setNewLeadSourcePerson] = useState<LeadSourcePerson | null>(null);
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user), [user]);
@@ -1094,6 +1103,22 @@ function useLeadsPageContent() {
       tx,
     ]
   );
+
+  // `/leads?new=person&source_…`: open a fresh create-mode wizard prefilled
+  // from that person; the parameters are consumed once (replaced in history).
+  useEffect(() => {
+    const source = leadSourcePersonFromSearchParams(searchParams);
+    if (!source) return;
+    if (permissions.canCreate && permissions.canConvert) {
+      preloadLeadWizard();
+      setDetailOpen(false);
+      setWizardLeadId(null);
+      setNewLeadSourcePerson(source);
+      setNewLeadWizardSession((session) => session + 1);
+      setNewLeadWizardOpen(true);
+    }
+    setSearchParams(withoutLeadSourcePersonParams(searchParams), { replace: true });
+  }, [permissions.canConvert, permissions.canCreate, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!permissions.canOpen) {
@@ -3225,6 +3250,7 @@ function useLeadsPageContent() {
                       preloadLeadWizard();
                       setDetailOpen(false);
                       setWizardLeadId(null);
+                      setNewLeadSourcePerson(null);
                       setNewLeadWizardSession((session) => session + 1);
                       setNewLeadWizardOpen(true);
                       syncLeadQuery(undefined, { replace: false });
@@ -3567,6 +3593,10 @@ function useLeadsPageContent() {
             leadId={wizardLeadId}
             open
             createMode={newLeadWizardOpen}
+            sourcePerson={newLeadWizardOpen ? newLeadSourcePerson : null}
+            onNewRequestForPerson={permissions.canCreate
+              ? (source) => staffGo(newRequestForPersonHref(source))
+              : undefined}
             onContactsSaved={reload}
             onCreated={(leadId) => {
               setNewLeadWizardOpen(false);

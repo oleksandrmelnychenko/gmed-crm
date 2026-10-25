@@ -352,8 +352,17 @@ pub(crate) fn converted_patient_languages(
 struct CreateLeadRequest {
     creation_key: Option<Uuid>,
     repeat_patient_id: Option<Uuid>,
+    /// Empty when the person comes from `source_person` (filled from there).
+    #[serde(default)]
     first_name: String,
+    #[serde(default)]
     last_name: String,
+    /// «Neue Anfrage für diese Person» (owner decision 2026-10-25): a relation
+    /// of a patient or a trusted contact of an open lead whose identity data
+    /// pre-fill the empty fields of this lead
+    /// ([`crate::routes::lead_source_person`]).
+    #[serde(default)]
+    source_person: Option<super::lead_source_person::SourcePersonRequest>,
     email: Option<String>,
     phone: Option<String>,
     date_of_birth: Option<String>,
@@ -2159,6 +2168,20 @@ async fn validate_lead_contact_identity(
     state: &AppState,
     candidate: &LeadContactIdentity<'_>,
 ) -> Result<(), axum::response::Response> {
+    validate_lead_contact_identity_from(state, candidate, None).await
+}
+
+/// [`validate_lead_contact_identity`] for a lead pre-filled from a relation
+/// or trusted contact (`source_person`, owner decision 2026-10-25): an e-mail
+/// or phone whose only owner is the source record — the child whose relation
+/// or contact the data come from — passes, because the parent's contact data
+/// on the child's record are the parent's own. Any other owner still
+/// conflicts.
+async fn validate_lead_contact_identity_from(
+    state: &AppState,
+    candidate: &LeadContactIdentity<'_>,
+    source: Option<&super::lead_source_person::SourcePersonData>,
+) -> Result<(), axum::response::Response> {
     let contacts = [
         ("email", normalized_identity_email(candidate.email)),
         ("phone", normalized_identity_phone(candidate.phone)),
@@ -2251,6 +2274,7 @@ async fn validate_lead_contact_identity(
                 .lead_id
                 .is_some_and(|lead_id| owner_lead_id == Some(lead_id))
                 || owner_patient_id.is_some_and(|id| candidate.patient_ids.contains(&id))
+                || source.is_some_and(|source| source.owns(owner_lead_id, owner_patient_id))
             {
                 continue;
             }
@@ -4084,6 +4108,33 @@ async fn create_lead(
         };
     }
 
+    // «Neue Anfrage für diese Person»: the person GMED already knows fills the
+    // empty fields of the body; what the body says wins (owner decision
+    // 2026-10-25). Access to the source and the own-record rule are checked
+    // there (409 `existing_parent_patient_use_repeat_intake`).
+    let (source_person, mut prefilled_fields) = match body.source_person {
+        Some(request) => {
+            let data = match super::lead_source_person::load(&state, &auth, request).await {
+                Ok(data) => data,
+                Err(response) => return response,
+            };
+            let filled = super::lead_source_person::fill_body(
+                &data,
+                super::lead_source_person::BodyFields {
+                    first_name: &mut body.first_name,
+                    last_name: &mut body.last_name,
+                    date_of_birth: &mut body.date_of_birth,
+                    phone: &mut body.phone,
+                    email: &mut body.email,
+                    country: &mut body.country,
+                    citizenships: &mut body.citizenships,
+                },
+            );
+            (Some(data), filled)
+        }
+        None => (None, Vec::new()),
+    };
+
     if body.first_name.trim().is_empty() || body.last_name.trim().is_empty() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Name required");
     }
@@ -4233,7 +4284,7 @@ async fn create_lead(
             }))).into_response();
         }
     }
-    if let Err(response) = validate_lead_contact_identity(
+    if let Err(response) = validate_lead_contact_identity_from(
         &state,
         &LeadContactIdentity {
             lead_id: None,
@@ -4245,6 +4296,7 @@ async fn create_lead(
             phone: body.phone.as_deref(),
             guardians: &trusted_contacts,
         },
+        source_person.as_ref(),
     )
     .await
     {
@@ -4367,6 +4419,25 @@ async fn create_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
         }
     }
+    if let Some(data) = source_person.as_ref() {
+        // The address and the identity block of the GwG sheet, the source on
+        // the lead, and the audit row with the field names.
+        match super::lead_source_person::apply_in_tx(
+            &mut tx,
+            id,
+            data,
+            std::mem::take(&mut prefilled_fields),
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(fields) => prefilled_fields = fields,
+            Err(error) => {
+                tracing::error!(%error, lead = %id, "pre-fill the lead from its source person");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+            }
+        }
+    }
     if let Err(error) =
         super::lead_portal_guardians::auto_link_parent_logins_in_tx(&mut tx, id, Some(auth.user_id))
             .await
@@ -4426,16 +4497,17 @@ async fn create_lead(
     )
     .await;
     tracing::info!(by = %auth.user_id, lead = %id, "Lead created manually");
-    (
-        StatusCode::CREATED,
-        Json(json!({
-            "id": id,
-            "portal_account": portal_account.as_ref().map(|account| {
-                crate::routes::lead_portal_account::new_account_payload(account, auth.role)
-            }),
-        })),
-    )
-        .into_response()
+    let mut response = json!({
+        "id": id,
+        "portal_account": portal_account.as_ref().map(|account| {
+            crate::routes::lead_portal_account::new_account_payload(account, auth.role)
+        }),
+    });
+    if let Some(data) = source_person.as_ref() {
+        response["prefilled_from_source"] =
+            super::lead_source_person::response_fragment(data, &prefilled_fields);
+    }
+    (StatusCode::CREATED, Json(response)).into_response()
 }
 
 async fn retired_repeat_patient_intake() -> axum::response::Response {
