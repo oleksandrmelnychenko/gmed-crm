@@ -8,6 +8,7 @@ import {
   hasBaseFormInput,
   initialStep,
   missingByStep,
+  refusedIdentityUploadKeys,
   stepDone,
   stepMissingCount,
   stepOfField,
@@ -69,6 +70,32 @@ describe("lead cabinet steps", () => {
     // Something the server still misses there keeps it incomplete.
     expect(stepDone(request({ ...consented, progress: { filled: 0, total: 1, missing_for_submit: ["request_reason"] } }), "documents")).toBe(false);
   });
+  it("counts an identity copy GMED refused as missing until a new copy arrives (QA 2026-10-25, F-V2)", () => {
+    const scan = { id: "id-1", file_name: "pass.jpg", uploaded_at: "2026-10-25T08:00:00Z" } as unknown as LeadRequest["documents"][number];
+    const fresh = { id: "id-2", file_name: "pass-neu.jpg", uploaded_at: "2026-10-25T09:00:00Z" } as unknown as LeadRequest["documents"][number];
+    const refused = followUp({ required: false, refused_identity_documents: [{ document_id: "id-1", file_name: "pass.jpg", reason: "unreadable", representative_id: null }] });
+    const sent = { ...request({ submitted_at: "2026-10-25T08:30:00Z", follow_up: refused }), identity_documents: [scan] };
+    expect(refusedIdentityUploadKeys(sent)).toEqual(["id_document_upload"]);
+    expect(missingByStep(sent).identity).toEqual(["id_document_upload"]);
+    expect(stepMissingCount(sent, "identity")).toBe(1);
+    expect(stepDone(sent, "identity")).toBe(false);
+    // A new copy replaces it: complete again.
+    const replaced = { ...sent, identity_documents: [scan, fresh] };
+    expect(stepMissingCount(replaced, "identity")).toBe(0);
+    expect(stepDone(replaced, "identity")).toBe(true);
+    // The server listing the upload itself is not counted twice.
+    const listed = { ...sent, progress: { filled: 0, total: 1, missing_for_submit: ["id_document_upload"] } };
+    expect(stepMissingCount(listed, "identity")).toBe(1);
+    // A parent of a minor: the copy is the parent's, on the same step.
+    const parent = {
+      ...request({ submitted_at: "2026-10-25T08:30:00Z", follow_up: followUp({ required: false, refused_identity_documents: [{ document_id: "id-9", file_name: null, reason: "expired", representative_id: "rep-a" }] }) }),
+      representation: { representatives: [{ id: "rep-a", slot: "rep1", identity_documents: [{ id: "id-9", file_name: "ausweis.pdf" }] }] },
+    } as unknown as LeadRequest;
+    expect(refusedIdentityUploadKeys(parent)).toEqual(["rep1_id_upload"]);
+    expect(stepMissingCount(parent, "identity")).toBe(1);
+    expect(refusedIdentityUploadKeys(request())).toEqual([]);
+  });
+
   it("inserts a live country step before first submission and completes it by autosaved answers", () => {
     const preview = request({ follow_up: followUp({ before_submit: true, blocks: ["A", "L", "I"], missing: { A: ["funds_source"], L: ["pep_self"], I: ["id_document_upload"] } }) });
     expect(visibleSteps(preview)).toEqual(["person", "identity", "billing", "follow_up", "disclosure", "documents", "send"]);

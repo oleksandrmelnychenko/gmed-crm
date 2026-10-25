@@ -11960,6 +11960,111 @@ async fn converted_minor_contract_names_only_the_parent_who_receives_and_pays_th
     );
 }
 
+/// Staff name the paying parent in the wizard ("Кто из родителей платит",
+/// payer kind `representative`; DEV re-check V-A2, map item 94 «лише
+/// платник»): without an answer of the cabinet about the invoice recipient
+/// that parent alone is the Auftraggeber of the Rahmenvertrag and the
+/// Einzelauftrag, signs them alone, and is the patient card's
+/// "Vertragspartei". A cabinet answer that names the other parent as the
+/// paying recipient wins.
+#[tokio::test]
+async fn minor_contract_names_only_the_parent_staff_named_as_payer() {
+    let Some((app, pool, admin, bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("spp-lead");
+    let parents = joint_custody_parents(&tag);
+    let lead = seed_joint_custody_lead(&pool, admin, &tag, &parents, None).await;
+    let father: Uuid = parents[1]["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query(
+        "INSERT INTO lead_payer_declarations(lead_id,payer_kind,payer_representative_id,source_of_funds,payer_informed_at,acts_on_own_account,own_account_answered,payment_method,account_country,account_holder,bank_name,via_third_party) VALUES($1,'representative',$2,'employment',now(),true,true,'bank_transfer','DE','Boris Vater','Musterbank',false)",
+    )
+    .bind(lead)
+    .bind(father)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let contract: Uuid = sqlx::query_scalar("INSERT INTO framework_contracts(lead_id,contract_number,status,created_by) VALUES($1,$2,'draft',$3) RETURNING id")
+        .bind(lead).bind(format!("FC-{tag}")).bind(admin).fetch_one(&pool).await.unwrap();
+    let order: Uuid = sqlx::query_scalar("INSERT INTO orders(source_lead_id,contract_id,order_number,created_by) VALUES($1,$2,$3,$4) RETURNING id")
+        .bind(lead).bind(contract).bind(format!("AUF-{tag}")).bind(admin).fetch_one(&pool).await.unwrap();
+    seed_quote_for_order(&pool, order, admin, &tag).await;
+
+    for template in ["framework_contract", "single_order"] {
+        let (text, roles) = generate_contract_text(
+            &app,
+            &bearer,
+            json!({"template_id":template,"lead_id":lead,"order_id":order,"language":"de"}),
+        )
+        .await;
+        assert!(text.contains("Boris Vater"), "{template}: {text}");
+        assert!(text.contains("Elternweg 22"), "{template}: {text}");
+        assert!(!text.contains("Anna Mutter"), "{template}: {text}");
+        assert!(
+            !text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
+            "{template}: {text}"
+        );
+        assert_eq!(roles, vec!["guardian_1", "agency"], "{template}");
+    }
+
+    // The cabinet named the mother as the recipient who pays: its answer
+    // decides.
+    set_parent_invoice_recipient(&pool, lead, &parents[0], true).await;
+    let (text, roles) = generate_contract_text(
+        &app,
+        &bearer,
+        json!({"template_id":"framework_contract","lead_id":lead,"order_id":order,"language":"de"}),
+    )
+    .await;
+    assert!(text.contains("Anna Mutter"), "{text}");
+    assert!(!text.contains("Boris Vater"), "{text}");
+    assert_eq!(roles, vec!["guardian_1", "agency"]);
+
+    // A converted lead: the patient card's "Vertragspartei" follows the same
+    // rule, the parent matched by the relation's `source_contact_id`.
+    let tag = unique_tag("spp-pat");
+    let patient = seed_patient(&pool, admin, &tag).await;
+    sqlx::query(
+        "UPDATE patients SET first_name='Mia',last_name=$2,birth_date='2015-06-07' WHERE id=$1",
+    )
+    .bind(patient)
+    .bind(format!("Kind-{tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let parents = joint_custody_parents(&tag);
+    let father: Uuid = parents[1]["id"].as_str().unwrap().parse().unwrap();
+    let lead = seed_joint_custody_lead(&pool, admin, &tag, &parents, Some(patient)).await;
+    sqlx::query(
+        "INSERT INTO lead_payer_declarations(lead_id,payer_kind,payer_representative_id,source_of_funds) VALUES($1,'representative',$2,'employment')",
+    )
+    .bind(lead)
+    .bind(father)
+    .execute(&pool)
+    .await
+    .unwrap();
+    for (index, parent) in parents.iter().enumerate() {
+        let contact: Uuid = parent["id"].as_str().unwrap().parse().unwrap();
+        sqlx::query(
+            r#"INSERT INTO patient_relations (patient_id, related_name, relation_type, source_contact_id,
+                                              birth_date, address_street, address_zip, address_city)
+               VALUES ($1, $2, 'parent', $3, $4::date, $5, '80331', 'München')"#,
+        )
+        .bind(patient)
+        .bind(parent["name"].as_str())
+        .bind(contact)
+        .bind(parent["birth_date"].as_str())
+        .bind(format!("Elternweg {}", index + 21))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    assert_eq!(
+        payer_summary_party_names(&app, &bearer, patient).await,
+        vec!["Boris Vater".to_string()]
+    );
+}
+
 /// The representatives the patient card shows as "Vertragspartei"
 /// (`GET /patients/{id}/payer-summary`).
 async fn payer_summary_party_names(app: &axum::Router, bearer: &str, patient: Uuid) -> Vec<String> {

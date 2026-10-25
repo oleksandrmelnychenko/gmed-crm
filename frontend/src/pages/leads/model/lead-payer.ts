@@ -15,6 +15,12 @@ import { formatAppDate } from "@/lib/app-time-zone";
 import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 
 import { normalizePayerPackageSummary, type PayerPackageSummary } from "../data/lead-payer-package-api";
+import {
+  normalizePayerIdentification,
+  PAYER_PAPER_PATH_ID,
+  payerNotIdentifiedHint,
+  type PayerIdentificationStatus,
+} from "./lead-payer-paper";
 
 export type Tx = (ru: string, de: string) => string;
 
@@ -231,6 +237,13 @@ export type PayerDeclarationStatus = {
    * absent on an older server.
    */
   payer_package?: PayerPackageSummary | null;
+  /**
+   * Whether a third-party payer must identify himself and how far he is
+   * (link questionnaire or paper Selbstauskunft, and the identity document;
+   * re-check V-A7). Null without a third-party payer of his own, absent on an
+   * older server.
+   */
+  identification?: PayerIdentificationStatus | null;
 };
 
 /** Who wrote the funds of a person (server `lead_funds`). */
@@ -372,6 +385,9 @@ export function normalizePayerDeclarationResponse(value: unknown): PayerDeclarat
           : {}),
       ...(Object.hasOwn(status, "payer_package")
         ? { payer_package: normalizePayerPackageSummary(status.payer_package) }
+        : {}),
+      ...(Object.hasOwn(status, "identification")
+        ? { identification: normalizePayerIdentification(status.identification) }
         : {}),
     },
   };
@@ -1050,10 +1066,8 @@ function payerIdentityIncompleteLabel(tx: Tx, payerType?: PayerType | null) {
  */
 /** The readiness reason / 422 `payer_not_identified` (third-party payer without questionnaire and ID document). */
 export function payerNotIdentifiedText(tx: Tx): string {
-  return tx(
-    "Плательщик не идентифицирован: нужна анкета плательщика и его документ",
-    "Zahler/in nicht identifiziert: Fragebogen und Ausweis des Zahlers fehlen",
-  );
+  // Re-check V-A7: the link or the paper path (the wizard's payer section).
+  return payerNotIdentifiedHint(tx);
 }
 
 export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | null) {
@@ -1166,10 +1180,17 @@ export function payerReadinessReasonSteps(): Record<string, "documents"> {
 /** Field the wizard focuses for a payer readiness reason. */
 export const PAYER_SECTION_ID = "lead-wizard-payer-declaration";
 
-/** Every payer readiness reason focuses the payer section. */
+/**
+ * Every payer readiness reason focuses the payer section; the missing
+ * identification of a third-party payer its paper path beside the link
+ * (re-check V-A7).
+ */
 export function payerReadinessReasonFields(): Record<string, string> {
   return Object.fromEntries(
-    Object.keys(PAYER_READINESS_REASON_CODES).map((reason) => [reason, PAYER_SECTION_ID]),
+    Object.entries(PAYER_READINESS_REASON_CODES).map(([reason, code]) => [
+      reason,
+      code === "payer_not_identified" ? PAYER_PAPER_PATH_ID : PAYER_SECTION_ID,
+    ]),
   );
 }
 

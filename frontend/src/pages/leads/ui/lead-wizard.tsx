@@ -161,7 +161,7 @@ import { uploadEach } from "../model/upload-each";
 import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
 import { removeLeadRepresentativeData, removeLeadTrustedContact, updateLeadRepresentativeDetails, type RepresentativeDetails } from "../data/lead-representation-api";
-import { EMPTY_REPRESENTATIVE_DETAILS, pendingRepresentativeDetailsReady, representativeDetailsChanged } from "../model/lead-representative-details";
+import { EMPTY_REPRESENTATIVE_DETAILS, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors } from "../model/lead-representative-details";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import { LeadCustodySelect } from "./lead-custody-select";
 import { LeadGwgSheetActions, gwgSheetBusyKey } from "./lead-gwg-sheet-actions";
@@ -6128,6 +6128,15 @@ export function LeadWizard({
     const detailsDraft = leadId && trustedContactDetailsDraftRef.current?.contactId === trustedContactEditor.id
       ? trustedContactDetailsDraftRef.current
       : null;
+    // A value the details form marks as too long stops the save, as its own button did (V-A4).
+    if (detailsDraft && Object.keys(representativeDetailsErrors(detailsDraft.draft, detailsDraft.loaded)).length > 0) {
+      // The field itself says what is wrong; the name field is not the place for it.
+      toast.error(tx(
+        "Исправьте отмеченные поля в блоке «Адрес и данные для анкеты GwG»",
+        "Bitte die markierten Felder unter „Anschrift und Angaben für den GwG-Bogen“ korrigieren",
+      ));
+      return;
+    }
     const changedDetails = detailsDraft ? changedRepresentativeDetails(detailsDraft.draft, detailsDraft.loaded) : undefined;
     const normalizedContact: TrustedContactDraft = {
       ...trustedContactEditor,
@@ -7971,12 +7980,15 @@ ${serviceCommentLines.join("\n")}`
   // The service step is optional too: its tick needs data (a program period,
   // a requested service, a note); a new lead shows it open (QA 2026-10-25).
   const serviceTabFilled = Boolean(draft && serviceStepHasContent(draft));
+  // A converted lead is finished: every step stands as done and read-only, only
+  // an optional step left empty says so (QA 2026-10-25, N-3: «Договор и смета —
+  // не завершено» on a lead that already is a patient).
   const isStepTicked = (id: StepId) => (
     id === "medical"
-      ? medicalTabFilled && isStepReady(id)
+      ? medicalTabFilled && (leadConverted || isStepReady(id))
       : id === "service"
-        ? serviceTabFilled && isStepReady(id)
-        : isStepReady(id)
+        ? serviceTabFilled && (leadConverted || isStepReady(id))
+        : leadConverted || isStepReady(id)
   );
   // Why «Подписано на бумаге» would be refused now (409 `*_document_outdated`
   // of the paper signature): the button waits and the reason stands beside
@@ -8261,7 +8273,7 @@ ${serviceCommentLines.join("\n")}`
               {STEPS.map((item, itemIndex) => {
                 const selected = item.id === step;
                 const done = isStepTicked(item.id);
-                const optionalEmpty = (item.id === "medical" || item.id === "service") && !done && isStepReady(item.id);
+                const optionalEmpty = (item.id === "medical" || item.id === "service") && !done && (leadConverted || isStepReady(item.id));
                 const StepIcon = STEP_ICONS[item.id];
                 return (
                   <button
@@ -11664,6 +11676,9 @@ ${serviceCommentLines.join("\n")}`
               <AdminDialogScaffold
                 testId="trusted-contact-editor"
                 onSubmit={saveTrustedContact}
+                // The editor checks every field itself and says it at the field in the app's
+                // words; the browser's own bubble came first for a mistyped e-mail (QA 2026-10-25, V-A5).
+                noValidate
                 title={trustedContactEditorGuardian
                   ? (editingTrustedContact
                       ? tx("Редактировать родителя или законного представителя", "Elternteil oder gesetzlichen Vertreter bearbeiten")
@@ -11844,6 +11859,9 @@ ${serviceCommentLines.join("\n")}`
                     const cabinetAddress = onFile
                       ? representativeCabinetAddress(onFile, (code) => countryLabel(code, lang))
                       : null;
+                    // Said by its source: a parent GMED entered has nothing from the cabinet
+                    // (QA 2026-10-25, V-A4).
+                    const fromCabinet = Boolean(onFile && (onFile.has_login || onFile.contact_origin === "portal"));
                     // A representative takes the address in parts (street, postcode, city,
                     // country) below: a one-line address never reached the contract's check
                     // (walk-through 2026-10-24).
@@ -11861,10 +11879,15 @@ ${serviceCommentLines.join("\n")}`
                         />
                         {cabinetAddress ? (
                           <p id="trusted-contact-address-cabinet" className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground" data-testid="trusted-contact-address-cabinet">
-                            {tx(
-                              "Из кабинета: так адрес стоит в анкете GwG и в документах. Исправить его можно в блоке «Адрес и данные для анкеты GwG» ниже.",
-                              "Aus dem Kundenkabinett: so steht sie im GwG-Bogen und in den Unterlagen. Korrigieren unten unter „Anschrift und Angaben für den GwG-Bogen“.",
-                            )}
+                            {fromCabinet
+                              ? tx(
+                                  "Из кабинета: так адрес стоит в анкете GwG и в документах. Исправить его можно в блоке «Адрес и данные для анкеты GwG» ниже.",
+                                  "Aus dem Kundenkabinett: so steht sie im GwG-Bogen und in den Unterlagen. Korrigieren unten unter „Anschrift und Angaben für den GwG-Bogen“.",
+                                )
+                              : tx(
+                                  "Внесено сотрудниками GMED: так адрес стоит в анкете GwG и в документах. Исправить его можно в блоке «Адрес и данные для анкеты GwG» ниже.",
+                                  "Von GMED erfasst: so steht sie im GwG-Bogen und in den Unterlagen. Korrigieren unten unter „Anschrift und Angaben für den GwG-Bogen“.",
+                                )}
                           </p>
                         ) : null}
                       </Field>
@@ -11898,12 +11921,10 @@ ${serviceCommentLines.join("\n")}`
                     <>
                     <div className="mt-4 border-t border-border/70 pt-3">
                       <LeadRepresentativeDetailsForm
-                        leadId={leadId}
                         person={person}
                         tx={tx}
                         lang={lang}
                         disabled={isBusy}
-                        onSaved={afterRepresentativeUpload}
                         onDraftChange={(details, loaded) => {
                           trustedContactDetailsDraftRef.current = { contactId: person.id, draft: details, loaded };
                         }}
@@ -12677,6 +12698,10 @@ ${serviceCommentLines.join("\n")}`
                           draft,
                         );
                         setProspectCandidates(null);
+                        // The server made the lead a request of that patient: the header (no
+                        // purge countdown), the step names and the repeat review follow at once,
+                        // not after a reload (QA 2026-10-25, V-A1).
+                        await refreshLeadState().catch(() => null);
                       } catch (nextError) {
                         showWizardError(nextError);
                       } finally {

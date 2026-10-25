@@ -81,13 +81,18 @@ export function isInternalOverlayInteractionEvent(event: Event | undefined) {
 // the capture phase, before the list closes and leaves the DOM: a searchable
 // list's own input is gone by the time the dialog hears the key (DEV check
 // 2026-10-11: Escape in the service search closed the whole lead wizard).
-let escapeWhileListOpen = false
+//
+// Kept per key event, not as one flag that the first reader clears: the dialog
+// may hear the same Escape more than once (its own key handler and the
+// document listener), and the second reading then asked "close without
+// saving?" right after the list closed (QA 2026-10-25, F-V1).
+const escapeEventsWhileListOpen = new WeakSet<Event>()
 if (typeof document !== "undefined") {
   document.addEventListener(
     "keydown",
     (event) => {
-      if (event.key === "Escape") {
-        escapeWhileListOpen = document.querySelector(OPEN_AUXILIARY_OVERLAY_SELECTOR) !== null
+      if (event.key === "Escape" && document.querySelector(OPEN_AUXILIARY_OVERLAY_SELECTOR) !== null) {
+        escapeEventsWhileListOpen.add(event)
       }
     },
     true,
@@ -98,8 +103,12 @@ export function isAuxiliaryOverlayEscape(reason: string, event: Event | undefine
   if (reason !== "escape-key" || !event) {
     return false
   }
-  if (escapeWhileListOpen) {
-    escapeWhileListOpen = false
+  if (escapeEventsWhileListOpen.has(event)) {
+    return true
+  }
+  // A list, picker or field inside the dialog already handled this Escape
+  // (it closed itself and prevented the default).
+  if (event.defaultPrevented) {
     return true
   }
 

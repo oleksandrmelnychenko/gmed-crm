@@ -149,7 +149,6 @@ export interface SanctionsTranslations {
   risk_reviewers_hint: string;
   /** "{ceo}" active CEO accounts and "{deputies}" named deputies who may decide. */
   risk_reviewers_count: string;
-  risk_reviewers_second_missing: string;
   risk_reviewers_none: string;
   risk_config_saved: string;
   risk_config_error_codes: string;
@@ -315,9 +314,8 @@ export const sanctionsRu: SanctionsTranslations = {
   risk_level_2_blocks_automatic: "На уровне 2 дополнительные вопросы задаются автоматически",
   risk_reviewers: "Проверяющие — заместители CEO",
   risk_reviewers_hint:
-    "Каждый аккаунт CEO проверяет всегда, заместители — по назначению. Уровень 3 решают два разных человека: пока проверяющий один, уровень 3 нельзя разрешить.",
+    "Каждый аккаунт CEO проверяет всегда, заместители — по назначению. Решение одного проверяющего действует сразу на любом уровне, причина обязательна.",
   risk_reviewers_count: "Сейчас решают: аккаунты CEO — {ceo}, назначенные заместители — {deputies}.",
-  risk_reviewers_second_missing: "Второго проверяющего нет: уровень 3 сейчас разрешить нельзя. Назначьте заместителя.",
   risk_reviewers_none: "Нет подходящих сотрудников",
   risk_config_saved: "Настройки оценки риска сохранены",
   risk_config_error_codes: "Коды стран: две латинские буквы (ISO).",
@@ -325,10 +323,10 @@ export const sanctionsRu: SanctionsTranslations = {
   risk_config_error_points: "Баллы — целые числа от 0 до 20.",
   risk_config_error_levels: "Уровень 2 начинается раньше уровня 3 и больше 0 (целые баллы).",
   risk_queue_title: "Очередь проверки",
-  risk_queue_hint: "Обращения, которые ждут решения, сведений или второго проверяющего — сначала самые старые.",
+  risk_queue_hint: "Обращения, которые ждут решения или сведений — сначала самые старые.",
   risk_queue_empty: "Нет обращений на проверке",
   risk_queue_since: "с {date}",
-  risk_queue_proposal: "Предложение: {decision} — {name}, {date}",
+  risk_queue_proposal: "Старое предложение: {decision} — {name}, {date}",
 };
 
 export const sanctionsDe: SanctionsTranslations = {
@@ -483,9 +481,8 @@ export const sanctionsDe: SanctionsTranslations = {
   risk_level_2_blocks_automatic: "Auf Stufe 2 werden ergänzende Angaben automatisch abgefragt",
   risk_reviewers: "Prüfende – Vertretung des CEO",
   risk_reviewers_hint:
-    "Jedes CEO-Konto prüft immer, Vertretungen nach Benennung. Stufe 3 entscheiden zwei verschiedene Personen: Solange nur eine Person prüft, kann Stufe 3 nicht freigegeben werden.",
+    "Jedes CEO-Konto prüft immer, Vertretungen nach Benennung. Die Entscheidung einer prüfenden Person gilt auf jeder Stufe sofort; eine Begründung ist Pflicht.",
   risk_reviewers_count: "Derzeit entscheiden: CEO-Konten – {ceo}, benannte Vertretungen – {deputies}.",
-  risk_reviewers_second_missing: "Keine zweite prüfende Person: Stufe 3 kann derzeit nicht freigegeben werden. Bitte eine Vertretung benennen.",
   risk_reviewers_none: "Keine geeigneten Mitarbeitenden",
   risk_config_saved: "Einstellungen der Risikobewertung gespeichert",
   risk_config_error_codes: "Ländercodes: zwei lateinische Buchstaben (ISO).",
@@ -493,8 +490,8 @@ export const sanctionsDe: SanctionsTranslations = {
   risk_config_error_points: "Punkte sind ganze Zahlen von 0 bis 20.",
   risk_config_error_levels: "Stufe 2 beginnt vor Stufe 3 und über 0 (ganze Punkte).",
   risk_queue_title: "Prüfwarteschlange",
-  risk_queue_hint: "Anfragen, die auf eine Entscheidung, Angaben oder die Zweitprüfung warten – die ältesten zuerst.",
+  risk_queue_hint: "Anfragen, die auf eine Entscheidung oder Angaben warten – die ältesten zuerst.",
   risk_queue_empty: "Keine Anfragen in Prüfung",
   risk_queue_since: "seit {date}",
-  risk_queue_proposal: "Vorschlag: {decision} – {name}, {date}",
+  risk_queue_proposal: "Alter Vorschlag: {decision} – {name}, {date}",
 };

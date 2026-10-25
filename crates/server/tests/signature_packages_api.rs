@@ -2412,14 +2412,23 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
         candidates["onboarding_manifest"]["items"][3]["state"],
         "missing"
     );
-    let guardians: Vec<&str> = candidates["suggested_signers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|s| s["role"] == "client")
-        .map(|s| s["email"].as_str().unwrap())
-        .collect();
-    assert_eq!(guardians, ["anna@example.org", "bernd@example.org"]);
+    let guardians = |candidates: &Value| -> Vec<String> {
+        candidates["suggested_signers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s["role"] == "client")
+            .map(|s| s["email"].as_str().unwrap().to_string())
+            .collect()
+    };
+    // Staff named the mother as the paying parent: she alone contracts and
+    // signs the contract (map item 94, re-check V-A2). The package suggests
+    // the signers of all its documents: the father signs the child's consent
+    // in it, so he is suggested too, after the contracting mother.
+    assert_eq!(
+        guardians(&candidates),
+        ["anna@example.org", "bernd@example.org"]
+    );
 
     // Once the child's patient form exists (the request was sent) it joins
     // the preset after the order; the guardians sign it like the consent.
@@ -2457,15 +2466,24 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
         candidates["preset_document_ids"],
         json!([contract, order, estimate, form, child])
     );
+    assert_eq!(
+        guardians(&candidates),
+        ["anna@example.org", "bernd@example.org"]
+    );
 
     // An old, incomplete legacy request cannot omit the required patient
-    // form and estimate. The current composer sends all five explicitly.
-    let signers = json!([
-        signer("Anna", "anna@example.org", "client"),
-        signer("Bernd", "bernd@example.org", "client"),
-        signer("Kind", "kind@example.org", "minor"),
-        signer("Max", "max@example.org", "agency"),
-    ]);
+    // form and estimate. The current composer sends all five explicitly,
+    // with the client signers the package suggested (no manual addition).
+    let mut signers: Vec<Value> = candidates["suggested_signers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["role"] == "client")
+        .cloned()
+        .collect();
+    signers.push(signer("Kind", "kind@example.org", "minor"));
+    signers.push(signer("Max", "max@example.org", "agency"));
+    let signers = Value::Array(signers);
     let (status, value) = call(&env.app, "POST", &format!("/api/v1/documents/{contract}/signature-requests"), &env.ceo, Some(json!({
         "signers": signers, "attachment_document_id": information, "signing_document_ids": [child, order],
     }))).await;
@@ -2509,6 +2527,20 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
         2,
         "second guardian: both guardian_2 declarations"
     );
+    // The father is not a signer of the contract: none of his frames lies on
+    // the contract (page 0 of the bundle), the client frame there is Anna's.
+    assert_eq!(created[0]["email"], "anna@example.org");
+    assert_eq!(created[1]["email"], "bernd@example.org");
+    let pages = |index: usize| -> Vec<String> {
+        created[index]["positions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|frame| frame["page"].as_str().unwrap_or_default().to_string())
+            .collect()
+    };
+    assert!(pages(0).contains(&"0".to_string()), "{created}");
+    assert!(!pages(1).contains(&"0".to_string()), "{created}");
     assert_eq!(frames(2), 0, "the minor has no generated frame");
     assert_eq!(frames(3), 1, "agency frame");
     env.mock.set_status(id, "SIGNED");

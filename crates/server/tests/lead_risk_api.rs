@@ -647,8 +647,36 @@ async fn the_wizard_reads_the_configured_country_lists() {
     }
 }
 
+/// A level-3 release / reject proposal as recorded before 2026-10-25
+/// (`four_eyes` NULL), on the lead's current fingerprint, by the CEO.
+async fn legacy_proposal(app: &TestApp, lead: Uuid, decision: &str) -> Uuid {
+    let print: String =
+        sqlx::query_scalar("SELECT fingerprint FROM lead_risk_assessments WHERE lead_id = $1")
+            .bind(lead)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    sqlx::query_scalar(
+        r#"INSERT INTO lead_risk_decisions
+               (lead_id, decision, reason, level, fingerprint, decided_by, four_eyes)
+           VALUES ($1, $2, 'Proposal from before the rule change', 3, $3, $4, NULL)
+           RETURNING id"#,
+    )
+    .bind(lead)
+    .bind(decision)
+    .bind(print)
+    .bind(app.ceo_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap()
+}
+
+/// Owner decision 2026-10-25: no four eyes at level 3. One reviewer (the CEO
+/// or a named deputy) releases or rejects at once, with a mandatory reason; a
+/// proposal recorded before that decision can still be confirmed or withdrawn
+/// by any reviewer, the proposer included.
 #[tokio::test]
-async fn level_three_needs_two_different_reviewers() {
+async fn level_three_is_decided_by_one_reviewer() {
     let Some(app) = test_app().await else { return };
     // The CEO names the patient manager a deputy reviewer; Sales cannot be one.
     let (status, config) = request(&app, "GET", "/compliance/risk-config", &app.ceo(), None).await;
@@ -718,70 +746,65 @@ async fn level_three_needs_two_different_reviewers() {
     assert_eq!(status, StatusCode::OK, "{restarted}");
     assert_eq!(restarted["level"], 3);
     assert_eq!(restarted["knockout"], true);
-    assert_eq!(restarted["four_eyes_required"], true);
+    assert_eq!(restarted["four_eyes_required"], false);
+    assert!(held(&qualify(&app, lead_id).await));
 
-    // The CEO proposes the release: nothing is effective yet.
-    let (status, proposed) = decide(
+    // The reason is mandatory at level 3 too.
+    for reason in ["", "   ", "too short"] {
+        let (status, body) = decide(
+            &app,
+            &app.ceo(),
+            lead_id,
+            json!({ "decision": "release", "reason": reason }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "reason_required", "{body}");
+    }
+    let (status, body) = decide(&app, &app.ceo(), lead_id, json!({ "decision": "release" })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "reason_required", "{body}");
+    assert!(held(&qualify(&app, lead_id).await));
+
+    // The CEO releases: effective at once, no proposal, the lead qualifies.
+    let (status, released) = decide(
         &app,
         &app.ceo(),
         lead_id,
         json!({ "decision": "release", "reason": "Former local councillor, checked sources" }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED, "{proposed}");
-    assert_eq!(proposed["status"], "proposed");
-    let proposal_id = proposed["pending_proposal"]["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert!(held(&qualify(&app, lead_id).await));
-    // A second proposal waits for the first.
-    let (status, _) = decide(
-        &app,
-        &app.pm(),
-        lead_id,
-        json!({ "decision": "reject", "reason": "Second opinion: refuse the client" }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    // The proposer cannot confirm the own proposal.
-    let (status, body) = request(
-        &app,
-        "POST",
-        &format!("/leads/{lead_id}/risk-assessment/decisions/{proposal_id}/confirm"),
-        &app.ceo(),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["code"], "four_eyes_same_user");
-    // The deputy confirms: released, the gate lets the lead pass.
-    let (status, confirmed) = request(
-        &app,
-        "POST",
-        &format!("/leads/{lead_id}/risk-assessment/decisions/{proposal_id}/confirm"),
-        &app.pm(),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{confirmed}");
-    assert_eq!(confirmed["status"], "released");
-    assert!(confirmed["pending_proposal"].is_null());
-    assert!(!held(&qualify(&app, lead_id).await));
-    // The database refuses the same person confirming, too.
-    let own = sqlx::query(
-        r#"INSERT INTO lead_risk_decisions
-               (lead_id, decision, reason, level, fingerprint, decided_by, confirms_decision_id)
-           VALUES ($1, 'release', 'Confirmed by myself again', 3, 'x', $2, $3)"#,
+    assert_eq!(status, StatusCode::CREATED, "{released}");
+    assert_eq!(released["status"], "released", "{released}");
+    assert_eq!(released["level"], 3, "{released}");
+    assert!(released["pending_proposal"].is_null(), "{released}");
+    assert_eq!(released["can_confirm"], false, "{released}");
+    assert_eq!(released["can_withdraw"], false, "{released}");
+    let decision = &released["decisions"].as_array().unwrap()[0];
+    assert_eq!(decision["kind"], "decision", "{released}");
+    assert!(decision["proposal_state"].is_null(), "{released}");
+    let (status, qualified) = qualify(&app, lead_id).await;
+    assert!(!held(&(status, qualified.clone())), "{qualified}");
+    // The row and the audit say: a single reviewer's decision at level 3.
+    let four_eyes: Option<bool> =
+        sqlx::query_scalar("SELECT four_eyes FROM lead_risk_decisions WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(four_eyes, Some(false));
+    let audit: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action = 'lead_risk_decision' AND entity_id = $1",
     )
     .bind(lead_id)
-    .bind(app.ceo_id)
-    .bind(Uuid::parse_str(&proposal_id).unwrap())
-    .execute(app.pool())
-    .await;
-    assert!(own.is_err());
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(audit["level"], 3, "{audit}");
+    assert_eq!(audit["four_eyes"], false, "{audit}");
+    assert_eq!(audit["decision"], "release", "{audit}");
 
-    // A stale proposal: the assessment changes before the confirmation.
+    // A deputy rejects a sanctions-link lead at once; the gate keeps holding it.
     let other = insert_lead(&app, "Mia", &["DE"]).await;
     sqlx::query("INSERT INTO lead_gwg_declarations (lead_id, sanctions_links) VALUES ($1, true)")
         .bind(other)
@@ -789,53 +812,99 @@ async fn level_three_needs_two_different_reviewers() {
         .await
         .unwrap();
     assert!(held(&qualify(&app, other).await));
-    let (status, proposed) = decide(
+    let (status, rejected) = decide(
         &app,
         &app.pm(),
         other,
         json!({ "decision": "reject", "reason": "Business ties to a listed company" }),
     )
     .await;
-    assert_eq!(status, StatusCode::ACCEPTED, "{proposed}");
-    let proposal_id = proposed["pending_proposal"]["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    sqlx::query("UPDATE leads SET citizenships = '{SY}' WHERE id = $1")
-        .bind(other)
+    assert_eq!(status, StatusCode::CREATED, "{rejected}");
+    assert_eq!(rejected["status"], "rejected", "{rejected}");
+    assert_eq!(rejected["level"], 3, "{rejected}");
+    assert!(rejected["pending_proposal"].is_null(), "{rejected}");
+    assert!(held(&qualify(&app, other).await));
+
+    // A proposal recorded before 2026-10-25 (`four_eyes` NULL) is not stranded.
+    let pending_lead = insert_lead(&app, "Lea", &["DE"]).await;
+    sqlx::query("INSERT INTO lead_gwg_declarations (lead_id, pep_self) VALUES ($1, true)")
+        .bind(pending_lead)
         .execute(app.pool())
         .await
         .unwrap();
-    let (status, body) = request(
+    assert!(held(&qualify(&app, pending_lead).await));
+    let proposal_id = legacy_proposal(&app, pending_lead, "release").await;
+    let (status, shown) = request(
         &app,
-        "POST",
-        &format!("/leads/{other}/risk-assessment/decisions/{proposal_id}/confirm"),
+        "GET",
+        &format!("/leads/{pending_lead}/risk-assessment"),
         &app.ceo(),
         None,
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "{shown}");
+    assert_eq!(shown["status"], "proposed", "{shown}");
+    assert_eq!(
+        shown["pending_proposal"]["id"],
+        json!(proposal_id),
+        "{shown}"
+    );
+    // The proposer may confirm it now.
+    assert_eq!(shown["can_confirm"], true, "{shown}");
+    assert_eq!(shown["can_withdraw"], true, "{shown}");
+    // A new decision waits until the old proposal is settled.
+    let (status, body) = decide(
+        &app,
+        &app.pm(),
+        pending_lead,
+        json!({ "decision": "reject", "reason": "Second opinion: refuse the client" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "assessment_changed");
-    // The proposer withdraws it; the queue lists the lead for review.
+    assert_eq!(body["code"], "proposal_pending", "{body}");
+    let (status, confirmed) = request(
+        &app,
+        "POST",
+        &format!("/leads/{pending_lead}/risk-assessment/decisions/{proposal_id}/confirm"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    assert_eq!(confirmed["status"], "released", "{confirmed}");
+    assert!(confirmed["pending_proposal"].is_null(), "{confirmed}");
+    assert!(!held(&qualify(&app, pending_lead).await));
+
+    // Another reviewer than the proposer withdraws an old proposal.
+    let withdraw_lead = insert_lead(&app, "Tom", &["DE"]).await;
+    sqlx::query("INSERT INTO lead_gwg_declarations (lead_id, pep_self) VALUES ($1, true)")
+        .bind(withdraw_lead)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    assert!(held(&qualify(&app, withdraw_lead).await));
+    let proposal_id = legacy_proposal(&app, withdraw_lead, "reject").await;
     let (status, withdrawn) = request(
         &app,
         "POST",
-        &format!("/leads/{other}/risk-assessment/decisions/{proposal_id}/withdraw"),
+        &format!("/leads/{withdraw_lead}/risk-assessment/decisions/{proposal_id}/withdraw"),
         &app.pm(),
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{withdrawn}");
-    assert!(withdrawn["pending_proposal"].is_null());
+    assert!(withdrawn["pending_proposal"].is_null(), "{withdrawn}");
+    assert_ne!(withdrawn["status"], "proposed", "{withdrawn}");
     let (status, queue) = request(&app, "GET", "/compliance/risk-reviews", &app.ceo(), None).await;
     assert_eq!(status, StatusCode::OK, "{queue}");
-    assert!(
-        queue["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["lead_id"] == json!(other))
-    );
+    let item = queue["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["lead_id"] == json!(withdraw_lead))
+        .cloned()
+        .unwrap_or_else(|| panic!("{queue}"));
+    assert!(item["pending_proposal"].is_null(), "{item}");
     let (status, _) = request(&app, "GET", "/compliance/risk-reviews", &app.sales(), None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }

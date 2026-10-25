@@ -12,7 +12,6 @@ import {
   riskCanRestart,
   riskCanWithdraw,
   riskDecisionErrorText,
-  riskDecisionNeedsSecondReviewer,
   riskDisplayedScore,
   riskEventLabel,
   riskGateErrorText,
@@ -26,7 +25,6 @@ import {
   riskPointsLine,
   riskReasonValid,
   riskReviewerRoleEligible,
-  riskSecondReviewerMissing,
   riskShowsPreview,
   riskStatusLabel,
   riskSubjectLabel,
@@ -107,7 +105,8 @@ describe("the risk assessment of a lead (staff)", () => {
     )!;
     expect(assessment.knockout).toBe(true);
     expect(assessment.level).toBe(3);
-    expect(assessment.four_eyes_required).toBe(true);
+    // Four-eyes removed (owner 2026-10-25): level 3 stays level 3, the server flag is false.
+    expect(assessment.four_eyes_required).toBe(false);
     expect(riskLevelTone(assessment.level)).toBe("error");
     expect(riskLevelTone(2)).toBe("warning");
     expect(riskLevelTone(1)).toBe("success");
@@ -196,25 +195,24 @@ describe("the risk assessment of a lead (staff)", () => {
     expect(riskTriggerLabel("T16", ru)).toBe("Подтверждённое совпадение с санкционным списком");
   });
 
-  it("needs a second reviewer for a release or a reject at level 3", () => {
-    const three = normalizeLeadRiskAssessment(levelTwo({ level: 3, points: 9, reviewers_available: 1 }))!;
-    expect(riskDecisionNeedsSecondReviewer(three, "release")).toBe(true);
-    expect(riskDecisionNeedsSecondReviewer(three, "reject")).toBe(true);
-    expect(riskDecisionNeedsSecondReviewer(three, "request_more")).toBe(false);
-    expect(riskDecisionNeedsSecondReviewer(normalizeLeadRiskAssessment(levelTwo())!, "release")).toBe(false);
-    expect(riskSecondReviewerMissing(three)).toBe(true);
-    expect(riskSecondReviewerMissing({ ...three, reviewers_available: 2 })).toBe(false);
+  it("lets one reviewer release or reject at level 3 directly (four-eyes removed 2026-10-25)", () => {
+    const three = normalizeLeadRiskAssessment(levelTwo({ level: 3, points: 9, reviewers_available: 1, four_eyes_required: false }))!;
+    expect(three.four_eyes_required).toBe(false);
+    expect(riskAvailableDecisions(three)).toEqual(expect.arrayContaining(["release", "reject", "request_more"]));
   });
 
-  it("lets only the proposer withdraw", () => {
+  it("lets any reviewer withdraw an old proposal", () => {
     const proposal = { id: "d1", decision: "reject", reason: "Mittelherkunft unklar", decided_by: "user-1", decided_by_name: "Test CEO", decided_at: null };
-    const mine = normalizeLeadRiskAssessment(levelTwo({ level: 3, pending_proposal: proposal, can_confirm: false }))!;
-    expect(riskCanWithdraw(mine)).toBe(true);
-    expect(riskCanWithdraw(mine, "user-2")).toBe(false);
-    expect(riskCanWithdraw(mine, "user-1")).toBe(true);
-    const other = { ...mine, can_confirm: true };
-    expect(riskCanWithdraw(other)).toBe(false);
-    expect(riskCanWithdraw({ ...other, can_withdraw: true })).toBe(true);
+    const pending = normalizeLeadRiskAssessment(levelTwo({ level: 3, pending_proposal: proposal, can_confirm: true }))!;
+    // The server does not say: any reviewer.
+    expect(pending.can_withdraw).toBeNull();
+    expect(riskCanWithdraw(pending)).toBe(true);
+    expect(riskCanWithdraw({ ...pending, can_decide: false })).toBe(false);
+    // The server's answer wins.
+    expect(riskCanWithdraw({ ...pending, can_withdraw: false })).toBe(false);
+    expect(riskCanWithdraw({ ...pending, can_decide: false, can_withdraw: true })).toBe(true);
+    // No proposal, nothing to withdraw; and no new decision while one waits.
+    expect(riskAvailableDecisions(pending)).toEqual([]);
     expect(riskCanWithdraw(normalizeLeadRiskAssessment(levelTwo())!)).toBe(false);
   });
 
@@ -238,7 +236,7 @@ describe("the risk assessment of a lead (staff)", () => {
     for (const key of RISK_BLOCK_KEYS) {
       expect(riskBlockLabel(key, de)).not.toBe(key);
     }
-    expect(riskStatusLabel("proposed", de)).toBe("Wartet auf Zweitprüfung");
+    expect(riskStatusLabel("proposed", de)).toBe("Wartet auf Bestätigung (alter Vorschlag)");
     expect(riskStatusLabel(null, ru)).toBe("Не начата");
   });
 
@@ -260,7 +258,8 @@ describe("the risk assessment of a lead (staff)", () => {
 
   it("explains the server's decision errors", () => {
     const error = (code: string, status = 409) => new ApiRequestError(code, { status, code, body: { error: code } });
-    expect(riskDecisionErrorText(error("four_eyes_same_user"), de)).toContain("Vier-Augen-Prinzip");
+    expect(riskDecisionErrorText(error("four_eyes_same_user"), de)).toBeNull();
+    expect(riskDecisionErrorText(error("proposal_pending"), ru)).toBe("Есть старое предложение — подтвердите или отзовите его.");
     expect(riskDecisionErrorText(error("assessment_changed"), ru)).toContain("Оценка изменилась");
     expect(riskDecisionErrorText(error("sanctions_confirmed"), ru)).toBe(
       "Подтверждено совпадение с санкционным списком: разрешение невозможно. Обновите страницу.",

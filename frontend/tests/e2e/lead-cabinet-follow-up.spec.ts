@@ -916,6 +916,10 @@ test.describe("lead cabinet stepper and follow-up", () => {
     });
     await page.goto("/");
     await expect(page.getByTestId("lead-request-follow-up-A")).toHaveCount(0);
+    // The refused only copy leaves step "Ausweis" incomplete until a new one arrives (QA 2026-10-25, F-V2).
+    const identityTab = page.locator("[role=tab][data-step=identity]");
+    await expect(identityTab).toContainText("1 Angabe fehlt");
+    await expect(identityTab).not.toContainText("Vollständig");
 
     const blockC = page.getByTestId("lead-request-follow-up-C");
     await choose(page, blockC.getByRole("combobox", { name: "Welche Zahlungsart für Rechnungen bevorzugen Sie?" }), "Bar");
@@ -956,6 +960,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(blockI.getByTestId("lead-request-identity-list").getByRole("listitem")).toHaveCount(1);
     await expect(page.getByTestId("lead-request-follow-up-I-missing")).toHaveCount(0);
     await expect(blockI.getByTestId("lead-request-identity-list-refused")).toHaveCount(0);
+    await expect(identityTab).not.toContainText("Angabe fehlt");
     expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
   });
 

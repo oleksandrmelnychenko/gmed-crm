@@ -114,6 +114,7 @@ const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
     title: { ru: "Требуется проверка риска", de: "Risikoprüfung erforderlich" },
     body: { ru: "Откройте лид и проверьте оценку риска.", de: "Lead öffnen und die Risikobewertung prüfen." },
   },
+  // Old notices only: no new proposals since the four-eyes rule was removed (owner 2026-10-25).
   risk_decision_proposed: {
     title: {
       ru: "Решение по риску ждёт второго проверяющего",

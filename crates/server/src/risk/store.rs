@@ -31,7 +31,6 @@ pub const STATUS_REJECTED: &str = "rejected";
 pub const STATUS_GRANDFATHERED: &str = "grandfathered";
 
 pub const NOTIFY_REVIEW_REQUIRED: &str = "risk_review_required";
-pub const NOTIFY_DECISION_PROPOSED: &str = "risk_decision_proposed";
 
 pub const PARTY_CABINET: &str = "cabinet";
 pub const PARTY_PAYER_LINK: &str = "payer_link";
@@ -782,7 +781,8 @@ pub fn block_states(
     answers: &BlockAnswers,
 ) -> BTreeMap<&'static str, BlockState> {
     // Level 3 too (owner 2026-10-10): staff decide on level 3 with the details the
-    // triggers ask for; the halt and the four-eyes decision stay.
+    // triggers ask for; the halt stays. Since 2026-10-25 one reviewer decides
+    // level 3 at once (no four eyes).
     let funds = funds_asked(level, requested);
     let automatic = if level >= 2 && config.level_2_blocks_automatic {
         blocks_of(triggers)
@@ -905,7 +905,11 @@ fn computed_status(level: i16, states: &BTreeMap<&'static str, BlockState>) -> &
 // Reassessment
 // ----------------------------------------------------------------------------
 
-/// Whether a proposal waits for its second reviewer.
+/// A proposal recorded before 2026-10-25 that still waits for its second
+/// reviewer. Four eyes at level 3 are gone (owner decision 2026-10-25): new
+/// decisions are effective at once (`four_eyes = false`) and never a
+/// proposal; an older one (`four_eyes IS NULL`) can still be confirmed or
+/// withdrawn, so nothing is stranded.
 async fn pending_proposal_id(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -915,6 +919,7 @@ async fn pending_proposal_id(
            WHERE p.lead_id = $1
              AND p.level = 3
              AND p.decision IN ('release', 'reject')
+             AND p.four_eyes IS NOT FALSE
              AND p.confirms_decision_id IS NULL
              AND p.withdraws_decision_id IS NULL
              AND NOT EXISTS (
@@ -1444,8 +1449,6 @@ pub enum DecisionError {
     BlocksRequired,
     ProposalPending,
     ProposalNotPending,
-    SameUser,
-    NotProposer,
     AssessmentChanged,
     /// A release of a lead with a confirmed sanctions match.
     SanctionsConfirmed,
@@ -1458,12 +1461,11 @@ impl From<sqlx::Error> for DecisionError {
     }
 }
 
-/// What a decision did: its row, and whether it is a proposal waiting for a
-/// second reviewer (level 3) rather than effective at once.
+/// What a decision did: its row. Every decision is effective at once (four
+/// eyes at level 3 removed, owner decision 2026-10-25).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionOutcome {
     pub id: Uuid,
-    pub proposed: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1481,8 +1483,8 @@ async fn insert_decision(
     let id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO lead_risk_decisions
                (lead_id, decision, reason, blocks, level, fingerprint, decided_by,
-                confirms_decision_id, withdraws_decision_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                confirms_decision_id, withdraws_decision_id, four_eyes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false)
            RETURNING id"#,
     )
     .bind(lead_id)
@@ -1511,6 +1513,9 @@ async fn insert_decision(
                 "fingerprint": assessment.fingerprint,
                 "confirms_decision_id": confirms,
                 "withdraws_decision_id": withdraws,
+                // One reviewer's decision by rule, at every level (owner
+                // decision 2026-10-25: no second reviewer at level 3).
+                "four_eyes": false,
             }),
         ),
     )
@@ -1605,9 +1610,11 @@ async fn apply_effect(
     Ok(())
 }
 
-/// A reviewer's decision (contract 4.2). `request_more` and every decision
-/// at level ≤ 2 are effective at once; `release` / `reject` at level 3 are a
-/// proposal until another reviewer confirms it.
+/// A reviewer's decision (contract 4.2), effective at once at every level:
+/// four eyes at level 3 were removed (owner decision 2026-10-25), so one
+/// reviewer releases or rejects a level-3 lead, with the mandatory reason the
+/// route checks. Refused while a proposal from before that decision waits
+/// (it is confirmed or withdrawn first).
 pub async fn decide(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -1657,77 +1664,37 @@ pub async fn decide(
         None,
     )
     .await?;
-    if decision != "request_more" && assessment.score.level >= 3 {
-        sqlx::query(
-            "UPDATE lead_risk_assessments SET status = 'proposed', updated_at = now() WHERE lead_id = $1",
-        )
-        .bind(lead_id)
-        .execute(&mut *conn)
-        .await?;
-        if assessment.status != STATUS_PROPOSED {
-            write_event(
-                conn,
-                lead_id,
-                "status",
-                &assessment.score,
-                &assessment.triggers,
-                STATUS_PROPOSED,
-                Cause::Staff,
-                Some(actor),
-            )
-            .await?;
-        }
-        let config = load_config(conn).await?;
-        let others: Vec<Uuid> = reviewer_ids(conn, &config)
-            .await?
-            .into_iter()
-            .filter(|id| *id != actor)
-            .collect();
-        notify(
-            conn,
-            &others,
-            lead_id,
-            NOTIFY_DECISION_PROPOSED,
-            "Risk decision waits for a second reviewer",
-        )
-        .await?;
-        return Ok(DecisionOutcome { id, proposed: true });
-    }
     apply_effect(conn, &assessment, decision, &blocks, actor).await?;
     if decision == "request_more" {
         reassess(conn, lead_id, Cause::Staff, Some(actor)).await?;
     }
-    Ok(DecisionOutcome {
-        id,
-        proposed: false,
-    })
+    Ok(DecisionOutcome { id })
 }
 
-/// The pending proposal `proposal_id` of the lead with its decision, proposer
-/// and fingerprint.
+/// The pending proposal `proposal_id` of the lead with its decision,
+/// fingerprint and reason.
 async fn pending_proposal(
     conn: &mut PgConnection,
     lead_id: Uuid,
     proposal_id: Uuid,
-) -> Result<Option<(String, Uuid, String, String)>, sqlx::Error> {
+) -> Result<Option<(String, String, String)>, sqlx::Error> {
     if pending_proposal_id(conn, lead_id).await? != Some(proposal_id) {
         return Ok(None);
     }
-    let row = sqlx::query(
-        "SELECT decision, decided_by, fingerprint, reason FROM lead_risk_decisions WHERE id = $1",
-    )
-    .bind(proposal_id)
-    .fetch_one(&mut *conn)
-    .await?;
+    let row =
+        sqlx::query("SELECT decision, fingerprint, reason FROM lead_risk_decisions WHERE id = $1")
+            .bind(proposal_id)
+            .fetch_one(&mut *conn)
+            .await?;
     Ok(Some((
         row.try_get("decision")?,
-        row.try_get("decided_by")?,
         row.try_get("fingerprint")?,
         row.try_get("reason")?,
     )))
 }
 
-/// The second reviewer confirms a proposal (four eyes).
+/// A reviewer confirms a proposal recorded before 2026-10-25. Any reviewer,
+/// the proposer included: one reviewer's decision suffices now.
 pub async fn confirm(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -1738,14 +1705,11 @@ pub async fn confirm(
     let Some(assessment) = reassess(conn, lead_id, Cause::Staff, Some(actor)).await? else {
         return Err(DecisionError::NotStarted);
     };
-    let Some((decision, proposer, print, proposal_reason)) =
+    let Some((decision, print, proposal_reason)) =
         pending_proposal(conn, lead_id, proposal_id).await?
     else {
         return Err(DecisionError::ProposalNotPending);
     };
-    if proposer == actor {
-        return Err(DecisionError::SameUser);
-    }
     if print != assessment.fingerprint {
         return Err(DecisionError::AssessmentChanged);
     }
@@ -1773,8 +1737,9 @@ pub async fn confirm(
     Ok(id)
 }
 
-/// The proposer withdraws the own proposal; the status follows from the
-/// assessment again.
+/// A reviewer withdraws a proposal recorded before 2026-10-25 (not only its
+/// proposer, so none is stranded); the status follows from the assessment
+/// again.
 pub async fn withdraw(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -1785,17 +1750,13 @@ pub async fn withdraw(
     let Some(assessment) = load(conn, lead_id).await? else {
         return Err(DecisionError::NotStarted);
     };
-    let Some((decision, proposer, _, _)) = pending_proposal(conn, lead_id, proposal_id).await?
-    else {
+    let Some((decision, _, _)) = pending_proposal(conn, lead_id, proposal_id).await? else {
         return Err(DecisionError::ProposalNotPending);
     };
-    if proposer != actor {
-        return Err(DecisionError::NotProposer);
-    }
     let reason = reason
         .map(str::trim)
         .filter(|reason| reason.chars().count() >= super::cabinet::MIN_REASON_CHARS)
-        .unwrap_or("Proposal withdrawn by the proposer")
+        .unwrap_or("Proposal withdrawn by a reviewer")
         .to_string();
     let id = insert_decision(
         conn,

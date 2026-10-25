@@ -275,6 +275,13 @@ node node_modules/@playwright/test/cli.js test tests/e2e/document-signatures.spe
   (`frame_roles`), розмір, `pending_elsewhere`, `electronic_form_excluded`;
   інформаційні додатки окремо; запропонований комплект
   (`preset_document_ids`), підписанти й мова запрошення, ліміти.
+  Запропоновані підписанти (`suggested_signers`) — об'єднання підписантів
+  **усіх** документів запропонованого комплекту без повторів за e-mail
+  (`defaults::suggested_for_package`, 2026-10-25): спершу підписанти першого
+  документа, клієнт-підписант договору (батько-платник неповнолітнього, пункт
+  94 карти) — першим серед клієнтів; тож другий батько, який підписує лише
+  згоди дитини, пропонується без ручного додавання й отримує тільки рамки
+  `guardian_N` своїх документів, ніколи рамку `client` договору.
 - `POST /signature-packages` — `document_ids[]` (порядок = порядок сторінок,
   перший документ — головний), `signers`, `attachment_ids[]`, `level`
   (`QES`/`AES`), `expires_at`, `message`, `language`. Перевіряються: 1–10

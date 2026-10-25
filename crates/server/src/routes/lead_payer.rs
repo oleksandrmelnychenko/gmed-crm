@@ -1430,7 +1430,7 @@ impl PayerReadiness {
         // or the payer is identified.
         checks.push(json!({
             "key": "payer_identified",
-            "label": "Third-party payer identified (questionnaire and identity document) at risk level 2",
+            "label": "Third-party payer identified (questionnaire or paper Selbstauskunft, and identity document) at risk level 2",
             "passed": !self.reasons.contains(&PayerReason::PayerNotIdentified),
             "blocking_for": "conversion",
             "stage": "compliance",
@@ -1770,14 +1770,40 @@ async fn payer_identification_required(
 /// "Ausweis (Zahler/in)"). A previous payer's copies are archived and do not
 /// count.
 async fn payer_identified(conn: &mut PgConnection, lead_id: Uuid) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
-        r#"SELECT (
+    Ok(load_payer_identification(conn, lead_id).await?.identified())
+}
+
+/// What identifies a third-party payer ([`payer_identified`]), part by part,
+/// for the wizard's payer section (re-check V-A7: the staff paper path).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PayerIdentification {
+    /// The questionnaire was sent (or adopted) through the link or cabinet.
+    pub statement_sent: bool,
+    /// A signed Selbstauskunft is on file (QES or the scan of the paper copy).
+    pub self_disclosure_signed: bool,
+    /// A current identity document of the payer is on file.
+    pub identity_document: bool,
+}
+
+impl PayerIdentification {
+    pub(crate) fn identified(self) -> bool {
+        (self.statement_sent || self.self_disclosure_signed) && self.identity_document
+    }
+}
+
+pub(crate) async fn load_payer_identification(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<PayerIdentification, sqlx::Error> {
+    let (statement_sent, self_disclosure_signed, identity_document): (bool, bool, bool) =
+        sqlx::query_as(
+            r#"SELECT
                   EXISTS (
                       SELECT 1 FROM lead_payer_statements s
                       WHERE s.lead_id = $1
                         AND (s.submitted_at IS NOT NULL OR s.adopted_at IS NOT NULL)
-                  )
-                  OR EXISTS (
+                  ),
+                  EXISTS (
                       SELECT 1 FROM documents d
                       WHERE (d.lead_id = $1
                              OR d.order_id IN (SELECT o.id FROM orders o WHERE o.source_lead_id = $1))
@@ -1786,18 +1812,46 @@ async fn payer_identified(conn: &mut PgConnection, lead_id: Uuid) -> Result<bool
                         AND d.signed_at IS NOT NULL
                         AND d.status <> 'archived'
                         AND d.file_deleted_at IS NULL
-                  )
-              ) AND EXISTS (
-                  SELECT 1 FROM documents d
-                  WHERE d.lead_id = $1
-                    AND d.art = 'payer_identity'
-                    AND d.status <> 'archived'
-                    AND d.file_deleted_at IS NULL
-              )"#,
-    )
-    .bind(lead_id)
-    .fetch_one(&mut *conn)
-    .await
+                  ),
+                  EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.lead_id = $1
+                        AND d.art = 'payer_identity'
+                        AND d.status <> 'archived'
+                        AND d.file_deleted_at IS NULL
+                  )"#,
+        )
+        .bind(lead_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(PayerIdentification {
+        statement_sent,
+        self_disclosure_signed,
+        identity_document,
+    })
+}
+
+/// `status.identification` of `GET /leads/{id}/payer-declaration`: whether
+/// the third-party payer must identify himself and how far he is, so staff
+/// see the paper path beside the link (re-check V-A7). `null` without a
+/// third-party payer of his own (nobody else pays, or a minor's parent).
+async fn identification_status(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    state: &PayerState,
+) -> Result<Value, sqlx::Error> {
+    if !state.is_third_party() || state.paying_parent {
+        return Ok(Value::Null);
+    }
+    let required = payer_identification_required(conn, lead_id).await?;
+    let parts = load_payer_identification(conn, lead_id).await?;
+    Ok(json!({
+        "required": required,
+        "identified": parts.identified(),
+        "statement_sent": parts.statement_sent,
+        "self_disclosure_signed": parts.self_disclosure_signed,
+        "identity_document": parts.identity_document,
+    }))
 }
 
 /// [`PayerReason::PayerNotIdentified`]: a third party who is not the minor's
@@ -2398,6 +2452,11 @@ async fn get_payer_declaration(
     payload["status"]["contact_consent_required"] = required.clone();
     payload["status"]["cost_estimate_consent_required"] = required.clone();
     payload["status"]["payer_package"] = package;
+    payload["status"]["identification"] =
+        match identification_status(&mut conn, lead_id, &payer).await {
+            Ok(value) => value,
+            Err(error) => return database_error(error, "load payer identification"),
+        };
     // Who may be named as paying representative, and who is (owner decision
     // 2026-10-19): the minor's current parents or legal representatives with
     // their data as the representative block holds them.

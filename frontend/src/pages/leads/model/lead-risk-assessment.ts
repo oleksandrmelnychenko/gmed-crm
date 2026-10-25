@@ -180,12 +180,17 @@ export type LeadRiskAssessment = RiskScore & {
   config_version: number | null;
   /** The caller is a reviewer (CEO or a named deputy). */
   can_decide: boolean;
-  /** The caller may confirm the pending proposal (a reviewer other than the proposer). */
+  /**
+   * The caller may confirm the pending proposal. Proposals exist only from
+   * before 2026-10-25 (four-eyes at level 3 was removed then); any reviewer
+   * may confirm one, its author too.
+   */
   can_confirm: boolean;
-  /** The caller may withdraw the pending proposal (the proposer); null when the server does not say. */
+  /** The caller may withdraw the pending (old) proposal — any reviewer; null when the server does not say. */
   can_withdraw: boolean | null;
   /** The caller may start a grandfathered or not-started assessment; null when the server does not say. */
   can_restart: boolean | null;
+  /** Always false since 2026-10-25 (owner decision): every decision is effective at once. Kept as the server sends it. */
   four_eyes_required: boolean;
   reviewers_available: number;
   /** The lead has a confirmed (final) sanctions match: no release is offered. */
@@ -381,7 +386,7 @@ export function normalizeLeadRiskAssessment(value: unknown): LeadRiskAssessment 
     can_confirm: raw.can_confirm === true,
     can_withdraw: typeof raw.can_withdraw === "boolean" ? raw.can_withdraw : null,
     can_restart: typeof raw.can_restart === "boolean" ? raw.can_restart : null,
-    four_eyes_required: raw.four_eyes_required === true || score.level === 3,
+    four_eyes_required: raw.four_eyes_required === true,
     reviewers_available: count(raw.reviewers_available),
     sanctions_confirmed: raw.sanctions_confirmed === true,
   };
@@ -433,26 +438,14 @@ export function riskCanRestart(assessment: LeadRiskAssessment): boolean {
   return assessment.can_restart ?? assessment.can_decide;
 }
 
-/** Release / reject are effective at once up to level 2; at level 3 they are a proposal for a second reviewer. */
-export function riskDecisionNeedsSecondReviewer(assessment: LeadRiskAssessment, decision: RiskDecisionKind): boolean {
-  return decision !== "request_more" && (assessment.level === 3 || assessment.four_eyes_required);
-}
-
-/** Level 3 cannot be released while fewer than two reviewers exist (the owner must name a deputy). */
-export function riskSecondReviewerMissing(assessment: LeadRiskAssessment): boolean {
-  return assessment.level === 3 && assessment.reviewers_available < 2;
-}
-
 /**
- * Whether the caller may withdraw the pending proposal: the server's answer,
- * else the proposer is the reviewer who may decide but not confirm.
+ * Whether the caller may withdraw the pending proposal (one recorded before
+ * the four-eyes rule was removed on 2026-10-25): the server's answer, else any
+ * reviewer.
  */
-export function riskCanWithdraw(assessment: LeadRiskAssessment, currentUserId?: string | null): boolean {
-  const proposal = assessment.pending_proposal;
-  if (!proposal) return false;
-  if (assessment.can_withdraw !== null) return assessment.can_withdraw;
-  if (currentUserId && proposal.decided_by) return proposal.decided_by === currentUserId;
-  return assessment.can_decide && !assessment.can_confirm;
+export function riskCanWithdraw(assessment: LeadRiskAssessment): boolean {
+  if (!assessment.pending_proposal) return false;
+  return assessment.can_withdraw ?? assessment.can_decide;
 }
 
 /** The decisions a reviewer may take now (none while a proposal waits). */
@@ -709,7 +702,8 @@ export function riskStatusLabel(status: RiskStatus | null, tx: Tx): string {
     case "review_required":
       return tx("Нужно решение", "Entscheidung erforderlich");
     case "proposed":
-      return tx("Ждёт второго проверяющего", "Wartet auf Zweitprüfung");
+      // Only proposals recorded before 2026-10-25 (four-eyes removed) can still wait.
+      return tx("Ждёт подтверждения (старое предложение)", "Wartet auf Bestätigung (alter Vorschlag)");
     case "released":
       return tx("Разрешено", "Freigegeben");
     case "rejected":
@@ -834,27 +828,20 @@ export function riskDecisionErrorText(error: unknown, tx: Tx): string | null {
       return tx("Укажите причину (минимум 10 символов).", "Bitte eine Begründung angeben (mindestens 10 Zeichen).");
     case "blocks_required":
       return tx("Выберите хотя бы один блок.", "Bitte mindestens einen Block auswählen.");
-    case "four_eyes_same_user":
-      return tx(
-        "Подтвердить должен другой проверяющий (принцип четырёх глаз).",
-        "Bestätigen muss eine andere prüfende Person (Vier-Augen-Prinzip).",
-      );
     case "assessment_changed":
       return tx(
-        "Оценка изменилась после предложения: проверьте данные и предложите решение заново.",
-        "Die Bewertung hat sich seit dem Vorschlag geändert: bitte prüfen und neu vorschlagen.",
+        "Оценка изменилась после предложения: проверьте данные и примите решение заново.",
+        "Die Bewertung hat sich seit dem Vorschlag geändert: bitte prüfen und neu entscheiden.",
       );
     case "risk_review_required":
       return riskGateErrorText(error, tx);
     case "proposal_pending":
       return tx(
-        "Предложение ещё ждёт второго проверяющего: сначала подтвердите или отзовите его.",
-        "Ein Vorschlag wartet noch auf die Zweitprüfung: erst bestätigen oder zurücknehmen.",
+        "Есть старое предложение — подтвердите или отзовите его.",
+        "Es gibt einen alten Vorschlag – bitte bestätigen oder zurücknehmen.",
       );
     case "proposal_not_pending":
       return tx("Это предложение уже подтверждено или отозвано.", "Dieser Vorschlag ist bereits bestätigt oder zurückgenommen.");
-    case "not_proposer":
-      return tx("Отозвать предложение может только его автор.", "Nur die vorschlagende Person kann den Vorschlag zurücknehmen.");
     case "assessment_not_started":
       return tx("Оценка риска ещё не начата.", "Die Risikobewertung hat noch nicht begonnen.");
     case "sanctions_confirmed":

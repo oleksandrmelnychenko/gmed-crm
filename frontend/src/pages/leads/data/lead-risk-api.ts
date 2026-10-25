@@ -23,8 +23,8 @@ export async function fetchLeadRiskAssessment(leadId: string) {
 
 /**
  * `POST /leads/{id}/risk-assessment/decisions`: release / request more /
- * reject with a reason (at least 10 characters). At level 3 a release or a
- * reject is a proposal until a second reviewer confirms it.
+ * reject with a mandatory reason (at least 10 characters, else 422
+ * `reason_required`). Effective at once at every level (four-eyes removed 2026-10-25).
  */
 export async function postLeadRiskDecision(
   leadId: string,
@@ -35,7 +35,7 @@ export async function postLeadRiskDecision(
   return apiFetch<unknown>(`${base(leadId)}/risk-assessment/decisions`, send("POST", body));
 }
 
-/** `POST …/decisions/{id}/confirm`: the second reviewer confirms a level-3 proposal (own reason). */
+/** `POST …/decisions/{id}/confirm`: any reviewer confirms a level-3 proposal recorded before 2026-10-25 (own reason). */
 export async function confirmLeadRiskDecision(leadId: string, decisionId: string, reason: string) {
   return apiFetch<unknown>(
     `${base(leadId)}/risk-assessment/decisions/${encodeURIComponent(decisionId)}/confirm`,
@@ -43,7 +43,7 @@ export async function confirmLeadRiskDecision(leadId: string, decisionId: string
   );
 }
 
-/** `POST …/decisions/{id}/withdraw`: the proposer takes the proposal back (own reason). */
+/** `POST …/decisions/{id}/withdraw`: any reviewer withdraws a proposal recorded before 2026-10-25 (own reason). */
 export async function withdrawLeadRiskDecision(leadId: string, decisionId: string, reason: string) {
   return apiFetch<unknown>(
     `${base(leadId)}/risk-assessment/decisions/${encodeURIComponent(decisionId)}/withdraw`,

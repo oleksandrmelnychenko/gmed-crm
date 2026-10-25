@@ -348,11 +348,6 @@ export function RiskSettingsTab() {
                 {formatUiText(t.risk_reviewers_count, { ceo: reviewerCounts.ceo, deputies: reviewerCounts.deputies })}
               </p>
             ) : null}
-            {reviewerCounts && reviewerCounts.ceo + reviewerCounts.deputies < 2 ? (
-              <p className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid="risk-reviewers-second-missing">
-                {t.risk_reviewers_second_missing}
-              </p>
-            ) : null}
             {reviewerOptions.length === 0 ? (
               <p className="text-xs text-muted-foreground">{t.risk_reviewers_none}</p>
             ) : (

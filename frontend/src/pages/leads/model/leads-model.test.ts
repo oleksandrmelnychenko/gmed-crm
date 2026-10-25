@@ -506,12 +506,12 @@ describe("readiness check payer_identified (backend 2026-10-25)", () => {
   it("labels the check and the reason, and explains the 422 of the conversion", () => {
     expect(leadReadinessCheckLabel({ key: "payer_identified", label: "raw" }, translateCatalog("ru"))).toBe("Плательщик идентифицирован (анкета и документ)");
     expect(leadReadinessReasonLabel("Third-party payer is not identified", translateCatalog("de")))
-      .toBe("Zahler/in nicht identifiziert: Fragebogen und Ausweis des Zahlers fehlen");
+      .toBe("Fragebogen des Zahlers über den Link ausfüllen lassen oder die auf Papier unterschriebene Selbstauskunft und den Ausweis des Zahlers hochladen");
     const refused = new ApiRequestError("Lead is not conversion-ready", {
       status: 422,
       code: "payer_not_identified",
       body: { error: "Unprocessable Entity", code: "payer_not_identified", blocking_reasons: ["Third-party payer is not identified"] },
     });
-    expect(leadErrorMessage(refused, tx)).toBe("Плательщик не идентифицирован: нужна анкета плательщика и его документ");
+    expect(leadErrorMessage(refused, tx)).toBe("Заполните анкету плательщика по ссылке или загрузите подписанную на бумаге Selbstauskunft и документ плательщика");
   });
 });

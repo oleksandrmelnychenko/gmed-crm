@@ -127,6 +127,23 @@ describe("dismissal guard", () => {
     expect(isAuxiliaryOverlayEscape("escape-key", undefined)).toBe(false)
   })
 
+  it("keeps the dialog open on an Escape a list inside it already handled, however often the dialog hears it", () => {
+    class FakeElement {
+      closest() {
+        return null
+      }
+    }
+    vi.stubGlobal("Element", FakeElement)
+
+    // QA 2026-10-25, F-V1: the list closed and prevented the default; the dialog
+    // must not ask "close without saving?" for the same key press.
+    const handled = { target: new FakeElement(), defaultPrevented: true } as unknown as Event
+    expect(isAuxiliaryOverlayEscape("escape-key", handled)).toBe(true)
+    expect(isAuxiliaryOverlayEscape("escape-key", handled)).toBe(true)
+    const own = { target: new FakeElement(), defaultPrevented: false } as unknown as Event
+    expect(isAuxiliaryOverlayEscape("escape-key", own)).toBe(false)
+  })
+
   it("closes the dialog on Escape in the search input of a list that is already closing", () => {
     // Closest-match emulation: the list root carries data-closed during its exit animation.
     class FakeElement {

@@ -2440,3 +2440,186 @@ async fn a_level_two_third_party_payer_must_be_identified_before_the_conversion(
     .await;
     assert_ne!(refused["code"], "payer_not_identified", "{refused}");
 }
+
+/// `POST /documents/upload` as the wizard's payer section sends the payer's
+/// identity document on the paper path: type "Ausweis (Zahler/in)" on the
+/// lead, the optional ID data in the notes.
+async fn upload_payer_identity(app: &TestApp, bearer: &str, lead_id: Uuid) -> (StatusCode, Value) {
+    let boundary = format!("----gmed-payer-id-{}", Uuid::new_v4().simple());
+    let mut body = Vec::new();
+    for (name, value) in [
+        ("lead_id", lead_id.to_string()),
+        ("art", "payer_identity".to_string()),
+        ("category", "identity".to_string()),
+        (
+            "auto_name",
+            "Ausweisdokument – Kostenübernehmer/in Erika Zahler".to_string(),
+        ),
+        ("document_direction", "incoming".to_string()),
+        ("access_category", "internal".to_string()),
+        ("is_medical", "false".to_string()),
+        ("source_person", "payer".to_string()),
+        ("ursprung", "staff_paper_path".to_string()),
+        (
+            "notes",
+            "Reisepass Nr. P7654321, gültig bis 31.12.2031".to_string(),
+        ),
+    ] {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"payer-pass.pdf\"\r\nContent-Type: application/pdf\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(b"%PDF-1.4 synthetic payer passport scan");
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/documents/upload")
+        .header("Authorization", bearer)
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let response = app.suite.app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
+}
+
+/// DEV re-check V-A7: a level-2 third-party payer without e-mail (or who
+/// prefers paper) is identified without any payer link — staff upload the
+/// payer's identity document and file the Selbstauskunft generated as a
+/// paper form and signed by hand. The conversion then no longer refuses
+/// with `payer_not_identified`.
+#[tokio::test]
+async fn a_level_two_payer_is_identified_on_paper_without_a_payer_link() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let pm = app.bearer("patient_manager");
+    let ceo = app.bearer("ceo");
+
+    let lead_id = seed_lead(pool).await;
+    let mut payer = third_party_payer();
+    payer["citizenships"] = json!(["IR"]);
+    payer["country"] = json!("IR");
+    payer["email"] = Value::Null;
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(payer)).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    // The risk gate holds level 2 first (the attempt starts the
+    // assessment); the CEO releases it.
+    let convert = format!("/api/v1/leads/{lead_id}/convert");
+    let (status, held) = json_request(&app, "POST", &convert, &ceo, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{held}");
+    assert_eq!(held["error"], "risk_review_required", "{held}");
+    let (status, released) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/risk-assessment/decisions"),
+        &ceo,
+        Some(json!({ "decision": "release", "reason": "Payer checked in person" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{released}");
+    let (_, declaration) = json_request(&app, "GET", &path, &pm, None).await;
+    let identification = &declaration["status"]["identification"];
+    assert_eq!(identification["required"], true, "{declaration}");
+    assert_eq!(identification["identified"], false, "{declaration}");
+
+    // Without the paper form the Selbstauskunft still waits for the payer.
+    let generate = |paper: bool| {
+        json!({
+            "template_id": "payer_self_disclosure", "lead_id": lead_id,
+            "language": "de", "document_language": "de",
+            "document_direction": "outgoing", "document_variant": "original",
+            "status": "active", "paper_form": paper,
+        })
+    };
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &pm,
+        Some(generate(false)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "payer_not_submitted", "{refused}");
+
+    // (a) The payer's identity document, uploaded by staff.
+    let (status, uploaded) = upload_payer_identity(&app, &pm, lead_id).await;
+    assert!(status.is_success(), "{status} {uploaded}");
+    let (art, category, notes): (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT art, category, notes FROM documents WHERE lead_id = $1 AND art = 'payer_identity'",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(art, "payer_identity");
+    assert_eq!(category.as_deref(), Some("identity"));
+    assert!(notes.unwrap_or_default().contains("P7654321"));
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(readiness_check(&lead, "payer_identified")["passed"], false);
+
+    // (b) The paper Selbstauskunft, generated and signed on paper.
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &pm,
+        Some(generate(true)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id = generated["id"].as_str().unwrap().to_string();
+    let (status, signed) = support::paper_signature(&app.suite.app, &pm, &document_id).await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+
+    let (_, declaration) = json_request(&app, "GET", &path, &pm, None).await;
+    let identification = &declaration["status"]["identification"];
+    assert_eq!(identification["identified"], true, "{declaration}");
+    assert_eq!(identification["self_disclosure_signed"], true);
+    assert_eq!(identification["identity_document"], true);
+    assert_eq!(identification["statement_sent"], false);
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(
+        readiness_check(&lead, "payer_identified")["passed"],
+        true,
+        "{lead}"
+    );
+    assert!(!has_reason(&lead, "Third-party payer is not identified"));
+    let links: i64 = sqlx::query_scalar("SELECT count(*) FROM lead_payer_links WHERE lead_id = $1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(links, 0, "no payer link was needed");
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/convert"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_ne!(
+        refused["code"], "payer_not_identified",
+        "{status} {refused}"
+    );
+}

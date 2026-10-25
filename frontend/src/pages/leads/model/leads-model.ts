@@ -357,8 +357,8 @@ export function leadErrorMessage(
   // The gate answers `error` "Unprocessable Entity" with the reason in `code`.
   if (leadErrorBody(error)?.code === "payer_not_identified" || leadErrorCode(error) === "payer_not_identified") {
     return tx(
-      "Плательщик не идентифицирован: нужна анкета плательщика и его документ",
-      "Zahler/in nicht identifiziert: Fragebogen und Ausweis des Zahlers fehlen",
+      "Заполните анкету плательщика по ссылке или загрузите подписанную на бумаге Selbstauskunft и документ плательщика",
+      "Fragebogen des Zahlers über den Link ausfüllen lassen oder die auf Papier unterschriebene Selbstauskunft und den Ausweis des Zahlers hochladen",
     );
   }
   if (guardianOwnLoginError(error)) {

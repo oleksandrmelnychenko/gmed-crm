@@ -49,6 +49,7 @@ import type { LeadPayerPackageState, PayerPackageDocument } from "../data/lead-p
 import { useLeadPayerPackage } from "../model/use-lead-payer-package";
 import { LeadPayerLinkPanel } from "./lead-payer-link-panel";
 import { LeadPayerPackagePanel } from "./lead-payer-package-panel";
+import { LeadPayerPaperPath } from "./lead-payer-paper-path";
 import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata";
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
@@ -90,6 +91,16 @@ import {
 } from "../model/lead-payer";
 
 const MAX_EVIDENCE_FILE_SIZE = 25 * 1024 * 1024;
+
+/** The stored payer's name for document titles: the organisation, else first and last name. */
+function payerDisplayName(declaration: PayerDeclaration): string {
+  const organisation = declaration.organisation_name?.trim();
+  if (organisation) return organisation;
+  return [declaration.first_name, declaration.last_name]
+    .map((part) => part?.trim() ?? "")
+    .filter(Boolean)
+    .join(" ");
+}
 
 /** A typed third-party e-mail that is not name@domain.tld. */
 const payerEmailFormatInvalid = (form: PayerDeclarationForm) =>
@@ -1217,6 +1228,21 @@ export function LeadPayerDeclarationSection({
                 {tx("Не удалось загрузить ссылку плательщика: ", "Zahler-Link konnte nicht geladen werden: ")}
                 {errorText(payerLink.error)}
               </p>
+            ) : null}
+            {/* The payer link goes by e-mail only: beside it staff identify a payer on paper (re-check V-A7). */}
+            {data?.status.identification && !payingParent && data.declaration?.payer_kind === "third_party" ? (
+              <LeadPayerPaperPath
+                leadId={leadId}
+                identification={data.status.identification}
+                payerName={payerDisplayName(data.declaration)}
+                canEdit={canEdit}
+                disabled={disabled}
+                lang={lang === "de" ? "de" : "ru"}
+                tx={tx}
+                errorText={errorText}
+                onChanged={onPayerLinkSent}
+                onOpenDocument={onOpenPayerDocument}
+              />
             ) : null}
           </div>
         ) : null}

@@ -548,6 +548,103 @@ pub(super) async fn suggested(
     Ok(signers)
 }
 
+/// The signers a package suggests: the union of every document's suggestion
+/// (`suggested`), deduplicated by e-mail, the first document's signers first
+/// (owner rule map 94 follow-up 2026-10-25). A minor's contract names only the
+/// paying parent, the child's consents both custody parents: a package with
+/// both suggests both. The parent who contracts leads the client signers, so
+/// the bundle gives the contract's `client` frame to that parent and the other
+/// parent only the `guardian_N` frames of the documents they sign
+/// (`package::visual_positions`).
+pub(super) async fn suggested_for_package(
+    state: &AppState,
+    auth: &AuthUser,
+    rows: &[&PgRow],
+    policy: SignerPolicy,
+) -> Result<Vec<Signer>, Response> {
+    let mut merged: Vec<Signer> = Vec::new();
+    let mut contracting: Vec<String> = Vec::new();
+    for row in rows {
+        let template = row
+            .try_get::<Option<String>, _>("generated_template_id")
+            .unwrap_or_default();
+        let contract = paying_parent_signs_alone(template.as_deref());
+        for signer in suggested(state, auth, row, policy).await? {
+            let email = normalized_email(&signer.email);
+            if contract && signer.role == "client" && !email.is_empty() {
+                contracting.push(email);
+            }
+            merge_signer(&mut merged, signer);
+        }
+    }
+    lead_with_contracting_clients(&mut merged, &contracting);
+    Ok(merged)
+}
+
+fn normalized_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
+/// Adds one document's suggested signer to the package's list: a known e-mail
+/// is skipped, a named signer fills an empty placeholder of its role, a new
+/// signer joins after the last one of its role (the agency stays last).
+fn merge_signer(merged: &mut Vec<Signer>, signer: Signer) {
+    let email = normalized_email(&signer.email);
+    if email.is_empty() {
+        if !merged.iter().any(|known| known.role == signer.role) {
+            let at = insertion_point(merged, &signer.role);
+            merged.insert(at, signer);
+        }
+        return;
+    }
+    if merged
+        .iter()
+        .any(|known| normalized_email(&known.email) == email)
+    {
+        return;
+    }
+    if let Some(placeholder) = merged
+        .iter_mut()
+        .find(|known| known.role == signer.role && known.email.trim().is_empty())
+    {
+        *placeholder = signer;
+        return;
+    }
+    let at = insertion_point(merged, &signer.role);
+    merged.insert(at, signer);
+}
+
+fn insertion_point(merged: &[Signer], role: &str) -> usize {
+    if let Some(last) = merged.iter().rposition(|known| known.role == role) {
+        return last + 1;
+    }
+    if role != "agency"
+        && let Some(agency) = merged.iter().position(|known| known.role == "agency")
+    {
+        return agency;
+    }
+    merged.len()
+}
+
+/// Moves the client signers who sign a contract document ahead of the other
+/// client signers, keeping every other position and order.
+fn lead_with_contracting_clients(merged: &mut [Signer], contracting: &[String]) {
+    if contracting.is_empty() {
+        return;
+    }
+    let positions: Vec<usize> = merged
+        .iter()
+        .enumerate()
+        .filter(|(_, signer)| signer.role == "client")
+        .map(|(index, _)| index)
+        .collect();
+    let mut clients: Vec<Signer> = positions.iter().map(|&i| merged[i].clone()).collect();
+    clients.sort_by_key(|signer| !contracting.contains(&normalized_email(&signer.email)));
+    for (index, signer) in positions.into_iter().zip(clients) {
+        merged[index] = signer;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -671,6 +768,49 @@ mod tests {
         assert!(paying_parent_signs_alone(Some("single_order")));
         assert!(!paying_parent_signs_alone(Some("privacy_consents")));
         assert!(!paying_parent_signs_alone(None));
+    }
+
+    #[test]
+    fn a_package_suggests_the_union_of_its_documents_signers() {
+        let signer = |email: &str, role: &str| Signer {
+            first_name: String::new(),
+            last_name: String::new(),
+            email: email.into(),
+            role: role.into(),
+            positions: Vec::new(),
+        };
+        // Started from the consent: both parents, the father chose first.
+        let mut merged = Vec::new();
+        for s in [
+            signer("bernd@example.org", "client"),
+            signer("anna@example.org", "client"),
+            signer("", "agency"),
+        ] {
+            merge_signer(&mut merged, s);
+        }
+        // The contract: the paying mother alone; the agency is now named.
+        for s in [
+            signer("Anna@Example.org ", "client"),
+            signer("max@example.org", "agency"),
+        ] {
+            merge_signer(&mut merged, s);
+        }
+        // A cost coverage declaration adds its payer before the agency.
+        merge_signer(&mut merged, signer("payer@example.org", "payer"));
+        lead_with_contracting_clients(&mut merged, &["anna@example.org".into()]);
+        let listed: Vec<(&str, &str)> = merged
+            .iter()
+            .map(|s| (s.email.as_str(), s.role.as_str()))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("anna@example.org", "client"),
+                ("bernd@example.org", "client"),
+                ("payer@example.org", "payer"),
+                ("max@example.org", "agency"),
+            ]
+        );
     }
 
     #[test]

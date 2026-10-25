@@ -3056,6 +3056,11 @@ struct GenerateDocumentRequest {
     /// 3b): set only by [`generate_lead_document`], never read from a body.
     #[serde(skip)]
     source_cost_estimate_id: Option<Uuid>,
+    /// The paper Selbstauskunft of a third-party payer (`payer_self_disclosure`
+    /// only, DEV re-check V-A7): generated without the payer's sent answers,
+    /// with blank lines the payer fills in by hand and signs.
+    #[serde(default)]
+    paper_form: bool,
 }
 
 /// Optional manual binding fields ("yellow sockets") for the generated
@@ -19000,16 +19005,23 @@ async fn generate_document(
                     "The self-disclosure of the payer is generated for a lead",
                 );
             };
-            let disclosure = match load_payer_self_disclosure(&state, lead_uuid).await {
-                Ok(Some(disclosure)) => disclosure,
-                Ok(None) => {
-                    return gwg_sheet_refusal(
-                        "payer_not_submitted",
-                        "The payer has not sent its answers yet",
-                    );
-                }
-                Err(response) => return response,
-            };
+            let disclosure =
+                match load_payer_self_disclosure(&state, lead_uuid, body.paper_form).await {
+                    Ok(Some(disclosure)) => disclosure,
+                    Ok(None) if body.paper_form => {
+                        return gwg_sheet_refusal(
+                            "payer_declaration_not_third_party",
+                            "No third-party payer answers on paper for this lead",
+                        );
+                    }
+                    Ok(None) => {
+                        return gwg_sheet_refusal(
+                            "payer_not_submitted",
+                            "The payer has not sent its answers yet",
+                        );
+                    }
+                    Err(response) => return response,
+                };
             let agency = match load_agency_contract_settings(&state).await {
                 Ok(value) => value,
                 Err(resp) => return resp,
@@ -20962,31 +20974,177 @@ fn contracting_representative_block(
     }
 }
 
-/// The contact id of the parent a minor's cabinet named as invoice recipient
-/// who also pays ("Rechnungsempfänger: Elternteil …, der Rechnungsempfänger
-/// ist auch der Zahler"; `lead_invoice_recipients`, the one source of the
-/// recipient, read as every other reader reads it). `None` for every other
-/// answer — the patient side without a named parent, a third party as
-/// recipient, a parent who receives the invoice while someone else pays, no
-/// answer yet (older requests) — and when that parent is no representative
-/// of the child any more.
+/// What the minor's cabinet answered about a paying parent in step 3
+/// (`lead_invoice_recipients`, the one source of the recipient, read as every
+/// other reader reads it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CabinetPayingParent {
+    /// "Rechnungsempfänger: Elternteil …, der Rechnungsempfänger ist auch der
+    /// Zahler": that parent pays.
+    Pays(Uuid),
+    /// That parent receives the invoice while somebody else pays.
+    DoesNotPay(Uuid),
+    /// A third party receives the invoice and pays it: no parent pays.
+    NoParent,
+    /// No answer about a paying parent: no answer yet (older requests), the
+    /// patient side without a named parent, a third party who receives the
+    /// invoice only, or the named parent is no representative any more.
+    Unknown,
+}
+
+impl CabinetPayingParent {
+    fn of(recipient: Option<super::lead_invoice_recipient::LeadRecipient>) -> Self {
+        let Some(recipient) = recipient.filter(|recipient| !recipient.parent_removed) else {
+            return Self::Unknown;
+        };
+        let answers = recipient.answers;
+        if answers.is_third_party() {
+            return if answers.is_payer == Some(true) {
+                Self::NoParent
+            } else {
+                Self::Unknown
+            };
+        }
+        match (
+            answers.recipient.as_deref() == Some(super::lead_invoice_recipient::RECIPIENT_SELF),
+            answers.representative_contact_id,
+            answers.is_payer,
+        ) {
+            (true, Some(parent), Some(true)) => Self::Pays(parent),
+            (true, Some(parent), Some(false)) => Self::DoesNotPay(parent),
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// The one rule who of a minor's parents pays and therefore alone contracts
+/// (owner decision 2026-10-25, map item 94, re-check V-A2): the cabinet's
+/// answer "the recipient is also the payer" or, without such an answer, the
+/// parent staff named in the payer declaration ("Кто из родителей платит",
+/// kind `representative`, or a third-party row of before that is one of the
+/// parents — [`lead_representatives::payer_same_person`]). When both exist
+/// and contradict each other the cabinet's answer wins; the second value
+/// says so (the caller logs it).
+pub(crate) fn decide_paying_parent(
+    cabinet: CabinetPayingParent,
+    declared: Option<Uuid>,
+) -> (Option<Uuid>, bool) {
+    match cabinet {
+        CabinetPayingParent::Pays(parent) => {
+            (Some(parent), declared.is_some_and(|other| other != parent))
+        }
+        CabinetPayingParent::DoesNotPay(parent) if declared == Some(parent) => (None, true),
+        CabinetPayingParent::NoParent => (None, declared.is_some()),
+        CabinetPayingParent::DoesNotPay(_) | CabinetPayingParent::Unknown => (declared, false),
+    }
+}
+
+/// The contact id of the minor's parent who pays and alone is the
+/// Auftraggeber ([`decide_paying_parent`]): read by the contract documents,
+/// their default signers (`document_signatures/defaults.rs`) and the patient
+/// card's "Vertragspartei" (`patient_payer_summary.rs`). `None` when no
+/// parent is named as payer or the named one is no representative of the
+/// child any more.
 pub(crate) async fn paying_parent_contact(
     conn: &mut sqlx::PgConnection,
     lead_id: Uuid,
 ) -> Result<Option<Uuid>, sqlx::Error> {
-    Ok(super::lead_invoice_recipient::load_for_lead(conn, lead_id)
-        .await?
-        .filter(|recipient| !recipient.parent_removed)
-        .map(|recipient| recipient.answers)
-        .filter(|answers| {
-            answers.recipient.as_deref() == Some(super::lead_invoice_recipient::RECIPIENT_SELF)
-                && answers.is_payer == Some(true)
-        })
-        .and_then(|answers| answers.representative_contact_id))
+    let cabinet =
+        CabinetPayingParent::of(super::lead_invoice_recipient::load_for_lead(conn, lead_id).await?);
+    let declared = declared_paying_parent(conn, lead_id).await?;
+    let (parent, conflict) = decide_paying_parent(cabinet, declared);
+    if conflict {
+        tracing::warn!(
+            %lead_id,
+            ?cabinet,
+            ?declared,
+            "the cabinet's paying parent differs from the payer declaration; the cabinet's answer wins"
+        );
+    }
+    Ok(parent)
+}
+
+/// The parent the payer declaration names as payer
+/// ([`super::lead_representatives::payer_same_person`]), the representation
+/// of a converted lead read as of its conversion day like the invoice
+/// recipient's.
+async fn declared_paying_parent(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let Some(declaration) = super::lead_payer::load_declaration(conn, lead_id).await? else {
+        return Ok(None);
+    };
+    if !(declaration.is_representative()
+        || (declaration.is_third_party() && !declaration.is_organisation()))
+    {
+        return Ok(None);
+    }
+    let converted_on: Option<Option<chrono::DateTime<chrono::Utc>>> = sqlx::query_scalar(
+        "SELECT status_changed_at FROM leads WHERE id = $1 AND converted_patient_id IS NOT NULL",
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let on = converted_on
+        .flatten()
+        .map(crate::app_time::date_of)
+        .unwrap_or_else(crate::app_time::today);
+    let Some(loaded) = super::lead_representatives::load_on(conn, lead_id, on).await? else {
+        return Ok(None);
+    };
+    Ok(super::lead_representatives::payer_same_person(
+        &loaded.representation,
+        Some(&declaration),
+    ))
+}
+
+#[cfg(test)]
+mod paying_parent_rule_tests {
+    use super::{CabinetPayingParent as Cabinet, decide_paying_parent};
+    use uuid::Uuid;
+
+    #[test]
+    fn the_cabinet_answer_wins_and_the_declaration_fills_its_gap() {
+        let (mother, father) = (Uuid::new_v4(), Uuid::new_v4());
+        // Staff's choice alone (re-check V-A2).
+        assert_eq!(
+            decide_paying_parent(Cabinet::Unknown, Some(father)),
+            (Some(father), false)
+        );
+        assert_eq!(decide_paying_parent(Cabinet::Unknown, None), (None, false));
+        // The mother receives the invoice, the father pays: no contradiction.
+        assert_eq!(
+            decide_paying_parent(Cabinet::DoesNotPay(mother), Some(father)),
+            (Some(father), false)
+        );
+        // Agreement and contradictions: the cabinet decides, flagged.
+        assert_eq!(
+            decide_paying_parent(Cabinet::Pays(mother), Some(mother)),
+            (Some(mother), false)
+        );
+        assert_eq!(
+            decide_paying_parent(Cabinet::Pays(mother), Some(father)),
+            (Some(mother), true)
+        );
+        assert_eq!(
+            decide_paying_parent(Cabinet::Pays(mother), None),
+            (Some(mother), false)
+        );
+        assert_eq!(
+            decide_paying_parent(Cabinet::DoesNotPay(mother), Some(mother)),
+            (None, true)
+        );
+        assert_eq!(
+            decide_paying_parent(Cabinet::NoParent, Some(mother)),
+            (None, true)
+        );
+    }
 }
 
 /// The parents who contract for a minor in their own name, narrowed to the
-/// one the cabinet named as invoice recipient who also pays (owner decision
+/// paying parent ([`paying_parent_contact`]: the cabinet's invoice recipient
+/// who also pays, else the parent staff named as payer) (owner decision
 /// 2026-10-25, map item 94): that parent alone is the Auftraggeber (§ 328
 /// BGB, decision of 2026-10-19); the other parent is no party to the
 /// contract and appears in the consents only, which name every custody
@@ -25853,9 +26011,12 @@ async fn lead_order_reference(
     })
 }
 
+/// The payer's answers for the Selbstauskunft; with `paper` the paper form
+/// of a third-party payer who sent nothing ([`super::lead_payer_link::paper_self_disclosure`]).
 async fn load_payer_self_disclosure(
     state: &AppState,
     lead_id: Uuid,
+    paper: bool,
 ) -> Result<Option<super::lead_payer_link::PayerSelfDisclosure>, axum::response::Response> {
     let failed = |error: sqlx::Error| {
         tracing::error!(%error, %lead_id, "load the payer's self-disclosure");
@@ -25872,6 +26033,11 @@ async fn load_payer_self_disclosure(
         .map_err(failed)?
     {
         return Err(super::lead_payer::payer_is_representative());
+    }
+    if paper {
+        return super::lead_payer_link::paper_self_disclosure(&mut conn, lead_id)
+            .await
+            .map_err(failed);
     }
     super::lead_payer_link::self_disclosure(&mut conn, lead_id)
         .await
@@ -26021,6 +26187,11 @@ fn payer_type_label(payer_type: &str) -> &'static str {
 }
 
 /// "ja – <Angaben>", "ja", "nein" or "keine Angabe".
+/// An empty field of a paper form, filled in by hand.
+const PAPER_FORM_BLANK: &str = "________________________________________";
+/// A yes/no question of a paper form, ticked by hand.
+const PAPER_FORM_YES_NO: &str = "[  ] ja     [  ] nein";
+
 fn payer_yes_no(answer: Option<bool>, details: Option<&str>) -> String {
     match answer {
         Some(true) => match details.map(str::trim).filter(|value| !value.is_empty()) {
@@ -26129,6 +26300,21 @@ fn build_payer_self_disclosure_pdf(
         .unwrap_or("die Patientin / den Patienten");
     let (received_on, received_at) = payer_date_time(data.submitted_at);
     let email = text(data.confirmed_email.as_ref());
+    // The paper form (re-check V-A7): what staff recorded is printed, every
+    // empty field is a line the payer fills in by hand.
+    let paper = data.paper;
+    let field = |layout: &mut TreatmentPlanPdfLayout, label: &str, value: Option<&str>| {
+        let value = value.map(str::trim).filter(|value| !value.is_empty());
+        aml_labeled_value(
+            layout,
+            label,
+            if paper {
+                value.or(Some(PAPER_FORM_BLANK))
+            } else {
+                value
+            },
+        );
+    };
 
     layout.text_block_centered(
         "Selbstauskunft",
@@ -26160,12 +26346,38 @@ fn build_payer_self_disclosure_pdf(
     };
     admin_block(
         &mut layout,
-        &format!(
-            "Angaben der zahlenden Person zur Kostenübernahme für {patient} gegenüber {agency_name}, übermittelt am {received_on} um {received_at} {channel}."
-        ),
+        &if paper {
+            format!(
+                "Angaben der zahlenden Person zur Kostenübernahme für {patient} gegenüber {agency_name}, auf Papier ausgefüllt und eigenhändig unterschrieben. Bitte füllen Sie die leeren Felder aus und kreuzen Sie Zutreffendes an. Bitte legen Sie eine Kopie Ihres Ausweisdokuments bei."
+            )
+        } else {
+            format!(
+                "Angaben der zahlenden Person zur Kostenübernahme für {patient} gegenüber {agency_name}, übermittelt am {received_on} um {received_at} {channel}."
+            )
+        },
         0.0,
         3.0,
     );
+    let payer_cell = if paper && payer_name.trim().is_empty() {
+        PAPER_FORM_BLANK.to_string()
+    } else {
+        aml_binding_value(Some(payer_name.as_str())).to_string()
+    };
+    let (received_label, received_value, email_label, email_value) = if paper {
+        (
+            "Angaben",
+            "auf Papier".to_string(),
+            "E-Mail",
+            PAPER_FORM_BLANK.to_string(),
+        )
+    } else {
+        (
+            "Eingang der Angaben",
+            format!("{received_on} {received_at}"),
+            "E-Mail (bestätigt)",
+            aml_binding_value(email.as_deref()).to_string(),
+        )
+    };
     legal_meta_grid(
         &mut layout,
         &[
@@ -26175,21 +26387,15 @@ fn build_payer_self_disclosure_pdf(
                 } else {
                     "Zahlende Person"
                 },
-                aml_binding_value(Some(payer_name.as_str())).to_string(),
+                payer_cell,
             ),
             (
                 "Patient/in",
                 aml_binding_value(Some(patient_name)).to_string(),
             ),
             ("Auftrags-Nr.", aml_binding_value(order_number).to_string()),
-            (
-                "Eingang der Angaben",
-                format!("{received_on} {received_at}"),
-            ),
-            (
-                "E-Mail (bestätigt)",
-                aml_binding_value(email.as_deref()).to_string(),
-            ),
+            (received_label, received_value),
+            (email_label, email_value),
         ],
     );
 
@@ -26203,28 +26409,28 @@ fn build_payer_self_disclosure_pdf(
     let address = Some(address).filter(|line| !line.is_empty());
     if organisation {
         section.heading(&mut layout, "Angaben zur Organisation");
-        aml_labeled_value(&mut layout, "Firma", Some(payer_name.as_str()));
-        aml_labeled_value(&mut layout, "Art", Some(payer_type_label(&data.payer_type)));
-        aml_labeled_value(&mut layout, "Rechtsform", data.legal_form.as_deref());
-        aml_labeled_value(&mut layout, "USt-IdNr.", data.vat_id.as_deref());
-        aml_labeled_value(
+        field(&mut layout, "Firma", Some(payer_name.as_str()));
+        field(&mut layout, "Art", Some(payer_type_label(&data.payer_type)));
+        field(&mut layout, "Rechtsform", data.legal_form.as_deref());
+        field(&mut layout, "USt-IdNr.", data.vat_id.as_deref());
+        field(
             &mut layout,
             "Grund der Zahlung",
             data.payment_reason.as_deref(),
         );
-        aml_labeled_value(&mut layout, "Sitz", address.as_deref());
-        aml_labeled_value(
+        field(&mut layout, "Sitz", address.as_deref());
+        field(
             &mut layout,
             "Registergericht",
             data.register_court.as_deref(),
         );
-        aml_labeled_value(
+        field(
             &mut layout,
             "Registernummer",
             data.register_number.as_deref(),
         );
-        aml_labeled_value(&mut layout, "Branche", data.industry.as_deref());
-        aml_labeled_value(&mut layout, "Telefon", data.phone.as_deref());
+        field(&mut layout, "Branche", data.industry.as_deref());
+        field(&mut layout, "Telefon", data.phone.as_deref());
         let representative_line = match (
             representative.is_empty(),
             text(data.representative_role.as_ref()),
@@ -26233,14 +26439,14 @@ fn build_payer_self_disclosure_pdf(
             (false, Some(role)) => Some(format!("{representative}, {role}")),
             (false, None) => Some(representative.clone()),
         };
-        aml_labeled_value(
+        field(
             &mut layout,
             "Gesetzliche/r Vertreter/in (Funktion)",
             representative_line.as_deref(),
         );
     } else {
         section.heading(&mut layout, "Angaben zur Person");
-        aml_labeled_value(
+        field(
             &mut layout,
             "Anrede",
             data.salutation
@@ -26249,11 +26455,12 @@ fn build_payer_self_disclosure_pdf(
                     "mr" => "Herr",
                     "ms" => "Frau",
                     _ => "keine Angabe",
-                }),
+                })
+                .or(paper.then_some("[  ] Herr     [  ] Frau")),
         );
-        aml_labeled_value(&mut layout, "Vor- und Nachname", Some(person_name.as_str()));
-        aml_labeled_value(&mut layout, "Frühere Namen", data.former_names.as_deref());
-        aml_labeled_value(
+        field(&mut layout, "Vor- und Nachname", Some(person_name.as_str()));
+        field(&mut layout, "Frühere Namen", data.former_names.as_deref());
+        field(
             &mut layout,
             "Geburtsdatum",
             date(data.date_of_birth).as_deref(),
@@ -26266,26 +26473,26 @@ fn build_payer_self_disclosure_pdf(
             (Some(place), None) => Some(place),
             (None, country) => country,
         };
-        aml_labeled_value(&mut layout, "Geburtsort (Land)", birth_place.as_deref());
+        field(&mut layout, "Geburtsort (Land)", birth_place.as_deref());
         let citizenships = data
             .citizenships
             .iter()
             .map(|code| german_document_country(code))
             .collect::<Vec<_>>()
             .join(", ");
-        aml_labeled_value(
+        field(
             &mut layout,
             "Staatsangehörigkeit(en)",
             Some(citizenships.as_str()),
         );
-        aml_labeled_value(&mut layout, "Anschrift", address.as_deref());
-        aml_labeled_value(
+        field(&mut layout, "Anschrift", address.as_deref());
+        field(
             &mut layout,
             "Gewöhnlicher Aufenthalt (falls abweichend)",
             country(data.habitual_residence_country.as_deref()).as_deref(),
         );
-        aml_labeled_value(&mut layout, "Telefon", data.phone.as_deref());
-        aml_labeled_value(&mut layout, "Beruf", data.occupation.as_deref());
+        field(&mut layout, "Telefon", data.phone.as_deref());
+        field(&mut layout, "Beruf", data.occupation.as_deref());
     }
 
     section.heading(
@@ -26296,7 +26503,7 @@ fn build_payer_self_disclosure_pdf(
             "Ausweisdokument"
         },
     );
-    aml_labeled_value(
+    field(
         &mut layout,
         "Art",
         data.id_document_type.as_deref().map(|kind| match kind {
@@ -26306,37 +26513,47 @@ fn build_payer_self_disclosure_pdf(
             other => other,
         }),
     );
-    aml_labeled_value(&mut layout, "Nummer", data.id_document_number.as_deref());
-    aml_labeled_value(
+    field(&mut layout, "Nummer", data.id_document_number.as_deref());
+    field(
         &mut layout,
         "Ausstellende Behörde",
         data.id_issuing_authority.as_deref(),
     );
-    aml_labeled_value(
+    field(
         &mut layout,
         "Ausstellungsstaat",
         country(data.id_issuing_country.as_deref()).as_deref(),
     );
-    aml_labeled_value(
+    field(
         &mut layout,
         "Ausgestellt am",
         date(data.id_issued_on).as_deref(),
     );
-    aml_labeled_value(
+    field(
         &mut layout,
         "Gültig bis",
         date(data.id_valid_until).as_deref(),
     );
-    aml_labeled_value(
+    field(
         &mut layout,
-        "Kopie übermittelt",
-        Some(if data.id_copy_on_file { "ja" } else { "nein" }),
+        if paper {
+            "Kopie beigefügt"
+        } else {
+            "Kopie übermittelt"
+        },
+        Some(if paper && !data.id_copy_on_file {
+            PAPER_FORM_YES_NO
+        } else if data.id_copy_on_file {
+            "ja"
+        } else {
+            "nein"
+        }),
     );
 
     if organisation {
         section.heading(&mut layout, "Wirtschaftlich Berechtigte");
         if data.beneficial_owners.is_empty() {
-            aml_labeled_value(
+            field(
                 &mut layout,
                 "Wirtschaftlich Berechtigte",
                 (data.beneficial_owners_none == Some(true)).then_some(
@@ -26365,7 +26582,7 @@ fn build_payer_self_disclosure_pdf(
             .flatten()
             .collect::<Vec<_>>()
             .join(", ");
-            aml_labeled_value(
+            field(
                 &mut layout,
                 &format!("Wirtschaftlich Berechtigte/r {}", index + 1),
                 Some(line.as_str()),
@@ -26374,7 +26591,7 @@ fn build_payer_self_disclosure_pdf(
     }
 
     section.heading(&mut layout, "Beziehung zur Patientin / zum Patienten");
-    aml_labeled_value(
+    field(
         &mut layout,
         "Beziehung",
         payer_relationship_label(
@@ -26386,16 +26603,22 @@ fn build_payer_self_disclosure_pdf(
 
     section.heading(&mut layout, "Herkunft der Mittel");
     let sources = data.funds_sources.join(", ");
-    aml_labeled_value(&mut layout, "Herkunft der Mittel", Some(sources.as_str()));
-    aml_labeled_value(
+    field(&mut layout, "Herkunft der Mittel", Some(sources.as_str()));
+    field(
         &mut layout,
         "Beschreibung",
         data.funds_description.as_deref(),
     );
-    aml_labeled_value(
+    field(
         &mut layout,
-        "Nachweis übermittelt",
-        Some(if data.funds_proof_on_file {
+        if paper {
+            "Nachweis beigefügt"
+        } else {
+            "Nachweis übermittelt"
+        },
+        Some(if paper && !data.funds_proof_on_file {
+            PAPER_FORM_YES_NO
+        } else if data.funds_proof_on_file {
             "ja"
         } else {
             "nein"
@@ -26404,11 +26627,16 @@ fn build_payer_self_disclosure_pdf(
 
     section.heading(&mut layout, "Zahlungsweg");
     let route = GwgPaymentRoute::from_declaration(&data.payment_route);
-    aml_labeled_value(&mut layout, "Zahlungsweg", Some(route.line().as_str()));
-    aml_labeled_value(
+    // On paper an unknown route is filled in by hand, never "keine Angabe".
+    let unknown = |line: String| (!(paper && line == "keine Angabe")).then_some(line);
+    let route_line = unknown(route.line());
+    field(&mut layout, "Zahlungsweg", route_line.as_deref());
+    let third_party_line = unknown(route.third_party_line())
+        .or_else(|| paper.then(|| format!("{PAPER_FORM_YES_NO}     Angaben: {PAPER_FORM_BLANK}")));
+    field(
         &mut layout,
         "Zahlung über Dritte / Zahlungsdienstleister",
-        Some(route.third_party_line().as_str()),
+        third_party_line.as_deref(),
     );
 
     section.heading(&mut layout, "Erklärungen");
@@ -26470,11 +26698,12 @@ fn build_payer_self_disclosure_pdf(
         if answer.is_none() && label.contains("Drittstaat mit hohem Risiko") {
             continue;
         }
-        aml_labeled_value(
-            &mut layout,
-            label,
-            Some(payer_yes_no(answer, details).as_str()),
-        );
+        let line = if paper && answer.is_none() {
+            format!("{PAPER_FORM_YES_NO}     Angaben: {PAPER_FORM_BLANK}")
+        } else {
+            payer_yes_no(answer, details)
+        };
+        field(&mut layout, label, Some(line.as_str()));
     }
 
     section.heading(&mut layout, "Datenschutz");
@@ -26487,7 +26716,15 @@ fn build_payer_self_disclosure_pdf(
                 .unwrap_or(super::lead_payer_link::PRIVACY_TEXT_VERSION)
         )
     });
-    aml_labeled_value(&mut layout, "Datenschutzhinweise", acknowledged.as_deref());
+    let acknowledged = acknowledged.or_else(|| {
+        paper.then(|| {
+            format!(
+                "[  ] Die Datenschutzhinweise von GMED (Fassung {}) habe ich erhalten und zur Kenntnis genommen.",
+                super::lead_payer_link::PRIVACY_TEXT_VERSION
+            )
+        })
+    });
+    field(&mut layout, "Datenschutzhinweise", acknowledged.as_deref());
     let channels = data
         .contact_channels
         .iter()
@@ -26499,7 +26736,12 @@ fn build_payer_self_disclosure_pdf(
         })
         .collect::<Vec<_>>()
         .join(", ");
-    aml_labeled_value(&mut layout, "Kontaktwege", Some(channels.as_str()));
+    let channels = if paper && channels.is_empty() {
+        "[  ] E-Mail     [  ] Telefon     [  ] Messenger".to_string()
+    } else {
+        channels
+    };
+    field(&mut layout, "Kontaktwege", Some(channels.as_str()));
 
     section.heading(&mut layout, "Versicherung");
     admin_block(
@@ -27384,6 +27626,29 @@ fn build_lead_self_disclosure_pdf(
         ));
     }
     legal_meta_grid(&mut layout, &meta);
+    // An adult under rechtliche Betreuung (owner decision 2026-10-25, DEV QA
+    // F-G1, re-check V-A3): the Betreuer declares and signs for the adult, so
+    // the form names the representation under the patient like Anlage 1/2.
+    let betreuer = (!minor)
+        .then(|| {
+            data.acting_persons
+                .iter()
+                .find(|person| person.role == "Rechtliche/r Betreuer/in")
+                .map(|person| person.name.trim().to_string())
+                .filter(|name| !name.is_empty())
+        })
+        .flatten();
+    if let Some(betreuer) = betreuer.as_deref() {
+        layout.text_block(
+            &format!("gesetzlich vertreten durch die/den rechtliche(n) Betreuer/in {betreuer}"),
+            10.5,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            1.0,
+            2.0,
+        );
+    }
 
     let mut section = PayerSectionCounter(0);
     // 1. The person.
@@ -27928,15 +28193,7 @@ fn build_lead_self_disclosure_pdf(
         .collect::<Vec<_>>();
     // An adult under rechtliche Betreuung: the Betreuer signs for the adult
     // (owner decision 2026-10-25, DEV QA F-G1), the adult stays the person
-    // the form is about.
-    let betreuer = (!minor)
-        .then(|| {
-            data.acting_persons
-                .iter()
-                .find(|person| person.role == "Rechtliche/r Betreuer/in")
-                .map(|person| person.name.clone())
-        })
-        .flatten();
+    // the form is about (`betreuer`, read above).
     let signers: Vec<String> = if let Some(betreuer) = betreuer.clone() {
         vec![betreuer]
     } else if minor {
@@ -39202,6 +39459,58 @@ mod tests {
         }
     }
 
+    /// DEV re-check V-A7: the paper Selbstauskunft of a payer who sent
+    /// nothing prints what staff recorded and leaves lines and boxes for the
+    /// rest; the payer signs it on paper.
+    #[test]
+    fn the_paper_self_disclosure_leaves_the_payers_answers_to_be_filled_in() {
+        let paper = crate::routes::lead_payer_link::PayerSelfDisclosure {
+            mode: "link",
+            payer_type: "person".to_string(),
+            first_name: Some("Viktor".to_string()),
+            last_name: Some("Zahler".to_string()),
+            citizenships: vec!["IR".to_string()],
+            relationship_kind: Some("other".to_string()),
+            relationship: Some("Onkel".to_string()),
+            paper: true,
+            ..Default::default()
+        };
+        let generated = super::build_payer_self_disclosure_pdf(
+            &paper,
+            "Mia Muster",
+            &legal_test_agency(),
+            None,
+            "DOC-PAYER-SD-PAPER",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["payer"]);
+        let text = normalized_pdf_text(&generated);
+        assert!(
+            text.contains("auf Papier ausgefüllt und eigenhändig unterschrieben"),
+            "{text}"
+        );
+        assert!(!text.contains("übermittelt am"), "{text}");
+        assert!(text.contains("Viktor Zahler"), "{text}");
+        assert!(text.contains("Onkel"), "{text}");
+        assert!(text.contains("Kopie beigefügt"), "{text}");
+        assert!(text.contains("Herr"), "{text}");
+        assert!(text.contains("_____"), "{text}");
+        assert!(!text.contains("keine Angabe"), "{text}");
+        // The submitted answers keep their own wording.
+        let sent = normalized_pdf_text(
+            &super::build_payer_self_disclosure_pdf(
+                &viktor_disclosure(),
+                "Mia Muster",
+                &legal_test_agency(),
+                None,
+                "DOC-PAYER-SD-SENT",
+            )
+            .unwrap(),
+        );
+        assert!(!sent.contains("auf Papier"), "{sent}");
+        assert!(!sent.contains("Kopie beigefügt"), "{sent}");
+    }
+
     #[test]
     fn the_payers_self_disclosure_omits_the_high_risk_country_question_not_asked() {
         // Not asked since 2026-10-22: the payer never signs "keine Angabe"
@@ -40204,6 +40513,24 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("Unterschrift Patient/in"), "{text}");
+        // Re-check V-A3: the representation is named under the patient,
+        // like Anlage 1/2 do.
+        assert!(
+            text.contains(
+                "gesetzlich vertreten durch die/den rechtliche(n) Betreuer/in Ute Betreuerin"
+            ),
+            "{text}"
+        );
+        let own = normalized_pdf_text(
+            &super::build_lead_self_disclosure_pdf(
+                &anna_lead_disclosure(),
+                &legal_test_agency(),
+                None,
+                "DOC-LEAD-SD-0022",
+            )
+            .unwrap(),
+        );
+        assert!(!own.contains("gesetzlich vertreten durch"), "{own}");
     }
 
     #[test]

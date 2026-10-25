@@ -1074,28 +1074,53 @@ test("staff correct a parent's address and birth data for the GwG sheet (owner 2
   const editor = page.getByTestId("trusted-contact-editor");
   const form = editor.getByTestId(`lead-representative-details-${ANNA_ID}`);
   await expect(form.locator('input[name="street"]')).toHaveValue("Musterweg 1");
-  const save = form.getByRole("button", { name: "Сохранить адрес и данные" });
-  await expect(save).toBeDisabled();
-  await form.locator('input[name="street"]').fill("Neue Straße 5");
-  await form.locator('input[name="birth_place"]').fill("Lviv");
-  await save.click();
-  await expect.poll(() => calls.detailSaves.length).toBe(1);
-  // What the form loaded goes along, so the server keeps a cabinet change made meanwhile.
-  expect(calls.detailSaves[0]).toMatchObject({
-    id: ANNA_ID,
-    body: {
-      values: { street: "Neue Straße 5", birth_place: "Lviv", city: "Berlin", zip: "10115", country: "DE", citizenships: ["UA", "DE"] },
-      base: { street: "Musterweg 1", birth_place: "Kyiv", city: "Berlin" },
-    },
-  });
-  await expect(form.getByTestId(`lead-representative-details-${ANNA_ID}-saved`)).toBeVisible();
-  // The one-line address shows the parts the GwG sheet prints.
-  await expect(editor.getByRole("textbox", { name: /^Адрес/ })).toHaveValue("Neue Straße 5, 10115 Berlin, Германия");
+  // The stored relation is the older "parent": the save asks for mother or father first.
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Мать (родитель)", exact: true }).click();
+  // One save for the whole dialog (QA 2026-10-25, V-A4): no own button in the details block.
+  await expect(form.getByRole("button", { name: "Сохранить адрес и данные" })).toHaveCount(0);
+  await expect(form).toContainText("Сохраняются кнопкой «Сохранить» вместе с карточкой.");
   // A city too long for the shared rule is refused before saving.
   await form.locator('input[name="city"]').evaluate((input: HTMLInputElement) => input.removeAttribute("maxlength"));
   await form.locator('input[name="city"]').fill("y".repeat(121));
   await expect(form.getByText("Слишком длинное значение")).toBeVisible();
-  await expect(save).toBeDisabled();
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(editor).toBeVisible();
+  expect(calls.detailSaves).toEqual([]);
+  await form.locator('input[name="city"]').fill("Berlin");
+
+  const updatesBefore = calls.updates.length;
+  await form.locator('input[name="street"]').fill("Neue Straße 5");
+  await form.locator('input[name="birth_place"]').fill("Lviv");
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  // The address parts on their own endpoint, with what the form loaded, so the server
+  // keeps a cabinet change made meanwhile ...
+  await expect.poll(() => calls.detailSaves.length).toBe(1);
+  expect(calls.detailSaves[0]).toMatchObject({
+    id: ANNA_ID,
+    body: {
+      values: { street: "Neue Straße 5", city: "Berlin", zip: "10115", country: "DE" },
+      base: { street: "Musterweg 1", city: "Berlin" },
+    },
+  });
+  // ... the birth data with the contact.
+  await expect.poll(() => calls.updates.length).toBeGreaterThan(updatesBefore);
+  const written = (calls.updates.at(-1)?.trusted_contacts as Json[]).find((contact) => contact.id === ANNA_ID)!;
+  expect(written).toMatchObject({ birth_place: "Lviv" });
+});
+
+test("a mistyped parent e-mail is named by the app at the field, not by the browser (QA 2026-10-25, V-A5)", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", step: "master" });
+  await wizard.locator("#lead-wizard-guardian").getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
+  const editor = page.getByTestId("trusted-contact-editor");
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Мать (родитель)", exact: true }).click();
+  await editor.getByLabel("E-Mail", { exact: true }).fill("pavel.zweielternau@@web");
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(editor.locator("#trusted-contact-email-error")).toHaveText("Введите корректный адрес электронной почты");
+  await expect(editor.getByLabel("E-Mail", { exact: true })).toHaveAttribute("aria-invalid", "true");
+  expect(calls.updates).toEqual([]);
 });
 
 test("a parent born less than 18 years ago is refused in the contact editor", async ({ page }) => {

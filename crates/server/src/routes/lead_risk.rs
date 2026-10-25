@@ -5,9 +5,12 @@
 //!   reassesses, then shows points, level, triggers, blocks, status,
 //!   decisions and history; before the start a live `preview`.
 //! * Decisions of a reviewer (`risk.review` — the CEO — or a deputy named in
-//!   the configuration): `request_more`, `release`, `reject` with a reason;
-//!   at level 3 release and reject are proposals a second reviewer confirms
-//!   (four eyes). `restart` starts a grandfathered or not started lead.
+//!   the configuration): `request_more`, `release`, `reject` with a mandatory
+//!   reason, effective at once at every level — four eyes at level 3 were
+//!   removed (owner decision 2026-10-25). A proposal recorded before that
+//!   (level-3 release / reject awaiting a second reviewer) can still be
+//!   confirmed or withdrawn by any reviewer. `restart` starts a
+//!   grandfathered or not started lead.
 //! * Staff enter the identity document data the lead only uploads
 //!   (`PUT …/identity-document-data`, also per representative).
 //! * The configuration (`GET` reviewers, `PUT` CEO) and the review queue.
@@ -185,7 +188,7 @@ async fn decisions_json(conn: &mut PgConnection, lead_id: Uuid) -> Result<Vec<Va
     let rows = sqlx::query(
         r#"SELECT d.id, d.decision, d.reason, d.blocks, d.level, d.fingerprint, d.decided_by,
                   u.name AS decided_by_name, d.decided_at, d.confirms_decision_id,
-                  d.withdraws_decision_id,
+                  d.withdraws_decision_id, d.four_eyes,
                   EXISTS (SELECT 1 FROM lead_risk_decisions c WHERE c.confirms_decision_id = d.id)
                       AS confirmed,
                   EXISTS (SELECT 1 FROM lead_risk_decisions w WHERE w.withdraws_decision_id = d.id)
@@ -205,10 +208,14 @@ async fn decisions_json(conn: &mut PgConnection, lead_id: Uuid) -> Result<Vec<Va
             let level: i16 = row.try_get("level").unwrap_or(1);
             let confirms: Option<Uuid> = row.try_get("confirms_decision_id").ok().flatten();
             let withdraws: Option<Uuid> = row.try_get("withdraws_decision_id").ok().flatten();
+            // `four_eyes` is NULL on rows from before 2026-10-25 (level-3
+            // release / reject were proposals then) and false since.
+            let four_eyes: Option<bool> = row.try_get("four_eyes").ok().flatten();
             let proposal = confirms.is_none()
                 && withdraws.is_none()
                 && level >= 3
-                && decision != "request_more";
+                && decision != "request_more"
+                && four_eyes != Some(false);
             let kind = if confirms.is_some() {
                 "confirmation"
             } else if withdraws.is_some() {
@@ -363,10 +370,9 @@ async fn assessment_json(
     let reviewers = store::reviewer_counts(conn, &config).await?;
     let reviewer = store::is_reviewer(auth, &config);
     let review_notice = store::review_notice(conn, lead_id).await?;
-    let can_confirm = reviewer
-        && pending
-            .as_ref()
-            .is_some_and(|pending| pending["decided_by"] != json!(auth.user_id));
+    // A proposal from before 2026-10-25: any reviewer, the proposer
+    // included, confirms or withdraws it (one reviewer suffices now).
+    let can_confirm = reviewer && pending.is_some();
     let score = stored
         .as_ref()
         .map(|assessment| assessment.score)
@@ -402,8 +408,13 @@ async fn assessment_json(
             .unwrap_or(config.version),
         "can_decide": reviewer && started,
         "can_confirm": can_confirm,
+        "can_withdraw": can_confirm,
         "can_restart": reviewer && !started,
-        "four_eyes_required": started && score.level >= 3,
+        // Always false since the owner decision of 2026-10-25 (one reviewer
+        // decides level 3 at once); kept so older clients read no proposal
+        // flow. `pending_proposal` / `can_confirm` cover a proposal recorded
+        // before that decision.
+        "four_eyes_required": false,
         // A confirmed sanctions match is final (the sanctions gate holds for
         // good): the panel offers no release then (QA 2026-10-11 N-09).
         "sanctions_confirmed": inputs.confirmed_hit_patient || inputs.confirmed_hit_payer,
@@ -483,22 +494,12 @@ fn decision_error(refusal: DecisionError) -> Response {
         DecisionError::ProposalPending => error(
             StatusCode::CONFLICT,
             "proposal_pending",
-            "A proposal waits for its second reviewer",
+            "An earlier proposal waits: confirm or withdraw it first",
         ),
         DecisionError::ProposalNotPending => error(
             StatusCode::CONFLICT,
             "proposal_not_pending",
             "This proposal is no longer pending",
-        ),
-        DecisionError::SameUser => error(
-            StatusCode::CONFLICT,
-            "four_eyes_same_user",
-            "A second reviewer must confirm the proposal",
-        ),
-        DecisionError::NotProposer => error(
-            StatusCode::FORBIDDEN,
-            "not_proposer",
-            "Only the proposer withdraws a proposal",
         ),
         DecisionError::AssessmentChanged => error(
             StatusCode::CONFLICT,
@@ -600,12 +601,7 @@ async fn post_decision(
             )
             .await;
             tracing::info!(decision_id = %outcome.id, %lead_id, "lead risk decision");
-            let status = if outcome.proposed {
-                StatusCode::ACCEPTED
-            } else {
-                StatusCode::CREATED
-            };
-            respond_with_assessment(&state, &auth, lead_id, status).await
+            respond_with_assessment(&state, &auth, lead_id, StatusCode::CREATED).await
         }
         Ok(Err(response)) => response,
         Err(error) => database(error, "decide"),
@@ -646,13 +642,7 @@ async fn proposal_action(
         };
         match outcome {
             Ok(_) => {}
-            Err(DecisionError::Database(error)) => {
-                // The database's four-eyes trigger answers like the server check.
-                if error.to_string().contains("four_eyes_same_user") {
-                    return Ok(Err(decision_error(DecisionError::SameUser)));
-                }
-                return Err(error);
-            }
+            Err(DecisionError::Database(error)) => return Err(error),
             Err(other) => return Ok(Err(decision_error(other))),
         }
         tx.commit().await?;
@@ -1443,6 +1433,7 @@ async fn review_queue(
                FROM lead_risk_decisions d
                WHERE d.lead_id = a.lead_id AND d.level = 3
                  AND d.decision IN ('release', 'reject')
+                 AND d.four_eyes IS NOT FALSE
                  AND d.confirms_decision_id IS NULL AND d.withdraws_decision_id IS NULL
                  AND NOT EXISTS (
                      SELECT 1 FROM lead_risk_decisions r

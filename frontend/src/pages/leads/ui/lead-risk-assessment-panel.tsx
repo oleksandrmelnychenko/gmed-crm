@@ -24,7 +24,6 @@ import {
   riskCauseLabel,
   riskDecisionErrorText,
   riskDecisionLabel,
-  riskDecisionNeedsSecondReviewer,
   riskDisplayedScore,
   riskEventLabel,
   riskLevelLabel,
@@ -32,7 +31,6 @@ import {
   riskMissingLabel,
   riskPartyLabel,
   riskPointsLine,
-  riskSecondReviewerMissing,
   riskShowsPreview,
   riskStatusLabel,
   riskStatusTone,
@@ -165,7 +163,7 @@ function DecisionLine({ decision, tx }: { decision: RiskDecision; tx: Tx }) {
     ? tx("подтверждено", "bestätigt")
     : decision.proposal_state === "withdrawn"
       ? tx("отозвано", "zurückgenommen")
-      : tx("ждёт второго проверяющего", "wartet auf Zweitprüfung");
+      : tx("ждёт подтверждения (старое предложение)", "wartet auf Bestätigung (alter Vorschlag)");
   const kind = decision.confirms_decision_id || decision.kind === "confirmation"
     ? tx("подтверждение", "Bestätigung")
     : decision.withdraws_decision_id || decision.kind === "withdrawal"
@@ -196,23 +194,22 @@ function DecisionLine({ decision, tx }: { decision: RiskDecision; tx: Tx }) {
  * "Оценка риска / Risikobewertung" in the documents step of the lead wizard:
  * level (1 green, 2 amber, 3 red, K.o.), points per subject, the triggers,
  * the follow-up blocks with who answers them, status, decisions and history.
- * Reviewers decide with a reason; at level 3 a release or a reject is a
- * proposal until a second reviewer confirms it. Before the assessment starts
- * the live preview is shown. Read-only for everybody else. Staff only: the
- * lead and the payer never see any of this.
+ * Reviewers decide with a mandatory reason; every decision is effective at
+ * once, level 3 included (four-eyes removed by the owner on 2026-10-25). A
+ * proposal recorded before that can still be confirmed or withdrawn by any
+ * reviewer. Before the assessment starts the live preview is shown. Read-only
+ * for everybody else. Staff only: the lead and the payer never see any of this.
  */
 export function LeadRiskAssessmentPanel({
   assessment,
   controller,
   tx,
   disabled = false,
-  currentUserId = null,
 }: {
   assessment: LeadRiskAssessment | null;
   controller: LeadRiskController;
   tx: Tx;
   disabled?: boolean;
-  currentUserId?: string | null;
 }) {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [blocks, setBlocks] = useState<string[]>([]);
@@ -227,8 +224,7 @@ export function LeadRiskAssessmentPanel({
   const score = riskDisplayedScore(assessment);
   const decisions = riskAvailableDecisions(assessment);
   const proposal = assessment.pending_proposal;
-  const canWithdraw = riskCanWithdraw(assessment, currentUserId);
-  const secondReviewerMissing = riskSecondReviewerMissing(assessment);
+  const canWithdraw = riskCanWithdraw(assessment);
   const requested = new Set(assessment.requested_blocks);
   const blocksShown = assessment.blocks.filter((block) => block.open || requested.has(block.key));
   const lang = tx("ru", "de");
@@ -264,28 +260,19 @@ export function LeadRiskAssessmentPanel({
     if (dialog.kind === "confirm") return `${tx("Подтвердить решение", "Entscheidung bestätigen")}: ${riskDecisionLabel(dialog.decision, tx)}`;
     if (dialog.kind === "withdraw") return tx("Отозвать предложение", "Vorschlag zurücknehmen");
     if (dialog.decision === "request_more") return tx("Запросить дополнительные сведения", "Weitere Angaben anfordern");
-    const proposalOnly = riskDecisionNeedsSecondReviewer(assessment, dialog.decision);
-    if (dialog.decision === "release") {
-      return proposalOnly ? tx("Предложить разрешение", "Freigabe vorschlagen") : tx("Разрешить работу с обращением", "Anfrage freigeben");
-    }
-    return proposalOnly ? tx("Предложить отклонение", "Ablehnung vorschlagen") : tx("Отклонить обращение", "Anfrage ablehnen");
+    if (dialog.decision === "release") return tx("Разрешить работу с обращением", "Anfrage freigeben");
+    return tx("Отклонить обращение", "Anfrage ablehnen");
   })();
 
   const dialogDescription = (() => {
     if (!dialog) return "";
     if (dialog.kind === "confirm") {
       return tx(
-        "Вы второй проверяющий: после подтверждения решение вступает в силу.",
-        "Sie sind die zweite prüfende Person: Mit der Bestätigung wird die Entscheidung wirksam.",
+        "Предложение записано до отмены второй проверки: после подтверждения решение вступает в силу.",
+        "Der Vorschlag stammt aus der Zeit vor dem Wegfall der Zweitprüfung: Mit der Bestätigung wird die Entscheidung wirksam.",
       );
     }
-    if (dialog.kind === "withdraw") return tx("Предложение снимается; решение можно предложить заново.", "Der Vorschlag entfällt; er kann neu gestellt werden.");
-    const fourEyes = riskDecisionNeedsSecondReviewer(assessment, dialog.decision)
-      ? ` ${tx(
-          "Уровень 3: решение вступит в силу после подтверждения другим проверяющим (принцип четырёх глаз).",
-          "Stufe 3: Die Entscheidung wird erst mit der Bestätigung einer anderen prüfenden Person wirksam (Vier-Augen-Prinzip).",
-        )}`
-      : "";
+    if (dialog.kind === "withdraw") return tx("Предложение снимается; затем можно принять решение заново.", "Der Vorschlag entfällt; danach kann neu entschieden werden.");
     if (dialog.decision === "request_more") {
       return tx(
         "Пациент (или плательщик по своей ссылке) увидит только нейтральные вопросы выбранных блоков — без баллов, уровня и причин.",
@@ -296,7 +283,7 @@ export function LeadRiskAssessmentPanel({
       return tx(
         "Разрешение снимает удержание подписей, квалификации и конвертации. Новый триггер или рост баллов отменяет его.",
         "Die Freigabe hebt das Zurückhalten von Unterschriften, Qualifizierung und Konvertierung auf. Ein neuer Auslöser oder mehr Punkte heben sie wieder auf.",
-      ) + fourEyes;
+      );
     }
     // With a confirmed sanctions hit no permission can follow (QA 2026-10-12, round 3).
     return (assessment.sanctions_confirmed
@@ -307,7 +294,7 @@ export function LeadRiskAssessmentPanel({
       : tx(
           "Отклонение ничего не отправляет пациенту; позже его можно заменить разрешением.",
           "Die Ablehnung wird dem Patienten nicht mitgeteilt; später kann eine Freigabe folgen.",
-        )) + fourEyes;
+        ));
   })();
 
   return (
@@ -437,15 +424,15 @@ export function LeadRiskAssessmentPanel({
             data-testid="lead-risk-proposal"
           >
             <div className="font-semibold text-foreground">
-              {tx("Предложение", "Vorschlag")}: {riskDecisionLabel(proposal.decision, tx)}
+              {tx("Старое предложение", "Alter Vorschlag")}: {riskDecisionLabel(proposal.decision, tx)}
               {" — "}
               {proposal.decided_by_name ?? "—"}, {formatAppDateTime(proposal.decided_at)}
             </div>
             {proposal.reason ? <div className="whitespace-pre-line text-foreground">{proposal.reason}</div> : null}
-            <p className={WARNING_TEXT} data-testid="lead-risk-four-eyes">
+            <p className={WARNING_TEXT} data-testid="lead-risk-old-proposal">
               {tx(
-                "Принцип четырёх глаз: решение вступит в силу после подтверждения другим проверяющим.",
-                "Vier-Augen-Prinzip: Die Entscheidung wird mit der Bestätigung einer anderen prüfenden Person wirksam.",
+                "Записано до отмены второй проверки: подтвердите его или отзовите, затем можно принять новое решение.",
+                "Vor dem Wegfall der Zweitprüfung erfasst: bestätigen oder zurücknehmen, danach kann neu entschieden werden.",
               )}
             </p>
             {assessment.can_confirm || canWithdraw ? (
@@ -478,22 +465,27 @@ export function LeadRiskAssessmentPanel({
           </div>
         ) : null}
 
-        {secondReviewerMissing ? (
-          <p className={cn("text-xs font-medium leading-5", WARNING_TEXT)} data-testid="lead-risk-second-reviewer-missing">
-            {tx(
-              "Второго проверяющего нет: уровень 3 нельзя разрешить, пока CEO не назначит заместителя (Санкционные проверки → Оценка риска).",
-              "Keine zweite prüfende Person: Stufe 3 kann erst freigegeben werden, wenn der CEO eine Vertretung benennt (Sanktionsprüfung → Risikobewertung).",
-            )}
+        {started && score.level === 3 && assessment.status !== "released" && assessment.status !== "rejected" ? (
+          <p className={cn("text-xs font-medium leading-5", WARNING_TEXT)} data-testid="lead-risk-level3-stop">
+            {score.knockout
+              ? tx(
+                  "K.o.: уровень 3 независимо от баллов. Подписи, квалификация и конвертация остановлены до решения проверяющего.",
+                  "K.o.: Stufe 3 unabhängig von den Punkten. Unterschriften, Qualifizierung und Konvertierung sind bis zur Entscheidung angehalten.",
+                )
+              : tx(
+                  "Уровень 3: подписи, квалификация и конвертация остановлены до решения проверяющего.",
+                  "Stufe 3: Unterschriften, Qualifizierung und Konvertierung sind bis zur Entscheidung angehalten.",
+                )}
           </p>
         ) : null}
 
         {decisions.length > 0 ? (
           <div className="space-y-1.5" data-testid="lead-risk-actions">
-            {score.level === 3 && !proposal ? (
-              <p className="text-xs leading-5 text-muted-foreground">
+            {decisions.some((decision) => decision !== "request_more") ? (
+              <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-risk-decision-hint">
                 {tx(
-                  "Уровень 3: разрешение и отклонение — это предложение; в силу вступает после подтверждения вторым проверяющим.",
-                  "Stufe 3: Freigabe und Ablehnung sind Vorschläge; wirksam erst nach Bestätigung durch eine zweite prüfende Person.",
+                  "Решение вступает в силу сразу, на любом уровне. Причина обязательна (минимум 10 символов).",
+                  "Die Entscheidung wird sofort wirksam, auf jeder Stufe. Eine Begründung ist Pflicht (mindestens 10 Zeichen).",
                 )}
               </p>
             ) : null}

@@ -5697,6 +5697,10 @@ pub(crate) struct PayerSelfDisclosure {
     pub privacy_ack_at: Option<DateTime<Utc>>,
     pub privacy_text_version: Option<String>,
     pub contact_channels: Vec<String>,
+    /// The paper form (re-check V-A7): the payer has sent nothing; what staff
+    /// recorded is printed and every other field is a line the payer fills
+    /// in by hand before signing. `submitted_at` means nothing then.
+    pub paper: bool,
 }
 
 /// `None` while no third party is named or its answers are not sent.
@@ -5710,9 +5714,40 @@ pub(crate) async fn self_disclosure(
     let (Some(mode), Some(submitted_at)) = (context.mode(), context.submitted_at()) else {
         return Ok(None);
     };
+    Ok(Some(disclosure_of(&context, mode, submitted_at, false)))
+}
+
+/// The paper Selbstauskunft of a third-party payer who answers neither on
+/// the link nor in a cabinet (DEV re-check V-A7: no e-mail, or the payer
+/// prefers paper): the sent answers when there are any, else what staff
+/// recorded in the payer declaration with blank lines for the rest. `None`
+/// without a third-party payer of the link (no payer, a paying parent, a
+/// parent who answers in the cabinet).
+pub(crate) async fn paper_self_disclosure(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<PayerSelfDisclosure>, sqlx::Error> {
+    let Some(context) = load_context(conn, lead_id).await? else {
+        return Ok(None);
+    };
+    if context.mode() != Some(Mode::Link) || context.paying_parent().is_some() {
+        return Ok(None);
+    }
+    Ok(Some(match context.submitted_at() {
+        Some(submitted_at) => disclosure_of(&context, Mode::Link, submitted_at, false),
+        None => disclosure_of(&context, Mode::Link, Utc::now(), true),
+    }))
+}
+
+fn disclosure_of(
+    context: &LeadContext,
+    mode: Mode,
+    submitted_at: DateTime<Utc>,
+    paper: bool,
+) -> PayerSelfDisclosure {
     // The self-disclosure prints no check level: only the answers count.
     let built = questionnaire(
-        &context,
+        context,
         Viewer::Staff,
         &EnhancedCheck::default(),
         crate::app_time::today(),
@@ -5731,7 +5766,7 @@ pub(crate) async fn self_disclosure(
         country: owner.country.clone(),
         share_percent: cents_text(owner.share_cents),
     };
-    Ok(Some(PayerSelfDisclosure {
+    PayerSelfDisclosure {
         mode: mode.as_str(),
         organisation: built.organisation,
         payer_type: built.payer_type.clone(),
@@ -5792,7 +5827,8 @@ pub(crate) async fn self_disclosure(
         high_risk_country_code: answers.high_risk_country_code,
         sanctions_links: answers.sanctions_links,
         sanctions_links_details: answers.sanctions_links_details,
-    }))
+        paper,
+    }
 }
 
 /// `payer_link` of `GET /leads/{id}/portal-intake`: how far the link is and

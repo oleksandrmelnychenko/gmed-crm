@@ -81,7 +81,7 @@ describe("LeadRiskAssessmentPanel", () => {
     expect(html).not.toContain("K.o.</span></span>");
   });
 
-  it("shows the K.o. tag and the four-eyes note at level 3, and warns without a second reviewer", () => {
+  it("shows the K.o. tag and the level-3 stop, and lets one reviewer decide at once", () => {
     const html = render(
       assessment({
         level: 3,
@@ -94,24 +94,33 @@ describe("LeadRiskAssessmentPanel", () => {
     expect(html).toContain("Stufe 3");
     expect(html).toContain("lead-risk-knockout");
     expect(html).toContain("PEP: Antwort „ja“");
-    expect(html).toContain("Stufe 3: Freigabe und Ablehnung sind Vorschläge");
-    expect(html).toContain("lead-risk-second-reviewer-missing");
+    // Four-eyes removed (owner 2026-10-25): no proposal wording, no second-reviewer warning.
+    expect(html).toContain("lead-risk-level3-stop");
+    expect(html).toContain("K.o.: Stufe 3 unabhängig von den Punkten");
+    expect(html).toContain("Die Entscheidung wird sofort wirksam, auf jeder Stufe. Eine Begründung ist Pflicht (mindestens 10 Zeichen).");
+    expect(html).toContain(">Freigeben<");
+    expect(html).toContain(">Ablehnen<");
+    expect(html).not.toContain("Vorschläge");
+    expect(html).not.toContain("Zweitprüfung");
+    expect(html).not.toContain("second-reviewer-missing");
   });
 
-  it("shows a pending proposal with confirm for a second reviewer and withdraw for the proposer", () => {
+  it("shows an old pending proposal that any reviewer may confirm or withdraw", () => {
     const proposal = { id: "d1", decision: "release", reason: "Herkunft der Mittel belegt", decided_by_name: "Test CEO", decided_at: "2026-10-07T10:00:00Z" };
-    const second = render(assessment({ level: 3, status: "proposed", pending_proposal: proposal, can_confirm: true }));
-    expect(second).toContain("lead-risk-proposal");
-    expect(second).toContain("Предложение: Разрешить — Test CEO, 07.10.2026 12:00");
-    expect(second).toContain("Herkunft der Mittel belegt");
-    expect(second).toContain("Принцип четырёх глаз");
-    expect(second).toContain(">Подтвердить<");
-    expect(second).not.toContain(">Отозвать<");
+    const reviewer = render(assessment({ level: 3, status: "proposed", pending_proposal: proposal, can_confirm: true, can_withdraw: true }));
+    expect(reviewer).toContain("lead-risk-proposal");
+    expect(reviewer).toContain("Старое предложение: Разрешить — Test CEO, 07.10.2026 12:00");
+    expect(reviewer).toContain("Herkunft der Mittel belegt");
+    expect(reviewer).toContain("Ждёт подтверждения (старое предложение)");
+    expect(reviewer).not.toContain("четырёх глаз");
+    expect(reviewer).toContain(">Подтвердить<");
+    expect(reviewer).toContain(">Отозвать<");
     // No new decision while the proposal waits.
-    expect(second).not.toContain("lead-risk-decide-");
-    const proposer = render(assessment({ level: 3, status: "proposed", pending_proposal: proposal, can_confirm: false }));
-    expect(proposer).toContain(">Отозвать<");
-    expect(proposer).not.toContain(">Подтвердить<");
+    expect(reviewer).not.toContain("lead-risk-decide-");
+    // The server may refuse one of them.
+    const confirmOnly = render(assessment({ level: 3, status: "proposed", pending_proposal: proposal, can_confirm: true, can_withdraw: false }));
+    expect(confirmOnly).toContain(">Подтвердить<");
+    expect(confirmOnly).not.toContain(">Отозвать<");
     // The proposal in the list of decisions, with its state.
     const listed = render(
       assessment({

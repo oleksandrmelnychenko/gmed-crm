@@ -1,15 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Check, LoaderCircle } from "lucide-react";
 
 import { inputClass, selectClass } from "@/components/ui-shell";
-import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { PERSON_CITY_MAX } from "@/lib/person-fields";
 
-import type { LeadRepresentation, LeadRepresentative } from "../data/lead-portal-intake-api";
-import { updateLeadRepresentativeDetails, type RepresentativeDetails } from "../data/lead-representation-api";
+import type { LeadRepresentative } from "../data/lead-portal-intake-api";
+import type { RepresentativeDetails } from "../data/lead-representation-api";
 import type { Tx } from "../model/lead-payer";
 import {
   EMPTY_REPRESENTATIVE_DETAILS,
@@ -18,33 +16,30 @@ import {
   representativeDetailsErrors,
   representativeDetailsOf,
 } from "../model/lead-representative-details";
-import { leadErrorMessage } from "../model/leads-model";
 
 /**
  * Staff correct a representative's address, birth data and citizenships
  * (owner 2026-10-24): the parts the GwG sheet and the consent form print.
- * Saved on its own; only what staff changed since loading is written, so a
- * change made in the cabinet meanwhile stays.
+ * No own save button (QA 2026-10-25, V-A4): the contact dialog's «Сохранить»
+ * writes them — the citizenships and birth data with the contact, the address
+ * parts on their own endpoint — and only what staff changed since loading, so
+ * a change made in the cabinet meanwhile stays.
  */
 export function LeadRepresentativeDetailsForm({
-  leadId,
   person,
   tx,
   lang,
   disabled,
-  onSaved,
   onDraftChange,
 }: {
-  leadId: string;
   person: LeadRepresentative;
   tx: Tx;
   lang: string;
   disabled: boolean;
-  onSaved: (representation: LeadRepresentation | null) => void;
   /**
    * The form's values and what they were loaded from, after every change:
-   * the contact dialog's own «Сохранить» carries the citizenships and birth
-   * data with the contact (F-11, QA 2026-10-25: they were dropped silently).
+   * the contact dialog's own «Сохранить» carries them (F-11, QA 2026-10-25:
+   * they were dropped silently).
    */
   onDraftChange?: (draft: RepresentativeDetails, loaded: RepresentativeDetails) => void;
 }) {
@@ -54,9 +49,6 @@ export function LeadRepresentativeDetailsForm({
   const loadedRef = useRef<RepresentativeDetails>(stored);
   const [draft, setDraftState] = useState<RepresentativeDetails>(stored);
   const draftRef = useRef(draft);
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
   // The server changed this person while staff edit: "updated" when only
   // untouched fields were refreshed, "conflict" when a typed field changed too.
   const [meanwhile, setMeanwhile] = useState<"updated" | "conflict" | null>(null);
@@ -87,60 +79,30 @@ export function LeadRepresentativeDetailsForm({
 
   const changed = representativeDetailsChanged(draft, loadedRef.current);
   const errors = representativeDetailsErrors(draft, loadedRef.current);
-  const canSave = !disabled && !busy && changed && Object.keys(errors).length === 0;
   const set = <K extends keyof RepresentativeDetails>(key: K, value: RepresentativeDetails[K]) => {
-    setSaved(false);
     setDraft({ ...draftRef.current, [key]: value });
-  };
-  const save = async () => {
-    if (Object.keys(errors).length > 0) return;
-    setBusy(true);
-    setError("");
-    try {
-      const representation = await updateLeadRepresentativeDetails(leadId, person.id, draftRef.current, loadedRef.current);
-      const fresh = representation?.representatives.find((item) => item.id === person.id);
-      if (fresh) {
-        const next = representativeDetailsOf(fresh);
-        loadedRef.current = next;
-        setDraft(next);
-      }
-      setMeanwhile(null);
-      setSaved(true);
-      onSaved(representation);
-    } catch (cause) {
-      setError(leadErrorMessage(cause, tx));
-    } finally {
-      setBusy(false);
-    }
   };
   return (
     <div className="space-y-3" data-testid={`lead-representative-details-${person.id}`}>
       <h4 className="text-xs font-semibold text-foreground">
         {tx("Адрес и данные для анкеты GwG", "Anschrift und Angaben für den GwG-Bogen")}
       </h4>
+      <p className="text-[11.5px] leading-tight text-muted-foreground">
+        {tx(
+          "Сохраняются кнопкой «Сохранить» вместе с карточкой.",
+          "Werden mit „Speichern“ zusammen mit der Karte gespeichert.",
+        )}
+      </p>
       <RepresentativeDetailsFields
         draft={draft}
         errors={errors}
         tx={tx}
         lang={lang}
-        disabled={disabled || busy}
+        disabled={disabled}
         onChange={set}
-        onEnter={() => {
-          if (canSave) void save();
-        }}
       />
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={!canSave}
-          onClick={() => void save()}
-        >
-          {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}
-          {tx("Сохранить адрес и данные", "Anschrift und Angaben speichern")}
-        </Button>
-        {meanwhile && changed ? (
+      {meanwhile && changed ? (
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-amber-700 dark:text-amber-300" role="status" data-testid={`lead-representative-details-${person.id}-meanwhile`}>
             {meanwhile === "conflict"
               ? tx(
@@ -152,15 +114,8 @@ export function LeadRepresentativeDetailsForm({
                   "Die Angaben dieser Person wurden inzwischen geändert (Portal oder anderer Tab): unberührte Felder wurden aktualisiert",
                 )}
           </span>
-        ) : null}
-        {saved && !changed ? (
-          <span className="flex items-center gap-1 text-xs text-muted-foreground" data-testid={`lead-representative-details-${person.id}-saved`}>
-            <Check aria-hidden="true" className="size-3.5" />
-            {tx("Сохранено", "Gespeichert")}
-          </span>
-        ) : null}
-        {error ? <span role="alert" className="text-xs text-destructive">{error}</span> : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -227,7 +182,7 @@ export function RepresentativeDetailsFields({
   lang: string;
   disabled: boolean;
   onChange: <K extends keyof RepresentativeDetails>(key: K, value: RepresentativeDetails[K]) => void;
-  /** Enter in a text field; the saved form stores the details. */
+  /** Enter in a text field (never submits the contact form around it). */
   onEnter?: () => void;
 }) {
   const id = useId();

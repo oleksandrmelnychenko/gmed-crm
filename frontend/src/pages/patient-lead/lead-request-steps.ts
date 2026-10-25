@@ -1,7 +1,7 @@
 import { HEALTH_CONSENT, INQUIRY_CONSENT, type LeadRequest } from "./lead-request-api";
 import { isBillingField } from "./lead-request-billing-model";
 import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown } from "./lead-request-follow-up-model";
-import { SUBMIT_FIELDS, changedSinceSubmit, consentGiven } from "./lead-request-model";
+import { SUBMIT_FIELDS, changedSinceSubmit, consentGiven, identityDocumentsInStep } from "./lead-request-model";
 import { isRecipientField } from "./lead-request-recipient-model";
 import { representativeSubmitPart } from "./lead-request-representation-model";
 import { disclosureDraft, disclosureProblem } from "./lead-trusted-persons-model";
@@ -147,12 +147,35 @@ function byFormOrder(keys: string[]): string[] {
 }
 
 /**
+ * The upload keys of the persons whose only identity copies GMED could not use
+ * (`follow_up.refused_identity_documents`, no current copy): `id_document_upload`
+ * for the lead's own, `<slot>_id_upload` for a representative. The server lists
+ * no missing key for them, yet the person has to upload a new copy (QA 2026-10-25,
+ * F-V2: step "Ausweis" said "complete" next to the refused scan).
+ */
+export function refusedIdentityUploadKeys(
+  request: Pick<LeadRequest, "follow_up"> & Partial<Pick<LeadRequest, "identity_documents" | "representation">>,
+): string[] {
+  if (!request.follow_up?.refused_identity_documents?.length) return [];
+  const keys: string[] = [];
+  if (identityDocumentsInStep(request, request.identity_documents ?? []).refused.length > 0) keys.push("id_document_upload");
+  for (const person of request.representation?.representatives ?? []) {
+    if (!person.slot) continue;
+    if (identityDocumentsInStep(request, person.identity_documents ?? [], person.id).refused.length > 0) {
+      keys.push(`${person.slot}_id_upload`);
+    }
+  }
+  return keys;
+}
+
+/**
  * What every step still misses: the server's own map for the steps it knows,
  * any other key of `missing_for_submit` by `stepOfField` (an older server, or
- * the reason of the request), and the follow-up's keys as `<block>:<key>`.
+ * the reason of the request), a new upload for an identity copy GMED refused
+ * (`refusedIdentityUploadKeys`), and the follow-up's keys as `<block>:<key>`.
  */
 export function missingByStep(
-  request: Pick<LeadRequest, "progress" | "follow_up">,
+  request: Pick<LeadRequest, "progress" | "follow_up"> & Partial<Pick<LeadRequest, "identity_documents" | "representation">>,
 ): Record<StepId, string[]> {
   const result = Object.fromEntries(STEP_IDS.map((step) => [step, [] as string[]])) as Record<StepId, string[]>;
   const server = request.progress.missing_by_step;
@@ -167,7 +190,7 @@ export function missingByStep(
       }
     }
   }
-  for (const key of request.progress.missing_for_submit) {
+  for (const key of [...request.progress.missing_for_submit, ...refusedIdentityUploadKeys(request)]) {
     if (placed.has(key)) continue;
     placed.add(key);
     result[stepOfField(key)].push(key);

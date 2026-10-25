@@ -207,9 +207,10 @@ async function mount(page: Page, initial: RiskState, me: { id: string } = { id: 
       pending_proposal: risk.proposal,
       config_version: 1,
       can_decide: true,
-      can_confirm: Boolean(risk.proposal && risk.proposal.decided_by !== me.id),
-      can_withdraw: Boolean(risk.proposal && risk.proposal.decided_by === me.id),
-      four_eyes_required: risk.level === 3,
+      // Four-eyes removed (owner 2026-10-25): any reviewer may confirm or withdraw an old proposal.
+      can_confirm: Boolean(risk.proposal),
+      can_withdraw: Boolean(risk.proposal),
+      four_eyes_required: false,
       reviewers_available: 2,
     });
     if (path === "/me") {
@@ -230,10 +231,7 @@ async function mount(page: Page, initial: RiskState, me: { id: string } = { id: 
       const input = body as { decision: string; reason: string; blocks?: string[] };
       const at = "2026-10-07T10:00:00Z";
       const decidedByName = me.id === CEO_ID ? "Test CEO" : "Ben Muster";
-      if (input.decision !== "request_more" && risk.level === 3) {
-        risk.proposal = { id: "d-1", decision: input.decision, reason: input.reason, decided_by: me.id, decided_by_name: decidedByName, decided_at: at };
-        risk.status = "proposed";
-      } else if (input.decision === "request_more") {
+      if (input.decision === "request_more") {
         risk.requested = [...new Set([...risk.requested, ...(input.blocks ?? [])])].sort();
         risk.status = "awaiting_answers";
       } else {
@@ -350,50 +348,66 @@ test("level 2: staff see points and level, request more and release with a reaso
   expect(await wizard.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
 });
 
-test("level 3: a proposal waits for a second reviewer, who confirms it", async ({ page }, testInfo) => {
+test("level 3: one reviewer releases at once with a mandatory reason (four-eyes removed)", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   const session = await mount(page, levelThreeState());
-  let wizard = await session.open("Документы");
-  let panel = wizard.getByTestId("lead-risk-assessment");
+  const wizard = await session.open("Документы");
+  const panel = wizard.getByTestId("lead-risk-assessment");
 
   await expect(panel.getByTestId("lead-risk-level")).toHaveText("Уровень 3");
   await expect(panel.getByTestId("lead-risk-knockout")).toHaveText("K.o.");
-  await expect(panel.getByTestId("lead-risk-actions")).toContainText("Уровень 3: разрешение и отклонение — это предложение");
-  await expect(panel.getByTestId("lead-risk-second-reviewer-missing")).toHaveCount(0);
+  await expect(panel.getByTestId("lead-risk-level3-stop")).toContainText("K.o.: уровень 3 независимо от баллов");
+  await expect(panel.getByTestId("lead-risk-actions")).toContainText("Решение вступает в силу сразу, на любом уровне. Причина обязательна (минимум 10 символов).");
+  await expect(panel).not.toContainText("второго проверяющего");
+  await expect(panel.getByTestId("lead-risk-decide-release")).toHaveText("Разрешить");
+  await expect(panel.getByTestId("lead-risk-decide-reject")).toHaveText("Отклонить");
 
   await panel.getByTestId("lead-risk-decide-release").click();
-  const propose = page.getByRole("dialog", { name: "Предложить разрешение" });
-  await expect(propose).toContainText("принцип четырёх глаз");
-  await propose.getByLabel("Причина").fill("PEP-Status geprüft, Amt seit 2019 beendet");
-  await propose.getByRole("button", { name: "Разрешить", exact: true }).click();
-  await expect(propose).toHaveCount(0);
+  const release = page.getByRole("dialog", { name: "Разрешить работу с обращением" });
+  await expect(release).not.toContainText("четырёх глаз");
+  await expect(release).toContainText("Обязательно, минимум 10 символов.");
+  // A short reason cannot be sent.
+  await release.getByLabel("Причина").fill("kurz");
+  await expect(release.getByRole("button", { name: "Разрешить", exact: true })).toBeDisabled();
+  await release.getByLabel("Причина").fill("PEP-Status geprüft, Amt seit 2019 beendet");
+  await page.screenshot({ path: testInfo.outputPath("lead-risk-level-3-release-dialog.png"), animations: "disabled" });
+  await release.getByRole("button", { name: "Разрешить", exact: true }).click();
+  await expect(release).toHaveCount(0);
 
-  // The proposer sees the four-eyes state and may only withdraw.
-  const proposal = panel.getByTestId("lead-risk-proposal");
-  await expect(panel.getByTestId("lead-risk-status")).toHaveText("Ждёт второго проверяющего");
-  await expect(proposal).toContainText("Предложение: Разрешить — Test CEO, 07.10.2026 12:00");
-  await expect(proposal.getByTestId("lead-risk-four-eyes")).toBeVisible();
-  await expect(proposal.getByRole("button", { name: "Отозвать" })).toBeVisible();
-  await expect(proposal.getByRole("button", { name: "Подтвердить" })).toHaveCount(0);
-  await expect(panel.getByTestId("lead-risk-decide-release")).toHaveCount(0);
-  await proposal.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: testInfo.outputPath("lead-risk-level-3-proposed.png"), animations: "disabled" });
+  await expect(panel.getByTestId("lead-risk-status")).toHaveText("Разрешено");
+  await expect(panel.getByTestId("lead-risk-proposal")).toHaveCount(0);
+  await expect(panel.getByTestId("lead-risk-level3-stop")).toHaveCount(0);
+  expect(session.calls.find((call) => call.path.endsWith("/risk-assessment/decisions"))?.body).toEqual({
+    decision: "release",
+    reason: "PEP-Status geprüft, Amt seit 2019 beendet",
+  });
+});
 
-  // A second reviewer (the CEO's deputy) confirms with an own reason.
-  session.me.id = DEPUTY_ID;
-  wizard = await session.open("Документы");
-  panel = wizard.getByTestId("lead-risk-assessment");
+test("level 3: an old proposal from before the change is confirmed by any reviewer, its author too", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const state = levelThreeState();
+  state.status = "proposed";
+  state.proposal = { id: "d-1", decision: "release", reason: "PEP-Status geprüft, Amt seit 2019 beendet", decided_by: CEO_ID, decided_by_name: "Test CEO", decided_at: "2026-10-07T10:00:00Z" };
+  const session = await mount(page, state);
+  const wizard = await session.open("Документы");
+  const panel = wizard.getByTestId("lead-risk-assessment");
+
   const pending = panel.getByTestId("lead-risk-proposal");
-  await expect(pending.getByRole("button", { name: "Отозвать" })).toHaveCount(0);
+  await expect(panel.getByTestId("lead-risk-status")).toHaveText("Ждёт подтверждения (старое предложение)");
+  await expect(pending).toContainText("Старое предложение: Разрешить — Test CEO, 07.10.2026 12:00");
+  await expect(pending.getByTestId("lead-risk-old-proposal")).toBeVisible();
+  // The author may confirm it as well as withdraw it; no new decision while it waits.
+  await expect(pending.getByRole("button", { name: "Отозвать" })).toBeVisible();
+  await expect(panel.getByTestId("lead-risk-decide-release")).toHaveCount(0);
   await pending.getByRole("button", { name: "Подтвердить" }).click();
   const confirm = page.getByRole("dialog", { name: "Подтвердить решение: Разрешить" });
-  await confirm.getByLabel("Причина").fill("Zweitprüfung: Unterlagen vollständig");
+  await confirm.getByLabel("Причина").fill("Unterlagen vollständig geprüft");
   await confirm.getByRole("button", { name: "Подтвердить", exact: true }).click();
   await expect(confirm).toHaveCount(0);
   await expect(panel.getByTestId("lead-risk-status")).toHaveText("Разрешено");
   await expect(panel.getByTestId("lead-risk-proposal")).toHaveCount(0);
   expect(session.calls.find((call) => call.path.endsWith("/decisions/d-1/confirm"))?.body).toEqual({
-    reason: "Zweitprüfung: Unterlagen vollständig",
+    reason: "Unterlagen vollständig geprüft",
   });
 });
 
@@ -489,7 +503,7 @@ test("the CEO saves the risk configuration and sees the review queue", async ({ 
   const queue = page.getByTestId("risk-review-queue");
   await expect(queue.getByTestId("risk-review-row")).toContainText("Anna Muster");
   await expect(queue.getByTestId("risk-review-row")).toContainText("Уровень 3");
-  await expect(queue.getByTestId("risk-review-row")).toContainText("Предложение: Разрешить — Test CEO, 07.10.2026 10:00");
+  await expect(queue.getByTestId("risk-review-row")).toContainText("Старое предложение: Разрешить — Test CEO, 07.10.2026 10:00");
 
   // A wrong bound is refused before it is sent.
   const save = settings.getByTestId("risk-config-save");

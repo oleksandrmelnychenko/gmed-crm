@@ -888,7 +888,7 @@ pub(super) async fn candidates(
     .map_err(db_error)?;
     let mut documents = Vec::new();
     let mut attachments = Vec::new();
-    let mut first_row = source;
+    let mut signing_rows: Vec<(Uuid, PgRow)> = Vec::new();
     for id in ids {
         let Ok(row) = signature_document_access(&state, &auth, id, true).await else {
             continue;
@@ -925,12 +925,13 @@ pub(super) async fn candidates(
             .or_else(|| electronic_form_excluded(&row).map(|_| "electronic_form_excluded"))
             .or_else(|| pending.contains(&id).then_some("signature_already_pending"));
         candidate["ineligible_reason"] = json!(ineligible_reason);
-        if first_row.is_none() {
-            first_row = Some(row);
-        }
         documents.push(candidate);
+        signing_rows.push((id, row));
     }
-    let (mut presets, suggested_signers, language) = match &first_row {
+    let first_row: Option<&PgRow> = source
+        .as_ref()
+        .or_else(|| signing_rows.first().map(|(_, row)| row));
+    let (mut presets, language) = match first_row {
         Some(row) => {
             let preset = match query.document_id {
                 Some(_) => package::preset_document_ids(&state, &auth, row).await?,
@@ -938,13 +939,12 @@ pub(super) async fn candidates(
             };
             (
                 preset,
-                defaults::suggested(&state, &auth, row, SignerPolicy::ClientPayerAndAgency).await?,
                 legal::suggested_language(&scope_languages(&state, row).await?),
             )
         }
-        None => (vec![], vec![], "de"),
+        None => (vec![], "de"),
     };
-    let onboarding_manifest = match &first_row {
+    let onboarding_manifest = match first_row {
         Some(row) => onboarding::manifest(&state, &auth, row).await?,
         None => None,
     };
@@ -963,6 +963,31 @@ pub(super) async fn candidates(
             })
             .collect();
     }
+    // The package suggests the signers of every preset document, the first
+    // document's first (`defaults::suggested_for_package`): a package started
+    // from a minor's contract still suggests the second custody parent, who
+    // signs the child's consents in it but not the contract.
+    let first_id = first_row.map(|row| row.get::<Uuid, _>("id"));
+    let mut package_rows: Vec<&PgRow> = first_row.into_iter().collect();
+    for id in &presets {
+        if Some(*id) == first_id {
+            continue;
+        }
+        if let Some((_, row)) = signing_rows.iter().find(|(candidate, _)| candidate == id) {
+            package_rows.push(row);
+        }
+    }
+    let suggested_signers = if package_rows.is_empty() {
+        Vec::new()
+    } else {
+        defaults::suggested_for_package(
+            &state,
+            &auth,
+            &package_rows,
+            SignerPolicy::ClientPayerAndAgency,
+        )
+        .await?
+    };
     Ok(Json(json!({
         "scope": {"patient_id": patient_id, "lead_id": lead_id},
         "documents": documents,
