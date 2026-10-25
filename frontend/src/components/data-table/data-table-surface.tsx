@@ -220,10 +220,17 @@ export function DataTableSurface<T>({
     }
     return map;
   }, [enhancedColumns]);
+  const sortAccessors = useMemo(() => {
+    const map: Record<string, ColumnDef<T>["accessor"]> = {};
+    for (const column of enhancedColumns) {
+      map[column.id] = column.sortAccessor ?? column.accessor;
+    }
+    return map;
+  }, [enhancedColumns]);
 
   const { visibleRows, filteredCount } = useMemo(() => {
     const filtered = applyFilters(rows, filters, { accessors });
-    const sorted = applySort(filtered, sortStack, { accessors });
+    const sorted = applySort(filtered, sortStack, { accessors: sortAccessors });
     // Child rows are injected after filtering/sorting so they always stay
     // attached directly under their parent row. The count names the rows
     // themselves, not their opened sub-rows (QA C2-03: "5 / 4").
@@ -236,7 +243,7 @@ export function DataTableSurface<T>({
         : sorted,
       filteredCount: sorted.length,
     };
-  }, [accessors, expandRow, filters, rows, sortStack]);
+  }, [accessors, expandRow, filters, rows, sortAccessors, sortStack]);
 
   const paginationResetKey = pagination
     ? `${pagination.resetKey ?? ""}:${JSON.stringify(filters)}:${JSON.stringify(sortStack)}`

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { openFollowUpBlocks } from "./lead-request-follow-up-model";
 import { leadRequestText, followUpFieldLabel } from "./lead-request-text";
-import { representativeCountryDraft, representativeCountryPatch, updateRepresentativeCountryDraft } from "./lead-request-representative-questions-model";
+import { representativeCountryDraft, representativeCountryPatch, updateRepresentativeCountryDraft, withKnownBirth } from "./lead-request-representative-questions-model";
 
 describe("parent country answers", () => {
   it("retains known No answers and residence without inventing answers for the child", () => {
@@ -45,5 +45,16 @@ describe("parent country answers", () => {
       expect(label).not.toContain("parent-id");
       expect(label).not.toContain("ребён");
     }
+  });
+});
+
+describe("birth data GMED already knows (QA 2026-10-25, R-2)", () => {
+  it("fills an empty birth place and country from the representative, never over an answer", () => {
+    const empty = representativeCountryDraft({ birth_country: "IR" });
+    expect(withKnownBirth(empty, { birth_place: "Tehran", birth_country: "DE" })).toMatchObject({ birth_place: "Tehran", birth_country: "IR" });
+    expect(withKnownBirth(representativeCountryDraft({ birth_place: "Shiraz" }), { birth_place: "Tehran" }).birth_place).toBe("Shiraz");
+    expect(withKnownBirth(empty, undefined)).toEqual(empty);
+    // The prefilled place is then saved with the questionnaire.
+    expect(representativeCountryPatch(empty, withKnownBirth(empty, { birth_place: "Tehran" }))).toEqual({ birth_place: "Tehran" });
   });
 });

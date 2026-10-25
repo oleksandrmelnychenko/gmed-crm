@@ -67,6 +67,8 @@ export type ColumnDef<T> = {
   id: string;
   label: string;
   accessor: (row: T) => unknown;
+  /** The value the column sorts by when it differs from the shown/filtered one (e.g. last name first). */
+  sortAccessor?: (row: T) => unknown;
   filterType?: FilterFieldType;
   filterOptions?: FilterOption[] | ((rows: readonly T[]) => FilterOption[]);
   sortable?: boolean;

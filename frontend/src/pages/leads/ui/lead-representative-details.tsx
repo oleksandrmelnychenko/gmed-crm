@@ -33,6 +33,7 @@ export function LeadRepresentativeDetailsForm({
   lang,
   disabled,
   onSaved,
+  onDraftChange,
 }: {
   leadId: string;
   person: LeadRepresentative;
@@ -40,6 +41,12 @@ export function LeadRepresentativeDetailsForm({
   lang: string;
   disabled: boolean;
   onSaved: (representation: LeadRepresentation | null) => void;
+  /**
+   * The form's values and what they were loaded from, after every change:
+   * the contact dialog's own «Сохранить» carries the citizenships and birth
+   * data with the contact (F-11, QA 2026-10-25: they were dropped silently).
+   */
+  onDraftChange?: (draft: RepresentativeDetails, loaded: RepresentativeDetails) => void;
 }) {
   const stored = representativeDetailsOf(person);
   const storedKey = JSON.stringify(stored);
@@ -69,6 +76,14 @@ export function LeadRepresentativeDetailsForm({
       setMeanwhile((current) => (merged.conflict || current === "conflict" ? "conflict" : "updated"));
     }
   }, [storedKey]);
+
+  const onDraftChangeRef = useRef(onDraftChange);
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  }, [onDraftChange]);
+  useEffect(() => {
+    onDraftChangeRef.current?.(draft, loadedRef.current);
+  }, [draft]);
 
   const changed = representativeDetailsChanged(draft, loadedRef.current);
   const errors = representativeDetailsErrors(draft, loadedRef.current);

@@ -331,3 +331,14 @@ describe("payer package: Skribble's languages", () => {
     expect(payerPackageLanguageHint(state(), "en", ru)).toBeNull();
   });
 });
+
+describe("R-7: the standalone Kostenübernahmeerklärung in the package rows", () => {
+  it("fills the empty cost-coverage slot, never a slot the package has", () => {
+    const standalone = { slot: "cost_coverage" as const, document_id: "doc-108", title: "DOC-108", version: 1, signed_at: "2026-10-25T10:00:00Z" };
+    const rows = payerPackageRows(null, { cost_coverage: standalone });
+    expect(rows.find((row) => row.slot === "cost_coverage")?.document).toEqual(standalone);
+    expect(rows.find((row) => row.slot === "self_disclosure")?.document).toBeNull();
+    const packaged = { documents: [{ ...standalone, document_id: "pkg-doc", signed_at: null }] };
+    expect(payerPackageRows(packaged, { cost_coverage: standalone }).find((row) => row.slot === "cost_coverage")?.document?.document_id).toBe("pkg-doc");
+  });
+});

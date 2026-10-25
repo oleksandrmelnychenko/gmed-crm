@@ -49,6 +49,7 @@ import {
   type WizardDraft,
   type WizardOrderLine,
 } from "./lead-wizard.model";
+import { insuranceAnswerFromStored } from "./lead-wizard.model";
 
 function lead(overrides: Partial<LeadDetail> = {}): LeadDetail {
   return {
@@ -663,5 +664,16 @@ describe("the agency's confirmation of the order (walk-through 2026-10-24)", () 
     // A confirmation already made can be taken back.
     expect(agencyOrderConfirmationBlocked(false, true)).toBe(false);
     expect(agencyOrderConfirmationBlocked(true, true)).toBe(false);
+  });
+});
+
+describe("F-W7: a self payer has no insurance", () => {
+  it("answers «Нет, самооплата» for a stored self-pay type, whatever has_insurance says", () => {
+    expect(insuranceAnswerFromStored({ hasInsurance: true, insuranceType: "self_pay" })).toBe("no");
+    expect(insuranceAnswerFromStored({ hasInsurance: null, insuranceType: "self_pay" })).toBe("no");
+    expect(insuranceAnswerFromStored({ hasInsurance: true, insuranceType: "private" })).toBe("yes");
+    expect(insuranceAnswerFromStored({ hasInsurance: false, insuranceType: "" })).toBe("no");
+    expect(insuranceAnswerFromStored({ hasInsurance: null, insuranceType: "", insuranceProvider: "AOK" })).toBe("yes");
+    expect(insuranceAnswerFromStored({ hasInsurance: undefined, insuranceType: null })).toBe("");
   });
 });

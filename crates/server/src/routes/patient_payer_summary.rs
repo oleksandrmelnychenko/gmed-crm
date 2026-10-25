@@ -214,8 +214,12 @@ async fn load_summary(
     patient_id: Uuid,
     with_identification: bool,
 ) -> Result<PayerSummary, sqlx::Error> {
-    let party =
+    let mut party =
         contracting_party::resolve(conn, patient_id, None, None, crate::app_time::today()).await?;
+    // The card names the party of the signed contract: the paying parent
+    // alone when the lead's cabinet named one (map 94, QA 2026-10-25 R-5).
+    crate::routes::documents::narrow_patient_party_to_paying_parent(conn, patient_id, &mut party)
+        .await?;
     let mut declared = lead_payer::patient_declaration(conn, patient_id).await?;
     // A parent named as payer (owner decision 2026-10-19) is shown with the
     // representative's data, as of the conversion day.

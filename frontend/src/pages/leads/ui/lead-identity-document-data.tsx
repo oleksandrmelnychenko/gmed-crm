@@ -428,12 +428,17 @@ export function LeadIdentityDocumentDataForm({
             className={inputClass}
             type="date"
             name="id_issued_on"
-            max={today}
+            // No `max`: the picker would keep a future date to itself and the
+            // form would say «Сохранено» without it (QA 2026-10-25, F-W2); the
+            // rule below names it at the field and the date is not sent.
             value={draft.issuedOn}
             disabled={disabled}
             aria-invalid={Boolean(fieldError("issuedOn"))}
             aria-describedby={described("issuedOn")}
-            onChange={(event) => patch({ issuedOn: event.target.value })}
+            onChange={(event) => {
+              touch("issuedOn")();
+              patch({ issuedOn: event.target.value });
+            }}
           />
         </FormField>
         <FormField label={tx("Действителен до", "Gültig bis")} error={fieldError("validUntil")} errorId={errorId("validUntil")} onBlur={touch("validUntil")}>
@@ -445,7 +450,10 @@ export function LeadIdentityDocumentDataForm({
             disabled={disabled}
             aria-invalid={Boolean(fieldError("validUntil")) || status.kind === "expired"}
             aria-describedby={described("validUntil")}
-            onChange={(event) => patch({ validUntil: event.target.value })}
+            onChange={(event) => {
+              touch("validUntil")();
+              patch({ validUntil: event.target.value });
+            }}
           />
         </FormField>
       </div>

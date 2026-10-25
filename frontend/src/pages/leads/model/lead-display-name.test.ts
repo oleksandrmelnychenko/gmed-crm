@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deletedLeadLabel, isAnonymizedLead, leadDisplayName } from "./lead-display-name";
+import { deletedLeadLabel, isAnonymizedLead, leadDisplayName, leadSortName } from "./lead-display-name";
 
 const ru = (text: string) => text;
 const de = (_ru: string, text: string) => text;
@@ -31,5 +31,20 @@ describe("the name staff see for a lead", () => {
     expect(isAnonymizedLead({ first_name: "Anna", last_name: "MusterA", failed_outcome: { status: "archived" } })).toBe(false);
     expect(isAnonymizedLead({ first_name: "Deleted", last_name: "Lead", qualification_status: "new" })).toBe(false);
     expect(isAnonymizedLead(null)).toBe(false);
+  });
+});
+
+describe("the sort value of the «Лиды» column", () => {
+  it("orders by last name, then first name", () => {
+    const rows = [
+      { first_name: "Thomas", last_name: "Staffweg" },
+      { first_name: "Peter", last_name: "Pepmann" },
+      { first_name: "Dmitri", last_name: "Spisokov" },
+      { first_name: "Anna", last_name: "Pepmann" },
+    ];
+    const sorted = rows
+      .map((row) => leadSortName(row, ru))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    expect(sorted).toEqual(["Pepmann Anna", "Pepmann Peter", "Spisokov Dmitri", "Staffweg Thomas"]);
   });
 });

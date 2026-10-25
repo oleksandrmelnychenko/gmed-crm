@@ -752,6 +752,12 @@ pub async fn link_to_patient_in_tx(
         )
         .await?;
     }
+    // The relation or contact this lead was made from is linked first, by
+    // its id, with its own audit (`link_source_relation_to_patient`); the
+    // matchers by login and by e-mail below then find it linked already
+    // (QA 2026-10-25: the e-mail matcher took it first and the link was
+    // audited as `link_parent_relation_by_email`).
+    link_source_person_in_tx(tx, lead_id, patient_id, assigned_by).await?;
     if let Some(user_id) =
         sqlx::query_scalar::<_, Option<Uuid>>("SELECT portal_user_id FROM leads WHERE id=$1")
             .bind(lead_id)
@@ -761,7 +767,6 @@ pub async fn link_to_patient_in_tx(
         link_guardian_relationships_in_tx(tx, user_id, patient_id, assigned_by).await?;
     }
     link_parent_relations_by_email_in_tx(tx, patient_id, assigned_by).await?;
-    link_source_person_in_tx(tx, lead_id, patient_id, assigned_by).await?;
     sqlx::query(
         "UPDATE consent_records SET patient_id = $2 WHERE lead_id = $1 AND patient_id IS NULL",
     )
@@ -833,6 +838,7 @@ pub async fn link_source_person_in_tx(
                 ),
             )
             .await?;
+            add_reverse_relation_in_tx(tx, relation_id, lead_id, actor).await?;
             linked = true;
         }
     }
@@ -874,10 +880,75 @@ pub async fn link_source_person_in_tx(
                 ),
             )
             .await?;
+            for relation_id in &relations {
+                add_reverse_relation_in_tx(tx, *relation_id, lead_id, actor).await?;
+            }
             linked = true;
         }
     }
     Ok(linked)
+}
+
+/// The relation seen from the other side (QA 2026-10-25): once a child's
+/// relation `relation_id` points to the parent's own record, the parent's
+/// record names the child (`child`; a spouse or sibling the same kind), unless
+/// the parent's record already has a relation to that child. Audited on the
+/// parent's record; a relation of another kind gets no reverse row.
+async fn add_reverse_relation_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    relation_id: Uuid,
+    lead_id: Uuid,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let reverse: Option<(Uuid, Uuid, Uuid, String)> = sqlx::query_as(
+        r#"INSERT INTO patient_relations (patient_id, related_patient_id, related_name, relation_type)
+           SELECT r.related_patient_id, r.patient_id,
+                  COALESCE(NULLIF(btrim(concat_ws(' ', NULLIF(btrim(other.first_name), ''),
+                                                   NULLIF(btrim(other.last_name), ''))), ''),
+                           other.patient_id),
+                  reverse.relation_type
+           FROM patient_relations r
+           JOIN patients other ON other.id = r.patient_id
+           CROSS JOIN LATERAL (
+               SELECT CASE
+                   WHEN r.relation_type IN ('parent', 'mother', 'father', 'guardian') THEN 'child'
+                   WHEN r.relation_type IN ('spouse', 'sibling') THEN r.relation_type
+               END AS relation_type
+           ) reverse
+           WHERE r.id = $1
+             AND r.related_patient_id IS NOT NULL
+             AND r.related_patient_id <> r.patient_id
+             AND reverse.relation_type IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM patient_relations existing
+                 WHERE existing.patient_id = r.related_patient_id
+                   AND existing.related_patient_id = r.patient_id
+             )
+           RETURNING id, patient_id, related_patient_id, relation_type"#,
+    )
+    .bind(relation_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some((reverse_id, parent, child, relation_type)) = reverse {
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "add_reverse_relation_from_source_person",
+                Some(actor),
+                "patient",
+                Some(parent),
+                json!({
+                    "relation_id": reverse_id,
+                    "reverse_of_relation_id": relation_id,
+                    "related_patient_id": child,
+                    "relation_type": relation_type,
+                    "lead_id": lead_id,
+                }),
+            ),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Sets `trusted_contacts[].related_patient_id` of the entry `contact_id` on

@@ -2178,3 +2178,265 @@ async fn staff_enter_an_organisations_register_data_and_a_wrong_payer_phone_is_r
     assert_eq!(saved["declaration"]["organisation_legal_form"], "GmbH");
     assert_eq!(saved["declaration"]["organisation_details_locked"], true);
 }
+
+/// QA 2026-10-25, F-G2 (S1): a value added where the payer had none — an
+/// e-mail address, the date of birth the cabinet does not ask for — completes
+/// the same payer: the patient's two consents, the payer's link and the
+/// record that the payer was informed stay, and the identity is not dated
+/// anew.
+#[tokio::test]
+async fn completing_the_payer_keeps_consents_link_and_informed_record() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let manager = app.bearer("patient_manager");
+    let (_, manager_id) = *app
+        .users
+        .iter()
+        .find(|(role, _)| *role == "patient_manager")
+        .unwrap();
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let mut sparse = third_party_payer();
+    for key in ["date_of_birth", "email", "payer_informed"] {
+        sparse.as_object_mut().unwrap().remove(key);
+    }
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(sparse.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET contact_consent_at = now() - interval '2 days',
+               cost_estimate_consent_at = now() - interval '2 days'
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    type Kept = (
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    );
+    let kept = async |pool: &PgPool| -> Kept {
+        sqlx::query_as(
+            r#"SELECT contact_consent_at, cost_estimate_consent_at, payer_informed_at,
+                      identity_changed_at
+               FROM lead_payer_declarations WHERE lead_id = $1"#,
+        )
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+    let before = kept(pool).await;
+    assert!(before.0.is_some() && before.1.is_some(), "{before:?}");
+
+    // (c) An e-mail address added to a payer without one.
+    let mut with_email = sparse.clone();
+    with_email["email"] = json!("erika.zahler@example.org");
+    let (status, body) =
+        json_request(&app, "POST", &path, &manager, Some(with_email.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(kept(pool).await, before, "{body}");
+
+    // The link goes to that address; its invitation informed the payer.
+    let link_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO lead_payer_links (lead_id, token_hash, email, language, payer_key, sent_by,
+                                         expires_at)
+           SELECT lead_id, $2, email, 'de',
+                  jsonb_build_array(payer_type, organisation_name, first_name, last_name,
+                                    date_of_birth),
+                  $3, now() + interval '30 days'
+           FROM lead_payer_declarations WHERE lead_id = $1
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .bind("c4".repeat(32))
+    .bind(manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_payer_link_emails
+               (lead_id, link_id, kind, recipient, language, status, provider_message_id, sent_by)
+           VALUES ($1, $2, 'invitation', 'erika.zahler@example.org', 'de', 'sent', 'email_2', $3)"#,
+    )
+    .bind(lead_id)
+    .bind(link_id)
+    .bind(manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET payer_informed_at = now() - interval '1 day', payer_informed_by = $2
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let before = kept(pool).await;
+    assert!(before.2.is_some(), "{before:?}");
+
+    // (a) Staff add the date of birth without ticking "informed": the link
+    // of the payer without one still names this payer.
+    let mut born = with_email.clone();
+    born["date_of_birth"] = json!("1958-03-14");
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(born.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["declaration"]["date_of_birth"], "1958-03-14", "{body}");
+    assert_eq!(kept(pool).await, before, "{body}");
+    let revoked: Option<String> =
+        sqlx::query_scalar("SELECT revoked_reason FROM lead_payer_links WHERE id = $1")
+            .bind(link_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(revoked.is_none(), "the completed payer keeps the link");
+
+    // (b) Another date of birth than the one set: another payer.
+    let mut other = born.clone();
+    other["date_of_birth"] = json!("1959-03-14");
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(other)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let after = kept(pool).await;
+    assert_eq!((after.0, after.1, after.2), (None, None, None), "{body}");
+    assert_ne!(after.3, before.3, "the identity is dated anew");
+    let revoked: Option<String> =
+        sqlx::query_scalar("SELECT revoked_reason FROM lead_payer_links WHERE id = $1")
+            .bind(link_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(revoked.as_deref(), Some("payer_changed"));
+}
+
+fn readiness_check<'a>(lead: &'a Value, key: &str) -> &'a Value {
+    lead["readiness"]["checks"]
+        .as_array()
+        .and_then(|checks| checks.iter().find(|check| check["key"] == key))
+        .unwrap_or_else(|| panic!("readiness check {key} missing: {lead}"))
+}
+
+async fn insert_payer_identity_scan(app: &TestApp, lead_id: Uuid) {
+    let document_id = Uuid::new_v4();
+    let (_, uploader) = app.users[1];
+    sqlx::query(
+        r#"INSERT INTO documents (
+               id, lead_id, auto_name, original_filename, art, category,
+               status, visibility, is_medical, mime_type,
+               version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+               $1, $2, 'Ausweis (Zahler/in)', 'payer-pass.pdf', 'payer_identity', 'identity',
+               'active', 'internal', false, 'application/pdf', $1, 1, $3
+           )"#,
+    )
+    .bind(document_id)
+    .bind(lead_id)
+    .bind(uploader)
+    .execute(app.pool())
+    .await
+    .unwrap();
+}
+
+/// QA 2026-10-25, R-8 (owner decision «Блокувати при рівні 2»): a
+/// third-party payer at level 2 must have identified himself — the sent
+/// questionnaire with an identity document — before the conversion; the
+/// conversion refuses with `payer_not_identified`. A level-1 payer without a
+/// trigger of his own person converts as before.
+#[tokio::test]
+async fn a_level_two_third_party_payer_must_be_identified_before_the_conversion() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let pm = app.bearer("patient_manager");
+    let ceo = app.bearer("ceo");
+
+    // Level 2: the payer is an Iranian citizen (black list, T6 4 + T4 1).
+    let lead_id = seed_lead(pool).await;
+    let mut payer = third_party_payer();
+    payer["citizenships"] = json!(["IR"]);
+    payer["country"] = json!("IR");
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(payer)).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (status, lead) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    let check = readiness_check(&lead, "payer_identified");
+    assert_eq!(check["passed"], false, "{check}");
+    assert_eq!(check["blocking_for"], "conversion");
+    assert_eq!(check["stage"], "compliance");
+    assert!(has_reason(&lead, "Third-party payer is not identified"));
+    // The risk gate holds level 2 first; the CEO's release does not lift
+    // the payer's identification.
+    let convert = format!("/api/v1/leads/{lead_id}/convert");
+    let (status, held) = json_request(&app, "POST", &convert, &ceo, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{held}");
+    assert_eq!(held["error"], "risk_review_required", "{held}");
+    let (status, released) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/risk-assessment/decisions"),
+        &ceo,
+        Some(json!({ "decision": "release", "reason": "Payer and residence checked in the video call" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{released}");
+    let (status, refused) = json_request(&app, "POST", &convert, &ceo, None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "payer_not_identified", "{refused}");
+    // The identity document alone is not enough, nor the questionnaire alone.
+    insert_payer_identity_scan(&app, lead_id).await;
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(readiness_check(&lead, "payer_identified")["passed"], false);
+
+    // The payer sent the questionnaire: identified, no longer this blocker.
+    sqlx::query(
+        "INSERT INTO lead_payer_statements (lead_id, source, submitted_at, adopted_at)
+         VALUES ($1, 'link', now(), now())",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(
+        readiness_check(&lead, "payer_identified")["passed"],
+        true,
+        "{lead}"
+    );
+    assert!(!has_reason(&lead, "Third-party payer is not identified"));
+    let (status, refused) = json_request(&app, "POST", &convert, &ceo, None).await;
+    assert_ne!(
+        refused["code"], "payer_not_identified",
+        "{status} {refused}"
+    );
+
+    // Level 1: a Ukrainian aunt (T4 only) needs no questionnaire, as before.
+    let lead_id = seed_lead(pool).await;
+    let mut payer = third_party_payer();
+    payer["citizenships"] = json!(["UA"]);
+    payer["country"] = json!("UA");
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(payer)).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(
+        readiness_check(&lead, "payer_identified")["passed"],
+        true,
+        "{lead}"
+    );
+    assert!(!has_reason(&lead, "Third-party payer is not identified"));
+    let (_, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/convert"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_ne!(refused["code"], "payer_not_identified", "{refused}");
+}

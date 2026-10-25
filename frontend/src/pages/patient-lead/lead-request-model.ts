@@ -3,6 +3,8 @@ import { cachedLanguageDisplayNames } from "@/lib/intl-cache";
 import type {
   IdentificationPatch,
   LeadRequest,
+  LeadRequestDocument,
+  RefusedIdentityReason,
   LeadRequestIdentification,
   LeadRequestPayer,
   LeadRequestPayerInput,
@@ -1269,4 +1271,43 @@ export function languageName(code: string, lang: string): string {
   } catch {
     return code;
   }
+}
+
+/** A copy of an identity document GMED could not use, as the step shows it: greyed, with the reason. */
+export type RefusedIdentityCopy = {
+  id: string;
+  file_name: string | null;
+  uploaded_at: string | null;
+  reason: RefusedIdentityReason;
+};
+
+/**
+ * One person's identity copies split for the step (QA 2026-10-25, G F-G4): the copies the server
+ * lists in `follow_up.refused_identity_documents` for that person (`representativeId` null = the
+ * lead's own) are refused, each with its reason (unreadable / expired); the rest are current.
+ * A new copy replaces the refused ones — the server withdraws them — so they show only while
+ * the person has no current copy. Name and date come from the uploaded copy when it is listed.
+ */
+export function identityDocumentsInStep(
+  request: Pick<LeadRequest, "follow_up">,
+  documents: readonly LeadRequestDocument[],
+  representativeId: string | null = null,
+): { current: LeadRequestDocument[]; refused: RefusedIdentityCopy[] } {
+  const entries = (request.follow_up?.refused_identity_documents ?? []).filter(
+    (entry) => (entry.representative_id ?? null) === representativeId,
+  );
+  const refusedIds = new Set(entries.map((entry) => entry.document_id));
+  const current = documents.filter((document) => !refusedIds.has(document.id));
+  if (current.length > 0) return { current, refused: [] };
+  const byId = new Map(documents.map((document) => [document.id, document]));
+  const refused = entries.map((entry) => {
+    const uploaded = byId.get(entry.document_id);
+    return {
+      id: entry.document_id,
+      file_name: uploaded?.file_name ?? entry.file_name,
+      uploaded_at: uploaded?.uploaded_at ?? null,
+      reason: entry.reason,
+    };
+  });
+  return { current, refused };
 }

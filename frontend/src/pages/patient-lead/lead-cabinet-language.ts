@@ -11,30 +11,36 @@ import { asLeadCabinetLang, resolveLeadCabinetLang, type LeadCabinetLang } from 
  * resolves the language (`resolveLeadCabinetLang`) and publishes it here, so the side bar, the
  * top bar and the locked-module dialog speak the same language, UA and EN included. Before the
  * page has published anything (first render, a reload on the account page) the shell derives the
- * same starting value the page would: the remembered choice, else the account language, else the
- * portal language. Kept per login for the browser tab, like the account label, and never for
- * another login.
+ * same starting value the page would: the login's remembered choice, else the account language,
+ * else the portal language. The choice is remembered per login (QA 2026-10-25, G F-G5: a second
+ * person in the same browser opened in the first person's language), never for another login.
  */
-const STORAGE_KEY = "gmed_lead_cabinet_lang";
+const STORAGE_PREFIX = "gmed_lead_cabinet_lang:";
+/** The key of the first version: one choice for every login of the browser; no longer read. */
+const LEGACY_STORAGE_KEY = "gmed_lead_cabinet_lang";
 
 type Entry = { userId: string; lang: LeadCabinetLang };
 
 const listeners = new Set<() => void>();
 let entry: Entry | null = null;
 
-/** The choice remembered in this browser, if it is a cabinet language. */
-export function readStoredLeadCabinetLang(): LeadCabinetLang | null {
+/** The choice the login `userId` made in this browser, if it is a cabinet language. */
+export function readStoredLeadCabinetLang(userId: string | null | undefined): LeadCabinetLang | null {
+  if (!userId) return null;
   try {
-    return asLeadCabinetLang(window.localStorage.getItem(STORAGE_KEY));
+    return asLeadCabinetLang(window.localStorage.getItem(STORAGE_PREFIX + userId));
   } catch {
     return null;
   }
 }
 
-/** Remembers the choice in this browser; without storage it lasts for the visit only. */
-export function storeLeadCabinetLang(lang: LeadCabinetLang): void {
+/** Remembers the choice of the login `userId` in this browser; without storage it lasts for the visit only. */
+export function storeLeadCabinetLang(userId: string | null | undefined, lang: LeadCabinetLang): void {
+  if (!userId) return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, lang);
+    window.localStorage.setItem(STORAGE_PREFIX + userId, lang);
+    // The browser-wide choice of the first version would mislead nobody now, but it is not kept either.
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
     // The choice then lasts for this visit only.
   }
@@ -74,7 +80,7 @@ export function useLeadCabinetLangState(
 ): { lang: LeadCabinetLang; settled: boolean } {
   const current = useSyncExternalStore(subscribe, currentEntry, currentEntry);
   if (user?.id && current?.userId === user.id) return { lang: current.lang, settled: true };
-  const chosen = readStoredLeadCabinetLang() ?? asLeadCabinetLang(user?.preferred_language);
+  const chosen = readStoredLeadCabinetLang(user?.id) ?? asLeadCabinetLang(user?.preferred_language);
   return { lang: resolveLeadCabinetLang(chosen, null, portalLang), settled: chosen !== null };
 }
 

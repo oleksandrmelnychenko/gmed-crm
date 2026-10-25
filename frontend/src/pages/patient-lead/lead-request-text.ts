@@ -9,6 +9,7 @@ import type {
   PaymentRouteBy,
   PayerType,
   RecipientType,
+  RefusedIdentityReason,
   RepresentativeSlot,
   RepresentativeCountryQuestions,
 } from "./lead-request-api";
@@ -58,6 +59,8 @@ export type LeadRequestText = {
   intro: string;
   introGuardian: string;
   deadline: (date: string) => string;
+  /** After sending: the same deletion date until the data protection consent is signed (QA 2026-10-25, R-11). */
+  deadlineSent: (date: string) => string;
   deadlineNote: string;
   /**
    * The cabinet as a stepper of short tabs (trigger flow 2026-10-07): the
@@ -105,6 +108,10 @@ export type LeadRequestText = {
   documentsOptional: string;
   removeDocument: string;
   documentTakenOver: string;
+  /** An identity copy GMED could not use: block I asks a new one (QA 2026-10-25, G F-G4). Never "abgelehnt" (reads as the request refused). */
+  documentRefused: string;
+  /** Per reason of the server (`follow_up.refused_identity_documents[].reason`); about the document only. */
+  documentRefusedReasons: Record<RefusedIdentityReason, string>;
   maxDocuments: (count: number) => string;
   /** The server refused an upload over its limit (`too_many_documents` with `max_documents`). */
   tooManyDocuments: (count: number) => string;
@@ -369,6 +376,8 @@ export type LeadRequestText = {
   identificationFields: Record<IdentificationField, string>;
   /** Questions that say "you", for a parent who fills in the request of a child. */
   identificationFieldsGuardian: Partial<Record<IdentificationField, string>>;
+  /** Questions about another named person (a parent answering for the other parent, QA 2026-10-25 M F-14). */
+  identificationFieldsOther: (name: string) => Partial<Record<IdentificationField, string>>;
   /** Short names of the legal questions for the list of what is still missing. */
   legalTopics: Record<LegalQuestion, string>;
   yesNo: { yes: string; no: string };
@@ -512,6 +521,9 @@ export type LeadRequestText = {
   payerNoticeMissing: string;
   payerDeclarationLabel: string;
   payerDeclarationRequired: string;
+  /** Next to "send" of the payer's statement: what it still waits for (QA 2026-10-25, R-1). */
+  payerSendNeeds: string;
+  payerDeclarationMissing: string;
   payerSubmitButton: string;
   payerSubmittedAt: (dateTime: string) => string;
   payerSubmittedNote: string;
@@ -565,6 +577,20 @@ export function payerQuestionnaireFieldLabel(text: LeadRequestText, field: strin
     default:
       return (SUBMIT_FIELDS as readonly string[]).includes(field) ? submitFieldLabel(text, field as SubmitField) : field;
   }
+}
+
+/**
+ * What "send" of the paying parent's statement still waits for, in the order of the section: the
+ * notice, every key of the server's list, the confirmation (QA 2026-10-25, R-1). Empty: ready.
+ */
+export function payerSendNeeds(
+  text: LeadRequestText,
+  state: { acknowledged: boolean; declared: boolean; missing: readonly string[] },
+): string[] {
+  const keys = [...(!state.acknowledged && !state.missing.includes("privacy_ack") ? ["privacy_ack"] : []), ...state.missing];
+  const items = keys.map((key) => payerQuestionnaireFieldLabel(text, key));
+  if (!state.declared) items.push(text.payerDeclarationMissing);
+  return [...new Set(items)];
 }
 
 /**
@@ -983,6 +1009,7 @@ const de: LeadRequestText = {
   introGuardian:
     "Bitte tragen Sie die persönlichen Daten Ihres Kindes ein und laden Sie die Unterlagen hoch. Alles wird automatisch gespeichert.",
   deadline: (date) => `Bitte bis ${date} ausfüllen.`,
+  deadlineSent: (date) => `Ihre Anfrage wird am ${date} gelöscht, wenn die Datenschutz-Einwilligung (DSGVO) bis dahin nicht unterschrieben vorliegt.`,
   deadlineNote:
     "Aus Datenschutzgründen löschen wir Anfragen, die bis dahin nicht weiterbearbeitet werden, nach diesem Datum automatisch.",
   steps: {
@@ -1060,6 +1087,11 @@ const de: LeadRequestText = {
   documentsOptional: "Sie können die Anfrage auch ohne Unterlagen senden.",
   removeDocument: "Entfernen",
   documentTakenOver: "Von uns übernommen",
+  documentRefused: "Nicht verwendbar",
+  documentRefusedReasons: {
+    unreadable: "GMED konnte dieses Dokument nicht lesen. Bitte laden Sie einen neuen, gut lesbaren Scan hoch – er ersetzt dieses Dokument.",
+    expired: "Dieses Dokument ist nicht mehr gültig. Bitte laden Sie ein gültiges Ausweisdokument hoch – es ersetzt dieses Dokument.",
+  },
   maxDocuments: (count) => `Höchstens ${count} Dateien pro Anfrage.`,
   tooManyDocuments: (count) => `Sie können höchstens ${count} Dokumente hochladen. Entfernen Sie zuerst eine nicht benötigte Datei.`,
   sendTitle: "An Ihre Ansprechperson senden",
@@ -1346,6 +1378,13 @@ const de: LeadRequestText = {
       "Ist ein unmittelbares Familienmitglied der Patientin / des Patienten oder eine ihr / ihm nahestehende Person politisch exponiert?",
     residence_since: "Seit wann wohnt die Patientin / der Patient im Wohnsitzland?",
   },
+  identificationFieldsOther: (name: string) => ({
+    residence_since: `Seit wann wohnt ${name} im Wohnsitzland?`,
+    pep_self: `Übt ${name} ein hochrangiges öffentliches Amt aus oder hat ${name} es in den letzten 12 Monaten ausgeübt?`,
+    pep_related: `Ist ein unmittelbares Familienmitglied oder eine nahestehende Person von ${name} politisch exponiert?`,
+    sanctions_links: `Bestehen bei ${name} Verbindungen zu Personen oder Unternehmen, die Sanktionen unterliegen?`,
+    pep_relationship: `Beziehung zur Person mit dem Amt (falls nicht ${name} selbst)`,
+  }),
   legalTopics: {
     pep_self: "Öffentliches Amt",
     pep_related: "Politisch exponierte nahestehende Person",
@@ -1539,6 +1578,8 @@ const de: LeadRequestText = {
   payerNoticeMissing: "Datenschutzhinweis bestätigen",
   payerDeclarationLabel: "Ich bestätige, dass meine Angaben als zahlende Person vollständig und richtig sind.",
   payerDeclarationRequired: "Bitte bestätigen Sie Ihre Angaben, bevor Sie sie senden.",
+  payerSendNeeds: "Zum Senden fehlt noch:",
+  payerDeclarationMissing: "Bestätigung, dass Ihre Angaben vollständig und richtig sind",
   payerSubmitButton: "Angaben als Zahler senden",
   payerSubmittedAt: (dateTime) => `Ihre Angaben als zahlende Person wurden am ${dateTime} gesendet.`,
   payerSubmittedNote: "Möchten Sie etwas ändern, wenden Sie sich bitte an GMED.",
@@ -1559,6 +1600,7 @@ const ru: LeadRequestText = {
   introGuardian:
     "Пожалуйста, заполните личные данные ребёнка и загрузите документы. Всё сохраняется автоматически.",
   deadline: (date) => `Пожалуйста, заполните до ${date}.`,
+  deadlineSent: (date) => `Ваша заявка будет удалена ${date}, если к этой дате не будет подписано согласие на обработку данных (DSGVO).`,
   deadlineNote:
     "Из соображений защиты данных заявки, работа по которым к этой дате не продолжена, после неё удаляются автоматически.",
   steps: {
@@ -1635,6 +1677,11 @@ const ru: LeadRequestText = {
   documentsOptional: "Заявку можно отправить и без документов.",
   removeDocument: "Удалить",
   documentTakenOver: "Принято в работу",
+  documentRefused: "Не подходит",
+  documentRefusedReasons: {
+    unreadable: "GMED не удалось прочитать этот документ. Пожалуйста, загрузите новый, хорошо читаемый скан — он заменит этот документ.",
+    expired: "Этот документ больше не действителен. Пожалуйста, загрузите действующий документ, удостоверяющий личность, — он заменит этот документ.",
+  },
   maxDocuments: (count) => `Не более ${count} файлов на заявку.`,
   tooManyDocuments: (count) => `Можно загрузить до ${count} документов. Сначала удалите ненужный файл.`,
   sendTitle: "Отправить вашему менеджеру",
@@ -1911,6 +1958,13 @@ const ru: LeadRequestText = {
       "Является ли кто-то из ближайших членов семьи пациента или близкий ему человек политически значимым лицом?",
     residence_since: "С какого времени пациент живёт в стране проживания?",
   },
+  identificationFieldsOther: (name: string) => ({
+    residence_since: `С какого времени ${name} живёт в стране проживания?`,
+    pep_self: `Занимает ли ${name} высокую государственную должность или занимал(а) её в последние 12 месяцев?`,
+    pep_related: `Является ли кто-то из ближайших членов семьи или близких людей ${name} политически значимым лицом?`,
+    sanctions_links: `Есть ли у ${name} связи с лицами или компаниями, на которые наложены санкции?`,
+    pep_relationship: `Кем приходится ${name} человек с должностью (если это не ${name})`,
+  }),
   legalTopics: {
     pep_self: "Государственная должность",
     pep_related: "Политически значимое близкое лицо",
@@ -2109,6 +2163,8 @@ const ru: LeadRequestText = {
   payerNoticeMissing: "Подтвердить уведомление о защите данных",
   payerDeclarationLabel: "Я подтверждаю, что мои данные как плательщика полны и верны.",
   payerDeclarationRequired: "Пожалуйста, подтвердите свои данные перед отправкой.",
+  payerSendNeeds: "Для отправки ещё не хватает:",
+  payerDeclarationMissing: "Подтверждение, что ваши данные полны и верны",
   payerSubmitButton: "Отправить данные плательщика",
   payerSubmittedAt: (dateTime) => `Ваши данные как плательщика отправлены ${dateTime}.`,
   payerSubmittedNote: "Если вы хотите что-то изменить, обратитесь, пожалуйста, в GMED.",
@@ -2128,6 +2184,7 @@ const uk: LeadRequestText = {
   introGuardian:
     "Будь ласка, заповніть особисті дані дитини та завантажте документи. Усе зберігається автоматично.",
   deadline: (date) => `Будь ласка, заповніть до ${date}.`,
+  deadlineSent: (date) => `Вашу заявку буде видалено ${date}, якщо до цієї дати не буде підписано згоду на обробку даних (DSGVO).`,
   deadlineNote:
     "З міркувань захисту даних заявки, робота над якими до цієї дати не продовжена, після неї видаляються автоматично.",
   steps: {
@@ -2204,6 +2261,11 @@ const uk: LeadRequestText = {
   documentsOptional: "Заявку можна надіслати і без документів.",
   removeDocument: "Видалити",
   documentTakenOver: "Прийнято в роботу",
+  documentRefused: "Не підходить",
+  documentRefusedReasons: {
+    unreadable: "GMED не вдалося прочитати цей документ. Будь ласка, завантажте новий, добре читабельний скан — він замінить цей документ.",
+    expired: "Цей документ більше не дійсний. Будь ласка, завантажте чинний документ, що посвідчує особу, — він замінить цей документ.",
+  },
   maxDocuments: (count) => `Не більше ${count} файлів на заявку.`,
   tooManyDocuments: (count) => `Можна завантажити до ${count} документів. Спочатку видаліть непотрібний файл.`,
   sendTitle: "Надіслати вашому менеджеру",
@@ -2480,6 +2542,13 @@ const uk: LeadRequestText = {
       "Чи є хтось із найближчих членів родини пацієнта або близька йому людина політично значущою особою?",
     residence_since: "Відколи пацієнт живе в країні проживання?",
   },
+  identificationFieldsOther: (name: string) => ({
+    residence_since: `Відколи ${name} живе в країні проживання?`,
+    pep_self: `Чи обіймає ${name} високу державну посаду або обіймав(-ла) її протягом останніх 12 місяців?`,
+    pep_related: `Чи є хтось із найближчих членів родини або близьких людей ${name} політично значущою особою?`,
+    sanctions_links: `Чи має ${name} зв’язки з особами або компаніями, на які накладено санкції?`,
+    pep_relationship: `Ким доводиться ${name} людина з посадою (якщо це не ${name})`,
+  }),
   legalTopics: {
     pep_self: "Державна посада",
     pep_related: "Політично значуща близька особа",
@@ -2678,6 +2747,8 @@ const uk: LeadRequestText = {
   payerNoticeMissing: "Підтвердити повідомлення про захист даних",
   payerDeclarationLabel: "Я підтверджую, що мої дані як платника повні та правильні.",
   payerDeclarationRequired: "Будь ласка, підтвердьте свої дані перед надсиланням.",
+  payerSendNeeds: "Для надсилання ще бракує:",
+  payerDeclarationMissing: "Підтвердження, що ваші дані повні та правильні",
   payerSubmitButton: "Надіслати дані платника",
   payerSubmittedAt: (dateTime) => `Ваші дані як платника надіслано ${dateTime}.`,
   payerSubmittedNote: "Якщо ви хочете щось змінити, зверніться, будь ласка, до GMED.",
@@ -2697,6 +2768,7 @@ const en: LeadRequestText = {
   introGuardian:
     "Please enter your child's personal details and upload the documents. Everything is saved automatically.",
   deadline: (date) => `Please complete by ${date}.`,
+  deadlineSent: (date) => `Your request will be deleted on ${date} unless the data protection consent (GDPR) has been signed by then.`,
   deadlineNote:
     "For data protection reasons, requests that are not taken further by then are deleted automatically after this date.",
   steps: {
@@ -2773,6 +2845,11 @@ const en: LeadRequestText = {
   documentsOptional: "You can also send the request without documents.",
   removeDocument: "Remove",
   documentTakenOver: "Taken over by us",
+  documentRefused: "Not usable",
+  documentRefusedReasons: {
+    unreadable: "GMED could not read this document. Please upload a new, clearly legible scan – it replaces this document.",
+    expired: "This document is no longer valid. Please upload a valid identity document – it replaces this document.",
+  },
   maxDocuments: (count) => `At most ${count} files per request.`,
   tooManyDocuments: (count) => `You can upload up to ${count} documents. Remove an unneeded file first.`,
   sendTitle: "Send to your contact person",
@@ -3047,6 +3124,13 @@ const en: LeadRequestText = {
     pep_related: "Is an immediate family member of the patient or a person close to the patient politically exposed?",
     residence_since: "Since when has the patient lived in the country of residence?",
   },
+  identificationFieldsOther: (name: string) => ({
+    residence_since: `Since when has ${name} lived in the country of residence?`,
+    pep_self: `Does ${name} hold a prominent public office, or has ${name} held one in the last 12 months?`,
+    pep_related: `Is an immediate family member of ${name} or a person close to ${name} politically exposed?`,
+    sanctions_links: `Does ${name} have any links to persons or companies that are subject to sanctions?`,
+    pep_relationship: `Relationship to the office holder (if not ${name})`,
+  }),
   legalTopics: {
     pep_self: "Public office",
     pep_related: "Politically exposed close person",
@@ -3237,6 +3321,8 @@ const en: LeadRequestText = {
   payerNoticeMissing: "Confirm the privacy notice",
   payerDeclarationLabel: "I confirm that my details as the paying person are complete and correct.",
   payerDeclarationRequired: "Please confirm your details before you send them.",
+  payerSendNeeds: "Still needed before sending:",
+  payerDeclarationMissing: "Confirmation that your details are complete and correct",
   payerSubmitButton: "Send my details as payer",
   payerSubmittedAt: (dateTime) => `Your details as the paying person were sent on ${dateTime}.`,
   payerSubmittedNote: "If you want to change something, please contact GMED.",

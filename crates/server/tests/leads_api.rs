@@ -749,6 +749,53 @@ async fn create_lead_requires_name() {
     assert!(body["message"].as_str().unwrap().contains("Name"));
 }
 
+/// QA 2026-10-25: a lead source the app does not know is refused at the field
+/// (it was stored and shown as «Неизвестное значение»); every source the app
+/// names passes in any spelling the leads page reads, and none is fine.
+#[tokio::test]
+async fn create_lead_refuses_an_unknown_source() {
+    let Some(app) = test_app().await else { return };
+    let sales = app.auth_header("sales");
+    let create = |source: Value| {
+        let tag = Uuid::new_v4().simple().to_string();
+        let mut body = json!({
+            "first_name": "Source",
+            "last_name": format!("Check{}", &tag[..6]),
+            "email": format!("source-{tag}@example.com"),
+            "country": "DE"
+        });
+        if !source.is_null() {
+            body["source"] = source;
+        }
+        let app = &app;
+        let sales = sales.clone();
+        async move { json_request(app, "POST", "/api/v1/leads", &sales, Some(body)).await }
+    };
+
+    for unknown in ["Freund des Hauses", "Test", "website wizard x"] {
+        let (status, refused) = create(json!(unknown)).await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{unknown}: {refused}"
+        );
+        assert_eq!(refused["code"], "invalid_field", "{refused}");
+        assert_eq!(refused["field"], "source", "{refused}");
+    }
+    for known in [
+        json!("manual"),
+        json!("phone"),
+        json!("Website Wizard"),
+        json!("website-contact-form"),
+        json!(" Referral "),
+        json!(""),
+        Value::Null,
+    ] {
+        let (status, created) = create(known.clone()).await;
+        assert_eq!(status, StatusCode::CREATED, "{known}: {created}");
+    }
+}
+
 #[tokio::test]
 async fn create_and_get_lead() {
     let Some(app) = test_app().await else { return };
@@ -2090,7 +2137,7 @@ async fn list_leads_exposes_conversion_ready_field() {
             "last_name": "Ready",
             "email": format!("conv-{tag}@test.local"),
             "phone": "+49000000000",
-            "source": "Test",
+            "source": "manual",
             "country": "DE"
         })),
     )
@@ -2142,7 +2189,7 @@ async fn staff_cannot_mark_lead_compliance_signed_by_hand() {
             "last_name": "Compliance",
             "email": format!("manual-compliance-{tag}@test.local"),
             "phone": "+49111000001",
-            "source": "Test",
+            "source": "manual",
             "country": "DE"
         })),
     )
@@ -2224,7 +2271,7 @@ async fn the_pep_status_check_is_audited_as_its_own_action() {
             "first_name": "Anna",
             "last_name": "Muster",
             "email": format!("anna-pep-{tag}@example.com"),
-            "source": "Test",
+            "source": "manual",
             "country": "DE"
         })),
     )
@@ -2292,7 +2339,7 @@ async fn the_pep_review_is_stamped_and_audited_per_person() {
             "first_name": "Linda",
             "last_name": "Muster",
             "email": format!("linda-pep-{tag}@example.com"),
-            "source": "Test",
+            "source": "manual",
             "country": "DE"
         })),
     )
@@ -2408,7 +2455,7 @@ async fn converted_lead_is_absent_from_registry_but_detail_remains_auditable() {
             "last_name": "Converted",
             "email": "already-converted@test.local",
             "phone": "+49111000000",
-            "source": "Test",
+            "source": "manual",
             "country": "DE"
         })),
     )
@@ -2564,7 +2611,7 @@ async fn lead_can_convert_with_the_newest_accepted_quote_while_awaiting_prepayme
             "last_name": "Quote",
             "email": format!("newest-quote-{tag}@test.local"),
             "phone": "+49111000001",
-            "source": "Test",
+            "source": "manual",
             "country": "DE"
         })),
     )
@@ -2755,7 +2802,7 @@ async fn lead_readiness_normalizes_cost_passthrough_vat() {
             "last_name": "Quote",
             "email": format!("passthrough-quote-{tag}@test.local"),
             "phone": "+49111000002",
-            "source": "Test",
+            "source": "manual",
             "country": "DE"
         })),
     )
@@ -3323,16 +3370,42 @@ async fn returning_patient_attach_reuses_identity_without_overwriting_master_dat
         .execute(pool)
         .await
         .unwrap();
+    // The existing patient's own primary e-mail and phone (QA 2026-10-25: a
+    // lead attached to it with other contact data could not be converted, the
+    // lead's contacts were inserted as a second primary).
+    let phone_digits = format!("{:08}", Uuid::new_v4().as_u128() % 100_000_000);
+    let existing_phone = format!("+49151{phone_digits}");
+    sqlx::query(
+        r#"INSERT INTO patient_contacts (patient_id, contact_kind, contact_type, value, is_primary)
+           VALUES ($1, 'email', 'private', $2, true), ($1, 'phone', 'private', $3, true)"#,
+    )
+    .bind(patient_id)
+    .bind(&existing_email)
+    .bind(&existing_phone)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE patients SET phone_primary = $2 WHERE id = $1")
+        .bind(patient_id)
+        .bind(&existing_phone)
+        .execute(pool)
+        .await
+        .unwrap();
+    // The lead repeats the patient's phone in another notation: it is the
+    // same number and is not added again.
+    let existing_phone_other_notation = format!("0049 151 {phone_digits}");
     let lead_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO leads (
-                first_name, last_name, email, phone, country, primary_language,
+                first_name, last_name, email, phone, phones, country, primary_language,
                 date_of_birth, legal_sex, street_address, city, zip_code,
                 primary_concern_text, requested_specialties,
                 qualification_status, compliance_status,
                 consent_healthcare, consent_privacy_practices,
                 intake_source, intake_model, created_by
            ) VALUES (
-                'Returning', 'Patient', $1, '+4915776543210', 'DE', 'de',
+                'Returning', 'Patient', $1, '+4915776543210',
+                jsonb_build_array(jsonb_build_object('number', $3::text, 'type', 'mobile')),
+                'DE', 'de',
                 DATE '1982-04-03', 'female', 'Neue Str. 2', 'Berlin', '10115',
                 'New episode concern', '["orthopedics"]'::jsonb,
                 'qualified', 'signed', true, true,
@@ -3341,6 +3414,7 @@ async fn returning_patient_attach_reuses_identity_without_overwriting_master_dat
     )
     .bind(&incoming_email)
     .bind(app.patient_manager_id)
+    .bind(&existing_phone_other_notation)
     .fetch_one(pool)
     .await
     .unwrap();
@@ -3514,6 +3588,26 @@ async fn returning_patient_attach_reuses_identity_without_overwriting_master_dat
     assert_eq!(preserved.2, None);
     assert_eq!(preserved.3, "active");
     assert!(preserved.4);
+    // The patient keeps its primary e-mail and phone; the lead's differing
+    // e-mail and phone are added as further contacts, the repeated number in
+    // another notation is not added twice.
+    let contacts: Vec<(String, String, bool)> = sqlx::query_as(
+        "SELECT contact_kind, value, is_primary FROM patient_contacts WHERE patient_id = $1",
+    )
+    .bind(patient_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let mut contacts = contacts;
+    contacts.sort();
+    let mut expected = vec![
+        ("email".to_string(), existing_email.clone(), true),
+        ("email".to_string(), incoming_email.clone(), false),
+        ("phone".to_string(), existing_phone.clone(), true),
+        ("phone".to_string(), "+4915776543210".to_string(), false),
+    ];
+    expected.sort();
+    assert_eq!(contacts, expected);
     let patient_count_after: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM patients WHERE first_name = 'Returning' AND last_name = 'Patient'",
     )
@@ -9386,7 +9480,7 @@ async fn sales_sees_the_failure_reason_code_not_staff_words() {
             "last_name": "Reason",
             "email": format!("failed-reason-{tag}@test.local"),
             "phone": "+49111000004",
-            "source": "Test",
+            "source": "manual",
             "country": "DE"
         })),
     )
@@ -9443,7 +9537,7 @@ async fn ceo_assistant_reads_the_full_lead_not_the_service_grid() {
             "last_name": "Reads",
             "email": format!("assistant-reads-{tag}@test.local"),
             "phone": "+49111000003",
-            "source": "Test",
+            "source": "manual",
             "country": "DE",
             "date_of_birth": "1981-02-03"
         })),
@@ -9495,7 +9589,7 @@ async fn lead_update_audit_names_identity_fields_without_values() {
             "last_name": "Values",
             "email": format!("audit-values-{tag}@test.local"),
             "phone": "+49111000002",
-            "source": "Test",
+            "source": "manual",
             "country": "DE"
         })),
     )
@@ -9567,7 +9661,7 @@ async fn cabinet_consents_reach_the_patient_card_at_conversion() {
             "last_name": "Consent",
             "email": format!("cabinet-consent-{tag}@example.com"),
             "phone": "+49111000777",
-            "source": "Test",
+            "source": "manual",
             "country": "DE"
         })),
     )

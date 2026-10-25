@@ -13,6 +13,7 @@ import {
   invoiceToLabel,
   leadRequestText,
   payerFieldLabel,
+  payerSendNeeds,
   recipientOptions,
   resolveLeadCabinetLang,
   submitFieldLabel,
@@ -57,6 +58,63 @@ describe("a child's cabinet by who signs in (QA 2026-10-24)", () => {
     expect(disclosureWording(trustedPersonsText("de"), parentLogin).no).toBe("Nein, nur wir als Eltern.");
     expect(disclosureWording(trustedPersonsText("de"), vormundLogin).no).toBe("Nein, nur ich als Vormund.");
     expect(disclosureWording(uk, { access_kind: "self", minor: false })).toEqual({ no: uk.no, introduction: uk.introduction });
+  });
+
+  it("answers for the one parent with sole custody, not 'us as parents' (QA 2026-10-25, M F-8)", () => {
+    const soleLogin = { access_kind: "guardian", minor: true, representation: { custody: "sole_parent" } };
+    expect(disclosureWording(trustedPersonsText("de"), soleLogin).no).toBe("Nein, nur ich als allein sorgeberechtigter Elternteil.");
+    expect(disclosureWording(trustedPersonsText("de"), soleLogin).introduction).toContain("an Sie als allein sorgeberechtigten Elternteil");
+    for (const lang of ["de", "ru", "uk", "en"]) {
+      const text = trustedPersonsText(lang);
+      expect(disclosureWording(text, soleLogin).no).not.toBe(text.noParents);
+      expect(disclosureWording(text, parentLogin).no).toBe(text.noParents);
+      expect(disclosureWording(text, vormundLogin).no).toBe(text.noGuardian);
+    }
+  });
+
+  it("names the representative and the represented adult, never 'only you yourself' (QA 2026-10-25, M O-2)", () => {
+    const de = trustedPersonsText("de");
+    // The Betreuer's own login for an adult.
+    const representative = disclosureWording(de, { access_kind: "guardian", minor: false });
+    expect(representative.no).toBe("Nein, nur die vertretene Person selbst und ich als ihre Vertretung.");
+    expect(representative.introduction).toContain("an diese Person selbst und an Sie als ihre Vertretung");
+    // The adult's own login while a Betreuer acts.
+    const own = disclosureWording(de, { access_kind: "self", minor: false, representation: { has_representative: true } });
+    expect(own.no).toBe("Nein, nur ich selbst und meine Vertretung.");
+    expect(own.introduction).toContain("an Sie selbst und an die Person, die Sie vertritt");
+    expect(own.introduction).not.toContain("ausschließlich an Sie selbst.");
+    for (const lang of ["ru", "uk", "en"]) {
+      const text = trustedPersonsText(lang);
+      expect(disclosureWording(text, { access_kind: "self", minor: false, representation: { has_representative: false } }).no).toBe(text.no);
+      expect(disclosureWording(text, { access_kind: "guardian", minor: false }).no).toBe(text.noRepresented);
+    }
+  });
+});
+
+describe("questions about another person (QA 2026-10-25, M F-14)", () => {
+  it("names the other parent instead of asking 'you'", () => {
+    const de = leadRequestText("de").identificationFieldsOther("Max Kindrisk");
+    expect(de.pep_self).toBe("Übt Max Kindrisk ein hochrangiges öffentliches Amt aus oder hat Max Kindrisk es in den letzten 12 Monaten ausgeübt?");
+    expect(de.residence_since).toBe("Seit wann wohnt Max Kindrisk im Wohnsitzland?");
+    for (const lang of ["de", "ru", "uk", "en"]) {
+      const other = leadRequestText(lang).identificationFieldsOther("Max Kindrisk");
+      for (const key of ["residence_since", "pep_self", "pep_related", "sanctions_links", "pep_relationship"] as const) {
+        expect(other[key], `${lang} ${key}`).toContain("Max Kindrisk");
+        if (lang === "de") expect(other[key], key).not.toMatch(/\b(Sie|Ihnen|Ihr)\b/);
+        if (lang === "en") expect(other[key], key).not.toMatch(/\byou/i);
+      }
+    }
+  });
+});
+
+describe("the payer's send button says what it waits for (QA 2026-10-25, R-1)", () => {
+  it("lists the notice, the server's keys and the confirmation, in that order", () => {
+    const de = leadRequestText("de");
+    expect(payerSendNeeds(de, { acknowledged: false, declared: false, missing: [] })).toEqual([de.payerNoticeMissing, de.payerDeclarationMissing]);
+    expect(payerSendNeeds(de, { acknowledged: false, declared: false, missing: ["privacy_ack", "occupation"] })).toEqual([
+      de.payerNoticeMissing, de.payerQuestionnaireFields.occupation, de.payerDeclarationMissing,
+    ]);
+    expect(payerSendNeeds(de, { acknowledged: true, declared: true, missing: [] })).toEqual([]);
   });
 });
 
@@ -301,6 +359,9 @@ describe("lead cabinet languages", () => {
         text.followUpBeforeSubmitIntro,
         ...Object.values(text.followUpBlocks),
         ...Object.values(text.steps),
+        // A refused identity copy: about the document only (F-G4).
+        text.documentRefused,
+        ...Object.values(text.documentRefusedReasons),
       ];
       for (const word of words) expect(word, option.value).not.toMatch(risk);
     }

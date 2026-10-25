@@ -9,6 +9,12 @@ const texts = {
     representativeContext: (person: string) => `Sie entscheiden als Vertretung für ${person}. Die folgenden Angaben und die Einwilligung beziehen sich auf die Daten dieser Person.`,
     question: "Soll eine weitere Person Auskunft erhalten dürfen?", no: "Nein, nur ich selbst.", yes: "Ja, folgende Person(en) dürfen Auskunft erhalten:",
     noParents: "Nein, nur wir als Eltern.", noGuardian: "Nein, nur ich als Vormund.",
+    noOwnRepresented: "Nein, nur ich selbst und meine Vertretung.",
+    introductionOwnRepresented: "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst und an die Person, die Sie vertritt. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.",
+    noSoleParent: "Nein, nur ich als allein sorgeberechtigter Elternteil.",
+    noRepresented: "Nein, nur die vertretene Person selbst und ich als ihre Vertretung.",
+    introductionSoleParent: "Wir geben Auskunft über die persönlichen und medizinischen Daten Ihres Kindes ausschließlich an Sie als allein sorgeberechtigten Elternteil. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Partner, Freunde, Geschwister oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.",
+    introductionRepresented: "Wir geben Auskunft über die persönlichen und medizinischen Daten der von Ihnen vertretenen Person ausschließlich an diese Person selbst und an Sie als ihre Vertretung. Das gilt auch für Personen aus dem Umfeld der vertretenen Person, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.",
     introductionParents: "Wir geben Auskunft über die persönlichen und medizinischen Daten Ihres Kindes ausschließlich an Sie als Eltern. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Partner, Freunde, Geschwister oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.",
     introductionGuardian: "Wir geben Auskunft über die persönlichen und medizinischen Daten des Kindes ausschließlich an Sie als Vormund. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Partner, Freunde, Geschwister oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.",
     name: "Name, Vorname", relation: "Beziehung zu Ihnen (z. B. Ehefrau, Tochter, Freund)", contact: "Telefon / E-Mail", scope: "Umfang der Auskunft", scopePlaceholder: "Bitte auswählen",
@@ -34,6 +40,12 @@ const texts = {
     representativeContext: (person: string) => `You are deciding as a representative for ${person}. The following details and consent relate to this person's data.`,
     question: "May another person receive information?", no: "No, only me.", yes: "Yes, the following person(s) may receive information:",
     noParents: "No, only us as parents.", noGuardian: "No, only me as the guardian.",
+    noOwnRepresented: "No, only me and my representative.",
+    introductionOwnRepresented: "We provide information about your personal and medical data only to you personally and to the person who represents you. This also applies to people close to you who are not involved in organising your care or treatment, such as your spouse, partner, friends, children or other relatives. Without your explicit designation, we may not provide these people with any information.",
+    noSoleParent: "No, only me as the parent with sole custody.",
+    noRepresented: "No, only the represented person and me as their representative.",
+    introductionSoleParent: "We provide information about your child's personal and medical data only to you as the parent with sole custody. This also applies to people close to you who are not involved in organising the care or treatment, such as partners, friends, siblings or other relatives. Without your explicit designation, we may not provide these people with any information.",
+    introductionRepresented: "We provide information about the personal and medical data of the person you represent only to that person and to you as their representative. This also applies to people close to the represented person who are not involved in organising the care or treatment, such as a spouse, partner, friends, children or other relatives. Without explicit designation, we may not provide these people with any information.",
     introductionParents: "We provide information about your child's personal and medical data only to you as parents. This also applies to people close to you who are not involved in organising the care or treatment, such as partners, friends, siblings or other relatives. Without your explicit designation, we may not provide these people with any information.",
     introductionGuardian: "We provide information about the child's personal and medical data only to you as the guardian. This also applies to people close to you who are not involved in organising the care or treatment, such as partners, friends, siblings or other relatives. Without your explicit designation, we may not provide these people with any information.",
     name: "Last name, first name", relation: "Relationship to you (e.g. wife, daughter, friend)", contact: "Phone / email", scope: "Scope of information", scopePlaceholder: "Please choose",
@@ -58,6 +70,12 @@ const texts = {
     representativeContext: (person: string) => `Ви приймаєте рішення як представник особи ${person}. Наведені нижче відомості та згода стосуються даних цієї особи.`,
     question: "Чи можуть інші особи отримувати інформацію?", no: "Ні, лише я особисто.", yes: "Так, інформацію можуть отримувати такі особи:",
     noParents: "Ні, тільки ми (батьки).", noGuardian: "Ні, тільки я як опікун.",
+    noOwnRepresented: "Ні, лише я особисто та мій представник.",
+    introductionOwnRepresented: "Ми надаємо інформацію про ваші персональні та медичні дані лише вам особисто та особі, яка вас представляє. Це стосується й людей із вашого оточення, які не беруть участі в організації та лікуванні, наприклад чоловіка чи дружини, партнера, друзів, дітей або інших родичів. Без вашої прямої вказівки ми не маємо права надавати цим особам жодної інформації.",
+    noSoleParent: "Ні, тільки я як один із батьків з одноосібним правом опіки.",
+    noRepresented: "Ні, тільки особа, яку я представляю, і я як її представник.",
+    introductionSoleParent: "Ми надаємо інформацію про персональні та медичні дані вашої дитини лише вам як одному з батьків з одноосібним правом опіки. Це стосується й людей із вашого оточення, які не беруть участі в організації та лікуванні, наприклад партнерів, друзів, братів і сестер або інших родичів. Без вашої прямої вказівки ми не маємо права надавати цим особам жодної інформації.",
+    introductionRepresented: "Ми надаємо інформацію про персональні та медичні дані особи, яку ви представляєте, лише цій особі та вам як її представнику. Це стосується й людей з оточення цієї особи, які не беруть участі в організації та лікуванні, наприклад чоловіка чи дружини, партнера, друзів, дітей або інших родичів. Без прямої вказівки ми не маємо права надавати цим особам жодної інформації.",
     introductionParents: "Ми надаємо інформацію про персональні та медичні дані вашої дитини лише вам як батькам. Це стосується й людей із вашого оточення, які не беруть участі в організації та лікуванні, наприклад партнерів, друзів, братів і сестер або інших родичів. Без вашої прямої вказівки ми не маємо права надавати цим особам жодної інформації.",
     introductionGuardian: "Ми надаємо інформацію про персональні та медичні дані дитини лише вам як опікуну. Це стосується й людей із вашого оточення, які не беруть участі в організації та лікуванні, наприклад партнерів, друзів, братів і сестер або інших родичів. Без вашої прямої вказівки ми не маємо права надавати цим особам жодної інформації.",
     name: "Прізвище, ім’я", relation: "Ким доводиться вам (напр. дружина, донька, друг)", contact: "Телефон / ел. пошта", scope: "Обсяг інформації", scopePlaceholder: "Будь ласка, виберіть",
@@ -82,6 +100,12 @@ const texts = {
     representativeContext: (person: string) => `Вы принимаете решение как представитель лица ${person}. Приведённые ниже сведения и согласие относятся к данным этого лица.`,
     question: "Могут ли другие лица получать информацию?", no: "Нет, только я сам(а).", yes: "Да, информацию могут получать следующие лица:",
     noParents: "Нет, только мы (родители).", noGuardian: "Нет, только я как опекун.",
+    noOwnRepresented: "Нет, только я сам(а) и мой представитель.",
+    introductionOwnRepresented: "Мы предоставляем информацию о ваших персональных и медицинских данных только вам лично и лицу, которое вас представляет. Это касается и людей из вашего окружения, которые не участвуют в организации и лечении, например супруга(и), партнёра, друзей, детей или других родственников. Без вашего прямого указания мы не вправе предоставлять этим лицам никакую информацию.",
+    noSoleParent: "Нет, только я как родитель с единоличным правом опеки.",
+    noRepresented: "Нет, только представляемое лицо и я как его представитель.",
+    introductionSoleParent: "Мы предоставляем информацию о персональных и медицинских данных вашего ребёнка только вам как родителю с единоличным правом опеки. Это касается и людей из вашего окружения, которые не участвуют в организации и лечении, например партнёров, друзей, братьев и сестёр или других родственников. Без вашего прямого указания мы не вправе предоставлять этим лицам никакую информацию.",
+    introductionRepresented: "Мы предоставляем информацию о персональных и медицинских данных представляемого вами лица только этому лицу и вам как его представителю. Это касается и людей из окружения этого лица, которые не участвуют в организации и лечении, например супруга(и), партнёра, друзей, детей или других родственников. Без прямого указания мы не вправе предоставлять этим лицам никакую информацию.",
     introductionParents: "Мы предоставляем информацию о персональных и медицинских данных вашего ребёнка только вам как родителям. Это касается и людей из вашего окружения, которые не участвуют в организации и лечении, например партнёров, друзей, братьев и сестёр или других родственников. Без вашего прямого указания мы не вправе предоставлять этим лицам никакую информацию.",
     introductionGuardian: "Мы предоставляем информацию о персональных и медицинских данных ребёнка только вам как опекуну. Это касается и людей из вашего окружения, которые не участвуют в организации и лечении, например партнёров, друзей, братьев и сестёр или других родственников. Без вашего прямого указания мы не вправе предоставлять этим лицам никакую информацию.",
     name: "Фамилия, имя", relation: "Кем приходится вам (напр. жена, дочь, друг)", contact: "Телефон / эл. почта", scope: "Объём информации", scopePlaceholder: "Пожалуйста, выберите",
@@ -113,17 +137,30 @@ export function disclosureSubject(request: { access_kind?: string | null; minor?
 }
 
 type TrustedPersonsText = ReturnType<typeof trustedPersonsText>;
-type ChildCabinet = { access_kind?: string | null; minor?: boolean | null; representation?: { custody?: string | null } | null };
+type ChildCabinet = {
+  access_kind?: string | null;
+  minor?: boolean | null;
+  representation?: { custody?: string | null; has_representative?: boolean | null } | null;
+};
 
 /**
- * "No" and the introduction of the disclosure in a child's cabinet (QA 2026-10-24): the data are the
- * child's, and only the parents ("wir als Eltern") or the guardian ("ich als Vormund") get the
- * information — never "only me myself". An adult's own and a representative's login keep the own wording.
+ * "No" and the introduction of the disclosure by whose data it is and who decides (QA 2026-10-24/25):
+ * a child's data go only to the parents ("wir als Eltern"), the parent with sole custody ("ich als allein
+ * sorgeberechtigter Elternteil") or the guardian ("ich als Vormund") — never "only me myself"; a represented
+ * adult's data go to that person and the representative, also when the adult answers in the own login
+ * while somebody acts for them (Betreuer, power of attorney).
  */
 export function disclosureWording(text: TrustedPersonsText, request: ChildCabinet): { no: string; introduction: string } {
-  if (disclosureSubject(request) !== "child") return { no: text.no, introduction: text.introduction };
-  return actsAsVormund(request)
-    ? { no: text.noGuardian, introduction: text.introductionGuardian }
+  const subject = disclosureSubject(request);
+  if (subject === "represented") return { no: text.noRepresented, introduction: text.introductionRepresented };
+  if (subject === "own") {
+    return request.representation?.has_representative === true
+      ? { no: text.noOwnRepresented, introduction: text.introductionOwnRepresented }
+      : { no: text.no, introduction: text.introduction };
+  }
+  if (actsAsVormund(request)) return { no: text.noGuardian, introduction: text.introductionGuardian };
+  return request.representation?.custody === "sole_parent"
+    ? { no: text.noSoleParent, introduction: text.introductionSoleParent }
     : { no: text.noParents, introduction: text.introductionParents };
 }
 

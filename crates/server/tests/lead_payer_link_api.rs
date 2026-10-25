@@ -2900,3 +2900,116 @@ async fn an_undelivered_payer_e_mail_is_told_once_to_who_sent_the_link() {
     .unwrap();
     assert_eq!(count, 1);
 }
+
+async fn patient_consents(
+    pool: &PgPool,
+    lead_id: Uuid,
+) -> (
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<chrono::DateTime<chrono::Utc>>,
+) {
+    sqlx::query_as(
+        r#"SELECT contact_consent_at, cost_estimate_consent_at
+           FROM lead_payer_declarations WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// QA 2026-10-25, F-G2 (S1): the lead names the payer in the cabinet without
+/// a date of birth (optional there) and gives both consents; staff complete
+/// the date of birth in the wizard. That completes the same payer: both
+/// consents, the payer's link and the record that the payer was informed
+/// stay. Only a date of birth already set and changed names another payer.
+#[tokio::test]
+async fn staff_completing_the_payers_date_of_birth_keep_consents_and_link() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, patient) = lead(&app, "dob-completed").await;
+    let mut without_birth = viktor();
+    without_birth
+        .as_object_mut()
+        .unwrap()
+        .remove("date_of_birth");
+    name_payer(&app, lead_id, &patient, without_birth).await;
+    let (status, consented) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/payer/cost-estimate-consent"),
+        &patient,
+        Some(json!({ "consent": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{consented}");
+    submit_request(&app, lead_id).await;
+    let consents = patient_consents(pool, lead_id).await;
+    assert!(consents.0.is_some() && consents.1.is_some(), "{consents:?}");
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let informed: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+        "SELECT payer_informed_at FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(informed.is_some(), "the invitation informs the payer");
+
+    // Staff add the date of birth: the same payer.
+    let saved = staff_save(&app, lead_id, |form| {
+        form.insert("date_of_birth".into(), json!("1958-03-14"));
+    })
+    .await;
+    assert_eq!(saved["date_of_birth"], "1958-03-14", "{saved}");
+    assert_eq!(patient_consents(pool, lead_id).await, consents);
+    assert_eq!(active_links(pool, lead_id).await, 1);
+    let (status, opened) =
+        as_payer(&app, "GET", OPEN, &[("X-Payer-Link", token.as_str())], None).await;
+    assert_eq!(status, StatusCode::OK, "{opened}");
+    let still_informed: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+        "SELECT payer_informed_at FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(still_informed, informed);
+    let (_, request) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead_id}"),
+        &patient,
+        None,
+    )
+    .await;
+    let missing = request["progress"]["missing_for_submit"].to_string();
+    assert!(
+        !missing.contains("payer_contact_consent") && !missing.contains("payer_cost_estimate"),
+        "{request}"
+    );
+    let saves = audit_contexts(pool, "update_lead_payer_declaration", lead_id).await;
+    assert_eq!(
+        saves.last().unwrap().1["identity_changed"],
+        false,
+        "{saves:?}"
+    );
+
+    // Staff change the date of birth already set: another person.
+    staff_save(&app, lead_id, |form| {
+        form.insert("date_of_birth".into(), json!("1959-03-14"));
+    })
+    .await;
+    assert_eq!(patient_consents(pool, lead_id).await, (None, None));
+    assert_eq!(active_links(pool, lead_id).await, 0);
+    let reason: Option<String> =
+        sqlx::query_scalar("SELECT revoked_reason FROM lead_payer_links WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(reason.as_deref(), Some("payer_changed"));
+    let (status, body) =
+        as_payer(&app, "GET", OPEN, &[("X-Payer-Link", token.as_str())], None).await;
+    assert_eq!(status, StatusCode::GONE, "{body}");
+}

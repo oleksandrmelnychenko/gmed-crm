@@ -251,6 +251,12 @@ pub struct BlockAnswers {
     /// The payer is a legal representative, independent of the current viewer.
     pub paying_parent: bool,
     pub statement_submitted: bool,
+    /// Block E of a paying organisation: the legal form and why the payment
+    /// goes through the organisation — the organisation's own answer on its
+    /// link, else what the lead gave in the cabinet
+    /// (`lead_payer_declarations.organisation_legal_form`,
+    /// `lead_gwg_declarations.payment_background`), which the link shows as
+    /// its defaults (QA 2026-10-25, R-10: staff saw both as missing).
     pub statement_legal_form: Option<String>,
     pub statement_payment_reason: Option<String>,
     /// The lead is a minor (by the date of birth, [`Inputs::minor`]): block
@@ -382,8 +388,11 @@ pub async fn load_block_answers(
                   g.sanctions_link_since_extent, g.id_data_entered_at, g.birth_place,
                   g.birth_country, g.pep_self, g.sanctions_links,
                   d.via_third_party_kind,
-                  s.submitted_at AS statement_submitted_at, s.legal_form AS statement_legal_form,
-                  s.payment_reason AS statement_payment_reason,
+                  s.submitted_at AS statement_submitted_at,
+                  COALESCE(NULLIF(btrim(s.legal_form), ''),
+                           NULLIF(btrim(d.organisation_legal_form), '')) AS statement_legal_form,
+                  COALESCE(NULLIF(btrim(s.payment_reason), ''),
+                           NULLIF(btrim(g.payment_background), '')) AS statement_payment_reason,
                   EXISTS (
                       SELECT 1 FROM lead_portal_uploads u
                       JOIN documents doc ON doc.id = u.document_id
@@ -1182,6 +1191,25 @@ pub async fn ensure_started(
     start(conn, lead_id, cause, actor, false).await
 }
 
+/// Prefix of a representative's part of the fingerprint.
+const REPRESENTATIVE_PRINT: &str = "representative:";
+
+/// A release stored with the representative digests of before 2026-10-25:
+/// its trigger parts stay, the representative parts become the current ones
+/// (the legacy print matched, so the same people are released).
+fn upgraded_release(released: &str, current: &str) -> String {
+    released
+        .split(',')
+        .filter(|part| !part.is_empty() && !part.starts_with(REPRESENTATIVE_PRINT))
+        .chain(
+            current
+                .split(',')
+                .filter(|part| part.starts_with(REPRESENTATIVE_PRINT)),
+        )
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 async fn evaluate_and_store(
     conn: &mut PgConnection,
     stored: Assessment,
@@ -1208,18 +1236,32 @@ async fn evaluate_and_store(
     let score = score(&merged.triggers, &config);
     let representative_country_ids =
         representative_ids(&inputs, &config, &stored.representative_country_ids);
+    // A representative with a listed country stays part of the print by who
+    // the person is (another person in the slot is reviewed again), not by
+    // the record: the ID-document data, the birth place or a block R answer
+    // staff enter after the release raise no trigger and keep the release
+    // (QA 2026-10-25, R-4; a PEP, sanctions or country answer fires its own
+    // trigger). `legacy_print` is the digest of before, whole record and
+    // answers, so a release stored with it stays valid and is upgraded.
     let mut print = fingerprint(&merged.triggers);
+    let mut legacy_print = print.clone();
     for person in inputs
         .representatives
         .iter()
         .filter(|person| representative_country_ids.contains(&person.id))
     {
         use sha2::{Digest, Sha256};
-        let digest = hex::encode(Sha256::digest(
-            format!("{}:{}", person.identity_fingerprint, person.fields).as_bytes(),
+        let digest = hex::encode(Sha256::digest(person.identity_fingerprint.as_bytes()));
+        print.push_str(&format!(",{REPRESENTATIVE_PRINT}{}:{digest}", person.id));
+        let legacy = hex::encode(Sha256::digest(
+            format!("{}:{}", person.legacy_identity_fingerprint, person.fields).as_bytes(),
         ));
-        print.push_str(&format!(",representative:{}:{digest}", person.id));
+        legacy_print.push_str(&format!(",{REPRESENTATIVE_PRINT}{}:{legacy}", person.id));
     }
+    let released_print = stored.released_fingerprint.as_deref().unwrap_or("");
+    let release_upgraded = stored.status == STATUS_RELEASED
+        && !within_release(&print, released_print)
+        && within_release(&legacy_print, released_print);
     let mut answers = load_block_answers(conn, lead_id, &inputs, None).await?;
     answers.representatives = representative_questions(&inputs, &representative_country_ids);
     let states = block_states(
@@ -1235,7 +1277,7 @@ async fn evaluate_and_store(
     } else if stored.status == STATUS_REJECTED {
         STATUS_REJECTED.to_string()
     } else if stored.status == STATUS_RELEASED
-        && within_release(&print, stored.released_fingerprint.as_deref().unwrap_or(""))
+        && (within_release(&print, released_print) || release_upgraded)
     {
         STATUS_RELEASED.to_string()
     } else if pending.is_some() {
@@ -1258,7 +1300,9 @@ async fn evaluate_and_store(
     if !changed {
         return Ok(stored);
     }
-    let released_fingerprint = if status == STATUS_RELEASED {
+    let released_fingerprint = if status == STATUS_RELEASED && release_upgraded {
+        Some(upgraded_release(released_print, &print))
+    } else if status == STATUS_RELEASED {
         stored.released_fingerprint.clone()
     } else {
         None
@@ -2489,5 +2533,23 @@ mod tests {
             ..Default::default()
         };
         assert!(requests_cabinet_answer(&blocks(&["C"]), &self_payer));
+    }
+
+    /// QA 2026-10-25, R-4: a release stored with the representative digest
+    /// of before keeps its trigger parts and takes the current digests.
+    #[test]
+    fn a_release_of_before_is_upgraded_to_the_current_representative_digest() {
+        let released = "T13:patient:1,T1:representative:4,representative:a:old";
+        let current = "T1:representative:4,T13:patient:1,representative:a:new";
+        let upgraded = upgraded_release(released, current);
+        assert_eq!(
+            upgraded,
+            "T13:patient:1,T1:representative:4,representative:a:new"
+        );
+        assert!(within_release(current, &upgraded));
+        assert!(!within_release(
+            "T14:representative:5,representative:a:new",
+            &upgraded
+        ));
     }
 }

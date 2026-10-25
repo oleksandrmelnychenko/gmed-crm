@@ -34,7 +34,6 @@ import {
   PAYER_LANGUAGES,
   PAYER_LEGAL_DETAILS,
   PAYER_LEGAL_QUESTIONS,
-  canSubmitPayerQuestionnaire,
   draftFromPayerQuestionnaire,
   fundsDescriptionRequired,
   normalizeLeadPayerQuestionnaire,
@@ -62,7 +61,6 @@ import {
   GoToSectionButton,
   LabeledField,
   MissingItemLink,
-  MissingShownContext,
   RequiredMark,
   UploadedFileList,
   YesNoSelect,
@@ -75,7 +73,7 @@ import {
   useRequestPatch,
   type RequestQueue,
 } from "./lead-request-parts";
-import { payerQuestionnaireFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { payerQuestionnaireFieldLabel, payerSendNeeds, type LeadRequestText } from "./lead-request-text";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 
 /**
@@ -387,13 +385,12 @@ function PayerQuestionnaireForm({
 
   // The yellow lists only after the first send (owner 2026-10-09: "only after Далее").
   const [showMissing, setShowMissing] = useState(false);
-  const stepMissingShown = useContext(MissingShownContext);
 
   async function submit() {
     if (submitting || uploading) return;
     setShowMissing(true);
     // Nothing can be saved yet (the notice first): what is missing is all there is to show.
-    if (!writableRef.current && questionnaireRef.current.missing_for_submit.length > 0) return;
+    if (!writableRef.current) return;
     setSubmitting(true);
     setErrors([]);
     try {
@@ -406,6 +403,10 @@ function PayerQuestionnaireForm({
       // disabled button left the parent without a hint). The server's list from before the
       // save would still name the answer typed just before the press.
       if (questionnaireRef.current.missing_for_submit.length > 0) return;
+      if (!declared) {
+        setErrors([text.payerDeclarationRequired]);
+        return;
+      }
       const next = normalizeLeadPayerQuestionnaire(await enqueue(() => submitLeadPayerQuestionnaire(leadId)));
       if (next) apply(next);
       else await reload();
@@ -427,6 +428,8 @@ function PayerQuestionnaireForm({
     can_delete: document.can_delete && !submitted && !submitting,
   }));
   const readOnly = !acknowledged || submitted || submitting;
+  // What the send still waits for, next to the button: the notice, the server's list, the confirmation.
+  const sendNeeds = payerSendNeeds(text, { acknowledged, declared, missing: questionnaire.missing_for_submit });
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   return (
@@ -479,14 +482,13 @@ function PayerQuestionnaireForm({
         </div>
       </div>
 
+      {/* The fields are visible from the start, locked until the notice is confirmed, so that the
+          parent sees what is asked before the first click (QA 2026-10-25, R-1). */}
       {!acknowledged ? (
-        // Why the fields wait, only after "Next" or "send" was pressed (QA 2026-10-10).
-        stepMissingShown || showMissing ? (
-          <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-request-payer-notice-first">
-            {text.payerNoticeFirst}
-          </p>
-        ) : null
-      ) : (
+        <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-request-payer-notice-first">
+          {text.payerNoticeFirst}
+        </p>
+      ) : null}
         <fieldset disabled={readOnly} className="min-w-0 space-y-5" data-testid="lead-request-payer-fields">
           <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             {showAdditionalIdentity ? <>
@@ -689,7 +691,6 @@ function PayerQuestionnaireForm({
             })}
           </div>
         </fieldset>
-      )}
 
       {showMissing ? <PayerMissingLists request={request} text={text} parts={missing} /> : null}
 
@@ -722,13 +723,24 @@ function PayerQuestionnaireForm({
           <Button
             type="button"
             className="h-auto min-h-9 w-full gap-2 whitespace-normal py-1.5 sm:w-auto"
-            disabled={submitting || uploading || !canSubmitPayerQuestionnaire({ ...questionnaire, missing_for_submit: [] }, declared)}
+            // Pressable while something is missing: the press lists it (QA 2026-10-25, R-1: a disabled
+            // button said nothing, and the statement seemed sent).
+            disabled={submitting || uploading}
+            aria-describedby={sendNeeds.length > 0 ? "lead-request-payer-send-needs" : undefined}
             data-testid="lead-request-payer-submit"
             onClick={() => void submit()}
           >
             {submitting ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Send aria-hidden="true" className="size-4" />}
             {submitting ? text.sending : text.payerSubmitButton}
           </Button>
+          {sendNeeds.length > 0 ? (
+            <div id="lead-request-payer-send-needs" className="text-xs leading-5 text-muted-foreground" data-testid="lead-request-payer-send-needs">
+              <p>{text.payerSendNeeds}</p>
+              <ul className="list-disc pl-5">
+                {sendNeeds.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </div>
+          ) : null}
         </div>
       )}
 

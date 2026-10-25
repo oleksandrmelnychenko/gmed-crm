@@ -362,7 +362,17 @@ pub struct RepresentativeInputs {
     pub citizenships: Vec<String>,
     pub residences: Vec<String>,
     pub fields: Value,
+    /// Who the person is: name, date of birth, relation, linked patient
+    /// ([`inputs::risk_identity_material`]).
+    /// Part of the release fingerprint, so a released lead is reviewed again
+    /// when another person takes the slot — never because staff entered the
+    /// person's ID-document data, contact or street address (QA 2026-10-25,
+    /// R-4: entering a parent's passport after the CEO release voided it).
     pub identity_fingerprint: String,
+    /// The digest of before 2026-10-25 (the whole record, document data
+    /// included). Only read to keep a release stored with it valid
+    /// (`store::evaluate_and_store` upgrades it to the new digest).
+    pub legacy_identity_fingerprint: String,
 }
 
 impl RepresentativeInputs {
@@ -1463,6 +1473,7 @@ mod tests {
                 residences: vec!["DE".into()],
                 fields: serde_json::json!({ "pep_self": pep }),
                 identity_fingerprint: String::new(),
+                legacy_identity_fingerprint: String::new(),
             };
         let inputs = Inputs {
             minor: true,

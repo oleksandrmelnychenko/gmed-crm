@@ -73,6 +73,12 @@ export type PatientDetail = PatientSummary & {
   source_lead_id?: string | null;
   lead_snapshot?: Record<string, unknown> | null;
   passport_number?: string | null;
+  /** The identity document staff read from the scan (converted lead): passport, id_card, residence_permit. */
+  id_document_type?: string | null;
+  id_issuing_authority?: string | null;
+  /** ISO alpha-2 code (an older value may still be a country name). */
+  id_issuing_country?: string | null;
+  id_issued_on?: string | null;
   passport_expiry?: string | null;
   passport_status?: "valid" | "expiring" | "expired" | "unknown";
   passport_expired?: boolean;

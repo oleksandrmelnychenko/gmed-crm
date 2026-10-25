@@ -464,10 +464,32 @@ pub(super) async fn suggested(
                 clients = guardians;
             }
         } else {
-            let client = &mut clients[0];
-            client.first_name = row.get("first_name");
-            client.last_name = row.get("last_name");
-            client.email = row.get::<Option<String>, _>("email").unwrap_or_default();
+            // An adult under rechtliche Betreuung: the Betreuer acts and
+            // signs in the adult's name (owner decision 2026-10-25, DEV QA
+            // F-G1), as the contracts and the adult's forms print them.
+            let betreuer = {
+                let mut conn = state.db.acquire().await.map_err(db_error)?;
+                crate::routes::documents::adult_betreuer(
+                    &mut conn,
+                    patient_id,
+                    lead_id,
+                    source
+                        .try_get::<Option<Uuid>, _>("order_id")
+                        .unwrap_or_default(),
+                    crate::app_time::today(),
+                )
+                .await
+                .map_err(db_error)?
+            };
+            let betreuer = patient_contracting_signers(&betreuer);
+            if betreuer.is_empty() {
+                let client = &mut clients[0];
+                client.first_name = row.get("first_name");
+                client.last_name = row.get("last_name");
+                client.email = row.get::<Option<String>, _>("email").unwrap_or_default();
+            } else {
+                clients = betreuer;
+            }
         }
     }
     // The consent form declares the choice of the person who made it in the

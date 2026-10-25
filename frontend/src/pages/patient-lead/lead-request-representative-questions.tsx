@@ -10,7 +10,7 @@ import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-req
 import { combinedSaveState, SANCTIONS_LINK_KINDS, STAY_REASONS, type SaveState } from "./lead-request-model";
 import { LabeledField, YesNoSelect, errorBody, runDraftSave, useAutosave, type RequestQueue } from "./lead-request-parts";
 import {
-  REPRESENTATIVE_QUESTIONS, representativeCountryDraft, representativeCountryPatch, updateRepresentativeCountryDraft,
+  REPRESENTATIVE_QUESTIONS, representativeCountryDraft, representativeCountryPatch, updateRepresentativeCountryDraft, withKnownBirth,
   type RepresentativeCountryDraft, type RepresentativeCountryField,
 } from "./lead-request-representative-questions-model";
 import { followUpFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -47,7 +47,9 @@ function RepresentativeQuestionsForm({ request, person, text, lang, enqueue, onC
   person: RepresentativeCountryQuestions;
   onState: (id: string, state: SaveState) => void;
 }) {
-  const [draft, setDraft] = useState(() => representativeCountryDraft(person.fields));
+  // Name and birth data GMED entered for this person (staff wizard) fill an empty answer (QA 2026-10-25, R-2).
+  const known = request.representation?.representatives.find((value) => value.id === person.id);
+  const [draft, setDraft] = useState(() => withKnownBirth(representativeCountryDraft(person.fields), known));
   const savedRef = useRef(representativeCountryDraft(person.fields));
   const queuedRef = useRef(savedRef.current);
   const rejectedRef = useRef<Partial<RepresentativeCountryDraft>>({});
@@ -107,9 +109,11 @@ function RepresentativeQuestionsForm({ request, person, text, lang, enqueue, onC
   const update = (field: RepresentativeCountryField, value: string) => setDraft((current) => updateRepresentativeCountryDraft(current, field, value));
   const id = (field: RepresentativeCountryField) => `representative-${person.id}-${field}`;
   const error = (field: RepresentativeCountryField) => rejected[field] !== undefined && rejected[field] === draft[field] ? text.invalidField : undefined;
-  const label = (field: RepresentativeCountryField) => (REPRESENTATIVE_QUESTIONS as readonly string[]).includes(field)
+  // Another person's answers are asked about that person by name, never as "you" (QA 2026-10-25, M F-14).
+  const aboutOther: Partial<Record<string, string>> = known?.mine === true ? {} : text.identificationFieldsOther(person.name);
+  const label = (field: RepresentativeCountryField) => aboutOther[field] ?? ((REPRESENTATIVE_QUESTIONS as readonly string[]).includes(field)
     ? text.payerLegalFields[field as (typeof REPRESENTATIVE_QUESTIONS)[number]]
-    : followUpFieldLabel(text, field);
+    : followUpFieldLabel(text, field));
   const field = (key: RepresentativeCountryField, control: ReactNode, wide = false) => (
     <LabeledField id={id(key)} key={key} label={label(key)} required error={error(key)} question={(REPRESENTATIVE_QUESTIONS as readonly string[]).includes(key)} className={wide ? "sm:col-span-2 lg:col-span-3" : undefined}>{control}</LabeledField>
   );

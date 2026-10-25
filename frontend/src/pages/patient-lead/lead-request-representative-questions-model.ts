@@ -39,3 +39,20 @@ export function representativeCountryPatch(before: RepresentativeCountryDraft, a
       : after[field] || null,
   ]])) as RepresentativeCountryPatch;
 }
+
+/**
+ * Birth place and country GMED already knows of the person (the representative's identity, as staff or the
+ * person entered it) fill the empty answers of the questionnaire; the autosave then stores them for the
+ * questionnaire as well (QA 2026-10-25, R-2: the birth country was prefilled, the birth place was not).
+ */
+export function withKnownBirth(
+  draft: RepresentativeCountryDraft,
+  known: { birth_place?: string | null; birth_country?: string | null } | null | undefined,
+): RepresentativeCountryDraft {
+  if (!known) return draft;
+  return {
+    ...draft,
+    birth_place: draft.birth_place || known.birth_place?.trim() || "",
+    birth_country: draft.birth_country || known.birth_country?.trim() || "",
+  };
+}

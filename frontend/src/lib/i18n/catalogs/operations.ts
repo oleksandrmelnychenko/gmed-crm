@@ -433,6 +433,8 @@ export interface OperationsTranslations {
   lead_readiness_check_risk_assessment_released: string;
   lead_readiness_check_payer_declaration_complete: string;
   lead_readiness_check_cost_assumption_signed: string;
+  lead_readiness_check_payer_identified: string;
+  lead_readiness_reason_payer_not_identified: string;
   lead_readiness_reason_risk_review_required: string;
   lead_readiness_reason_payer_declaration_missing: string;
   lead_readiness_reason_payer_beneficial_owner_missing: string;
@@ -1077,6 +1079,8 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_check_risk_assessment_released: "Оценка риска: решение принято",
   lead_readiness_check_payer_declaration_complete: "Данные плательщика полные",
   lead_readiness_check_cost_assumption_signed: "Плательщик подписал заявление о принятии расходов",
+  lead_readiness_check_payer_identified: "Плательщик идентифицирован (анкета и документ)",
+  lead_readiness_reason_payer_not_identified: "Плательщик не идентифицирован: нужна анкета плательщика и его документ",
   lead_readiness_reason_risk_review_required: "Нужно решение по оценке риска",
   lead_readiness_reason_payer_declaration_missing: "Нет данных о плательщике",
   lead_readiness_reason_payer_beneficial_owner_missing: "Не указан фактический выгодоприобретатель",
@@ -1742,6 +1746,8 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_check_risk_assessment_released: "Risikobewertung entschieden",
   lead_readiness_check_payer_declaration_complete: "Angaben zum Zahler vollständig",
   lead_readiness_check_cost_assumption_signed: "Kostenübernahmeerklärung vom Zahler unterschrieben",
+  lead_readiness_check_payer_identified: "Zahler/in identifiziert (Fragebogen und Ausweis)",
+  lead_readiness_reason_payer_not_identified: "Zahler/in nicht identifiziert: Fragebogen und Ausweis des Zahlers fehlen",
   lead_readiness_reason_risk_review_required: "Entscheidung zur Risikobewertung nötig",
   lead_readiness_reason_payer_declaration_missing: "Angaben zum Zahler fehlen",
   lead_readiness_reason_payer_beneficial_owner_missing: "Wirtschaftlich Berechtigter nicht angegeben",

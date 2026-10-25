@@ -7,6 +7,7 @@ import {
   seedFromPatientRelation,
   seedFromTrustedContact,
   sourcePepHint,
+  sourcePepHintActive,
   sourcePepHintText,
   type LeadSourcePerson,
 } from "../model/lead-source-person";
@@ -140,6 +141,7 @@ import {
 import { custodyLabel, representativeName } from "../model/lead-gwg-statements";
 import {
   TRUSTED_CONTACT_RELATIONS,
+  changedRepresentativeDetails,
   emailChangedOnSave,
   isLegalGuardianRelation,
   isParentOrGuardianRelation,
@@ -152,6 +154,7 @@ import {
   trustedContactRelationLabel,
   trustedContactsPayload,
   type TrustedContactPayload,
+  type TrustedContactRepresentativeDetails,
 } from "../model/lead-trusted-contacts";
 import { medicalStepHasContent } from "../model/medical-step-content";
 import { uploadEach } from "../model/upload-each";
@@ -197,6 +200,7 @@ import {
   textareaClass,
   tokens,
 } from "@/components/ui-shell";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { useLang, type Lang } from "@/lib/i18n";
 import { NEW_LEAD_COUNTER_REFRESH_EVENT } from "@/lib/use-nav-counters";
 import type { LeadDetail } from "@/lib/api/types";
@@ -391,6 +395,7 @@ import { WizardLoadError } from "./wizard-load-error";
 import {
   agencyOrderConfirmationBlocked,
   discoveryReferrerMissing,
+  insuranceAnswerFromStored,
   intakeAsksDiscoverySource,
   isMinor,
   isRepeatIntakeLead,
@@ -461,6 +466,8 @@ type TrustedContactDraft = {
   relation: string;
   birthDate: string;
   address: string;
+  /** A representative's citizenships / birth data changed in the dialog, sent with the contact (F-11). */
+  representativeDetails?: TrustedContactRepresentativeDetails;
 };
 
 type AmlRiskTier = "high_risk" | "blacklist";
@@ -1808,11 +1815,17 @@ function draftFromLead(lead: LeadDetail): Draft {
     amlEnhancedDueDiligence: amlEnhancedDueDiligenceFromLead(lead),
     language: normalizedLanguageCode(lead.primary_language) || normalizedLanguageCode(lead.locale),
     whatsappNumber: lead.whatsapp_number ?? "",
-    hasInsurance: lead.has_insurance == null ? "" : lead.has_insurance ? "yes" : "no",
+    hasInsurance: insuranceAnswerFromStored({
+      hasInsurance: lead.has_insurance,
+      insuranceType: lead.insurance_type,
+      insuranceProvider: lead.insurance_provider,
+      insuranceNumber: lead.insurance_number,
+    }),
     insuranceCoversGermany: lead.insurance_covers_germany ?? "",
     insuranceType: lead.insurance_type ?? "",
-    insuranceProvider: lead.insurance_provider ?? "",
-    insuranceNumber: lead.insurance_number ?? "",
+    // A self payer has no insurer or policy (the «Нет, самооплата» choice clears them too).
+    insuranceProvider: lead.insurance_type === "self_pay" ? "" : lead.insurance_provider ?? "",
+    insuranceNumber: lead.insurance_type === "self_pay" ? "" : lead.insurance_number ?? "",
     trustedContacts: trustedContactsFromLead(lead),
     concern: lead.primary_concern_text ?? "",
     anamnese: clinical.narrative?.anamnese_aktuelle ?? lead.additional_concerns ?? "",
@@ -1954,14 +1967,19 @@ function draftFromExistingPatient(patient: PatientDetail): Draft {
     // with the document data from the scan (2026-10-24).
     passportExpiry: "",
     language: normalizedLanguageCode(patient.languages?.[0]),
-    hasInsurance: insuranceProvider || insuranceNumber || insuranceType ? "yes" : "",
+    hasInsurance: insuranceAnswerFromStored({
+      hasInsurance: null,
+      insuranceType,
+      insuranceProvider,
+      insuranceNumber,
+    }),
     // The patient file keeps the coverage only in the intake of the first
     // request; a repeat request showed "Не указано" (live QA 2026-10-24).
     insuranceCoversGermany: patientInsuranceCoversGermany(patient.intake_profile),
     privacyConsent: legal?.dsgvo_signed === true,
     insuranceType,
-    insuranceProvider,
-    insuranceNumber,
+    insuranceProvider: insuranceType === "self_pay" ? "" : insuranceProvider,
+    insuranceNumber: insuranceType === "self_pay" ? "" : insuranceNumber,
   };
 }
 
@@ -3025,7 +3043,8 @@ function validateMasterDraft(
     if (!draft.city.trim()) errors.city = required;
     if (!draft.zip.trim()) errors.zip = required;
   }
-  if (draft.hasInsurance === "yes") {
+  // A self payer names no insurer or policy, even with an older «Да» (F-W7).
+  if (draft.hasInsurance === "yes" && draft.insuranceType !== "self_pay") {
     if (!draft.insuranceType) errors.insuranceType = required;
     if (!draft.insuranceProvider.trim()) errors.insuranceProvider = required;
     if (!draft.insuranceNumber.trim()) errors.insuranceNumber = required;
@@ -3208,6 +3227,18 @@ function WizardDocumentRows({
           <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <LeadWizardDocumentMetadata document={document} lang={lang} />
             {documentNote?.(document)}
+            {/* The order changed after this PDF was made (`terms_current`, documents.rs):
+                it cannot be signed or confirmed any more (QA 2026-10-25, F-W3). */}
+            {!archived && !putAside && document.terms_current === false ? (
+              <Badge
+                variant="outline"
+                className="border-amber-300 bg-amber-50 text-[11px] font-semibold text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                title={tx("Заказ изменился после создания документа — создайте новую версию", "Der Auftrag wurde nach der Erstellung geändert – neue Version erstellen")}
+                data-testid={`lead-document-outdated-${document.id}`}
+              >
+                {document.generated_template_id === "order_cost_estimate" ? tx("Устарела", "Veraltet") : tx("Устарел", "Veraltet")}
+              </Badge>
+            ) : null}
             {putAside ? (
               <Badge variant="outline" className="border-border/70 bg-muted/40 text-[11px] font-normal text-muted-foreground" data-testid={`lead-document-archived-${document.id}`}>
                 {tx("архив", "Archiv")}
@@ -3595,6 +3626,9 @@ export function LeadWizard({
   // yet (a new card): kept per contact id and written once the parent is on
   // file (walk-through 2026-10-24, mode «Заполняю сам»).
   const [trustedContactPendingDetails, setTrustedContactPendingDetails] = useState<RepresentativeDetails>(EMPTY_REPRESENTATIVE_DETAILS);
+  // The details form of a representative on file in the open contact dialog:
+  // its values go with the dialog's own «Сохранить» (F-11).
+  const trustedContactDetailsDraftRef = useRef<{ contactId: string; draft: RepresentativeDetails; loaded: RepresentativeDetails } | null>(null);
   const pendingRepresentativeDetailsRef = useRef(new Map<string, RepresentativeDetails>());
   // A document generation in flight (the busy state shows a render later).
   const documentGenerationRef = useRef(false);
@@ -3671,6 +3705,12 @@ export function LeadWizard({
   const stepNavigationInFlightRef = useRef(false);
   const commercialGenerationInFlightRef = useRef(false);
   const reloadVersionRef = useRef(0);
+  // Every load of the lead state (reload, documents/commercial refresh) takes
+  // a number; a background refresh answered after a newer load started does
+  // not write its older lead, quotes or orders over it (QA 2026-10-25, M F-2:
+  // «Принято» next to «Смета не соответствует текущему заказу» right after
+  // confirming — a refresh begun before the confirmation landed last).
+  const stateLoadVersionRef = useRef(0);
   const lookupSessionVersionRef = useRef(0);
   const commercialLookupUiVersionRef = useRef(0);
   const medicalLookupsRequestRef = useRef<
@@ -4032,6 +4072,7 @@ export function LeadWizard({
     if (!leadId) return;
     const reloadVersion = reloadVersionRef.current + 1;
     reloadVersionRef.current = reloadVersion;
+    stateLoadVersionRef.current += 1;
     const isCurrentReload = () => reloadVersionRef.current === reloadVersion;
     const commercialVersions = { ...commercialFlagRequestVersionRef.current };
     setLoading(true);
@@ -4252,6 +4293,7 @@ export function LeadWizard({
 
   const refreshDocumentsState = useCallback(async () => {
     if (!leadId) return;
+    const loadVersion = ++stateLoadVersionRef.current;
     const commercialVersions = { ...commercialFlagRequestVersionRef.current };
     const [nextLead, nextDocuments, nextOrders] = await Promise.all([
       fetchLeadDetail(leadId),
@@ -4264,6 +4306,7 @@ export function LeadWizard({
     // (QA 2026-10-11 C-07).
     const nextContracts = await fetchWizardContracts(nextLead).catch(() => null);
     if (hydrated.current !== leadId) return;
+    if (stateLoadVersionRef.current !== loadVersion) return;
     setLead(nextLead);
     setDocuments(nextDocuments);
     if (nextContracts) setContracts(nextContracts);
@@ -4407,6 +4450,7 @@ export function LeadWizard({
   const refreshCommercialState = useCallback(async () => {
     if (!leadId) return [];
     const targetLeadId = leadId;
+    const loadVersion = ++stateLoadVersionRef.current;
     const signatureVersions = { ...commercialFlagRequestVersionRef.current };
     const leadPromise = fetchLeadDetail(targetLeadId);
     const [nextLead, nextDocuments, nextContracts, nextOrders, nextQuotes] = await Promise.all([
@@ -4417,6 +4461,8 @@ export function LeadWizard({
       fetchQuotes(`/quotes?lead_id=${encodeURIComponent(targetLeadId)}`),
     ]);
     if (hydrated.current !== targetLeadId) return [];
+    // A newer load is on its way: its state wins; the caller still gets the documents.
+    if (stateLoadVersionRef.current !== loadVersion) return nextDocuments;
     setLead(nextLead);
     setDocuments(nextDocuments);
     setContracts(nextContracts);
@@ -4535,11 +4581,18 @@ export function LeadWizard({
           seed: relation ? seedFromPatientRelation(relation) : null,
         };
       }
-      const child = await fetchLeadDetail(sourcePerson.lead_id);
+      const [child, childPortal] = await Promise.all([
+        fetchLeadDetail(sourcePerson.lead_id),
+        // The representative on file holds the address, birth date and
+        // citizenships staff should see before the lead exists (M F-7).
+        fetchLeadPortalIntake(sourcePerson.lead_id).catch(() => null),
+      ]);
       const contact = child.trusted_contacts?.find((item) => item.id === sourcePerson.contact_id);
+      const representative = childPortal?.representation?.representatives
+        .find((item) => item.id === sourcePerson.contact_id) ?? null;
       return {
         name: [child.first_name, child.last_name].filter(Boolean).join(" ").trim(),
-        seed: contact ? seedFromTrustedContact(contact) : null,
+        seed: contact ? seedFromTrustedContact(contact, representative) : null,
       };
     };
     void run()
@@ -4872,6 +4925,11 @@ export function LeadWizard({
     });
     return grouped;
   }, [documents]);
+  // The current KV PDF states older terms than the order (`terms_current: false`):
+  // the quote is not confirmed on it (409 `estimate_document_outdated`, F-W3/F-W4).
+  const estimateDocumentOutdated = commercialDocuments.order_cost_estimate.some(
+    (item) => item.is_latest_version && !wizardDocumentIsArchived(item) && item.terms_current === false,
+  );
   // Medical files of the client: uploaded and listed in the medical step.
   const medicalDocuments = useMemo(
     () => documents.filter((item) => (
@@ -5927,6 +5985,7 @@ export function LeadWizard({
   );
 
   const closeTrustedContactEditor = () => {
+    trustedContactDetailsDraftRef.current = null;
     setTrustedContactEditor(null);
     setTrustedContactEditorError("");
     setTrustedContactRelationError("");
@@ -6062,6 +6121,14 @@ export function LeadWizard({
       return;
     }
 
+    // A representative on file: the citizenships and birth data typed in the
+    // details form go with the contact in the wizard save, so the GwG row and
+    // the country triggers follow (F-11, QA 2026-10-25: «Сохранить» dropped
+    // them); changed address parts are written on their own endpoint.
+    const detailsDraft = leadId && trustedContactDetailsDraftRef.current?.contactId === trustedContactEditor.id
+      ? trustedContactDetailsDraftRef.current
+      : null;
+    const changedDetails = detailsDraft ? changedRepresentativeDetails(detailsDraft.draft, detailsDraft.loaded) : undefined;
     const normalizedContact: TrustedContactDraft = {
       ...trustedContactEditor,
       name,
@@ -6069,7 +6136,31 @@ export function LeadWizard({
       email: trustedContactEditor.email.trim(),
       relation: trustedContactEditor.relation.trim(),
       address: trustedContactEditor.address.trim(),
+      ...(changedDetails
+        ? { representativeDetails: { ...trustedContactEditor.representativeDetails, ...changedDetails } }
+        : {}),
     };
+    if (leadId && detailsDraft) {
+      const { draft: typed, loaded } = detailsDraft;
+      const addressChanged = (["street", "zip", "city", "country"] as const)
+        .some((key) => typed[key].trim() !== loaded[key].trim());
+      if (addressChanged) {
+        const addressOnly: RepresentativeDetails = {
+          ...loaded,
+          street: typed.street,
+          zip: typed.zip,
+          city: typed.city,
+          country: typed.country,
+        };
+        void updateLeadRepresentativeDetails(leadId, trustedContactEditor.id, addressOnly, loaded)
+          .then((representation) => {
+            if (representation) step1Portal.applyRepresentation(representation);
+          })
+          .catch((cause: unknown) => {
+            setServerContactError({ contactId: trustedContactEditor.id, message: errorText(cause, tx) });
+          });
+      }
+    }
     // A parent not on file yet: the address and citizenships entered on the
     // card are written once the autosave has created the parent.
     if (trustedContactEditorGuardian && !representativeOnFile(normalizedContact.id)) {
@@ -6811,7 +6902,11 @@ ${serviceCommentLines.join("\n")}`
         // decision 2026-10-12): never sent from the cached state, which would
         // undo a scan or QES recorded meanwhile.
         signed_patient: flags.signed_patient,
-        signed_agency: flags.signed_agency ?? (prospectMergeOnlyRef.current ? undefined : signedAgency),
+        // The agency mark is sent only by its own checkbox (`saveFlags`): a
+        // cached `false` sent with the next commercial save (confirming the
+        // quote, «Сохранить договор и заказ») unticked a mark stored meanwhile
+        // (QA 2026-10-25, M F-6 / F-G9; the server keeps it when left out).
+        signed_agency: flags.signed_agency,
         needs_description: needsDescription,
         date_from: draft.programDateFrom,
         date_to: draft.programDateTo,
@@ -7136,7 +7231,9 @@ ${serviceCommentLines.join("\n")}`
       await reload(false, true);
     } catch (nextError) {
       setValidationContext(null);
-      setCommercialQuoteError(errorText(nextError, tx));
+      // 409 `estimate_document_outdated`: the KV PDF is older than the order.
+      setCommercialQuoteError(outdatedDocumentSignErrorText(nextError, tx) ?? errorText(nextError, tx));
+      if (outdatedDocumentSignErrorText(nextError, tx)) void refreshDocumentsState();
     } finally {
       setBusy(null);
     }
@@ -7907,6 +8004,17 @@ ${serviceCommentLines.join("\n")}`
     || autosaveStatus === "saving"
     || autosaveStatus === "error";
   const saveInProgress = isBusy || autosaveStatus === "saving";
+  // A create-mode form with typed data and no lead yet: closing it loses that data.
+  const createModeUnsaved = createMode && !leadId && !saveInProgress && autosaveIsDirty;
+  // «Данные заполнены из записи …» belongs to the creating session; the PEP
+  // hint stays until the person answers the PEP question (QA 2026-10-25).
+  const sessionPrefill = prefilledFromSource && prefilledFromSource.leadId === (leadId ?? createdLeadId)
+    ? prefilledFromSource
+    : null;
+  const showSourcePepHint = sourcePepHintActive(lead, {
+    sessionHint: Boolean(sessionPrefill?.pep),
+    pepAnswer: step1Portal.intake?.identification?.pep_self,
+  });
   const editingTrustedContact = Boolean(
     trustedContactEditor
     && draft?.trustedContacts.some((contact) => contact.id === trustedContactEditor.id),
@@ -8002,8 +8110,11 @@ ${serviceCommentLines.join("\n")}`
       <Dialog
         open={open}
         modal={!documentPreview}
-        // Pending edits are saved on close (below); only a save that failed asks before discarding.
-        dirty={!saveInProgress && autosaveStatus === "error"}
+        // Pending edits are saved on close (below); only a save that failed asks
+        // before discarding — and a new lead not created yet, whose typed data
+        // nothing can save on close (QA 2026-10-25, F-W1/F-G8: Escape or a click
+        // outside lost the whole form without a question).
+        dirty={(!saveInProgress && autosaveStatus === "error") || createModeUnsaved}
         onOpenChange={(nextOpen, details) => {
           if (!nextOpen && saveInProgress) {
             details.cancel();
@@ -8242,6 +8353,9 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
           {/* Read-only for a converted lead: every control inside is off, the tabs above stay (QA 2026-10-25). */}
           <fieldset disabled={leadConverted} aria-readonly={leadConverted || undefined} data-readonly={leadConverted ? "true" : undefined} className="m-0 min-w-0 border-0 p-0">
+          {/* The fieldset turns native controls off; the scope turns off the shared
+              ones it cannot reach (date pickers, lists in portals) — QA 2026-10-25, F-W8. */}
+          <ReadOnlyScope active={leadConverted} banner={false}>
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5">
               <Banner tone="error">
@@ -8270,19 +8384,19 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && step === "master_data" ? (
             <section className="min-w-0 space-y-5">
-              {prefilledFromSource && prefilledFromSource.leadId === (leadId ?? createdLeadId) && (prefilledFromSource.notice || prefilledFromSource.pep) ? (
+              {sessionPrefill?.notice || showSourcePepHint ? (
                 <div
                   data-testid="lead-prefilled-from-source"
                   className="flex flex-col gap-2 rounded-xl border border-border/50 bg-muted/30 px-3.5 py-3 text-xs leading-5 text-muted-foreground"
                 >
-                  {prefilledFromSource.notice ? (
+                  {sessionPrefill?.notice ? (
                     <p className="text-foreground">
-                      {prefilledFromSource.notice}
+                      {sessionPrefill.notice}
                       {" "}
                       {tx("Проверьте и при необходимости исправьте.", "Bitte prüfen und bei Bedarf korrigieren.")}
                     </p>
                   ) : null}
-                  {prefilledFromSource.pep ? (
+                  {showSourcePepHint ? (
                     <StatusChip tone="warning" data-testid="lead-source-pep-hint">
                       <CircleAlert aria-hidden="true" />
                       <span>{sourcePepHintText(tx)}</span>
@@ -10619,7 +10733,13 @@ ${serviceCommentLines.join("\n")}`
                             // Off while the server would refuse it (the document is older than the order).
                             disabled={isBusy || Boolean(paperSignatureBlocker(documentToSign))}
                             errorText={(error) => wizardSignatureErrorText(error, tx)}
-                            onDone={() => { void refreshDocumentsState(); }}
+                            onDone={() => {
+                              // The scan signs the order for the client on the server: the
+                              // agency checkbox opens at once, not after the refresh lands
+                              // (QA 2026-10-25, M F-6: the first click on it was lost).
+                              setSignedPatient(true);
+                              void refreshDocumentsState();
+                            }}
                           />
                           {paperSignatureBlocker(documentToSign) ? (
                             <span className="text-xs text-amber-800 dark:text-amber-300" data-testid="lead-order-paper-signature-blocked">
@@ -10900,15 +11020,23 @@ ${serviceCommentLines.join("\n")}`
                       ) : null}
                   </div>
                   {!acceptedQuote ? (
-                    <Button
-                      type="button"
-                      className="w-fit"
-                      disabled={isBusy || !quote || !quoteIsCurrent}
-                      onClick={() => void createOrAcceptQuote(true)}
-                    >
-                      {busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                      {tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
-                    </Button>
+                    <div className="flex w-full flex-col gap-1.5 sm:w-auto">
+                      <Button
+                        type="button"
+                        className="w-fit"
+                        disabled={isBusy || !quote || !quoteIsCurrent || estimateDocumentOutdated}
+                        aria-describedby={estimateDocumentOutdated ? "lead-wizard-estimate-outdated" : undefined}
+                        onClick={() => void createOrAcceptQuote(true)}
+                      >
+                        {busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                        {tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
+                      </Button>
+                      {estimateDocumentOutdated ? (
+                        <p id="lead-wizard-estimate-outdated" className="max-w-xs text-xs leading-5 text-amber-800 dark:text-amber-200">
+                          {tx("Смета устарела — пересчитайте и создайте новую версию", "Kostenvoranschlag veraltet – neu berechnen und neue Version erstellen")}
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
                 {prepayment && quote ? (
@@ -11170,6 +11298,7 @@ ${serviceCommentLines.join("\n")}`
               )}
             </section>
           ) : null}
+          </ReadOnlyScope>
           </fieldset>
         </main>
         {draft ? (
@@ -11229,7 +11358,8 @@ ${serviceCommentLines.join("\n")}`
                 ) : null}
               </span>
               <span role="status" className="inline-flex items-center gap-1.5">
-                {autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount + commercialFlagsBackgroundCount > 0 ? (
+                {leadConverted ? tx("Только чтение: пациент создан", "Nur Lesen: Patient angelegt")
+                  : autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount + commercialFlagsBackgroundCount > 0 ? (
                     <><LoaderCircle aria-hidden="true" className="size-3 animate-spin" />{tx("Сохранение…", "Wird gespeichert…")}</>
                   ) : !leadId ? tx("Обращение создастся при переходе далее", "Der Lead wird beim Weitergehen angelegt")
                   : autosaveStatus === "dirty" || prepaymentDeadlineUnsaved ? tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")
@@ -11774,6 +11904,9 @@ ${serviceCommentLines.join("\n")}`
                         lang={lang}
                         disabled={isBusy}
                         onSaved={afterRepresentativeUpload}
+                        onDraftChange={(details, loaded) => {
+                          trustedContactDetailsDraftRef.current = { contactId: person.id, draft: details, loaded };
+                        }}
                       />
                     </div>
                     <div className="mt-4 space-y-2 border-t border-border/70 pt-3" data-testid="trusted-contact-representative-uploads">

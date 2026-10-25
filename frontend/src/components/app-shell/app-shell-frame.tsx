@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { CommandPalette } from "@/components/command-palette";
 import { Toaster } from "@/components/ui/toast";
@@ -28,6 +28,23 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
   const leadShell = isLeadPortalUser(user) ? leadShellText(cabinetLang) : null;
   const skipToContentLabel = leadShell?.skipToContent ?? (lang === "de" ? "Zum Inhalt springen" : "Перейти к содержанию");
   const toggleSidebarLabel = leadShell?.toggleSidebar ?? t.ui_toggle_sidebar;
+  const leadPortal = leadShell !== null;
+  // `<html lang>` follows the cabinet language, UA and EN included (QA 2026-10-25, G F-G6): screen
+  // readers and hyphenation. Every `useLang` sets the portal language there; the cabinet's wins.
+  useEffect(() => {
+    if (!leadPortal) return;
+    const root = document.documentElement;
+    const apply = () => {
+      if (root.lang !== cabinetLang) root.lang = cabinetLang;
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(root, { attributes: true, attributeFilter: ["lang"] });
+    return () => {
+      observer.disconnect();
+      root.lang = lang;
+    };
+  }, [leadPortal, cabinetLang, lang]);
 
   return (
     <div className="h-dvh overflow-hidden bg-background">

@@ -560,6 +560,21 @@ phone, relationship_kind, relationship, payment_reason }`; персонал ще
   перевіряються знову; ім'я друга чи родича — вільне; власне ім'я ліда
   персонал і далі вводить будь-яким письмом (кабінет просить підтвердити
   паспортне написання при відправленні).
+- **Дані представника зі збереженням контактів (F-11, 2026-10-25).** Запис
+  `trusted_contacts[]` у `POST /leads/{id}/update` може нести
+  `citizenships`, `birth_place`, `birth_country` (відсутній ключ — без змін,
+  `null` очищає; ключ, надісланий як у `trusted_contacts_base`, лишає
+  збережене значення). У тій самій транзакції
+  `lead_representatives::sync_wizard_contacts` переносить у рядок
+  `lead_representatives` (створює рядок `staff`, якщо його немає) нове ім'я
+  перейменованого контакту і надіслані ключі, з копією для батька-платника,
+  аудит `update_lead_representative_details` з `source = trusted_contacts`.
+  Ключ для особи, що не діє за ліда, — 422
+  `trusted_contact_not_representative`; ключ, що порушує правила кабінету, —
+  422 з його кодом; обидва з `field = trusted_contacts`, `contact_index`,
+  `contact_id`, `contact_field`, нічого не збережено. Після зміни контактів
+  чи рядків і після `PUT …/representatives/{id}/details` оцінка ризику
+  перераховується одразу (`risk::store::reassess`, `cause = staff`).
 
 ## «Нова заявка для цієї особи» — лід із даних батьків чи контакту (2026-10-25)
 
@@ -603,6 +618,13 @@ phone, relationship_kind, relationship, payment_reason }`; персонал ще
   релація дитини й запис `trusted_contacts[]` на її лідах отримують
   `related_patient_id` нового пацієнта напряму, без зіставлення за e-mail;
   аудит `link_source_relation_to_patient` / `link_source_contact_to_patient`.
+  Цей крок іде першим у `link_to_patient_in_tx`, до зіставлення за входом
+  опікуна й за e-mail (`link_parent_relations_by_email_in_tx`), тож зв'язок
+  завжди має власний аудит. Картка батька/матері отримує зворотну релацію
+  (`relation_type = 'child'`, для `spouse`/`sibling` — той самий тип,
+  `related_patient_id` = дитина, `related_name` = ім'я дитини), якщо релації
+  між цими двома картками ще немає; аудит
+  `add_reverse_relation_from_source_person` на картці батька/матері.
 - **Вхід у портал.** Повторне використання входу опікуна без змін
   (`create_for_lead_in_tx` → `reusable_guardian_scoped_in_tx`). Додатково
   приймається вхід, який вимкнув `coming_of_age`: усі опікунські зв'язки

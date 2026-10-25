@@ -291,6 +291,51 @@ export function passportNameRuleText(tx: LeadErrorTranslator): string {
   return tx("Только латинские буквы, как в загранпаспорте.", "Nur lateinische Buchstaben wie im Reisepass.");
 }
 
+/**
+ * 409 `use_patient_access` (lead_portal_guardians.rs): the parent's login is
+ * also the parent's own patient login, so its password is reset in the
+ * parent's own request (QA 2026-10-25, M F-3). The body names that request
+ * (`own_lead_id`) or the parent's patient record (`patient_id`), either
+ * nullable: `target` says which one `href` opens — the request in the
+ * wizard («Открыть его заявку») before the patient card («Открыть пациента»);
+ * with neither, only the message.
+ */
+export function guardianOwnLoginError(
+  error: unknown,
+): { href: string; target: "lead" | "patient" } | { href: null; target: null } | null {
+  if (leadErrorStatus(error) !== 409 || leadErrorCode(error) !== "use_patient_access") return null;
+  const body = leadErrorBody(error);
+  const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+  const leadId = text(body?.own_lead_id);
+  if (leadId) return { href: `/leads?lead=${encodeURIComponent(leadId)}&view=wizard`, target: "lead" };
+  const patientId = text(body?.patient_id);
+  if (patientId) return { href: `/patients/${encodeURIComponent(patientId)}`, target: "patient" };
+  return { href: null, target: null };
+}
+
+/**
+ * The 422 of a representative key sent with a trusted contact (`contact_field`
+ * citizenships / birth_place / birth_country; F-11), in words; null otherwise.
+ */
+export function representativeDetailErrorText(error: unknown, tx: LeadErrorTranslator): string | null {
+  const contact = leadServerContactError(error);
+  if (!contact || !["citizenships", "birth_place", "birth_country"].includes(contact.field)) return null;
+  if (leadErrorCode(error) === "trusted_contact_not_representative") {
+    return tx(
+      "Гражданство и данные о рождении указываются только для родителя, опекуна или представителя",
+      "Staatsangehörigkeit und Geburtsangaben gibt es nur für Eltern, Vormund oder Vertretung",
+    );
+  }
+  switch (contact.field) {
+    case "citizenships":
+      return tx("Проверьте гражданство: выберите страны из списка (не больше 5)", "Staatsangehörigkeit prüfen: Länder aus der Liste wählen (höchstens 5)");
+    case "birth_place":
+      return tx("Проверьте место рождения", "Geburtsort prüfen");
+    default:
+      return tx("Выберите страну рождения из списка", "Geburtsland aus der Liste wählen");
+  }
+}
+
 export function leadErrorMessage(
   error: unknown,
   tx: LeadErrorTranslator,
@@ -304,6 +349,24 @@ export function leadErrorMessage(
   if (isLeadConvertedError(error)) return tx("Пациент по этому лиду уже создан", "Für diesen Lead wurde bereits ein Patient angelegt");
   // The same rule as the cabinet's, so staff read the same words (QA 2026-10-25).
   if (isTrustedContactNameInvalidError(error)) return passportNameRuleText(tx);
+  // A representative's citizenships / birth data sent with a contact (F-11):
+  // the 422 names the contact and the key, shown at that contact.
+  const representativeDetail = representativeDetailErrorText(error, tx);
+  if (representativeDetail) return representativeDetail;
+    // 422 `payer_not_identified` of the conversion (readiness check `payer_identified`).
+  // The gate answers `error` "Unprocessable Entity" with the reason in `code`.
+  if (leadErrorBody(error)?.code === "payer_not_identified" || leadErrorCode(error) === "payer_not_identified") {
+    return tx(
+      "Плательщик не идентифицирован: нужна анкета плательщика и его документ",
+      "Zahler/in nicht identifiziert: Fragebogen und Ausweis des Zahlers fehlen",
+    );
+  }
+  if (guardianOwnLoginError(error)) {
+    return tx(
+      "У этого человека своя заявка — выдайте пароль в его заявке.",
+      "Diese Person hat eine eigene Anfrage – das Passwort wird in ihrer Anfrage vergeben.",
+    );
+  }
   // A server code with its own translation (e.g. a prepayment above the order
   // total) says more than the generic "check your input".
   if (isLocalizedApiError(error) && error.message.trim()) return error.message.trim();
@@ -518,6 +581,32 @@ const LEAD_SOURCE_LABEL_KEYS = {
   other: "lead_source_other",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+/**
+ * The sources staff pick when they create a lead (one key per label; older
+ * spellings stay readable only). The server refuses any other value with 422
+ * (`KNOWN_LEAD_SOURCES`), so the field is a list, never free text.
+ */
+export const LEAD_SOURCE_SELECT_OPTIONS = [
+  "manual",
+  "phone",
+  "email",
+  "whatsapp",
+  "walk_in",
+  "referral",
+  "partner",
+  "agent",
+  "existing_patient",
+  "website",
+  "website_wizard",
+  "website_questionnaire",
+  "visitor_facade",
+  "social_media",
+  "google_ads",
+  "facebook",
+  "instagram",
+  "other",
+] as const satisfies readonly (keyof typeof LEAD_SOURCE_LABEL_KEYS)[];
+
 const LEAD_TYPE_LABEL_KEYS = {
   form: "lead_type_form",
   questionnaire: "lead_type_questionnaire",
@@ -727,6 +816,7 @@ const LEAD_READINESS_CHECK_LABEL_KEYS: Partial<Record<string, TranslationKey>> =
   risk_assessment_released: "lead_readiness_check_risk_assessment_released",
   payer_declaration_complete: "lead_readiness_check_payer_declaration_complete",
   cost_assumption_signed: "lead_readiness_check_cost_assumption_signed",
+  payer_identified: "lead_readiness_check_payer_identified",
 };
 
 /** Server readiness blocking reasons (crates/server/src/routes/leads.rs). */
@@ -783,6 +873,7 @@ const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> 
   "Third-party payer details are incomplete": "lead_readiness_reason_payer_identity_incomplete",
   "Paying parent or legal representative is not named": "lead_readiness_reason_payer_representative_missing",
   "Payer is not informed about the processing of their data": "lead_readiness_reason_payer_not_informed",
+  "Third-party payer is not identified": "lead_readiness_reason_payer_not_identified",
   "Cost assumption declaration is missing": "lead_readiness_reason_cost_assumption_missing",
   "Cost assumption declaration names another payer": "lead_readiness_reason_cost_assumption_outdated",
   "Cost assumption declaration is not signed": "lead_readiness_reason_cost_assumption_unsigned",

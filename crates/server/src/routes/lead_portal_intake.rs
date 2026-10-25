@@ -2299,6 +2299,243 @@ pub(crate) fn upload_file_name(upload: &PgRow) -> Option<String> {
         .or_else(|| upload.try_get::<String, _>("auto_name").ok())
 }
 
+/// Why staff could not use a copy of an identity document, as the cabinet
+/// shows it next to the copy (F-G4, DEV QA 2026-10-25): staff marked the
+/// copy unreadable, or the document's validity ended before today. Only
+/// about the document, never about the check (no tipping-off, § 47 GwG).
+pub(crate) const REFUSED_UNREADABLE: &str = "unreadable";
+pub(crate) const REFUSED_EXPIRED: &str = "expired";
+
+/// A copy of the lead's (`identity`) or a representative's
+/// (`representative_identity`) identity document that staff could not use:
+/// uploaded before staff entered the document data, which they marked
+/// unreadable or whose validity ended before today. A copy staff took over
+/// (reviewed) after that entry counts as accepted and is no refused copy.
+pub(crate) struct RefusedIdentityUpload {
+    pub document_id: Uuid,
+    pub kind: String,
+    pub representative_id: Option<Uuid>,
+    pub file_name: Option<String>,
+    pub reason: &'static str,
+    pub storage_key: Option<String>,
+    /// Moved to a patient, shared, signed or under a review: still listed,
+    /// never withdrawn by a new copy.
+    pub used_elsewhere: bool,
+}
+
+impl RefusedIdentityUpload {
+    /// The cabinet's entry of `follow_up.refused_identity_documents`.
+    fn to_json(&self) -> Value {
+        json!({
+            "document_id": self.document_id,
+            "file_name": self.file_name,
+            "reason": self.reason,
+            "representative_id": self.representative_id,
+        })
+    }
+}
+
+/// The refused copies of the identity documents of a lead
+/// ([`RefusedIdentityUpload`]), oldest first; `today` in Europe/Berlin.
+pub(crate) async fn refused_identity_uploads<'e, E>(
+    executor: E,
+    lead_id: Uuid,
+    today: NaiveDate,
+) -> Result<Vec<RefusedIdentityUpload>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    let rows = sqlx::query(
+        r#"SELECT u.document_id, u.kind, u.representative_id,
+                  d.original_filename, d.auto_name, d.storage_key,
+                  COALESCE(g.id_document_unreadable, r.id_document_unreadable, false) AS unreadable,
+                  (d.patient_id IS NOT NULL OR d.lead_id IS DISTINCT FROM u.lead_id
+                   OR d.signed_at IS NOT NULL
+                   OR EXISTS (SELECT 1 FROM document_shares s WHERE s.document_id = d.id)
+                   OR EXISTS (SELECT 1 FROM document_review_events e WHERE e.document_id = d.id)
+                  ) AS used_elsewhere
+           FROM lead_portal_uploads u
+           JOIN documents d ON d.id = u.document_id
+           LEFT JOIN lead_gwg_declarations g
+             ON u.kind = 'identity' AND g.lead_id = u.lead_id
+           LEFT JOIN lead_representatives r
+             ON u.kind = 'representative_identity' AND r.lead_id = u.lead_id
+            AND r.contact_id = u.representative_id
+           WHERE u.lead_id = $1
+             AND u.kind IN ('identity', 'representative_identity')
+             AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL
+             AND COALESCE(g.id_data_entered_at, r.id_data_entered_at) IS NOT NULL
+             AND u.created_at <= COALESCE(g.id_data_entered_at, r.id_data_entered_at)
+             AND (u.reviewed_at IS NULL
+                  OR u.reviewed_at <= COALESCE(g.id_data_entered_at, r.id_data_entered_at))
+             AND (COALESCE(g.id_document_unreadable, r.id_document_unreadable, false)
+                  OR COALESCE(g.id_valid_until, r.id_valid_until) < $2)
+           ORDER BY u.created_at, u.document_id"#,
+    )
+    .bind(lead_id)
+    .bind(today)
+    .fetch_all(executor)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(RefusedIdentityUpload {
+                document_id: row.try_get("document_id")?,
+                kind: row.try_get("kind")?,
+                representative_id: row.try_get("representative_id")?,
+                file_name: upload_file_name(row),
+                reason: if row.try_get::<bool, _>("unreadable")? {
+                    REFUSED_UNREADABLE
+                } else {
+                    REFUSED_EXPIRED
+                },
+                storage_key: row.try_get("storage_key")?,
+                used_elsewhere: row.try_get("used_elsewhere")?,
+            })
+        })
+        .collect()
+}
+
+/// What withdrawing the refused copies replaced by a new one came to.
+#[derive(Default)]
+struct ReplacedRefusedCopies {
+    document_ids: Vec<Uuid>,
+    staged: Vec<crate::routes::documents::StagedDocumentDelete>,
+    translated_document_files: Vec<String>,
+}
+
+/// A new copy of an identity document (`new_document_id`) replaces the
+/// refused copies of the same person (F-G4, DEV QA 2026-10-25): each is
+/// withdrawn the way the lead's own withdrawal does it — the document is
+/// archived with its file and derived content removed, the upload withdrawn,
+/// one audit row per copy — and staff's "unreadable" mark, which was about
+/// the replaced copy, is cleared with it. The new copy is the one staff
+/// review next. A copy staff accepted, or one used elsewhere, stays. The
+/// files are staged for deletion: the caller finalises them after the commit
+/// and rolls them back otherwise (also when this fails). The inner error is
+/// a file that could not be staged.
+#[allow(clippy::too_many_arguments)]
+async fn replace_refused_identity_copies(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    upload_kind: UploadKind,
+    representative_id: Option<Uuid>,
+    new_document_id: Uuid,
+    actor: Uuid,
+    access_kind: AccessKind,
+    withdrawn_at: DateTime<Utc>,
+    replaced: &mut ReplacedRefusedCopies,
+) -> Result<Result<(), axum::response::Response>, sqlx::Error> {
+    if !matches!(
+        upload_kind,
+        UploadKind::Identity | UploadKind::RepresentativeIdentity
+    ) {
+        return Ok(Ok(()));
+    }
+    let today = crate::app_time::today();
+    let refused: Vec<RefusedIdentityUpload> = refused_identity_uploads(&mut **tx, lead_id, today)
+        .await?
+        .into_iter()
+        .filter(|copy| {
+            copy.kind == upload_kind.as_str()
+                && copy.representative_id == representative_id
+                && copy.document_id != new_document_id
+                && !copy.used_elsewhere
+        })
+        .collect();
+    if refused.is_empty() {
+        return Ok(Ok(()));
+    }
+    let unreadable_cleared = refused.iter().any(|copy| copy.reason == REFUSED_UNREADABLE);
+    for copy in &refused {
+        let staged =
+            match crate::routes::documents::stage_document_file_delete(copy.storage_key.as_deref())
+                .await
+            {
+                Ok(staged) => staged,
+                Err(response) => return Ok(Err(response)),
+            };
+        let file_removed = staged.is_some();
+        replaced.staged.extend(staged);
+        sqlx::query(
+            r#"UPDATE documents
+               SET status = 'archived',
+                   visibility = 'internal',
+                   storage_key = NULL,
+                   file_deleted_at = now(),
+                   file_deleted_by = $2,
+                   file_delete_reason = 'Replaced by a new copy the patient uploaded in the portal'
+               WHERE id = $1 AND file_deleted_at IS NULL"#,
+        )
+        .bind(copy.document_id)
+        .bind(actor)
+        .execute(&mut **tx)
+        .await?;
+        let derived = crate::routes::documents::purge_document_derived_content_in_tx(
+            tx,
+            &[copy.document_id],
+            Some(actor),
+        )
+        .await?;
+        replaced
+            .translated_document_files
+            .extend(derived.translated_document_files.iter().cloned());
+        sqlx::query(
+            "UPDATE lead_portal_uploads SET withdrawn_at = $2
+             WHERE document_id = $1 AND withdrawn_at IS NULL",
+        )
+        .bind(copy.document_id)
+        .bind(withdrawn_at)
+        .execute(&mut **tx)
+        .await?;
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "lead_portal_withdraw_document",
+                Some(actor),
+                "document",
+                Some(copy.document_id),
+                json!({
+                    "lead_id": lead_id,
+                    "access_kind": access_kind.as_str(),
+                    "kind": copy.kind,
+                    "representative_id": copy.representative_id,
+                    "replaced_by_document_id": new_document_id,
+                    "refusal": copy.reason,
+                    "file_removed_from_disk": file_removed,
+                    "derived_content_removed": derived,
+                    "id_document_unreadable_cleared": unreadable_cleared,
+                }),
+            ),
+        )
+        .await?;
+        replaced.document_ids.push(copy.document_id);
+    }
+    if unreadable_cleared {
+        match representative_id {
+            None => {
+                sqlx::query(
+                    "UPDATE lead_gwg_declarations SET id_document_unreadable = false
+                     WHERE lead_id = $1",
+                )
+                .bind(lead_id)
+                .execute(&mut **tx)
+                .await?;
+            }
+            Some(representative_id) => {
+                sqlx::query(
+                    "UPDATE lead_representatives SET id_document_unreadable = false
+                     WHERE lead_id = $1 AND contact_id = $2",
+                )
+                .bind(lead_id)
+                .bind(representative_id)
+                .execute(&mut **tx)
+                .await?;
+            }
+        }
+    }
+    Ok(Ok(()))
+}
+
 /// Whether the lead has an identity document uploaded through the cabinet.
 async fn identity_document_uploaded<'e, E>(executor: E, lead_id: Uuid) -> Result<bool, sqlx::Error>
 where
@@ -2763,6 +3000,16 @@ pub(crate) async fn request_payload(
             .iter()
             .filter(|document| identity_since.is_none_or(|since| uploaded_after(document, since)))
             .cloned()
+            .collect::<Vec<_>>()
+    );
+    // The copies staff could not use, each with the reason about the document
+    // only (F-G4, DEV QA 2026-10-25): `unreadable` or `expired`. A new copy of
+    // the same person replaces them; then they are gone from here.
+    follow_up["refused_identity_documents"] = json!(
+        refused_identity_uploads(&state.db, lead_id, today)
+            .await?
+            .iter()
+            .map(RefusedIdentityUpload::to_json)
             .collect::<Vec<_>>()
     );
     // A paying representative is shown with the representative's own data
@@ -5562,6 +5809,8 @@ pub(crate) async fn store_my_upload(
     // link or the consent went away meanwhile, the stored file goes again.
     let mut upload_limit_reached = false;
     let mut duplicate_found = false;
+    let mut replaced = ReplacedRefusedCopies::default();
+    let mut staging_failed: Option<axum::response::Response> = None;
     let registered = async {
         let mut tx = state.db.begin().await?;
         let Some((kind, _)) = lock_my_lead(&mut tx, lead_id, auth.user_id).await? else {
@@ -5645,16 +5894,50 @@ pub(crate) async fn store_my_upload(
             ),
         )
         .await?;
+        // A new copy of an identity document replaces the copies staff could
+        // not use (F-G4, DEV QA 2026-10-25).
+        if let Err(response) = replace_refused_identity_copies(
+            &mut tx,
+            lead_id,
+            upload_kind,
+            representative_key,
+            document_id,
+            auth.user_id,
+            kind,
+            uploaded_at,
+            &mut replaced,
+        )
+        .await?
+        {
+            staging_failed = Some(response);
+            return Ok(None);
+        }
         tx.commit().await?;
         Ok(Some(kind))
     }
     .await;
+    // The files of the replaced copies go with the commit, or come back.
+    if matches!(registered, Ok(Some(_))) {
+        for staged in &replaced.staged {
+            crate::routes::documents::finalize_staged_document_delete(staged).await;
+        }
+        for storage_key in &replaced.translated_document_files {
+            crate::routes::documents::remove_document_blob(storage_key).await;
+        }
+    } else {
+        for staged in &replaced.staged {
+            crate::routes::documents::rollback_staged_document_delete(staged).await;
+        }
+    }
     match registered {
         Ok(Some(_)) => {}
         Ok(None) => {
             discard_stored_document(&state, document_id, &storage_key).await;
             if duplicate_found {
                 return duplicate_document();
+            }
+            if let Some(response) = staging_failed {
+                return response;
             }
             return if upload_limit_reached {
                 coded(
@@ -5682,6 +5965,7 @@ pub(crate) async fn store_my_upload(
             "document_id": document_id,
             "access_kind": kind.as_str(),
             "kind": upload_kind.as_str(),
+            "replaced_document_ids": replaced.document_ids,
         }),
     )
     .await;

@@ -11933,6 +11933,12 @@ async fn converted_minor_contract_names_only_the_parent_who_receives_and_pays_th
         "{text}"
     );
     assert_eq!(roles, vec!["guardian_1", "agency"]);
+    // QA 2026-10-25, R-5: the card's "Vertragspartei" names the same
+    // party as the signed contract.
+    assert_eq!(
+        payer_summary_party_names(&app, &bearer, patient).await,
+        vec!["Anna Mutter".to_string()]
+    );
 
     set_parent_invoice_recipient(&pool, lead, &parents[0], false).await;
     let (text, roles) = generate_contract_text(
@@ -11948,6 +11954,34 @@ async fn converted_minor_contract_names_only_the_parent_who_receives_and_pays_th
         "{text}"
     );
     assert_eq!(roles, vec!["guardian_1", "agency", "guardian_2"]);
+    assert_eq!(
+        payer_summary_party_names(&app, &bearer, patient).await,
+        vec!["Anna Mutter".to_string(), "Boris Vater".to_string()]
+    );
+}
+
+/// The representatives the patient card shows as "Vertragspartei"
+/// (`GET /patients/{id}/payer-summary`).
+async fn payer_summary_party_names(app: &axum::Router, bearer: &str, patient: Uuid) -> Vec<String> {
+    let (status, summary) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/patients/{patient}/payer-summary"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(
+        summary["contracting_party"]["kind"], "legal_representatives",
+        "{summary}"
+    );
+    summary["contracting_party"]["representatives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|person| person["name"].as_str().unwrap_or_default().to_string())
+        .collect()
 }
 
 /// Unconverted and repeat inquiries use their current custody and representative
@@ -12085,7 +12119,38 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                         assert_eq!(status, StatusCode::OK);
                         let text = extract_pdf_text(&bytes);
                         assert!(!text.contains("Veralteter Kontakt"), "{text}");
-                        if !represented && matches!(template, "framework_contract" | "single_order")
+                        // A Vormund never contracts in their own name (owner
+                        // decision 2026-10-25): the child is the Auftraggeber,
+                        // represented by the guardian, also where the order
+                        // names no party; parents contract in their own name.
+                        let child_party = represented || custody == "guardian";
+                        if matches!(template, "framework_contract" | "single_order") {
+                            assert_eq!(
+                                text.contains("im eigenen Namen"),
+                                !child_party,
+                                "{scenario} {template}: {text}"
+                            );
+                        }
+                        if custody == "guardian" && template != "order_cost_estimate" {
+                            assert!(
+                                text.contains(
+                                    "gesetzlich vertreten durch den Vormund Carla Vormund"
+                                ),
+                                "{template}: {text}"
+                            );
+                        }
+                        if custody == "guardian" && template == "order_cost_estimate" {
+                            assert!(text.contains("Vormund Carla Vormund"), "{text}");
+                        }
+                        if custody == "guardian"
+                            && matches!(template, "framework_contract" | "single_order")
+                        {
+                            assert!(
+                                text.contains("Unterschrift Vormund (ges. Vertreter)"),
+                                "{template}: {text}"
+                            );
+                        }
+                        if !child_party && matches!(template, "framework_contract" | "single_order")
                         {
                             assert!(
                                 text.contains("zugunsten des Patienten")
@@ -12112,7 +12177,7 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                                 "{template}: {text}"
                             );
                             if matches!(template, "framework_contract" | "single_order")
-                                && !represented
+                                && !child_party
                             {
                                 assert!(
                                     text.contains(&format!("Elternweg {}", index + 21)),
@@ -12122,7 +12187,7 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                         }
                         // No invoice recipient answered: two custody parents
                         // stay joint debtors (owner decision 2026-10-25).
-                        if matches!(template, "framework_contract" | "single_order") && !represented
+                        if matches!(template, "framework_contract" | "single_order") && !child_party
                         {
                             assert_eq!(
                                 text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
@@ -12140,7 +12205,7 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                             assert!(roles.contains(&"payer"), "{detail}");
                             assert!(!roles.contains(&"client"), "{detail}");
                             assert!(text.contains(&format!("Mia Kind-{scenario}")), "{text}");
-                            if represented {
+                            if child_party {
                                 assert!(text.contains("gesetzlich vertreten durch"), "{text}");
                                 assert!(
                                     text.contains("Geburtsdatum des Auftraggebers: 07.06.2015"),
@@ -12258,6 +12323,134 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
             assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         }
     }
+}
+
+/// An adult under rechtliche Betreuung (owner decision 2026-10-25, DEV QA
+/// F-G1): the Betreuer acts in the adult's name. The contract names the adult
+/// as Auftraggeber "vertreten durch" the Betreuer, who signs it; Anlage 1 und
+/// 2 and the patient form carry the Betreuer's signature line; the signature
+/// package suggests the Betreuer as client signer. Staff naming the patient
+/// alone as party keeps the adult's own signature on the contract.
+#[tokio::test]
+async fn an_adult_under_betreuung_contracts_represented_by_the_betreuer() {
+    let Some((app, pool, admin, bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("lead-betreuer");
+    let betreuer = Uuid::new_v4();
+    let betreuer_email = format!("ute-{tag}@example.test");
+    let contacts = json!([{
+        "id": betreuer, "name": "Ute Betreuerin", "relation": "guardian",
+        "birth_date": "1970-07-08", "email": betreuer_email, "phone": "+49 30 7654321"
+    }]);
+    let lead: Uuid = sqlx::query_scalar(
+        "INSERT INTO leads(first_name,last_name,date_of_birth,email,legal_sex,street_address,zip_code,city,country,citizenships,trusted_contacts,portal_submitted_at,created_by) VALUES('Karl',$1,'1950-01-02',$2,'male','Altenweg 1','10115','Berlin','DE','{DE}',$3,now(),$4) RETURNING id",
+    )
+    .bind(format!("Betreuter-{tag}"))
+    .bind(format!("karl-{tag}@example.test"))
+    .bind(&contacts)
+    .bind(admin)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,has_representative,under_guardianship) VALUES($1,true,true)")
+        .bind(lead)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,citizenships,street,zip,city,country) VALUES($1,$2,'legal_guardian','staff','Ute','Betreuerin','{DE}','Betreuungsweg 4','80333','München','DE')",
+    )
+    .bind(lead)
+    .bind(betreuer)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let contract: Uuid = sqlx::query_scalar("INSERT INTO framework_contracts(lead_id,contract_number,status,created_by) VALUES($1,$2,'draft',$3) RETURNING id")
+        .bind(lead).bind(format!("FC-{tag}")).bind(admin).fetch_one(&pool).await.unwrap();
+    let order: Uuid = sqlx::query_scalar("INSERT INTO orders(source_lead_id,contract_id,order_number,created_by) VALUES($1,$2,$3,$4) RETURNING id")
+        .bind(lead).bind(contract).bind(format!("AUF-{tag}")).bind(admin).fetch_one(&pool).await.unwrap();
+
+    let (text, roles) = generate_contract_text(
+        &app,
+        &bearer,
+        json!({"template_id":"framework_contract","lead_id":lead,"order_id":order,"language":"de"}),
+    )
+    .await;
+    assert!(text.contains(&format!("Karl Betreuter-{tag}")), "{text}");
+    assert!(
+        text.contains(
+            "gesetzlich vertreten durch die/den rechtliche(n) Betreuer/in Ute Betreuerin"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("im eigenen Namen"), "{text}");
+    assert!(
+        text.contains("Unterschrift Betreuer/in (ges. Vertreter)"),
+        "{text}"
+    );
+    assert_eq!(roles, vec!["guardian_1", "agency"]);
+
+    for template in ["privacy_consents", "confidentiality_release"] {
+        let (text, roles) = generate_contract_text(
+            &app,
+            &bearer,
+            json!({"template_id":template,"lead_id":lead,"language":"de"}),
+        )
+        .await;
+        assert!(
+            text.contains(
+                "gesetzlich vertreten durch die/den rechtliche(n) Betreuer/in Ute Betreuerin,"
+            ),
+            "{template}: {text}"
+        );
+        assert!(
+            text.contains("Betreuer/in (ges. Vertreter)"),
+            "{template}: {text}"
+        );
+        assert_eq!(roles, vec!["guardian_1"], "{template}");
+    }
+
+    // The signature package asks the Betreuer, not the adult, to sign.
+    let consent: Uuid = sqlx::query_scalar(
+        "SELECT id FROM documents WHERE lead_id = $1 AND generated_template_id = 'privacy_consents'",
+    )
+    .bind(lead)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, candidates) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/signature-packages/candidates?document_id={consent}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{candidates}");
+    let clients: Vec<&str> = candidates["suggested_signers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|signer| signer["role"] == "client")
+        .filter_map(|signer| signer["email"].as_str())
+        .collect();
+    assert_eq!(clients, [betreuer_email.as_str()], "{candidates}");
+
+    // Staff named the patient alone as party: the adult signs the contract.
+    sqlx::query("UPDATE orders SET contracting_party='patient' WHERE id=$1")
+        .bind(order)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (text, roles) = generate_contract_text(
+        &app,
+        &bearer,
+        json!({"template_id":"framework_contract","lead_id":lead,"order_id":order,"language":"de"}),
+    )
+    .await;
+    assert!(!text.contains("vertreten durch"), "{text}");
+    assert_eq!(roles, vec!["client", "agency"]);
 }
 
 /// § 15 Abs. 4 Nr. 2 GwG: the proofs of the origin of the assets are uploaded

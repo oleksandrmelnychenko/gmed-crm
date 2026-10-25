@@ -84,7 +84,9 @@ export function LeadRequestPage() {
   // The cabinet also speaks UA and EN (owner request 2026-10-04): an explicit
   // choice is remembered, otherwise the language the person entered for the
   // request is used, then the portal language.
-  const [chosenLang, setChosenLang] = useState<LeadCabinetLang | null>(readStoredLeadCabinetLang);
+  // Remembered per login (QA 2026-10-25, G F-G5): another login of this browser starts in its own language.
+  const [chosen, setChosen] = useState<{ userId: string | null; lang: LeadCabinetLang | null }>(() => ({ userId, lang: readStoredLeadCabinetLang(userId) }));
+  const chosenLang = chosen.userId === userId ? chosen.lang : readStoredLeadCabinetLang(userId);
   const [requestLang, setRequestLang] = useState<LeadCabinetLang | null>(null);
   // A UA/EN choice saved on the account also holds on another device.
   const lang = resolveLeadCabinetLang(chosenLang ?? asLeadCabinetLang(accountLang), requestLang, portalLang);
@@ -140,8 +142,8 @@ export function LeadRequestPage() {
 
   const chooseLang = useCallback(
     (next: LeadCabinetLang) => {
-      setChosenLang(next);
-      storeLeadCabinetLang(next);
+      setChosen({ userId, lang: next });
+      storeLeadCabinetLang(userId, next);
       // The app's own catalogs (account page, legal notice) speak DE and RU; the shell around
       // the cabinet follows the cabinet language itself (`publishLeadCabinetLang`).
       if (next === "de" || next === "ru") setPortalLang(next);
@@ -149,7 +151,7 @@ export function LeadRequestPage() {
       // 2026-10-24); best effort, the cabinet works without it.
       void saveCabinetLanguage(next).catch(() => undefined);
     },
-    [setPortalLang],
+    [setPortalLang, userId],
   );
 
   const load = useCallback(async () => {
@@ -606,13 +608,15 @@ function LeadRequestView({
             {guardian ? guardianCabinetTitle(text, request, patientName) : text.title}
           </h1>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-            {deadline && !request.submitted_at ? (
+            {/* The server's date is the staff list's: null once the lead is out of the purge
+                (DSGVO signed, qualified). After sending it stays, worded as what happens then (R-11). */}
+            {deadline ? (
               <div
                 className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
                 data-testid="lead-request-deadline"
               >
                 <Clock aria-hidden="true" className="size-4 shrink-0" />
-                <p className="font-medium">{text.deadline(deadline)}</p>
+                <p className="font-medium">{request.submitted_at ? text.deadlineSent(deadline) : text.deadline(deadline)}</p>
               </div>
             ) : null}
             {languageSwitch ? <CabinetLanguageSwitch lang={languageSwitch.lang} onLang={languageSwitch.onLang} /> : null}

@@ -379,7 +379,7 @@ test("a parent of a minor is identified on the own line, with the payment sent f
   expect(calls).toEqual([{ subject: mother, body: { confirmed: true } }]);
 });
 
-test("an adult's representative and Betreuer each get a line below the patient's, with the own confirmation", async ({ page }, testInfo) => {
+test("an adult's representative and Betreuer each get a line below the patient's; only the patient pays", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   const agentId = "22222222-2222-4222-8222-222222222222";
   const guardianId = "33333333-3333-4333-8333-333333333333";
@@ -409,7 +409,8 @@ test("an adult's representative and Betreuer each get a line below the patient's
   await expect(agentLine).toContainText("Ben Vertreter");
   await expect(agentLine).toContainText("уполномоченный представитель");
   await expect(block.getByTestId(`lead-identification-qes-${agent}`)).toHaveText("Квалифицированная подпись · 05.10.2026");
-  await expect(block.getByTestId(`lead-identification-payment-${agent}`)).toHaveText("Ожидается платёж с собственного счёта");
+  // They act and sign for the patient; the patient pays (QA 2026-10-25, M F-13).
+  await expect(block.getByTestId(`lead-identification-payment-${agent}`)).toHaveText("Платёж с собственного счёта не ожидается");
 
   const guardianLine = block.getByTestId(`lead-identification-${guardian}`);
   await expect(guardianLine).toContainText("Mia Betreuerin");
@@ -417,20 +418,21 @@ test("an adult's representative and Betreuer each get a line below the patient's
   await expect(block.getByTestId(`lead-identification-qes-${guardian}`)).toHaveText("Квалифицированной подписи ещё нет");
   await expect(block.getByTestId(`lead-identification-note-${guardian}`)).toHaveText("нет e-mail — подпись не засчитается");
 
-  // The Betreuer's payment is confirmed for the Betreuer and taken back.
-  await guardianLine.getByRole("button", { name: "Подтвердить платёж — Mia Betreuerin" }).click();
-  await expect(block.getByTestId(`lead-identification-payment-${guardian}`)).toHaveText(
-    "Платёж с собственного счёта подтверждён · 05.10.2026 · Intake QA",
-  );
-  await expect(block.getByTestId(`lead-identification-payment-${agent}`)).toHaveText("Ожидается платёж с собственного счёта");
+  await expect(block.getByTestId(`lead-identification-payment-${guardian}`)).toHaveText("Платёж с собственного счёта не ожидается");
+  await expect(guardianLine.getByRole("button", { name: "Подтвердить платёж — Mia Betreuerin" })).toHaveCount(0);
+  await expect(agentLine.getByRole("button", { name: "Подтвердить платёж — Ben Vertreter" })).toHaveCount(0);
+
+  // The patient's own payment is confirmed on the patient's line and taken back.
   await expect(row("contract_partner").payment).toHaveText("Ожидается платёж с собственного счёта");
+  await row("contract_partner").line.getByRole("button", { name: "Подтвердить платёж — Пациент" }).click();
+  await expect(row("contract_partner").payment).toHaveText("Платёж с собственного счёта подтверждён · 05.10.2026 · Intake QA");
   await block.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-identification-adult-acting-ru-desktop.png"), animations: "disabled" });
-  await guardianLine.getByRole("button", { name: "Отменить — Mia Betreuerin" }).click();
-  await expect(block.getByTestId(`lead-identification-payment-${guardian}`)).toHaveText("Ожидается платёж с собственного счёта");
+  await row("contract_partner").line.getByRole("button", { name: "Отменить — Пациент" }).click();
+  await expect(row("contract_partner").payment).toHaveText("Ожидается платёж с собственного счёта");
   expect(calls).toEqual([
-    { subject: guardian, body: { confirmed: true } },
-    { subject: guardian, body: { confirmed: false } },
+    { subject: "contract_partner", body: { confirmed: true } },
+    { subject: "contract_partner", body: { confirmed: false } },
   ]);
   await expect(block.getByTestId("lead-identification-error")).toHaveCount(0);
 });

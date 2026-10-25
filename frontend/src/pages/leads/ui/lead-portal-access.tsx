@@ -20,6 +20,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lead, LoginEmailDeliveryStatus } from "@/lib/api/types";
 import { copyText, selectElementText } from "@/lib/copy-text";
 import { cn } from "@/lib/utils";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { downloadDocumentFile, fetchDocuments, generateDocument } from "@/pages/documents/data/document-api";
 
 import {
@@ -46,7 +47,7 @@ import {
 } from "../model/lead-portal-access";
 import { currentGwgSheet, gwgSheetErrorText, gwgSheetRequest } from "../model/gwg-identification";
 import { guardianLinkRelation, medicalDocumentsFactLabel } from "../model/lead-portal-intake";
-import { leadErrorMessage } from "../model/leads-model";
+import { guardianOwnLoginError, leadErrorMessage } from "../model/leads-model";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import {
   fetchLeadPortalIntake,
@@ -853,6 +854,9 @@ export function LeadGuardianAccess({
   const [intake, setIntake] = useState<LeadPortalIntake | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // Where the parent's own request or patient record opens (409 `use_patient_access` naming it).
+  const [errorLink, setErrorLink] = useState<{ href: string; target: "lead" | "patient" } | null>(null);
+  const { staffGo } = useStaffNavigate();
   // `name`: the parent's own, for the greeting of the message (QA 2026-10-10: "Здравствуйте!" without a name).
   const [issued, setIssued] = useState<{ email: string; password: string; created: boolean; userId: string; name: string } | null>(null);
   const [notice, setNotice] = useState("");
@@ -890,6 +894,7 @@ export function LeadGuardianAccess({
   ) {
     setBusy(key);
     setError("");
+    setErrorLink(null);
     setNotice("");
     try {
       const result = await action();
@@ -913,6 +918,9 @@ export function LeadGuardianAccess({
       onChanged?.();
     } catch (nextError) {
       setError(leadErrorMessage(nextError, tx));
+      // The parent's own login: its password is reset in the parent's own request.
+      const own = guardianOwnLoginError(nextError);
+      setErrorLink(own?.href ? { href: own.href, target: own.target } : null);
     } finally {
       setBusy(null);
     }
@@ -1016,7 +1024,26 @@ export function LeadGuardianAccess({
         </p>
       ) : null}
       {notice ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 leading-5 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200" role="status">{notice}</p> : null}
-      {error ? <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 leading-5 text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200" role="alert">{error}</p> : null}
+      {error ? (
+        <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 leading-5 text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200" role="alert">
+          {error}
+          {errorLink ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="font-semibold underline underline-offset-2"
+                data-testid="lead-guardian-own-login-link"
+                onClick={() => staffGo(errorLink.href)}
+              >
+                {errorLink.target === "lead"
+                  ? tx("Открыть его заявку", "Eigene Anfrage öffnen")
+                  : tx("Открыть пациента", "Patientenakte öffnen")}
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : null}
       <LeadConfirmDialog
         open={revoking !== null}
         title={tx("Отозвать доступ родителя к этой заявке?", "Zugang des Elternteils zu dieser Anfrage widerrufen?")}

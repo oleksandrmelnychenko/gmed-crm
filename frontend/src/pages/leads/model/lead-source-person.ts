@@ -71,6 +71,8 @@ export type SourcePersonSeed = {
   zip?: string;
   city?: string;
   country?: string;
+  /** ISO alpha-2 codes; never the legal sex (the person states it). */
+  citizenships?: string[];
 };
 
 type RelationLike = {
@@ -81,11 +83,37 @@ type RelationLike = {
   address_zip?: string | null;
   address_city?: string | null;
   address_country?: string | null;
+  birth_date?: string | null;
+  citizenships?: readonly string[] | null;
+  notes?: string | null;
 };
 
+/** «Geburtsdatum: 1985-05-02» in the notes the lead conversion writes on a relation. */
+function birthDateFromRelationNotes(notes: string | null | undefined): string {
+  const match = /Geburtsdatum:\s*(\d{4}-\d{2}-\d{2})/i.exec(notes ?? "");
+  return match?.[1] ?? "";
+}
+
+function citizenshipCodes(values: readonly string[] | null | undefined): string[] {
+  const codes: string[] = [];
+  for (const value of values ?? []) {
+    const code = value.trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(code) && !codes.includes(code)) codes.push(code);
+  }
+  return codes;
+}
+
+/**
+ * The relation row as step 1 can show it before the lead exists (QA
+ * 2026-10-25, item 97 / M F-7): name, contact data, address, the date of
+ * birth (the row's own or the one the conversion noted) and the
+ * citizenships when the row carries them — never the legal sex.
+ */
 export function seedFromPatientRelation(relation: RelationLike): SourcePersonSeed {
   return {
     ...splitPersonName(relation.related_name),
+    birthDate: relation.birth_date?.trim() || birthDateFromRelationNotes(relation.notes),
+    citizenships: citizenshipCodes(relation.citizenships),
     phone: relation.phone?.trim() ?? "",
     email: relation.email?.trim() ?? "",
     street: relation.address_street?.trim() ?? "",
@@ -95,14 +123,30 @@ export function seedFromPatientRelation(relation: RelationLike): SourcePersonSee
   };
 }
 
+/** A representative on file for the contact (the child's portal state): address, birth date, citizenships. */
+type RepresentativeLike = {
+  date_of_birth?: string | null;
+  citizenships?: readonly string[] | null;
+  street?: string | null;
+  zip?: string | null;
+  city?: string | null;
+  country?: string | null;
+};
+
 export function seedFromTrustedContact(
   contact: Pick<LeadTrustedContact, "name" | "phone" | "email" | "birth_date">,
+  representative?: RepresentativeLike | null,
 ): SourcePersonSeed {
   return {
     ...splitPersonName(contact.name),
     phone: contact.phone?.trim() ?? "",
     email: contact.email?.trim() ?? "",
-    birthDate: contact.birth_date?.trim() ?? "",
+    birthDate: contact.birth_date?.trim() || representative?.date_of_birth?.trim() || "",
+    street: representative?.street?.trim() ?? "",
+    zip: representative?.zip?.trim() ?? "",
+    city: representative?.city?.trim() ?? "",
+    country: representative?.country?.trim() ?? "",
+    citizenships: citizenshipCodes(representative?.citizenships),
   };
 }
 
@@ -119,10 +163,14 @@ type IdentityDraft = {
 };
 
 /** Only empty fields take the seed: what staff typed meanwhile stays. */
-export function fillMissingFromSeed<Draft extends IdentityDraft>(draft: Draft, seed: SourcePersonSeed): Draft {
+export function fillMissingFromSeed<Draft extends IdentityDraft & { citizenships?: string[] }>(draft: Draft, seed: SourcePersonSeed): Draft {
   const pick = (current: string, next: string | undefined) => (current.trim() ? current : next?.trim() ?? "");
+  const citizenships = draft.citizenships && draft.citizenships.length === 0 && seed.citizenships?.length
+    ? { citizenships: [...seed.citizenships] }
+    : {};
   return {
     ...draft,
+    ...citizenships,
     firstName: pick(draft.firstName, seed.firstName),
     lastName: pick(draft.lastName, seed.lastName),
     birthDate: pick(draft.birthDate, seed.birthDate),
@@ -206,6 +254,21 @@ export function prefilledFromSourceNotice(
 /** The child's questionnaire named the person as a PEP: a hint to ask again, never an answer. */
 export function sourcePepHint(prefilled: LeadPrefilledFromSource | null | undefined): boolean {
   return prefilled?.hints?.pep_self === "yes";
+}
+
+/**
+ * The PEP hint stays until the person's own PEP question is answered (QA
+ * 2026-10-25): from the creating session (`sessionHint`, read from the
+ * `POST /leads` response's `prefilled_from_source.hints`) or, on a later
+ * opening, from the lead itself — `source_pep_hint`, which the server
+ * recomputes from the source on every read.
+ */
+export function sourcePepHintActive(
+  lead: { source_pep_hint?: "yes" | "no" | null } | null | undefined,
+  { sessionHint, pepAnswer }: { sessionHint: boolean; pepAnswer: boolean | null | undefined },
+): boolean {
+  if (pepAnswer === true || pepAnswer === false) return false;
+  return sessionHint || lead?.source_pep_hint === "yes";
 }
 
 export function sourcePepHintText(tx: Tx): string {

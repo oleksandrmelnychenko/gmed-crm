@@ -37,7 +37,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::services::contracting_party::PartyKind;
+use crate::services::contracting_party::{CourtGuardian, PartyKind};
 
 use crate::{
     access, audit,
@@ -3467,6 +3467,14 @@ struct GwgIdentificationSheet {
     /// "Getroffene Maßnahmen zur Ermittlung des wB" when it is not the
     /// questioning of the contract partner (the payer's own statement).
     beneficial_owner_measures: Option<String>,
+    /// The patient's sheet: "Zahlung durch Dritte" — the third party who
+    /// pays, "Name (Beziehung)" (QA 2026-10-25, R-9). `None` while the
+    /// patient or a paying parent pays.
+    third_party_payer: Option<String>,
+    /// The patient's sheet: "Herkunft der Mittel" of the person who pays,
+    /// the source and the words only for "other" (the funds rule of
+    /// 2026-10-24); `None` while nothing is stated.
+    funds_source: Option<String>,
     /// Questions 5 a) to d) of the form. b) is staff's conclusion once staff
     /// reviewed this person, the person's own answer before (owner decision
     /// 2026-10-23, [`crate::services::pep_review::politically_exposed`]).
@@ -4128,7 +4136,13 @@ async fn load_gwg_identification_sheet(
                 sheet.beneficial_owner_name = owner.name;
                 sheet.beneficial_owner_note = owner.note;
                 sheet.beneficial_owner_measures = Some(owner.measures);
-            } else if sheet.also_payer && representation.minor {
+            } else if sheet.also_payer
+                && representation.minor
+                && representation.answers.custody() != super::lead_representatives::CUSTODY_GUARDIAN
+            {
+                // A paying Vormund is not here: the guardian acts in the
+                // child's name (owner decision 2026-10-25), the child is the
+                // Vertragspartner and the guardian acts on its behalf.
                 // The parent named as payer contracts in the own name for the
                 // child (§ 328 BGB) and pays (owner decision 2026-10-19); the
                 // payer's questions are asked only when the enhanced check is
@@ -4171,6 +4185,33 @@ async fn load_gwg_identification_sheet(
             // the first box is ticked (QA 2026-10-25: neither box was).
             sheet.acts_on_own_account = Some(true);
             sheet.beneficial_owner_measures = Some(GWG_SELF_PAYER_MEASURES.to_string());
+        }
+        // QA 2026-10-25, R-9: the patient's sheet names the third party who
+        // pays and, once stated, where the money comes from (the payer's own
+        // answer, before it staff's entry; the patient's own when the patient
+        // pays) — the payer's details stay on the payer's own sheet.
+        if representative.is_none() {
+            let paying_parent = super::lead_representatives::payer_same_person(
+                representation,
+                declaration.as_ref(),
+            )
+            .is_some();
+            sheet.third_party_payer = declaration
+                .as_ref()
+                .filter(|declaration| declaration.is_third_party() && !paying_parent)
+                .and_then(gwg_third_party_payer_line);
+            if let Some(declaration) = declaration.as_ref() {
+                let mut conn = state
+                    .db
+                    .acquire()
+                    .await
+                    .map_err(|error| failed(error, "connection"))?;
+                let statement = super::lead_funds::load_statement_funds(&mut conn, lead_id)
+                    .await
+                    .map_err(|error| failed(error, "payer statement funds"))?;
+                let funds = super::lead_funds::lead_funds(Some(declaration), statement.as_ref());
+                sheet.funds_source = gwg_funds_source_line(funds.relevant());
+            }
         }
         risk_countries.extend(lead_country);
         risk_countries.extend(statements.habitual_residence_country.clone());
@@ -4458,6 +4499,47 @@ const GWG_PAYER_STATEMENT_SOURCE: &str = "Angaben des Kostenübernehmers über d
 /// payer's questions (no enhanced check required).
 /// Section 3 of the patient's sheet when the patient pays himself.
 const GWG_SELF_PAYER_MEASURES: &str = "Befragung des Vertragspartners: zahlt selbst und handelt im eigenen Namen (Erklärung zum Zahler in der Anfrage)";
+
+/// "Zahlung durch Dritte" on the patient's sheet: "Viktor Zahler (Onkel)";
+/// an organisation without a stated relationship as "(Organisation)";
+/// `None` without a name.
+fn gwg_third_party_payer_line(payer: &super::lead_payer::Declaration) -> Option<String> {
+    let name = payer.payer_name()?;
+    let relationship = payer
+        .relationship_label()
+        .map(|label| label.trim().to_string())
+        .filter(|label| !label.is_empty())
+        .or_else(|| payer.is_organisation().then(|| "Organisation".to_string()));
+    Some(match relationship {
+        Some(relationship) => format!("{name} ({relationship})"),
+        None => name,
+    })
+}
+
+/// "Herkunft der Mittel" on the patient's sheet: the source labels, the
+/// words only with "other" (the funds rule of 2026-10-24); staff's entry
+/// before the payer's own answer is marked as GMED's. `None` without a
+/// source.
+fn gwg_funds_source_line(funds: &super::lead_funds::PersonFunds) -> Option<String> {
+    let labels = funds.source_labels().join(", ");
+    if labels.is_empty() {
+        return None;
+    }
+    let words = funds
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|words| !words.is_empty())
+        .filter(|_| funds.sources.iter().any(|source| source == "other"));
+    let mut line = match words {
+        Some(words) => format!("{labels}: {words}"),
+        None => labels,
+    };
+    if funds.entered_by == Some(super::lead_funds::ENTERED_BY_STAFF) {
+        line.push_str(" (Angabe von GMED)");
+    }
+    Some(line)
+}
 
 const GWG_PAYING_PARENT_MEASURES: &str = "Befragung des Vertragspartners: Vertragsschluss im eigenen Namen zugunsten des Kindes (§ 328 BGB), Zahlung als Zahler/in (Angaben im Patientenformular)";
 /// The same questions answered by a paying parent (or guardian) of a minor in
@@ -10885,7 +10967,7 @@ fn build_framework_contract_pdf(
     // A minor's parents or guardian sign one form that holds both the consent
     // and the release (owner 2026-10-24): one annex entry; the Datenschutz
     // sheet keeps its number "Anlage 3".
-    let minor = context.contracting.parents_contract() || context.contracting.represented();
+    let minor = context.contracting.for_child();
     let annexes: &[&str] = if minor {
         &[
             "Anlage 1 und 2:  Einverständniserklärung zur Datenübermittlung und Schweigepflichtsentbindung (eine gemeinsame Erklärung für das Kind)",
@@ -18565,11 +18647,16 @@ async fn generate_document(
                 "Schweigepflichtsentbindung",
                 &[patient_party.name.clone(), generated_doc_id.clone()],
             );
-            let pdf_bytes = match build_adult_confidentiality_release_pdf(
+            let betreuer = match adult_betreuer_doc(&state, patient_id, lead_id, order_id).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let pdf_bytes = match build_adult_confidentiality_release_pdf_for(
                 &patient_party,
                 &agency,
                 &bindings,
                 &generated_doc_id,
+                betreuer.as_ref(),
             ) {
                 Ok(generated) => {
                     record_signature_anchors(&mut generated_bindings_snapshot, generated)
@@ -18595,12 +18682,17 @@ async fn generate_document(
                 "Einverständniserklärung zur Datenübermittlung",
                 &[patient_party.name.clone(), generated_doc_id.clone()],
             );
-            let pdf_bytes = match build_adult_privacy_consents_pdf(
+            let betreuer = match adult_betreuer_doc(&state, patient_id, lead_id, order_id).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let pdf_bytes = match build_adult_privacy_consents_pdf_for(
                 &patient_party,
                 &agency,
                 &bindings,
                 &generated_doc_id,
                 own_consent_choice.as_ref(),
+                betreuer.as_ref(),
             ) {
                 Ok(generated) => {
                     record_signature_anchors(&mut generated_bindings_snapshot, generated)
@@ -18844,10 +18936,18 @@ async fn generate_document(
             };
             // Only what the server stored of the sent request; nothing of the
             // request body goes into the document.
-            let disclosure = match load_lead_self_disclosure(&state, lead_uuid).await {
+            let mut disclosure = match load_lead_self_disclosure(&state, lead_uuid).await {
                 Ok(disclosure) => disclosure,
                 Err(response) => return response,
             };
+            // The signer's place like the consent forms (F-G7).
+            disclosure.sign_place = bindings
+                .party_sign_place
+                .as_deref()
+                .or(bindings.sign_place.as_deref())
+                .map(str::trim)
+                .filter(|place| !place.is_empty())
+                .map(str::to_string);
             generated_bindings_snapshot.get_or_insert_with(|| json!({}))
                 [crate::consent_choices::PATIENT_FORM_DISCLOSURE_KEY] = json!(true);
             // Made from the lead's data as GMED recorded them: superseded
@@ -20309,6 +20409,11 @@ fn admin_signature_rows(
 struct ContractingDoc {
     kind: PartyKind,
     representatives: Vec<DocPartyBlock>,
+    /// The representatives are a court-appointed guardian (Vormund of a
+    /// minor, Betreuer of an adult): the patient is the Auftraggeber,
+    /// represented by them — never a party in their own name (owner decision
+    /// 2026-10-25). `kind` is then `PatientRepresented`.
+    guardian: Option<CourtGuardian>,
 }
 
 impl Default for ContractingDoc {
@@ -20316,6 +20421,7 @@ impl Default for ContractingDoc {
         Self {
             kind: PartyKind::Patient,
             representatives: Vec::new(),
+            guardian: None,
         }
     }
 }
@@ -20330,7 +20436,7 @@ struct ContractSigner {
 impl ContractingDoc {
     fn fingerprint(&self) -> String {
         use sha2::Digest;
-        let snapshot = json!({
+        let mut snapshot = json!({
             "version":1,
             "kind":self.kind.as_str(),
             "representatives":self.representatives.iter().map(|person| json!({
@@ -20339,29 +20445,34 @@ impl ContractingDoc {
                 "city":person.city,"country":person.country,"email":person.email,"phone":person.phone
             })).collect::<Vec<_>>()
         });
+        // Only a court-appointed guardian adds a key: every other party keeps
+        // the fingerprint of its documents generated before 2026-10-25.
+        if let Some(guardian) = self.guardian {
+            snapshot["guardian"] = json!(match guardian {
+                CourtGuardian::Vormund => "vormund",
+                CourtGuardian::Betreuer => "betreuer",
+            });
+        }
         hex::encode(sha2::Sha256::digest(snapshot.to_string().as_bytes()))
     }
 
     fn from_party(party: &crate::services::contracting_party::ContractingParty) -> Self {
+        let guardian = party.court_guardian();
         Self {
-            kind: party.kind,
+            // A court-appointed guardian acts in the ward's name (owner
+            // decision 2026-10-25), also where the order still says the
+            // legal representatives contract.
+            kind: if guardian.is_some() {
+                PartyKind::PatientRepresented
+            } else {
+                party.kind
+            },
             representatives: party
                 .representatives
                 .iter()
-                .map(|representative| DocPartyBlock {
-                    name: representative.name.clone(),
-                    first_name: representative.first_name.clone(),
-                    last_name: representative.last_name.clone(),
-                    birth_date: representative.birth_date,
-                    street: representative.street.clone(),
-                    zip: representative.zip.clone(),
-                    city: representative.city.clone(),
-                    country: representative.country.clone(),
-                    email: representative.email.clone(),
-                    phone: representative.phone.clone(),
-                    ..DocPartyBlock::default()
-                })
+                .map(contracting_representative_block)
                 .collect(),
+            guardian,
         }
     }
 
@@ -20370,9 +20481,45 @@ impl ContractingDoc {
         self.kind == PartyKind::LegalRepresentatives && !self.representatives.is_empty()
     }
 
-    /// The minor patient contracts, represented by the guardians.
+    /// The patient contracts, represented by the custody parents, the
+    /// Vormund or the Betreuer.
     fn represented(&self) -> bool {
         self.kind == PartyKind::PatientRepresented && !self.representatives.is_empty()
+    }
+
+    /// The party side is a minor's: the parents contract, or the child
+    /// contracts represented by its parents or its Vormund (not an adult
+    /// represented by a Betreuer).
+    fn for_child(&self) -> bool {
+        self.parents_contract()
+            || (self.represented() && self.guardian != Some(CourtGuardian::Betreuer))
+    }
+
+    /// The representatives with what they are, in the accusative after
+    /// "durch" ("den Vormund Greta Muster", "die Sorgeberechtigten Erika
+    /// Muster und Max Muster"), or as a field value without the article
+    /// ("Vormund Greta Muster").
+    fn representation_label(&self, with_article: bool) -> String {
+        let several = self.representatives.len() > 1;
+        let (article, title) = match (self.guardian, several) {
+            (Some(CourtGuardian::Vormund), false) => ("den", "Vormund"),
+            (Some(CourtGuardian::Vormund), true) => ("die", "Vormünder"),
+            (Some(CourtGuardian::Betreuer), false) => ("die/den", "rechtliche(n) Betreuer/in"),
+            (Some(CourtGuardian::Betreuer), true) => ("die", "rechtlichen Betreuer"),
+            (None, true) => ("die", "Sorgeberechtigten"),
+            (None, false) => ("die/den", "Sorgeberechtigte(n)"),
+        };
+        let title = if with_article {
+            format!("{article} {title}")
+        } else {
+            match title {
+                "rechtliche(n) Betreuer/in" => "rechtliche/r Betreuer/in".to_string(),
+                "Sorgeberechtigte(n)" => "Sorgeberechtigte/r".to_string(),
+                "rechtlichen Betreuer" => "rechtliche Betreuer".to_string(),
+                other => other.to_string(),
+            }
+        };
+        format!("{title} {}", self.representative_names())
     }
 
     fn representative_names(&self) -> String {
@@ -20394,17 +20541,14 @@ impl ContractingDoc {
         }
     }
 
-    /// "gesetzlich vertreten durch …" under a minor party.
+    /// "gesetzlich vertreten durch …" under a represented party: the custody
+    /// parents, the Vormund of a minor, the Betreuer of an adult. No court
+    /// or deed number is recorded for a guardian, so none is printed.
     fn represented_by_line(&self) -> Option<String> {
         self.represented().then(|| {
             format!(
-                "gesetzlich vertreten durch {} {}",
-                if self.representatives.len() > 1 {
-                    "die Sorgeberechtigten"
-                } else {
-                    "die/den Sorgeberechtigte(n)"
-                },
-                self.representative_names()
+                "gesetzlich vertreten durch {}",
+                self.representation_label(true)
             )
         })
     }
@@ -20465,10 +20609,13 @@ impl ContractingDoc {
     /// representative on its own line (`guardian_1`, `guardian_2` frames).
     fn signers(&self, patient_name: &str) -> Vec<ContractSigner> {
         if self.parents_contract() || self.represented() {
-            let role = if self.parents_contract() {
-                "Auftraggeber"
-            } else {
-                "gesetzl. Vertreter/in"
+            // The caption keeps "Vertreter": the frame detection of a PDF
+            // reads a representative's rule by it.
+            let role = match (self.parents_contract(), self.guardian) {
+                (true, _) => "Auftraggeber",
+                (false, Some(CourtGuardian::Vormund)) => "Vormund (ges. Vertreter)",
+                (false, Some(CourtGuardian::Betreuer)) => "Betreuer/in (ges. Vertreter)",
+                (false, None) => "gesetzl. Vertreter/in",
             };
             return self
                 .representatives
@@ -20577,6 +20724,17 @@ async fn load_contracting_doc(
                     "A minor's contracting party must include the legal representatives",
                 ));
             }
+            // A Vormund never contracts in their own name (owner decision
+            // 2026-10-25): the child is the Auftraggeber, represented by the
+            // guardian. Parents keep contracting in their own name.
+            let guardian = (representation.answers.custody()
+                == super::lead_representatives::CUSTODY_GUARDIAN)
+                .then_some(CourtGuardian::Vormund);
+            let kind = if guardian.is_some() {
+                PartyKind::PatientRepresented
+            } else {
+                kind
+            };
             let paying_parent = if kind == PartyKind::LegalRepresentatives {
                 paying_parent_contact(&mut conn, lead_id)
                     .await
@@ -20604,6 +20762,26 @@ async fn load_contracting_doc(
                     ..DocPartyBlock::default()
                 })
                 .collect(),
+                guardian,
+            });
+        }
+        // An adult under rechtliche Betreuung: the Betreuer acts in the
+        // adult's name (owner decision 2026-10-25) unless staff named the
+        // patient alone as party.
+        let betreuer = lead_betreuer(representation);
+        if !betreuer.is_empty()
+            && crate::services::contracting_party::selected_kind(&mut conn, order_id, contract_id)
+                .await
+                .map_err(failed)?
+                != Some(PartyKind::Patient)
+        {
+            return Ok(ContractingDoc {
+                kind: PartyKind::PatientRepresented,
+                representatives: betreuer
+                    .iter()
+                    .map(contracting_representative_block)
+                    .collect(),
+                guardian: Some(CourtGuardian::Betreuer),
             });
         }
     }
@@ -20616,28 +20794,172 @@ async fn load_contracting_doc(
     )
     .await
     .map_err(failed)?;
-    // A converted lead's answer about the invoice recipient applies to the
-    // patient's documents as well: its parents became the patient's relations
-    // at conversion, each with the contact id of its entry.
-    if party.kind == PartyKind::LegalRepresentatives
-        && party.representatives.len() > 1
-        && let Some(lead_id) = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM leads WHERE converted_patient_id = $1 ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(patient_id)
-        .fetch_optional(&mut *conn)
+    narrow_patient_party_to_paying_parent(&mut conn, patient_id, &mut party)
         .await
-        .map_err(failed)?
+        .map_err(failed)?;
+    // An adult patient with a rechtliche Betreuer (a `guardian` relation)
+    // contracts represented by them when staff chose no party (owner
+    // decision 2026-10-25; until then the adult signed alone). An open
+    // inquiry's own answers decided that above.
+    if lead_id.is_none()
+        && party.kind == PartyKind::Patient
+        && !party.explicit
+        && !party.patient_is_minor
     {
-        let paying_parent = paying_parent_contact(&mut conn, lead_id)
-            .await
-            .map_err(failed)?;
-        party.representatives =
-            only_paying_parent(party.representatives, paying_parent, |representative| {
-                representative.source_contact_id
-            });
+        let betreuer =
+            crate::services::contracting_party::adult_betreuer(&mut conn, patient_id, on)
+                .await
+                .map_err(failed)?;
+        if !betreuer.is_empty() {
+            party.kind = PartyKind::PatientRepresented;
+            party.representatives = betreuer;
+        }
     }
     Ok(ContractingDoc::from_party(&party))
+}
+
+/// The rechtliche Betreuer of an adult inquiry: the legal guardian the
+/// cabinet asks for ("is it a court-appointed representative?" — yes), with
+/// a name. Empty for a minor and without that answer.
+fn lead_betreuer(
+    representation: &super::lead_representatives::Representation,
+) -> Vec<crate::services::contracting_party::Representative> {
+    if representation.minor {
+        return Vec::new();
+    }
+    let text = |value: &str| Some(value.trim().to_string()).filter(|value| !value.is_empty());
+    representation
+        .representatives
+        .iter()
+        .filter(|person| {
+            person.slot == Some(super::lead_representatives::SLOT_GUARDIAN)
+                && person.role == super::lead_representatives::ROLE_LEGAL_GUARDIAN
+                && !person.name().is_empty()
+        })
+        .map(
+            |person| crate::services::contracting_party::Representative {
+                relation_id: person.id,
+                source_contact_id: Some(person.id),
+                relation_type: "guardian".to_string(),
+                name: person.name(),
+                first_name: text(&person.first_name),
+                last_name: text(&person.last_name),
+                birth_date: person.date_of_birth,
+                email: person.email.clone(),
+                phone: person.phone.clone(),
+                street: person.extras.street.clone(),
+                zip: person.extras.zip.clone(),
+                city: person.extras.city.clone(),
+                country: person.extras.country.clone(),
+                ..Default::default()
+            },
+        )
+        .collect()
+}
+
+/// The rechtliche Betreuer who acts and signs for an adult in the adult's
+/// name (owner decision 2026-10-25), as the contract documents print them
+/// (`load_contracting_doc`): an open inquiry's legal guardian, else the
+/// patient's `guardian` relations. Empty for a minor, without a Betreuer,
+/// and when staff chose the party on the order or framework contract (the
+/// patient alone, or representatives the documents print themselves).
+pub(crate) async fn adult_betreuer(
+    conn: &mut sqlx::PgConnection,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+    on: NaiveDate,
+) -> Result<Vec<crate::services::contracting_party::Representative>, sqlx::Error> {
+    let lead_id = match (lead_id, order_id) {
+        (Some(lead_id), _) => Some(lead_id),
+        (None, Some(order_id)) => super::lead_payer::open_lead_of_order(conn, order_id).await?,
+        (None, None) => None,
+    };
+    let selected = crate::services::contracting_party::selected_kind(conn, order_id, None).await?;
+    if let Some(lead_id) = lead_id {
+        if selected == Some(PartyKind::Patient) {
+            return Ok(Vec::new());
+        }
+        return Ok(super::lead_representatives::load_on(conn, lead_id, on)
+            .await?
+            .map(|loaded| lead_betreuer(&loaded.representation))
+            .unwrap_or_default());
+    }
+    match (patient_id, selected) {
+        (Some(patient_id), None) => {
+            crate::services::contracting_party::adult_betreuer(conn, patient_id, on).await
+        }
+        // A party staff chose: its own representatives, if any, as resolved.
+        (
+            Some(patient_id),
+            Some(PartyKind::PatientRepresented | PartyKind::LegalRepresentatives),
+        ) => {
+            let party =
+                crate::services::contracting_party::resolve(conn, patient_id, order_id, None, on)
+                    .await?;
+            Ok(if party.court_guardian() == Some(CourtGuardian::Betreuer) {
+                party.representatives
+            } else {
+                Vec::new()
+            })
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// The rechtliche Betreuer who declares and signs an adult's own forms
+/// (Anlage 1 und 2) for the adult, as a represented party ([`adult_betreuer`]);
+/// `None` when the adult signs alone.
+async fn adult_betreuer_doc(
+    state: &AppState,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+) -> Result<Option<ContractingDoc>, axum::response::Response> {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, ?patient_id, ?lead_id, "load the adult's Betreuer");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the legal guardian",
+        )
+    };
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    let betreuer = adult_betreuer(
+        &mut conn,
+        patient_id,
+        lead_id,
+        order_id,
+        crate::app_time::today(),
+    )
+    .await
+    .map_err(failed)?;
+    Ok((!betreuer.is_empty()).then(|| ContractingDoc {
+        kind: PartyKind::PatientRepresented,
+        representatives: betreuer
+            .iter()
+            .map(contracting_representative_block)
+            .collect(),
+        guardian: Some(CourtGuardian::Betreuer),
+    }))
+}
+
+/// A representative of the party as the documents print them.
+fn contracting_representative_block(
+    representative: &crate::services::contracting_party::Representative,
+) -> DocPartyBlock {
+    DocPartyBlock {
+        name: representative.name.clone(),
+        first_name: representative.first_name.clone(),
+        last_name: representative.last_name.clone(),
+        birth_date: representative.birth_date,
+        street: representative.street.clone(),
+        zip: representative.zip.clone(),
+        city: representative.city.clone(),
+        country: representative.country.clone(),
+        email: representative.email.clone(),
+        phone: representative.phone.clone(),
+        ..DocPartyBlock::default()
+    }
 }
 
 /// The contact id of the parent a minor's cabinet named as invoice recipient
@@ -20690,6 +21012,39 @@ pub(crate) fn only_paying_parent<T>(
         .into_iter()
         .filter(|person| contact_id(person) == Some(parent))
         .collect()
+}
+
+/// A converted lead's answer about the invoice recipient applies to the
+/// patient as well: its parents became the patient's relations at
+/// conversion, each with the contact id of its entry
+/// (`patient_relations.source_contact_id`), so the party of the patient's
+/// contract documents — and the card's "Vertragspartei" (QA 2026-10-25, R-5)
+/// — is the paying parent alone, like the signed Rahmenvertrag. The invoice
+/// debtor chain (`invoices/payer.rs`) does not read this.
+pub(crate) async fn narrow_patient_party_to_paying_parent(
+    conn: &mut sqlx::PgConnection,
+    patient_id: Uuid,
+    party: &mut crate::services::contracting_party::ContractingParty,
+) -> Result<(), sqlx::Error> {
+    if party.kind != PartyKind::LegalRepresentatives || party.representatives.len() < 2 {
+        return Ok(());
+    }
+    let Some(lead_id) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM leads WHERE converted_patient_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(patient_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(());
+    };
+    let paying_parent = paying_parent_contact(conn, lead_id).await?;
+    party.representatives = only_paying_parent(
+        std::mem::take(&mut party.representatives),
+        paying_parent,
+        |representative| representative.source_contact_id,
+    );
+    Ok(())
 }
 
 /// Party block lines for the contract letterhead, using the gendered
@@ -21222,10 +21577,19 @@ fn cost_estimate_contracting_cells(
     context: &GeneratedSingleOrderContext,
 ) -> Vec<(&'static str, String)> {
     if !context.contracting.parents_contract() {
-        return vec![(
+        let mut cells = vec![(
             "Auftraggeber:",
             context.contracting.debtor_name(&context.party),
         )];
+        // The represented patient: by whom (a Vormund or Betreuer acts in
+        // the patient's name, owner decision 2026-10-25).
+        if context.contracting.represented() {
+            cells.push((
+                "Gesetzlich vertreten durch:",
+                context.contracting.representation_label(false),
+            ));
+        }
+        return cells;
     }
     let mut cells = Vec::new();
     for person in &context.contracting.representatives {
@@ -23130,6 +23494,77 @@ fn adult_legal_signature_line(
     );
 }
 
+/// The adult's form signed for the adult by the rechtliche Betreuer (owner
+/// decision 2026-10-25, DEV QA F-G1): `representative` is the represented
+/// party of [`ContractingDoc`], `None` when the adult signs alone.
+fn adult_legal_betreuer(representative: Option<&ContractingDoc>) -> Option<&ContractingDoc> {
+    representative.filter(|representative| representative.represented())
+}
+
+/// "gesetzlich vertreten durch die/den rechtliche(n) Betreuer/in …," under
+/// the identity block ("Ich, …"): the adult declares through the Betreuer.
+fn adult_legal_representation_line(
+    layout: &mut TreatmentPlanPdfLayout,
+    representative: Option<&ContractingDoc>,
+) {
+    if let Some(line) =
+        adult_legal_betreuer(representative).and_then(ContractingDoc::represented_by_line)
+    {
+        layout.text_block(
+            &format!("{line},"),
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            2.0,
+        );
+    }
+}
+
+/// The signature lines of an adult's form: the adult's own, or each
+/// Betreuer's («Unterschrift Betreuer/in», frames `guardian_1`, …).
+fn adult_legal_signature_lines(
+    layout: &mut TreatmentPlanPdfLayout,
+    party: &DocPartyBlock,
+    bindings: &DocumentBindingOverrides,
+    representative: Option<&ContractingDoc>,
+) {
+    let Some(representative) = adult_legal_betreuer(representative) else {
+        adult_legal_signature_line(layout, party, bindings);
+        return;
+    };
+    let place = bindings
+        .party_sign_place
+        .as_deref()
+        .or(bindings.sign_place.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("____________________");
+    let date = bindings
+        .party_sign_date
+        .or(bindings.sign_date)
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "______________".to_string());
+    for (index, person) in representative.representatives.iter().enumerate() {
+        // "Name\nRolle": the role under the line, where the frame detection
+        // of a PDF reads "ges. Vertreter".
+        legal_signature_line(
+            layout,
+            &format!("Ort, Datum: {place}, {date}"),
+            &format!("{}\nBetreuer/in (ges. Vertreter)", person.name.trim()),
+            &format!("guardian_{}", index + 1),
+        );
+    }
+}
+
+/// The number of signature lines [`adult_legal_signature_lines`] prints.
+fn adult_legal_signature_count(representative: Option<&ContractingDoc>) -> usize {
+    adult_legal_betreuer(representative)
+        .map(|representative| representative.representatives.len())
+        .unwrap_or(1)
+}
+
 /// Frame reserved above the "Unterschrift" underline of a single-party
 /// signature line, in millimetres.
 const LEGAL_SIGNATURE_FRAME_X_MM: f32 = 147.0;
@@ -23395,11 +23830,24 @@ fn agency_privacy_email(agency: &AgencyContractSettings) -> Option<&str> {
         })
 }
 
+#[cfg(test)]
 fn build_adult_confidentiality_release_pdf(
     party: &DocPartyBlock,
     agency: &AgencyContractSettings,
     bindings: &DocumentBindingOverrides,
     document_reference: &str,
+) -> Result<GeneratedPdf, &'static str> {
+    build_adult_confidentiality_release_pdf_for(party, agency, bindings, document_reference, None)
+}
+
+/// Anlage 2 of an adult; `representative`: the Betreuer who declares and
+/// signs it for the adult ([`adult_legal_betreuer`]).
+fn build_adult_confidentiality_release_pdf_for(
+    party: &DocPartyBlock,
+    agency: &AgencyContractSettings,
+    bindings: &DocumentBindingOverrides,
+    document_reference: &str,
+    representative: Option<&ContractingDoc>,
 ) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
@@ -23407,6 +23855,7 @@ fn build_adult_confidentiality_release_pdf(
 
     adult_legal_document_header(&mut layout, "Anlage 2", "Schweigepflichtentbindung");
     adult_legal_identity_block(&mut layout, party, false);
+    adult_legal_representation_line(&mut layout, representative);
     fc_body(
         &mut layout,
         "bin mir bewusst, dass ärztliche und medizinische Dokumentation, Arztberichte, Rezepte, Kostenvoranschläge, Rechnungen und Quittungen Informationen im Sinne von § 203 StGB enthalten können, die insbesondere Rückschlüsse auf meine Diagnosen, medizinischen Untersuchungen, medizinischen Zustände sowie geplante, abgeschlossene oder noch andauernde Behandlungen zulassen oder solche Informationen enthalten können.",
@@ -23427,7 +23876,7 @@ fn build_adult_confidentiality_release_pdf(
         1.0,
         1.0,
     );
-    adult_legal_signature_line(&mut layout, party, bindings);
+    adult_legal_signature_lines(&mut layout, party, bindings, representative);
 
     Ok(finalize_generated_pdf(document, layout))
 }
@@ -24458,6 +24907,12 @@ fn build_gwg_identification_pdf(
                 .map(|_| "Befragung des Vertragspartners (Erklärung zum Zahler in der Anfrage)")
         }),
     );
+    if let Some(payer) = sheet.third_party_payer.as_deref() {
+        aml_labeled_value(&mut layout, "Zahlung durch Dritte", Some(payer));
+    }
+    if let Some(funds) = sheet.funds_source.as_deref() {
+        aml_labeled_value(&mut layout, "Herkunft der Mittel", Some(funds));
+    }
 
     admin_heading(&mut layout, "4. Hintergrund der Geschäftsbeziehung");
     aml_checkbox_line(
@@ -26255,6 +26710,12 @@ struct LeadDisclosureRecipient {
 /// never the cost estimate — none of it is read.
 #[derive(Clone, Debug, Default)]
 struct LeadSelfDisclosure {
+    /// The place on the signature line, as on the lead's consent forms
+    /// (Anlage 1, Schweigepflichtentbindung): the signer's place the wizard
+    /// sends (`party_sign_place`, prefilled with the lead's city), else a
+    /// blank to write by hand (DEV QA 2026-10-25, F-G7: the form printed the
+    /// agency's place while the consents printed the patient's city).
+    sign_place: Option<String>,
     /// When the lead sent the request through the cabinet; `None` when staff
     /// recorded the data themselves ("Ich fülle aus", no cabinet submission,
     /// owner decision 2026-10-23): the form says "Angaben aufgenommen durch
@@ -26695,6 +27156,8 @@ async fn load_lead_self_disclosure(
     let funds = super::lead_funds::lead_funds(declaration.as_ref(), None);
     let patient_about_payer = funds.payer_stated_by_patient.as_ref();
     Ok(LeadSelfDisclosure {
+        // Set by the generation from the signer's place binding.
+        sign_place: None,
         submitted_at,
         consent_choice,
         follow_up_sent_at,
@@ -27447,6 +27910,12 @@ fn build_lead_self_disclosure_pdf(
         &mut section,
         data.consent_choice.as_ref(),
         minor,
+        // No stated custody counts as both parents, as for the signers.
+        Some(
+            data.custody
+                .as_deref()
+                .unwrap_or(super::lead_representatives::CUSTODY_JOINT),
+        ),
     );
 
     // The declaration of § 11 Abs. 6 GwG and the signature of the
@@ -27457,7 +27926,20 @@ fn build_lead_self_disclosure_pdf(
         .iter()
         .map(|person| person.name.clone())
         .collect::<Vec<_>>();
-    let signers: Vec<String> = if minor {
+    // An adult under rechtliche Betreuung: the Betreuer signs for the adult
+    // (owner decision 2026-10-25, DEV QA F-G1), the adult stays the person
+    // the form is about.
+    let betreuer = (!minor)
+        .then(|| {
+            data.acting_persons
+                .iter()
+                .find(|person| person.role == "Rechtliche/r Betreuer/in")
+                .map(|person| person.name.clone())
+        })
+        .flatten();
+    let signers: Vec<String> = if let Some(betreuer) = betreuer.clone() {
+        vec![betreuer]
+    } else if minor {
         if representatives.is_empty() {
             let count = if data
                 .custody
@@ -27491,7 +27973,9 @@ fn build_lead_self_disclosure_pdf(
                 .unwrap_or_else(|| "____________________".to_string()),
         ]
     };
-    let declaration = if !minor {
+    let declaration = if betreuer.is_some() {
+        "Ich versichere als rechtliche/r Betreuer/in der oben bezeichneten Person, dass die Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit."
+    } else if !minor {
         "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit."
     } else if signers.len() > 1 {
         "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind. Änderungen teilen wir der GMED unverzüglich mit."
@@ -27511,17 +27995,20 @@ fn build_lead_self_disclosure_pdf(
         .iter()
         .enumerate()
         .map(|(index, name)| AdminSignatureParty {
-            // The agency's place ("Berlin, den …") like the other forms;
-            // the day is written by hand (QA 2026-10-25).
-            place: Some(agency.sign_place.as_str()).filter(|place| !place.trim().is_empty()),
+            // The signer's place like the consent forms (the lead's city
+            // the wizard sends), else a blank; the day is written by hand
+            // (DEV QA 2026-10-25, F-G7).
+            place: data.sign_place.as_deref(),
             date: None,
             name: name.as_str(),
-            role: if minor {
+            role: if betreuer.is_some() {
+                "Betreuer/in (ges. Vertreter)"
+            } else if minor {
                 "gesetzl. Vertreter/in"
             } else {
                 "Patient/in"
             },
-            anchor: Some(if minor {
+            anchor: Some(if minor || betreuer.is_some() {
                 anchors[index].as_str()
             } else {
                 "client"
@@ -27655,6 +28142,7 @@ fn append_third_party_disclosure_pdf(
     section: &mut PayerSectionCounter,
     choice: Option<&crate::consent_choices::OwnConsentChoice>,
     minor: bool,
+    custody: Option<&str>,
 ) {
     // No answer in the cabinet counts as "Nein, nur ich selbst." (owner
     // decision 2026-10-22). An older named-recipient choice without a
@@ -27731,7 +28219,14 @@ fn append_third_party_disclosure_pdf(
             &crate::consent_choices::disclosure_consent_text_for(
                 "de",
                 &disclosure.company_name,
-                crate::consent_choices::DisclosureSubject::of(&disclosure.access_kind, minor),
+                // The custody decides the wording: "unseres Kindes" for both
+                // parents, "des von mir vertretenen Kindes" for a Vormund,
+                // "meines Kindes" for a sole-custody parent.
+                crate::consent_choices::DisclosureSubject::for_custody(
+                    &disclosure.access_kind,
+                    minor,
+                    custody,
+                ),
             ),
         );
     }
@@ -27822,12 +28317,33 @@ fn append_named_recipients_consent_pdf(
     );
 }
 
+#[cfg(test)]
 fn build_adult_privacy_consents_pdf(
     party: &DocPartyBlock,
     agency: &AgencyContractSettings,
     bindings: &DocumentBindingOverrides,
     document_reference: &str,
     own_choice: Option<&crate::consent_choices::OwnConsentChoice>,
+) -> Result<GeneratedPdf, &'static str> {
+    build_adult_privacy_consents_pdf_for(
+        party,
+        agency,
+        bindings,
+        document_reference,
+        own_choice,
+        None,
+    )
+}
+
+/// Anlage 1 of an adult; `representative`: the Betreuer who declares and
+/// signs it for the adult ([`adult_legal_betreuer`]).
+fn build_adult_privacy_consents_pdf_for(
+    party: &DocPartyBlock,
+    agency: &AgencyContractSettings,
+    bindings: &DocumentBindingOverrides,
+    document_reference: &str,
+    own_choice: Option<&crate::consent_choices::OwnConsentChoice>,
+    representative: Option<&ContractingDoc>,
 ) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
@@ -27845,6 +28361,7 @@ fn build_adult_privacy_consents_pdf(
         "Einverständniserklärung zur Datenübermittlung",
     );
     adult_legal_identity_block(&mut layout, party, true);
+    adult_legal_representation_line(&mut layout, representative);
     // Choice provenance stays in generated_bindings and the audit history,
     // rather than adding system instructions to the signed consent text.
     fc_body(
@@ -27951,9 +28468,13 @@ fn build_adult_privacy_consents_pdf(
     );
     let closing = "Die Aufklärung gemäß EU-Datenschutz-Grundverordnung (DS-GVO) ist erfolgt. Ich wurde darüber aufgeklärt, dass ich ein Recht auf Auskunft, Berichtigung, Löschung oder Einschränkung der Verarbeitung meiner personenbezogenen Daten habe und diese Rechte jederzeit geltend machen kann.";
     let closing_height = admin_block_height_mm(&layout, closing, 0.0, 2.0);
-    keep_closing_with_signature_rows(&mut layout, closing_height, 1);
+    keep_closing_with_signature_rows(
+        &mut layout,
+        closing_height,
+        adult_legal_signature_count(representative),
+    );
     fc_body(&mut layout, closing);
-    adult_legal_signature_line(&mut layout, party, bindings);
+    adult_legal_signature_lines(&mut layout, party, bindings, representative);
 
     Ok(finalize_generated_pdf(document, layout))
 }
@@ -39339,7 +39860,10 @@ mod tests {
     #[test]
     fn the_lead_self_disclosure_prints_the_answers_and_one_patient_signature() {
         let generated = super::build_lead_self_disclosure_pdf(
-            &anna_lead_disclosure(),
+            &super::LeadSelfDisclosure {
+                sign_place: Some("Berlin".to_string()),
+                ..anna_lead_disclosure()
+            },
             &legal_test_agency(),
             Some("A-20261007-0001"),
             "DOC-LEAD-SD-0001",
@@ -39407,11 +39931,13 @@ mod tests {
             "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit.",
             "Anna Maria Muster",
             "Unterschrift Patient/in",
-            // The agency's place is prefilled, the day written by hand.
-            "Köln, den ____________",
+            // The signer's place like the consent forms (the lead's city the
+            // wizard sends), the day written by hand (F-G7).
+            "Berlin, den ____________",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }
+        assert!(!text.contains("Köln, den"), "{text}");
         assert!(!text.contains("gesetzl. Vertreter/in"), "{text}");
         assert!(!text.contains("wird von GMED erfasst"), "{text}");
     }
@@ -39588,6 +40114,96 @@ mod tests {
         )
         .unwrap();
         assert_eq!(recorded_roles(&generated), ["guardian_1", "guardian_2"]);
+    }
+
+    /// Owner decision 2026-10-25 (DEV QA F-G1, document review): the consent
+    /// of "Auskunft an Dritte" follows the custody — a Vormund declares for
+    /// "des von mir vertretenen Kindes", both parents for "unseres Kindes", a
+    /// sole-custody parent for "meines Kindes"; an adult's Betreuer signs the
+    /// form for the adult.
+    #[test]
+    fn the_patient_form_words_the_consent_by_custody_and_lets_the_betreuer_sign() {
+        let mut choice: crate::consent_choices::OwnConsentChoice = serde_json::from_value(json!({
+            "id": Uuid::nil(), "choices": { "agency_processing": true },
+            "chosen_at": "2026-10-16T12:00:00Z", "source": "lead_portal",
+            "access_kind": "guardian",
+            "recipients": [
+                { "name": "Max Named", "relation": "friend", "contact": "max@example.test", "scope": "Nur Termine" }
+            ]
+        }))
+        .unwrap();
+        choice.disclosure = Some(disclosure_test_receipt(&choice));
+        let minor = |custody: &str, role: &'static str| super::LeadSelfDisclosure {
+            first_name: "Mia".to_string(),
+            middle_name: None,
+            last_name: "Muster".to_string(),
+            date_of_birth: NaiveDate::from_ymd_opt(2015, 6, 1),
+            minor: true,
+            custody: Some(custody.to_string()),
+            has_representative: None,
+            under_guardianship: None,
+            acting_persons: vec![super::LeadDisclosurePerson {
+                role,
+                name: "Greta Vormund".to_string(),
+            }],
+            consent_choice: Some(choice.clone()),
+            ..anna_lead_disclosure()
+        };
+        let text_of = |data: &super::LeadSelfDisclosure| {
+            normalized_pdf_text(
+                &super::build_lead_self_disclosure_pdf(
+                    data,
+                    &legal_test_agency(),
+                    None,
+                    "DOC-LEAD-SD-0020",
+                )
+                .unwrap(),
+            )
+        };
+        let ward = text_of(&minor("guardian", "Vormund"));
+        assert!(
+            ward.contains("Daten des von mir vertretenen Kindes"),
+            "{ward}"
+        );
+        assert!(!ward.contains("meines Kindes"), "{ward}");
+        let sole = text_of(&minor("sole_parent", "Elternteil"));
+        assert!(sole.contains("Daten meines Kindes"), "{sole}");
+        let joint = text_of(&minor("joint", "Elternteil"));
+        assert!(joint.contains("Daten unseres Kindes"), "{joint}");
+        assert!(!joint.contains("meines Kindes"), "{joint}");
+
+        // An adult under rechtliche Betreuung: the Betreuer signs.
+        let betreut = super::LeadSelfDisclosure {
+            has_representative: Some(true),
+            under_guardianship: Some(true),
+            acting_persons: vec![super::LeadDisclosurePerson {
+                role: "Rechtliche/r Betreuer/in",
+                name: "Ute Betreuerin".to_string(),
+            }],
+            consent_choice: None,
+            ..anna_lead_disclosure()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &betreut,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0021",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["guardian_1"]);
+        assert_signature_frames_detected(&generated);
+        let text = normalized_pdf_text(&generated);
+        assert!(
+            text.contains(
+                "Ich versichere als rechtliche/r Betreuer/in der oben bezeichneten Person"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("Unterschrift Betreuer/in (ges. Vertreter)"),
+            "{text}"
+        );
+        assert!(!text.contains("Unterschrift Patient/in"), "{text}");
     }
 
     #[test]
@@ -39857,6 +40473,91 @@ mod tests {
         assert!(text.contains("Zahlung aus eigenen Mitteln"));
         assert!(text.contains("Angaben zum Zahlungsweg (Angaben des Kostenübernehmers)"));
         assert!(!text.contains("(Patientenformular"));
+    }
+
+    /// QA 2026-10-25, R-9: the patient's sheet names the third party who pays
+    /// and where the money comes from — the source, the words only for
+    /// "other".
+    #[test]
+    fn the_patients_sheet_names_the_third_party_payer_and_the_funds() {
+        let payer = crate::routes::lead_payer::Declaration {
+            payer_kind: crate::routes::lead_payer::PAYER_KIND_THIRD_PARTY.to_string(),
+            payer_type: Some("person".to_string()),
+            first_name: Some("Viktor".to_string()),
+            last_name: Some("Zahler".to_string()),
+            relationship: Some("Onkel".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::gwg_third_party_payer_line(&payer).as_deref(),
+            Some("Viktor Zahler (Onkel)")
+        );
+        let funds = |sources: &[&str], entered_by| crate::routes::lead_funds::PersonFunds {
+            person: crate::routes::lead_funds::PERSON_PAYER,
+            sources: sources.iter().map(|source| source.to_string()).collect(),
+            description: Some("Verkauf einer Wohnung".to_string()),
+            entered_by: Some(entered_by),
+            proofs: Vec::new(),
+        };
+        let savings = super::gwg_funds_source_line(&funds(
+            &["savings"],
+            crate::routes::lead_funds::ENTERED_BY_PAYER,
+        ))
+        .unwrap();
+        assert!(!savings.contains("Wohnung"), "{savings}");
+        let other = super::gwg_funds_source_line(&funds(
+            &["other"],
+            crate::routes::lead_funds::ENTERED_BY_STAFF,
+        ))
+        .unwrap();
+        assert!(
+            other.ends_with(": Verkauf einer Wohnung (Angabe von GMED)"),
+            "{other}"
+        );
+        assert_eq!(
+            super::gwg_funds_source_line(&funds(&[], crate::routes::lead_funds::ENTERED_BY_PAYER)),
+            None
+        );
+
+        let day = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        let sheet = super::GwgIdentificationSheet {
+            role: "Patient/in",
+            first_name: "Hans".to_string(),
+            last_name: "Muster".to_string(),
+            acts_on_own_account: Some(true),
+            third_party_payer: super::gwg_third_party_payer_line(&payer),
+            funds_source: Some(savings.clone()),
+            reviewer_name: "Bearbeiter Beispiel".to_string(),
+            review_date: day,
+            ..Default::default()
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &sheet,
+            &legal_test_agency(),
+            None,
+            "GWG-20261025-UNITTEST0009",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261025-UNITTEST0009");
+        assert!(text.contains("Zahlung durch Dritte"), "{text}");
+        assert!(text.contains("Viktor Zahler (Onkel)"), "{text}");
+        assert!(text.contains("Herkunft der Mittel"), "{text}");
+        assert!(text.contains(&savings), "{text}");
+        // Without a third party and funds the lines are not printed.
+        let plain = super::GwgIdentificationSheet {
+            third_party_payer: None,
+            funds_source: None,
+            ..sheet
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &plain,
+            &legal_test_agency(),
+            None,
+            "GWG-20261025-UNITTEST0010",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261025-UNITTEST0010");
+        assert!(!text.contains("Zahlung durch Dritte"), "{text}");
     }
 
     fn gwg_test_representative(
@@ -41122,7 +41823,152 @@ mod tests {
         super::ContractingDoc {
             kind: super::PartyKind::LegalRepresentatives,
             representatives: vec![parent("Erika"), parent("Max")],
+            guardian: None,
         }
+    }
+
+    /// A minor represented by a Vormund, or an adult by a Betreuer.
+    fn ward_of(guardian: super::CourtGuardian, name: &str) -> super::ContractingDoc {
+        super::ContractingDoc {
+            kind: super::PartyKind::PatientRepresented,
+            representatives: vec![DocPartyBlock {
+                name: name.to_string(),
+                ..DocPartyBlock::default()
+            }],
+            guardian: Some(guardian),
+        }
+    }
+
+    /// Owner decision 2026-10-25: a court-appointed guardian (Vormund,
+    /// Betreuer) never contracts in their own name — the ward is the
+    /// Auftraggeber, "vertreten durch" the guardian, who signs once.
+    #[test]
+    fn a_court_appointed_guardian_acts_in_the_wards_name() {
+        let child = DocPartyBlock {
+            name: "Mia Muster".to_string(),
+            birth_date: NaiveDate::from_ymd_opt(2015, 3, 4),
+            ..DocPartyBlock::default()
+        };
+        let ward = ward_of(super::CourtGuardian::Vormund, "Greta Vormund");
+        assert!(!ward.parents_contract());
+        assert!(ward.for_child());
+        assert_eq!(ward.debtor_name(&child), "Mia Muster");
+        assert!(ward.beneficiary_lines(&child).is_empty());
+        assert_eq!(
+            ward.represented_by_line().as_deref(),
+            Some("gesetzlich vertreten durch den Vormund Greta Vormund")
+        );
+        assert_eq!(ward.role_line(), "– nachfolgend „Auftraggeber“ genannt –");
+        let signers = ward.signers("Mia Muster");
+        assert_eq!(signers.len(), 1);
+        assert_eq!(signers[0].name, "Greta Vormund");
+        assert_eq!(signers[0].anchor, "guardian_1");
+        assert_eq!(signers[0].role, "Vormund (ges. Vertreter)");
+        let groups = ward.party_line_groups(&child);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0][0], "Mia Muster");
+        assert_eq!(
+            groups[0].last().unwrap(),
+            "gesetzlich vertreten durch den Vormund Greta Vormund"
+        );
+
+        let adult = ward_of(super::CourtGuardian::Betreuer, "Ute Betreuerin");
+        assert!(!adult.for_child());
+        assert_eq!(
+            adult.represented_by_line().as_deref(),
+            Some("gesetzlich vertreten durch die/den rechtliche(n) Betreuer/in Ute Betreuerin")
+        );
+        assert_eq!(
+            adult.signers("Karl Betreuter")[0].role,
+            "Betreuer/in (ges. Vertreter)"
+        );
+
+        // From the resolved party: a Vormund the order names as the legal
+        // representatives still acts in the child's name; parents stay the
+        // party in their own name (§ 328 BGB).
+        let party = |relation_type: &str, minor: bool| {
+            crate::services::contracting_party::ContractingParty {
+                kind: super::PartyKind::LegalRepresentatives,
+                explicit: false,
+                patient_id: Uuid::nil(),
+                patient_name: "Mia Muster".to_string(),
+                patient_is_minor: minor,
+                representatives: vec![crate::services::contracting_party::Representative {
+                    relation_type: relation_type.to_string(),
+                    name: "Greta Vormund".to_string(),
+                    ..Default::default()
+                }],
+            }
+        };
+        let doc = super::ContractingDoc::from_party(&party("guardian", true));
+        assert_eq!(doc.kind, super::PartyKind::PatientRepresented);
+        assert_eq!(doc.guardian, Some(super::CourtGuardian::Vormund));
+        let doc = super::ContractingDoc::from_party(&party("guardian", false));
+        assert_eq!(doc.guardian, Some(super::CourtGuardian::Betreuer));
+        let doc = super::ContractingDoc::from_party(&party("mother", true));
+        assert_eq!(doc.kind, super::PartyKind::LegalRepresentatives);
+        assert_eq!(doc.guardian, None);
+        // Only a guardian changes the fingerprint of the party snapshot.
+        assert_ne!(
+            ward.fingerprint(),
+            super::ContractingDoc {
+                guardian: None,
+                ..ward.clone()
+            }
+            .fingerprint()
+        );
+    }
+
+    /// Anlage 1 und 2 of an adult under rechtliche Betreuung name the adult
+    /// "vertreten durch" the Betreuer, who signs (DEV QA F-G1).
+    #[test]
+    fn an_adults_consents_are_signed_by_the_betreuer() {
+        let party = legal_test_party("Germany");
+        let agency = legal_test_agency();
+        let bindings = DocumentBindingOverrides::default();
+        let betreuer = ward_of(super::CourtGuardian::Betreuer, "Ute Betreuerin");
+        let consent = super::build_adult_privacy_consents_pdf_for(
+            &party,
+            &agency,
+            &bindings,
+            "EW-20261025-UNITTEST0001",
+            None,
+            Some(&betreuer),
+        )
+        .unwrap();
+        let release = super::build_adult_confidentiality_release_pdf_for(
+            &party,
+            &agency,
+            &bindings,
+            "SE-20261025-UNITTEST0001",
+            Some(&betreuer),
+        )
+        .unwrap();
+        for generated in [&consent, &release] {
+            assert_eq!(recorded_roles(generated), ["guardian_1"]);
+            assert_signature_frames_detected(generated);
+            let text = normalized_pdf_text(generated);
+            assert!(
+                text.contains(
+                    "gesetzlich vertreten durch die/den rechtliche(n) Betreuer/in Ute Betreuerin,"
+                ),
+                "{text}"
+            );
+            assert!(text.contains("Ute Betreuerin"), "{text}");
+            assert!(text.contains("Betreuer/in (ges. Vertreter)"), "{text}");
+        }
+        // Without a Betreuer the adult signs alone, as before.
+        let own = super::build_adult_privacy_consents_pdf_for(
+            &party,
+            &agency,
+            &bindings,
+            "EW-20261025-UNITTEST0002",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&own), ["client"]);
+        assert!(!normalized_pdf_text(&own).contains("vertreten durch"));
     }
 
     #[test]
@@ -41182,7 +42028,7 @@ mod tests {
     fn framework_contract_with_parents_as_party_prints_both_and_their_frames() {
         let party = legal_test_party("Germany");
         let agency = legal_test_agency();
-        let context = GeneratedFrameworkContractContext {
+        let mut context = GeneratedFrameworkContractContext {
             patient_pid: "PT-LEGAL-2".to_string(),
             patient_name: "Mia Muster".to_string(),
             patient_title: None,
@@ -41255,6 +42101,37 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("Anlage 3: Informationsblatt zum Datenschutz"));
+
+        // A Vormund (owner decision 2026-10-25): the child is the
+        // Auftraggeber, "vertreten durch" the guardian, never a contract in
+        // the guardian's own name; one signature frame, the minor's annexes.
+        context.contracting = ward_of(super::CourtGuardian::Vormund, "Greta Vormund");
+        let generated = build_framework_contract_pdf(&context, "DOC-FRAMEWORK-WARD").unwrap();
+        let roles = generated
+            .signature_anchors
+            .iter()
+            .map(|anchor| anchor.role.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(roles, vec!["guardian_1", "agency"]);
+        assert_signature_frames_detected(&generated);
+        let text = normalized_pdf_pages(&generated.bytes).join(" ");
+        assert!(text.contains("Mia Muster"), "{text}");
+        assert!(
+            text.contains("gesetzlich vertreten durch den Vormund Greta Vormund"),
+            "{text}"
+        );
+        assert!(!text.contains("im eigenen Namen"), "{text}");
+        assert!(!text.contains("§ 328 BGB"), "{text}");
+        assert!(
+            text.contains("Unterschrift Vormund (ges. Vertreter)"),
+            "{text}"
+        );
+        assert!(text.contains("Anlage 1 und 2:"), "{text}");
+        // Parents keep contracting in their own name.
+        context.contracting = parents_as_party();
+        let generated = build_framework_contract_pdf(&context, "DOC-FRAMEWORK-PARENTS-2").unwrap();
+        let text = normalized_pdf_pages(&generated.bytes).join(" ");
+        assert!(text.contains("im eigenen Namen zugunsten"), "{text}");
     }
 
     #[test]
@@ -41332,6 +42209,19 @@ mod tests {
         assert_eq!(
             super::cost_estimate_contracting_cells(&context),
             vec![("Auftraggeber:", "Mia Muster".to_string())]
+        );
+        // A child under Vormundschaft is the Auftraggeber, represented by
+        // the guardian (owner decision 2026-10-25).
+        context.contracting = ward_of(super::CourtGuardian::Vormund, "Greta Vormund");
+        assert_eq!(
+            super::cost_estimate_contracting_cells(&context),
+            vec![
+                ("Auftraggeber:", "Mia Muster".to_string()),
+                (
+                    "Gesetzlich vertreten durch:",
+                    "Vormund Greta Vormund".to_string()
+                ),
+            ]
         );
     }
 

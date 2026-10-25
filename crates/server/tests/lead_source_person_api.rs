@@ -45,6 +45,25 @@ async fn post(app: &Router, path: &str, token: &str, body: Value) -> (StatusCode
     )
 }
 
+async fn get(app: &Router, path: &str, token: &str) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method("GET")
+        .uri(path)
+        .header("Authorization", token)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) })),
+    )
+}
+
 fn years_before(today: NaiveDate, years: u32) -> NaiveDate {
     today.checked_sub_months(Months::new(years * 12)).unwrap()
 }
@@ -375,6 +394,36 @@ async fn relation_of_a_converted_minor_prefills_the_parents_own_request() {
         Value::Null
     );
 
+    // The lead remembers its source and reads the PEP hint again from it.
+    let (status, lead) = get(
+        &suite.app,
+        &format!("/api/v1/leads/{lead_id}"),
+        &bearer(ceo, "ceo"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert_eq!(lead["source_relation_id"], json!(relation_id), "{lead}");
+    assert_eq!(lead["source_contact_lead_id"], Value::Null, "{lead}");
+    assert_eq!(lead["source_contact_id"], Value::Null, "{lead}");
+    assert_eq!(lead["source_pep_hint"], json!("yes"), "{lead}");
+    // The relation row on the child's card carries the date of birth and
+    // the citizenships.
+    let (status, relations) = get(
+        &suite.app,
+        &format!("/api/v1/patients/{child}/relations"),
+        &bearer(ceo, "ceo"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{relations}");
+    let row = relations
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == json!(relation_id))
+        .expect("relation row");
+    assert_eq!(row["birth_date"], json!("1985-03-04"), "{row}");
+    assert_eq!(row["citizenships"], json!(["UA"]), "{row}");
+
     let audit = audit_context(pool, "lead_prefilled_from_relation", lead_id)
         .await
         .expect("audit row");
@@ -595,6 +644,35 @@ async fn a_trusted_contact_of_an_open_lead_prefills_the_request() {
     let filled = fields(&body);
     assert!(filled.iter().any(|f| f == "phone"), "{filled:?}");
     assert!(filled.iter().any(|f| f == "street_address"), "{filled:?}");
+    let lead_path = format!("/api/v1/leads/{lead_id}");
+    let (status, lead) = get(&suite.app, &lead_path, &bearer(ceo, "ceo")).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert_eq!(lead["source_relation_id"], Value::Null, "{lead}");
+    assert_eq!(lead["source_contact_lead_id"], json!(child_lead), "{lead}");
+    assert_eq!(lead["source_contact_id"], json!(contact_id), "{lead}");
+    assert_eq!(lead["source_pep_hint"], Value::Null, "{lead}");
+    // The hint is read again: the child's answer given later shows up.
+    sqlx::query(
+        r#"UPDATE lead_representatives
+           SET country_questions = '{"pep_self": false}'::jsonb
+           WHERE lead_id = $1 AND contact_id = $2"#,
+    )
+    .bind(child_lead)
+    .bind(contact_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (_, lead) = get(&suite.app, &lead_path, &bearer(ceo, "ceo")).await;
+    assert_eq!(lead["source_pep_hint"], json!("no"), "{lead}");
+    // The child's request itself has no source.
+    let (_, child) = get(
+        &suite.app,
+        &format!("/api/v1/leads/{child_lead}"),
+        &bearer(ceo, "ceo"),
+    )
+    .await;
+    assert_eq!(child["source_pep_hint"], Value::Null, "{child}");
+    assert_eq!(child["source_relation_id"], Value::Null, "{child}");
 
     // The same contact again: a lead cannot be pre-filled from a contact
     // that is not on the lead.
@@ -730,14 +808,16 @@ async fn the_conversion_links_the_relation_to_the_new_patient() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let lead_id: Uuid = body["id"].as_str().unwrap().parse().unwrap();
 
-    // The conversion step that links the login and the relations; the new
-    // patient record carries no e-mail, so no match by e-mail can do it.
+    // The conversion step that links the login and the relations. The new
+    // patient record carries the e-mail the child's relation names, so the
+    // match by e-mail could link it too: the link by the source runs first
+    // and is audited as such (QA 2026-10-25).
     let mother = patient(
         pool,
         ceo,
         "Anna",
         NaiveDate::from_ymd_opt(1985, 3, 4).unwrap(),
-        None,
+        Some(&mother_email),
         None,
     )
     .await;
@@ -782,8 +862,34 @@ async fn the_conversion_links_the_relation_to_the_new_patient() {
         .expect("audit row on the child");
     assert_eq!(audit["relation_id"], json!(relation_id));
     assert_eq!(audit["related_patient_id"], json!(mother));
+    assert!(
+        audit_context(pool, "link_parent_relation_by_email", child)
+            .await
+            .is_none(),
+        "the e-mail matcher finds the relation linked already"
+    );
 
-    // A second run finds nothing to do.
+    // The mother's own record names the child (the reverse relation).
+    let reverse: Vec<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT id, relation_type, related_name FROM patient_relations
+         WHERE patient_id = $1 AND related_patient_id = $2",
+    )
+    .bind(mother)
+    .bind(child)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(reverse.len(), 1, "{reverse:?}");
+    assert_eq!(reverse[0].1, "child");
+    assert_eq!(reverse[0].2, "Mia Muster");
+    let audit = audit_context(pool, "add_reverse_relation_from_source_person", mother)
+        .await
+        .expect("reverse relation audited on the parent");
+    assert_eq!(audit["relation_id"], json!(reverse[0].0));
+    assert_eq!(audit["reverse_of_relation_id"], json!(relation_id));
+    assert_eq!(audit["related_patient_id"], json!(child));
+
+    // A second run finds nothing to do and adds no second reverse row.
     let mut tx = pool.begin().await.unwrap();
     let again = gmed_server::routes::lead_portal_account::link_source_person_in_tx(
         &mut tx, lead_id, mother, ceo,
@@ -792,6 +898,15 @@ async fn the_conversion_links_the_relation_to_the_new_patient() {
     .unwrap();
     tx.commit().await.unwrap();
     assert!(!again);
+    let reverse_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patient_relations WHERE patient_id = $1 AND related_patient_id = $2",
+    )
+    .bind(mother)
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(reverse_rows, 1);
 }
 
 #[tokio::test]

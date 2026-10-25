@@ -39,3 +39,15 @@ export function leadDisplayName(lead: NamedLead, tx: Tx): string {
     .filter(Boolean)
     .join(" ");
 }
+
+/**
+ * The value the «Лиды» column sorts by (QA 2026-10-25, N-4): last name, then
+ * first name, so a locale compare orders the list like a register.
+ */
+export function leadSortName(lead: NamedLead, tx: Tx): string {
+  if (isAnonymizedLead(lead)) return deletedLeadLabel(tx);
+  return [lead.last_name, lead.first_name]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" ");
+}

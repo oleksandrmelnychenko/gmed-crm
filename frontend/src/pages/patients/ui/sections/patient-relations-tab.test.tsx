@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { Tabs } from "@/components/ui/tabs";
 
-import { PatientRelationsTab } from "./patient-relations-tab";
+import { PatientRelationsTab, localizeRelationNotes } from "./patient-relations-tab";
 
 const noop = () => undefined;
 
@@ -81,5 +81,16 @@ describe("PatientRelationsTab", () => {
     const html = renderEmpty(false);
     expect(html).toContain("patients_not_recorded_yet");
     expect(html).not.toContain("patients_new_relation");
+  });
+});
+
+describe("localizeRelationNotes", () => {
+  it("translates the conversion labels and prints dates as DD.MM.YYYY (QA 2026-10-25, M F-1)", () => {
+    const notes = ["Email: m@example.test", "Geburtsdatum: 1985-05-02", "Adresse: Hauptstr. 1"].join(String.fromCharCode(10));
+    expect(localizeRelationNotes(notes, "ru")).toBe(
+      ["Электронная почта: m@example.test", "Дата рождения: 02.05.1985", "Адрес: Hauptstr. 1"].join(String.fromCharCode(10)),
+    );
+    expect(localizeRelationNotes(notes, "de")).toContain("Geburtsdatum: 02.05.1985");
+    expect(localizeRelationNotes(null, "ru")).toBe("");
   });
 });

@@ -15,7 +15,14 @@ import {
   type LeadRequest,
   type LeadRequestDocument,
 } from "./lead-request-api";
-import { LEAD_UPLOAD_ACCEPT, consentGiven, formatFileSize, type PersonalField, type SaveState } from "./lead-request-model";
+import {
+  LEAD_UPLOAD_ACCEPT,
+  consentGiven,
+  formatFileSize,
+  type PersonalField,
+  type RefusedIdentityCopy,
+  type SaveState,
+} from "./lead-request-model";
 import type { CabinetTarget } from "./lead-request-field-target";
 import { SECTION_ANCHORS, type SectionAnchor, type StepId } from "./lead-request-steps";
 import type { LeadRequestText } from "./lead-request-text";
@@ -814,6 +821,7 @@ export function UploadedFileList({
   emptyText,
   testId,
   onRemove,
+  refused = [],
 }: {
   documents: readonly LeadRequestDocument[];
   text: LeadRequestText;
@@ -821,7 +829,35 @@ export function UploadedFileList({
   emptyText: string;
   testId: string;
   onRemove: (documentId: string) => void;
+  /** Copies GMED could not use: greyed, marked and each with its reason, never removable here. */
+  refused?: readonly RefusedIdentityCopy[];
 }) {
+  if (refused.length > 0 && documents.length === 0) {
+    return (
+      <div className="space-y-1.5" data-testid={`${testId}-refused`}>
+        <ul className="divide-y divide-border rounded-lg border border-dashed border-border bg-muted/30" data-testid={testId} aria-label={emptyText}>
+          {refused.map((document) => (
+            <li key={document.id} className="flex items-center gap-3 px-3 py-2.5 text-sm text-muted-foreground">
+              <FileText aria-hidden="true" className="size-4 shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate line-through">{document.file_name ?? "—"}</span>
+                <span className="mt-0.5 inline-flex w-fit items-center rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
+                  {[document.uploaded_at ? formatAppDateTime(document.uploaded_at) : null, text.documentRefused].filter(Boolean).join(" · ")}
+                </span>
+                <span
+                  className="mt-1 block text-xs leading-5 text-red-800 dark:text-red-200"
+                  data-testid={`${testId}-refused-reason`}
+                  data-reason={document.reason}
+                >
+                  {text.documentRefusedReasons[document.reason] ?? text.documentRefusedReasons.unreadable}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
   // Nothing uploaded yet: no empty frame (owner 2026-10-09); the list stays for its test id.
   if (documents.length === 0) return <ul hidden data-testid={testId} aria-label={emptyText} />;
   return (

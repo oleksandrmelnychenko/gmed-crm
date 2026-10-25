@@ -29,6 +29,7 @@ import {
   LEAD_UPLOAD_ACCEPT,
   MAX_UPLOAD_BYTES,
   consentGiven,
+  identityDocumentsInStep,
   uploadLimitReached,
   draftFromIdentification,
   identificationPatch,
@@ -384,6 +385,8 @@ export function IdentityDocumentSection({
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  // A copy GMED refused is shown with its reason until a new one replaces it (QA 2026-10-25, G F-G4).
+  const shownDocuments = identityDocumentsInStep(request, documents ?? request.identity_documents ?? []);
 
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
@@ -465,7 +468,8 @@ export function IdentityDocumentSection({
           </p>
         ))}
         <UploadedFileList
-          documents={documents ?? request.identity_documents ?? []}
+          documents={shownDocuments.current}
+          refused={shownDocuments.refused}
           text={text}
           lang={lang}
           emptyText={text.noIdentityDocuments}

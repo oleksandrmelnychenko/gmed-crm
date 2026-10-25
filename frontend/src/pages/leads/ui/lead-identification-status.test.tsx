@@ -197,8 +197,9 @@ describe("LeadIdentificationStatusView", () => {
     expect(agent).toContain("Ben Vertreter");
     expect(agent).toContain("уполномоченный представитель");
     expect(agent).toContain("Квалифицированная подпись · 05.10.2026");
-    expect(agent).toContain("Ожидается платёж с собственного счёта");
-    expect(agent).toContain("Подтвердить платёж — Ben Vertreter");
+    // The representative signs for the patient; the patient pays (QA 2026-10-25, M F-13).
+    expect(agent).toContain("Платёж с собственного счёта не ожидается");
+    expect(agent).not.toContain("Подтвердить платёж — Ben Vertreter");
     expect(agent).not.toContain("нет e-mail");
 
     const guardian = line(html, ANNA);
@@ -213,7 +214,7 @@ describe("LeadIdentificationStatusView", () => {
 
     const german = render(ADULT_REPRESENTED, { lang: "de" });
     expect(line(german, BEN)).toContain("bevollmächtigte Person");
-    expect(line(german, BEN)).toContain("Zahlung bestätigen — Ben Vertreter");
+    expect(line(german, BEN)).toContain("Keine Zahlung vom eigenen Konto zu erwarten");
     expect(line(german, ANNA)).toContain("Betreuer/in");
     expect(line(german, ANNA)).toContain("Zurücknehmen — Mia Betreuerin");
     expect(render(ADULT_REPRESENTED, { canEdit: false })).not.toMatch(/<button\b/);

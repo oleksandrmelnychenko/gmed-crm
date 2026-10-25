@@ -22,6 +22,8 @@ import {
   normalizeLeadServiceValue,
   updateLeadServiceSelection,
 } from "./leads-model";
+import { LEAD_SOURCE_SELECT_OPTIONS, guardianOwnLoginError, leadSourceLabel } from "./leads-model";
+import { ApiRequestError } from "@/lib/api";
 
 // Mirrors the readiness payload built in crates/server/src/routes/leads.rs.
 const SERVER_READINESS_CHECK_KEYS = [
@@ -458,4 +460,58 @@ it("the «what is left» list leaves out the qualification the conversion does i
   // A lead out of work is not qualified by the conversion: the blocker stays.
   expect(leadOpenBlockingReasons(readiness(LEAD_QUALIFICATION_REASON), "not_qualified")).toEqual([LEAD_QUALIFICATION_REASON]);
   expect(leadOpenBlockingReasons(null, "new")).toEqual([]);
+});
+
+describe("QA 2026-10-25 lead texts", () => {
+  const tx = (ru: string) => ru;
+  it("offers only sources with a label (the server refuses others)", () => {
+    const unknown = leadSourceLabel("no_such_source", translateCatalog("ru"));
+    for (const value of LEAD_SOURCE_SELECT_OPTIONS) {
+      expect(leadSourceLabel(value, translateCatalog("ru"))).not.toBe(unknown);
+    }
+  });
+  it("explains 409 use_patient_access and links the parent's own request when named", () => {
+    const plain = new ApiRequestError("This login is also the parent's own patient login; reset it there", {
+      status: 409, code: "use_patient_access", body: { error: "use_patient_access", message: "x" },
+    });
+    expect(leadErrorMessage(plain, tx)).toBe("У этого человека своя заявка — выдайте пароль в его заявке.");
+    expect(guardianOwnLoginError(plain)).toEqual({ href: null, target: null });
+    const conflict = (body: Record<string, unknown>) =>
+      new ApiRequestError("x", { status: 409, code: "use_patient_access", body: { error: "use_patient_access", ...body } });
+    // The own request first, opened in the wizard …
+    expect(guardianOwnLoginError(conflict({ own_lead_id: "lead-7", patient_id: "patient-3" })))
+      .toEqual({ href: "/leads?lead=lead-7&view=wizard", target: "lead" });
+    // … else the patient record …
+    expect(guardianOwnLoginError(conflict({ own_lead_id: null, patient_id: "patient-3" })))
+      .toEqual({ href: "/patients/patient-3", target: "patient" });
+    // … else only the message.
+    expect(guardianOwnLoginError(conflict({ own_lead_id: null, patient_id: null }))).toEqual({ href: null, target: null });
+    expect(leadErrorMessage(conflict({ own_lead_id: "lead-7" }), tx)).toBe("У этого человека своя заявка — выдайте пароль в его заявке.");
+    expect(guardianOwnLoginError(new ApiRequestError("x", { status: 409, code: "other", body: {} }))).toBeNull();
+  });
+  it("names a refused representative key at the contact (F-11)", () => {
+    const refused = new ApiRequestError("x", {
+      status: 422,
+      code: "trusted_contact_not_representative",
+      body: { error: "trusted_contact_not_representative", contact_id: "c1", contact_field: "citizenships" },
+    });
+    expect(leadErrorMessage(refused, tx)).toBe("Гражданство и данные о рождении указываются только для родителя, опекуна или представителя");
+    const invalid = new ApiRequestError("x", { status: 422, body: { error: "invalid_field", contact_id: "c1", contact_field: "birth_country" } });
+    expect(leadErrorMessage(invalid, tx)).toBe("Выберите страну рождения из списка");
+  });
+});
+
+describe("readiness check payer_identified (backend 2026-10-25)", () => {
+  const tx = (ru: string) => ru;
+  it("labels the check and the reason, and explains the 422 of the conversion", () => {
+    expect(leadReadinessCheckLabel({ key: "payer_identified", label: "raw" }, translateCatalog("ru"))).toBe("Плательщик идентифицирован (анкета и документ)");
+    expect(leadReadinessReasonLabel("Third-party payer is not identified", translateCatalog("de")))
+      .toBe("Zahler/in nicht identifiziert: Fragebogen und Ausweis des Zahlers fehlen");
+    const refused = new ApiRequestError("Lead is not conversion-ready", {
+      status: 422,
+      code: "payer_not_identified",
+      body: { error: "Unprocessable Entity", code: "payer_not_identified", blocking_reasons: ["Third-party payer is not identified"] },
+    });
+    expect(leadErrorMessage(refused, tx)).toBe("Плательщик не идентифицирован: нужна анкета плательщика и его документ");
+  });
 });

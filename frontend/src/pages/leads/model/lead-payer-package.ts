@@ -109,13 +109,20 @@ export function payerPackageLanguageHint(
     );
 }
 
-/** Each slot with its document of the package, in the bundle's order; `null` before preparing. */
+/**
+ * Each slot with its document of the package, in the bundle's order; `null`
+ * before preparing. A slot the package has no document for shows the one
+ * made outside it (`fallback`): the Kostenübernahmeerklärung created and
+ * signed under «Порядок подписания» is the same document (QA 2026-10-25, R-7:
+ * the package said «ещё не создан» beside the signed declaration).
+ */
 export function payerPackageRows(
   pkg: Pick<PayerPackage, "documents"> | null | undefined,
+  fallback: Partial<Record<PayerPackageSlot, PayerPackageDocument | null>> = {},
 ): { slot: PayerPackageSlot; document: PayerPackageDocument | null }[] {
   return PAYER_PACKAGE_SLOTS.map((slot) => ({
     slot,
-    document: pkg?.documents.find((item) => item.slot === slot) ?? null,
+    document: pkg?.documents.find((item) => item.slot === slot) ?? fallback[slot] ?? null,
   }));
 }
 

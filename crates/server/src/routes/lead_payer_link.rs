@@ -2477,7 +2477,9 @@ async fn resolve_link(conn: &mut PgConnection, headers: &HeaderMap) -> Result<Li
     let current = declaration.filter(|declaration| {
         declaration.is_third_party()
             && declaration.contact_consent_at.is_some()
-            && lead_payer::same_payer_key(&declaration.payer_key(), &link.payer_key)
+            // The link's snapshot is the earlier key: a date of birth staff
+            // added since completes the same payer (QA 2026-10-25, F-G2).
+            && lead_payer::same_payer_key(&link.payer_key, &declaration.payer_key())
             && normalized_email(declaration.email.as_deref()) == normalized_email(Some(&link.email))
     });
     if current.is_none() {
@@ -4940,7 +4942,9 @@ async fn staff_revoke(
 ///
 /// The stored keys hold the raw names; they match through
 /// [`lead_payer::same_payer_key`], so a cosmetic correction of the name by
-/// staff ("Olga" to "OLGA ") keeps the record (QA 2026-10-24, C-5).
+/// staff ("Olga" to "OLGA ") keeps the record (QA 2026-10-24, C-5), and so
+/// does a date of birth staff added after the link went out (QA 2026-10-25,
+/// F-G2): `payer_key` is the current key, the stored ones the earlier.
 pub(crate) async fn link_sent_for(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -5146,8 +5150,13 @@ pub(crate) async fn payer_changed_in_tx(
     if previous.contact_consent_at.is_some() && next.contact_consent_at.is_none() {
         revoke_active(conn, lead_id, "consent_withdrawn", actor).await?;
     }
+    // An address added where there was none completes the same payer (QA
+    // 2026-10-25, F-G2): no link went to an address before, and taking one
+    // away already reset the answers given through a link.
+    let previous_email = normalized_email(previous.email.as_deref());
     if !next.is_third_party()
-        || normalized_email(previous.email.as_deref()) == normalized_email(next.email.as_deref())
+        || previous_email.is_none()
+        || previous_email == normalized_email(next.email.as_deref())
     {
         return Ok(());
     }

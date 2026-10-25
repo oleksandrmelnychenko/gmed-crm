@@ -42,6 +42,7 @@ import {
   salutationLabel,
   enhancedDetailsShown,
   enhancedFundsProofMissing,
+  gwgStatementsTitle,
   type BillingStatement,
   type GwgPayerStatement,
   type RepresentationStatements,
@@ -951,7 +952,7 @@ function LeadGwgStatementsBody({
 }) {
   if (!intake || intake.identification_hidden) return null;
   const identification = intake.identification;
-  const title = tx("Данные от пациента", "Angaben des Patienten");
+  const title = gwgStatementsTitle(intake, tx);
   const cards = Boolean(identification && hasGwgStatements(intake));
   const representation = representationStatements(intake, tx);
   const representationGroup = representation ? (

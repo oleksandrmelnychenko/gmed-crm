@@ -253,6 +253,18 @@ export interface LeadDetail extends Lead {
   readiness: LeadReadiness;
   failed_outcome: FailedLeadOutcome;
   lifecycle: LeadLifecycle;
+  /**
+   * «Новая заявка для этого человека»: the relation / trusted contact this
+   * lead was prefilled from (leads.source_*; migration 20261025140000).
+   */
+  source_relation_id?: string | null;
+  source_contact_lead_id?: string | null;
+  source_contact_id?: string | null;
+  /**
+   * The source's own PEP answer (e.g. the child's questionnaire named this
+   * person a PEP), recomputed on every read: a hint to ask again, never an answer.
+   */
+  source_pep_hint?: "yes" | "no" | null;
 
   attachments: LeadAttachment[];
   /**

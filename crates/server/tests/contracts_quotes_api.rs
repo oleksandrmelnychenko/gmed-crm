@@ -1225,6 +1225,131 @@ async fn billing_can_accept_an_unpaid_quote_but_interpreter_cannot_access_quote(
     assert!(body["message"].as_str().is_some());
 }
 
+/// QA 2026-10-25: the quote is not confirmed while the newest generated
+/// Kostenvoranschlag of the order is outdated (made before the last change of
+/// the prepayment terms, `document_terms_current`); a fresh estimate lets the
+/// confirmation through. An order without an estimate document is confirmed
+/// as before (the test above).
+#[tokio::test]
+async fn quote_is_not_accepted_while_the_estimate_document_is_outdated() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("quote-estimate-outdated");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Outdated estimate"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let order_id = body["id"].as_str().unwrap().to_string();
+    let order_uuid = Uuid::parse_str(&order_id).unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Single service",
+            "quantity": 1.0,
+            "unit_price": 100.0,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let quote_id = body["id"].as_str().unwrap().to_string();
+
+    let insert_estimate = |name: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let id = Uuid::new_v4();
+            sqlx::query(
+                r#"INSERT INTO documents (
+                        id, version_root_document_id, patient_id, order_id, auto_name,
+                        art, category, status, visibility, is_medical, uploaded_by,
+                        generated_template_id
+                   ) VALUES ($1, $1, $2, $3, $4, 'cost_estimate', 'finance', 'active',
+                             'internal', false, $5, 'order_cost_estimate')"#,
+            )
+            .bind(id)
+            .bind(patient_id)
+            .bind(order_uuid)
+            .bind(name)
+            .bind(admin_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+            id
+        }
+    };
+    let first = insert_estimate("Kostenvoranschlag V01").await;
+    // Staff require a prepayment after the estimate was generated.
+    sqlx::query(
+        "UPDATE orders SET prepayment_required = true, prepayment_amount = 50.00 WHERE id = $1",
+    )
+    .bind(order_uuid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let current: Option<bool> = sqlx::query_scalar("SELECT document_terms_current($1)")
+        .bind(first)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(current, Some(false));
+
+    let status_path = format!("/api/v1/quotes/{quote_id}/status");
+    let accept = || {
+        json_request(
+            &app,
+            "POST",
+            &status_path,
+            &pm_bearer,
+            Some(json!({ "status": "accepted" })),
+        )
+    };
+    let (status, refused) = accept().await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "estimate_document_outdated", "{refused}");
+    let quote_status: String = sqlx::query_scalar("SELECT status FROM quotes WHERE id = $1")
+        .bind(Uuid::parse_str(&quote_id).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(quote_status, "draft");
+
+    // A fresh estimate shows the order's terms again.
+    insert_estimate("Kostenvoranschlag V02").await;
+    let (status, accepted) = accept().await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(accepted["status"], "accepted");
+}
+
 #[tokio::test]
 async fn quote_commercial_invariants_use_persisted_order_lines() {
     let Some((app, pool, admin_id, _)) = test_context().await else {

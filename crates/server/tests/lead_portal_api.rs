@@ -9615,3 +9615,95 @@ async fn duplicates_are_refused_files_move_between_slots_and_downloads_name_the_
     .unwrap();
     assert_eq!(context["lead_id"], json!(lead_id), "{context}");
 }
+
+#[tokio::test]
+async fn a_parents_own_login_is_reset_on_the_own_request_and_the_refusal_names_it() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    let mother_email = format!("olga.own.{}@example.com", Uuid::new_v4().simple());
+    let (child_lead, contact) = minor_lead(&app, "Lina", &mother_email).await;
+    let issue_path = format!("/api/v1/leads/{child_lead}/portal-guardians");
+    let (status, issued) = json_request(
+        router,
+        "POST",
+        &issue_path,
+        &pm,
+        Some(json!({ "trusted_contact_id": contact })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let parent: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let access = issued["access_id"].as_str().unwrap().to_string();
+    let reset_path = format!("{issue_path}/{access}/password");
+
+    // The mother's own open request on the same login.
+    let own_lead: Uuid = sqlx::query_scalar(
+        "INSERT INTO leads (first_name, last_name, date_of_birth, email, portal_user_id,
+                            qualification_status, created_by)
+         VALUES ('Olga', 'Kind', '1985-02-03', $1, $2, 'new', $3) RETURNING id",
+    )
+    .bind(&mother_email)
+    .bind(parent)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let (status, refused) = json_request(router, "POST", &reset_path, &pm, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "use_patient_access", "{refused}");
+    assert_eq!(refused["own_lead_id"], json!(own_lead), "{refused}");
+    assert_eq!(refused["patient_id"], Value::Null, "{refused}");
+
+    // Converted: the request is no longer open, the own patient record is
+    // named instead; the child's record reached as a guardian is not.
+    let own_patient: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Olga', 'Kind', DATE '1985-02-03', 'female', $2) RETURNING id"#,
+    )
+    .bind(format!("P-OWN-{}", Uuid::new_v4().simple()))
+    .bind(app.suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let childs_record: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Lina', 'Kind', DATE '2016-04-05', 'female', $2) RETURNING id"#,
+    )
+    .bind(format!("P-CHILD-{}", Uuid::new_v4().simple()))
+    .bind(app.suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE leads SET qualification_status = 'converted', converted_patient_id = $2
+         WHERE id = $1",
+    )
+    .bind(own_lead)
+    .bind(own_patient)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by, source)
+         VALUES ($1, $3, $4, 'manual'), ($2, $3, $4, 'lead_guardian')",
+    )
+    .bind(own_patient)
+    .bind(childs_record)
+    .bind(parent)
+    .bind(app.suite.admin_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, refused) = json_request(router, "POST", &reset_path, &pm, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "use_patient_access", "{refused}");
+    assert_eq!(refused["own_lead_id"], Value::Null, "{refused}");
+    assert_eq!(refused["patient_id"], json!(own_patient), "{refused}");
+    assert_eq!(
+        audit_count(pool, "reset_lead_guardian_password", child_lead).await,
+        0,
+        "a refused reset leaves no audit row"
+    );
+}

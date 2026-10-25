@@ -851,16 +851,32 @@ async fn active_guardian_link(
     lead_id: Uuid,
     access_id: Uuid,
 ) -> Result<Option<sqlx::postgres::PgRow>, sqlx::Error> {
-    sqlx::query(
+    // `own_lead_id` / `own_patient_id`: where the parent's own access is
+    // managed, for the 409 `use_patient_access` — the parent's own open
+    // request (newest) and own patient record (not a child's record reached
+    // through a guardian grant).
+    sqlx::query(&format!(
         r#"SELECT a.user_id, u.email, u.is_active,
                   EXISTS(SELECT 1 FROM patient_assignments pa
                          WHERE pa.user_id = a.user_id AND pa.revoked_at IS NULL)
                   OR EXISTS(SELECT 1 FROM leads l WHERE l.portal_user_id = a.user_id)
-                      AS own_patient_login
+                      AS own_patient_login,
+                  (SELECT l.id FROM leads l
+                   WHERE l.portal_user_id = a.user_id AND l.id <> a.lead_id
+                     AND {PORTAL_LEAD_SQL}
+                   ORDER BY l.created_at DESC, l.id DESC
+                   LIMIT 1) AS own_lead_id,
+                  (SELECT p.id FROM patient_assignments pa
+                   JOIN patients p ON p.id = pa.patient_id
+                   WHERE pa.user_id = a.user_id AND pa.revoked_at IS NULL
+                     AND pa.source <> 'lead_guardian'
+                     AND p.lifecycle_status <> 'deleted'
+                   ORDER BY pa.assigned_at DESC, p.id DESC
+                   LIMIT 1) AS own_patient_id
            FROM lead_portal_access a
            JOIN users u ON u.id = a.user_id
            WHERE a.id = $1 AND a.lead_id = $2 AND a.kind = 'guardian' AND a.revoked_at IS NULL"#,
-    )
+    ))
     .bind(access_id)
     .bind(lead_id)
     .fetch_optional(&state.db)
@@ -891,11 +907,19 @@ async fn reset_guardian_password(
         Err(error) => return internal(error, "read access"),
     };
     if link.try_get::<bool, _>("own_patient_login").unwrap_or(true) {
-        return coded(
+        // Where staff reset it instead: the parent's own request or record.
+        let own = |col: &str| link.try_get::<Option<Uuid>, _>(col).ok().flatten();
+        return (
             StatusCode::CONFLICT,
-            "use_patient_access",
-            "This login is also the parent's own patient login; reset it there",
-        );
+            Json(json!({
+                "error": StatusCode::CONFLICT.canonical_reason().unwrap_or("error"),
+                "code": "use_patient_access",
+                "message": "This login is also the parent's own patient login; reset it there",
+                "own_lead_id": own("own_lead_id"),
+                "patient_id": own("own_patient_id"),
+            })),
+        )
+            .into_response();
     }
     if !link.try_get::<bool, _>("is_active").unwrap_or(false) {
         return err(StatusCode::CONFLICT, "The login is deactivated");

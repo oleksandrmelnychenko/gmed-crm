@@ -183,6 +183,20 @@ export type TrustedContactDraft = {
   relation: string;
   birthDate: string;
   address: string;
+  /**
+   * A representative's citizenships and birth data staff changed in the
+   * contact dialog: sent with the contact by the wizard save (F-11, QA
+   * 2026-10-25), only the keys staff changed. The address parts stay on
+   * `PUT …/representatives/{id}/details`.
+   */
+  representativeDetails?: TrustedContactRepresentativeDetails;
+};
+
+/** The representative keys a contact carries in the wizard save (`TrustedContactRequest` on the server). */
+export type TrustedContactRepresentativeDetails = {
+  citizenships?: string[];
+  birth_place?: string | null;
+  birth_country?: string | null;
 };
 
 /** A trusted contact as `POST /leads/{id}/update` takes it. */
@@ -195,7 +209,7 @@ export type TrustedContactPayload = {
   relation: string | null;
   birth_date: string | null;
   address: string | null;
-};
+} & TrustedContactRepresentativeDetails;
 
 export function trustedContactsPayload(contacts: readonly TrustedContactDraft[]): TrustedContactPayload[] {
   return contacts.map((contact) => ({
@@ -207,7 +221,38 @@ export function trustedContactsPayload(contacts: readonly TrustedContactDraft[])
     relation: contact.relation.trim() || null,
     birth_date: contact.birthDate || null,
     address: contact.address.trim() || null,
+    ...representativeDetailsPayload(contact.representativeDetails),
   }));
+}
+
+/** Only the keys staff changed; a cleared text is `null` (the server clears it then). */
+function representativeDetailsPayload(details: TrustedContactRepresentativeDetails | undefined): TrustedContactRepresentativeDetails {
+  if (!details) return {};
+  const result: TrustedContactRepresentativeDetails = {};
+  if (details.citizenships !== undefined) result.citizenships = [...details.citizenships];
+  if (details.birth_place !== undefined) result.birth_place = details.birth_place?.trim() || null;
+  if (details.birth_country !== undefined) result.birth_country = details.birth_country?.trim().toUpperCase() || null;
+  return result;
+}
+
+/**
+ * The representative keys of the contact dialog that staff changed against
+ * what the dialog loaded (`undefined` when none): the citizenships and the
+ * birth data, never the address parts.
+ */
+export function changedRepresentativeDetails(
+  draft: { citizenships: readonly string[]; birth_place: string; birth_country: string },
+  loaded: { citizenships: readonly string[]; birth_place: string; birth_country: string },
+): TrustedContactRepresentativeDetails | undefined {
+  const codes = (values: readonly string[]) => values.map((value) => value.trim().toUpperCase()).filter(Boolean);
+  const text = (value: string) => value.trim().split(/\s+/).join(" ");
+  const result: TrustedContactRepresentativeDetails = {};
+  if (codes(draft.citizenships).join() !== codes(loaded.citizenships).join()) result.citizenships = codes(draft.citizenships);
+  if (text(draft.birth_place) !== text(loaded.birth_place)) result.birth_place = text(draft.birth_place) || null;
+  if (draft.birth_country.trim().toUpperCase() !== loaded.birth_country.trim().toUpperCase()) {
+    result.birth_country = draft.birth_country.trim().toUpperCase() || null;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 /**
@@ -234,7 +279,15 @@ function sameContact(left: TrustedContactPayload, right: TrustedContactPayload):
     && left.relation === right.relation
     && left.birth_date === right.birth_date
     && left.address === right.address
+    && REPRESENTATIVE_DETAIL_KEYS.every((key) => sentDetail(left, key) === sentDetail(right, key))
   );
+}
+
+const REPRESENTATIVE_DETAIL_KEYS = ["citizenships", "birth_place", "birth_country"] as const;
+
+/** A representative key as sent: left out differs from a cleared `null`. */
+function sentDetail(contact: TrustedContactPayload, key: (typeof REPRESENTATIVE_DETAIL_KEYS)[number]): string {
+  return key in contact && contact[key] !== undefined ? JSON.stringify(contact[key]) : "-";
 }
 
 /**

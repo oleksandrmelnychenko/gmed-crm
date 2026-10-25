@@ -120,6 +120,7 @@ import {
   COMPLIANCE_OPTIONS,
   DEFAULT_FILTERS,
   LEGAL_SEX_OPTIONS,
+  LEAD_SOURCE_SELECT_OPTIONS,
   LEAD_TYPE_OPTIONS,
   STATUS_OPTIONS,
   blankFailedLeadResolutionForm,
@@ -173,7 +174,7 @@ import {
 import { LeadPortalAccessDetail, PortalCredentialsDialog, type PortalCredentials } from "./ui/lead-portal-access";
 import { LeadConfirmDialog } from "./ui/lead-confirm-dialog";
 import { LeadIdentityDocumentsBlock } from "./ui/lead-identity-documents-block";
-import { deletedLeadLabel, isAnonymizedLead, leadDisplayName } from "./model/lead-display-name";
+import { deletedLeadLabel, isAnonymizedLead, leadDisplayName, leadSortName } from "./model/lead-display-name";
 import {
   LEAD_FAILURE_REASONS,
   LEAD_FAILURE_REASON_MAX_LENGTH,
@@ -818,6 +819,8 @@ function useLeadsPageContent() {
         id: "lead",
         label: t.leads_title,
         accessor: (row) => leadDisplayName(row, tx),
+        // Last name, then first name (QA 2026-10-25, N-4).
+        sortAccessor: (row) => leadSortName(row, tx),
         filterType: "text",
         group: "identity",
         sortable: true,
@@ -1055,16 +1058,36 @@ function useLeadsPageContent() {
           value: status,
           label: failedOutcomeLabel(status, t),
         })),
+        // The column reads the stored reason («Пациент отказался»), the
+        // outcome (archived/deleted) stays the filter and the tooltip
+        // (QA 2026-10-25, N-5).
+        sortAccessor: (row) =>
+          leadFailureReasonLabel(row.failed_outcome?.reason, tx)
+          ?? (row.failed_outcome?.status && row.failed_outcome.status !== "none"
+            ? failedOutcomeLabel(row.failed_outcome.status, t)
+            : ""),
         group: "lifecycle",
         width: 170,
-        render: (row) =>
-          row.failed_outcome?.status && row.failed_outcome.status !== "none" ? (
-            <StatusBadge tone={failedOutcomeTone(row.failed_outcome.status)}>
-              {failedOutcomeLabel(row.failed_outcome.status, t)}
-            </StatusBadge>
+        render: (row) => {
+          const status = row.failed_outcome?.status;
+          const outcome = status && status !== "none" ? failedOutcomeLabel(status, t) : null;
+          const reason = leadFailureReasonLabel(row.failed_outcome?.reason, tx);
+          if (reason) {
+            return (
+              <span
+                className="block truncate text-xs text-foreground"
+                title={outcome ? `${outcome} · ${reason}` : reason}
+              >
+                {reason}
+              </span>
+            );
+          }
+          return outcome && status ? (
+            <StatusBadge tone={failedOutcomeTone(status)}>{outcome}</StatusBadge>
           ) : (
             <span className="text-xs text-foreground">{t.common_not_set}</span>
-          ),
+          );
+        },
       },
       ];
       // The shared filter picker prints a column's group as it is, so the
@@ -3529,14 +3552,23 @@ function useLeadsPageContent() {
                       />
                       <EmailDomainWarning email={createForm.email} lang={lang} />
                     </LeadField>
-                    <LeadField label={t.leads_source}>
-                      <Input
+                    <LeadField label={t.leads_source} htmlFor="lead-create-source">
+                      {/* Only the sources the server knows (422 for any other). */}
+                      <NativeComboboxSelect
+                        id="lead-create-source"
                         className={shellInputClassName}
                         value={createForm.source}
                         onChange={(event) =>
                           setCreateForm((current) => ({ ...current, source: event.target.value }))
                         }
-                      />
+                      >
+                        <option value="">{tx("Не указан", "Nicht angegeben")}</option>
+                        {LEAD_SOURCE_SELECT_OPTIONS.map((value) => (
+                          <option key={value} value={value}>
+                            {leadSourceLabel(value, t)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
                     </LeadField>
                     <LeadField label={t.providers_country}>
                       <Input

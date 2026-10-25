@@ -29,6 +29,7 @@ import {
   useLeadLabels,
 } from "@/pages/leads/model/leads-model";
 import { isOtherPersonUploadArt } from "@/pages/leads/model/gwg-identification";
+import { idDocumentTypeLabel } from "@/pages/leads/model/lead-gwg-statements";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 import { LinkedTasksSection, OPEN_PATIENT_TASK_CREATOR_EVENT } from "@/pages/concierge/linked-tasks-section";
 import { nationalityNameForDisplay } from "../../model/nationalities";
@@ -1140,10 +1141,36 @@ function usePatientProfileTabContent({
               )}
             />
           ) : null}
+          {/* The document read from the scan at the lead (type, authority,
+              country, issue date) next to its number and validity. */}
+          {detail.id_document_type ? (
+            <ProfileSummaryLine
+              label={lang === "de" ? "Dokumentart" : "Вид документа"}
+              value={hiddenOr("passport", idDocumentTypeLabel(detail.id_document_type, lang === "de" ? (_ru, de) => de : (ru) => ru))}
+            />
+          ) : null}
           <ProfileSummaryLine
             label={t.patient_profile_editor_passport_number}
             value={hiddenOr("passport", fieldValue(detail.passport_number, t.common_not_set))}
           />
+          {detail.id_issuing_authority ? (
+            <ProfileSummaryLine
+              label={lang === "de" ? "Ausstellende Behörde" : "Кем выдан"}
+              value={hiddenOr("passport", detail.id_issuing_authority)}
+            />
+          ) : null}
+          {detail.id_issuing_country ? (
+            <ProfileSummaryLine
+              label={lang === "de" ? "Ausstellungsstaat" : "Страна выдачи"}
+              value={hiddenOr("passport", countryNameForDisplay(detail.id_issuing_country, lang) || detail.id_issuing_country)}
+            />
+          ) : null}
+          {detail.id_issued_on ? (
+            <ProfileSummaryLine
+              label={lang === "de" ? "Ausstellungsdatum" : "Дата выдачи"}
+              value={hiddenOr("passport", formatDate(detail.id_issued_on))}
+            />
+          ) : null}
           <ProfileSummaryLine
             label={t.patient_profile_editor_passport_expiry}
             value={

@@ -4789,6 +4789,39 @@ async fn update_quote_status(
                 "Quote no longer matches the current order services",
             );
         }
+        // QA 2026-10-25: the estimate the client confirms is the generated
+        // Kostenvoranschlag; one made before the last change of the order's
+        // services, period or prepayment terms shows terms the order no
+        // longer has (`document_terms_current`, the rule of the paper
+        // signature). An order without an estimate document is confirmed as
+        // before.
+        let newest_estimate_current = match sqlx::query_scalar::<_, Option<bool>>(
+            r#"SELECT document_terms_current(d.id)
+               FROM documents d
+               WHERE d.order_id = $1
+                 AND d.generated_template_id = 'order_cost_estimate'
+                 AND d.status = 'active'
+                 AND d.file_deleted_at IS NULL
+               ORDER BY d.created_at DESC, d.id DESC
+               LIMIT 1"#,
+        )
+        .bind(order_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(current) => current.flatten(),
+            Err(error) => {
+                tracing::error!(%error, %quote_id, %order_id, "check estimate document before quote acceptance");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+            }
+        };
+        if newest_estimate_current == Some(false) {
+            return coded_err(
+                StatusCode::CONFLICT,
+                "estimate_document_outdated",
+                "The cost estimate document is outdated; generate a new version first",
+            );
+        }
     }
 
     let updated_row = match sqlx::query(

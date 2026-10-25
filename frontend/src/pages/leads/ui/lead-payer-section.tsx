@@ -45,7 +45,7 @@ import { createPayerAutosave, type PayerAutosave, type PayerAutosaveState } from
 import { costCoveragePurpose, standaloneCostAssumptionKept } from "../model/lead-payer-package";
 import { payerFundsSourceLabel } from "../model/lead-payer-link";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
-import type { LeadPayerPackageState } from "../data/lead-payer-package-api";
+import type { LeadPayerPackageState, PayerPackageDocument } from "../data/lead-payer-package-api";
 import { useLeadPayerPackage } from "../model/use-lead-payer-package";
 import { LeadPayerLinkPanel } from "./lead-payer-link-panel";
 import { LeadPayerPackagePanel } from "./lead-payer-package-panel";
@@ -1344,6 +1344,30 @@ export type LeadPayerSignatureFlowPackage = {
  * the standalone "Kostenübernahmeerklärung erstellen", which stays for a
  * payer that staff filled in.
  */
+/**
+ * The standalone Kostenübernahmeerklärung as a row of the payer's package
+ * (R-7): the declaration the status names, with its version and signature.
+ */
+function standaloneCostCoverageDocument(
+  status: PayerDeclarationStatus | null,
+  documents: readonly DocumentItem[],
+): PayerPackageDocument | null {
+  const costAssumption = status?.cost_assumption;
+  const latest = sortWizardDocumentsNewestFirst([...documents]).find((document) => document.is_latest_version) ?? null;
+  const documentId = costAssumption?.document_id ?? latest?.id ?? null;
+  if (!documentId) return null;
+  const document = documents.find((item) => item.id === documentId) ?? latest;
+  return {
+    slot: "cost_coverage",
+    document_id: documentId,
+    title: document?.auto_name ?? document?.original_filename ?? null,
+    version: document?.version_number ?? null,
+    signed_at: costAssumption?.document_id === documentId && costAssumption.signed
+      ? costAssumption.signed_at ?? document?.signed_at ?? document?.updated_at ?? null
+      : document?.signed_at ?? null,
+  };
+}
+
 export function LeadPayerSignatureFlow({
   leadId,
   status,
@@ -1486,6 +1510,7 @@ export function LeadPayerSignatureFlow({
           tx={tx}
           errorText={errorText}
           onOpenDocument={payerPackage?.onOpenDocument}
+          fallbackDocuments={{ cost_coverage: standaloneCostCoverageDocument(status, documents) }}
           renderDetails={(documentId, title) => (
             <DocumentSignatureAction
               documentId={documentId}

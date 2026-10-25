@@ -1005,11 +1005,22 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     assert_eq!(status, StatusCode::OK, "{body}");
     // From here this fixture represents an already submitted base form and
     // tests the stored assessment, including its identity follow-up.
-    sqlx::query("UPDATE leads SET portal_submitted_at = clock_timestamp() WHERE id = $1")
-        .bind(lead_id)
-        .execute(app.pool())
-        .await
-        .unwrap();
+    // The server stamps its changes with a time that never steps back
+    // (`portal_update_time`): after a clock correction (WSL, NTP) it runs
+    // ahead of `clock_timestamp()`, so the send is never older than the
+    // changes before it, as the server's own send guarantees.
+    sqlx::query(
+        "UPDATE leads SET portal_submitted_at = GREATEST(
+             clock_timestamp(),
+             (SELECT max((f.value->>'at')::timestamptz)
+              FROM jsonb_each(portal_field_updates) f
+              WHERE f.value ? 'at'))
+         WHERE id = $1",
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
     let (status, request_object) = request(&app, "GET", &path, &patient, None).await;
     assert_eq!(status, StatusCode::OK);
     let follow_up = &request_object["follow_up"];
@@ -1186,9 +1197,23 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
             .len(),
         1
     );
+    // The old copy is listed as refused, with a reason about the document
+    // only (F-G4, DEV QA 2026-10-25).
+    let expired_copy = request_object["identity_documents"][0]["id"].clone();
+    assert_eq!(
+        follow_up["refused_identity_documents"],
+        json!([{
+            "document_id": expired_copy,
+            "file_name": request_object["identity_documents"][0]["file_name"],
+            "reason": "expired",
+            "representative_id": null,
+        }]),
+        "{follow_up}"
+    );
     let (status, body) = upload(&app, &format!("{path}/identity-document"), &patient).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    // The new copy answers the block: it closes.
+    // The new copy answers the block: it closes. It replaces the expired copy
+    // (withdrawn, F-G4), so the step "document" lists the new one only.
     let (_, request_object) = request(&app, "GET", &path, &patient, None).await;
     let follow_up = &request_object["follow_up"];
     assert!(
@@ -1198,13 +1223,15 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
             .contains(&json!("I")),
         "{follow_up}"
     );
+    assert_eq!(follow_up["refused_identity_documents"], json!([]));
     assert_eq!(
         request_object["identity_documents"]
             .as_array()
             .unwrap()
             .len(),
-        2
+        1
     );
+    assert_ne!(request_object["identity_documents"][0]["id"], expired_copy);
     // Requested by staff, the block stays open and lists the new copy only.
     let (status, body) = decide(
         &app,
@@ -1466,4 +1493,378 @@ async fn a_deleted_lead_takes_no_identity_document_data() {
             .await
             .unwrap();
     assert_eq!(rows, 0);
+}
+
+/// QA 2026-10-25, R-4: the parent's ID-document data entered after the CEO
+/// release raise no trigger, so the release stays and the next paper
+/// signature is not refused with `risk_review_required`.
+#[tokio::test]
+async fn a_parents_document_data_entered_after_the_release_keep_it() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let parent_id = Uuid::new_v4();
+    // A minor whose mother is an Iranian citizen (list 2): level 2.
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, date_of_birth, citizenships, country,
+                              email, created_by, trusted_contacts)
+           VALUES ('Lena', 'Kindrisk', '2016-03-05', '{DE}', 'DE', $1, $2, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("lead-{}@example.com", Uuid::new_v4().simple()))
+    .bind(app.pm_id)
+    .bind(json!([{
+        "id": parent_id,
+        "name": "Olga Kindrisk",
+        "relation": "mother",
+        "email": format!("parent-{}@example.com", Uuid::new_v4().simple()),
+        "birth_date": "1988-02-02",
+        "citizenships": ["IR"]
+    }]))
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert!(held(&qualify(&app, lead_id).await));
+    let started = assessment(&app, lead_id).await;
+    assert!(started["level"].as_i64().unwrap() >= 2, "{started}");
+    assert!(
+        trigger(&started, "T1", "representative").is_some(),
+        "{started}"
+    );
+    let (status, released) = decide(
+        &app,
+        &app.ceo(),
+        lead_id,
+        json!({ "decision": "release", "reason": "Mother's residence and identity checked in person" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{released}");
+    assert_eq!(released["status"], "released");
+    let released_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar("SELECT now()")
+        .fetch_one(app.pool())
+        .await
+        .unwrap();
+
+    let (status, data) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{lead_id}/representatives/{parent_id}/identity-document-data"),
+        &app.pm(),
+        Some(json!({
+            "id_document_type": "passport",
+            "id_document_number": "P7654321",
+            "id_issuing_authority": "Passamt Teheran",
+            "id_issuing_country": "IR",
+            "id_issued_on": "2020-01-10",
+            "id_valid_until": "2030-01-09"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    let after = assessment(&app, lead_id).await;
+    assert_eq!(after["status"], "released", "{after}");
+    assert!(!held(&qualify(&app, lead_id).await));
+    // No silent "status" event of a voided release either.
+    let voided: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_risk_events WHERE lead_id = $1 AND kind = 'status' AND status <> 'released' AND at > $2",
+    )
+    .bind(lead_id)
+    .bind(released_at)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(voided, 0);
+}
+
+/// QA 2026-10-25, R-10: block E of a paying organisation counts the legal
+/// form and the reason of the payment the lead gave in the cabinet (the
+/// payer link shows them as its defaults); only the organisation's own send
+/// is still missing.
+#[tokio::test]
+async fn block_e_reads_the_organisations_answers_from_the_cabinet() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let lead_id = insert_lead(&app, "Olena", &["DE"]).await;
+    // A company seated in Iran pays: T4 + T6 (black list) + T7, level 2.
+    sqlx::query(
+        r#"INSERT INTO lead_payer_declarations
+               (lead_id, payer_kind, payer_type, organisation_name, country,
+                organisation_legal_form)
+           VALUES ($1, 'third_party', 'company', 'Teheran Trading', 'IR', 'Private Joint Stock')"#,
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO lead_gwg_declarations (lead_id, payment_background) VALUES ($1, 'Arbeitgeber übernimmt die Behandlung')",
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    assert!(held(&qualify(&app, lead_id).await));
+    let started = assessment(&app, lead_id).await;
+    assert!(started["level"].as_i64().unwrap() >= 2, "{started}");
+    let block = &started["blocks"]["E"];
+    assert_eq!(block["open"], true, "{started}");
+    let missing: Vec<&str> = block["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(!missing.contains(&"legal_form"), "{block}");
+    assert!(!missing.contains(&"payment_reason"), "{block}");
+
+    // Without the cabinet's answers both are missing, as before.
+    sqlx::query(
+        "UPDATE lead_payer_declarations SET organisation_legal_form = NULL WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE lead_gwg_declarations SET payment_background = NULL WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let emptied = assessment(&app, lead_id).await;
+    let missing: Vec<&str> = emptied["blocks"]["E"]["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(
+        missing.contains(&"legal_form") && missing.contains(&"payment_reason"),
+        "{emptied}"
+    );
+}
+
+/// The withdrawal of a refused copy that a new copy replaced, as stored.
+async fn replaced_copy(app: &TestApp, document_id: &Value) -> (bool, String, bool, Value) {
+    let document_id: Uuid = document_id.as_str().unwrap().parse().unwrap();
+    let (withdrawn, status, file_deleted): (bool, String, bool) = sqlx::query_as(
+        r#"SELECT u.withdrawn_at IS NOT NULL, d.status, d.file_deleted_at IS NOT NULL
+           FROM lead_portal_uploads u JOIN documents d ON d.id = u.document_id
+           WHERE u.document_id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    let audit: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action = 'lead_portal_withdraw_document' AND entity_id = $1",
+    )
+    .bind(document_id)
+    .fetch_optional(app.pool())
+    .await
+    .unwrap()
+    .unwrap_or(Value::Null);
+    (withdrawn, status, file_deleted, audit)
+}
+
+/// F-G4 (DEV QA 2026-10-25): staff mark the lead's scan unreadable; the
+/// cabinet lists it as refused with the reason; the new scan replaces it —
+/// the old one is withdrawn and archived (audit kept), staff see one current
+/// scan and the mark is cleared. A scan staff accepted is never replaced. The
+/// same for a representative's scan.
+#[tokio::test]
+async fn a_new_scan_replaces_the_refused_copy_of_the_identity_document() {
+    let Some(app) = test_app().await else { return };
+    let (status, created) = request(
+        &app,
+        "POST",
+        "/leads",
+        &app.pm(),
+        Some(json!({ "first_name": "Ida", "last_name": "Muster", "email": format!("ida-{}@example.com", Uuid::new_v4().simple()) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let user_id: Uuid = created["portal_account"]["user_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let patient = app.bearer(user_id, "patient");
+    let path = format!("/me/lead-requests/{lead_id}");
+    let (status, _) = request(
+        &app,
+        "POST",
+        &format!("{path}/consent"),
+        &patient,
+        Some(json!({ "purpose": "lead_inquiry_processing", "version": CONSENT_VERSION, "language": "de" })),
+    )
+    .await;
+    assert!(status.is_success());
+    let (status, body) = upload(&app, &format!("{path}/identity-document"), &patient).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["follow_up"]["refused_identity_documents"], json!([]));
+    let first = body["identity_documents"][0]["id"].clone();
+
+    // Staff mark the scan unreadable: the cabinet lists it as refused.
+    let (status, data) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{lead_id}/identity-document-data"),
+        &app.pm(),
+        Some(json!({ "id_document_unreadable": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    let (status, before) = request(&app, "GET", &path, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{before}");
+    assert_eq!(
+        before["follow_up"]["refused_identity_documents"],
+        json!([{
+            "document_id": first,
+            "file_name": "pass.pdf",
+            "reason": "unreadable",
+            "representative_id": null,
+        }]),
+        "{before}"
+    );
+
+    // The new scan replaces it.
+    let (status, after) = upload(&app, &format!("{path}/identity-document"), &patient).await;
+    assert_eq!(status, StatusCode::CREATED, "{after}");
+    assert_eq!(after["follow_up"]["refused_identity_documents"], json!([]));
+    let current = after["identity_documents"].as_array().unwrap();
+    assert_eq!(current.len(), 1, "{after}");
+    let second = current[0]["id"].clone();
+    assert_ne!(second, first);
+    assert_eq!(
+        current[0]["reviewed"], false,
+        "the new scan waits for review"
+    );
+    let (withdrawn, status, file_deleted, audit) = replaced_copy(&app, &first).await;
+    assert!(withdrawn && file_deleted);
+    assert_eq!(status, "archived");
+    assert_eq!(audit["refusal"], "unreadable", "{audit}");
+    assert_eq!(audit["replaced_by_document_id"], second, "{audit}");
+    assert_eq!(audit["kind"], "identity", "{audit}");
+    assert_eq!(audit["id_document_unreadable_cleared"], true, "{audit}");
+    let unreadable: bool = sqlx::query_scalar(
+        "SELECT id_document_unreadable FROM lead_gwg_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert!(!unreadable);
+    // Staff see one current scan, the new one.
+    let (status, intake) = request(
+        &app,
+        "GET",
+        &format!("/leads/{lead_id}/portal-intake"),
+        &app.pm(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    let staff_copies = intake["identity_documents"].as_array().unwrap();
+    assert_eq!(staff_copies.len(), 1, "{intake}");
+    assert_eq!(staff_copies[0]["id"], second);
+    assert_eq!(staff_copies[0]["reviewed"], false);
+
+    // Staff accept the new scan (valid data): a further copy never replaces it.
+    let (status, data) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{lead_id}/identity-document-data"),
+        &app.pm(),
+        Some(json!({ "id_document_type": "passport", "id_document_number": "AB123456", "id_valid_until": "2099-01-31" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    let (status, body) = upload(&app, &format!("{path}/identity-document"), &patient).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["follow_up"]["refused_identity_documents"], json!([]));
+    assert_eq!(body["identity_documents"].as_array().unwrap().len(), 2);
+    let (withdrawn, _, _, audit) = replaced_copy(&app, &second).await;
+    assert!(!withdrawn && audit.is_null());
+
+    // A representative's scan: the same rule, with the person named.
+    let agent = Uuid::new_v4();
+    let agent_path = format!("{path}/representatives/{agent}");
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("{path}/representation"),
+        &patient,
+        Some(json!({ "has_representative": true, "under_guardianship": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = request(
+        &app,
+        "POST",
+        &agent_path,
+        &patient,
+        Some(json!({ "role": "authorised_representative", "last_name": "Muster" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = upload(&app, &format!("{agent_path}/identity-document"), &patient).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let agent_copy: Uuid = sqlx::query_scalar(
+        "SELECT document_id FROM lead_portal_uploads WHERE lead_id = $1 AND representative_id = $2",
+    )
+    .bind(lead_id)
+    .bind(agent)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    let (status, data) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{lead_id}/representatives/{agent}/identity-document-data"),
+        &app.pm(),
+        Some(json!({ "id_document_unreadable": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    let (_, before) = request(&app, "GET", &path, &patient, None).await;
+    assert_eq!(
+        before["follow_up"]["refused_identity_documents"],
+        json!([{
+            "document_id": agent_copy,
+            "file_name": "pass.pdf",
+            "reason": "unreadable",
+            "representative_id": agent,
+        }]),
+        "{before}"
+    );
+    let (status, after) = upload(&app, &format!("{agent_path}/identity-document"), &patient).await;
+    assert_eq!(status, StatusCode::CREATED, "{after}");
+    assert_eq!(after["follow_up"]["refused_identity_documents"], json!([]));
+    let (withdrawn, status, _, audit) = replaced_copy(&app, &json!(agent_copy)).await;
+    assert!(withdrawn);
+    assert_eq!(status, "archived");
+    assert_eq!(audit["kind"], "representative_identity", "{audit}");
+    assert_eq!(audit["representative_id"], json!(agent), "{audit}");
+    let current: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_portal_uploads WHERE lead_id = $1 AND representative_id = $2 AND withdrawn_at IS NULL",
+    )
+    .bind(lead_id)
+    .bind(agent)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(current, 1);
+    let unreadable: bool = sqlx::query_scalar(
+        "SELECT id_document_unreadable FROM lead_representatives WHERE lead_id = $1 AND contact_id = $2",
+    )
+    .bind(lead_id)
+    .bind(agent)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert!(!unreadable);
+    // The lead's own accepted copies stay untouched by the person's scan.
+    assert_eq!(after["identity_documents"].as_array().unwrap().len(), 2);
 }

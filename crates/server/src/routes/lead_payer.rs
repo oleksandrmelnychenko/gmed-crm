@@ -538,7 +538,7 @@ impl Declaration {
 
     /// The relationship to the patient in words, for the order payer record:
     /// the free text, otherwise the chosen kind in German like the documents.
-    fn relationship_label(&self) -> Option<String> {
+    pub(crate) fn relationship_label(&self) -> Option<String> {
         if !blank(&self.relationship) {
             return self.relationship.clone();
         }
@@ -1272,6 +1272,12 @@ pub(crate) enum PayerReason {
     CostAssumptionOutdated,
     CostAssumptionUnsigned,
     ClientOrderSignatureMissing,
+    /// A third-party payer at risk level 2 or with a trigger of the payer's
+    /// own person who has not identified himself: no sent questionnaire (or
+    /// paper Selbstauskunft) with an identity document on file (owner
+    /// decision 2026-10-25, QA R-8). Readiness only, never the agency gate;
+    /// the CEO's risk release does not lift it.
+    PayerNotIdentified,
 }
 
 impl PayerReason {
@@ -1287,6 +1293,7 @@ impl PayerReason {
             Self::CostAssumptionOutdated => "cost_assumption_outdated",
             Self::CostAssumptionUnsigned => "cost_assumption_unsigned",
             Self::ClientOrderSignatureMissing => "client_order_signature_missing",
+            Self::PayerNotIdentified => "payer_not_identified",
         }
     }
 
@@ -1305,6 +1312,7 @@ impl PayerReason {
             Self::CostAssumptionOutdated => "Cost assumption declaration names another payer",
             Self::CostAssumptionUnsigned => "Cost assumption declaration is not signed",
             Self::ClientOrderSignatureMissing => "Customer order signature is missing",
+            Self::PayerNotIdentified => "Third-party payer is not identified",
         }
     }
 }
@@ -1416,6 +1424,16 @@ impl PayerReadiness {
             )),
             "blocking_for": "conversion",
             "stage": "documents",
+        }));
+        // QA R-8 (owner decision 2026-10-25): passed when nothing is asked
+        // (no third party, level 1 without a trigger of the payer's person)
+        // or the payer is identified.
+        checks.push(json!({
+            "key": "payer_identified",
+            "label": "Third-party payer identified (questionnaire and identity document) at risk level 2",
+            "passed": !self.reasons.contains(&PayerReason::PayerNotIdentified),
+            "blocking_for": "conversion",
+            "stage": "compliance",
         }));
         conversion_reasons.extend(
             self.reasons
@@ -1700,7 +1718,102 @@ pub(crate) async fn load_payer_readiness(
     lead_id: Uuid,
 ) -> Result<PayerReadiness, sqlx::Error> {
     let mut conn = db.acquire().await?;
-    Ok(load_payer_state(&mut conn, lead_id).await?.readiness())
+    let state = load_payer_state(&mut conn, lead_id).await?;
+    let mut readiness = state.readiness();
+    if payer_identification_missing(&mut conn, lead_id, &state).await? {
+        readiness.reasons.push(PayerReason::PayerNotIdentified);
+    }
+    Ok(readiness)
+}
+
+/// Triggers about the payer's own person (QA R-8): a listed country, a PEP,
+/// sanctions links, a confirmed hit. T4, T5, T7, T8 and T9 only say that and
+/// how a third party pays; they alone ask no identification below level 2.
+const PAYER_PERSON_TRIGGERS: [&str; 4] = ["T6", "T14", "T15", "T16"];
+
+/// Whether the lead's risk asks the third-party payer to identify himself
+/// (owner decision 2026-10-25, «Блокувати при рівні 2»): level 2 or more,
+/// or a trigger of the payer's own person ([`PAYER_PERSON_TRIGGERS`]). The
+/// stored assessment decides; a lead not started yet is read from the
+/// preview; a grandfathered lead asks nothing (like `readiness_held`).
+async fn payer_identification_required(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let payer_person = |key: &str, subject: &str| {
+        subject == crate::risk::SUBJECT_PAYER && PAYER_PERSON_TRIGGERS.contains(&key)
+    };
+    match crate::risk::store::load(conn, lead_id).await? {
+        Some(assessment) if assessment.started() => Ok(assessment.level() >= 2
+            || assessment
+                .triggers
+                .iter()
+                .any(|trigger| payer_person(&trigger.key, &trigger.subject))),
+        Some(assessment) if assessment.status == crate::risk::store::STATUS_GRANDFATHERED => {
+            Ok(false)
+        }
+        _ => Ok(crate::risk::store::preview(conn, lead_id)
+            .await?
+            .is_some_and(|(fired, score, _)| {
+                score.level >= 2
+                    || fired
+                        .iter()
+                        .any(|trigger| payer_person(trigger.key, trigger.subject))
+            })),
+    }
+}
+
+/// Whether the third-party payer is identified: the payer's questionnaire
+/// was sent (or adopted and reopened for a correction) — or staff filed the
+/// signed paper Selbstauskunft — and the payer's identity document is on
+/// file (the payer's own upload on the link or a staff scan with the type
+/// "Ausweis (Zahler/in)"). A previous payer's copies are archived and do not
+/// count.
+async fn payer_identified(conn: &mut PgConnection, lead_id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT (
+                  EXISTS (
+                      SELECT 1 FROM lead_payer_statements s
+                      WHERE s.lead_id = $1
+                        AND (s.submitted_at IS NOT NULL OR s.adopted_at IS NOT NULL)
+                  )
+                  OR EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE (d.lead_id = $1
+                             OR d.order_id IN (SELECT o.id FROM orders o WHERE o.source_lead_id = $1))
+                        AND (d.art = 'payer_self_disclosure'
+                             OR d.generated_template_id = 'payer_self_disclosure')
+                        AND d.signed_at IS NOT NULL
+                        AND d.status <> 'archived'
+                        AND d.file_deleted_at IS NULL
+                  )
+              ) AND EXISTS (
+                  SELECT 1 FROM documents d
+                  WHERE d.lead_id = $1
+                    AND d.art = 'payer_identity'
+                    AND d.status <> 'archived'
+                    AND d.file_deleted_at IS NULL
+              )"#,
+    )
+    .bind(lead_id)
+    .fetch_one(&mut *conn)
+    .await
+}
+
+/// [`PayerReason::PayerNotIdentified`]: a third party who is not the minor's
+/// paying parent (the parent contracts and is identified as representative),
+/// the risk asks it ([`payer_identification_required`]) and the payer is not
+/// identified ([`payer_identified`]).
+pub(crate) async fn payer_identification_missing(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    state: &PayerState,
+) -> Result<bool, sqlx::Error> {
+    if !state.is_third_party() || state.paying_parent {
+        return Ok(false);
+    }
+    Ok(payer_identification_required(conn, lead_id).await?
+        && !payer_identified(conn, lead_id).await?)
 }
 
 /// 409 with the reasons why GMED may not countersign yet.
@@ -2950,34 +3063,63 @@ fn changed_json_fields(before: &Value, after: &Value) -> Vec<String> {
         .collect()
 }
 
-/// Whether two [`Declaration::payer_key`] values name the same payer. A
-/// cosmetic correction of the name — a trailing space, a doubled space,
-/// another case, "Anna-Maria" for "Anna Maria" — is the same payer: it keeps
-/// the payer's statement, files, consents and link. Another normalised name,
-/// type, organisation or date of birth is another payer. Only comparisons
-/// normalise; the stored keys (`identity_adopted_key`,
+/// Whether `later` still names the payer an `earlier`
+/// [`Declaration::payer_key`] named. A cosmetic correction of the name — a
+/// trailing space, a doubled space, another case, "Anna-Maria" for "Anna
+/// Maria" — is the same payer: it keeps the payer's statement, files,
+/// consents and link. So is a date of birth added where `earlier` had none
+/// (QA 2026-10-25, F-G2): the cabinet does not require it, staff complete it
+/// in the wizard, and that completes the same person. Another normalised
+/// name, type or organisation, or an already-set date of birth changed or
+/// removed, is another payer.
+///
+/// The order matters: `earlier` is the stored key (the previous
+/// declaration, a link's or a statement's snapshot), `later` the current
+/// one. Only comparisons normalise; the stored keys (`identity_adopted_key`,
 /// `lead_payer_links.payer_key`) keep the raw values and match through this
 /// function.
-pub(crate) fn same_payer_key(left: &Value, right: &Value) -> bool {
-    normalized_payer_key(left) == normalized_payer_key(right)
+pub(crate) fn same_payer_key(earlier: &Value, later: &Value) -> bool {
+    same_key_completed(earlier, later, PAYER_KEY_COMPLETABLE)
 }
 
-/// [`same_payer_key`]: the type, organisation and names normalised, the date
-/// of birth as it is.
-fn normalized_payer_key(key: &Value) -> Value {
-    let Some(parts) = key.as_array() else {
-        return key.clone();
-    };
-    Value::Array(
-        parts
+/// The parts of [`Declaration::payer_key`] a later key may fill in where the
+/// earlier one was empty: the date of birth.
+const PAYER_KEY_COMPLETABLE: &[usize] = &[4];
+
+/// The parts of [`Declaration::identity_key`] a later key may fill in where
+/// the earlier one was empty: the date of birth and the address.
+const IDENTITY_KEY_COMPLETABLE: &[usize] = &[5, 6, 7, 8, 9];
+
+/// Compares two keys part by part, the texts normalised
+/// ([`normalized_payer_name`], an empty text as no value). A part listed in
+/// `completable` that `earlier` left empty matches whatever `later` holds:
+/// adding a value completes the same payer; only changing or removing one
+/// names another.
+fn same_key_completed(earlier: &Value, later: &Value, completable: &[usize]) -> bool {
+    match (earlier.as_array(), later.as_array()) {
+        (Some(earlier), Some(later)) if earlier.len() == later.len() => earlier
             .iter()
+            .zip(later)
             .enumerate()
-            .map(|(index, part)| match (index, part) {
-                (0..=3, Value::String(text)) => Value::String(normalized_payer_name(text)),
-                _ => part.clone(),
-            })
-            .collect(),
-    )
+            .all(|(index, (earlier, later))| {
+                let earlier = normalized_key_part(earlier);
+                earlier == normalized_key_part(later)
+                    || (earlier.is_null() && completable.contains(&index))
+            }),
+        _ => earlier == later,
+    }
+}
+
+/// A part of a key for [`same_key_completed`]: a text normalised like a name,
+/// an empty one as `null`.
+fn normalized_key_part(part: &Value) -> Value {
+    match part {
+        Value::String(text) => match normalized_payer_name(text) {
+            normalized if normalized.is_empty() => Value::Null,
+            normalized => Value::String(normalized),
+        },
+        other => other.clone(),
+    }
 }
 
 /// A name for [`same_payer_key`]: trimmed, inner whitespace collapsed,
@@ -2993,7 +3135,7 @@ fn normalized_payer_name(text: &str) -> String {
 impl Declaration {
     fn keep_patient_consents(&mut self, previous: Option<&Self>) {
         let same = previous.filter(|previous| {
-            self.is_third_party() && previous.is_third_party() && self.same_payer(previous)
+            self.is_third_party() && previous.is_third_party() && previous.same_payer(self)
         });
         self.contact_consent_at = same.and_then(|previous| previous.contact_consent_at);
         self.cost_estimate_consent_at = same.and_then(|previous| previous.cost_estimate_consent_at);
@@ -3013,32 +3155,28 @@ impl Declaration {
         ])
     }
 
-    /// Whether `other` names the same payer ([`same_payer_key`]).
+    /// Whether `other`, the later declaration, still names the payer `self`
+    /// named ([`same_payer_key`]; a date of birth added completes the same
+    /// payer).
     pub(crate) fn same_payer(&self, other: &Self) -> bool {
         same_payer_key(&self.payer_key(), &other.payer_key())
     }
 
-    /// Whether `other` names the same payer at the same address
-    /// ([`identity_key`](Self::identity_key)), the texts normalised like
-    /// [`same_payer_key`]: a cosmetic correction by staff — "Olga" to
-    /// "OLGA ", a doubled space in the street — dates no new identity
-    /// (`identity_changed_at`) and keeps the record that the payer was
-    /// informed (QA 2026-10-24, C-5). Another name, date of birth, type,
-    /// kind, representative or address is another identity.
+    /// Whether `other`, the later declaration, names the same payer at the
+    /// same address as `self` ([`identity_key`](Self::identity_key)), the
+    /// texts normalised like [`same_payer_key`]: a cosmetic correction by
+    /// staff — "Olga" to "OLGA ", a doubled space in the street — dates no
+    /// new identity (`identity_changed_at`) and keeps the record that the
+    /// payer was informed (QA 2026-10-24, C-5); a date of birth or an address
+    /// part added where `self` had none completes the same identity (QA
+    /// 2026-10-25, F-G2). Another name, type, kind or representative, or a
+    /// date of birth or address part changed or removed, is another identity.
     pub(crate) fn same_identity(&self, other: &Self) -> bool {
-        let normalized = |declaration: &Self| match declaration.identity_key() {
-            Value::Array(parts) => Value::Array(
-                parts
-                    .into_iter()
-                    .map(|part| match part {
-                        Value::String(text) => Value::String(normalized_payer_name(&text)),
-                        other => other,
-                    })
-                    .collect(),
-            ),
-            other => other,
-        };
-        normalized(self) == normalized(other)
+        same_key_completed(
+            &self.identity_key(),
+            &other.identity_key(),
+            IDENTITY_KEY_COMPLETABLE,
+        )
     }
 
     /// The part of the declaration the lead cabinet shows and edits.
@@ -5113,6 +5251,58 @@ mod tests {
         let spaced = from_input(&organisation("company", " beispiel  gmbh")).unwrap();
         assert!(company.same_identity(&spaced));
         assert!(!company.same_identity(&stored));
+    }
+
+    /// QA 2026-10-25, F-G2: a value added where the earlier declaration had
+    /// none completes the same payer; a value changed or removed names
+    /// another. The order matters.
+    #[test]
+    fn a_value_added_where_none_was_completes_the_same_payer() {
+        let full = from_input(&input("third_party")).unwrap();
+        let mut sparse = full.clone();
+        sparse.date_of_birth = None;
+        sparse.street = None;
+        sparse.zip = None;
+        sparse.city = Some("  ".into());
+        assert!(sparse.same_payer(&full));
+        assert!(sparse.same_identity(&full));
+        // Removing the date of birth or the address is no completion.
+        assert!(!full.same_payer(&sparse));
+        assert!(!full.same_identity(&sparse));
+        // A link's raw snapshot without the date still names the payer.
+        let snapshot = json!([
+            PAYER_TYPE_PERSON,
+            Value::Null,
+            "Erika",
+            "Muster",
+            Value::Null
+        ]);
+        assert!(same_payer_key(&snapshot, &full.payer_key()));
+        assert!(!same_payer_key(&full.payer_key(), &snapshot));
+        // Names, type and kind are never completed.
+        let mut unnamed = full.clone();
+        unnamed.first_name = None;
+        assert!(!unnamed.same_payer(&full));
+        let mut untyped = full.clone();
+        untyped.payer_type = None;
+        assert!(!untyped.same_payer(&full));
+        // Consents survive a completion, not a change.
+        let at = Utc::now();
+        let mut previous = sparse.clone();
+        previous.contact_consent_at = Some(at);
+        previous.cost_estimate_consent_at = Some(at);
+        let mut next = full.clone();
+        next.keep_patient_consents(Some(&previous));
+        assert_eq!(
+            (next.contact_consent_at, next.cost_estimate_consent_at),
+            (Some(at), Some(at))
+        );
+        let mut previous = full.clone();
+        previous.contact_consent_at = Some(at);
+        let mut moved = full.clone();
+        moved.date_of_birth = NaiveDate::from_ymd_opt(1971, 5, 1);
+        moved.keep_patient_consents(Some(&previous));
+        assert_eq!(moved.contact_consent_at, None);
     }
 
     fn organisation(payer_type: &str, name: &str) -> DeclarationInput {

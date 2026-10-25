@@ -526,51 +526,24 @@ async fn load_patient_relation(
     let mut data = SourcePersonData::empty(source);
     data.record_patient_ids.push(patient_id);
 
-    // The child's requests that know this contact: the identity document and
-    // the birth place live on the newest `lead_representatives` row.
-    let contact_keys = [source_contact_id, Some(relation_id)]
-        .into_iter()
-        .flatten()
-        .map(|id| id.to_string())
-        .collect::<Vec<_>>();
-    let known = sqlx::query_as::<_, (Uuid, String)>(
-        r#"SELECT l.id, c ->> 'id'
-           FROM leads l
-           CROSS JOIN LATERAL jsonb_array_elements(
-               CASE WHEN jsonb_typeof(l.trusted_contacts) = 'array'
-                    THEN l.trusted_contacts ELSE '[]'::jsonb END) c
-           LEFT JOIN lead_representatives r
-                  ON r.lead_id = l.id AND r.contact_id::text = c ->> 'id'
-           WHERE (l.converted_patient_id = $1 OR l.repeat_patient_id = $1)
-             AND l.qualification_status <> 'deleted'
-             AND c ->> 'id' = ANY($2::text[])
-           ORDER BY (r.contact_id IS NOT NULL) DESC, r.updated_at DESC NULLS LAST,
-                    l.created_at DESC
-           LIMIT 1"#,
-    )
-    .bind(patient_id)
-    .bind(&contact_keys)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|error| failed(error, "child's request contact"))?;
+    let known = childs_request_contact(&state.db, patient_id, relation_id, source_contact_id)
+        .await
+        .map_err(|error| failed(error, "child's request contact"))?;
     let identity = match known {
-        Some((lead_id, contact_id)) => match Uuid::parse_str(&contact_id) {
-            Ok(contact_id) => {
-                let mut conn = state
-                    .db
-                    .acquire()
-                    .await
-                    .map_err(|error| failed(error, "connection"))?;
-                let identity = lead_guardian_identity::load_contact(&mut conn, lead_id, contact_id)
-                    .await
-                    .map_err(|error| failed(error, "representative identity"))?;
-                data.hints = hints(&state.db, lead_id, contact_id)
-                    .await
-                    .map_err(|error| failed(error, "hints"))?;
-                identity
-            }
-            Err(_) => None,
-        },
+        Some((lead_id, contact_id)) => {
+            let mut conn = state
+                .db
+                .acquire()
+                .await
+                .map_err(|error| failed(error, "connection"))?;
+            let identity = lead_guardian_identity::load_contact(&mut conn, lead_id, contact_id)
+                .await
+                .map_err(|error| failed(error, "representative identity"))?;
+            data.hints = hints(&state.db, lead_id, contact_id)
+                .await
+                .map_err(|error| failed(error, "hints"))?;
+            identity
+        }
         None => None,
     };
 
@@ -771,6 +744,91 @@ fn take_declaration(data: &mut SourcePersonData, extras: &Value) {
         .filter(|code| crate::services::citizenships::is_country_code(code));
     data.id_issued_on = date(extras, "id_issued_on");
     data.id_valid_until = date(extras, "id_valid_until");
+}
+
+/// The child's request that knows the relation `relation_id` of `patient_id`
+/// as a trusted contact (by the relation's `source_contact_id` or its own id):
+/// `(lead_id, contact_id)`, the newest one with a `lead_representatives` row
+/// first — the identity document and the birth place live there.
+async fn childs_request_contact(
+    pool: &sqlx::PgPool,
+    patient_id: Uuid,
+    relation_id: Uuid,
+    source_contact_id: Option<Uuid>,
+) -> Result<Option<(Uuid, Uuid)>, sqlx::Error> {
+    let contact_keys = [source_contact_id, Some(relation_id)]
+        .into_iter()
+        .flatten()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>();
+    let known = sqlx::query_as::<_, (Uuid, String)>(
+        r#"SELECT l.id, c ->> 'id'
+           FROM leads l
+           CROSS JOIN LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(l.trusted_contacts) = 'array'
+                    THEN l.trusted_contacts ELSE '[]'::jsonb END) c
+           LEFT JOIN lead_representatives r
+                  ON r.lead_id = l.id AND r.contact_id::text = c ->> 'id'
+           WHERE (l.converted_patient_id = $1 OR l.repeat_patient_id = $1)
+             AND l.qualification_status <> 'deleted'
+             AND c ->> 'id' = ANY($2::text[])
+           ORDER BY (r.contact_id IS NOT NULL) DESC, r.updated_at DESC NULLS LAST,
+                    l.created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(patient_id)
+    .bind(&contact_keys)
+    .fetch_optional(pool)
+    .await?;
+    Ok(known.and_then(|(lead_id, contact_id)| {
+        Uuid::parse_str(&contact_id)
+            .ok()
+            .map(|contact_id| (lead_id, contact_id))
+    }))
+}
+
+/// `source_pep_hint` of `GET /leads/{id}`: the child's own PEP answer about
+/// the person a lead was pre-filled from — the same value as
+/// `prefilled_from_source.hints.pep_self` at creation, read again from the
+/// source (`source_contact_lead_id` + `source_contact_id`, else
+/// `source_relation_id`). `None` without a source or an answer.
+pub(crate) async fn source_pep_hint(
+    pool: &sqlx::PgPool,
+    source_relation_id: Option<Uuid>,
+    source_contact_lead_id: Option<Uuid>,
+    source_contact_id: Option<Uuid>,
+) -> Result<Option<bool>, sqlx::Error> {
+    let known = match (
+        source_contact_lead_id,
+        source_contact_id,
+        source_relation_id,
+    ) {
+        (Some(lead_id), Some(contact_id), _) => Some((lead_id, contact_id)),
+        (_, _, Some(relation_id)) => {
+            let relation = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
+                "SELECT patient_id, source_contact_id FROM patient_relations WHERE id = $1",
+            )
+            .bind(relation_id)
+            .fetch_optional(pool)
+            .await?;
+            match relation {
+                Some((patient_id, source_contact_id)) => {
+                    childs_request_contact(pool, patient_id, relation_id, source_contact_id).await?
+                }
+                None => None,
+            }
+        }
+        _ => None,
+    };
+    match known {
+        Some((lead_id, contact_id)) => Ok(hints(pool, lead_id, contact_id).await?.pep_self),
+        None => Ok(None),
+    }
+}
+
+/// `"yes"` / `"no"` / `null`, as the creation's `hints` answer.
+pub(crate) fn hint_json(value: Option<bool>) -> Value {
+    Hints::answer(value)
 }
 
 /// The child's own answers about this person and the person's identity scan

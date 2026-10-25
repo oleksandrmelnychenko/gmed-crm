@@ -759,6 +759,23 @@ export type LeadRequestFollowUp = {
    * answer (QA 2026-10-10). Absent on an older server.
    */
   identity_documents?: LeadRequestDocument[];
+  /**
+   * The copies of an identity document GMED could not use, oldest first
+   * (F-G4, QA 2026-10-25): the lead's own (`representative_id` null) and the
+   * representatives'. A new copy of the same person replaces them; empty when none.
+   */
+  refused_identity_documents?: LeadRequestRefusedIdentityDocument[];
+};
+
+/** Why GMED could not use a copy: only about the document, never about the check. */
+export type RefusedIdentityReason = "unreadable" | "expired";
+
+export type LeadRequestRefusedIdentityDocument = {
+  document_id: string;
+  file_name: string | null;
+  reason: RefusedIdentityReason;
+  /** The representative whose copy it is; `null` for the lead's own. */
+  representative_id: string | null;
 };
 
 /** Which questions of block A this login is asked (from who pays and what the server misses). */

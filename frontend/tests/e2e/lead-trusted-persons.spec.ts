@@ -23,7 +23,7 @@ async function setup(page: Page, options: { requests?: ReturnType<typeof request
   await page.addInitScript(({ lang }) => {
     localStorage.setItem("gmed_access_token", "synthetic-disclosure-token");
     localStorage.setItem("gmed_lang", "ru");
-    localStorage.setItem("gmed_lead_cabinet_lang", lang);
+    localStorage.setItem("gmed_lead_cabinet_lang:synthetic-guardian", lang);
   }, { lang: options.lang ?? "en" });
   await page.routeWebSocket("**/api/**", (socket) => socket.close());
   await page.route("**/api/**", async (route) => {

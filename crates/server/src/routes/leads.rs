@@ -409,6 +409,67 @@ struct TrustedContactRequest {
     relation: Option<String>,
     birth_date: Option<String>,
     address: Option<String>,
+    /// A representative's citizenships and birth data, sent with the contact
+    /// by a wizard save (`POST /leads/{id}/update`, F-11 QA 2026-10-25): not
+    /// part of the entry, written to the representative's row
+    /// (`lead_representatives::sync_wizard_contacts`). Left out, the row
+    /// keeps its value; `null` clears it.
+    #[serde(default, deserialize_with = "sent")]
+    citizenships: Option<Option<Vec<String>>>,
+    #[serde(default, deserialize_with = "sent")]
+    birth_place: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    birth_country: Option<Option<String>>,
+}
+
+impl TrustedContactRequest {
+    /// The representative's keys the request carries (see the fields).
+    fn representative_details(&self) -> serde_json::Map<String, Value> {
+        let mut values = serde_json::Map::new();
+        if let Some(citizenships) = &self.citizenships {
+            values.insert("citizenships".into(), json!(citizenships));
+        }
+        if let Some(birth_place) = &self.birth_place {
+            values.insert("birth_place".into(), json!(birth_place));
+        }
+        if let Some(birth_country) = &self.birth_country {
+            values.insert("birth_country".into(), json!(birth_country));
+        }
+        values
+    }
+}
+
+/// The representatives' keys a wizard save sends with its contacts, by the
+/// id each contact has in the normalized list (`normalized`, same order), with
+/// the same keys of the contact in the loaded list (`base`).
+fn contact_details_edits(
+    sent: &[TrustedContactRequest],
+    normalized: &Value,
+    base: Option<&[TrustedContactRequest]>,
+) -> Vec<super::lead_representatives::ContactDetailsEdit> {
+    sent.iter()
+        .enumerate()
+        .filter_map(|(index, contact)| {
+            let values = contact.representative_details();
+            if values.is_empty() {
+                return None;
+            }
+            let contact_id =
+                super::lead_representatives::entry_id(normalized.as_array()?.get(index)?)?;
+            let base = base.map(|base| {
+                base.iter()
+                    .find(|loaded| loaded.id == Some(contact_id))
+                    .map(TrustedContactRequest::representative_details)
+                    .unwrap_or_default()
+            });
+            Some(super::lead_representatives::ContactDetailsEdit {
+                index,
+                contact_id,
+                values,
+                base,
+            })
+        })
+        .collect()
 }
 
 /// A key that is present in the body, also with `null`; an absent key stays
@@ -532,6 +593,69 @@ fn field_err(field: &str, message: &str) -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+/// The lead sources the app names (the leads page's source labels), in the
+/// normalised form [`normalize_lead_source`] gives. It holds every value the
+/// app and the public intake write, older spellings included, so a value
+/// already stored stays a known one (QA 2026-10-25: any text was accepted and
+/// shown as «Неизвестное значение»).
+const KNOWN_LEAD_SOURCES: &[&str] = &[
+    "manual",
+    "existing_patient",
+    "agent",
+    "website",
+    "apply",
+    "website_wizard",
+    "wizard",
+    "website_questionnaire",
+    "questionnaire",
+    "oprosnik",
+    "website_contact",
+    "website_contact_form",
+    "website_form",
+    "contact_form",
+    "contact",
+    "visitor_facade",
+    "referral",
+    "phone",
+    "email",
+    "whatsapp",
+    "partner",
+    "social_media",
+    "google_ads",
+    "facebook",
+    "instagram",
+    "walk_in",
+    "other",
+];
+
+/// Lower case, trimmed, runs of spaces and hyphens as one `_` — the form the
+/// leads page reads a source in ("Website Wizard" is `website_wizard`).
+fn normalize_lead_source(value: &str) -> String {
+    let mut normalized = String::with_capacity(value.len());
+    let mut separator = false;
+    for character in value.trim().chars() {
+        if character == '-' || character.is_whitespace() {
+            separator = true;
+            continue;
+        }
+        if separator {
+            normalized.push('_');
+            separator = false;
+        }
+        normalized.extend(character.to_lowercase());
+    }
+    normalized
+}
+
+/// Whether a lead source sent by staff is one the app knows; none (or a
+/// blank one) is accepted as before.
+fn lead_source_known(value: Option<&str>) -> bool {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        None => true,
+        Some(value) => KNOWN_LEAD_SOURCES.contains(&normalize_lead_source(value).as_str()),
+    }
 }
 
 fn normalize_trusted_contacts(contacts: &[TrustedContactRequest]) -> Result<Value, &'static str> {
@@ -3570,6 +3694,28 @@ fn lead_gate_err(
         .into_response()
 }
 
+/// [`lead_gate_err`] with a `code` naming the blocker the wizard explains.
+fn lead_gate_err_coded(
+    code: &str,
+    message: &str,
+    blocking_reasons: &[String],
+    readiness: &Value,
+) -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({
+            "error": StatusCode::UNPROCESSABLE_ENTITY
+                .canonical_reason()
+                .unwrap_or("error"),
+            "code": code,
+            "message": message,
+            "blocking_reasons": blocking_reasons,
+            "readiness": readiness,
+        })),
+    )
+        .into_response()
+}
+
 async fn list_repeat_intakes(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -4181,6 +4327,18 @@ async fn create_lead(
     }) {
         return field_err("phone", "Invalid phone");
     }
+    if !lead_source_known(body.source.as_deref()) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "invalid_field",
+                "code": "invalid_field",
+                "message": "Unknown lead source",
+                "field": "source",
+            })),
+        )
+            .into_response();
+    }
     // The address of the patient login: an adult's own.
     let account_email = portal_email.clone().filter(|_| !minor);
 
@@ -4554,6 +4712,7 @@ async fn get_lead(
                   requested_specialties, wizard_state, status_changed_at,
                   intake_model, prospect_patient_id, referrer_patient_id,
                   repeat_patient_id, retention_warning_sent_at,
+                  source_relation_id, source_contact_lead_id, source_contact_id,
                   (
                       SELECT p.patient_id FROM patients p
                       WHERE p.id = leads.repeat_patient_id
@@ -5016,6 +5175,40 @@ async fn get_lead(
         rfc(row
             .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
             .ok()),
+    );
+    // «Новая заявка для этого человека»: where the lead was pre-filled from,
+    // and the child's own PEP answer about this person, read again from the
+    // source (the wizard asks again while it is "yes" and the lead's own
+    // answer is missing). Never copied to the lead.
+    let source_id = |col: &str| row.try_get::<Option<Uuid>, _>(col).ok().flatten();
+    let (source_relation_id, source_contact_lead_id, source_contact_id) = (
+        source_id("source_relation_id"),
+        source_id("source_contact_lead_id"),
+        source_id("source_contact_id"),
+    );
+    obj.insert("source_relation_id".into(), json!(source_relation_id));
+    obj.insert(
+        "source_contact_lead_id".into(),
+        json!(source_contact_lead_id),
+    );
+    obj.insert("source_contact_id".into(), json!(source_contact_id));
+    let source_pep_hint = match super::lead_source_person::source_pep_hint(
+        &state.db,
+        source_relation_id,
+        source_contact_lead_id,
+        source_contact_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "load lead: source PEP hint");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load lead");
+        }
+    };
+    obj.insert(
+        "source_pep_hint".into(),
+        super::lead_source_person::hint_json(source_pep_hint),
     );
     let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
         Ok(Some(readiness)) => readiness,
@@ -5532,6 +5725,14 @@ async fn update_lead(
             Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
         },
         None => None,
+    };
+    // A representative's citizenships and birth data sent with a contact go
+    // to its row in the transaction of the save (F-11, QA 2026-10-25).
+    let contact_details = match (body.trusted_contacts.as_deref(), trusted_contacts.as_ref()) {
+        (Some(sent), Some(normalized)) => {
+            contact_details_edits(sent, normalized, body.trusted_contacts_base.as_deref())
+        }
+        _ => Vec::new(),
     };
 
     let insurance_type_supplied = body.insurance_type.is_some();
@@ -6181,6 +6382,28 @@ async fn update_lead(
     } else {
         Vec::new()
     };
+    // The representatives' rows follow the saved entries (a renamed parent's
+    // name), and take the citizenships and birth data sent with a contact; a
+    // refused key refuses the save, naming the contact and the key (F-11).
+    let representative_details_changed = if trusted_contacts.is_some() {
+        match super::lead_representatives::sync_wizard_contacts(
+            &mut tx,
+            lead_id,
+            &contact_details,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(Ok(changed)) => changed,
+            Ok(Err(response)) => return response,
+            Err(error) => {
+                tracing::error!(%error, lead_id = %lead_id, "sync representatives with contacts");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    } else {
+        false
+    };
     let previous_citizenships = match citizenships.as_deref() {
         Some(codes) => {
             match super::lead_payer::set_lead_citizenships(&mut tx, lead_id, codes).await {
@@ -6341,7 +6564,22 @@ async fn update_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
-    let representative_invites = if representative_changed {
+    // Who acts for the lead, their names and countries decide the country
+    // triggers of the representatives: the assessment follows in the same
+    // transaction, as after the cabinet's change (F-11, QA 2026-10-25).
+    if (representative_changed || representative_details_changed)
+        && let Err(error) = crate::risk::store::reassess(
+            &mut tx,
+            lead_id,
+            crate::risk::store::Cause::Staff,
+            Some(auth.user_id),
+        )
+        .await
+    {
+        tracing::error!(%error, %lead_id, "reassess risk after contacts");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let representative_invites = if representative_changed || representative_details_changed {
         match crate::document_signatures::invalidate_representative_identity(
             &mut tx,
             lead_id,
@@ -8293,6 +8531,22 @@ async fn convert_lead(
         Err(resp) => return resp,
     };
     if !readiness.conversion_ready {
+        // QA R-8 (owner decision 2026-10-25): the unidentified payer is named
+        // by its code, so the wizard can say what is missing; the CEO's risk
+        // release does not lift it.
+        let payer_not_identified = super::lead_payer::PayerReason::PayerNotIdentified;
+        if readiness
+            .conversion_reasons
+            .iter()
+            .any(|reason| reason == payer_not_identified.message())
+        {
+            return lead_gate_err_coded(
+                payer_not_identified.code(),
+                "Lead is not conversion-ready",
+                &readiness.conversion_reasons,
+                &readiness.payload,
+            );
+        }
         return lead_gate_err(
             "Lead is not conversion-ready",
             &readiness.conversion_reasons,
@@ -8939,16 +9193,33 @@ async fn convert_lead(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
+    // A patient the lead was attached to (duplicate dialog, repeat intake)
+    // keeps its primary e-mail and phone: the lead's own differing values are
+    // added beside them as further contacts (QA 2026-10-25, the insert of a
+    // second primary violated `uq_patient_contacts_primary`). A value the
+    // patient already has — compared normalised, as the identity check
+    // compares — is not added twice.
     for contact in &contacts {
         if let Err(error) = sqlx::query(
             r#"INSERT INTO patient_contacts
                       (patient_id, contact_kind, contact_type, value, is_primary, notes)
-               SELECT $1, $2, $3, $4, $5, $6
+               SELECT $1, $2, $3, $4,
+                      $5 AND NOT EXISTS (
+                          SELECT 1 FROM patient_contacts primary_contact
+                          WHERE primary_contact.patient_id = $1
+                            AND primary_contact.contact_kind = $2
+                            AND primary_contact.is_primary
+                      ),
+                      $6
                WHERE NOT EXISTS (
                    SELECT 1 FROM patient_contacts existing
                    WHERE existing.patient_id = $1
                      AND existing.contact_kind = $2
-                     AND existing.value = $4
+                     AND CASE WHEN $2 = 'phone'
+                              THEN regexp_replace(phone_digits(existing.value), '^00', '')
+                                   = regexp_replace(phone_digits($4), '^00', '')
+                              ELSE lower(btrim(existing.value)) = lower(btrim($4))
+                         END
                )"#,
         )
         .bind(patient_id)
@@ -13207,6 +13478,9 @@ mod lead_conversion_readiness_tests {
             relation: Some("mother".to_string()),
             birth_date: Some(birth_date.to_string()),
             address: None,
+            citizenships: None,
+            birth_place: None,
+            birth_country: None,
         };
         assert!(normalize_trusted_contacts(&[contact("1985-03-02")]).is_ok());
         assert_eq!(

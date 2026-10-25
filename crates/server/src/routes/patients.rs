@@ -9967,6 +9967,7 @@ async fn list_relations(
                   pr.is_emergency_contact, pr.phone, pr.notes, pr.created_at,
                   pr.email, pr.address_street, pr.address_zip, pr.address_city,
                   pr.address_country, pr.is_default_payer, pr.is_organisation,
+                  pr.birth_date, pr.citizenships,
                   rp.patient_id AS related_patient_pid,
                   rp.first_name AS related_first_name,
                   rp.last_name AS related_last_name
@@ -10044,12 +10045,13 @@ impl RelationBillingFields {
 const RELATION_RETURNING: &str = r#"id, patient_id, related_patient_id, related_name, relation_type,
                           is_emergency_contact, phone, notes, created_at, email,
                           address_street, address_zip, address_city, address_country,
-                          is_default_payer, is_organisation"#;
+                          is_default_payer, is_organisation, birth_date, citizenships"#;
 
 const RELATION_SELECT_FROM_UPSERTED: &str = r#"SELECT u.id, u.patient_id, u.related_patient_id, u.related_name, u.relation_type,
                   u.is_emergency_contact, u.phone, u.notes, u.created_at,
                   u.email, u.address_street, u.address_zip, u.address_city,
                   u.address_country, u.is_default_payer, u.is_organisation,
+                  u.birth_date, u.citizenships,
                   rp.patient_id AS related_patient_pid,
                   rp.first_name AS related_first_name,
                   rp.last_name AS related_last_name
@@ -11984,6 +11986,10 @@ fn build_relation_json(row: sqlx::postgres::PgRow, linked_patient_visible: bool)
         "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
         "is_default_payer": row.try_get::<bool, _>("is_default_payer").unwrap_or(false),
         "is_organisation": is_organisation,
+        // The relation's own date of birth and ISO citizenships (written by
+        // the lead conversion); same visibility as its other contact fields.
+        "birth_date": row.try_get::<Option<chrono::NaiveDate>, _>("birth_date").unwrap_or_default().map(|date| date.format("%Y-%m-%d").to_string()),
+        "citizenships": row.try_get::<Vec<String>, _>("citizenships").unwrap_or_default(),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
     })
 }

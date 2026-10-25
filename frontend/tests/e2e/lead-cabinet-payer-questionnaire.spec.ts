@@ -571,12 +571,18 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await expect(notice).not.toContainText("GwG");
     await expect(section).not.toContainText("Geldwäschegesetz");
     await expect(notice.getByRole("link", { name: "Datenschutzhinweise" })).toHaveAttribute("href", "/legal?notice=form&lang=de#privacy");
-    // Why the fields wait only after a press (QA 2026-10-10: no hint before "Weiter").
-    await expect(section.getByTestId("lead-request-payer-notice-first")).toHaveCount(0);
-    await expect(section.getByTestId("lead-request-payer-fields")).toHaveCount(0);
+    // The fields are visible from the start, locked until the notice is confirmed, and the hint
+    // says why (QA 2026-10-25, R-1: they appeared only after the first click).
+    await expect(section.getByTestId("lead-request-payer-notice-first")).toBeVisible();
+    await expect(section.getByTestId("lead-request-payer-fields")).toBeVisible();
+    await expect(section.getByRole("textbox", { name: /Beruf \/ Tätigkeit/ })).toBeDisabled();
     // The yellow lists only after a press on send (owner 2026-10-09, QA 2026-10-10).
     await expect(section.getByTestId("lead-request-payer-missing-own")).toHaveCount(0);
-    await expect(section.getByTestId("lead-request-payer-submit")).toBeDisabled();
+    // Next to "send": what it still waits for (R-1: a disabled button said nothing).
+    await expect(section.getByTestId("lead-request-payer-submit")).toBeEnabled();
+    const needs = section.getByTestId("lead-request-payer-send-needs");
+    await expect(needs).toContainText("Zum Senden fehlt noch:");
+    await expect(needs).toContainText("Bestätigung, dass Ihre Angaben vollständig und richtig sind");
     await page.screenshot({ path: testInfo.outputPath("lead-cabinet-payer-notice-de-desktop.png"), animations: "disabled", fullPage: true });
 
     await notice.getByRole("checkbox", { name: "E-Mail" }).check();
@@ -649,8 +655,13 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     expect(calls.other).toEqual([]);
 
     const submit = section.getByTestId("lead-request-payer-submit");
-    await expect(submit).toBeDisabled();
+    await expect(needs).toHaveText(/Zum Senden fehlt noch:\s*Bestätigung, dass Ihre Angaben vollständig und richtig sind/);
+    // A press without the confirmation sends nothing and says why.
+    await submit.click();
+    await expect(section.getByRole("alert")).toContainText("Bitte bestätigen Sie Ihre Angaben, bevor Sie sie senden.");
+    expect(calls.submits).toEqual([]);
     await section.getByTestId("lead-request-payer-declaration").getByRole("checkbox").check();
+    await expect(needs).toHaveCount(0);
     await expect(submit).toBeEnabled();
     await page.screenshot({ path: testInfo.outputPath("lead-cabinet-payer-filled-de-desktop.png"), animations: "disabled", fullPage: true });
     await submit.click();

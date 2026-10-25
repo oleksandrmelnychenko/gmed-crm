@@ -16,6 +16,7 @@ import {
   withoutTrustedContacts,
   type TrustedContactDraft,
 } from "./lead-trusted-contacts";
+import { changedRepresentativeDetails } from "./lead-trusted-contacts";
 
 describe("the relation of a trusted contact", () => {
   const ru = (text: string) => text;
@@ -323,5 +324,37 @@ describe("whether an e-mail address is judged by its domain on save", () => {
     expect(emailChangedOnSave("anna@dead.example", undefined)).toBe(true);
     expect(emailChangedOnSave("anna@other.example", "anna@dead.example")).toBe(true);
     expect(emailChangedOnSave("", "anna@dead.example")).toBe(false);
+  });
+});
+
+describe("F-11: a representative's citizenships and birth data go with the contact", () => {
+  const contact: TrustedContactDraft = {
+    id: "c1", relatedPatientId: "", relatedPatientLabel: "", name: "Iwan Parallelov", phone: "", email: "",
+    relation: "father", birthDate: "", address: "",
+  };
+  it("sends only the keys staff changed, and counts them as a change", () => {
+    const changed = changedRepresentativeDetails(
+      { citizenships: ["IR"], birth_place: "Moskau", birth_country: "RU" },
+      { citizenships: ["RU"], birth_place: "Moskau", birth_country: "ru" },
+    );
+    expect(changed).toEqual({ citizenships: ["IR"] });
+    const stored = trustedContactsPayload([contact]);
+    const payload = trustedContactsPayload([{ ...contact, representativeDetails: changed }]);
+    expect(payload[0]).toMatchObject({ citizenships: ["IR"] });
+    expect(payload[0]).not.toHaveProperty("birth_place");
+    expect(trustedContactsChanged(payload, stored)).toBe(true);
+    expect(trustedContactsChanged(payload, payload)).toBe(false);
+    expect(leadUpdateWithChangedContacts({}, [{ ...contact, representativeDetails: changed }], stored).contacts?.[0].citizenships).toEqual(["IR"]);
+  });
+  it("clears a birth place with null and leaves the payload alone without changes", () => {
+    expect(changedRepresentativeDetails(
+      { citizenships: ["RU"], birth_place: " ", birth_country: "" },
+      { citizenships: ["RU"], birth_place: "Moskau", birth_country: "" },
+    )).toEqual({ birth_place: null });
+    expect(changedRepresentativeDetails(
+      { citizenships: ["RU"], birth_place: "Moskau", birth_country: "" },
+      { citizenships: ["ru"], birth_place: "Moskau ", birth_country: "" },
+    )).toBeUndefined();
+    expect(trustedContactsPayload([contact])[0]).not.toHaveProperty("citizenships");
   });
 });

@@ -58,6 +58,10 @@ export type RelationItem = {
   address_zip?: string | null;
   address_city?: string | null;
   address_country?: string | null;
+  /** ISO date; not sent by the server yet (the conversion keeps it in `notes`, «Geburtsdatum: …»). */
+  birth_date?: string | null;
+  /** ISO alpha-2 codes; not sent by the server yet. */
+  citizenships?: string[] | null;
   /** Receives the patient's invoices unless an order names another payer. */
   is_default_payer?: boolean;
   /**

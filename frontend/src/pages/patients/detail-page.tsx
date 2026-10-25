@@ -83,6 +83,7 @@ import {
   type PatientTimelineItem,
   type PatientTimelineRangeFilter,
   isPatientDetailTabReadOnly,
+  patientRelationTypeLabel,
   usePatientDetailLabels,
 } from "./model/detail-model";
 import {
@@ -375,7 +376,9 @@ function relationTypeLabel(value: string) {
     case "other":
       return patientDetailText("patients_detail_other");
     default:
-      return patientDetailUnknownEnumLabel(value);
+      // mother/father (stored since 2026-10-17) and any later type: the label
+      // table of the relation editor and the profile.
+      return patientRelationTypeLabel(value);
   }
 }
 

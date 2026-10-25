@@ -120,6 +120,29 @@ export function patientInsuranceCoversGermany(intakeProfile: unknown): "" | "yes
   return value === "yes" || value === "no" || value === "not_sure" ? value : "";
 }
 
+/**
+ * The answer to «Есть ли медицинская страховка» from what is stored: a self
+ * payer (`insurance_type: "self_pay"`) has none, whatever an older
+ * `has_insurance` says — a repeat request prefilled «Да / Самооплата» and
+ * then asked for insurer and policy number (QA 2026-10-25, F-W7).
+ */
+export function insuranceAnswerFromStored({
+  hasInsurance,
+  insuranceType,
+  insuranceProvider,
+  insuranceNumber,
+}: {
+  hasInsurance: boolean | null | undefined;
+  insuranceType: string | null | undefined;
+  insuranceProvider?: string | null;
+  insuranceNumber?: string | null;
+}): "" | "yes" | "no" {
+  if ((insuranceType ?? "").trim() === "self_pay") return "no";
+  if (hasInsurance === true) return "yes";
+  if (hasInsurance === false) return "no";
+  return (insuranceType ?? "").trim() || (insuranceProvider ?? "").trim() || (insuranceNumber ?? "").trim() ? "yes" : "";
+}
+
 /** The patient number shown next to "Повторное обращение". */
 export function repeatIntakePatientNumber(
   existingPatientNumber: string | null | undefined,

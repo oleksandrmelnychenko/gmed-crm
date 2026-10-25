@@ -497,3 +497,19 @@ describe("when the status is loaded again", () => {
     expect(identificationStatusChanged({ type: "document.updated", payload: { change: "representation" } })).toBe(false);
   });
 });
+
+describe("M F-13: an adult's Betreuer/in who does not pay", () => {
+  it("expects no payment from the representative's own account when the patient pays", () => {
+    const adult = status({
+      acting_persons: [
+        { ...representative({ id: ANNA_ID, name: "Ute Betreuerin", relation: "guardian" }), slot: "guardian", role: "legal_guardian" },
+      ],
+    });
+    const [patient, betreuerin] = identificationPersons(adult, ru);
+    expect(patient.paymentExpected).toBe(true);
+    expect(betreuerin.paymentExpected).toBe(false);
+    expect(betreuerin.paidByThirdParty).toBe(false);
+    expect(ownAccountPaymentLabel(betreuerin.person, ru, betreuerin.paymentExpected, betreuerin.paidByThirdParty).text)
+      .toBe("Платёж с собственного счёта не ожидается");
+  });
+});

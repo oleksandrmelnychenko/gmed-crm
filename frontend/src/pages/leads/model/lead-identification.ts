@@ -347,7 +347,10 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
           detail: actingPersonRoleLabel(acting, tx),
           person: { qes: acting.qes, own_account_payment: acting.own_account_payment },
           canConfirm: true,
-          paymentExpected: !thirdPartyPays,
+          // An adult's representative or Betreuer/in acts and signs for the
+          // patient; the payment comes from the patient (or the named payer),
+          // never from this person's own account (QA 2026-10-25, M F-13).
+          paymentExpected: false,
           paidByThirdParty: thirdPartyPays,
           wide: false,
           note: missingEmailNote(acting, tx),

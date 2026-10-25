@@ -11,6 +11,37 @@ use uuid::Uuid;
 use super::Inputs;
 use crate::routes::lead_enhanced_check;
 
+/// Who a representative is for the release fingerprint
+/// ([`super::RepresentativeInputs`]): the name, the date of birth, the
+/// relation and a linked patient record of the trusted contact — another
+/// person in the slot is reviewed again. Nothing staff or the parent enter
+/// later counts: the ID-document data (`id_*`), the contract details of the
+/// `lead_representatives` row (created by that entry), birth place, e-mail,
+/// phone and address raise no trigger, so they must not void the release
+/// (QA 2026-10-25, R-4; owner rule: only a new or a higher trigger re-opens
+/// the review). Countries, an expired or unreadable document, a PEP or a
+/// sanctions answer fire their own triggers.
+pub(crate) fn risk_identity_material(contact: &serde_json::Value) -> serde_json::Value {
+    const CONTACT: [&str; 5] = [
+        "name",
+        "relation",
+        "birth_date",
+        "date_of_birth",
+        "related_patient_id",
+    ];
+    serde_json::Value::Object(
+        CONTACT
+            .iter()
+            .filter_map(|key| {
+                contact
+                    .get(*key)
+                    .filter(|value| !value.is_null())
+                    .map(|value| ((*key).to_string(), value.clone()))
+            })
+            .collect(),
+    )
+}
+
 /// Payer identity of an order: who it names (not the patient).
 const ORDER_PAYER_SQL: &str = r#"COALESCE(
     'patient:' || o.payer_patient_id::text,
@@ -128,12 +159,16 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
             let identity = canonical.iter().find(|identity| identity.contact_id == Some(person.id));
             let citizenships = identity.map(|identity| identity.citizenships.clone()).unwrap_or_else(|| person.extras.citizenships.clone());
             let residences = identity.map(|identity| identity.residences.clone()).unwrap_or_else(|| person.extras.country.clone().into_iter().collect());
-            let material = identity.map(|identity| serde_json::json!({"contact":identity.contact,"extras":identity.extras}))
-                .unwrap_or_else(|| serde_json::json!({"id":person.id,"name":person.name(),"citizenships":citizenships,"residences":residences}));
+            let fallback = serde_json::json!({"id":person.id,"name":person.name(),"citizenships":citizenships,"residences":residences});
+            let legacy = identity.map(|identity| serde_json::json!({"contact":identity.contact,"extras":identity.extras}))
+                .unwrap_or(fallback);
+            let material = identity.map(|identity| risk_identity_material(&identity.contact))
+                .unwrap_or_else(|| serde_json::json!({"id":person.id,"name":person.name()}));
             super::RepresentativeInputs {
                 id: person.id, name: person.name(), citizenships, residences,
                 fields: crate::routes::lead_representatives::representative_question_fields(&person.extras),
                 identity_fingerprint: hex::encode(Sha256::digest(material.to_string().as_bytes())),
+                legacy_identity_fingerprint: hex::encode(Sha256::digest(legacy.to_string().as_bytes())),
             }
         }).collect();
     let inputs = Inputs {
@@ -180,4 +215,37 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
         today: Some(today),
     };
     Ok(Some(inputs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::risk_identity_material;
+    use serde_json::json;
+
+    /// QA 2026-10-25, R-4: the parent's passport, contact and address
+    /// entered after the CEO release change nothing the release fingerprint
+    /// reads; another person in the slot does.
+    #[test]
+    fn only_who_the_representative_is_counts_for_the_release() {
+        let contact = json!({
+            "id": "c1", "name": "Olga Kindrisk", "relation": "mother",
+            "birth_date": "1988-02-02", "email": "olga@example.test",
+            "phone": "+49 30 1", "address": "Hauptstr. 1",
+            "citizenships": ["IR"], "country": "DE",
+        });
+        let before = risk_identity_material(&contact);
+        let mut reached = contact.clone();
+        reached["email"] = json!("olga.k@example.test");
+        reached["phone"] = json!("+49 30 2");
+        reached["address"] = json!("Nebenstr. 2");
+        // A country fires its own trigger (T1 / T2).
+        reached["citizenships"] = json!(["IR", "SY"]);
+        assert_eq!(risk_identity_material(&reached), before);
+        let mut other_person = contact.clone();
+        other_person["name"] = json!("Max Kindrisk");
+        assert_ne!(risk_identity_material(&other_person), before);
+        let mut other_birth = contact;
+        other_birth["birth_date"] = json!("1987-01-01");
+        assert_ne!(risk_identity_material(&other_birth), before);
+    }
 }

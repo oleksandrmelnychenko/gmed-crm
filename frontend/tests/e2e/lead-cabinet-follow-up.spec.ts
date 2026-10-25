@@ -124,6 +124,8 @@ function leadRequest() {
       relationship_proof_documents: [] as Json[],
       // Block I: only the copies uploaded since staff took the document's data down.
       identity_documents: [] as Json[],
+      // The copies staff could not use, each with the reason (F-G4); a new copy of the person replaces them.
+      refused_identity_documents: [] as Json[],
     },
     review_notice: false,
     payer_questionnaire: null,
@@ -373,6 +375,16 @@ async function setup(page: Page, prepare?: (request: LeadRequestMock) => void, o
     }
     if (method === "POST" && path === `${base}/identity-document`) {
       calls.identityUploads += 1;
+      // As the server: the new copy replaces the lead's own refused copies (F-G4).
+      const replaced = new Set(
+        (request.follow_up.refused_identity_documents as { document_id: string; representative_id: string | null }[])
+          .filter((entry) => entry.representative_id === null)
+          .map((entry) => entry.document_id),
+      );
+      request.identity_documents = request.identity_documents.filter((document) => !replaced.has((document as { id: string }).id));
+      request.follow_up.refused_identity_documents = (
+        request.follow_up.refused_identity_documents as { representative_id: string | null }[]
+      ).filter((entry) => entry.representative_id !== null);
       upload(request.identity_documents, "reisepass.pdf");
       // A new copy answers block I too.
       request.follow_up.identity_documents.push(request.identity_documents[request.identity_documents.length - 1]);
@@ -895,7 +907,13 @@ test.describe("lead cabinet stepper and follow-up", () => {
   });
 
   test("blocks C and I: the payment route with its extras, and a new copy of the identity document", async ({ page }) => {
-    const { calls } = await setup(page, sentWithBlocks(["C", "I"]));
+    const { calls } = await setup(page, (request) => {
+      sentWithBlocks(["C", "I"])(request);
+      // Staff marked the copy from before as unreadable (F-G4).
+      request.follow_up.refused_identity_documents = [
+        { document_id: "id-doc-0", file_name: "reisepass.pdf", reason: "unreadable", representative_id: null },
+      ];
+    });
     await page.goto("/");
     await expect(page.getByTestId("lead-request-follow-up-A")).toHaveCount(0);
 
@@ -919,10 +937,15 @@ test.describe("lead cabinet stepper and follow-up", () => {
     // No intro sentence above the upload (owner 2026-10-09): the button says what to do.
     await expect(blockI).not.toContainText("Bitte laden Sie ein aktuelles, gut lesbares Foto");
     await expect(blockI.getByRole("button", { name: "Foto oder Scan des Ausweises hochladen" })).toBeEnabled();
-    // The copy uploaded before the block opened is no answer (QA 2026-10-10): the
-    // block shows the empty upload, without a reason.
-    await expect(blockI.getByTestId("lead-request-identity-list")).toBeHidden();
-    await expect(blockI).not.toContainText("reisepass.pdf");
+    // The copy uploaded before the block opened is no answer (QA 2026-10-10). It is shown
+    // greyed as refused, with the reason, until a new copy replaces it (QA 2026-10-25, G F-G4).
+    await expect(blockI.getByTestId("lead-request-identity-list-refused")).toContainText("reisepass.pdf");
+    await expect(blockI.getByTestId("lead-request-identity-list-refused")).toContainText("Nicht verwendbar");
+    expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
+    await expect(blockI.getByTestId("lead-request-identity-list-refused-reason")).toHaveText(
+      "GMED konnte dieses Dokument nicht lesen. Bitte laden Sie einen neuen, gut lesbaren Scan hoch – er ersetzt dieses Dokument.",
+    );
+    await expect(blockI.getByTestId("lead-request-identity-list").getByRole("button")).toHaveCount(0);
     await blockI.locator("#lead-request-identity-files").setInputFiles({
       name: "reisepass-neu.pdf",
       mimeType: "application/pdf",
@@ -932,6 +955,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(blockI.getByTestId("lead-request-identity-list")).toContainText("reisepass.pdf");
     await expect(blockI.getByTestId("lead-request-identity-list").getByRole("listitem")).toHaveCount(1);
     await expect(page.getByTestId("lead-request-follow-up-I-missing")).toHaveCount(0);
+    await expect(blockI.getByTestId("lead-request-identity-list-refused")).toHaveCount(0);
     expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
   });
 

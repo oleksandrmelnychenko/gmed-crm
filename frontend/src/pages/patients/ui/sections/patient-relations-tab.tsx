@@ -39,7 +39,11 @@ type PatientRelationsTabProps = {
   tabLoading: boolean;
 };
 
-function localizeRelationNotes(value: string | null | undefined, lang: "de" | "ru") {
+/**
+ * The notes the lead conversion writes («Email: …», «Geburtsdatum: 1985-05-02»):
+ * labels in the UI language and every ISO date as DD.MM.YYYY.
+ */
+export function localizeRelationNotes(value: string | null | undefined, lang: "de" | "ru") {
   if (!value) return "";
   const labels =
     lang === "de"
@@ -48,7 +52,8 @@ function localizeRelationNotes(value: string | null | undefined, lang: "de" | "r
   return value
     .replace(/\bEmail:/gi, labels.email)
     .replace(/\bGeburtsdatum:/gi, labels.birthDate)
-    .replace(/\bAdresse:/gi, labels.address);
+    .replace(/\bAdresse:/gi, labels.address)
+    .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, "$3.$2.$1");
 }
 
 export function PatientRelationsTab({

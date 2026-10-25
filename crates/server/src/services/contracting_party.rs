@@ -16,6 +16,12 @@
 //! The choice is stored on the order (else on its framework contract); when
 //! neither names it, it is derived from the patient's age at the given date.
 //! See `docs/architecture/invoice-payer-model_ua.md`.
+//!
+//! A court-appointed guardian never contracts in their own name (owner
+//! decision 2026-10-25): the ward is the Auftraggeber, represented by the
+//! Vormund (minor) or the rechtliche Betreuer (adult) — see
+//! [`ContractingParty::court_guardian`] and [`adult_betreuer`]. The contract
+//! documents print it so; the invoice side keeps the party resolved here.
 
 use chrono::{Datelike, NaiveDate};
 use serde_json::{Value, json};
@@ -58,6 +64,16 @@ impl PartyKind {
             Self::LegalRepresentatives => PARTY_LEGAL_REPRESENTATIVES,
         }
     }
+}
+
+/// A court-appointed guardian who represents the patient as party: the
+/// Vormund of a minor (Bestallungsurkunde), the rechtliche Betreuer of an
+/// adult. Both act in the ward's name, never in their own (owner decision
+/// 2026-10-25).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CourtGuardian {
+    Vormund,
+    Betreuer,
 }
 
 /// A parent or guardian recorded as a patient relation.
@@ -152,6 +168,25 @@ impl ContractingParty {
                 .map(|representative| representative.name.clone())
                 .collect::<Vec<_>>(),
         )
+    }
+
+    /// The court-appointed guardian when every representative of the party
+    /// is a `guardian` relation: a Vormund for a minor, a Betreuer for an
+    /// adult. The documents then name the patient as the Auftraggeber,
+    /// represented by that guardian, whatever `kind` says (owner decision
+    /// 2026-10-25); parents keep contracting in their own name.
+    pub fn court_guardian(&self) -> Option<CourtGuardian> {
+        (self.kind != PartyKind::Patient
+            && !self.representatives.is_empty()
+            && self
+                .representatives
+                .iter()
+                .all(|representative| representative.relation_type == "guardian"))
+        .then_some(if self.patient_is_minor {
+            CourtGuardian::Vormund
+        } else {
+            CourtGuardian::Betreuer
+        })
     }
 
     /// Who owes the agency: the patient, or the legal representatives.
@@ -378,6 +413,34 @@ pub async fn load_representatives(
     // An adult is represented by a guardian (Betreuer) only, never by the
     // parents as such (owner decision 2026-10-20).
     load_relations(conn, patient_id, relation_ids, adult).await
+}
+
+/// The rechtliche Betreuer of an adult patient (the `guardian` relations),
+/// who acts in the adult's name (owner decision 2026-10-25). Empty for a
+/// minor on `on`, and for a former ward whose recorded custody is `guardian`:
+/// that Vormundschaft ended at 18 and is no Betreuung.
+pub async fn adult_betreuer(
+    conn: &mut PgConnection,
+    patient_id: Uuid,
+    on: NaiveDate,
+) -> Result<Vec<Representative>, sqlx::Error> {
+    let Some(row) = sqlx::query("SELECT birth_date, custody FROM patients WHERE id = $1")
+        .bind(patient_id)
+        .fetch_optional(&mut *conn)
+        .await?
+    else {
+        return Ok(Vec::new());
+    };
+    let birth_date = row
+        .try_get::<Option<NaiveDate>, _>("birth_date")
+        .unwrap_or_default();
+    let custody = row
+        .try_get::<Option<String>, _>("custody")
+        .unwrap_or_default();
+    if is_minor_on(birth_date, on) || custody.as_deref() == Some("guardian") {
+        return Ok(Vec::new());
+    }
+    load_relations(conn, patient_id, &[], true).await
 }
 
 /// The named relations, or with none named every parent and guardian
@@ -614,6 +677,39 @@ mod tests {
             join_names(&["A".into(), "B".into(), "C".into()]),
             "A, B und C"
         );
+    }
+
+    #[test]
+    fn a_court_appointed_guardian_represents_the_ward_and_parents_stay_the_party() {
+        let guardian = Representative {
+            relation_type: "guardian".into(),
+            ..representative("Greta Vormund", false)
+        };
+        let ward = party(PartyKind::LegalRepresentatives, vec![guardian.clone()]);
+        assert_eq!(ward.court_guardian(), Some(CourtGuardian::Vormund));
+        let adult = ContractingParty {
+            kind: PartyKind::PatientRepresented,
+            patient_is_minor: false,
+            ..ward.clone()
+        };
+        assert_eq!(adult.court_guardian(), Some(CourtGuardian::Betreuer));
+        // Parents, a parent beside the guardian, or the patient alone: no
+        // court-appointed representation.
+        let parents = party(
+            PartyKind::LegalRepresentatives,
+            vec![representative("Erika Muster", false)],
+        );
+        assert_eq!(parents.court_guardian(), None);
+        let mixed = party(
+            PartyKind::LegalRepresentatives,
+            vec![guardian, representative("Erika Muster", false)],
+        );
+        assert_eq!(mixed.court_guardian(), None);
+        let alone = ContractingParty {
+            kind: PartyKind::Patient,
+            ..ward
+        };
+        assert_eq!(alone.court_guardian(), None);
     }
 
     #[test]

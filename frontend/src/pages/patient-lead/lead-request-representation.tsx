@@ -32,7 +32,15 @@ import {
   type RepresentativeUploadKind,
 } from "./lead-request-api";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
-import { LEAD_UPLOAD_ACCEPT, MAX_UPLOAD_BYTES, combinedSaveState, consentGiven, uploadLimitReached, type SaveState } from "./lead-request-model";
+import {
+  LEAD_UPLOAD_ACCEPT,
+  MAX_UPLOAD_BYTES,
+  combinedSaveState,
+  consentGiven,
+  identityDocumentsInStep,
+  uploadLimitReached,
+  type SaveState,
+} from "./lead-request-model";
 import {
   CabinetSection as Section,
   ConsentNeededNote,
@@ -408,6 +416,11 @@ export function RepresentativeUpload({
   const [errors, setErrors] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const id = `lead-request-${slot}-${kind}`;
+  // A copy of this person's identity document GMED could not use shows under the person,
+  // with its reason, until a new one replaces it (QA 2026-10-25, G F-G4).
+  const shown = kind === "identity" && person
+    ? identityDocumentsInStep(request, documents, person.id)
+    : { current: documents, refused: [] };
 
   async function uploadFiles(files: File[]) {
     if (files.length === 0 || !person) return;
@@ -489,7 +502,8 @@ export function RepresentativeUpload({
         </p>
       ))}
       <UploadedFileList
-        documents={documents}
+        documents={shown.current}
+        refused={shown.refused}
         text={text}
         lang={lang}
         emptyText={kind === "identity" ? text.noIdentityDocuments : text.noAuthorityDocuments}
@@ -504,7 +518,12 @@ export function RepresentativeUpload({
  * One person who acts for the lead: who that is and the uploads of the
  * identity document and of the authority. `fields` are the fields asked in
  * this step (a minor's parents give names and contacts in the first step,
- * the rest in block G); `uploads` whether the uploads are asked here.
+ * the rest in block G); `uploads` whether the uploads are asked here;
+ * `uploadsRequired` whether they (and the address) are needed for sending now.
+ * In the first-request stage of a minor the details for the contract can be
+ * shown, but the server asks them only at the document stage: they carry no
+ * star there unless the server lists them (QA 2026-10-25, M F-10: step 1
+ * read "complete" while the starred deed was empty).
  */
 function RepresentativeBlock({
   request,
@@ -514,6 +533,7 @@ function RepresentativeBlock({
   custody,
   fields,
   uploads,
+  uploadsRequired = uploads,
   identityUpload,
   text,
   lang,
@@ -533,6 +553,8 @@ function RepresentativeBlock({
   custody: Custody | null;
   fields: ReadonlySet<RepresentativeField>;
   uploads: boolean;
+  /** The uploads and the address are needed for sending now (default: when asked). */
+  uploadsRequired?: boolean;
   /** The identity document copy is asked here (a minor's parent: as soon as the person exists). */
   identityUpload: boolean;
   text: LeadRequestText;
@@ -596,7 +618,7 @@ function RepresentativeBlock({
     label: representativeFieldLabel(text, field),
     error: form.errorFor(field),
     required: requiresRepresentativeField(slot, field) && (
-      uploads || !minor || !["street", "zip", "city"].includes(field)
+      uploadsRequired || !minor || !["street", "zip", "city"].includes(field)
       || request.progress.missing_for_submit.includes(`${slot}_${field}`)
     ),
     className,
@@ -789,7 +811,7 @@ function RepresentativeBlock({
           slot={slot}
           kind="identity"
           label={representativeUploadLabel(text, slot, "identity")}
-          required={uploads}
+          required={uploadsRequired || request.progress.missing_for_submit.includes(`${slot}_id_upload`)}
           person={person}
           documents={person?.identity_documents ?? []}
           text={text}
@@ -804,7 +826,7 @@ function RepresentativeBlock({
           slot={slot}
           kind="authority"
           label={text.representativeAuthority[proof.proof]}
-          required={proof.required}
+          required={proof.required && (uploadsRequired || request.progress.missing_for_submit.includes(`${slot}_authority_upload`))}
           person={person}
           documents={person?.authority_documents ?? []}
           text={text}
@@ -1001,6 +1023,7 @@ export function RepresentationSection({
       custody={minor ? draft.custody || null : null}
       fields={fieldsOf(slot)}
       uploads={whole(slot)}
+      uploadsRequired={whole(slot) && !(minor && mode === "base" && representation?.document_stage === false)}
       // A parent uploads the identity document copy as soon as the person
       // exists, not only at the document stage (owner report 2026-10-19).
       identityUpload={minor ? mode !== "base" : whole(slot)}

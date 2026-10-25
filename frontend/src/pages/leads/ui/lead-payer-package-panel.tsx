@@ -7,7 +7,7 @@ import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
-import type { LeadPayerPackageState } from "../data/lead-payer-package-api";
+import type { LeadPayerPackageState, PayerPackageDocument, PayerPackageSlot } from "../data/lead-payer-package-api";
 import {
   payerPackageActions,
   payerPackageBlockedReasonText,
@@ -49,6 +49,7 @@ export function LeadPayerPackagePanel({
   errorText,
   onOpenDocument,
   renderDetails,
+  fallbackDocuments,
 }: {
   leadId: string;
   state: LeadPayerPackageState;
@@ -61,6 +62,8 @@ export function LeadPayerPackagePanel({
   onOpenDocument?: (documentId: string, title: string) => void;
   /** The details of the sent request (withdraw, refresh, review, report) on the first document. */
   renderDetails?: (documentId: string, title: string) => ReactNode;
+  /** A document of a slot made outside the package (the standalone Kostenübernahmeerklärung). */
+  fallbackDocuments?: Partial<Record<PayerPackageSlot, PayerPackageDocument | null>>;
 }) {
   const [language, setLanguage] = useState<string | null>(null);
   const [busy, setBusy] = useState<"prepare" | "send" | null>(null);
@@ -70,7 +73,7 @@ export function LeadPayerPackagePanel({
 
   const pkg = state.package;
   const actions = payerPackageActions(state, canEdit);
-  const rows = payerPackageRows(pkg);
+  const rows = payerPackageRows(pkg, fallbackDocuments);
   const status = pkg ? payerPackageStatusLine(pkg, tx) : null;
   const chosenLanguage = payerPackageLanguageOf(state, language);
   const languageHint = payerPackageLanguageHint(state, chosenLanguage, tx);

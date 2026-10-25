@@ -64,6 +64,7 @@ import {
   representativeRoleLabel,
   salutationLabel,
 } from "./lead-gwg-statements";
+import { gwgStatementsTitle } from "./lead-gwg-statements";
 
 const ru = (text: string) => text;
 const de = (_ru: string, text: string) => text;
@@ -1096,5 +1097,15 @@ describe("section 8 of a third-party payer with the own link (phase 3a)", () => 
       ["bank_name", ""],
       ["via_third_party", "Nein"],
     ]);
+  });
+});
+
+describe("F7: the heading names who entered the data", () => {
+  it("says «Внесено сотрудником» when only staff entered the document data", () => {
+    const staffOnly = { identification: { declared_correct_at: null, id_data_entered_at: "2026-10-25T10:00:00Z", id_data_entered_by_name: "Ben" }, identification_updated_at: null };
+    expect(gwgStatementsTitle(staffOnly, ru)).toBe("Внесено сотрудником");
+    expect(gwgStatementsTitle({ ...staffOnly, identification_updated_at: "2026-10-24T10:00:00Z" }, ru)).toBe("Данные от пациента и сотрудника");
+    expect(gwgStatementsTitle({ identification: { declared_correct_at: "2026-10-24T10:00:00Z" }, identification_updated_at: null }, ru)).toBe("Данные от пациента");
+    expect(gwgStatementsTitle({ identification: null }, ru)).toBe("Данные от пациента");
   });
 });

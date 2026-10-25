@@ -1048,6 +1048,14 @@ function payerIdentityIncompleteLabel(tx: Tx, payerType?: PayerType | null) {
  * Localized text for a payer reason code of the server. With the payer type
  * the incomplete identity is worded for that type.
  */
+/** The readiness reason / 422 `payer_not_identified` (third-party payer without questionnaire and ID document). */
+export function payerNotIdentifiedText(tx: Tx): string {
+  return tx(
+    "Плательщик не идентифицирован: нужна анкета плательщика и его документ",
+    "Zahler/in nicht identifiziert: Fragebogen und Ausweis des Zahlers fehlen",
+  );
+}
+
 export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | null) {
   const labels: Record<string, string> = {
     payer_declaration_missing: tx("Заполните раздел «Кто платит»", "Angaben „Wer zahlt“ ausfüllen"),
@@ -1063,6 +1071,7 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
       "Ein Kind zahlt nicht selbst: Elternteil / gesetzlichen Vertreter oder einen Dritten wählen",
     ),
     payer_not_informed: tx("Подтвердите, что плательщик проинформирован об обработке его данных", "Bestätigen, dass der Kostenübernehmer über die Verarbeitung seiner Daten informiert wurde"),
+    payer_not_identified: payerNotIdentifiedText(tx),
     cost_assumption_missing: tx("Создайте заявление о принятии расходов (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung erstellen"),
     cost_assumption_outdated: tx("Плательщик изменён — создайте новое заявление о принятии расходов", "Kostenübernehmer geändert – neue Kostenübernahmeerklärung erstellen"),
     cost_assumption_unsigned: tx("Получите подпись плательщика на заявлении о принятии расходов", "Unterschrift des Kostenübernehmers einholen"),
@@ -1130,6 +1139,8 @@ export const PAYER_READINESS_REASON_CODES: Record<string, string> = {
   "Third-party payer details are incomplete": "payer_identity_incomplete",
   "Paying parent or legal representative is not named": "payer_representative_missing",
   "Payer is not informed about the processing of their data": "payer_not_informed",
+  // Readiness check `payer_identified` (backend 2026-10-25): questionnaire and ID document of a third-party payer.
+  "Third-party payer is not identified": "payer_not_identified",
   "Cost assumption declaration is missing": "cost_assumption_missing",
   "Cost assumption declaration names another payer": "cost_assumption_outdated",
   "Cost assumption declaration is not signed": "cost_assumption_unsigned",

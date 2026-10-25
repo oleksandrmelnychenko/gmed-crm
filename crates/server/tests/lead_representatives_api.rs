@@ -2826,3 +2826,224 @@ async fn staff_enter_a_parents_citizenship_and_address_for_the_contract() {
         assert!(!after.contains(key), "{key} {after:?}");
     }
 }
+
+/// The trigger of the assessment with this key on the representative.
+fn representative_trigger(assessment: &Value, key: &str) -> Value {
+    assessment["triggers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no triggers: {assessment}"))
+        .iter()
+        .find(|trigger| trigger["key"] == key && trigger["subject"] == "representative")
+        .cloned()
+        .unwrap_or_else(|| panic!("no {key} of a representative: {assessment}"))
+}
+
+async fn risk_assessment(app: &TestApp, lead_id: Uuid) -> Value {
+    let (status, body) = json_request(
+        &app.suite.app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/risk-assessment"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body
+}
+
+/// Staff's reassessments of the lead that raised it (not the reads).
+async fn staff_raises(pool: &PgPool, lead_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        r#"SELECT count(*) FROM lead_risk_events
+           WHERE lead_id = $1 AND kind = 'raised' AND cause = 'staff'"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// F-11 (DEV QA 2026-10-25): staff rename a minor's parent in the wizard and
+/// change the citizenship from RU (list 1) to IR (list 2). The save of the
+/// contacts carries the citizenships with the contact; the parent's row takes
+/// the new name and IR, the assessment follows in the same transaction, and a
+/// key the server cannot take refuses the save naming the contact and key.
+#[tokio::test]
+async fn a_wizard_save_writes_a_parents_new_name_and_citizenship_to_the_row_and_the_risk() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let staff = app.staff("patient_manager");
+    let (mother, aunt) = (Uuid::new_v4(), Uuid::new_v4());
+    let mother_email = address("elena.paralleli");
+    let aunt_entry = json!({ "id": aunt, "name": "Tina Paralleli", "relation": "relative",
+                             "email": null, "phone": "+49 30 654321", "birth_date": null,
+                             "address": null, "related_patient_id": null });
+    let mother_entry = |name: &str| {
+        json!({ "id": mother, "name": name, "relation": "mother", "email": mother_email,
+                "phone": "+49 30 123456", "birth_date": "1984-02-03", "address": null,
+                "related_patient_id": null })
+    };
+    let lead_id = minor_lead(
+        &app,
+        json!([mother_entry("Elena Paralleli"), aunt_entry.clone()]),
+    )
+    .await;
+    // The new parent card's details, written after the lead exists.
+    let (status, body) = json_request(
+        router,
+        "PUT",
+        &format!("/api/v1/leads/{lead_id}/representatives/{mother}/details"),
+        &staff,
+        Some(json!({ "values": { "citizenships": ["RU"] }, "base": { "citizenships": [] } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    start_assessment(&app, lead_id).await;
+    let started = risk_assessment(&app, lead_id).await;
+    let t1 = representative_trigger(&started, "T1");
+    assert_eq!(t1["variant"], "list_1", "{t1}");
+    assert_eq!(t1["representative_id"], json!(mother), "{t1}");
+    let raises_before = staff_raises(&app.suite.pool, lead_id).await;
+
+    let update_path = format!("/api/v1/leads/{lead_id}/update");
+    let update = |contacts: Value, base: Value| {
+        json_request(
+            router,
+            "POST",
+            &update_path,
+            &staff,
+            Some(json!({ "trusted_contacts": contacts, "trusted_contacts_base": base })),
+        )
+    };
+    let mut loaded_mother = mother_entry("Elena Paralleli");
+    loaded_mother["citizenships"] = json!(["RU"]);
+    let base = json!([loaded_mother, aunt_entry.clone()]);
+
+    // Refused, nothing written: a key of somebody who does not act for the
+    // child, and a code that is no country.
+    let mut aunt_with_country = aunt_entry.clone();
+    aunt_with_country["citizenships"] = json!(["IR"]);
+    let (status, refusal) = update(
+        json!([mother_entry("Elena Paralleli"), aunt_with_country]),
+        base.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refusal}");
+    assert_eq!(refusal["code"], "trusted_contact_not_representative");
+    assert_eq!(refusal["contact_id"], json!(aunt), "{refusal}");
+    assert_eq!(refusal["contact_field"], "citizenships", "{refusal}");
+    let mut renamed = mother_entry("Elena Maria Paralleli");
+    renamed["citizenships"] = json!(["XX"]);
+    let (status, refusal) = update(json!([renamed, aunt_entry.clone()]), base.clone()).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refusal}");
+    assert_eq!(refusal["contact_id"], json!(mother), "{refusal}");
+    assert_eq!(refusal["contact_field"], "citizenships", "{refusal}");
+    let name: String =
+        sqlx::query_scalar("SELECT trusted_contacts -> 0 ->> 'name' FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(name, "Elena Paralleli", "a refused save writes nothing");
+
+    // The rename and RU → IR in one save.
+    let mut renamed = mother_entry("Elena Maria Paralleli");
+    renamed["citizenships"] = json!(["ir"]);
+    let (status, body) = update(json!([renamed, aunt_entry.clone()]), base.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let row: (Option<String>, Option<String>, Vec<String>, String) = sqlx::query_as(
+        r#"SELECT first_name, last_name, citizenships, contact_origin
+           FROM lead_representatives WHERE lead_id = $1 AND contact_id = $2"#,
+    )
+    .bind(lead_id)
+    .bind(mother)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0.as_deref(), Some("Elena Maria"));
+    assert_eq!(row.1.as_deref(), Some("Paralleli"));
+    assert_eq!(row.2, vec!["IR".to_string()]);
+    assert_eq!(row.3, "staff");
+    // Reassessed by the save itself, before anybody reads the assessment.
+    assert!(
+        staff_raises(&app.suite.pool, lead_id).await > raises_before,
+        "the save reassesses the risk"
+    );
+    let after = risk_assessment(&app, lead_id).await;
+    let t1 = representative_trigger(&after, "T1");
+    assert_eq!(t1["variant"], "list_2", "{t1}");
+    assert_eq!(t1["points"], 4, "{t1}");
+    assert_eq!(t1["representative_id"], json!(mother), "{t1}");
+    assert_eq!(t1["representative_name"], "Elena Maria Paralleli", "{t1}");
+    assert_eq!(after["level"], 2, "{after}");
+    let audits = audit_contexts(
+        &app.suite.pool,
+        "update_lead_representative_details",
+        lead_id,
+    )
+    .await;
+    assert!(
+        audits
+            .iter()
+            .any(|context| context["source"] == "trusted_contacts"
+                && context["fields"] == json!(["citizenships"])),
+        "{audits:?}"
+    );
+
+    // A save from the older load leaves a key sent as loaded alone: the
+    // stored IR stays.
+    let (status, body) = update(
+        json!([
+            loaded_mother_again(&mother_entry("Elena Maria Paralleli")),
+            aunt_entry
+        ]),
+        json!([loaded_mother_again(&mother_entry("Elena Maria Paralleli"))]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let stored: Vec<String> = sqlx::query_scalar(
+        "SELECT citizenships FROM lead_representatives WHERE lead_id = $1 AND contact_id = $2",
+    )
+    .bind(lead_id)
+    .bind(mother)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, vec!["IR".to_string()]);
+}
+
+/// The contact as a wizard loaded it before the change: citizenship RU.
+fn loaded_mother_again(entry: &Value) -> Value {
+    let mut entry = entry.clone();
+    entry["citizenships"] = json!(["RU"]);
+    entry
+}
+
+/// F-11: a staff correction of a parent's citizenship in the details form
+/// reassesses the risk at once, as the cabinet's change does.
+#[tokio::test]
+async fn a_staff_details_correction_reassesses_the_risk() {
+    let Some(app) = test_app().await else { return };
+    let mother = Uuid::new_v4();
+    let lead_id = minor_lead(
+        &app,
+        json!([{ "id": mother, "name": "Anna Muster", "relation": "mother",
+                 "email": address("anna.risk"), "phone": "+49 30 123456" }]),
+    )
+    .await;
+    start_assessment(&app, lead_id).await;
+    let raises_before = staff_raises(&app.suite.pool, lead_id).await;
+    let (status, body) = json_request(
+        &app.suite.app,
+        "PUT",
+        &format!("/api/v1/leads/{lead_id}/representatives/{mother}/details"),
+        &app.staff("patient_manager"),
+        Some(json!({ "values": { "citizenships": ["IR"] }, "base": { "citizenships": [] } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(staff_raises(&app.suite.pool, lead_id).await > raises_before);
+    let t1 = representative_trigger(&risk_assessment(&app, lead_id).await, "T1");
+    assert_eq!(t1["variant"], "list_2", "{t1}");
+    assert_eq!(t1["representative_id"], json!(mother), "{t1}");
+}

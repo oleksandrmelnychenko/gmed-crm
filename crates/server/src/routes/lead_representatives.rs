@@ -2000,6 +2000,246 @@ async fn store_row(
     .map(|_| ())
 }
 
+/// Stores what staff changed of a representative: the row (a person without
+/// one gets a staff row; an existing row keeps its origin) and, for a paying
+/// parent, the payer's copy — one person, as when the cabinet corrects it.
+#[allow(clippy::too_many_arguments)]
+async fn store_staff_person(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    representation: &Representation,
+    representative_id: Uuid,
+    role: &str,
+    next: &Person,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    let parent_payer = lead_payer::load_declaration(&mut *conn, lead_id)
+        .await?
+        .filter(|payer| {
+            payer.is_third_party()
+                && payer_same_person(representation, Some(payer)) == Some(representative_id)
+        });
+    if let Some(mut payer) = parent_payer {
+        payer.place_of_birth = next.birth_place.clone();
+        payer.citizenships = next.citizenships.clone();
+        payer.street = next.street.clone();
+        payer.zip = next.zip.clone();
+        payer.city = next.city.clone();
+        payer.country = next.country.clone();
+        lead_payer::adopt_payer_identity(&mut *conn, lead_id, &payer, Some(actor), None).await?;
+    }
+    store_row(
+        conn,
+        lead_id,
+        representative_id,
+        role,
+        ORIGIN_STAFF,
+        next,
+        actor,
+    )
+    .await
+}
+
+/// The keys of a representative a wizard save of the trusted contacts may
+/// carry with the contact (`POST /leads/{id}/update`, F-11 QA 2026-10-25):
+/// the citizenships and the birth data. The address parts stay with
+/// `PUT …/representatives/{id}/details` (the entry holds its own one-line
+/// address).
+pub(crate) const CONTACT_DETAIL_FIELDS: [&str; 3] =
+    ["citizenships", "birth_place", "birth_country"];
+
+/// What a wizard save states for one contact beyond the entry: `values` the
+/// keys of [`CONTACT_DETAIL_FIELDS`] it sent (`null` clears), `base` the same
+/// keys of the contact in `trusted_contacts_base`. A key sent as loaded keeps
+/// the stored value, so a parent's change in the cabinet since the load
+/// stays.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ContactDetailsEdit {
+    /// The position of the contact in the sent list (for the 422).
+    pub index: usize,
+    pub contact_id: Uuid,
+    pub values: Map<String, Value>,
+    pub base: Option<Map<String, Value>>,
+}
+
+/// The 422 of a refused key of a contact, in the shape of the wizard's other
+/// trusted-contact refusals: the list field, which entry and which key.
+fn contact_details_refusal(
+    edit: &ContactDetailsEdit,
+    code: &str,
+    contact_field: &str,
+    message: &str,
+) -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({
+            "error": code,
+            "code": code,
+            "message": message,
+            "field": "trusted_contacts",
+            "contact_index": edit.index,
+            "contact_id": edit.contact_id,
+            "contact_field": contact_field,
+        })),
+    )
+        .into_response()
+}
+
+/// After a wizard save wrote the trusted contacts (same transaction, lead
+/// row locked): the rows of the representatives follow their entries, and
+/// the citizenships and birth data staff sent with a contact are written to
+/// its row — created when the person has none yet (F-11, QA 2026-10-25: a
+/// parent renamed and changed from RU to IR in the wizard kept the old name
+/// and RU in `lead_representatives`, so the country triggers stayed stale).
+///
+/// A renamed contact's row takes the entry's name, split as the readers split
+/// it; the name rules (passport spelling for a new or changed name, a stored
+/// name never re-judged) were applied to the entry before. A key sent for a
+/// contact who does not act for the lead, or that breaks the cabinet's rules,
+/// refuses the whole save with a 422 naming the contact and the key — nothing
+/// is dropped silently. `Ok(Ok(true))` when sent data changed a row (the
+/// readers take the name from the entry already: a rename is a change of the
+/// contacts the caller knows about).
+pub(crate) async fn sync_wizard_contacts(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    edits: &[ContactDetailsEdit],
+    actor: Uuid,
+) -> Result<Result<bool, axum::response::Response>, sqlx::Error> {
+    let Some(loaded) = load(&mut *conn, lead_id).await? else {
+        return Ok(Ok(false));
+    };
+    let mut changed = false;
+    // A row whose name parts no longer give the entry's name (staff renamed
+    // the contact) takes the entry's parts.
+    for person in &loaded.representation.representatives {
+        let current = Person::of(person);
+        if !person.has_data
+            || (person.extras.first_name == current.first_name
+                && person.extras.last_name == current.last_name)
+        {
+            continue;
+        }
+        sqlx::query(
+            r#"UPDATE lead_representatives
+               SET first_name = $3, last_name = $4, updated_by = $5, updated_at = now()
+               WHERE lead_id = $1 AND contact_id = $2"#,
+        )
+        .bind(lead_id)
+        .bind(person.id)
+        .bind(&current.first_name)
+        .bind(&current.last_name)
+        .bind(actor)
+        .execute(&mut *conn)
+        .await?;
+    }
+    let today = crate::app_time::today();
+    let empty = |value: &Value| match value {
+        Value::String(text) if text.trim().is_empty() => Value::Null,
+        Value::Array(items) if items.is_empty() => Value::Null,
+        value => value.clone(),
+    };
+    for edit in edits {
+        let mut sent = Map::new();
+        for (key, value) in &edit.values {
+            if !CONTACT_DETAIL_FIELDS.contains(&key.as_str()) {
+                return Ok(Err(contact_details_refusal(
+                    edit,
+                    "invalid_field",
+                    key,
+                    "Unknown field",
+                )));
+            }
+            if parse_person_patch(&json!({ key.as_str(): value })).is_err() {
+                return Ok(Err(contact_details_refusal(
+                    edit,
+                    "invalid_field",
+                    key,
+                    if key == "citizenships" {
+                        "A list of country codes is expected"
+                    } else {
+                        "A text is expected"
+                    },
+                )));
+            }
+            let as_loaded = edit
+                .base
+                .as_ref()
+                .and_then(|base| base.get(key))
+                .is_some_and(|loaded| empty(loaded) == empty(value));
+            if !as_loaded {
+                sent.insert(key.clone(), value.clone());
+            }
+        }
+        let Some(first_key) = sent.keys().next().cloned() else {
+            continue;
+        };
+        let Some(person) = loaded.representation.find(edit.contact_id) else {
+            return Ok(Err(contact_details_refusal(
+                edit,
+                "trusted_contact_not_representative",
+                &first_key,
+                "Only a parent, guardian or representative has these data",
+            )));
+        };
+        let patch = match parse_person_patch(&Value::Object(sent)) {
+            Ok(patch) => patch,
+            Err(_) => {
+                return Ok(Err(contact_details_refusal(
+                    edit,
+                    "invalid_field",
+                    &first_key,
+                    "Invalid value",
+                )));
+            }
+        };
+        let current = Person::of(person);
+        let next = match apply_person_patch(&current, &patch, today) {
+            Ok(next) => next,
+            Err(error) => {
+                return Ok(Err(contact_details_refusal(
+                    edit,
+                    error.code,
+                    error.field,
+                    error.message,
+                )));
+            }
+        };
+        let fields = changed_person_fields(&current, &next);
+        if fields.is_empty() {
+            continue;
+        }
+        store_staff_person(
+            &mut *conn,
+            lead_id,
+            &loaded.representation,
+            person.id,
+            person.role,
+            &next,
+            actor,
+        )
+        .await?;
+        audit::write_in_transaction(
+            &mut *conn,
+            &audit::domain_event(
+                "update_lead_representative_details",
+                Some(actor),
+                "lead",
+                Some(lead_id),
+                json!({
+                    "representative_id": person.id,
+                    "role": person.role,
+                    "fields": fields,
+                    "source": "trusted_contacts",
+                }),
+            ),
+        )
+        .await?;
+        changed = true;
+    }
+    Ok(Ok(changed))
+}
+
 /// Makes sure a legal representative of a minor has a row before a file is
 /// linked to it: a parent staff entered gets an empty one (`staff`). Returns
 /// whether the person is a representative of the lead at all.
@@ -4031,13 +4271,6 @@ pub(crate) async fn update_lead_representative_details(
         return Json(json!({ "representation": staff_payload(&loaded) })).into_response();
     }
     let role = person.role;
-    let parent_payer = match lead_payer::load_declaration(&mut tx, lead_id).await {
-        Ok(payer) => payer.filter(|payer| {
-            payer.is_third_party()
-                && payer_same_person(&loaded.representation, Some(payer)) == Some(representative_id)
-        }),
-        Err(error) => return intake::internal(error, "load parent payer"),
-    };
     let mut contacts = loaded.contacts.clone();
     let relation = person.relation.clone().unwrap_or_default();
     // The parent's login carries the contact's name: a rename here renames it
@@ -4060,25 +4293,12 @@ pub(crate) async fn update_lead_representative_details(
     );
     let mut invalidated = Vec::new();
     let written = async {
-        // A paying parent is one person: the payer's copy follows, as when
-        // the cabinet corrects it.
-        if let Some(mut payer) = parent_payer {
-            payer.place_of_birth = next.birth_place.clone();
-            payer.citizenships = next.citizenships.clone();
-            payer.street = next.street.clone();
-            payer.zip = next.zip.clone();
-            payer.city = next.city.clone();
-            payer.country = next.country.clone();
-            lead_payer::adopt_payer_identity(&mut tx, lead_id, &payer, Some(auth.user_id), None)
-                .await?;
-        }
-        // A row keeps its origin; a person without one gets a staff row.
-        store_row(
+        store_staff_person(
             &mut tx,
             lead_id,
+            &loaded.representation,
             representative_id,
             role,
-            ORIGIN_STAFF,
             &next,
             auth.user_id,
         )
@@ -4114,6 +4334,16 @@ pub(crate) async fn update_lead_representative_details(
         )
         .await?
         .1;
+        // A citizenship or a residence decides triggers T1/T2 of the
+        // representative: the assessment follows at once (F-11, QA
+        // 2026-10-25), as after the cabinet's change.
+        crate::risk::store::reassess(
+            &mut tx,
+            lead_id,
+            crate::risk::store::Cause::Staff,
+            Some(auth.user_id),
+        )
+        .await?;
         Ok::<_, sqlx::Error>(())
     }
     .await;

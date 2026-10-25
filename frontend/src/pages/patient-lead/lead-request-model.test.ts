@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { LeadRequest, LeadRequestIdentification, LeadRequestPayer } from "./lead-request-api";
 import {
   uploadLimitReached,
+  identityDocumentsInStep,
   canSubmit,
   changedSinceSubmit,
   combinedSaveState,
@@ -997,5 +998,52 @@ describe("the cabinet's file limit", () => {
     const file = { id: "f" } as LeadRequest["documents"][number];
     expect(uploadLimitReached(request({ max_documents: 2, documents: [file], identity_documents: [file] }))).toBe(true);
     expect(uploadLimitReached(request({ max_documents: 3, documents: [file], identity_documents: [file] }))).toBe(false);
+  });
+});
+
+describe("a refused identity copy (QA 2026-10-25, G F-G4)", () => {
+  const old = { id: "old", file_name: "passport.pdf", uploaded_at: "2026-10-20T08:00:00Z", reviewed: true } as LeadRequest["identity_documents"][number];
+  const back = { id: "back", file_name: "passport-back.pdf", uploaded_at: "2026-10-20T08:01:00Z", reviewed: true } as LeadRequest["identity_documents"][number];
+  const fresh = { id: "new", file_name: "passport-new.pdf", uploaded_at: "2026-10-25T08:00:00Z", reviewed: false } as LeadRequest["identity_documents"][number];
+  type Entry = NonNullable<NonNullable<LeadRequest["follow_up"]>["refused_identity_documents"]>[number];
+  const followUp = (refused: Entry[] | undefined) =>
+    ({ required: true, blocks: ["I"], missing: {}, answered_at: null, identity_documents: [], refused_identity_documents: refused }) as unknown as LeadRequest["follow_up"];
+  const entry = (document_id: string, reason: Entry["reason"], representative_id: string | null = null, file_name = "scan.pdf"): Entry =>
+    ({ document_id, file_name, reason, representative_id });
+
+  it("shows each refused copy of the person with its own reason, oldest first", () => {
+    const request = { follow_up: followUp([entry("old", "expired"), entry("back", "unreadable")]) };
+    expect(identityDocumentsInStep(request, [old, back])).toEqual({
+      current: [],
+      refused: [
+        { id: "old", file_name: "passport.pdf", uploaded_at: "2026-10-20T08:00:00Z", reason: "expired" },
+        { id: "back", file_name: "passport-back.pdf", uploaded_at: "2026-10-20T08:01:00Z", reason: "unreadable" },
+      ],
+    });
+  });
+
+  it("names a refused copy the list does not hold by the server's file name", () => {
+    const request = { follow_up: followUp([entry("gone", "unreadable", null, "pass.jpg")]) };
+    expect(identityDocumentsInStep(request, [])).toEqual({
+      current: [],
+      refused: [{ id: "gone", file_name: "pass.jpg", uploaded_at: null, reason: "unreadable" }],
+    });
+  });
+
+  it("keeps a representative's copy under that representative", () => {
+    const request = { follow_up: followUp([entry("old", "expired", "rep-1")]) };
+    expect(identityDocumentsInStep(request, [old])).toEqual({ current: [old], refused: [] });
+    expect(identityDocumentsInStep(request, [old], "rep-1").refused).toEqual([
+      { id: "old", file_name: "passport.pdf", uploaded_at: "2026-10-20T08:00:00Z", reason: "expired" },
+    ]);
+    expect(identityDocumentsInStep(request, [old], "rep-2")).toEqual({ current: [old], refused: [] });
+  });
+
+  it("is replaced by a new copy, and every copy is current without refusals", () => {
+    const request = { follow_up: followUp([entry("old", "unreadable")]) };
+    expect(identityDocumentsInStep(request, [old, fresh])).toEqual({ current: [fresh], refused: [] });
+    expect(identityDocumentsInStep({ follow_up: followUp([]) }, [old])).toEqual({ current: [old], refused: [] });
+    expect(identityDocumentsInStep({ follow_up: followUp(undefined) }, [old])).toEqual({ current: [old], refused: [] });
+    expect(identityDocumentsInStep({ follow_up: undefined }, [old])).toEqual({ current: [old], refused: [] });
   });
 });

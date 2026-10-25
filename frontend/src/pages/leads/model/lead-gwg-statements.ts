@@ -372,6 +372,27 @@ export type GwgPayerStatement = {
 };
 
 /**
+ * The heading of the GwG statements block by who entered the values (QA
+ * 2026-10-25, F7): «Данные от пациента» for the cabinet's answers,
+ * «Внесено сотрудником» when only staff entered data (the identity document
+ * read from the scan) and both when both did.
+ */
+export function gwgStatementsTitle(
+  intake: {
+    identification: ({ declared_correct_at?: string | null; id_data_entered_at?: string | null; id_data_entered_by_name?: string | null }) | null;
+    identification_updated_at?: string | null;
+  },
+  tx: (ru: string, de: string) => string,
+): string {
+  const identification = intake.identification;
+  const byPatient = Boolean(intake.identification_updated_at || identification?.declared_correct_at);
+  const byStaff = Boolean(identification?.id_data_entered_at || identification?.id_data_entered_by_name);
+  if (byStaff && !byPatient) return tx("Внесено сотрудником", "Von Mitarbeitenden erfasst");
+  if (byStaff) return tx("Данные от пациента и сотрудника", "Angaben des Patienten und der Mitarbeitenden");
+  return tx("Данные от пациента", "Angaben des Patienten");
+}
+
+/**
  * Own economic interest: the answer (null = not answered, also without a
  * payer declaration) and, for a "no", the person in whose interest the
  * patient acts.
