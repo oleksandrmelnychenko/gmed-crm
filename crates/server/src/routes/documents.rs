@@ -20577,28 +20577,37 @@ async fn load_contracting_doc(
                     "A minor's contracting party must include the legal representatives",
                 ));
             }
+            let paying_parent = if kind == PartyKind::LegalRepresentatives {
+                paying_parent_contact(&mut conn, lead_id)
+                    .await
+                    .map_err(failed)?
+            } else {
+                None
+            };
             return Ok(ContractingDoc {
                 kind,
-                representatives: representatives
-                    .into_iter()
-                    .map(|person| DocPartyBlock {
-                        name: person.name(),
-                        first_name: Some(person.first_name.clone()),
-                        last_name: Some(person.last_name.clone()),
-                        birth_date: person.date_of_birth,
-                        street: person.extras.street.clone(),
-                        zip: person.extras.zip.clone(),
-                        city: person.extras.city.clone(),
-                        country: person.extras.country.clone(),
-                        email: person.email.clone(),
-                        phone: person.phone.clone(),
-                        ..DocPartyBlock::default()
-                    })
-                    .collect(),
+                representatives: only_paying_parent(representatives, paying_parent, |person| {
+                    Some(person.id)
+                })
+                .into_iter()
+                .map(|person| DocPartyBlock {
+                    name: person.name(),
+                    first_name: Some(person.first_name.clone()),
+                    last_name: Some(person.last_name.clone()),
+                    birth_date: person.date_of_birth,
+                    street: person.extras.street.clone(),
+                    zip: person.extras.zip.clone(),
+                    city: person.extras.city.clone(),
+                    country: person.extras.country.clone(),
+                    email: person.email.clone(),
+                    phone: person.phone.clone(),
+                    ..DocPartyBlock::default()
+                })
+                .collect(),
             });
         }
     }
-    let party = crate::services::contracting_party::resolve(
+    let mut party = crate::services::contracting_party::resolve(
         &mut conn,
         patient_id,
         order_id,
@@ -20607,7 +20616,80 @@ async fn load_contracting_doc(
     )
     .await
     .map_err(failed)?;
+    // A converted lead's answer about the invoice recipient applies to the
+    // patient's documents as well: its parents became the patient's relations
+    // at conversion, each with the contact id of its entry.
+    if party.kind == PartyKind::LegalRepresentatives
+        && party.representatives.len() > 1
+        && let Some(lead_id) = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM leads WHERE converted_patient_id = $1 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(patient_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(failed)?
+    {
+        let paying_parent = paying_parent_contact(&mut conn, lead_id)
+            .await
+            .map_err(failed)?;
+        party.representatives =
+            only_paying_parent(party.representatives, paying_parent, |representative| {
+                representative.source_contact_id
+            });
+    }
     Ok(ContractingDoc::from_party(&party))
+}
+
+/// The contact id of the parent a minor's cabinet named as invoice recipient
+/// who also pays ("Rechnungsempfänger: Elternteil …, der Rechnungsempfänger
+/// ist auch der Zahler"; `lead_invoice_recipients`, the one source of the
+/// recipient, read as every other reader reads it). `None` for every other
+/// answer — the patient side without a named parent, a third party as
+/// recipient, a parent who receives the invoice while someone else pays, no
+/// answer yet (older requests) — and when that parent is no representative
+/// of the child any more.
+pub(crate) async fn paying_parent_contact(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    Ok(super::lead_invoice_recipient::load_for_lead(conn, lead_id)
+        .await?
+        .filter(|recipient| !recipient.parent_removed)
+        .map(|recipient| recipient.answers)
+        .filter(|answers| {
+            answers.recipient.as_deref() == Some(super::lead_invoice_recipient::RECIPIENT_SELF)
+                && answers.is_payer == Some(true)
+        })
+        .and_then(|answers| answers.representative_contact_id))
+}
+
+/// The parents who contract for a minor in their own name, narrowed to the
+/// one the cabinet named as invoice recipient who also pays (owner decision
+/// 2026-10-25, map item 94): that parent alone is the Auftraggeber (§ 328
+/// BGB, decision of 2026-10-19); the other parent is no party to the
+/// contract and appears in the consents only, which name every custody
+/// parent as before. Without such a parent among `representatives` every
+/// representative stays a party: both custody parents jointly, a sole-custody
+/// parent or a guardian alone.
+pub(crate) fn only_paying_parent<T>(
+    representatives: Vec<T>,
+    paying_parent: Option<Uuid>,
+    contact_id: impl Fn(&T) -> Option<Uuid>,
+) -> Vec<T> {
+    let Some(parent) = paying_parent else {
+        return representatives;
+    };
+    if representatives.len() < 2
+        || !representatives
+            .iter()
+            .any(|person| contact_id(person) == Some(parent))
+    {
+        return representatives;
+    }
+    representatives
+        .into_iter()
+        .filter(|person| contact_id(person) == Some(parent))
+        .collect()
 }
 
 /// Party block lines for the contract letterhead, using the gendered

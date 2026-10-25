@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { CircleAlert, FileSignature, LoaderCircle, Mail, Undo2 } from "lucide-react";
+import { ChevronRight, CircleAlert, FileSignature, FileText, History, LoaderCircle, Mail, Undo2 } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, checkboxClass } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { cn } from "@/lib/utils";
+import { downloadDocumentFile } from "@/pages/documents/data/document-api";
 
 import {
   PAYER_LINK_LANGUAGES,
@@ -22,6 +23,7 @@ import {
   payerLinkResendAsksFirst,
   payerLinkResendQuestion,
   payerLinkStatusLine,
+  previousQuestionnaireSummary,
   type Tx,
 } from "../model/lead-payer-link";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
@@ -61,6 +63,7 @@ export function LeadPayerLinkPanel({
   onSent,
   packageSummary,
   leadSubmitted = true,
+  onOpenDocument,
 }: {
   leadId: string;
   state: LeadPayerLinkState;
@@ -81,6 +84,8 @@ export function LeadPayerLinkPanel({
   packageSummary?: PayerPackageSummary | null;
   /** The lead has sent the request; before that "теперь можно отправить ссылку" is not said (QA 2026-10-25). */
   leadSubmitted?: boolean;
+  /** Opens a document of the lead (the wizard's preview): the archived identity document of a previous payer. */
+  onOpenDocument?: (documentId: string, title: string) => void;
 }) {
   const [language, setLanguage] = useState<PayerLinkLanguage | null>(null);
   const [reopen, setReopen] = useState(false);
@@ -267,6 +272,58 @@ export function LeadPayerLinkPanel({
           ) : null}
         </>
       )}
+
+      {state.previous_questionnaires.length > 0 ? (
+        // The sent statements of previous payers (QA 2026-10-25, map item 95): one
+        // collapsed line each, newest first; the archived identity document opens
+        // through the wizard's document preview.
+        <ul className="space-y-1 border-t border-border/50 pt-3" data-testid="lead-payer-link-previous">
+          {state.previous_questionnaires.map((entry) => {
+            const summary = previousQuestionnaireSummary(entry, tx);
+            const documentId = entry.document_id;
+            return (
+              <li key={entry.statement_id}>
+                <details
+                  className="group rounded-lg border border-border/50 bg-field/40 text-xs"
+                  data-testid="lead-payer-link-previous-entry"
+                  data-statement-id={entry.statement_id}
+                >
+                  <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 leading-5 text-foreground [&::-webkit-details-marker]:hidden">
+                    <ChevronRight aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+                    <History aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="break-words">{summary.title}</span>
+                  </summary>
+                  <div className="space-y-1.5 px-2.5 pb-2.5 pl-9 text-muted-foreground">
+                    {summary.details.map((line) => (
+                      <p key={line} className="break-words leading-5">
+                        {line}
+                      </p>
+                    ))}
+                    {summary.documentLabel && documentId ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 rounded-lg text-xs"
+                        disabled={disabled}
+                        data-testid="lead-payer-link-previous-document"
+                        onClick={() => {
+                          // The wizard's preview when it is wired; a download of the archived copy otherwise.
+                          if (onOpenDocument) onOpenDocument(documentId, summary.title);
+                          else downloadDocumentFile(documentId, `${summary.title}.pdf`).catch((cause) => setError(message(cause)));
+                        }}
+                      >
+                        <FileText className="size-3.5" />
+                        {summary.documentLabel}
+                      </Button>
+                    ) : null}
+                  </div>
+                </details>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
 
       {state.questionnaire?.submitted_at && packageSummary !== undefined ? (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-border/50 pt-3" data-testid="lead-payer-link-package" data-status={packageSummary?.status ?? "none"}>

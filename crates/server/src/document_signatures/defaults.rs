@@ -239,25 +239,53 @@ fn patient_contracting_signers(
     }))
 }
 
+/// The contract documents a minor's paying parent signs alone (owner decision
+/// 2026-10-25, map item 94: one e-mail, one signature — the parent the
+/// cabinet named as invoice recipient who also pays is the only Auftraggeber,
+/// as the PDF prints them). The consents keep every custody parent.
+fn paying_parent_signs_alone(template: Option<&str>) -> bool {
+    matches!(
+        template,
+        Some("framework_contract" | "single_order" | "order_cost_estimate")
+    )
+}
+
 /// Who signs for a minor; `None` when nothing is recorded beyond the legacy
-/// trusted contacts of a patient.
+/// trusted contacts of a patient. `template` is the generated template of the
+/// document: for the contract documents the signers follow the party block
+/// (`paying_parent_signs_alone`).
 async fn contracting_signers(
     state: &AppState,
     patient_id: Option<Uuid>,
     lead_id: Option<Uuid>,
     order_id: Option<Uuid>,
+    template: Option<&str>,
 ) -> Result<Option<Vec<Signer>>, Response> {
+    use crate::routes::documents::{only_paying_parent, paying_parent_contact};
     let mut conn = state.db.acquire().await.map_err(db_error)?;
     if let Some(lead_id) = lead_id {
-        let loaded = crate::routes::lead_representatives::load(&mut conn, lead_id)
+        let Some(mut loaded) = crate::routes::lead_representatives::load(&mut conn, lead_id)
             .await
-            .map_err(db_error)?;
-        return Ok(loaded.map(|loaded| lead_contracting_signers(&loaded.representation)));
+            .map_err(db_error)?
+        else {
+            return Ok(None);
+        };
+        if paying_parent_signs_alone(template) {
+            let paying_parent = paying_parent_contact(&mut conn, lead_id)
+                .await
+                .map_err(db_error)?;
+            loaded.representation.representatives = only_paying_parent(
+                loaded.representation.representatives,
+                paying_parent,
+                |person| Some(person.id),
+            );
+        }
+        return Ok(Some(lead_contracting_signers(&loaded.representation)));
     }
     let Some(patient_id) = patient_id else {
         return Ok(None);
     };
-    let party = crate::services::contracting_party::resolve(
+    let mut party = crate::services::contracting_party::resolve(
         &mut conn,
         patient_id,
         order_id,
@@ -268,6 +296,24 @@ async fn contracting_signers(
     .map_err(db_error)?;
     if party.representatives.is_empty() {
         return Ok(None);
+    }
+    if paying_parent_signs_alone(template)
+        && party.representatives.len() > 1
+        && let Some(lead_id) = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM leads WHERE converted_patient_id = $1 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(patient_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(db_error)?
+    {
+        let paying_parent = paying_parent_contact(&mut conn, lead_id)
+            .await
+            .map_err(db_error)?;
+        party.representatives =
+            only_paying_parent(party.representatives, paying_parent, |representative| {
+                representative.source_contact_id
+            });
     }
     Ok(Some(patient_contracting_signers(&party.representatives)))
 }
@@ -397,6 +443,9 @@ pub(super) async fn suggested(
             // The representatives who contract for the child sign (owner
             // decision 2026-10-19): the recorded parents only for old
             // patients nobody resolved.
+            let template = source
+                .try_get::<Option<String>, _>("generated_template_id")
+                .unwrap_or_default();
             let guardians = match contracting_signers(
                 state,
                 patient_id,
@@ -404,6 +453,7 @@ pub(super) async fn suggested(
                 source
                     .try_get::<Option<Uuid>, _>("order_id")
                     .unwrap_or_default(),
+                template.as_deref(),
             )
             .await?
             {
@@ -577,9 +627,28 @@ mod tests {
         // Without an e-mail address nobody can be invited.
         let no_email = Representation {
             representatives: vec![lead_parent(Some("rep1"), "Ioann", None)],
-            ..joint
+            ..joint.clone()
         };
         assert!(lead_contracting_signers(&no_email).is_empty());
+        // The contract documents: the paying parent signs alone (map 94); the
+        // consents and every document of another kind keep both.
+        let maria = joint.representatives[1].id;
+        let contract_only = Representation {
+            representatives: crate::routes::documents::only_paying_parent(
+                joint.representatives.clone(),
+                Some(maria),
+                |person| Some(person.id),
+            ),
+            ..joint.clone()
+        };
+        assert_eq!(
+            emails(lead_contracting_signers(&contract_only)),
+            vec!["maria@example.org"]
+        );
+        assert!(paying_parent_signs_alone(Some("framework_contract")));
+        assert!(paying_parent_signs_alone(Some("single_order")));
+        assert!(!paying_parent_signs_alone(Some("privacy_consents")));
+        assert!(!paying_parent_signs_alone(None));
     }
 
     #[test]

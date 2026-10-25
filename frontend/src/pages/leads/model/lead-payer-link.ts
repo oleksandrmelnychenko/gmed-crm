@@ -15,6 +15,7 @@ import {
   type PayerLinkEmail,
   type PayerLinkInfo,
   type PayerLinkRiskHold,
+  type PayerPreviousQuestionnaire,
   type PayerQuestionnaireDocument,
   type StaffPayerQuestionnaire,
 } from "../data/lead-payer-link-api";
@@ -31,6 +32,7 @@ import {
 import { loginEmailErrorMessage } from "./lead-portal-access";
 import {
   PAYER_RELATIONSHIP_KINDS,
+  PAYER_TYPES,
   SOURCE_OF_FUNDS,
   payerRelationshipKindLabel,
   payerTypeLabel,
@@ -725,4 +727,58 @@ export function payerPrivacyLine(questionnaire: Pick<StaffPayerQuestionnaire, "p
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+export type PreviousQuestionnaireSummary = {
+  /** The collapsed line: "Предыдущий плательщик: Viktor Zahler — анкета от 06.10.2026". */
+  title: string;
+  /** The expanded facts: payer kind, when it was sent, when and why it was superseded. */
+  details: string[];
+  /** The label of the button that opens the archived identity document; null without one. */
+  documentLabel: string | null;
+};
+
+/** Why the previous payer's statement was superseded, in words. */
+function previousQuestionnaireReason(reason: PayerPreviousQuestionnaire["archived_reason"], tx: Tx): string {
+  switch (reason) {
+    case "payer_changed":
+      return tx("плательщик изменён", "Zahler geändert");
+    case "email_changed":
+      return tx("изменён e-mail плательщика", "E-Mail des Zahlers geändert");
+    default:
+      return "";
+  }
+}
+
+/**
+ * One archived statement of a previous payer (QA 2026-10-25, map item 95) as
+ * the panel shows it: a collapsed line with the name and the date the payer
+ * sent it, and the facts behind it. A nameless entry is "a previous payer".
+ */
+export function previousQuestionnaireSummary(entry: PayerPreviousQuestionnaire, tx: Tx): PreviousQuestionnaireSummary {
+  const name = entry.payer_name ?? tx("имя не указано", "Name nicht angegeben");
+  const submitted = entry.submitted_at ? formatAppDate(entry.submitted_at) : "";
+  const title = `${tx("Предыдущий плательщик", "Früherer Zahler")}: ${name}${
+    submitted ? `${tx(" — анкета от", " – Fragebogen vom")} ${submitted}` : ""
+  }`;
+  const type = payerTypeLabel((PAYER_TYPES as readonly string[]).includes(entry.payer_type ?? "") ? (entry.payer_type as PayerType) : "person", tx);
+  const kind =
+    entry.payer_kind === "representative"
+      ? tx("родитель / законный представитель", "Elternteil / gesetzliche Vertretung")
+      : tx("третье лицо", "Dritter");
+  const details = [
+    `${tx("Тип плательщика", "Art des Zahlers")}: ${type} (${kind})`,
+    entry.submitted_at ? `${tx("Анкета отправлена", "Fragebogen gesendet am")} ${formatAppDateTime(entry.submitted_at)}` : "",
+    entry.archived_at
+      ? `${tx("В архиве с", "Archiviert am")} ${formatAppDateTime(entry.archived_at)}${
+          entry.archived_reason ? ` · ${previousQuestionnaireReason(entry.archived_reason, tx)}` : ""
+        }`
+      : "",
+    entry.document_id ? "" : tx("Документ, удостоверяющий личность, не загружался", "Kein Ausweisdokument hochgeladen"),
+  ].filter(Boolean);
+  return {
+    title,
+    details,
+    documentLabel: entry.document_id ? tx("Открыть архивный документ", "Archiviertes Dokument öffnen") : null,
+  };
 }

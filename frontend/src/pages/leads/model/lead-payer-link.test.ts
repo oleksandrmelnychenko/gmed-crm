@@ -27,6 +27,7 @@ import {
   payerLinkStatusLine,
   payerPrivacyLine,
   payerQuestionnaireGroups,
+  previousQuestionnaireSummary,
 } from "./lead-payer-link";
 
 const ru = (text: string) => text;
@@ -158,6 +159,7 @@ function state(patch: Partial<LeadPayerLinkState> = {}): LeadPayerLinkState {
     mail_available: true,
     link: null,
     questionnaire: null,
+    previous_questionnaires: [],
     ...patch,
   };
 }
@@ -542,6 +544,7 @@ describe("payer link: the server's answer", () => {
       mail_available: true,
       link: null,
       questionnaire: null,
+      previous_questionnaires: [],
     });
     expect(normalizeLeadPayerLinkState({ can_send: true, risk_hold: "review" })?.risk_hold).toBe("review");
     expect(normalizeLeadPayerLinkState({ can_send: true, risk_hold: "level3" })?.risk_hold).toBeNull();
@@ -550,5 +553,84 @@ describe("payer link: the server's answer", () => {
     expect(q?.answers.citizenships).toEqual(["AT"]);
     expect(q?.check_level).toBeNull();
     expect(q?.payer_type).toBe("person");
+  });
+
+  it("lists the sent statements of previous payers, dropping entries without an id", () => {
+    const value = normalizeLeadPayerLinkState({
+      can_send: true,
+      previous_questionnaires: [
+        {
+          statement_id: "st-2",
+          payer_name: "Viktor Zahler",
+          payer_kind: "third_party",
+          payer_type: "person",
+          submitted_at: "2026-10-20T09:30:00Z",
+          archived_at: "2026-10-24T08:00:00Z",
+          archived_reason: "payer_changed",
+          document_id: "doc-2",
+        },
+        { statement_id: "st-1", payer_name: null, archived_reason: "unknown", document_id: null },
+        { payer_name: "ohne id" },
+      ],
+    });
+    expect(value?.previous_questionnaires).toEqual([
+      {
+        statement_id: "st-2",
+        payer_name: "Viktor Zahler",
+        payer_kind: "third_party",
+        payer_type: "person",
+        submitted_at: "2026-10-20T09:30:00Z",
+        archived_at: "2026-10-24T08:00:00Z",
+        archived_reason: "payer_changed",
+        document_id: "doc-2",
+      },
+      {
+        statement_id: "st-1",
+        payer_name: null,
+        payer_kind: null,
+        payer_type: null,
+        submitted_at: null,
+        archived_at: null,
+        archived_reason: null,
+        document_id: null,
+      },
+    ]);
+  });
+});
+
+describe("payer link: a previous payer's statement (QA 2026-10-25, map item 95)", () => {
+  const entry = {
+    statement_id: "st-2",
+    payer_name: "Viktor Zahler",
+    payer_kind: "third_party",
+    payer_type: "person",
+    submitted_at: "2026-10-20T09:30:00Z",
+    archived_at: "2026-10-24T08:00:00Z",
+    archived_reason: "payer_changed" as const,
+    document_id: "doc-2",
+  };
+
+  it("names the payer and the date of the statement, with the facts behind it", () => {
+    const summary = previousQuestionnaireSummary(entry, ru);
+    expect(summary.title).toBe("Предыдущий плательщик: Viktor Zahler — анкета от 20.10.2026");
+    expect(summary.details).toEqual([
+      "Тип плательщика: Частное лицо (третье лицо)",
+      "Анкета отправлена 20.10.2026 11:30",
+      "В архиве с 24.10.2026 10:00 · плательщик изменён",
+    ]);
+    expect(summary.documentLabel).toBe("Открыть архивный документ");
+    expect(previousQuestionnaireSummary(entry, de).title).toBe("Früherer Zahler: Viktor Zahler – Fragebogen vom 20.10.2026");
+  });
+
+  it("copes with a nameless organisation payer without a document", () => {
+    const summary = previousQuestionnaireSummary(
+      { ...entry, payer_name: null, payer_kind: "representative", payer_type: "company", archived_reason: "email_changed", document_id: null },
+      de,
+    );
+    expect(summary.title).toBe("Früherer Zahler: Name nicht angegeben – Fragebogen vom 20.10.2026");
+    expect(summary.details[0]).toBe("Art des Zahlers: Unternehmen (Elternteil / gesetzliche Vertretung)");
+    expect(summary.details[2]).toBe("Archiviert am 24.10.2026 10:00 · E-Mail des Zahlers geändert");
+    expect(summary.details[3]).toBe("Kein Ausweisdokument hochgeladen");
+    expect(summary.documentLabel).toBeNull();
   });
 });

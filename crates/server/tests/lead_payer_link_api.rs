@@ -2146,8 +2146,9 @@ async fn another_payer_or_address_ends_the_link_and_the_purge_removes_it() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let left: (i64, i64, i64, i64) = sqlx::query_as(
+    let left: (i64, i64, i64, i64, i64) = sqlx::query_as(
         r#"SELECT (SELECT count(*) FROM lead_payer_statements WHERE lead_id = $1),
+                  (SELECT count(*) FROM lead_payer_statement_archive WHERE lead_id = $1),
                   (SELECT count(*) FROM lead_payer_links WHERE lead_id = $1),
                   (SELECT count(*) FROM lead_payer_link_emails WHERE lead_id = $1),
                   (SELECT count(*) FROM lead_portal_uploads WHERE lead_id = $1)"#,
@@ -2156,7 +2157,7 @@ async fn another_payer_or_address_ends_the_link_and_the_purge_removes_it() {
     .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(left, (0, 0, 0, 0));
+    assert_eq!(left, (0, 0, 0, 0, 0));
     let (status, _) = as_payer(&app, "GET", OPEN, &[("X-Payer-Link", token.as_str())], None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
@@ -2326,6 +2327,15 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["state"], "submitted");
+    let first_submitted_at = body["submitted_at"].clone();
+    assert!(first_submitted_at.is_string(), "{body}");
+    let link_path = format!("/api/v1/leads/{lead_id}/payer-link");
+    let (_, before) = with_login(&app, "GET", &link_path, &app.manager(), None).await;
+    assert_eq!(
+        before["previous_questionnaires"],
+        json!([]),
+        "the current statement is never a previous one: {before}"
+    );
 
     // Staff change the payer's address: the same payer, another e-mail.
     let declaration_path = format!("/api/v1/leads/{lead_id}/payer-declaration");
@@ -2402,6 +2412,56 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     for value in OLD_ANSWERS {
         assert!(!context.to_string().contains(value), "{value}: {context}");
     }
+    // The sent statement of before stays readable for staff (QA 2026-10-25,
+    // map item 95): who sent it, when, when it was superseded and its
+    // archived identity document — names and dates only, no answers.
+    let archived_statement = context["archived_statement"].clone();
+    assert!(archived_statement.is_string(), "{context}");
+    let (status, after) = with_login(&app, "GET", &link_path, &app.manager(), None).await;
+    assert_eq!(status, StatusCode::OK, "{after}");
+    let previous = after["previous_questionnaires"].as_array().unwrap();
+    assert_eq!(previous.len(), 1, "{after}");
+    let first_previous = &previous[0];
+    assert_eq!(
+        first_previous["statement_id"], archived_statement,
+        "{after}"
+    );
+    assert_eq!(first_previous["payer_name"], "Viktor Zahler", "{after}");
+    assert_eq!(first_previous["payer_kind"], "third_party", "{after}");
+    assert_eq!(first_previous["payer_type"], "person", "{after}");
+    assert_eq!(
+        first_previous["submitted_at"], first_submitted_at,
+        "{after}"
+    );
+    assert_eq!(
+        first_previous["archived_reason"], "email_changed",
+        "{after}"
+    );
+    assert!(first_previous["archived_at"].is_string(), "{after}");
+    assert_eq!(first_previous["document_id"], json!(document), "{after}");
+    for value in OLD_ANSWERS {
+        assert!(
+            !first_previous.to_string().contains(value),
+            "{value}: {after}"
+        );
+    }
+    assert!(after["questionnaire"]["submitted_at"].is_null(), "{after}");
+    let (archived_name, archived_answers): (Option<String>, Value) = sqlx::query_as(
+        "SELECT payer_name, statement -> 'answers' FROM lead_payer_statement_archive WHERE id = $1",
+    )
+    .bind(
+        archived_statement
+            .as_str()
+            .unwrap()
+            .parse::<Uuid>()
+            .unwrap(),
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(archived_name.as_deref(), Some("Viktor Zahler"));
+    assert_eq!(archived_answers["id_document_number"], "P1234567");
+    assert_eq!(archived_answers["occupation"], "Kaufmann");
     // The statement is reset, but the declaration still holds the identity
     // the payer stated (QA retest R2-a): the lead's cabinet shows the name,
     // the type, the relationship and the own consent only, and does not
@@ -2546,6 +2606,16 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     let (_, request) = with_login(&app, "GET", &request_path, &patient, None).await;
     assert_eq!(request["payer"]["answered_by_payer"], false, "{request}");
     assert_eq!(request["payer"]["last_name"], "Zahler-Neu", "{request}");
+    // The draft of the new address was never sent: nothing to keep of it.
+    let (_, after_rename) = with_login(&app, "GET", &link_path, &app.manager(), None).await;
+    assert_eq!(
+        after_rename["previous_questionnaires"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "a draft is not archived: {after_rename}"
+    );
     let (status, body) = with_login(
         &app,
         "POST",
@@ -2555,6 +2625,71 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The payer answers once more and sends; then staff change the surname
+    // (another person): that statement is listed first, the older one after
+    // it (QA 2026-10-25, map item 95).
+    submit_request(&app, lead_id).await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    let headers = [
+        ("X-Payer-Link", token.as_str()),
+        ("X-Payer-Session", session.as_str()),
+    ];
+    consent(&app, &token, &session).await;
+    let (status, body) = patch(&app, &token, &session, person_answers()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass-2.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let second_document: Uuid = body["identity_documents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (status, body) = as_payer(
+        &app,
+        "POST",
+        SUBMIT,
+        &headers,
+        Some(json!({ "declared_correct": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let second_submitted_at = body["submitted_at"].clone();
+    let saved = staff_save(&app, lead_id, |form| {
+        form.insert("last_name".into(), json!("Anders"));
+    })
+    .await;
+    assert_eq!(saved["last_name"], "Anders", "{saved}");
+    let (status, listed) = with_login(&app, "GET", &link_path, &app.manager(), None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let previous = listed["previous_questionnaires"].as_array().unwrap();
+    assert_eq!(previous.len(), 2, "{listed}");
+    assert_eq!(previous[0]["payer_name"], "Viktor Zahler", "{listed}");
+    assert_eq!(previous[0]["submitted_at"], second_submitted_at, "{listed}");
+    assert_eq!(previous[0]["archived_reason"], "payer_changed", "{listed}");
+    assert_eq!(
+        previous[0]["document_id"],
+        json!(second_document),
+        "{listed}"
+    );
+    assert_eq!(previous[1]["submitted_at"], first_submitted_at, "{listed}");
+    assert_eq!(previous[1]["document_id"], json!(document), "{listed}");
+    assert!(
+        listed["questionnaire"]["submitted_at"].is_null(),
+        "the new payer's statement is current, not previous: {listed}"
+    );
+    let (archived_status, archived_name): (String, String) =
+        sqlx::query_as("SELECT status, auto_name FROM documents WHERE id = $1")
+            .bind(second_document)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(archived_status, "archived");
+    assert!(
+        archived_name.starts_with("Früherer Zahler – "),
+        "{archived_name}"
+    );
 }
 
 #[tokio::test]

@@ -231,6 +231,7 @@ export function LeadPayerDeclarationSection({
   payerLinkCanEdit,
   leadLanguage,
   onPayerLinkSent,
+  onOpenPayerDocument,
   enhancedDetails,
   portalIntake = null,
   prefill = null,
@@ -261,6 +262,8 @@ export function LeadPayerDeclarationSection({
   leadLanguage?: string | null;
   /** A payer link went out: the server marked the payer as informed, the declaration is to be reloaded. */
   onPayerLinkSent?: () => void;
+  /** Opens a document of the lead in the wizard's preview (a previous payer's archived identity document); a download without it. */
+  onOpenPayerDocument?: (documentId: string, title: string) => void;
   /**
    * The cabinet's extra step with the self-payer's proofs (the portal state);
    * without it the declaration's answers are shown without files.
@@ -1207,6 +1210,7 @@ export function LeadPayerDeclarationSection({
                 onSent={onPayerLinkSent}
                 packageSummary={data?.status.payer_package}
                 leadSubmitted={Boolean(portalIntake?.submitted_at)}
+                onOpenDocument={onOpenPayerDocument}
               />
             ) : payerLink?.error ? (
               <p className="text-xs text-rose-700" data-testid="lead-payer-link-error">

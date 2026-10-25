@@ -7677,6 +7677,13 @@ ${serviceCommentLines.join("\n")}`
       payerLinkCanEdit={canEditPayerLink}
       leadLanguage={draft.language}
       onPayerLinkSent={() => void payer.reload()}
+      // The archived copy of a previous payer's questionnaire opens in the
+      // wizard's preview like every other document (map item 95).
+      onOpenPayerDocument={(documentId, title) => {
+        const document = documents.find((item) => item.id === documentId);
+        if (document) void openOrDownloadDocument(document);
+        else void downloadDocumentFile(documentId, `${title}.pdf`).catch(showWizardError);
+      }}
       registerAutosave={registerPayerAutosave}
       errorText={(nextError) => errorText(nextError, tx)}
       onSave={async (form) => {

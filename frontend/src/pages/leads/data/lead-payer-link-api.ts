@@ -206,6 +206,29 @@ export type StaffPayerQuestionnaire = {
 
 export type PayerLinkRiskHold = "review" | "rejected";
 
+/** Why a previous payer's statement was superseded: another payer, or the same payer at another e-mail address. */
+export type PayerPreviousQuestionnaireReason = "payer_changed" | "email_changed";
+
+/**
+ * The sent questionnaire of a previous payer (QA 2026-10-25, map item 95):
+ * archived when staff changed the payer or its address, named here with dates
+ * only — its answers stay in the archive. `document_id` is the archived copy
+ * of that payer's identity document ("Früherer Zahler – …"), if one was
+ * uploaded.
+ */
+export type PayerPreviousQuestionnaire = {
+  statement_id: string;
+  payer_name: string | null;
+  /** `third_party` or `representative`: the declaration's payer kind. */
+  payer_kind: string | null;
+  /** `person`, `company`, `organisation` or `insurance`. */
+  payer_type: string | null;
+  submitted_at: string | null;
+  archived_at: string | null;
+  archived_reason: PayerPreviousQuestionnaireReason | null;
+  document_id: string | null;
+};
+
 /** `GET /leads/{id}/payer-link`. */
 export type LeadPayerLinkState = {
   mode: PayerLinkMode | null;
@@ -221,6 +244,8 @@ export type LeadPayerLinkState = {
   mail_available: boolean;
   link: PayerLinkInfo | null;
   questionnaire: StaffPayerQuestionnaire | null;
+  /** The sent statements of previous payers, newest first; empty on an older server. */
+  previous_questionnaires: PayerPreviousQuestionnaire[];
 };
 
 /** The body of "send" and "resend": the language of the e-mail and the page, and whether a submitted questionnaire is reopened. */
@@ -465,5 +490,29 @@ export function normalizeLeadPayerLinkState(value: unknown): LeadPayerLinkState 
     mail_available: raw.mail_available !== false,
     link: normalizeLink(raw.link),
     questionnaire: normalizeStaffPayerQuestionnaire(raw.questionnaire),
+    previous_questionnaires: normalizePreviousQuestionnaires(raw.previous_questionnaires),
   };
+}
+
+/** The previous payers' statements as the server lists them (newest first); none on an older server. */
+export function normalizePreviousQuestionnaires(value: unknown): PayerPreviousQuestionnaire[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const raw = asRecord(item);
+    const id = raw ? textOrNull(raw.statement_id) : null;
+    if (!raw || !id) return [];
+    return [
+      {
+        statement_id: id,
+        payer_name: textOrNull(raw.payer_name),
+        payer_kind: textOrNull(raw.payer_kind),
+        payer_type: textOrNull(raw.payer_type),
+        submitted_at: textOrNull(raw.submitted_at),
+        archived_at: textOrNull(raw.archived_at),
+        archived_reason:
+          raw.archived_reason === "payer_changed" || raw.archived_reason === "email_changed" ? raw.archived_reason : null,
+        document_id: textOrNull(raw.document_id),
+      },
+    ];
+  });
 }

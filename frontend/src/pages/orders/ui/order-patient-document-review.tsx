@@ -12,7 +12,7 @@ import type { ContractItem } from "@/pages/contracts/model/types";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import type { PatientOrderRecheck } from "../model/types";
 import { formatIntakeDate, INTAKE_CHECK_LABELS, isContractUsable } from "../model/order-intake";
-import { contractUsability, CONTRACT_USABILITY_LABELS, identityDocumentOnFile, passportReviewStatus, PASSPORT_REVIEW_LABELS } from "../model/order-document-review";
+import { contractUsability, CONTRACT_USABILITY_LABELS, DOCUMENT_CHECK_STATUS_LABELS, documentCheckEvidence, documentCheckStatus, isDocumentCheckReady, passportReviewStatus, PASSPORT_REVIEW_LABELS } from "../model/order-document-review";
 import { OrderWizardSection } from "./order-wizard-tables";
 
 const tableClass = "rounded-none border-0 bg-transparent shadow-none sm:max-h-[400px]";
@@ -53,11 +53,10 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
   const [editing, setEditing] = useState(false);
   const [expiry, setExpiry] = useState("");
   const passportStatus = passportReviewStatus(readiness.passport_expiry, dateTo);
-  const signedOn = (kind: string) => documents.filter(doc => doc.is_latest_version && doc.status !== "archived" && !doc.file_deleted_at && doc.signed_at && (doc.compliance_kind === kind || doc.generated_template_id === kind))
-    .map(doc => doc.signed_at!).sort().at(-1);
-  const consentDate = signedOn("dsgvo") ?? signedOn("privacy_consents");
-  const releaseDate = signedOn("confidentiality_release");
-  const identity = identityDocumentOnFile(documents);
+  // Status and details of the document rows come from the same source: the
+  // card's flags where they are set, the documents in hand where they lag.
+  const evidence = documentCheckEvidence(readiness, documents);
+  const { consentDate, releaseDate, identity, missingDocuments } = evidence;
   const outstanding = readiness.debt_management?.outstanding_balance ?? readiness.outstanding_balance;
   const rows: ReviewRow[] = [
     // Process mapping 2B: the debt check comes before a new order. Debt never blocks by itself; it is shown for attention.
@@ -69,18 +68,20 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
         : "—" },
     { key: "passport", label: tx("Паспорт", "Reisepass"), ready: passportStatus === "valid", status: PASSPORT_REVIEW_LABELS[passportStatus][language],
       detail: readiness.passport_expiry ? `${tx("Действует до", "Gültig bis")}: ${formatIntakeDate(readiness.passport_expiry)}` : tx("Дата окончания действия отсутствует", "Ablaufdatum fehlt") },
-    ...(["compliance_ready", "confidentiality_release_ready", "identity_ready", "document_pack_ready"] as const).map(key => ({
-      key, label: INTAKE_CHECK_LABELS[key][language], ready: readiness.requires_recheck && readiness[key] && !(key === "document_pack_ready" && (readiness.document_alerts.missing_count > 0 || readiness.document_alerts.out_of_sync)),
-      status: !readiness.requires_recheck ? tx("Проверка ещё не выполнена", "Noch nicht geprüft")
-        : key === "document_pack_ready" && readiness[key] && (readiness.document_alerts.missing_count > 0 || readiness.document_alerts.out_of_sync) ? tx("Есть расхождения — проверьте документы", "Abweichungen — Dokumente prüfen")
-        : readiness[key] ? tx("Подтверждено в карточке", "In der Akte bestätigt") : tx("Нужно проверить / дополнить", "Prüfen / ergänzen"),
-      detail: key === "compliance_ready" && consentDate ? `${tx("Согласие подписано", "Einwilligung unterzeichnet")}: ${formatIntakeDate(consentDate)}`
-        : key === "confidentiality_release_ready" && releaseDate ? `${tx("Подписано", "Unterzeichnet")}: ${formatIntakeDate(releaseDate)}`
-        // The passport already on file is named, so nobody uploads it a second time.
-        : key === "identity_ready" && identity?.verifiedAt ? `${tx("Проверен", "Geprüft")}: ${formatIntakeDate(identity.verifiedAt)}${identity.name ? ` · ${identity.name}` : ""}`
-        : key === "identity_ready" && identity ? `${tx("Файл есть, ждёт подтверждения", "Datei vorhanden, Bestätigung offen")}${identity.name ? `: ${identity.name}` : ""}`
-        : key === "document_pack_ready" && readiness.document_alerts.missing_count > 0 ? `${tx("Не хватает документов", "Fehlende Dokumente")}: ${readiness.document_alerts.missing_count}` : "—",
-    })),
+    ...(["compliance_ready", "confidentiality_release_ready", "identity_ready", "document_pack_ready"] as const).map(key => {
+      const status = documentCheckStatus(key, readiness, evidence);
+      return {
+        key, label: INTAKE_CHECK_LABELS[key][language], ready: isDocumentCheckReady(status),
+        status: DOCUMENT_CHECK_STATUS_LABELS[status][language],
+        detail: key === "compliance_ready" && consentDate ? `${tx("Согласие подписано", "Einwilligung unterzeichnet")}: ${formatIntakeDate(consentDate)}`
+          : key === "confidentiality_release_ready" && releaseDate ? `${tx("Подписано", "Unterzeichnet")}: ${formatIntakeDate(releaseDate)}`
+          // The passport already on file is named, so nobody uploads it a second time.
+          : key === "identity_ready" && identity?.verifiedAt ? `${tx("Проверен", "Geprüft")}: ${formatIntakeDate(identity.verifiedAt)}${identity.name ? ` · ${identity.name}` : ""}`
+          : key === "identity_ready" && identity ? `${tx("Файл есть, ждёт подтверждения", "Datei vorhanden, Bestätigung offen")}${identity.name ? `: ${identity.name}` : ""}`
+          // The count leaves out the documents already in hand, like the rows above it.
+          : key === "document_pack_ready" && missingDocuments.length > 0 ? `${tx("Не хватает документов", "Fehlende Dokumente")}: ${missingDocuments.length}` : "—",
+      };
+    }),
     ...requestRows,
   ];
   const columns: ColumnDef<ReviewRow>[] = compact ? [
@@ -102,6 +103,6 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
       <Field label={tx("Паспорт действителен до", "Reisepass gültig bis")}><Input aria-label={tx("Паспорт действителен до", "Reisepass gültig bis")} type="date" value={expiry} onChange={event => setExpiry(event.target.value)} className="max-w-xs" /></Field>
       <div className="flex flex-wrap gap-2"><Button type="button" size="sm" disabled={busy || !expiry || expiry === readiness.passport_expiry} onClick={() => { void onSaveExpiry(expiry).then(saved => { if (saved) setEditing(false); }); }}>{tx("Сохранить срок в карточке пациента", "Gültigkeit in Patientenakte speichern")}</Button><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(false)}>{tx("Отмена", "Abbrechen")}</Button></div>
     </div> : null}
-    {readiness.document_alerts.missing_documents.length ? <p className="border-t p-3 text-xs text-amber-800">{tx("Отсутствуют", "Fehlend")}: {readiness.document_alerts.missing_documents.map(doc => doc.label).join(", ")}</p> : null}
+    {missingDocuments.length ? <p className="border-t p-3 text-xs text-amber-800">{tx("Отсутствуют", "Fehlend")}: {missingDocuments.map(doc => doc.label).join(", ")}</p> : null}
   </OrderWizardSection>;
 }

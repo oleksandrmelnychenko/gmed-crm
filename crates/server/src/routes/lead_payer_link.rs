@@ -4534,10 +4534,11 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
         let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
         // The stored assessment only (the send itself reassesses in the gate).
         let risk = crate::risk::store::load(&mut conn, lead_id).await?;
-        Ok::<_, sqlx::Error>(Some((context, link, emails, check, risk)))
+        let previous = previous_questionnaires(&mut conn, lead_id).await?;
+        Ok::<_, sqlx::Error>(Some((context, link, emails, check, risk, previous)))
     }
     .await;
-    let (context, link, emails, check, risk) = match loaded {
+    let (context, link, emails, check, risk, previous) = match loaded {
         Ok(Some(found)) => found,
         Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
         Err(error) => return intake::internal(error, "load payer link"),
@@ -4585,6 +4586,8 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
         "mail_available": mail_available,
         "link": link_json,
         "questionnaire": questionnaire_value,
+        // The sent statements of previous payers, newest first (map item 95).
+        "previous_questionnaires": previous,
     }))
     .into_response()
 }
@@ -5132,7 +5135,7 @@ pub(crate) async fn payer_changed_in_tx(
             .await?;
         }
         revoke_active(conn, lead_id, "payer_changed", actor).await?;
-        return reset_statement(conn, lead_id, "payer_changed", actor, &[]).await;
+        return reset_statement(conn, lead_id, previous, "payer_changed", actor, &[]).await;
     }
     // Nobody but a third party answers through a link: once the payer is the
     // patient or a paying parent — the same parent the third-party row of
@@ -5172,20 +5175,35 @@ pub(crate) async fn payer_changed_in_tx(
         .execute(&mut *conn)
         .await?;
     }
-    reset_statement(conn, lead_id, "email_changed", actor, &route_cleared).await
+    reset_statement(
+        conn,
+        lead_id,
+        previous,
+        "email_changed",
+        actor,
+        &route_cleared,
+    )
+    .await
 }
 
 /// Clears the payer's answers (all but staff's expected total, with the
 /// privacy acknowledgement, the confirmed address and the submit), withdraws
 /// the payer's files and audits the reset with the field names of section 8
-/// that went with it.
+/// that went with it. A statement the previous payer had sent is copied to
+/// `lead_payer_statement_archive` first (QA 2026-10-25, map item 95): staff
+/// keep seeing what the previous payer stated, listed by `GET
+/// /leads/{id}/payer-link` as `previous_questionnaires`. `previous` is the
+/// declaration the statement belonged to (its kind, type and name when the
+/// statement itself names nobody).
 async fn reset_statement(
     conn: &mut PgConnection,
     lead_id: Uuid,
+    previous: &Declaration,
     reason: &str,
     actor: Option<Uuid>,
     payment_route_cleared: &[&'static str],
 ) -> Result<(), sqlx::Error> {
+    let superseded = sent_statement_snapshot(conn, lead_id, previous).await?;
     let cleared: Option<bool> = sqlx::query_scalar(
         r#"UPDATE lead_payer_statements
                SET answered_by_user = NULL, link_id = NULL, payer_key = NULL,
@@ -5222,9 +5240,12 @@ async fn reset_statement(
     // archived as "früherer Zahler" — kept with the lead for retention and
     // audit, never shown as current nor carried to the patient (owner
     // 2026-10-24).
-    let archived: Vec<Uuid> = if matches!(reason, "payer_changed" | "email_changed") {
-        sqlx::query_scalar(&format!(
-            r#"UPDATE documents d
+    let archived_copies: Vec<(Uuid, String)> = if matches!(
+        reason,
+        "payer_changed" | "email_changed"
+    ) {
+        sqlx::query_as(&format!(
+                r#"UPDATE documents d
                SET status = 'archived',
                    auto_name = CASE WHEN d.auto_name LIKE '{PREVIOUS_PAYER_PREFIX}%' THEN d.auto_name
                                     ELSE '{PREVIOUS_PAYER_PREFIX}' || d.auto_name END,
@@ -5237,13 +5258,47 @@ async fn reset_statement(
                  AND u.kind IN ('payer_identity', 'payer_funds_proof')
                  AND u.withdrawn_at IS NULL
                  AND d.lead_id = $1
-               RETURNING d.id"#
-        ))
-        .bind(lead_id)
-        .fetch_all(&mut *conn)
-        .await?
+               RETURNING d.id, u.kind"#
+            ))
+            .bind(lead_id)
+            .fetch_all(&mut *conn)
+            .await?
     } else {
         Vec::new()
+    };
+    let archived: Vec<Uuid> = archived_copies.iter().map(|(id, _)| *id).collect();
+    // The previous payer's sent statement stays readable for staff, with its
+    // archived identity document when there is one (else the proof of funds).
+    let archived_statement: Option<Uuid> = match superseded {
+        Some(snapshot) if matches!(reason, "payer_changed" | "email_changed") => {
+            let document_id = archived_copies
+                .iter()
+                .find(|(_, kind)| kind == "payer_identity")
+                .or_else(|| archived_copies.first())
+                .map(|(id, _)| *id);
+            Some(
+                sqlx::query_scalar(
+                    r#"INSERT INTO lead_payer_statement_archive
+                       (lead_id, source, payer_kind, payer_type, payer_name, submitted_at,
+                        archived_reason, archived_by, document_id, statement)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                       RETURNING id"#,
+                )
+                .bind(lead_id)
+                .bind(&snapshot.source)
+                .bind(&snapshot.payer_kind)
+                .bind(&snapshot.payer_type)
+                .bind(&snapshot.payer_name)
+                .bind(snapshot.submitted_at)
+                .bind(reason)
+                .bind(actor)
+                .bind(document_id)
+                .bind(&snapshot.statement)
+                .fetch_one(&mut *conn)
+                .await?,
+            )
+        }
+        _ => None,
     };
     let withdrawn = sqlx::query(
         r#"UPDATE lead_portal_uploads SET withdrawn_at = now()
@@ -5267,6 +5322,7 @@ async fn reset_statement(
                     "reason": reason,
                     "withdrawn_uploads": withdrawn,
                     "archived_previous_payer_documents": archived,
+                    "archived_statement": archived_statement,
                     "payment_route_cleared": payment_route_cleared,
                 }),
             ),
@@ -5274,6 +5330,111 @@ async fn reset_statement(
         .await?;
     }
     Ok(())
+}
+
+/// The sent statement of a lead as it is copied to the archive on a reset.
+struct SentStatementSnapshot {
+    source: String,
+    payer_kind: String,
+    payer_type: String,
+    payer_name: Option<String>,
+    submitted_at: DateTime<Utc>,
+    /// The statement as staff read it: the answers under their API keys,
+    /// the confirmed address, the privacy acknowledgement and the times.
+    statement: Value,
+}
+
+/// The statement of `lead_id` if the payer has sent it (a draft is not
+/// archived: nothing was stated to GMED yet), with the kind, type and — when
+/// the statement names nobody — the name of `declaration`, the declaration
+/// it belonged to.
+async fn sent_statement_snapshot(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    declaration: &Declaration,
+) -> Result<Option<SentStatementSnapshot>, sqlx::Error> {
+    let Some(row) = sqlx::query(&format!(
+        "SELECT source, {STATEMENT_COLUMNS} FROM lead_payer_statements \
+         WHERE lead_id = $1 AND submitted_at IS NOT NULL"
+    ))
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let statement = Statement::from_row(&row);
+    let Some(submitted_at) = statement.submitted_at else {
+        return Ok(None);
+    };
+    let organisation = declaration.is_organisation();
+    let payer_type = declaration
+        .payer_type
+        .clone()
+        .unwrap_or_else(|| lead_payer::PAYER_TYPE_PERSON.to_string());
+    let payer_name = statement
+        .answers
+        .display_name(organisation)
+        .or_else(|| declaration.payer_name());
+    let source: String = row.try_get("source").unwrap_or_else(|_| "link".to_string());
+    let snapshot = json!({
+        "source": source,
+        "payer_type": payer_type,
+        "email": statement.confirmed_email,
+        "email_confirmed_at": statement.email_confirmed_at,
+        "privacy": {
+            "acknowledged_at": statement.privacy_ack_at,
+            "text_version": statement.privacy_text_version,
+            "contact_channels": statement.contact_channels,
+        },
+        "answers": statement.answers.to_json(organisation),
+        "declared_correct_at": statement.declared_correct_at,
+        "submitted_at": submitted_at,
+        "adopted_at": statement.adopted_at,
+    });
+    Ok(Some(SentStatementSnapshot {
+        source,
+        payer_kind: declaration.payer_kind.clone(),
+        payer_type,
+        payer_name,
+        submitted_at,
+        statement: snapshot,
+    }))
+}
+
+/// The sent statements of previous payers of a lead, newest first (QA
+/// 2026-10-25, map item 95), for the wizard's payer panel: who stated, when,
+/// when the statement was superseded and the archived identity document to
+/// open. Names and dates only — the answers stay in the archive.
+async fn previous_questionnaires(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT id, payer_kind, payer_type, payer_name, submitted_at, archived_at,
+                  archived_reason, document_id
+           FROM lead_payer_statement_archive
+           WHERE lead_id = $1
+           ORDER BY archived_at DESC, id DESC"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            json!({
+                "statement_id": row.try_get::<Uuid, _>("id").ok(),
+                "payer_name": row.try_get::<Option<String>, _>("payer_name").ok().flatten(),
+                "payer_kind": row.try_get::<String, _>("payer_kind").ok(),
+                "payer_type": row.try_get::<String, _>("payer_type").ok(),
+                "submitted_at": row.try_get::<DateTime<Utc>, _>("submitted_at").ok(),
+                "archived_at": row.try_get::<DateTime<Utc>, _>("archived_at").ok(),
+                "archived_reason": row.try_get::<String, _>("archived_reason").ok(),
+                "document_id": row.try_get::<Option<Uuid>, _>("document_id").ok().flatten(),
+            })
+        })
+        .collect())
 }
 
 /// Conversion: the link ends (`lead_converted`); the statement stays with the
@@ -5288,8 +5449,9 @@ pub(crate) async fn revoke_for_conversion(
         .map(|_| ())
 }
 
-/// The purge of an unconverted lead: the statement, the links with their
-/// e-mails and the payer's signature packages (phase 3b; their documents
+/// The purge of an unconverted lead: the statement with the archived
+/// statements of previous payers, the links with their e-mails and the
+/// payer's signature packages (phase 3b; their documents
 /// follow the lead's documents). A converted lead keeps them (§ 8 Abs. 4
 /// GwG).
 pub(crate) async fn purge_in_tx(conn: &mut PgConnection, lead_id: Uuid) -> Result<(), sqlx::Error> {
@@ -5308,6 +5470,16 @@ pub(crate) async fn purge_in_tx(conn: &mut PgConnection, lead_id: Uuid) -> Resul
            USING leads lead
            WHERE payer_statement.lead_id = $1
              AND lead.id = payer_statement.lead_id
+             AND lead.converted_patient_id IS NULL"#,
+    )
+    .bind(lead_id)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query(
+        r#"DELETE FROM lead_payer_statement_archive archived_statement
+           USING leads lead
+           WHERE archived_statement.lead_id = $1
+             AND lead.id = archived_statement.lead_id
              AND lead.converted_patient_id IS NULL"#,
     )
     .bind(lead_id)

@@ -6,9 +6,12 @@
 //! the child (Vertrag zugunsten Dritter, § 328 BGB): a minor is only of
 //! limited capacity (§§ 106–108 BGB) and its liability from contracts its
 //! parents concluded is limited (§ 1629a BGB), so the parents are the
-//! debtors — two of them jointly (Gesamtschuldner, § 421 BGB). Staff can still
-//! choose the child as the party, represented by its guardians (§ 1629 Abs. 1
-//! BGB, both sign under joint custody).
+//! debtors — two of them jointly (Gesamtschuldner, § 421 BGB). The contract
+//! documents narrow two custody parents to the one the lead's cabinet named
+//! as invoice recipient who also pays (owner decision 2026-10-25, see
+//! `routes::documents::load_contracting_doc`). Staff can still choose the
+//! child as the party, represented by its guardians (§ 1629 Abs. 1 BGB, both
+//! sign under joint custody).
 //!
 //! The choice is stored on the order (else on its framework contract); when
 //! neither names it, it is derived from the patient's age at the given date.
@@ -62,6 +65,10 @@ impl PartyKind {
 pub struct Representative {
     pub relation_id: Uuid,
     pub related_patient_id: Option<Uuid>,
+    /// The trusted-contact entry of the lead the relation was made from at
+    /// conversion (`patient_relations.source_contact_id`): the id by which
+    /// the lead's invoice recipient names this parent.
+    pub source_contact_id: Option<Uuid>,
     pub relation_type: String,
     pub name: String,
     pub first_name: Option<String>,
@@ -382,8 +389,8 @@ async fn load_relations(
     guardians_only: bool,
 ) -> Result<Vec<Representative>, sqlx::Error> {
     let rows = sqlx::query(
-        r#"SELECT relation.id, relation.related_patient_id, relation.relation_type,
-                  relation.is_default_payer,
+        r#"SELECT relation.id, relation.related_patient_id, relation.source_contact_id,
+                  relation.relation_type, relation.is_default_payer,
                   COALESCE(gmed_person_display_name(NULL, person.first_name, person.last_name),
                            NULLIF(btrim(relation.related_name), '')) AS name,
                   person.first_name, person.last_name,
@@ -424,6 +431,7 @@ async fn load_relations(
         .map(|row| Representative {
             relation_id: row.try_get("id").unwrap_or_default(),
             related_patient_id: row.try_get("related_patient_id").unwrap_or_default(),
+            source_contact_id: row.try_get("source_contact_id").unwrap_or_default(),
             relation_type: row.try_get("relation_type").unwrap_or_default(),
             name: clean(row.try_get("name").unwrap_or_default()).unwrap_or_default(),
             first_name: clean(row.try_get("first_name").unwrap_or_default()),

@@ -161,6 +161,52 @@ describe("LeadPayerLinkPanel", () => {
     expect(render(state())).not.toContain("lead-payer-link-package");
   });
 
+  it("lists a previous payer's statement collapsed, with its archived document (QA 2026-10-25, map item 95)", () => {
+    const previous = state({
+      previous_questionnaires: [
+        {
+          statement_id: "st-2",
+          payer_name: "Ben Zahler",
+          payer_kind: "third_party",
+          payer_type: "person",
+          submitted_at: "2026-10-22T09:30:00Z",
+          archived_at: "2026-10-24T08:00:00Z",
+          archived_reason: "payer_changed",
+          document_id: "doc-2",
+        },
+        {
+          statement_id: "st-1",
+          payer_name: "Viktor Zahler",
+          payer_kind: "third_party",
+          payer_type: "person",
+          submitted_at: "2026-10-20T09:30:00Z",
+          archived_at: "2026-10-21T08:00:00Z",
+          archived_reason: "email_changed",
+          document_id: null,
+        },
+      ],
+    });
+    const html = render(previous);
+    expect(html).toContain('data-testid="lead-payer-link-previous"');
+    // Newest first, each a collapsed <details> with the name and the date of the statement.
+    const first = html.indexOf("Предыдущий плательщик: Ben Zahler — анкета от 22.10.2026");
+    const second = html.indexOf("Предыдущий плательщик: Viktor Zahler — анкета от 20.10.2026");
+    expect(first).toBeGreaterThan(-1);
+    expect(second).toBeGreaterThan(first);
+    expect(html).toMatch(/<details[^>]*data-statement-id="st-2"[^>]*>\s*<summary/);
+    expect(html).not.toContain("<details open");
+    // The facts behind the line and the button for the archived copy — only where there is one.
+    expect(html).toContain("Анкета отправлена 22.10.2026 11:30");
+    expect(html).toContain("В архиве с 24.10.2026 10:00 · плательщик изменён");
+    expect(html).toContain("изменён e-mail плательщика");
+    expect(html.match(/data-testid="lead-payer-link-previous-document"/g)).toHaveLength(1);
+    expect(html).toContain("Открыть архивный документ");
+    expect(html).toContain("Документ, удостоверяющий личность, не загружался");
+    expect(render(previous, { tx: de })).toContain("Früherer Zahler: Ben Zahler – Fragebogen vom 22.10.2026");
+    // Nothing of it without previous payers.
+    expect(render(state())).not.toContain("lead-payer-link-previous");
+  });
+
   it("reads the lead's language as one of the four", () => {
     expect(payerLinkLanguageOf("uk-UA")).toBe("uk");
     expect(payerLinkLanguageOf("UA")).toBe("uk");

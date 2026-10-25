@@ -11678,6 +11678,278 @@ async fn minor_single_order_names_both_parents_and_their_signature_frames() {
     assert!(text.contains("zugunsten des Patienten"), "{text}");
 }
 
+/// A minor lead under joint custody with `contacts` as its parents, each with
+/// a legal-representative row and identity proofs; `converted_patient_id`
+/// marks the lead as converted into that patient.
+async fn seed_joint_custody_lead(
+    pool: &PgPool,
+    admin: Uuid,
+    tag: &str,
+    contacts: &[Value],
+    converted_patient_id: Option<Uuid>,
+) -> Uuid {
+    let lead: Uuid = sqlx::query_scalar(
+        "INSERT INTO leads(first_name,last_name,date_of_birth,email,legal_sex,street_address,zip_code,city,country,citizenships,trusted_contacts,portal_submitted_at,created_by,converted_patient_id) VALUES('Mia',$1,'2015-06-07',$2,'female','Kinderweg 11','10115','Berlin','DE','{DE}',$3,now(),$4,$5) RETURNING id",
+    )
+    .bind(format!("Kind-{tag}"))
+    .bind(format!("child-{tag}@example.test"))
+    .bind(json!(contacts))
+    .bind(admin)
+    .bind(converted_patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,custody) VALUES($1,'joint')")
+        .bind(lead)
+        .execute(pool)
+        .await
+        .unwrap();
+    for (index, contact) in contacts.iter().enumerate() {
+        let id: Uuid = contact["id"].as_str().unwrap().parse().unwrap();
+        let (first, last) = contact["name"].as_str().unwrap().split_once(' ').unwrap();
+        sqlx::query(
+            "INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_issued_on,id_valid_until) VALUES($1,$2,'legal_representative','staff',$3,$4,'{DE}',$5,'80331','München','DE','passport',$6,'Stadt München','DE','2020-01-02','2035-01-02')",
+        )
+        .bind(lead)
+        .bind(id)
+        .bind(first)
+        .bind(last)
+        .bind(format!("Elternweg {}", index + 21))
+        .bind(format!("QA-{tag}-{index}"))
+        .execute(pool)
+        .await
+        .unwrap();
+        for kind in ["representative_identity", "representative_authority"] {
+            let document = Uuid::new_v4();
+            sqlx::query("INSERT INTO documents(id,lead_id,auto_name,original_filename,art,category,status,visibility,is_medical,mime_type,version_root_document_id,version_number,uploaded_by) VALUES($1,$2,'Synthetic proof','proof.pdf',$3,'identity','active','internal',false,'application/pdf',$1,1,$4)")
+                .bind(document).bind(lead).bind(kind).bind(admin).execute(pool).await.unwrap();
+            sqlx::query("INSERT INTO lead_portal_uploads(document_id,lead_id,uploaded_by,access_kind,kind,representative_id) VALUES($1,$2,$3,'guardian',$4,$5)")
+                .bind(document).bind(lead).bind(admin).bind(kind).bind(id).execute(pool).await.unwrap();
+        }
+    }
+    lead
+}
+
+/// Step 3 of the cabinet as the lead answered it: the parent `contact` is the
+/// invoice recipient, who pays (`pays`) or not (`lead_invoice_recipients`,
+/// the one source of the recipient).
+async fn set_parent_invoice_recipient(pool: &PgPool, lead: Uuid, contact: &Value, pays: bool) {
+    let id: Uuid = contact["id"].as_str().unwrap().parse().unwrap();
+    let (first, last) = contact["name"].as_str().unwrap().split_once(' ').unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_invoice_recipients(lead_id,recipient,recipient_is_payer,representative_contact_id,recipient_type,first_name,last_name,email)
+           VALUES($1,'self',$2,$3,'person',$4,$5,$6)
+           ON CONFLICT (lead_id) DO UPDATE
+           SET recipient_is_payer = EXCLUDED.recipient_is_payer,
+               representative_contact_id = EXCLUDED.representative_contact_id"#,
+    )
+    .bind(lead)
+    .bind(pays)
+    .bind(id)
+    .bind(first)
+    .bind(last)
+    .bind(contact["email"].as_str())
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Generates a contract document and returns the PDF text with the roles of
+/// its signature frames.
+async fn generate_contract_text(
+    app: &axum::Router,
+    bearer: &str,
+    payload: Value,
+) -> (String, Vec<String>) {
+    let (status, body) = json_request(
+        app,
+        "POST",
+        "/api/v1/documents/generate",
+        bearer,
+        Some(payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let id = body["id"].as_str().unwrap().to_string();
+    let (_, detail) =
+        json_request(app, "GET", &format!("/api/v1/documents/{id}"), bearer, None).await;
+    let roles = detail["generated_bindings"]["_signature_anchors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|anchor| anchor["role"].as_str().map(str::to_string))
+        .collect();
+    let (status, bytes) = bytes_request(
+        app,
+        "GET",
+        &format!("/api/v1/documents/{id}/download"),
+        bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    (extract_pdf_text(&bytes), roles)
+}
+
+fn joint_custody_parents(tag: &str) -> Vec<Value> {
+    vec![
+        json!({
+            "id": Uuid::new_v4(), "name": "Anna Mutter", "relation": "mother",
+            "birth_date": "1985-03-02", "email": format!("anna-{tag}@example.test"),
+            "phone": "+49 30 1234567"
+        }),
+        json!({
+            "id": Uuid::new_v4(), "name": "Boris Vater", "relation": "father",
+            "birth_date": "1984-01-09", "email": format!("boris-{tag}@example.test"),
+            "phone": "+49 30 7654321"
+        }),
+    ]
+}
+
+/// The parent the cabinet named as invoice recipient who also pays contracts
+/// alone (owner decision 2026-10-25, map item 94): the Rahmenvertrag and the
+/// Einzelauftrag of a minor lead name that parent as the only Auftraggeber —
+/// no Gesamtschuldner sentence, one guardian frame — while the other custody
+/// parent is no party. Once that parent no longer pays the invoice it
+/// receives, both parents are the party again, as without an answer.
+#[tokio::test]
+async fn minor_lead_contract_names_only_the_parent_who_receives_and_pays_the_invoice() {
+    let Some((app, pool, admin, bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("lead-paying-parent");
+    let parents = joint_custody_parents(&tag);
+    let lead = seed_joint_custody_lead(&pool, admin, &tag, &parents, None).await;
+    let mother: Uuid = parents[0]["id"].as_str().unwrap().parse().unwrap();
+    sqlx::query(
+        "INSERT INTO lead_payer_declarations(lead_id,payer_kind,payer_representative_id,source_of_funds,payer_informed_at,acts_on_own_account,own_account_answered,payment_method,account_country,account_holder,bank_name,via_third_party) VALUES($1,'representative',$2,'employment',now(),true,true,'bank_transfer','DE','Anna Mutter','Musterbank',false)",
+    )
+    .bind(lead)
+    .bind(mother)
+    .execute(&pool)
+    .await
+    .unwrap();
+    set_parent_invoice_recipient(&pool, lead, &parents[0], true).await;
+    let contract: Uuid = sqlx::query_scalar("INSERT INTO framework_contracts(lead_id,contract_number,status,created_by) VALUES($1,$2,'draft',$3) RETURNING id")
+        .bind(lead).bind(format!("FC-{tag}")).bind(admin).fetch_one(&pool).await.unwrap();
+    let order: Uuid = sqlx::query_scalar("INSERT INTO orders(source_lead_id,contract_id,order_number,created_by) VALUES($1,$2,$3,$4) RETURNING id")
+        .bind(lead).bind(contract).bind(format!("AUF-{tag}")).bind(admin).fetch_one(&pool).await.unwrap();
+    seed_quote_for_order(&pool, order, admin, &tag).await;
+
+    for template in ["framework_contract", "single_order"] {
+        let (text, roles) = generate_contract_text(
+            &app,
+            &bearer,
+            json!({"template_id":template,"lead_id":lead,"order_id":order,"language":"de"}),
+        )
+        .await;
+        assert!(text.contains("Anna Mutter"), "{template}: {text}");
+        assert!(text.contains("Elternweg 21"), "{template}: {text}");
+        assert!(!text.contains("Boris Vater"), "{template}: {text}");
+        assert!(!text.contains("Elternweg 22"), "{template}: {text}");
+        assert!(
+            !text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
+            "{template}: {text}"
+        );
+        assert!(
+            !text.contains("gemeinsam „Auftraggeber“ genannt"),
+            "{template}: {text}"
+        );
+        assert!(
+            text.contains("zugunsten des Patienten") || text.contains("zugunsten der Patientin"),
+            "{template}: {text}"
+        );
+        assert_eq!(roles, vec!["guardian_1", "agency"], "{template}");
+    }
+
+    // The mother receives the invoice but someone else pays: no decided case,
+    // both custody parents contract as before.
+    set_parent_invoice_recipient(&pool, lead, &parents[0], false).await;
+    let (text, roles) = generate_contract_text(
+        &app,
+        &bearer,
+        json!({"template_id":"framework_contract","lead_id":lead,"order_id":order,"language":"de"}),
+    )
+    .await;
+    assert!(text.contains("Anna Mutter"), "{text}");
+    assert!(text.contains("Boris Vater"), "{text}");
+    assert!(
+        text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
+        "{text}"
+    );
+    assert_eq!(roles, vec!["guardian_1", "agency", "guardian_2"]);
+}
+
+/// The same rule for the documents of a converted patient: the answer of the
+/// lead that became the patient applies, the parent matched to the patient
+/// relation its entry made (`source_contact_id`).
+#[tokio::test]
+async fn converted_minor_contract_names_only_the_parent_who_receives_and_pays_the_invoice() {
+    let Some((app, pool, admin, bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("patient-paying-parent");
+    let patient = seed_patient(&pool, admin, &tag).await;
+    sqlx::query(
+        "UPDATE patients SET first_name='Mia',last_name=$2,birth_date='2015-06-07' WHERE id=$1",
+    )
+    .bind(patient)
+    .bind(format!("Kind-{tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let parents = joint_custody_parents(&tag);
+    let lead = seed_joint_custody_lead(&pool, admin, &tag, &parents, Some(patient)).await;
+    set_parent_invoice_recipient(&pool, lead, &parents[0], true).await;
+    for (index, parent) in parents.iter().enumerate() {
+        let contact: Uuid = parent["id"].as_str().unwrap().parse().unwrap();
+        sqlx::query(
+            r#"INSERT INTO patient_relations (patient_id, related_name, relation_type, source_contact_id,
+                                              birth_date, address_street, address_zip, address_city)
+               VALUES ($1, $2, 'parent', $3, $4::date, $5, '80331', 'München')"#,
+        )
+        .bind(patient)
+        .bind(parent["name"].as_str())
+        .bind(contact)
+        .bind(parent["birth_date"].as_str())
+        .bind(format!("Elternweg {}", index + 21))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let contract = seed_framework_contract(&pool, patient, admin, &tag).await;
+    let order = seed_order_with_contract(&pool, patient, contract, admin, &tag).await;
+
+    let (text, roles) = generate_contract_text(
+        &app,
+        &bearer,
+        json!({"template_id":"framework_contract","patient_id":patient,"order_id":order,"language":"de"}),
+    )
+    .await;
+    assert!(text.contains("Anna Mutter"), "{text}");
+    assert!(text.contains("geb. am 02.03.1985"), "{text}");
+    assert!(!text.contains("Boris Vater"), "{text}");
+    assert!(
+        !text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
+        "{text}"
+    );
+    assert_eq!(roles, vec!["guardian_1", "agency"]);
+
+    set_parent_invoice_recipient(&pool, lead, &parents[0], false).await;
+    let (text, roles) = generate_contract_text(
+        &app,
+        &bearer,
+        json!({"template_id":"framework_contract","patient_id":patient,"order_id":order,"language":"de"}),
+    )
+    .await;
+    assert!(text.contains("Anna Mutter"), "{text}");
+    assert!(text.contains("Boris Vater"), "{text}");
+    assert!(
+        text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
+        "{text}"
+    );
+    assert_eq!(roles, vec!["guardian_1", "agency", "guardian_2"]);
+}
+
 /// Unconverted and repeat inquiries use their current custody and representative
 /// records, even before there is a patient (or while patient relations are stale).
 #[tokio::test]
@@ -11847,6 +12119,16 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                                     "{template}: {text}"
                                 );
                             }
+                        }
+                        // No invoice recipient answered: two custody parents
+                        // stay joint debtors (owner decision 2026-10-25).
+                        if matches!(template, "framework_contract" | "single_order") && !represented
+                        {
+                            assert_eq!(
+                                text.contains("Mehrere Auftraggeber haften als Gesamtschuldner"),
+                                people.len() == 2,
+                                "{template}: {text}"
+                            );
                         }
                         let roles = detail["generated_bindings"]["_signature_anchors"]
                             .as_array()
