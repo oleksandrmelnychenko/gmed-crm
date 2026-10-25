@@ -15,8 +15,8 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use super::{
-    BLOCKS, Fired, Inputs, RiskConfig, Score, Sticky, blocks_of, evaluate, fingerprint, merge,
-    score, within_release,
+    BLOCKS, Fired, Inputs, RiskConfig, Score, Sticky, blocks_of, fingerprint, merge_pending, score,
+    within_release,
 };
 use crate::audit;
 use crate::routes::lead_payer::{self, Declaration, PaymentRouteBy};
@@ -1118,9 +1118,73 @@ pub async fn preview(
     let Some(inputs) = super::inputs::load(conn, lead_id).await? else {
         return Ok(None);
     };
-    let fired = evaluate(&inputs, &config);
+    let fired = inputs.sent_evaluation(&config);
     let score = super::score_fired(&fired, &config);
     Ok(Some((fired, score, config)))
+}
+
+/// What the payer's own questionnaire asks by ([`payer_form_preview`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PayerFormPreview {
+    /// The lead's one level as it would be stored once the payer sent the
+    /// current draft (never below the stored level).
+    pub level: i16,
+    /// Block E (an organisation's legal form and why it pays) would be open.
+    pub organisation_follow_up: bool,
+}
+
+/// The stored assessment as if the payer sent its draft now, without storing
+/// anything (owner decision 2026-10-25 «Рахувати лише відправлене»): the
+/// stored assessment counts only the payer's sent answers, yet the payer's
+/// form must ask the proof of funds, block E and the occupation / industry
+/// before the submit when its draft would raise the level. The same
+/// [`merge_pending`] and [`block_states`] as [`reassess`], fed by
+/// [`super::inputs::load_with_payer_draft`]; the cabinet's unsent answers
+/// stay pending here too. Before the start (and for a grandfathered lead)
+/// level 1 and no block, like [`block_open`].
+pub async fn payer_form_preview(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<PayerFormPreview, sqlx::Error> {
+    let Some(stored) = load(conn, lead_id).await?.filter(Assessment::started) else {
+        return Ok(PayerFormPreview {
+            level: 1,
+            organisation_follow_up: false,
+        });
+    };
+    let config = load_config(conn).await?;
+    let Some(inputs) = super::inputs::load_with_payer_draft(conn, lead_id).await? else {
+        return Ok(PayerFormPreview {
+            level: stored.level(),
+            organisation_follow_up: block_open(conn, lead_id, "E").await?,
+        });
+    };
+    let merged = merge_pending(
+        &stored.triggers,
+        &inputs.sent_evaluation(&config),
+        Utc::now(),
+        &inputs.t16_kept_for(),
+        &inputs.pending_unsent,
+    );
+    let level = score(&merged.triggers, &config).level.max(stored.level());
+    // A decision closes the blocks ([`block_open`]) unless the draft brings a
+    // new or higher trigger, which reopens the review once sent.
+    let decided =
+        matches!(stored.status.as_str(), STATUS_RELEASED | STATUS_REJECTED) && !merged.raised;
+    let organisation_follow_up = !decided
+        && block_states(
+            &merged.triggers,
+            level,
+            &stored.requested_blocks,
+            &config,
+            &BlockAnswers::default(),
+        )
+        .get("E")
+        .is_some_and(|state| state.open);
+    Ok(PayerFormPreview {
+        level,
+        organisation_follow_up,
+    })
 }
 
 /// Re-evaluates a started assessment and stores what changed: new triggers
@@ -1215,6 +1279,81 @@ fn upgraded_release(released: &str, current: &str) -> String {
         .join(",")
 }
 
+/// The stored T14 / T15 of the patient or a representative that only an
+/// autosaved, never sent cabinet answer fired before the owner decision
+/// 2026-10-25 «Рахувати лише відправлене» (DEV lead 7a7550cb…: a sanctions
+/// «Ja» saved for seconds and corrected to «Nein» before «Angaben senden»
+/// kept T15 and level 3). Recognised from the history: a cabinet write
+/// raised it (`lead_risk_events` "raised", cause `cabinet`), and its answer
+/// stopped firing (`inactive_since`) before any send after it — no request
+/// submit (`portal_submitted_at`, the audit log's `lead_portal_submit`, the
+/// cabinet's start of the assessment), no follow-up answer — and it neither
+/// fires now nor waits for a send. Such a trigger is withdrawn at the next
+/// evaluation (a `trigger_withdrawn` event). A trigger staff fired, or one
+/// whose "yes" was sent, stays sticky as before. Since the rule, an unsent
+/// answer fires nothing ([`super::Inputs::pending_unsent`]), so this only
+/// cleans what was stored before it.
+async fn never_sent_triggers(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    triggers: &[Sticky],
+    inputs: &Inputs,
+) -> Result<Vec<(String, String)>, sqlx::Error> {
+    let mut found = Vec::new();
+    for trigger in triggers {
+        let Some(inactive_since) = trigger.inactive_since else {
+            continue;
+        };
+        if trigger.active
+            || !matches!(trigger.key.as_str(), "T14" | "T15")
+            || !matches!(
+                trigger.subject.as_str(),
+                super::SUBJECT_PATIENT | super::SUBJECT_REPRESENTATIVE
+            )
+            || inputs.pending(&trigger.key, &trigger.subject)
+        {
+            continue;
+        }
+        let never_sent: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM lead_risk_events e
+                   WHERE e.lead_id = $1 AND e.kind = 'raised' AND e.cause = 'cabinet'
+                     AND e.at BETWEEN $2 - interval '1 minute' AND $2
+                     AND e.triggers @> jsonb_build_array(
+                         jsonb_build_object('key', $4::text, 'subject', $5::text))
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM (
+                       SELECT l.portal_submitted_at AS at FROM leads l WHERE l.id = $1
+                       UNION ALL
+                       SELECT ra.follow_up_answered_at FROM lead_risk_assessments ra
+                       WHERE ra.lead_id = $1
+                       UNION ALL
+                       SELECT e.at FROM lead_risk_events e
+                       WHERE e.lead_id = $1
+                         AND (e.kind = 'follow_up_answered'
+                              OR (e.kind = 'started' AND e.cause = 'cabinet'))
+                       UNION ALL
+                       SELECT a.created_at FROM audit_log a
+                       WHERE a.entity_type = 'lead' AND a.entity_id = $1
+                         AND a.action = 'lead_portal_submit'
+                   ) sends
+                   WHERE sends.at >= $2 - interval '5 seconds' AND sends.at < $3
+               )"#,
+        )
+        .bind(lead_id)
+        .bind(trigger.first_fired_at)
+        .bind(inactive_since)
+        .bind(&trigger.key)
+        .bind(&trigger.subject)
+        .fetch_one(&mut *conn)
+        .await?;
+        if never_sent {
+            found.push((trigger.key.clone(), trigger.subject.clone()));
+        }
+    }
+    Ok(found)
+}
+
 async fn evaluate_and_store(
     conn: &mut PgConnection,
     stored: Assessment,
@@ -1228,7 +1367,7 @@ async fn evaluate_and_store(
         return Ok(stored);
     };
     let now = Utc::now();
-    let live = evaluate(&inputs, &config);
+    let live = inputs.sent_evaluation(&config);
     let previous_triggers = if starting {
         Vec::new()
     } else {
@@ -1237,7 +1376,27 @@ async fn evaluate_and_store(
     // A stored T16 goes once its side has no confirmed hit (only a confirmed
     // hit fires it; QA 2026-10-11 A-15/A-21/A-33): also the T16 an open hit
     // set before, at the next reassessment of any cause.
-    let merged = merge(&previous_triggers, &live, now, &inputs.t16_kept_for());
+    // An answer the person has not sent changes nothing (owner decision
+    // 2026-10-25 «Рахувати лише відправлене»): its triggers stay as stored.
+    let mut merged = merge_pending(
+        &previous_triggers,
+        &live,
+        now,
+        &inputs.t16_kept_for(),
+        &inputs.pending_unsent,
+    );
+    // A trigger an autosaved, never sent "yes" left before that rule.
+    let never_sent = never_sent_triggers(conn, lead_id, &merged.triggers, &inputs).await?;
+    if !never_sent.is_empty() {
+        merged.triggers.retain(|trigger| {
+            !never_sent
+                .iter()
+                .any(|(key, subject)| trigger.key == *key && trigger.subject == *subject)
+        });
+        merged
+            .withdrawn
+            .extend(never_sent.into_iter().map(|(key, _)| key));
+    }
     let score = score(&merged.triggers, &config);
     let representative_country_ids =
         representative_ids(&inputs, &config, &stored.representative_country_ids);

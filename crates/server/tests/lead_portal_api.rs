@@ -5563,13 +5563,32 @@ async fn country_preview_blocks_first_submission_until_answers_are_complete_with
             .fetch_one(pool)
             .await
             .unwrap();
+    // Not sent yet: T1 stays exactly as sent (owner decision 2026-10-25
+    // «Рахувати лише відправлене»).
+    assert_eq!(stored[0]["key"], "T1", "{stored}");
+    assert_eq!(stored[0]["active"], true, "{stored}");
+    // Sent again: the ratchet keeps T1, inactive since then.
+    let (status, resent) = json_request(
+        router,
+        "POST",
+        &format!("{request}/submit"),
+        &patient,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{resent}");
+    let stored: Value =
+        sqlx::query_scalar("SELECT triggers FROM lead_risk_assessments WHERE lead_id=$1")
+            .bind(lead)
+            .fetch_one(pool)
+            .await
+            .unwrap();
     assert_eq!(stored[0]["key"], "T1", "{stored}");
     assert_eq!(stored[0]["active"], false, "{stored}");
 }
 
 #[tokio::test]
-async fn a_post_submission_country_change_holds_guarded_actions_only_until_its_answers_are_complete()
- {
+async fn a_post_submission_country_change_counts_once_sent_with_its_answers() {
     let Some(app) = test_app().await else { return };
     let router = &app.suite.app;
     let pool = &app.suite.pool;
@@ -5613,30 +5632,16 @@ async fn a_post_submission_country_change_holds_guarded_actions_only_until_its_a
     // A list-1 country is level 1: the residence (F) is asked, nothing of the
     // enhanced check (A, K, L) — one level per lead, owner 2026-10-24.
     assert_eq!(pending["follow_up"]["blocks"], json!(["F"]), "{pending}");
+    // Not sent yet: nothing is scored and nothing held (owner decision
+    // 2026-10-25 «Рахувати лише відправлене»).
     let (points, level, risk_status): (i32, i16, String) =
         sqlx::query_as("SELECT points,level,status FROM lead_risk_assessments WHERE lead_id=$1")
             .bind(lead)
             .fetch_one(pool)
             .await
             .unwrap();
-    assert_eq!(
-        (points, level, risk_status.as_str()),
-        (2, 1, "awaiting_answers")
-    );
+    assert_eq!((points, level, risk_status.as_str()), (0, 1, "clear"));
     let qualify = format!("/api/v1/leads/{lead}/qualify");
-    let (status, held) = json_request(
-        router,
-        "POST",
-        &qualify,
-        &app.staff("patient_manager"),
-        Some(json!({ "status": "qualified" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{held}");
-    assert_eq!(
-        held["code"], "risk_review_required",
-        "new country answers cannot be bypassed by qualification: {held}"
-    );
     // The residence alone completes the follow-up: no source of funds, no
     // proof, no birth data and no legal questions at level 1.
     let (status, complete) = json_request(
@@ -5653,6 +5658,16 @@ async fn a_post_submission_country_change_holds_guarded_actions_only_until_its_a
         json!({ "F": [] }),
         "{complete}"
     );
+    // The follow-up's send carries the changed citizenship and its answers.
+    let (status, sent) = json_request(
+        router,
+        "POST",
+        &format!("{request}/follow-up/submit"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
     let (points, level, risk_status): (i32, i16, String) =
         sqlx::query_as("SELECT points,level,status FROM lead_risk_assessments WHERE lead_id=$1")
             .bind(lead)

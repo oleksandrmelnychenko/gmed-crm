@@ -490,7 +490,7 @@ export function contractingPartyIsRepresentatives(party: PatientContractingParty
 
 /**
  * Line 3: "Patient" for an adult, "Gesetzliche Vertreter: Anna Muster und
- * Ben Muster" for a minor. Without a parent or guardian on file the server's
+ * Ben Muster" for a minor ("Gesetzliche Vertretung: Ben Muster" for one). Without a parent or guardian on file the server's
  * debtor name falls back to the child, which the line does not repeat.
  */
 export function contractingPartyLabel(party: PatientContractingParty, tx: Tx): string {
@@ -503,7 +503,12 @@ export function contractingPartyLabel(party: PatientContractingParty, tx: Tx): s
         ? `${named.slice(0, -1).join(", ")}${tx(" и ", " und ")}${named[named.length - 1]}`
         : named[0] ?? party.debtor_name ?? "—")
     : tx("не указаны", "nicht erfasst");
-  return `${tx("Законные представители: ", "Gesetzliche Vertreter: ")}${names}`;
+  // One representative (the paying parent who alone is the party) reads in the
+  // singular (QA 2026-10-25, F-F10).
+  const label = party.representatives.length === 1
+    ? tx("Законный представитель: ", "Gesetzliche Vertretung: ")
+    : tx("Законные представители: ", "Gesetzliche Vertreter: ");
+  return `${label}${names}`;
 }
 
 /**

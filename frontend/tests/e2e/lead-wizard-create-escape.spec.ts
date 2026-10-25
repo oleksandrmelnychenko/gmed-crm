@@ -63,6 +63,28 @@ for (const field of ["citizenship", "sex"] as const) {
   });
 }
 
+// QA 2026-10-25, F-F7: Escape right after opening, while the focus is still on
+// the trigger (not yet in the list's search box), closes the list at once.
+for (const field of ["citizenship", "sex"] as const) {
+  test(`one Escape with the focus still on the ${field} trigger closes the list`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const wizard = await mount(page);
+    await wizard.getByRole("textbox", { name: "Имя", exact: true }).fill("Erik");
+    const trigger = field === "sex"
+      ? wizard.locator("#lead-wizard-legal-sex")
+      : wizard.getByRole("combobox", { name: /Гражданство/ });
+    await trigger.click();
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await trigger.evaluate((element) => (element as HTMLElement).focus());
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(page.getByRole("alertdialog", { name: "Закрыть без сохранения?" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("alertdialog", { name: "Закрыть без сохранения?" })).toBeVisible();
+  });
+}
+
 test("the same on the leads page («Новый лид»)", async ({ page }) => {
   // (motion on: the list closes with its exit animation, as in the browser)
   await page.addInitScript(() => {

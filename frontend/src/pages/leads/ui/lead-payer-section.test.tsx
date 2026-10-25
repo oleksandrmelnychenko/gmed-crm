@@ -418,12 +418,13 @@ describe("LeadPayerDeclarationSection: the self-payer's source of funds from the
     enhancedDetails: LeadPortalEnhancedDetails | null,
     translate: (ru: string, de: string) => string = tx,
     funds?: LeadFunds,
+    statusPatch: Partial<PayerDeclarationStatus> = {},
   ) {
     return renderToStaticMarkup(
       <LocalizationProvider dateAdapter={AdapterDayjs}>
         <LeadPayerDeclarationSection
           leadId="lead-1"
-          data={{ declaration, status: status({ complete: true, agency_blocking: [] }), funds }}
+          data={{ declaration, status: status({ complete: true, agency_blocking: [], ...statusPatch }), funds }}
           loading={false}
           loadError={null}
           disabled={false}
@@ -532,6 +533,14 @@ describe("LeadPayerDeclarationSection: the self-payer's source of funds from the
     const open = renderWithDetails(viktor, null, tx, { ...funds, payer: personFunds({ person: "payer" }) });
     expect(open).toContain('aria-label="Источник средств"');
     expect(open).toContain("пока плательщик не ответил");
+    // The payer answered on paper (identified by the signed Selbstauskunft):
+    // staff transcribe the funds, the label no longer waits (QA 2026-10-25, F-F4).
+    const paper = renderWithDetails(viktor, null, tx, { ...funds, payer: personFunds({ person: "payer" }) }, {
+      identification: { required: true, identified: true, statement_sent: false, self_disclosure_signed: true, identity_document: true },
+    });
+    expect(paper).toContain('aria-label="Источник средств"');
+    expect(paper).toContain("Источник средств плательщика");
+    expect(paper).not.toContain("пока плательщик не ответил");
   });
 
   it("shows no proof block without files while the portal state is not loaded, and nothing for a third party", () => {

@@ -1937,3 +1937,275 @@ async fn a_new_scan_replaces_the_refused_copy_of_the_identity_document() {
     // The lead's own accepted copies stay untouched by the person's scan.
     assert_eq!(after["identity_documents"].as_array().unwrap().len(), 2);
 }
+
+/// The lead "sends": the request's submit, stamped after every change the
+/// cabinet made (the server's own send runs on the same monotonic clock).
+async fn send_request(app: &TestApp, lead_id: Uuid) {
+    sqlx::query(
+        "UPDATE leads SET portal_submitted_at = GREATEST(
+             clock_timestamp(),
+             (SELECT max((f.value->>'at')::timestamptz)
+              FROM jsonb_each(portal_field_updates) f
+              WHERE f.value ? 'at'))
+         WHERE id = $1",
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+}
+
+/// A lead with a cabinet login, a German citizen; its patient bearer.
+async fn cabinet_lead(app: &TestApp, first_name: &str) -> (Uuid, String) {
+    let (status, created) = request(
+        app,
+        "POST",
+        "/leads",
+        &app.pm(),
+        Some(json!({
+            "first_name": first_name,
+            "last_name": "Muster",
+            "email": format!("{}-{}@example.com", first_name.to_lowercase(), Uuid::new_v4().simple()),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let user_id: Uuid = created["portal_account"]["user_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    sqlx::query("UPDATE leads SET citizenships = '{DE}', country = 'DE' WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    (lead_id, app.bearer(user_id, "patient"))
+}
+
+async fn answer(app: &TestApp, lead_id: Uuid, patient: &str, body: Value) {
+    let (status, saved) = request(
+        app,
+        "POST",
+        &format!("/me/lead-requests/{lead_id}/identification"),
+        patient,
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+}
+
+/// Owner decision 2026-10-25 «Рахувати лише відправлене» (DEV QA F-F1, lead
+/// 7a7550cb…: a sanctions «Ja» autosaved for seconds and corrected to «Nein»
+/// before the send kept T15 and level 3): the lead's own answers fire only
+/// once sent; an unsent answer fires nothing and leaves nothing; a sent
+/// «Ja» stays sticky; staff's entries fire at once.
+#[tokio::test]
+async fn only_sent_cabinet_answers_fire_triggers() {
+    let Some(app) = test_app().await else { return };
+    let (lead_id, patient) = cabinet_lead(&app, "Sina").await;
+    let (status, started) = request(
+        &app,
+        "POST",
+        &format!("/leads/{lead_id}/risk-assessment/restart"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    assert_eq!(started["level"], 1, "{started}");
+
+    // Autosaved «Ja», not sent: no trigger.
+    answer(&app, lead_id, &patient, json!({ "sanctions_links": true })).await;
+    let staff = assessment(&app, lead_id).await;
+    assert!(trigger(&staff, "T15", "patient").is_none(), "{staff}");
+    assert_eq!(staff["level"], 1, "{staff}");
+    // Corrected to «Nein» and sent: nothing remains.
+    answer(&app, lead_id, &patient, json!({ "sanctions_links": false })).await;
+    send_request(&app, lead_id).await;
+    let staff = assessment(&app, lead_id).await;
+    assert!(trigger(&staff, "T15", "patient").is_none(), "{staff}");
+    assert_eq!(staff["level"], 1, "{staff}");
+
+    // A «Ja» counts once sent and stays sticky.
+    answer(&app, lead_id, &patient, json!({ "sanctions_links": true })).await;
+    assert!(trigger(&assessment(&app, lead_id).await, "T15", "patient").is_none());
+    send_request(&app, lead_id).await;
+    let staff = assessment(&app, lead_id).await;
+    let t15 = trigger(&staff, "T15", "patient")
+        .cloned()
+        .unwrap_or_else(|| panic!("a sent «Ja» fires T15: {staff}"));
+    assert_eq!(t15["active"], true, "{staff}");
+    assert_eq!(staff["level"], 3, "{staff}");
+    // Changed to «Nein», not sent: T15 stays exactly as sent.
+    answer(&app, lead_id, &patient, json!({ "sanctions_links": false })).await;
+    let staff = assessment(&app, lead_id).await;
+    let unsent = trigger(&staff, "T15", "patient").cloned().unwrap();
+    assert_eq!(unsent["active"], true, "{staff}");
+    assert!(unsent["inactive_since"].is_null(), "{staff}");
+    // Sent: the trigger stays (sticky), marked inactive since then.
+    send_request(&app, lead_id).await;
+    let staff = assessment(&app, lead_id).await;
+    let sent = trigger(&staff, "T15", "patient")
+        .cloned()
+        .unwrap_or_else(|| panic!("a sent «Ja» stays: {staff}"));
+    assert_eq!(sent["active"], false, "{staff}");
+    assert!(sent["inactive_since"].is_string(), "{staff}");
+    assert_eq!(staff["level"], 3, "{staff}");
+
+    // Staff's own data count at once, also while the lead has an unsent
+    // answer: a PEP «Ja» waits, the citizenship staff entered fires T1.
+    answer(&app, lead_id, &patient, json!({ "pep_self": true })).await;
+    sqlx::query("UPDATE leads SET citizenships = '{IR}' WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let staff = assessment(&app, lead_id).await;
+    assert!(trigger(&staff, "T1", "patient").is_some(), "{staff}");
+    assert!(trigger(&staff, "T14", "patient").is_none(), "{staff}");
+    // The follow-up's send counts as well.
+    sqlx::query(
+        "UPDATE lead_risk_assessments
+         SET follow_up_answered_at = clock_timestamp() + interval '1 second'
+         WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let staff = assessment(&app, lead_id).await;
+    assert!(trigger(&staff, "T14", "patient").is_some(), "{staff}");
+}
+
+/// Before the rule (owner decision 2026-10-25), an autosaved «Ja» corrected
+/// before the send left a sticky T15 (DEV lead 7a7550cb…). The history shows
+/// it was never sent: the next evaluation withdraws it. A «Ja» that was sent
+/// stays.
+#[tokio::test]
+async fn a_trigger_only_an_unsent_answer_left_is_withdrawn() {
+    let Some(app) = test_app().await else { return };
+    for (sent_in_between, name) in [(false, "Leni"), (true, "Mara")] {
+        let lead_id = insert_lead(&app, name, &["DE"]).await;
+        sqlx::query(
+            "INSERT INTO lead_gwg_declarations (lead_id, sanctions_links) VALUES ($1, false)",
+        )
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+        let (status, started) = request(
+            &app,
+            "POST",
+            &format!("/leads/{lead_id}/risk-assessment/restart"),
+            &app.ceo(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        // As stored by the old server: submit at t0, an autosaved «Ja» at t1
+        // raised T15, «Nein» at t2 made it inactive, the follow-up was sent
+        // after it. With `sent_in_between` the «Ja» was sent at t0 = t1 + 10 s.
+        let t1 = chrono::Utc::now() - chrono::Duration::minutes(10);
+        let t2 = t1 + chrono::Duration::seconds(20);
+        let submitted = if sent_in_between {
+            t1 + chrono::Duration::seconds(10)
+        } else {
+            t1 - chrono::Duration::seconds(30)
+        };
+        sqlx::query("UPDATE leads SET portal_submitted_at = $2 WHERE id = $1")
+            .bind(lead_id)
+            .bind(submitted)
+            .execute(app.pool())
+            .await
+            .unwrap();
+        let t15 = json!([{
+            "key": "T15", "subject": "patient", "variant": null, "points": 0,
+            "knockout": true, "first_fired_at": t1, "last_fired_at": t1,
+            "active": false, "inactive_since": t2,
+        }]);
+        sqlx::query(
+            "UPDATE lead_risk_assessments SET triggers = $2, level = 3, knockout = true,
+                    follow_up_answered_at = $3
+             WHERE lead_id = $1",
+        )
+        .bind(lead_id)
+        .bind(&t15)
+        .bind(t2 + chrono::Duration::seconds(5))
+        .execute(app.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO lead_risk_events (lead_id, at, kind, level, triggers, status, cause)
+               VALUES ($1, $2, 'raised', 3, '[{"key": "T15", "subject": "patient"}]',
+                       'awaiting_answers', 'cabinet')"#,
+        )
+        .bind(lead_id)
+        .bind(t1 - chrono::Duration::milliseconds(5))
+        .execute(app.pool())
+        .await
+        .unwrap();
+        let staff = assessment(&app, lead_id).await;
+        if sent_in_between {
+            assert!(trigger(&staff, "T15", "patient").is_some(), "{staff}");
+            assert_eq!(staff["level"], 3, "{staff}");
+        } else {
+            assert!(trigger(&staff, "T15", "patient").is_none(), "{staff}");
+            assert_eq!(staff["level"], 1, "{staff}");
+        }
+    }
+}
+
+/// DEV QA 2026-10-25, F-F9: the review queue listed a converted lead as
+/// "waiting for answers". A converted, archived or deleted lead leaves it.
+#[tokio::test]
+async fn the_review_queue_lists_open_leads_only() {
+    let Some(app) = test_app().await else { return };
+    let mut leads = Vec::new();
+    for (name, closed) in [
+        ("Queue", None),
+        ("Converted", Some("converted")),
+        ("Archived", Some("archived")),
+        ("Deleted", Some("deleted")),
+    ] {
+        let lead_id = insert_lead(&app, name, &["IR"]).await;
+        let (status, started) = request(
+            &app,
+            "POST",
+            &format!("/leads/{lead_id}/risk-assessment/restart"),
+            &app.ceo(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{started}");
+        leads.push((lead_id, closed));
+    }
+    let queued = |queue: &Value, lead_id: Uuid| {
+        queue["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["lead_id"] == json!(lead_id))
+    };
+    let (status, queue) = request(&app, "GET", "/compliance/risk-reviews", &app.ceo(), None).await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    for (lead_id, _) in &leads {
+        assert!(queued(&queue, *lead_id), "{queue}");
+    }
+    for (lead_id, closed) in &leads {
+        if let Some(closed) = closed {
+            sqlx::query("UPDATE leads SET qualification_status = $2 WHERE id = $1")
+                .bind(lead_id)
+                .bind(closed)
+                .execute(app.pool())
+                .await
+                .unwrap();
+        }
+    }
+    let (status, queue) = request(&app, "GET", "/compliance/risk-reviews", &app.ceo(), None).await;
+    assert_eq!(status, StatusCode::OK, "{queue}");
+    for (lead_id, closed) in &leads {
+        assert_eq!(queued(&queue, *lead_id), closed.is_none(), "{queue}");
+    }
+}

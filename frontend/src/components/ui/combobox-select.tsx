@@ -222,6 +222,7 @@ function ComboboxSelect({
   ...ariaProps
 }: ComboboxSelectProps) {
   const [query, setQuery] = React.useState("")
+  const actionsRef = React.useRef<ComboboxPrimitive.Root.Actions | null>(null)
   const { t } = useLang()
   const pageText = useComboboxText()
   const readOnly = useReadOnly()
@@ -337,6 +338,7 @@ function ComboboxSelect({
       }}
       autoHighlight={true}
       modal={false}
+      actionsRef={actionsRef}
     >
       <ComboboxPrimitive.Trigger
         id={id}
@@ -347,6 +349,16 @@ function ComboboxSelect({
         data-placeholder={!selectedValue && selectedLabel == null ? "" : undefined}
         onBlur={onBlur}
         onFocus={onFocus}
+        // Escape while the focus is still on the trigger of an open list (right
+        // after opening, before it moves into the search box): the list does
+        // not hear the key itself, so the trigger closes it — one Escape, as in
+        // the list; the dialog behind sees the handled key and stays (QA
+        // 2026-10-25, F-F7).
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || event.currentTarget.getAttribute("aria-expanded") !== "true") return
+          event.preventDefault()
+          actionsRef.current?.close()
+        }}
         className={cn(
           "flex h-9 w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-lg border border-input bg-field px-3 py-2 text-sm text-foreground transition-colors outline-none hover:bg-muted/35 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 data-placeholder:text-muted-foreground [&_span]:min-w-0 [&_span]:truncate",
           className,

@@ -18,7 +18,7 @@ import { OnboardingSignatureManifest } from "./onboarding-signature-manifest";
 import { signatureSignerProgress } from "./signature-signer-status";
 import { SignaturePackageComposer, emptyPackageSelection, expiryInstant, resolvePackage, type PackageSelection } from "./signature-package-composer";
 import {
-  abandonSignatureRequest, combinedSignerPolicy, createSignaturePackage, packageMinimumLevel, downloadSignatureReport, fetchPackageCandidates, fetchSignatureState,
+  abandonSignatureRequest, combinedSignerPolicy, createSignaturePackage, packageMinimumLevel, downloadSignatureReport, fetchLeadRepresentativeSigners, fetchPackageCandidates, fetchSignatureState, knownClientSigners,
   isSignaturePending, recordPaperSignature, recordSignatureDelivery, resolveSignatureReview, signatureAction, signatureErrorText, signatureFrameCoverage, signatureReasonValid, signerPolicyError,
   validSigners, type DeliveryChannel, type PackageCandidates, type SignatureRequest, type SignatureState, type SignatureStatus, type Signer, type SignerPolicy, type SignerRole,
 } from "../data/document-signature-api";
@@ -208,6 +208,10 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const [awaitingState, setAwaitingState] = useState(false);
   const [refreshCheck, setRefreshCheck] = useState<{ id: string; before?: string } | null>(null);
   const [paperSigned, setPaperSigned] = useState(false);
+  // The lead's known patient-side people, offered when staff add a legal
+  // representative by hand (QA 2026-10-25, F-F6).
+  const [representativeSigners, setRepresentativeSigners] = useState<Signer[]>([]);
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const busyRef = useRef(false);
   const onDoneRef = useRef(onDone);
   const onStateChangeRef = useRef(onStateChange);
@@ -308,6 +312,17 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
     return () => { cancelled = true; };
   }, [composing, documentId, revision]);
 
+  const representativeLeadId = composing ? candidates?.scope.lead_id ?? null : null;
+  useEffect(() => {
+    if (!representativeLeadId) return;
+    let cancelled = false;
+    fetchLeadRepresentativeSigners(representativeLeadId)
+      .then(next => { if (!cancelled) setRepresentativeSigners(next); })
+      // Only a convenience: without it the row is filled by hand.
+      .catch(() => { if (!cancelled) setRepresentativeSigners([]); });
+    return () => { cancelled = true; };
+  }, [representativeLeadId]);
+
   // A package with a contract needs the agency too; consents only the patient
   // side. Suggestions follow the package until staff edit the signers.
   const documentSuggestions = state?.suggested_signers;
@@ -363,11 +378,14 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
     setSigners(current => current.filter((_, n) => n !== index));
     setExcludedSigners(current => current.filter(n => n !== index).map(n => n > index ? n - 1 : n));
   };
-  const addSigner = (role: SignerRole) => {
+  const addSigner = (role: SignerRole, person?: Signer) => {
     touchSigners();
-    setSigners(current => [...current, emptySigner(role)]);
-    setEditingSigners(current => [...current, signers.length]);
+    setClientPickerOpen(false);
+    setSigners(current => [...current, person ? { ...person, role } : emptySigner(role)]);
+    // A known person with a valid address needs no edit; the row opens by itself otherwise.
+    if (!person) setEditingSigners(current => [...current, signers.length]);
   };
+  const knownClients = knownClientSigners([state?.suggested_signers, candidates?.suggested_signers, representativeSigners], signers);
   const isPackage = selection.documentIds.length > 1 || resolved.attachmentIds.length > 0;
   const canSend = !mutationDisabled && allPreviewed && Boolean(candidates) && resolved.complete && !resolved.blocked && levelOk && !policyError && confirmed && validSigners(selectedSigners);
 
@@ -530,11 +548,21 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
                   </div>;
                 })}
                 {signers.length < 6 ? <div className="flex flex-wrap gap-2">
-                  {policy !== "agency_only" && policy !== "payer_and_agency" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("client")}><Plus className="size-4" />{tx("Законный представитель / сторона пациента", "Gesetzliche Vertretung / Patientenseite")}</Button> : null}
+                  {policy !== "agency_only" && policy !== "payer_and_agency" ? <Button type="button" variant="outline" size="sm" disabled={busy} aria-expanded={knownClients.length > 0 ? clientPickerOpen : undefined} data-testid="signature-add-client" onClick={() => knownClients.length > 0 ? setClientPickerOpen(open => !open) : addSigner("client")}><Plus className="size-4" />{tx("Законный представитель / сторона пациента", "Gesetzliche Vertretung / Patientenseite")}</Button> : null}
                   {policy !== "agency_only" && policy !== "payer_and_agency" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("minor")}><Plus className="size-4" />{tx("Несовершеннолетний пациент (с ~14 лет)", "Minderjährige/r Patient/in (ab ca. 14 J.)")}</Button> : null}
                   {policy === "payer_and_agency" || policy === "client_payer_and_agency" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("payer")}><Plus className="size-4" />{tx("Плательщик", "Kostenübernehmer")}</Button> : null}
                   {policy !== "client_only" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("agency")}><Plus className="size-4" />{tx("Представитель GMED", "GMED-Vertretung")}</Button> : null}
                   {policy === "flexible" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("other")}><Plus className="size-4" />{tx("Добавить подписанта", "Person hinzufügen")}</Button> : null}
+                </div> : null}
+                {clientPickerOpen && knownClients.length > 0 && signers.length < 6 ? <div className="space-y-1.5 rounded-lg border border-border/70 bg-card p-2" role="group" aria-label={tx("Известные представители", "Bekannte Vertretungen")} data-testid="signature-known-clients">
+                  <p className="px-1 text-xs text-muted-foreground">{tx("Кого добавить:", "Wen hinzufügen:")}</p>
+                  {knownClients.map(person => {
+                    const label = `${person.first_name} ${person.last_name}`.trim();
+                    return <Button key={`${label}|${person.email}`} type="button" variant="ghost" size="sm" className="h-auto w-full justify-start whitespace-normal py-1.5 text-left" disabled={busy} onClick={() => addSigner("client", person)}>
+                      <span className="min-w-0"><span className="block break-words text-sm font-medium">{label}</span>{person.email ? <span className="block break-all text-xs text-muted-foreground">{person.email}</span> : <span className="block text-xs text-muted-foreground">{tx("e-mail не указан — заполните", "keine E-Mail – bitte ergänzen")}</span>}</span>
+                    </Button>;
+                  })}
+                  <Button type="button" variant="ghost" size="sm" className="w-full justify-start" disabled={busy} onClick={() => addSigner("client")}><Plus className="size-4" />{tx("Другой человек", "Andere Person")}</Button>
                 </div> : null}
                 {policyError && selectedSigners.length > 0 ? <Banner tone="warning">{signatureErrorText(policyError, tx)}</Banner> : null}
               </section>

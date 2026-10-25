@@ -73,9 +73,35 @@ pub(crate) const PAYER_SIDE_HIT_SQL: &str = "(h.subject_kind IN ('lead_payer', '
          AND (COALESCE(h.subject_snapshot->>'relation', '') = 'payer' \
               OR COALESCE(h.subject_snapshot->>'relation', '') LIKE '%; payer')))";
 
-/// The inputs of a lead; `None` when the lead does not exist.
+/// The inputs of a lead for the stored assessment; `None` when the lead does
+/// not exist. The payer's statement counts only once sent (owner decision
+/// 2026-10-25 «Рахувати лише відправлене»): an unsent draft is pending
+/// ([`Inputs::pending_unsent`]).
 pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Inputs>, sqlx::Error> {
-    let Some(subjects) = lead_enhanced_check::load_subjects(conn, lead_id).await? else {
+    load_inner(conn, lead_id, false).await
+}
+
+/// [`load`] with the payer's unsent draft as if it were sent: the payer
+/// form's own preview ([`super::store::payer_form_preview`]), never stored.
+/// The cabinet's unsent answers stay pending.
+pub async fn load_with_payer_draft(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<Inputs>, sqlx::Error> {
+    load_inner(conn, lead_id, true).await
+}
+
+async fn load_inner(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    payer_draft: bool,
+) -> Result<Option<Inputs>, sqlx::Error> {
+    let subjects = if payer_draft {
+        lead_enhanced_check::load_subjects_with_payer_draft(conn, lead_id).await?
+    } else {
+        lead_enhanced_check::load_subjects(conn, lead_id).await?
+    };
+    let Some(subjects) = subjects else {
         return Ok(None);
     };
     let row = sqlx::query(&format!(
@@ -88,6 +114,24 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
                   s.pep_self AS statement_pep_self,
                   s.pep_related AS statement_pep_related,
                   s.sanctions_links AS statement_sanctions_links,
+                  -- The payer link's statement not sent yet (a draft, also
+                  -- one staff reopened) and what of it the payer answered.
+                  (s.lead_id IS NOT NULL AND s.submitted_at IS NULL) AS statement_draft,
+                  (s.country IS NOT NULL OR s.habitual_residence_country IS NOT NULL
+                   OR COALESCE(cardinality(s.citizenships), 0) > 0) AS statement_countries,
+                  -- What the cabinet sent last: the request's submit or the
+                  -- follow-up's (`follow_up_answered_at`, cleared by a
+                  -- "request more"; its history keeps the time).
+                  GREATEST(
+                      l.portal_submitted_at,
+                      ra.follow_up_answered_at,
+                      (SELECT max(e.at) FROM lead_risk_events e
+                       WHERE e.lead_id = l.id AND e.kind = 'follow_up_answered')
+                  ) AS follow_up_sent_at,
+                  l.portal_field_updates,
+                  (SELECT max(r.updated_at) FROM lead_representatives r
+                   JOIN users ru ON ru.id = r.updated_by
+                   WHERE r.lead_id = l.id AND ru.role <> 'patient') AS representatives_staff_at,
                   (
                       EXISTS (
                           SELECT 1 FROM lead_portal_uploads u
@@ -113,6 +157,7 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
            LEFT JOIN lead_gwg_declarations g ON g.lead_id = l.id
            LEFT JOIN lead_payer_declarations d ON d.lead_id = l.id
            LEFT JOIN lead_payer_statements s ON s.lead_id = l.id
+           LEFT JOIN lead_risk_assessments ra ON ra.lead_id = l.id
            LEFT JOIN LATERAL (
                SELECT bool_or(NOT {PAYER_SIDE_HIT_SQL}) AS patient_hit,
                       bool_or({PAYER_SIDE_HIT_SQL} AND h.subject_kind <> 'lead_recipient')
@@ -171,7 +216,12 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
                 legacy_identity_fingerprint: hex::encode(Sha256::digest(legacy.to_string().as_bytes())),
             }
         }).collect();
-    let inputs = Inputs {
+    let pending_unsent = pending_cabinet(conn, lead_id, &row, &active).await?;
+    // The payer link's statement counts once sent (submit), also its PEP and
+    // sanctions answers; the preview of the payer form counts the draft.
+    let statement_draft = third_party && flag("statement_draft");
+    let statement_counts = payer_draft || !statement_draft;
+    let mut inputs = Inputs {
         representatives,
         patient_citizenships: subjects.patient_citizenships,
         former_citizenships: row
@@ -200,9 +250,11 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
         has_representative: flag("has_representative"),
         under_guardianship: flag("under_guardianship"),
         patient_pep: flag("pep_self") || flag("pep_related"),
-        payer_pep: third_party && (flag("statement_pep_self") || flag("statement_pep_related")),
+        payer_pep: third_party
+            && statement_counts
+            && (flag("statement_pep_self") || flag("statement_pep_related")),
         patient_sanctions_links: flag("sanctions_links"),
-        payer_sanctions_links: third_party && flag("statement_sanctions_links"),
+        payer_sanctions_links: third_party && statement_counts && flag("statement_sanctions_links"),
         patient_hit: flag("patient_hit"),
         // A hit of the invoice recipient is the payer's side even while the
         // patient pays: the recipient is a third party on the money side.
@@ -213,8 +265,164 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
         confirmed_hit_patient: flag("patient_hit"),
         confirmed_hit_payer: flag("payer_hit") || flag("recipient_hit"),
         today: Some(today),
+        pending_unsent,
     };
+    // The payer triggers the link's unsent draft answers (owner decision
+    // 2026-10-25 «Рахувати лише відправлене»): T6 (the payer's citizenship,
+    // residence or seat), T14 (PEP) and T15 (sanctions links) wait for the
+    // submit like the cabinet's unsent sections — the stored state stays as
+    // after the last submit: a draft "yes" fires nothing, a draft "no"
+    // withdraws nothing, and a "yes" corrected before the submit leaves no
+    // trace. Only what the draft answers waits (a statement emptied for a new
+    // payer holds nothing back). The payer form asks by the draft
+    // ([`load_with_payer_draft`]).
+    if !statement_counts {
+        let answered = |column: &str| {
+            row.try_get::<Option<bool>, _>(column)
+                .ok()
+                .flatten()
+                .is_some()
+        };
+        let mut pending = Vec::new();
+        if answered("statement_pep_self") || answered("statement_pep_related") {
+            pending.push("T14");
+        }
+        if answered("statement_sanctions_links") {
+            pending.push("T15");
+        }
+        // T6 also reads the declaration staff keep: only while that alone
+        // does not fire it does the draft's country wait for the submit.
+        if flag("statement_countries") {
+            let config = super::store::load_config(conn).await?;
+            if !super::evaluate(&inputs, &config)
+                .iter()
+                .any(|fired| fired.key == "T6" && fired.subject == PAYER)
+            {
+                pending.push("T6");
+            }
+        }
+        for key in pending {
+            if !inputs.pending(key, PAYER) {
+                inputs.pending_unsent.push((key, PAYER));
+            }
+        }
+    }
     Ok(Some(inputs))
+}
+
+use super::{
+    SUBJECT_PATIENT as PATIENT, SUBJECT_PAYER as PAYER, SUBJECT_REPRESENTATIVE as REPRESENTATIVE,
+};
+
+/// The triggers whose cabinet answers wait for the person's send (owner
+/// decision 2026-10-25 «Рахувати лише відправлене», [`Inputs::pending_unsent`]).
+///
+/// A cabinet write leaves a marker in `leads.portal_field_updates` (when,
+/// and for most sections a digest of the value). A section is unsent while
+/// its marker is later than the last send — the request's submit or the
+/// follow-up's (the cabinet shows the follow-up blocks a change brings at
+/// once, so their send carries the change too, `cabinet::follow_up_json`).
+/// Where the marker carries the value's digest, a later change by staff
+/// makes the value staff's own and counts at once; the statements (PEP,
+/// sanctions links, former citizenships, habitual residence) are written by
+/// the cabinet only. The representatives' answers count at once again once
+/// staff saved a representative after them.
+///
+/// The sources and what they feed:
+/// * statements / extra step → T14, T15, T2, T3 of the patient;
+/// * citizenships → T1, T3; residence (`country`) → T2 of the patient;
+/// * who pays → T4–T7 and T8, T9; payment route (block C) → T8, T9;
+/// * representation and a representative's questions (block R) → T1, T2,
+///   T14, T15 of the representative.
+///
+/// T12, T13 and T16 are never pending: T12 and T13 are withdrawn as soon as
+/// they no longer fire, T16 is a confirmed hit. The payer link's unsent
+/// draft is added by [`load`] itself (the statement's `submitted_at`).
+async fn pending_cabinet(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    row: &sqlx::postgres::PgRow,
+    representation: &crate::routes::lead_representatives::Loaded,
+) -> Result<Vec<(&'static str, &'static str)>, sqlx::Error> {
+    use crate::routes::lead_portal_intake::{self as intake, marker_time, value_marker};
+    use chrono::{DateTime, Utc};
+    let follow_up_sent_at: Option<DateTime<Utc>> = row.try_get("follow_up_sent_at").ok().flatten();
+    let markers: serde_json::Value = row
+        .try_get::<Option<serde_json::Value>, _>("portal_field_updates")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let after = |at: Option<DateTime<Utc>>, sent_at: Option<DateTime<Utc>>| {
+        at.is_some_and(|at| sent_at.is_none_or(|sent_at| at > sent_at))
+    };
+    let unsent = |key: &str| after(marker_time(markers.get(key)), follow_up_sent_at);
+    let digest_matches = |key: &str, value: String| {
+        markers
+            .get(key)
+            .and_then(|marker| marker.get("hash"))
+            .and_then(serde_json::Value::as_str)
+            == Some(value_marker(lead_id, key, Some(&value)).as_str())
+    };
+    let mut pending: Vec<(&'static str, &'static str)> = Vec::new();
+    let mut add = |keys: &[&'static str], subject: &'static str| {
+        for key in keys {
+            if !pending.contains(&(*key, subject)) {
+                pending.push((*key, subject));
+            }
+        }
+    };
+    if unsent(intake::STATEMENTS_MARKER) || unsent(intake::ENHANCED_DETAILS_MARKER) {
+        add(&["T2", "T3", "T14", "T15"], PATIENT);
+    }
+    let personal = intake::unsent_personal_fields(
+        conn,
+        lead_id,
+        follow_up_sent_at,
+        &["citizenships", "country"],
+    )
+    .await?;
+    if personal.contains(&"citizenships") {
+        add(&["T1", "T3"], PATIENT);
+    }
+    if personal.contains(&"country") {
+        add(&["T2"], PATIENT);
+    }
+    let declaration = crate::routes::lead_payer::load_declaration(conn, lead_id).await?;
+    if let Some(declaration) = declaration.as_ref() {
+        if unsent(intake::PAYER_MARKER)
+            && digest_matches(
+                intake::PAYER_MARKER,
+                crate::routes::lead_payer::portal_marker_value(declaration),
+            )
+        {
+            add(&["T4", "T5", "T6", "T7"], PAYER);
+            add(&["T8", "T9"], PATIENT);
+            add(&["T8", "T9"], PAYER);
+        }
+        if unsent(intake::BILLING_MARKER)
+            && digest_matches(intake::BILLING_MARKER, declaration.billing_marker_value())
+        {
+            add(&["T8", "T9"], PATIENT);
+            add(&["T8", "T9"], PAYER);
+        }
+    }
+    let staff_saved_representative: Option<DateTime<Utc>> =
+        row.try_get("representatives_staff_at").ok().flatten();
+    let questions_at = marker_time(markers.get("representative_questions"));
+    let questions_unsent = after(questions_at, follow_up_sent_at)
+        && questions_at
+            .zip(staff_saved_representative)
+            .is_none_or(|(answered, staff)| answered > staff);
+    let representation_marker = crate::routes::lead_representatives::REPRESENTATION_MARKER;
+    let representation_unsent = unsent(representation_marker)
+        && digest_matches(
+            representation_marker,
+            crate::routes::lead_representatives::marker_value(representation),
+        );
+    if questions_unsent || representation_unsent {
+        add(&["T1", "T2", "T14", "T15"], REPRESENTATIVE);
+    }
+    Ok(pending)
 }
 
 #[cfg(test)]

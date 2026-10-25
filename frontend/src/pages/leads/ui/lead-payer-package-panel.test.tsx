@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { normalizeLeadPayerPackageState, type LeadPayerPackageState } from "../data/lead-payer-package-api";
+import type { PayerIdentificationStatus } from "../model/lead-payer-paper";
 import { LeadPayerPackagePanel } from "./lead-payer-package-panel";
 import { LeadPayerSignatureFlow } from "./lead-payer-section";
 
@@ -62,7 +63,7 @@ const sendButton = (html: string) =>
 
 function render(
   value: LeadPayerPackageState,
-  options: { canEdit?: boolean; tx?: typeof ru; details?: boolean; open?: boolean } = {},
+  options: { canEdit?: boolean; tx?: typeof ru; details?: boolean; open?: boolean; paper?: PayerIdentificationStatus | null } = {},
 ) {
   return renderToStaticMarkup(
     <LeadPayerPackagePanel
@@ -74,6 +75,7 @@ function render(
       errorText={() => "error"}
       onOpenDocument={options.open === false ? undefined : () => undefined}
       renderDetails={options.details === false ? undefined : (id) => <span data-details-for={id}>details</span>}
+      paperIdentification={options.paper}
     />,
   );
 }
@@ -155,6 +157,26 @@ describe("LeadPayerPackagePanel", () => {
     expect(disconnected).toContain("Elektronische Signatur ist deaktiviert – bitte die Unterschrift auf Papier verwenden");
     expect(disconnected).toContain('data-testid="lead-payer-package-send-hint"');
     expect(sendButton(disconnected)).toContain('disabled=""');
+  });
+
+  it("shows the paper Selbstauskunft as the payer's statement once identified on paper (QA 2026-10-25, F-F2)", () => {
+    const paper: PayerIdentificationStatus = { required: true, identified: true, statement_sent: false, self_disclosure_signed: true, identity_document: true };
+    const html = render(state({ blocked_reason: "payer_not_submitted", can_prepare: false }), { paper });
+    expect(html).toContain("Selbstauskunft на бумаге — подписана");
+    expect(html).not.toContain("Плательщик ещё не отправил свою анкету");
+    expect(html).toContain("Плательщик ответил на бумаге (Selbstauskunft подписана)");
+    expect(html).toContain("Плательщик идентифицирован на бумаге");
+    expect(html).not.toContain("Идентификация плательщика (QES): ещё нет");
+    // The other documents are still missing.
+    expect(html.match(/ещё не создан</g)?.length).toBe(3);
+    const german = render(state({ blocked_reason: "payer_not_submitted", can_prepare: false }), { paper, tx: de });
+    expect(german).toContain("Selbstauskunft auf Papier – unterschrieben");
+    // Before the paper copy is signed, the link's wording stands.
+    const waiting = render(state({ blocked_reason: "payer_not_submitted", can_prepare: false }), {
+      paper: { ...paper, identified: false, self_disclosure_signed: false },
+    });
+    expect(waiting).toContain("Плательщик ещё не отправил свою анкету");
+    expect(waiting).not.toContain("Selbstauskunft на бумаге");
   });
 
   it("offers no writes without leads.edit, and names an organisation's representative", () => {

@@ -23,6 +23,7 @@ import {
   type PayerPackageSummary,
 } from "../data/lead-payer-package-api";
 import { payerReasonLabel, type Tx } from "./lead-payer";
+import type { PayerIdentificationStatus } from "./lead-payer-paper";
 
 export type { Tx };
 
@@ -124,6 +125,42 @@ export function payerPackageRows(
     slot,
     document: pkg?.documents.find((item) => item.slot === slot) ?? fallback[slot] ?? null,
   }));
+}
+
+/**
+ * Whether the payer answered on paper (re-check V-A7): a signed Selbstauskunft
+ * is on file although no statement came through the link — the scan of the
+ * paper form staff recorded «Подписано на бумаге». The package then has no
+ * questionnaire of its own, and «not sent» is no longer true (QA 2026-10-25,
+ * F-F2).
+ */
+export function payerAnsweredOnPaper(identification: PayerIdentificationStatus | null | undefined): boolean {
+  return Boolean(identification && !identification.statement_sent && identification.self_disclosure_signed);
+}
+
+/** The Selbstauskunft row of the package when the payer answered on paper: "Selbstauskunft на бумаге — подписана". */
+export function payerPaperSelfDisclosureText(tx: Tx): string {
+  return tx("Selbstauskunft на бумаге — подписана", "Selbstauskunft auf Papier – unterschrieben");
+}
+
+/**
+ * The blocked reason as shown: «not sent» is replaced when the payer answered
+ * on paper — the electronic package is then not needed, the remaining
+ * documents are signed on paper too.
+ */
+export function payerPackageBlockedText(
+  state: Pick<LeadPayerPackageState, "blocked_reason" | "missing">,
+  identification: PayerIdentificationStatus | null | undefined,
+  tx: Tx,
+): string | null {
+  if (!state.blocked_reason) return null;
+  if (state.blocked_reason === "payer_not_submitted" && payerAnsweredOnPaper(identification)) {
+    return tx(
+      "Плательщик ответил на бумаге (Selbstauskunft подписана): электронный пакет не готовится, остальные документы плательщика подпишите на бумаге",
+      "Der Zahler hat auf Papier geantwortet (Selbstauskunft unterschrieben): Kein elektronisches Paket, die übrigen Unterlagen des Zahlers auf Papier unterschreiben lassen",
+    );
+  }
+  return payerPackageBlockedReasonText(state.blocked_reason, tx, state.missing);
 }
 
 /** Why the package cannot be prepared now, as a sentence; `missing` names the gaps of the declaration. */
@@ -417,13 +454,24 @@ export function payerPackageSignerText(signer: PayerPackageSigner | null | undef
   ].filter(Boolean).join(" · ");
 }
 
-/** The payer's identification by the qualified signature, from the package state. */
+/** The payer's identification by the qualified signature, from the package state (or on paper, `paper`). */
 export function payerPackageIdentificationText(
   identification: PayerPackageIdentification | null | undefined,
   tx: Tx,
+  paper?: PayerIdentificationStatus | null,
 ): { tone: StatusTone; text: string } | null {
   if (!identification) return null;
   const prefix = tx("Идентификация плательщика (QES): ", "Identifizierung des Zahlers (QES): ");
+  if (!identification.qes_signed_at && paper?.identified && payerAnsweredOnPaper(paper)) {
+    // Identified on paper (Selbstauskunft + Ausweis): no QES is waited for (QA 2026-10-25, F-F2).
+    return {
+      tone: "success",
+      text: tx(
+        "Плательщик идентифицирован на бумаге: подписанная Selbstauskunft и документ плательщика",
+        "Zahler auf Papier identifiziert: unterschriebene Selbstauskunft und Ausweis des Zahlers",
+      ),
+    };
+  }
   if (!identification.qes_signed_at) {
     return { tone: "neutral", text: `${prefix}${tx("ещё нет", "noch nicht erfolgt")}` };
   }

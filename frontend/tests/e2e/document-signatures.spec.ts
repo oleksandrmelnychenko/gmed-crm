@@ -1447,6 +1447,43 @@ test("unchecked incomplete recipients retain their selection when another row is
   expect(fixture.submissions).toEqual([{ signers: [agency] }]);
 });
 
+// QA 2026-10-25, F-F6: adding «Gesetzliche Vertretung / Patientenseite» by hand
+// offers the lead's known representatives (the second custody parent) instead
+// of an empty row; «Andere Person» still adds an empty one.
+test("a hand-added legal representative is picked from the lead's known representatives", async ({ page }) => {
+  await prepare(page);
+  const stefan = { first_name: "Stefan", last_name: "Beispiel", email: "stefan@example.org", role: "client" };
+  const agency = { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" };
+  await page.route("**/api/v1/signature-packages/candidates?*", route => route.fulfill({ json: {
+    ...candidatesFor(documentId), scope: { patient_id: null, lead_id: "lead-sig-reps" }, suggested_signers: [stefan, agency],
+  } }));
+  await page.route("**/api/v1/leads/lead-sig-reps/portal-intake", route => route.fulfill({ json: {
+    lead_id: "lead-sig-reps",
+    representatives: [
+      { id: "rep-1", role: "legal_representative", first_name: "Maria", last_name: "Beispiel", email: "maria@example.org" },
+      { id: "rep-2", role: "legal_representative", first_name: "Stefan", last_name: "Beispiel", email: "stefan@example.org" },
+    ],
+  } }));
+  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, async route => {
+    if (route.request().method() === "POST") return route.fallback();
+    await route.fulfill({ json: { enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null, requests: [], suggested_signers: [stefan, agency] } });
+  });
+  await page.goto(`/documents/${documentId}`);
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  await expect(dialog.getByRole("checkbox", { name: /^Person auswählen 2:/ })).toBeVisible();
+  await dialog.getByRole("button", { name: "Gesetzliche Vertretung / Patientenseite", exact: true }).click();
+  const known = dialog.getByRole("group", { name: "Bekannte Vertretungen", exact: true });
+  await expect(known.getByRole("button")).toHaveText([/Maria Beispiels*maria@example.org/, "Andere Person"]);
+  await known.getByRole("button", { name: /Maria Beispiel/ }).click();
+  await expect(known).toHaveCount(0);
+  await expect(dialog.getByRole("checkbox", { name: "Person auswählen 3: Maria Beispiel", exact: true })).toBeChecked();
+  await expect(dialog.getByLabel("Vorname", { exact: true })).toHaveCount(0);
+  // Everyone known is listed: the button adds an empty row at once.
+  await dialog.getByRole("button", { name: "Gesetzliche Vertretung / Patientenseite", exact: true }).click();
+  await expect(dialog.getByLabel("Vorname", { exact: true })).toHaveCount(1);
+});
+
 test("contract recipient validation retains the selection and permits correcting it", async ({ page }) => {
   const fixture = await prepare(page);
   const client = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };

@@ -412,3 +412,50 @@ export function signatureErrorText(
       return tx("Действие не выполнено. Проверьте статус перед повторной отправкой.", "Aktion fehlgeschlagen. Prüfen Sie vor erneutem Versand den Status.");
   }
 }
+
+/**
+ * The patient side's known people of a lead (parents, guardians, authorised
+ * representatives with a name), as signers to pick from when staff add
+ * «Законный представитель / сторона пациента» by hand (QA 2026-10-25, F-F6:
+ * the second custody parent was an empty row). Read from the lead's
+ * representation (`GET /leads/{id}/portal-intake`); [] when unreadable.
+ */
+export async function fetchLeadRepresentativeSigners(leadId: string): Promise<Signer[]> {
+  const value = await apiFetch<unknown>(`/leads/${encodeURIComponent(leadId)}/portal-intake`, { forceFresh: true });
+  return representativeSigners(value);
+}
+
+/** `representatives` of the portal state as patient-side signers; people without a name are left out. */
+export function representativeSigners(value: unknown): Signer[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const list = (value as { representatives?: unknown }).representatives;
+  if (!Array.isArray(list)) return [];
+  const text = (item: Record<string, unknown>, key: string) => (typeof item[key] === "string" ? (item[key] as string).trim() : "");
+  return list.flatMap((entry): Signer[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Record<string, unknown>;
+    const first_name = text(item, "first_name");
+    const last_name = text(item, "last_name");
+    if (!first_name && !last_name) return [];
+    return [{ first_name, last_name, email: text(item, "email"), role: "client" }];
+  });
+}
+
+/**
+ * The known patient-side people not yet among the signers, once each:
+ * suggestions first (the document's, the package's), then the lead's
+ * representatives. A person counts as present by e-mail, else by name.
+ */
+export function knownClientSigners(sources: readonly (readonly Signer[] | null | undefined)[], current: readonly Signer[]): Signer[] {
+  const name = (signer: Signer) => `${signer.first_name} ${signer.last_name}`.trim().toLocaleLowerCase();
+  const email = (signer: Signer) => signer.email.trim().toLowerCase();
+  const taken = (list: readonly Signer[], signer: Signer) => list.some(other =>
+    (email(signer) && email(other) === email(signer)) || (name(signer) && name(other) === name(signer)));
+  const result: Signer[] = [];
+  for (const signer of sources.flatMap(source => source ?? [])) {
+    if (signer.role !== "client" || !name(signer)) continue;
+    if (taken(current, signer) || taken(result, signer)) continue;
+    result.push({ first_name: signer.first_name, last_name: signer.last_name, email: signer.email, role: "client" });
+  }
+  return result;
+}

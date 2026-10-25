@@ -8,8 +8,10 @@ import {
   type LeadPayerPackageState,
 } from "../data/lead-payer-package-api";
 import {
+  payerAnsweredOnPaper,
   payerPackageActions,
   payerPackageBlockedReasonText,
+  payerPackageBlockedText,
   payerPackageChanged,
   payerPackageErrorText,
   payerPackageIdentificationText,
@@ -214,6 +216,25 @@ describe("payer package labels", () => {
       text: "Идентификация плательщика (QES): подписано 07.10.2026 · тест, без юридической силы",
     });
     expect(payerPackageIdentificationText(null, ru)).toBeNull();
+  });
+
+  it("reads the paper path: the signed paper Selbstauskunft replaces «not sent» (QA 2026-10-25, F-F2)", () => {
+    const paper = { required: true, identified: true, statement_sent: false, self_disclosure_signed: true, identity_document: true };
+    expect(payerAnsweredOnPaper(paper)).toBe(true);
+    expect(payerAnsweredOnPaper({ ...paper, statement_sent: true })).toBe(false);
+    expect(payerAnsweredOnPaper({ ...paper, self_disclosure_signed: false })).toBe(false);
+    expect(payerAnsweredOnPaper(null)).toBe(false);
+    const blocked = state({ blocked_reason: "payer_not_submitted" });
+    expect(payerPackageBlockedText(blocked, paper, ru)).toContain("Плательщик ответил на бумаге");
+    expect(payerPackageBlockedText(blocked, null, ru)).toBe("Плательщик ещё не отправил свою анкету: документы готовятся после неё");
+    expect(payerPackageBlockedText(state(), paper, ru)).toBeNull();
+    expect(payerPackageIdentificationText(state().payer_identification, de, paper)).toEqual({
+      tone: "success",
+      text: "Zahler auf Papier identifiziert: unterschriebene Selbstauskunft und Ausweis des Zahlers",
+    });
+    // Signed on paper but the ID still missing: the QES line stays.
+    expect(payerPackageIdentificationText(state().payer_identification, ru, { ...paper, identified: false })?.text)
+      .toBe("Идентификация плательщика (QES): ещё нет");
   });
 
   it("starts the invitation in the suggested language", () => {

@@ -1444,7 +1444,11 @@ async fn review_queue(
            ) p ON true
            LEFT JOIN users pu ON pu.id = p.decided_by
            WHERE a.status IN ('review_required', 'proposed', 'awaiting_answers')
-             AND l.qualification_status <> 'deleted'
+             -- Only open leads (DEV QA 2026-10-25, F-F9: a converted lead
+             -- stayed "waiting for answers"): a converted, archived or
+             -- deleted lead waits for nobody.
+             AND l.qualification_status NOT IN ('converted', 'archived', 'deleted')
+             AND l.converted_patient_id IS NULL
            ORDER BY since, a.lead_id"#,
     )
     .fetch_all(&state.db)

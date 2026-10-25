@@ -38,7 +38,8 @@
 //! readiness, the staff wizard (`GET /leads/{id}/enhanced-check`), the
 //! payer's check level (proof of funds), the self-payer's proof of funds in
 //! the lead cabinet, the GwG identification sheet and the patient's legal
-//! status read it. See
+//! status read it. The payer's unsent draft is no input of it; the payer's
+//! own questionnaire previews the draft with [`payer_form_check`]. See
 //! docs/architecture/aml-enhanced-due-diligence_ua.md.
 
 use axum::{
@@ -292,10 +293,31 @@ fn push_all(target: &mut Vec<String>, values: Vec<String>) {
 }
 
 /// Loads what the rule looks at in one query; `None` when the lead does not
-/// exist.
+/// exist. The payer's own answers through the link (the statement's
+/// residence, habitual residence and citizenships) count only once the payer
+/// sent them (owner decision 2026-10-25 «Рахувати лише відправлене»): an
+/// unsent draft is no input of the stored rule
+/// ([`load_subjects_with_payer_draft`] is the payer form's own preview).
 pub(crate) async fn load_subjects(
     conn: &mut PgConnection,
     lead_id: Uuid,
+) -> Result<Option<Subjects>, sqlx::Error> {
+    load_subjects_inner(conn, lead_id, false).await
+}
+
+/// [`load_subjects`] with the payer's unsent draft as if it were sent: what
+/// the payer's questionnaire asks by while the payer is still answering.
+pub(crate) async fn load_subjects_with_payer_draft(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<Subjects>, sqlx::Error> {
+    load_subjects_inner(conn, lead_id, true).await
+}
+
+async fn load_subjects_inner(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    payer_draft: bool,
 ) -> Result<Option<Subjects>, sqlx::Error> {
     let Some(row) = sqlx::query(
         r#"SELECT l.country,
@@ -306,9 +328,15 @@ pub(crate) async fn load_subjects(
                   d.payer_type,
                   d.country AS payer_country,
                   d.citizenships AS payer_citizenships,
-                  s.country AS statement_country,
-                  s.habitual_residence_country AS statement_habitual_residence_country,
-                  s.citizenships AS statement_citizenships,
+                  -- The payer's statement: sent answers only, unless the
+                  -- payer form previews its own draft ($2).
+                  CASE WHEN s.submitted_at IS NOT NULL OR $2 THEN s.country END
+                      AS statement_country,
+                  CASE WHEN s.submitted_at IS NOT NULL OR $2
+                       THEN s.habitual_residence_country END
+                      AS statement_habitual_residence_country,
+                  CASE WHEN s.submitted_at IS NOT NULL OR $2 THEN s.citizenships END
+                      AS statement_citizenships,
                   d.payer_representative_id,
                   pr.country AS representative_payer_country,
                   pr.citizenships AS representative_payer_citizenships,
@@ -380,6 +408,7 @@ pub(crate) async fn load_subjects(
            WHERE l.id = $1"#,
     )
     .bind(lead_id)
+    .bind(payer_draft)
     .fetch_optional(&mut *conn)
     .await?
     else {
@@ -510,6 +539,29 @@ pub(crate) async fn enhanced_check_triggers(
         .map_or(1, crate::risk::store::Assessment::level);
     let mut check = with_risk_level(check, level);
     check.organisation_follow_up = crate::risk::store::block_open(conn, lead_id, "E").await?;
+    Ok(check)
+}
+
+/// The check the payer's own questionnaire asks by (the link and a paying
+/// parent's cabinet section): [`enhanced_check_triggers`] as if the payer
+/// sent the current draft now. The stored rule counts only sent answers
+/// (owner decision 2026-10-25 «Рахувати лише відправлене»), yet the form must
+/// ask the proof of funds, block E and the occupation / industry before the
+/// submit when the draft would raise the level, or the payer could send an
+/// incomplete questionnaire. Nothing is stored; once sent, the draft is the
+/// stored input and both agree.
+pub(crate) async fn payer_form_check(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<EnhancedCheck, sqlx::Error> {
+    let Some(subjects) = load_subjects_with_payer_draft(conn, lead_id).await? else {
+        return Ok(EnhancedCheck::default());
+    };
+    let config = crate::risk::store::load_config(conn).await?;
+    let check = evaluate_with(&subjects, &config.list_2);
+    let preview = crate::risk::store::payer_form_preview(conn, lead_id).await?;
+    let mut check = with_risk_level(check, preview.level);
+    check.organisation_follow_up = preview.organisation_follow_up;
     Ok(check)
 }
 

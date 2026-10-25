@@ -549,6 +549,10 @@ describe("label helpers", () => {
     // Without a parent on file the server's debtor name is the child's own; the line says none is recorded instead.
     expect(contractingPartyLabel({ ...minor, debtor_name: "Mia Muster", representatives: [] }, ru)).toBe("Законные представители: не указаны");
     expect(contractingPartyLabel({ ...minor, debtor_name: "Mia Muster", representatives: [] }, de)).toBe("Gesetzliche Vertreter: nicht erfasst");
+    // One paying parent alone is the party: singular (QA 2026-10-25, F-F10).
+    const one = [minor.representatives[1]];
+    expect(contractingPartyLabel({ ...minor, representatives: one }, ru)).toBe("Законный представитель: Ben Muster");
+    expect(contractingPartyLabel({ ...minor, representatives: one }, de)).toBe("Gesetzliche Vertretung: Ben Muster");
   });
 
   it("reads a third-party row of before that names a minor's parent as the paying parent", () => {

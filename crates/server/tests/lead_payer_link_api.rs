@@ -1668,30 +1668,13 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
     assert_eq!(info["link"]["status"], "submitted", "{info}");
 
-    // The payer's public office was a knock-out (level 3 of the risk
-    // assessment, trigger flow 2026-10-07): the link waits for staff until
-    // they ask for the payer's answers again (block D).
-    let (status, held) = with_login(&app, "POST", &path, &app.manager(), Some(json!({}))).await;
-    assert_eq!(status, StatusCode::CONFLICT, "{held}");
-    assert_eq!(held["code"], "risk_review_required", "{held}");
-    // The panel says so before staff press "send" (QA 2026-10-10).
+    // The public office was a draft «Ja» corrected before the submit: it left
+    // nothing (owner decision 2026-10-25 «Рахувати лише відправлене»), so no
+    // knock-out holds the link (the sent «Ja» is
+    // `a_submitted_payer_yes_is_sticky`).
     let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
-    assert_eq!(info["risk_hold"], "review", "{info}");
-    let (status, requested) = with_login(
-        &app,
-        "POST",
-        &format!("/api/v1/leads/{lead_id}/risk-assessment/decisions"),
-        &app.staff("ceo"),
-        Some(json!({
-            "decision": "request_more",
-            "reason": "The payer states the public office",
-            "blocks": ["D"]
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{requested}");
-    let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
-    assert!(info["risk_hold"].is_null(), "block D requested: {info}");
+    assert!(info["risk_hold"].is_null(), "{info}");
+    assert_eq!(stored_payer_triggers(pool, lead_id, &["T14"]).await, vec![]);
     // A resend needs "reopen", which keeps the answers; the payer corrects
     // them, so the lead still sees nothing of them.
     let (status, refused) = with_login(&app, "POST", &path, &app.manager(), Some(json!({}))).await;
@@ -1918,6 +1901,9 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
         json!(["payer_residence_blacklist"])
     );
     assert_eq!(info["questionnaire"]["funds_proof_required"], true);
+    // The questionnaire asks by the payer's draft; the lead's stored check
+    // counts the seat once the payer sent it (owner decision 2026-10-25
+    // «Рахувати лише відправлене»).
     let (_, check) = with_login(
         &app,
         "GET",
@@ -1926,8 +1912,14 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
         None,
     )
     .await;
-    assert_eq!(check["reasons"], json!(["payer_residence_blacklist"]));
-    assert_eq!(check["countries"], json!(["IR"]));
+    assert!(
+        !check["reasons"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("payer_residence_blacklist")),
+        "{check}"
+    );
+    assert_eq!(check["countries"], json!([]), "{check}");
     // "Nobody over 25 %" clears the list.
     let (status, body) = patch(
         &app,
@@ -3012,4 +3004,243 @@ async fn staff_completing_the_payers_date_of_birth_keep_consents_and_link() {
     let (status, body) =
         as_payer(&app, "GET", OPEN, &[("X-Payer-Link", token.as_str())], None).await;
     assert_eq!(status, StatusCode::GONE, "{body}");
+}
+
+/// The payer's stored triggers (key, active) of `keys`.
+async fn stored_payer_triggers(pool: &PgPool, lead_id: Uuid, keys: &[&str]) -> Vec<(String, bool)> {
+    let triggers: Option<Value> =
+        sqlx::query_scalar("SELECT triggers FROM lead_risk_assessments WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_optional(pool)
+            .await
+            .unwrap();
+    triggers
+        .and_then(|triggers| triggers.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter(|trigger| {
+            trigger["subject"] == "payer"
+                && keys.contains(&trigger["key"].as_str().unwrap_or_default())
+        })
+        .map(|trigger| {
+            (
+                trigger["key"].as_str().unwrap().to_string(),
+                trigger["active"].as_bool().unwrap_or(false),
+            )
+        })
+        .collect()
+}
+
+async fn assessment_started(pool: &PgPool, lead_id: Uuid) -> bool {
+    sqlx::query_scalar(
+        "SELECT started_at IS NOT NULL FROM lead_risk_assessments WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap()
+    .unwrap_or(false)
+}
+
+/// Owner decision 2026-10-25 «Рахувати лише відправлене» for the payer link:
+/// the payer's draft «Ja» (PEP, a black-list citizenship) fires no stored
+/// trigger — staff's enhanced check and the risk assessment do not see it —
+/// yet the payer's form asks the proof of funds by the draft; corrected to
+/// «Nein» before the submit, nothing is left.
+#[tokio::test]
+async fn a_payer_draft_counts_only_once_submitted() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, _) = lead_with_payer(&app, "draft").await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    assert!(assessment_started(pool, lead_id).await);
+    let check_path = format!("/api/v1/leads/{lead_id}/enhanced-check");
+    let (status, body) = patch(&app, &token, &session, person_answers()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["funds_proof_required"], false, "{body}");
+
+    // A draft PEP «Ja» and a black-list citizenship: the form asks the proof
+    // of funds at once …
+    let (status, body) = patch(
+        &app,
+        &token,
+        &session,
+        json!({
+            "citizenships": ["AT", "IR"],
+            "pep_self": true,
+            "pep_self_details": "Gemeinderat 2015–2020"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["funds_proof_required"], true, "{body}");
+    assert!(
+        body["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("funds_proof_upload")),
+        "{body}"
+    );
+    // … and staff's view of the questionnaire shows the level it asks by …
+    let (_, info) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-link"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert!(
+        info["questionnaire"]["check_level"].as_u64().unwrap() >= 2,
+        "{info}"
+    );
+    // … but nothing is stored: no trigger, no hold, no enhanced check.
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T6", "T14", "T15"]).await,
+        vec![]
+    );
+    assert!(info["risk_hold"].is_null(), "{info}");
+    let (_, check) = with_login(&app, "GET", &check_path, &app.manager(), None).await;
+    assert_eq!(check["required"], false, "{check}");
+
+    // Corrected to «Nein» before the submit: the form no longer asks for it.
+    let (status, body) = patch(
+        &app,
+        &token,
+        &session,
+        json!({ "citizenships": ["AT"], "pep_self": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["funds_proof_required"], false, "{body}");
+    let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["missing_for_submit"], json!([]), "{body}");
+    let (status, body) = as_payer(
+        &app,
+        "POST",
+        SUBMIT,
+        &[
+            ("X-Payer-Link", token.as_str()),
+            ("X-Payer-Session", session.as_str()),
+        ],
+        Some(json!({ "declared_correct": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Nothing of the corrected draft is left — not even an inactive row.
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T6", "T14", "T15"]).await,
+        vec![]
+    );
+    let raised: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM lead_risk_events
+           WHERE lead_id = $1
+             AND triggers @> '[{"key": "T14", "subject": "payer"}]'::jsonb"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(raised, 0);
+    let (_, check) = with_login(&app, "GET", &check_path, &app.manager(), None).await;
+    assert_eq!(check["required"], false, "{check}");
+}
+
+/// A sent «Ja» counts at once and stays (the ratchet): the PEP knock-out
+/// holds the link for the review; reopened for corrections, the draft
+/// «Nein» keeps the stored trigger as it was (pending), and the submitted
+/// «Nein» leaves it sticky, no longer active.
+#[tokio::test]
+async fn a_submitted_payer_yes_is_sticky() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, _) = lead_with_payer(&app, "sticky").await;
+    let path = format!("/api/v1/leads/{lead_id}/payer-link");
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    let mut answers = person_answers();
+    answers["pep_self"] = json!(true);
+    answers["pep_self_details"] = json!("Gemeinderat 2015–2020");
+    let (status, body) = patch(&app, &token, &session, answers).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["funds_proof_required"], true, "{body}");
+    assert_eq!(stored_payer_triggers(pool, lead_id, &["T14"]).await, vec![]);
+    let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = payer_upload(&app, FUNDS, &token, &session, "konto.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["missing_for_submit"], json!([]), "{body}");
+    let (status, body) = as_payer(
+        &app,
+        "POST",
+        SUBMIT,
+        &[
+            ("X-Payer-Link", token.as_str()),
+            ("X-Payer-Session", session.as_str()),
+        ],
+        Some(json!({ "declared_correct": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T14"]).await,
+        vec![("T14".to_string(), true)]
+    );
+    let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    assert_eq!(info["risk_hold"], "review", "{info}");
+    let (_, check) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/enhanced-check"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert_eq!(check["required"], true, "{check}");
+
+    // Reopened (block D requested): the draft «Nein» withdraws nothing yet.
+    let (status, requested) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/risk-assessment/decisions"),
+        &app.staff("ceo"),
+        Some(json!({
+            "decision": "request_more",
+            "reason": "The payer states the public office",
+            "blocks": ["D"]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{requested}");
+    let (token, _) = send_link(&app, lead_id, json!({ "reopen": true })).await;
+    let session = open_session(&app, &token).await;
+    let (status, body) = patch(&app, &token, &session, json!({ "pep_self": false })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T14"]).await,
+        vec![("T14".to_string(), true)]
+    );
+    // The form asks by the stored level, which the sent «Ja» keeps.
+    assert_eq!(body["funds_proof_required"], true, "{body}");
+    assert_eq!(body["missing_for_submit"], json!([]), "{body}");
+    let (status, body) = as_payer(
+        &app,
+        "POST",
+        SUBMIT,
+        &[
+            ("X-Payer-Link", token.as_str()),
+            ("X-Payer-Session", session.as_str()),
+        ],
+        Some(json!({ "declared_correct": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T14"]).await,
+        vec![("T14".to_string(), false)]
+    );
 }

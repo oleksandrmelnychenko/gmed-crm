@@ -317,12 +317,32 @@ pub async fn follow_up_json(
         let Some(assessment) = assessment.filter(store::Assessment::started) else {
             return Ok(empty);
         };
-        (
-            assessment.triggers,
-            assessment.score.level,
-            assessment.requested_blocks,
-            false,
-        )
+        // An answer the person has not sent yet scores nothing (owner
+        // decision 2026-10-25 «Рахувати лише відправлене»), but the cabinet
+        // asks what it brings at once — a «Ja» to the PEP or sanctions
+        // question shows block H / J, a listed citizenship F (and A, K, L at
+        // level 2) before the send, so one send of the follow-up carries the
+        // change and its answers. Shown to the person only: staff, the gate
+        // and the stored level see the change once it is sent.
+        let mut triggers = assessment.triggers;
+        let pending: Vec<super::Fired> = super::evaluate(&inputs, &config)
+            .into_iter()
+            .filter(|fired| {
+                inputs.pending(fired.key, fired.subject)
+                    && !triggers
+                        .iter()
+                        .any(|trigger| trigger.key == fired.key && trigger.subject == fired.subject)
+            })
+            .collect();
+        let level = if pending.is_empty() {
+            assessment.score.level
+        } else {
+            triggers.extend(super::merge(&[], &pending, chrono::Utc::now(), &[]).triggers);
+            super::score(&triggers, &config)
+                .level
+                .max(assessment.score.level)
+        };
+        (triggers, level, assessment.requested_blocks, false)
     };
     let states = store::block_states(&triggers, level, &requested, &config, &answers);
     // Neutral: whether block A asks the source of funds (never why).

@@ -2786,6 +2786,82 @@ async fn lead_can_convert_with_the_newest_accepted_quote_while_awaiting_prepayme
     );
 }
 
+/// DEV QA 2026-10-25, F-F5: «Смета не соответствует текущему заказу» right
+/// after «Подтвердить смету». The estimate matched the order's services (one
+/// catalogue service, 19 % VAT, prepayment), but the check compared its total
+/// with `orders.total_estimated`, which a wizard save writes from its own
+/// state. The check now prices the services as the estimate does.
+#[tokio::test]
+async fn an_accepted_estimate_matches_the_services_whatever_total_a_save_wrote() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Estimate",
+            "last_name": "Current",
+            "email": format!("estimate-current-{tag}@test.local"),
+            "phone": "+49111000003",
+            "source": "manual",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    make_lead_ready_for_qualification(&app, &pm, &lead_id.to_string()).await;
+    let (status, qualified) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/qualify"),
+        &pm,
+        Some(json!({ "status": "qualified" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{qualified}");
+    // One service of 100 € at 19 %, prepayment required, estimate KV accepted
+    // at 119 € (100 net + 19 VAT).
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    let quote_accepted = |lead: &Value| {
+        lead["readiness"]["checks"]
+            .as_array()
+            .and_then(|checks| checks.iter().find(|check| check["key"] == "quote_accepted"))
+            .and_then(|check| check["passed"].as_bool())
+            .unwrap_or_else(|| panic!("missing quote_accepted: {lead}"))
+    };
+    let lead_path = format!("/api/v1/leads/{lead_id}");
+    let (status, lead) = json_request(&app, "GET", &lead_path, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert!(quote_accepted(&lead), "{lead}");
+
+    // A save that raced the confirmation stored another total.
+    for stale in ["118.99", "100.00"] {
+        sqlx::query("UPDATE orders SET total_estimated = $2::numeric WHERE id = $1")
+            .bind(artifacts.order_id)
+            .bind(stale)
+            .execute(&app.suite.pool)
+            .await
+            .unwrap();
+        let (status, lead) = json_request(&app, "GET", &lead_path, &pm, None).await;
+        assert_eq!(status, StatusCode::OK, "{lead}");
+        assert!(quote_accepted(&lead), "total {stale}: {lead}");
+    }
+
+    // The services changed after the estimate: it no longer matches.
+    sqlx::query("UPDATE order_leistungen SET unit_price = 110 WHERE id = $1")
+        .bind(artifacts.service_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    let (status, lead) = json_request(&app, "GET", &lead_path, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert!(!quote_accepted(&lead), "{lead}");
+}
+
 #[tokio::test]
 async fn lead_readiness_normalizes_cost_passthrough_vat() {
     let Some(app) = test_app().await else { return };

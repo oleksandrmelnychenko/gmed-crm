@@ -3,6 +3,7 @@ import { Check, CircleAlert, FileText, LoaderCircle, Upload } from "lucide-react
 
 import { Banner, inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
 import { formatAppDate } from "@/lib/app-time-zone";
@@ -334,17 +335,17 @@ export function LeadPayerPaperPath({
                     onChange={(event) => patchField("number", event.target.value)}
                   />
                 </label>
-                <label className="min-w-0 space-y-1.5">
-                  <span className={cn(tokens.text.label, "block")}>{tx("Страна выдачи (код ISO)", "Ausstellungsstaat (ISO-Code)")}</span>
-                  <Input
-                    className={inputClass}
+                {/* The same country list as every other issuing country (QA 2026-10-25, F-F3). */}
+                <label className="min-w-0 space-y-1.5" data-testid="lead-payer-paper-id-country">
+                  <span className={cn(tokens.text.label, "block")}>{tx("Страна выдачи", "Ausstellungsstaat")}</span>
+                  <CountrySelect
                     value={fields.issuingCountry}
-                    maxLength={2}
+                    lang={lang}
+                    className={selectClass}
+                    aria-label={tx("Страна выдачи", "Ausstellungsstaat")}
+                    emptyLabel={tx("— не указана —", "— keine Angabe —")}
                     disabled={locked}
-                    autoComplete="off"
-                    placeholder="DE"
-                    data-testid="lead-payer-paper-id-country"
-                    onChange={(event) => patchField("issuingCountry", event.target.value.toUpperCase())}
+                    onChange={(code) => patchField("issuingCountry", code ?? "")}
                   />
                 </label>
                 <label className="min-w-0 space-y-1.5">

@@ -764,16 +764,16 @@ const EDITABLE_FIELDS: [&str; 17] = [
 
 /// Key of the "who pays" answer in `leads.portal_field_updates`: like a
 /// personal data field it says when the patient last changed it.
-const PAYER_MARKER: &str = "payer";
+pub(crate) const PAYER_MARKER: &str = "payer";
 /// Key of the answers to sections 7 and 8 (invoice recipient, payment route)
 /// in `leads.portal_field_updates`; separate from [`PAYER_MARKER`], so a
 /// billing save leaves "who pays — from the patient" as it is.
-const BILLING_MARKER: &str = "billing";
+pub(crate) const BILLING_MARKER: &str = "billing";
 /// Key of the invoice recipient's answers of step 3 (2026-10-11) in
 /// `leads.portal_field_updates`.
 const INVOICE_RECIPIENT_MARKER: &str = "invoice_recipient";
 /// Key of the answers of the extra step in `leads.portal_field_updates`.
-const ENHANCED_DETAILS_MARKER: &str = "enhanced_details";
+pub(crate) const ENHANCED_DETAILS_MARKER: &str = "enhanced_details";
 /// Key of the trusted persons (2026-10-14) in `leads.portal_field_updates`.
 const TRUSTED_PERSONS_MARKER: &str = "trusted_persons";
 
@@ -1254,6 +1254,50 @@ fn patient_field_markers(lead_id: Uuid, data: &PersonalData, updates: &Value) ->
     Value::Object(markers)
 }
 
+/// The marker's time, if any (`leads.portal_field_updates` entry).
+pub(crate) fn marker_time(marker: Option<&Value>) -> Option<DateTime<Utc>> {
+    marker
+        .and_then(|marker| marker.get("at"))
+        .and_then(Value::as_str)
+        .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+        .map(|at| at.with_timezone(&Utc))
+}
+
+/// Of `fields`, the personal data fields the cabinet changed after `sent_at`
+/// (never sent when `None`) whose current value is still the one the cabinet
+/// saved: a later change by staff makes the value staff's own, which counts
+/// at once (risk inputs, owner decision 2026-10-25 «Рахувати лише
+/// відправлене»).
+pub(crate) async fn unsent_personal_fields(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    sent_at: Option<DateTime<Utc>>,
+    fields: &[&'static str],
+) -> Result<Vec<&'static str>, sqlx::Error> {
+    let Some(row) = sqlx::query(&format!(
+        "SELECT {PERSONAL_DATA_COLUMNS}, l.portal_field_updates FROM leads l WHERE l.id = $1"
+    ))
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(Vec::new());
+    };
+    let data = PersonalData::from_row(&row);
+    let updates: Value = row
+        .try_get("portal_field_updates")
+        .unwrap_or_else(|_| json!({}));
+    let markers = patient_field_markers(lead_id, &data, &updates);
+    Ok(fields
+        .iter()
+        .copied()
+        .filter(|field| {
+            marker_time(markers.get(*field))
+                .is_some_and(|at| sent_at.is_none_or(|sent_at| at > sent_at))
+        })
+        .collect())
+}
+
 // ----------------------------------------------------------------------------
 // Identification: the lead's own GwG statements
 // ----------------------------------------------------------------------------
@@ -1263,7 +1307,7 @@ fn patient_field_markers(lead_id: Uuid, data: &PersonalData, updates: &Value) ->
 const IDENTIFICATION_MARKER: &str = "identification";
 /// Key of the statements of the follow-up blocks and the reason of the
 /// request in `leads.portal_field_updates`.
-const STATEMENTS_MARKER: &str = "statements";
+pub(crate) const STATEMENTS_MARKER: &str = "statements";
 
 const SALUTATION_VALUES: [&str; 3] = ["mr", "ms", "none"];
 /// In the order of the form; stored in this order.

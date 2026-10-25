@@ -1544,7 +1544,7 @@ pub(crate) fn updated_at(loaded: &Loaded, field_updates: &Value) -> Option<DateT
 
 /// Stable text of what the cabinet entered, for the marker in
 /// `leads.portal_field_updates` (answers and persons, not the files).
-fn marker_value(loaded: &Loaded) -> String {
+pub(crate) fn marker_value(loaded: &Loaded) -> String {
     let mut value = answers_json(&loaded.representation);
     value.insert(
         "representatives".into(),

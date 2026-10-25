@@ -18,6 +18,7 @@ import { useRepeatPatientReview } from "../model/use-repeat-patient-review";
 import { usePreviousRequests } from "../model/use-previous-requests";
 import { PreviousRequestsPanel } from "./previous-requests-panel";
 import { orderPeriodWarnings } from "../model/order-period-warnings";
+import { createNewestLoadGuard, type NewestLoadGuard } from "../model/newest-load-guard";
 import { repeatConsentNote, requestConsentStatus } from "../model/request-consents";
 import { OrderCatalogServicesTable } from "@/pages/orders/ui/order-catalog-services-table";
 import type { ServiceLine } from "@/pages/orders/model/order-service-line";
@@ -806,6 +807,8 @@ type WizardDocumentPreview = {
 const ignoreDocumentPreviewReady = () => undefined;
 
 const AUTOSAVE_DELAY_MS = 800;
+/** The first save of a new lead found an existing patient with the same name and birth date. */
+class ProspectDuplicateError extends Error {}
 const MAX_DOCUMENT_FILE_SIZE = 25 * 1024 * 1024;
 const LeadMedicalIntakeForm = lazy(() =>
   import("./lead-medical-intake-form").then((module) => ({
@@ -3711,6 +3714,10 @@ export function LeadWizard({
   // «Принято» next to «Смета не соответствует текущему заказу» right after
   // confirming — a refresh begun before the confirmation landed last).
   const stateLoadVersionRef = useRef(0);
+  // The lead object alone is written by more loads than those (the lead-only
+  // refresh, the cabinet's step-1 merge, the first autosave): every one takes
+  // a ticket here and an older answer never replaces a newer one's lead.
+  const leadLoadGuardRef = useRef<NewestLoadGuard>(createNewestLoadGuard());
   const lookupSessionVersionRef = useRef(0);
   const commercialLookupUiVersionRef = useRef(0);
   const medicalLookupsRequestRef = useRef<
@@ -3731,6 +3738,16 @@ export function LeadWizard({
     ProspectDuplicateCandidate[] | null
   >(null);
   const [prospectResolutionBusy, setProspectResolutionBusy] = useState(false);
+  // Saves of a step-1 dialog (an allergy, a diagnosis, …) that found a
+  // duplicate patient wait for staff's choice and are saved after
+  // «Привязать» / «Создать нового пациента» (QA 2026-10-25, F-F8).
+  const prospectWaitersRef = useRef<((resolved: boolean) => void)[]>([]);
+  const settleProspectWaiters = useCallback((resolved: boolean) => {
+    const waiters = prospectWaitersRef.current;
+    prospectWaitersRef.current = [];
+    waiters.forEach((waiter) => waiter(resolved));
+  }, []);
+  useEffect(() => () => settleProspectWaiters(false), [leadId, settleProspectWaiters]);
   const documentPreviewUrlRef = useRef<string | null>(null);
   const lastPersistedLeadIdRef = useRef<string | null>(null);
   const pendingParentProfileLeadRef = useRef<string | null>(null);
@@ -4072,7 +4089,10 @@ export function LeadWizard({
     if (!leadId) return;
     const reloadVersion = reloadVersionRef.current + 1;
     reloadVersionRef.current = reloadVersion;
+    // A reload supersedes every load begun before it: their lead, quotes and
+    // orders are not written once it started.
     stateLoadVersionRef.current += 1;
+    const leadTicket = leadLoadGuardRef.current.begin();
     const isCurrentReload = () => reloadVersionRef.current === reloadVersion;
     const commercialVersions = { ...commercialFlagRequestVersionRef.current };
     setLoading(true);
@@ -4223,7 +4243,7 @@ export function LeadWizard({
         ? String(paymentQuote.paid_amount ?? "")
         : "";
 
-      setLead(nextLead);
+      if (leadLoadGuardRef.current.claim(leadTicket)) setLead(nextLead);
       setCases(nextCase ? [nextCase] : nextCases as CaseListItem[]);
       caseIdRef.current = nextCase?.id ?? null;
       prospectPatientIdRef.current = prospectId ?? null;
@@ -4284,8 +4304,9 @@ export function LeadWizard({
 
   const refreshLeadState = useCallback(async () => {
     if (!leadId) return null;
+    const ticket = leadLoadGuardRef.current.begin();
     const nextLead = await fetchLeadDetail(leadId);
-    if (hydrated.current === leadId) {
+    if (hydrated.current === leadId && leadLoadGuardRef.current.claim(ticket)) {
       setLead(nextLead);
     }
     return nextLead;
@@ -4294,6 +4315,7 @@ export function LeadWizard({
   const refreshDocumentsState = useCallback(async () => {
     if (!leadId) return;
     const loadVersion = ++stateLoadVersionRef.current;
+    const leadTicket = leadLoadGuardRef.current.begin();
     const commercialVersions = { ...commercialFlagRequestVersionRef.current };
     const [nextLead, nextDocuments, nextOrders] = await Promise.all([
       fetchLeadDetail(leadId),
@@ -4307,7 +4329,7 @@ export function LeadWizard({
     const nextContracts = await fetchWizardContracts(nextLead).catch(() => null);
     if (hydrated.current !== leadId) return;
     if (stateLoadVersionRef.current !== loadVersion) return;
-    setLead(nextLead);
+    if (leadLoadGuardRef.current.claim(leadTicket)) setLead(nextLead);
     setDocuments(nextDocuments);
     if (nextContracts) setContracts(nextContracts);
     if (nextOrders) {
@@ -4332,8 +4354,11 @@ export function LeadWizard({
     // A save under way reaches the server first, so the fresh lead knows it.
     await saveQueueRef.current;
     clearApiCache(`/leads/${leadId}`);
+    const ticket = leadLoadGuardRef.current.begin();
     const fresh = await fetchLeadDetail(leadId).catch(() => null);
     if (!fresh || hydrated.current !== leadId) return;
+    // An older lead than the one shown would merge stale cabinet values back.
+    if (!leadLoadGuardRef.current.claim(ticket)) return;
     const previous = step1PortalLeadRef.current;
     const next = draftFromLead(fresh);
     if (previous) {
@@ -4451,6 +4476,7 @@ export function LeadWizard({
     if (!leadId) return [];
     const targetLeadId = leadId;
     const loadVersion = ++stateLoadVersionRef.current;
+    const leadTicket = leadLoadGuardRef.current.begin();
     const signatureVersions = { ...commercialFlagRequestVersionRef.current };
     const leadPromise = fetchLeadDetail(targetLeadId);
     const [nextLead, nextDocuments, nextContracts, nextOrders, nextQuotes] = await Promise.all([
@@ -4463,7 +4489,7 @@ export function LeadWizard({
     if (hydrated.current !== targetLeadId) return [];
     // A newer load is on its way: its state wins; the caller still gets the documents.
     if (stateLoadVersionRef.current !== loadVersion) return nextDocuments;
-    setLead(nextLead);
+    if (leadLoadGuardRef.current.claim(leadTicket)) setLead(nextLead);
     setDocuments(nextDocuments);
     setContracts(nextContracts);
     setOrders(nextOrders);
@@ -5179,7 +5205,7 @@ export function LeadWizard({
     });
     if (response.duplicate_candidates?.length) {
       setProspectCandidates(response.duplicate_candidates);
-      throw new Error(tx(
+      throw new ProspectDuplicateError(tx(
         "Найден существующий пациент с теми же данными — выберите: привязать или создать нового",
         "Vorhandener Patient mit denselben Stammdaten gefunden — bitte verknüpfen oder neu anlegen",
       ));
@@ -5394,8 +5420,28 @@ export function LeadWizard({
   ): Promise<NonNullable<Draft[S]>> {
     setError("");
     clearServerValidation();
-    const profile = await persistClinicalDraftSection(section, nextDraft);
-    const saved = applyPersistedClinicalProfile(nextDraft, profile)[section];
+    let toSave = nextDraft;
+    let profile: PatientClinicalProfile;
+    try {
+      profile = await persistClinicalDraftSection(section, toSave);
+    } catch (cause) {
+      if (!(cause instanceof ProspectDuplicateError)) throw cause;
+      // The value stays in its dialog while staff choose in «Найден
+      // существующий пациент»; once attached (or a new patient created) it is
+      // saved into that record beside what is already there (QA 2026-10-25, F-F8).
+      const resolved = await new Promise<boolean>((resolve) => {
+        prospectWaitersRef.current.push(resolve);
+      });
+      const persisted = clinicalBaselineRef.current;
+      const caseId = caseIdRef.current;
+      if (!resolved || !persisted || !caseId) throw cause;
+      const merged = mergePatientClinicalDraft(nextDraft, persisted, caseId);
+      toSave = section === "narrative"
+        ? { ...nextDraft, narrative: merged.narrative, anamnese: merged.anamnese }
+        : { ...nextDraft, [section]: merged[section] };
+      profile = await persistClinicalDraftSection(section, toSave);
+    }
+    const saved = applyPersistedClinicalProfile(toSave, profile)[section];
     if (saved == null) throw new Error(tx("Не удалось загрузить сохранённую запись", "Der gespeicherte Eintrag konnte nicht geladen werden"));
     return saved as NonNullable<Draft[S]>;
   }
@@ -5553,6 +5599,7 @@ export function LeadWizard({
 
         wizardStateBaseRef.current = payload.wizard_state;
         if (initializing) {
+          const freshTicket = leadLoadGuardRef.current.begin();
           const fresh = await fetchLeadDetail(targetLeadId);
           // A minor's repeat intake starts with the patient's parents as
           // trusted contacts (server prefill): the draft takes them, so the
@@ -5569,7 +5616,7 @@ export function LeadWizard({
               : current);
             setRepresentationVersion((version) => version + 1);
           }
-          setLead(fresh);
+          if (leadLoadGuardRef.current.claim(freshTicket)) setLead(fresh);
         }
         lastSavedAutosaveSignatureRef.current = signature;
         setServerMasterError(null);
@@ -7236,6 +7283,14 @@ ${serviceCommentLines.join("\n")}`
         });
         setPaidAmount(String(accepted.paid_amount ?? ""));
         setQuotes((current) => [accepted, ...current.filter((item) => item.id !== accepted.id)]);
+        // One reload after the confirmation supersedes every load begun before
+        // it (QA 2026-10-25, M F-2): none of their older leads, with the
+        // readiness of before, is written after it — and none is reused.
+        if (leadId) {
+          clearApiCache(`/leads/${leadId}`);
+          clearApiCache("/quotes");
+          clearApiCache("/orders");
+        }
       }
       await reload(false, true);
     } catch (nextError) {
@@ -12649,7 +12704,10 @@ ${serviceCommentLines.join("\n")}`
       <Dialog
         open={prospectCandidates != null}
         onOpenChange={(open) => {
-          if (!open && !prospectResolutionBusy) setProspectCandidates(null);
+          if (!open && !prospectResolutionBusy) {
+            setProspectCandidates(null);
+            settleProspectWaiters(false);
+          }
         }}
       >
         <DialogContent className="max-w-lg">
@@ -12698,6 +12756,8 @@ ${serviceCommentLines.join("\n")}`
                           draft,
                         );
                         setProspectCandidates(null);
+                        // The dialog value that ran into the duplicate check is saved now.
+                        settleProspectWaiters(true);
                         // The server made the lead a request of that patient: the header (no
                         // purge countdown), the step names and the repeat review follow at once,
                         // not after a reload (QA 2026-10-25, V-A1).
@@ -12720,7 +12780,10 @@ ${serviceCommentLines.join("\n")}`
               type="button"
               variant="outline"
               disabled={prospectResolutionBusy}
-              onClick={() => setProspectCandidates(null)}
+              onClick={() => {
+                setProspectCandidates(null);
+                settleProspectWaiters(false);
+              }}
             >
               {tx("Отмена", "Abbrechen")}
             </Button>
@@ -12736,6 +12799,7 @@ ${serviceCommentLines.join("\n")}`
                       await ensureProspect(draft, { forceCreate: true });
                       await persistMedicalDraft(draft);
                       setProspectCandidates(null);
+                      settleProspectWaiters(true);
                   } catch (nextError) {
                     showWizardError(nextError);
                   } finally {

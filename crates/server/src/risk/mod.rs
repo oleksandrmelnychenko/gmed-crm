@@ -440,9 +440,35 @@ pub struct Inputs {
     pub confirmed_hit_payer: bool,
     /// Today in Europe/Berlin.
     pub today: Option<NaiveDate>,
+    /// The triggers (key, subject) whose answers the person changed and has
+    /// not sent yet (owner decision 2026-10-25 «Рахувати лише
+    /// відправлене»): an autosaved answer neither fires nor withdraws them —
+    /// [`merge_pending`] keeps their stored state as it was after the last
+    /// send and ignores the live evaluation. [`inputs::load`] finds the
+    /// cabinet's by its change markers and the send times, and the payer
+    /// link's (T6, T14, T15 of the payer) by a statement not submitted yet.
+    /// Staff's own entries are never pending. The payer form asks by its
+    /// draft all the same ([`inputs::load_with_payer_draft`]).
+    pub pending_unsent: Vec<(&'static str, &'static str)>,
 }
 
 impl Inputs {
+    /// Whether `key` of `subject` waits for the person's send.
+    pub fn pending(&self, key: &str, subject: &str) -> bool {
+        self.pending_unsent
+            .iter()
+            .any(|(pending_key, pending_subject)| {
+                *pending_key == key && *pending_subject == subject
+            })
+    }
+
+    /// [`evaluate`] without the triggers that wait for the person's send.
+    pub fn sent_evaluation(&self, config: &RiskConfig) -> Vec<Fired> {
+        let mut fired = evaluate(self, config);
+        fired.retain(|fired| !self.pending(fired.key, fired.subject));
+        fired
+    }
+
     fn payer_is_person(&self) -> bool {
         self.payer_type
             .as_deref()
@@ -742,9 +768,30 @@ pub fn merge(
     now: DateTime<Utc>,
     t16_kept_for: &[&str],
 ) -> Merged {
+    merge_pending(stored, live, now, t16_kept_for, &[])
+}
+
+/// [`merge`] while some answers wait for the person's send
+/// ([`Inputs::pending_unsent`]): a stored trigger of such a (key, subject)
+/// stays exactly as stored — not re-fired, not marked inactive — and `live`
+/// must not contain them ([`Inputs::sent_evaluation`]).
+pub fn merge_pending(
+    stored: &[Sticky],
+    live: &[Fired],
+    now: DateTime<Utc>,
+    t16_kept_for: &[&str],
+    pending: &[(&'static str, &'static str)],
+) -> Merged {
     let mut merged = Merged::default();
     for entry in stored {
         let mut entry = entry.clone();
+        if pending
+            .iter()
+            .any(|(key, subject)| entry.key == *key && entry.subject == *subject)
+        {
+            merged.triggers.push(entry);
+            continue;
+        }
         match live.iter().find(|fired| entry.same(fired)) {
             Some(fired) => {
                 entry.active = true;
@@ -950,6 +997,50 @@ mod tests {
     fn a_clean_lead_fires_nothing() {
         assert!(fire(clean()).is_empty());
         assert_eq!(score_fired(&[], &config()).level, 1);
+    }
+
+    /// Owner decision 2026-10-25 «Рахувати лише відправлене»: an unsent
+    /// answer neither fires nor changes a stored trigger.
+    #[test]
+    fn an_unsent_answer_changes_nothing() {
+        let now = Utc::now();
+        let unsent = Inputs {
+            patient_sanctions_links: true,
+            pending_unsent: vec![("T15", SUBJECT_PATIENT), ("T14", SUBJECT_PATIENT)],
+            ..clean()
+        };
+        assert!(unsent.sent_evaluation(&config()).is_empty());
+        let merged = merge_pending(
+            &[],
+            &unsent.sent_evaluation(&config()),
+            now,
+            &[],
+            &unsent.pending_unsent,
+        );
+        assert!(merged.triggers.is_empty() && !merged.raised);
+        // A sent «Ja» stays exactly as stored while a «Nein» waits.
+        let sent = Inputs {
+            patient_sanctions_links: true,
+            ..clean()
+        };
+        let stored = merge(&[], &evaluate(&sent, &config()), now, &[]).triggers;
+        let corrected = Inputs {
+            pending_unsent: vec![("T15", SUBJECT_PATIENT)],
+            ..clean()
+        };
+        let later = now + chrono::Duration::seconds(5);
+        let kept = merge_pending(
+            &stored,
+            &corrected.sent_evaluation(&config()),
+            later,
+            &[],
+            &corrected.pending_unsent,
+        );
+        assert_eq!(kept.triggers, stored);
+        // Once sent, the ratchet keeps it inactive.
+        let sent_no = merge(&stored, &evaluate(&clean(), &config()), later, &[]);
+        assert_eq!(sent_no.triggers.len(), 1);
+        assert!(!sent_no.triggers[0].active);
     }
 
     #[test]

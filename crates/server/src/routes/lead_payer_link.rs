@@ -2037,8 +2037,8 @@ struct Questionnaire {
     missing: Vec<&'static str>,
 }
 
-/// `check` is the lead's enhanced check ([`lead_enhanced_check`]) as stored
-/// when the questionnaire is read; it sets the check level.
+/// `check` is the check the payer form asks by ([`lead_enhanced_check::payer_form_check`]:
+/// the stored assessment as if the draft were sent); it sets the check level.
 fn questionnaire(
     context: &LeadContext,
     viewer: Viewer,
@@ -2253,7 +2253,7 @@ async fn questionnaire_json(
     let Some(context) = load_context(&mut conn, lead_id).await? else {
         return Ok(Value::Null);
     };
-    let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
+    let check = lead_enhanced_check::payer_form_check(&mut conn, lead_id).await?;
     let built = questionnaire(&context, viewer, &check, crate::app_time::today());
     Ok(match viewer {
         Viewer::Staff => built.to_staff_json(),
@@ -2868,7 +2868,9 @@ async fn save_patch(
     )
     .await
     .map_err(database)?;
-    // The payer's answers count for the risk assessment at once (P3).
+    // The payer's draft counts once submitted (owner decision 2026-10-25
+    // «Рахувати лише відправлене»): its T6 / T14 / T15 wait as pending; the
+    // payment route of section 8 is the declaration and counts at once.
     crate::risk::store::reassess(conn, lead_id, crate::risk::store::Cause::PayerLink, None)
         .await
         .map_err(database)?;
@@ -3132,7 +3134,7 @@ async fn submit_in_tx(
     }
     // The answers are stored as they are typed, so the rule reads the
     // payer's countries of this submit.
-    let check = lead_enhanced_check::enhanced_check_triggers(conn, lead_id)
+    let check = lead_enhanced_check::payer_form_check(conn, lead_id)
         .await
         .map_err(database)?;
     let built = questionnaire(context, viewer, &check, crate::app_time::today());
@@ -4533,7 +4535,7 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
             Some((link, _, _)) => link_emails(&mut conn, link.id).await?,
             None => Vec::new(),
         };
-        let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
+        let check = lead_enhanced_check::payer_form_check(&mut conn, lead_id).await?;
         // The stored assessment only (the send itself reassesses in the gate).
         let risk = crate::risk::store::load(&mut conn, lead_id).await?;
         let previous = previous_questionnaires(&mut conn, lead_id).await?;
@@ -5847,7 +5849,7 @@ pub(crate) async fn intake_summary(state: &AppState, lead_id: Uuid) -> Result<Va
     let now = Utc::now();
     let level = match context.statement.as_ref() {
         Some(_) => {
-            let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
+            let check = lead_enhanced_check::payer_form_check(&mut conn, lead_id).await?;
             Some(questionnaire(&context, Viewer::Staff, &check, crate::app_time::today()).level)
         }
         None => None,
@@ -5877,7 +5879,7 @@ pub(crate) async fn cabinet_summary(
     else {
         return Ok(Value::Null);
     };
-    let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
+    let check = lead_enhanced_check::payer_form_check(&mut conn, lead_id).await?;
     // A paying parent is the contracting party, not a third-party payer
     // (owner 2026-10-19): occupation, PEP and sanctions questions of the payer
     // are asked only when the enhanced check is required (owner 2026-10-21).

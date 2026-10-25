@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  combinedSignerPolicy, isSignaturePending, signatureErrorText, signatureFrameCoverage, signatureGateErrorText, signerPolicyError, validSigners, type Signer,
+  combinedSignerPolicy, isSignaturePending, knownClientSigners, representativeSigners, signatureErrorText, signatureFrameCoverage, signatureGateErrorText, signerPolicyError, validSigners, type Signer,
 } from "./document-signature-api";
 import { ApiRequestError } from "@/lib/api";
 
@@ -72,5 +72,37 @@ describe("document signing", () => {
     expect(signatureGateErrorText(refused, de)).toBe("Unterschrift nicht möglich: Die Risikobewertung hat den Lead abgelehnt.");
     expect(signatureGateErrorText(new ApiRequestError("x", { status: 409, body: { error: "document_already_signed" } }), de)).toBeNull();
     expect(signatureGateErrorText(new Error("x"), de)).toBeNull();
+  });
+});
+
+describe("known patient-side people for a hand-added legal representative (QA 2026-10-25, F-F6)", () => {
+  const stefan: Signer = { first_name: "Stefan", last_name: "Beispiel", email: "stefan@example.org", role: "client" };
+  const agency: Signer = { first_name: "Greta", last_name: "Agentur", email: "greta@example.org", role: "agency" };
+  const portal = {
+    representatives: [
+      { first_name: "Maria", last_name: "Beispiel", email: "maria@example.org", role: "legal_representative" },
+      { first_name: " Stefan ", last_name: "Beispiel", email: "STEFAN@example.org", role: "legal_representative" },
+      { first_name: "", last_name: "", email: "nameless@example.org", role: "legal_representative" },
+      { first_name: "Olga", last_name: "Beispiel", email: null, role: "legal_guardian" },
+    ],
+  };
+
+  it("reads the lead's representatives as patient-side signers", () => {
+    expect(representativeSigners(portal)).toEqual([
+      { first_name: "Maria", last_name: "Beispiel", email: "maria@example.org", role: "client" },
+      { first_name: "Stefan", last_name: "Beispiel", email: "STEFAN@example.org", role: "client" },
+      { first_name: "Olga", last_name: "Beispiel", email: "", role: "client" },
+    ]);
+    expect(representativeSigners(null)).toEqual([]);
+    expect(representativeSigners({ representatives: "x" })).toEqual([]);
+  });
+
+  it("offers the people not yet among the signers, once each, never the agency", () => {
+    const known = knownClientSigners([[stefan, agency], representativeSigners(portal)], [stefan, agency]);
+    expect(known.map(person => person.first_name)).toEqual(["Maria", "Olga"]);
+    // Present by name when no e-mail is on file.
+    expect(knownClientSigners([representativeSigners(portal)], [{ ...stefan, email: "" }, { first_name: "Olga", last_name: "Beispiel", email: "", role: "client" }])
+      .map(person => person.first_name)).toEqual(["Maria"]);
+    expect(knownClientSigners([undefined, null], [])).toEqual([]);
   });
 });

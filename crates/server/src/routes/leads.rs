@@ -3269,8 +3269,26 @@ async fn load_lead_conversion_readiness(
                       LIMIT 1
                   ), false) AS order_signed_agency,
                   COALESCE((
+                      -- The quote's total against the order's services as the
+                      -- quote prices them (per line: net rounded to cents, VAT
+                      -- of the rounded net, none on a pass-through; invoiced
+                      -- and cancelled lines left out like the line check
+                      -- below), not the stored `total_estimated` a wizard save
+                      -- writes from its own state: a save that raced the
+                      -- confirmation left a just-accepted estimate "not
+                      -- matching the current order" (DEV QA 2026-10-25, F-F5).
                       SELECT q.status = 'accepted'
-                             AND q.total_gross = o.total_estimated
+                             AND q.total_gross = COALESCE((
+                                 SELECT sum(
+                                     round(ol.quantity * ol.unit_price_snapshot, 2)
+                                     + CASE WHEN ol.is_cost_passthrough THEN 0
+                                            ELSE round(round(ol.quantity * ol.unit_price_snapshot, 2)
+                                                       * ol.vat_rate_snapshot / 100, 2)
+                                       END)
+                                 FROM order_leistungen ol
+                                 WHERE ol.order_id = o.id
+                                   AND ol.status NOT IN ('invoiced', 'cancelled')
+                             ), o.total_estimated)
                       FROM orders o
                       JOIN LATERAL (
                           SELECT status, total_gross

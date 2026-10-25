@@ -8,9 +8,11 @@ import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import type { LeadPayerPackageState, PayerPackageDocument, PayerPackageSlot } from "../data/lead-payer-package-api";
+import type { PayerIdentificationStatus } from "../model/lead-payer-paper";
 import {
+  payerAnsweredOnPaper,
   payerPackageActions,
-  payerPackageBlockedReasonText,
+  payerPackageBlockedText,
   payerPackageErrorText,
   payerPackageIdentificationText,
   payerPackageLanguageHint,
@@ -25,6 +27,7 @@ import {
   payerPackageSlotPurpose,
   payerPackageStatusLine,
   payerPackageTestModeLabel,
+  payerPaperSelfDisclosureText,
   type Tx,
 } from "../model/lead-payer-package";
 import type { LeadPayerPackageController } from "../model/use-lead-payer-package";
@@ -50,6 +53,7 @@ export function LeadPayerPackagePanel({
   onOpenDocument,
   renderDetails,
   fallbackDocuments,
+  paperIdentification,
 }: {
   leadId: string;
   state: LeadPayerPackageState;
@@ -64,6 +68,12 @@ export function LeadPayerPackagePanel({
   renderDetails?: (documentId: string, title: string) => ReactNode;
   /** A document of a slot made outside the package (the standalone Kostenübernahmeerklärung). */
   fallbackDocuments?: Partial<Record<PayerPackageSlot, PayerPackageDocument | null>>;
+  /**
+   * `status.identification` of the payer declaration: a payer identified on
+   * the paper path shows the signed paper Selbstauskunft as his statement
+   * (QA 2026-10-25, F-F2).
+   */
+  paperIdentification?: PayerIdentificationStatus | null;
 }) {
   const [language, setLanguage] = useState<string | null>(null);
   const [busy, setBusy] = useState<"prepare" | "send" | null>(null);
@@ -78,16 +88,16 @@ export function LeadPayerPackagePanel({
   const chosenLanguage = payerPackageLanguageOf(state, language);
   const languageHint = payerPackageLanguageHint(state, chosenLanguage, tx);
   const signer = payerPackageSignerText(state.signer, tx);
-  const identification = payerPackageIdentificationText(state.payer_identification, tx);
+  const identification = payerPackageIdentificationText(state.payer_identification, tx, paperIdentification);
+  const answeredOnPaper = payerAnsweredOnPaper(paperIdentification);
+  const blockedText = payerPackageBlockedText(state, paperIdentification, tx);
   const outdated = pkg?.outdated_reasons ?? [];
   // Why the QES button is off, said beside it (QA 2026-10-25).
   const sendDisabledHint = !state.signature_enabled
     ? payerPackageSignatureDisabledText(tx)
     : pkg && outdated.length > 0
       ? tx("Пакет устарел — пересоздайте документы", "Paket veraltet – Unterlagen neu erstellen")
-      : state.blocked_reason
-        ? payerPackageBlockedReasonText(state.blocked_reason, tx, state.missing)
-        : null;
+      : blockedText;
   const locked = disabled || busy !== null;
   const firstDocument = rows[0]?.document ?? null;
   const message = (cause: unknown) => payerPackageErrorText(cause, tx) ?? errorText(cause);
@@ -174,7 +184,7 @@ export function LeadPayerPackagePanel({
                     {label}
                   </button>
                 ) : (
-                  <span className={cn("break-words text-sm", document ? "font-medium text-foreground" : "text-muted-foreground")}>{label}</span>
+                  <span className={cn("break-words text-sm", document || (slot === "self_disclosure" && answeredOnPaper) ? "font-medium text-foreground" : "text-muted-foreground")}>{label}</span>
                 )}
                 <p className="break-words text-xs leading-5 text-muted-foreground" data-testid={`lead-payer-package-purpose-${slot}`}>
                   {payerPackageSlotPurpose(slot, tx)}
@@ -192,6 +202,11 @@ export function LeadPayerPackagePanel({
                         </span>
                       ) : null}
                     </>
+                  ) : slot === "self_disclosure" && answeredOnPaper ? (
+                    <span className="inline-flex items-center gap-1 text-emerald-700" data-testid="lead-payer-package-paper-self_disclosure">
+                      <Check aria-hidden="true" className="size-3.5" />
+                      {payerPaperSelfDisclosureText(tx)}
+                    </span>
                   ) : (
                     <span>{tx("ещё не создан", "noch nicht erstellt")}</span>
                   )}
@@ -212,9 +227,13 @@ export function LeadPayerPackagePanel({
       {status ? (
         <p className="break-words text-xs leading-5 text-muted-foreground" data-testid="lead-payer-package-status">{status.text}</p>
       ) : null}
-      {state.blocked_reason ? (
-        <p className="text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-payer-package-blocked" data-reason={state.blocked_reason}>
-          {payerPackageBlockedReasonText(state.blocked_reason, tx, state.missing)}
+      {blockedText ? (
+        <p
+          className={cn("text-xs leading-5", answeredOnPaper && state.blocked_reason === "payer_not_submitted" ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300")}
+          data-testid="lead-payer-package-blocked"
+          data-reason={state.blocked_reason ?? undefined}
+        >
+          {blockedText}
         </p>
       ) : null}
       {pkg && outdated.length > 0 ? (

@@ -513,6 +513,12 @@ export function LeadPayerDeclarationSection({
   const ownFundsAuthor = form.selfFundsTouched ? "staff" : storedOwnFunds?.entered_by ?? data?.declaration?.self_funds_entered_by ?? null;
   const payerFunds = !ownFunds && data?.declaration?.payer_kind === form.kind ? data?.funds?.payer ?? null : null;
   const payerAnswered = payerFunds?.entered_by === "payer";
+  // The payer answered outside the link's form (the paper Selbstauskunft, or a
+  // statement adopted without funds data): staff transcribe it, the field no
+  // longer waits for the payer (QA 2026-10-25, F-F4).
+  const payerIdentification = data?.status.identification ?? null;
+  const payerStatementOnFile = Boolean(payerIdentification
+    && (payerIdentification.identified || payerIdentification.statement_sent || payerIdentification.self_disclosure_signed));
   const patientAboutPayer = form.kind === "third_party" ? data?.funds?.payer_stated_by_patient ?? null : null;
   // Asked only by a trigger of the enhanced check (2026-10-19); an older server requires it.
   const sourceRequired = data?.status.source_of_funds_required !== false && !payerAnswered;
@@ -712,9 +718,11 @@ export function LeadPayerDeclarationSection({
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             <PayerField
-              label={form.kind === "representative" || payingParent
-                ? tx("Источник средств родителя / представителя (пока плательщик не ответил)", "Herkunft der Mittel des zahlenden Elternteils / Vertreters (bis zur eigenen Angabe)")
-                : tx("Источник средств плательщика (пока плательщик не ответил)", "Herkunft der Mittel des Kostenübernehmers (bis zur eigenen Angabe)")}
+              label={`${form.kind === "representative" || payingParent
+                ? tx("Источник средств родителя / представителя", "Herkunft der Mittel des zahlenden Elternteils / Vertreters")
+                : tx("Источник средств плательщика", "Herkunft der Mittel des Kostenübernehmers")}${payerStatementOnFile
+                ? ""
+                : tx(" (пока плательщик не ответил)", " (bis zur eigenen Angabe)")}`}
               required={sourceRequired}
             >
               <NativeComboboxSelect
@@ -1537,6 +1545,7 @@ export function LeadPayerSignatureFlow({
           errorText={errorText}
           onOpenDocument={payerPackage?.onOpenDocument}
           fallbackDocuments={{ cost_coverage: standaloneCostCoverageDocument(status, documents) }}
+          paperIdentification={status?.identification ?? null}
           renderDetails={(documentId, title) => (
             <DocumentSignatureAction
               documentId={documentId}
