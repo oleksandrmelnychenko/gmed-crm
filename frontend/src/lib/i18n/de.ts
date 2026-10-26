@@ -750,6 +750,7 @@ export const de = {
   settings_refresh_token_days: "Refresh-Token Lebensdauer (Tage)",
   settings_max_sessions: "Max. Sitzungen pro Benutzer",
   settings_idle_days: "Sitzung widerrufen nach Tagen Inaktivität",
+  settings_idle_logout_minutes: "Automatische Abmeldung bei Inaktivität (Minuten, 15–720, 0 = aus)",
   settings_password_expire_days: "Passwortablauf in Tagen (0 = deaktiviert)",
   settings_agency_profile: "Agenturprofil für Dokumente",
   settings_agency_name: "Agenturname",

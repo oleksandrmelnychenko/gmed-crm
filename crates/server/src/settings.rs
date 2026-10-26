@@ -13,6 +13,9 @@ pub struct TokenSettings {
     pub max_sessions_per_user: i64,
     pub session_idle_days: i64,
     pub password_expire_days: i64,
+    /// The browser signs out after this many minutes without input (0 = off).
+    /// Sent to every signed-in client in `GET /me`.
+    pub idle_logout_minutes: i64,
 }
 
 impl Default for TokenSettings {
@@ -23,6 +26,7 @@ impl Default for TokenSettings {
             max_sessions_per_user: 10,
             session_idle_days: 7,
             password_expire_days: 90,
+            idle_logout_minutes: DEFAULT_IDLE_LOGOUT_MINUTES,
         }
     }
 }
@@ -77,7 +81,31 @@ pub async fn load_from_db(pool: &PgPool) -> Result<TokenSettings, sqlx::Error> {
         max_sessions_per_user: get_i64(pool, "max_sessions_per_user", 10).await,
         session_idle_days: get_i64(pool, "session_idle_days", 7).await,
         password_expire_days: get_i64(pool, "password_expire_days", 90).await,
+        idle_logout_minutes: idle_logout_minutes_or_default(
+            get_i64(
+                pool,
+                IDLE_LOGOUT_MINUTES_SETTING,
+                DEFAULT_IDLE_LOGOUT_MINUTES,
+            )
+            .await,
+        ),
     })
+}
+
+/// Minutes without input before the browser signs out (owner 2026-10-26:
+/// default 120, 15–720, 0 = off). A business decision: changed by the CEO.
+pub const IDLE_LOGOUT_MINUTES_SETTING: &str = "idle_logout_minutes";
+pub const DEFAULT_IDLE_LOGOUT_MINUTES: i64 = 120;
+pub const IDLE_LOGOUT_MINUTES_RANGE: std::ops::RangeInclusive<i64> = 15..=720;
+
+/// A stored value outside the allowed values (edited in the database) falls
+/// back to the default instead of reaching the browser.
+fn idle_logout_minutes_or_default(value: i64) -> i64 {
+    if value == 0 || IDLE_LOGOUT_MINUTES_RANGE.contains(&value) {
+        value
+    } else {
+        DEFAULT_IDLE_LOGOUT_MINUTES
+    }
 }
 
 /// Settings owned by the personnel file module.
@@ -427,6 +455,15 @@ fn validate_positive_integer_setting(key: &str, value: &str) -> Result<Value, Up
     if key == "password_expire_days" && parsed == 0 {
         return Ok(Value::from(0));
     }
+    if key == IDLE_LOGOUT_MINUTES_SETTING {
+        if parsed != 0 && !IDLE_LOGOUT_MINUTES_RANGE.contains(&parsed) {
+            return Err(UpdateError::InvalidValue(
+                "The idle sign-out must be between 15 and 720 minutes, or 0 to switch it off"
+                    .into(),
+            ));
+        }
+        return Ok(Value::from(parsed));
+    }
     // 0 sends the first automatic reminder the day after the due date.
     if key == "auto_dunning_grace_days" {
         if !(0..=90).contains(&parsed) {
@@ -707,9 +744,9 @@ fn validate_required_patient_documents_setting(value: &str) -> Result<Value, Upd
 #[cfg(test)]
 mod tests {
     use super::{
-        UpdateError, is_technical_setting, normalize_bic, normalize_iban,
-        validate_optional_website_setting, validate_positive_integer_setting,
-        validate_required_patient_documents_setting,
+        DEFAULT_IDLE_LOGOUT_MINUTES, UpdateError, idle_logout_minutes_or_default,
+        is_technical_setting, normalize_bic, normalize_iban, validate_optional_website_setting,
+        validate_positive_integer_setting, validate_required_patient_documents_setting,
     };
     use serde_json::{Value, json};
 
@@ -818,6 +855,7 @@ mod tests {
             "auto_dunning_grace_days",
             "signature_provider_deletion_days",
             "cleanup_audit_log_days",
+            "idle_logout_minutes",
             "some_future_setting",
         ] {
             assert!(!is_technical_setting(key), "{key}");
@@ -900,6 +938,35 @@ mod tests {
                 validate_positive_integer_setting("auto_dunning_grace_days", invalid),
                 Err(UpdateError::InvalidValue(_))
             ));
+        }
+    }
+
+    /// Owner 2026-10-26: 15 to 720 minutes, 0 switches the idle sign-out off.
+    #[test]
+    fn idle_logout_minutes_allow_zero_or_fifteen_to_seven_hundred_twenty() {
+        for (raw, value) in [("0", 0), ("15", 15), ("120", 120), ("720", 720)] {
+            assert_eq!(
+                validate_positive_integer_setting("idle_logout_minutes", raw).unwrap(),
+                Value::from(value)
+            );
+        }
+        for invalid in ["-1", "1", "14", "721", "two hours"] {
+            assert!(matches!(
+                validate_positive_integer_setting("idle_logout_minutes", invalid),
+                Err(UpdateError::InvalidValue(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn an_idle_logout_value_edited_out_of_range_falls_back_to_the_default() {
+        assert_eq!(idle_logout_minutes_or_default(0), 0);
+        assert_eq!(idle_logout_minutes_or_default(45), 45);
+        for stored in [-5, 3, 721] {
+            assert_eq!(
+                idle_logout_minutes_or_default(stored),
+                DEFAULT_IDLE_LOGOUT_MINUTES
+            );
         }
     }
 }
