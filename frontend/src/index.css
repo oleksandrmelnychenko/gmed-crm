@@ -293,9 +293,18 @@
   cursor: not-allowed;
 }
 
-/* The cabinet ends at its footer without extra scroll space below it. */
+/* Fill the actual workspace height so short steps end at the same bottom edge
+   as long steps, without a viewport estimate or extra space after the footer. */
 #main-content:has(.patient-request-wizard) {
+  display: flex;
+  flex-direction: column;
   padding-bottom: 0;
+}
+
+#main-content [data-testid="lead-cabinet"]:has(.patient-request-wizard) {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
 }
 
 /* Sent forms stay read-only, but their values must remain readable. */

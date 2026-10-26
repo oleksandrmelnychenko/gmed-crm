@@ -607,7 +607,7 @@ function LeadRequestView({
     <ServerConflictContext.Provider value={conflictRegistry}>
     <RequestPatchContext.Provider value={patchRequest}>
       {/* `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer. */}
-      <article ref={topRef} className="patient-request-wizard flex min-h-[calc(100dvh-9rem)] min-w-0 flex-col overflow-clip rounded-xl border border-border/60 bg-card" data-testid="lead-request">
+      <article ref={topRef} className="patient-request-wizard flex min-w-0 flex-[1_0_auto] flex-col overflow-clip rounded-xl border border-border/60 bg-card" data-testid="lead-request">
         {/* The title and the deadline share one line (wrapping on a phone). */}
         <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 px-4 py-3 sm:px-5">
           <h1 className="flex items-center gap-2.5 text-base font-semibold leading-tight">
