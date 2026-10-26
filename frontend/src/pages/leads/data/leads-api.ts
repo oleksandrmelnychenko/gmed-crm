@@ -75,6 +75,26 @@ export type LeadGuardianCandidate = {
    * the name and patient number come, the contact data stays hidden.
    */
   contact_hidden?: boolean;
+  /**
+   * The person-level data the system holds (DEV 2026-10-26: picking a known
+   * father left the GwG block empty): address parts, citizenships and birth
+   * data; for a patient also the card's identity document. Countries are ISO
+   * 3166-1 alpha-2 codes; null / empty when unknown or hidden. Absent on an
+   * older server.
+   */
+  street?: string | null;
+  zip?: string | null;
+  city?: string | null;
+  country?: string | null;
+  citizenships?: string[];
+  birth_place?: string | null;
+  birth_country?: string | null;
+  id_document_type?: string | null;
+  id_document_number?: string | null;
+  id_issuing_authority?: string | null;
+  id_issuing_country?: string | null;
+  id_issued_on?: string | null;
+  id_valid_until?: string | null;
 };
 
 export function fetchLeadGuardianCandidates(search = "", excludeLeadId?: string | null) {

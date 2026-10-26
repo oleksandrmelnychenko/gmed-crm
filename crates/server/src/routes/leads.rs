@@ -1267,7 +1267,14 @@ async fn list_guardian_candidates(
     Query(query): Query<GuardianCandidatesQuery>,
 ) -> Result<Json<Value>, axum::response::Response> {
     auth.require_capability(Capability::LeadsEdit)?;
-    let rows = sqlx::query(
+    // The person-level data of the (at most 50) picked rows: a patient's
+    // address, citizenships, birth data and identity document exactly as a
+    // linked parent's identity reads them (`lead_guardian_identity`), so the
+    // dialog shows what the saved parent will have (DEV 2026-10-26: the GwG
+    // block stayed empty for a father picked from the patients). A lead has
+    // no link that carries a document: its address, citizenships and birth
+    // data only.
+    let sql = format!(
         r#"WITH candidates AS (
             SELECT id, 'patient'::text AS source, id AS patient_record_id,
                    patient_id AS display_id, first_name, last_name, birth_date, email,
@@ -1283,21 +1290,40 @@ async fn list_guardian_candidates(
             WHERE converted_patient_id IS NULL
               AND qualification_status NOT IN ('converted', 'archived', 'deleted')
               AND ($3::uuid IS NULL OR id <> $3)
+        ), picked AS (
+            SELECT * FROM candidates
+            WHERE (birth_date IS NULL OR birth_date <= ($2::date - INTERVAL '18 years')::date)
+              AND ($1::text = '%%' OR de_normalize(concat_ws(' ', display_id, first_name, last_name, email, phone)) LIKE de_normalize($1))
+            ORDER BY lower(last_name), lower(first_name), source, id LIMIT 50
         )
-        SELECT * FROM candidates
-        WHERE (birth_date IS NULL OR birth_date <= ($2::date - INTERVAL '18 years')::date)
-          AND ($1::text = '%%' OR de_normalize(concat_ws(' ', display_id, first_name, last_name, email, phone)) LIKE de_normalize($1))
-        ORDER BY lower(last_name), lower(first_name), source, id LIMIT 50"#,
-    )
-    .bind(format!("%{}%", query.search.unwrap_or_default().trim()))
-    .bind(crate::app_time::today())
-    .bind(query.exclude_lead_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|error| {
-        tracing::error!(%error, "list guardian candidates");
-        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load guardian candidates")
-    })?;
+        SELECT c.*, CASE WHEN c.source = 'patient' THEN (
+                SELECT {identity} FROM patients p {gwg} WHERE p.id = c.id
+            ) ELSE (
+                SELECT jsonb_build_object(
+                    'street', l.street_address, 'zip', l.zip_code, 'city', l.city,
+                    'country', l.country, 'citizenships', to_jsonb(l.citizenships),
+                    'birth_place', g.birth_place, 'birth_country', g.birth_country)
+                FROM leads l LEFT JOIN lead_gwg_declarations g ON g.lead_id = l.id
+                WHERE l.id = c.id
+            ) END AS details
+        FROM picked c
+        ORDER BY lower(c.last_name), lower(c.first_name), c.source, c.id"#,
+        identity = crate::services::lead_guardian_identity::PATIENT_IDENTITY_JSON,
+        gwg = crate::services::lead_guardian_identity::PATIENT_GWG_JOIN,
+    );
+    let rows = sqlx::query(&sql)
+        .bind(format!("%{}%", query.search.unwrap_or_default().trim()))
+        .bind(crate::app_time::today())
+        .bind(query.exclude_lead_id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "list guardian candidates");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load guardian candidates",
+            )
+        })?;
     let full_patient_contact = auth.can(Capability::PatientsView);
     Ok(Json(Value::Array(
         rows.into_iter()
@@ -1314,6 +1340,9 @@ async fn list_guardian_candidates(
                         email: row.get("email"),
                         phone: row.get("phone"),
                         address: row.get("address"),
+                        details: row
+                            .get::<Option<Value>, _>("details")
+                            .unwrap_or(Value::Null),
                     },
                     full_patient_contact,
                 )
@@ -1333,14 +1362,25 @@ struct GuardianCandidate {
     email: Option<String>,
     phone: Option<String>,
     address: String,
+    /// Raw person-level data (address parts, citizenships, birth data and,
+    /// for a patient, the identity document), normalised on the way out.
+    details: Value,
 }
 
 /// Owner 2026-10-23: a role without `patients.view` (Sales) sees only a
 /// patient's name and number in the lead pickers, never the patient's birth
-/// date or contact data. Lead rows stay complete: those roles see leads anyway.
+/// date, contact data, address, citizenships or document. Lead rows stay
+/// complete: those roles see leads anyway.
+///
+/// The person-level keys ([`lead_guardian_identity::PERSON_DETAIL_KEYS`])
+/// are always present: ISO country codes, `null` for what is not known.
+///
+/// [`lead_guardian_identity::PERSON_DETAIL_KEYS`]: crate::services::lead_guardian_identity::PERSON_DETAIL_KEYS
 fn guardian_candidate_value(candidate: GuardianCandidate, full_patient_contact: bool) -> Value {
+    use crate::services::lead_guardian_identity::{empty_person_details, person_details};
     if candidate.source == "patient" && !full_patient_contact {
-        return json!({
+        let mut value = empty_person_details();
+        let base = json!({
             "id": candidate.id,
             "source": candidate.source,
             "patient_record_id": candidate.patient_record_id,
@@ -1353,8 +1393,11 @@ fn guardian_candidate_value(candidate: GuardianCandidate, full_patient_contact: 
             "address": Value::Null,
             "contact_hidden": true,
         });
+        merge_object(&mut value, base);
+        return value;
     }
-    json!({
+    let mut value = person_details(&candidate.details);
+    let base = json!({
         "id": candidate.id,
         "source": candidate.source,
         "patient_record_id": candidate.patient_record_id,
@@ -1366,7 +1409,16 @@ fn guardian_candidate_value(candidate: GuardianCandidate, full_patient_contact: 
         "phone": candidate.phone,
         "address": candidate.address,
         "contact_hidden": false,
-    })
+    });
+    merge_object(&mut value, base);
+    value
+}
+
+/// Copies the keys of `from` (an object) into `into` (an object).
+fn merge_object(into: &mut Value, from: Value) {
+    if let (Some(into), Value::Object(from)) = (into.as_object_mut(), from) {
+        into.extend(from);
+    }
 }
 
 struct ReferrerPatient {
@@ -1420,6 +1472,21 @@ mod lead_picker_contact_tests {
             email: Some("anna@example.test".into()),
             phone: Some("+49 170 1234567".into()),
             address: "Hauptstr. 1, 10115, Berlin, DE".into(),
+            details: json!({
+                "street": "Hauptstr. 1",
+                "zip": "10115",
+                "city": "Berlin",
+                "country": "Ukraine",
+                "citizenships": ["UA", "de"],
+                "birth_place": "Kyiv",
+                "birth_country": "UA",
+                "id_document_type": "passport",
+                "id_document_number": "FA1234567",
+                "id_issuing_authority": "Passamt 8031",
+                "id_issuing_country": "UA",
+                "id_issued_on": "2020-01-02",
+                "id_valid_until": "2030-01-01",
+            }),
         }
     }
 
@@ -1449,6 +1516,14 @@ mod lead_picker_contact_tests {
         for key in ["birth_date", "email", "phone", "address"] {
             assert!(value[key].is_null(), "{key} must be hidden");
         }
+        // Nor the address parts, birth data or the document (DEV 2026-10-26).
+        for key in crate::services::lead_guardian_identity::PERSON_DETAIL_KEYS {
+            if key == "citizenships" {
+                assert_eq!(value[key], json!([]), "{key} must be hidden");
+            } else {
+                assert!(value[key].is_null(), "{key} must be hidden");
+            }
+        }
         assert_eq!(value["contact_hidden"], true);
 
         let value = referrer_patient_value(referrer(), false);
@@ -1466,6 +1541,13 @@ mod lead_picker_contact_tests {
         assert_eq!(value["email"], "anna@example.test");
         assert_eq!(value["birth_date"], "1980-01-02");
         assert_eq!(value["contact_hidden"], false);
+        // The GwG block's data come along, countries as ISO codes.
+        assert_eq!(value["street"], "Hauptstr. 1");
+        assert_eq!(value["country"], "UA");
+        assert_eq!(value["citizenships"], json!(["UA", "DE"]));
+        assert_eq!(value["birth_place"], "Kyiv");
+        assert_eq!(value["id_document_number"], "FA1234567");
+        assert_eq!(value["id_valid_until"], "2030-01-01");
         let value = referrer_patient_value(referrer(), true);
         assert_eq!(value["phone"], "+49 170 1234567");
         assert_eq!(value["birth_date"], "1980-01-02");

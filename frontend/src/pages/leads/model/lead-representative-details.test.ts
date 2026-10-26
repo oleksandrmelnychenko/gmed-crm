@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   EMPTY_REPRESENTATIVE_DETAILS,
+  fillEmptyRepresentativeDetails,
+  guardianCandidateDetails,
   mergeRepresentativeDetails,
   pendingRepresentativeDetailsReady,
   representativeDetailsChanged,
@@ -94,5 +96,70 @@ describe("a newer server state while staff edit a representative's details", () 
     expect(merged.draft).toEqual({ ...draft, citizenships: ["ua", "DE"] });
     expect(merged.loaded).toEqual({ ...loaded, citizenships: ["ua", "DE"] });
     expect(merged).toMatchObject({ changedMeanwhile: false, conflict: false });
+  });
+});
+
+// DEV 2026-10-26: a father picked from the patients left the GwG block empty.
+describe("a picked guardian candidate", () => {
+  const father = {
+    contact_hidden: false,
+    street: "Testova 13",
+    zip: "29000",
+    city: "Lwiw",
+    country: "UA",
+    citizenships: ["UA"],
+    birth_place: "Lwiw",
+    birth_country: "UA",
+  };
+
+  it("brings its address, birth data and citizenships", () => {
+    expect(guardianCandidateDetails(father)).toEqual({
+      street: "Testova 13",
+      zip: "29000",
+      city: "Lwiw",
+      country: "UA",
+      citizenships: ["UA"],
+      birth_place: "Lwiw",
+      birth_country: "UA",
+    });
+  });
+
+  it("brings nothing when the role may not see the data or none are held", () => {
+    expect(guardianCandidateDetails({ ...father, contact_hidden: true })).toBeNull();
+    expect(guardianCandidateDetails({ contact_hidden: false })).toBeNull();
+    expect(guardianCandidateDetails({ street: null, citizenships: [] })).toBeNull();
+  });
+
+  it("fills only the empty fields and never what staff typed", () => {
+    const typed = { ...EMPTY_REPRESENTATIVE_DETAILS, street: "Typed street 1", citizenships: ["DE"] };
+    const { details, filled } = fillEmptyRepresentativeDetails(typed, guardianCandidateDetails(father)!);
+    expect(details).toEqual({
+      street: "Typed street 1",
+      zip: "29000",
+      city: "Lwiw",
+      country: "UA",
+      citizenships: ["DE"],
+      birth_place: "Lwiw",
+      birth_country: "UA",
+    });
+    expect(filled.sort()).toEqual(["birth_country", "birth_place", "city", "country", "zip"]);
+  });
+
+  it("replaces the previous pick's values but keeps a field staff changed since", () => {
+    const first = guardianCandidateDetails(father)!;
+    const afterFirst = fillEmptyRepresentativeDetails(EMPTY_REPRESENTATIVE_DETAILS, first).details;
+    const edited = { ...afterFirst, city: "Lviv (typed)" };
+    const second = guardianCandidateDetails({ street: "Musterweg 1", zip: "10115", city: "Berlin", country: "DE", citizenships: ["DE"] })!;
+    const { details } = fillEmptyRepresentativeDetails(edited, second, first);
+    expect(details).toEqual({
+      street: "Musterweg 1",
+      zip: "10115",
+      city: "Lviv (typed)",
+      country: "DE",
+      citizenships: ["DE"],
+      // The first pick's birth data leave with it: the second has none.
+      birth_place: "",
+      birth_country: "",
+    });
   });
 });

@@ -11,6 +11,7 @@ import type { RepresentativeDetails } from "../data/lead-representation-api";
 import type { Tx } from "../model/lead-payer";
 import {
   EMPTY_REPRESENTATIVE_DETAILS,
+  fillEmptyRepresentativeDetails,
   mergeRepresentativeDetails,
   representativeDetailsChanged,
   representativeDetailsErrors,
@@ -31,6 +32,7 @@ export function LeadRepresentativeDetailsForm({
   lang,
   disabled,
   onDraftChange,
+  prefill,
 }: {
   person: LeadRepresentative;
   tx: Tx;
@@ -42,6 +44,12 @@ export function LeadRepresentativeDetailsForm({
    * they were dropped silently).
    */
   onDraftChange?: (draft: RepresentativeDetails, loaded: RepresentativeDetails) => void;
+  /**
+   * A person picked from the patients or leads in the dialog: their details
+   * go into the empty fields (DEV 2026-10-26); `key` changes with each pick,
+   * and a field still holding the previous pick's value takes the new one.
+   */
+  prefill?: { key: string; values: RepresentativeDetails } | null;
 }) {
   const stored = representativeDetailsOf(person);
   const storedKey = JSON.stringify(stored);
@@ -68,6 +76,21 @@ export function LeadRepresentativeDetailsForm({
       setMeanwhile((current) => (merged.conflict || current === "conflict" ? "conflict" : "updated"));
     }
   }, [storedKey]);
+
+  // A pick fills the empty fields once; the save writes them like typed ones.
+  const prefillRef = useRef(prefill);
+  useEffect(() => {
+    prefillRef.current = prefill;
+  }, [prefill]);
+  const previousPrefillRef = useRef<RepresentativeDetails | null>(null);
+  const prefillKey = prefill?.key ?? "";
+  useEffect(() => {
+    const current = prefillRef.current;
+    if (!current) return;
+    const { details } = fillEmptyRepresentativeDetails(draftRef.current, current.values, previousPrefillRef.current);
+    previousPrefillRef.current = current.values;
+    setDraft(details);
+  }, [prefillKey]);
 
   const onDraftChangeRef = useRef(onDraftChange);
   useEffect(() => {

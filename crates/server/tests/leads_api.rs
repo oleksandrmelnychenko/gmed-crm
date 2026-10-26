@@ -9620,6 +9620,114 @@ async fn guardian_candidates_include_adult_leads_without_creating_patients_or_ac
     assert_eq!(links, 0, "Looking up a parent must never grant access");
 }
 
+/// DEV 2026-10-26 (father P-20261025-0019 picked for a new child's lead):
+/// the dialog filled the name and contacts, but the GwG block stayed empty.
+/// A candidate carries the person-level data the system holds — address
+/// parts with an ISO country, citizenships, birth data from the patient's
+/// own lead declaration and the card's identity document — and a role
+/// without `patients.view` gets none of it.
+#[tokio::test]
+async fn guardian_candidates_carry_the_gwg_details_of_a_patient_and_a_lead() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    // The father's own lead, converted: its GwG statements hold the birth data.
+    let source: Uuid = sqlx::query_scalar("INSERT INTO leads(first_name,last_name,email,date_of_birth,qualification_status,created_by) VALUES('Adolf',$1,$2,'1980-01-01','new',$3) RETURNING id")
+        .bind(&tag).bind(format!("adolf-{tag}@example.test")).bind(app.patient_manager_id)
+        .fetch_one(pool).await.unwrap();
+    sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,birth_place,birth_country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_issued_on,id_valid_until) VALUES($1,'Lwiw','UA','passport','FA1234567','Passamt 4610','UA','2020-02-03','2030-02-02')")
+        .bind(source).execute(pool).await.unwrap();
+    let patient: Uuid = sqlx::query_scalar(
+        "INSERT INTO patients(patient_id,first_name,last_name,birth_date,gender,email,address_street,address_zip,address_city,address_country,citizenships,passport_number,passport_expiry,id_document_type,id_issuing_authority,id_issuing_country,id_issued_on,source_lead_id,created_by)
+         VALUES($1,'Adolf',$2,'1980-01-01','male',$3,'Testova 13','29000','Lwiw','Ukraine','{UA}','FA1234567','2030-02-02','passport','Passamt 4610','UA','2020-02-03',$4,$5) RETURNING id",
+    )
+    .bind(format!("P-{tag}")).bind(&tag).bind(format!("adolf-{tag}@example.test"))
+    .bind(source).bind(app.patient_manager_id).fetch_one(pool).await.unwrap();
+    sqlx::query(
+        "UPDATE leads SET converted_patient_id=$1, qualification_status='converted' WHERE id=$2",
+    )
+    .bind(patient)
+    .bind(source)
+    .execute(pool)
+    .await
+    .unwrap();
+    // An adult who is still a lead, with her own statements.
+    let mother: Uuid = sqlx::query_scalar("INSERT INTO leads(first_name,last_name,email,date_of_birth,qualification_status,street_address,zip_code,city,country,citizenships,created_by) VALUES('Olena',$1,$2,'1985-05-01','new','Testweg 1','10115','Berlin','DE','{UA,DE}',$3) RETURNING id")
+        .bind(&tag).bind(format!("olena-{tag}@example.test")).bind(app.patient_manager_id)
+        .fetch_one(pool).await.unwrap();
+    sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,birth_place,birth_country,id_document_type,id_document_number) VALUES($1,'Kyiv','UA','passport','EA7654321')")
+        .bind(mother).execute(pool).await.unwrap();
+
+    let path = format!("/api/v1/leads/guardian-candidates?search={tag}");
+    let (status, found) = json_request(
+        &app,
+        "GET",
+        &path,
+        &app.auth_header("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    let items = found.as_array().unwrap();
+    let father = items
+        .iter()
+        .find(|row| row["patient_record_id"] == json!(patient))
+        .unwrap();
+    assert_eq!(father["contact_hidden"], false);
+    assert_eq!(father["street"], "Testova 13");
+    assert_eq!(father["zip"], "29000");
+    assert_eq!(father["city"], "Lwiw");
+    // The card's free-text "Ukraine" becomes the code the country select takes.
+    assert_eq!(father["country"], "UA");
+    assert_eq!(father["citizenships"], json!(["UA"]));
+    assert_eq!(father["birth_place"], "Lwiw");
+    assert_eq!(father["birth_country"], "UA");
+    assert_eq!(father["id_document_type"], "passport");
+    assert_eq!(father["id_document_number"], "FA1234567");
+    assert_eq!(father["id_issuing_authority"], "Passamt 4610");
+    assert_eq!(father["id_issuing_country"], "UA");
+    assert_eq!(father["id_issued_on"], "2020-02-03");
+    assert_eq!(father["id_valid_until"], "2030-02-02");
+
+    let lead = items.iter().find(|row| row["id"] == json!(mother)).unwrap();
+    assert_eq!(lead["source"], "lead");
+    assert_eq!(lead["street"], "Testweg 1");
+    assert_eq!(lead["country"], "DE");
+    assert_eq!(lead["citizenships"], json!(["UA", "DE"]));
+    assert_eq!(lead["birth_place"], "Kyiv");
+    assert_eq!(lead["birth_country"], "UA");
+    // No link carries a lead's document to the child's request.
+    assert!(lead["id_document_number"].is_null(), "{lead}");
+
+    // Sales: the patient's name and number only.
+    let (status, masked) = json_request(&app, "GET", &path, &app.auth_header("sales"), None).await;
+    assert_eq!(status, StatusCode::OK, "{masked}");
+    let father = masked
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["patient_record_id"] == json!(patient))
+        .unwrap();
+    assert_eq!(father["contact_hidden"], true);
+    for key in [
+        "street",
+        "zip",
+        "city",
+        "country",
+        "birth_place",
+        "birth_country",
+        "id_document_type",
+        "id_document_number",
+        "id_issuing_authority",
+        "id_issuing_country",
+        "id_issued_on",
+        "id_valid_until",
+    ] {
+        assert!(father[key].is_null(), "{key} must be hidden: {father}");
+    }
+    assert_eq!(father["citizenships"], json!([]));
+}
+
 /// Owner decision 2026-10-19: minors converted before the conversion stored
 /// the contracting party get it from the backfill — custody and rep1/rep2
 /// relations from the converted lead, audited; a second run changes nothing

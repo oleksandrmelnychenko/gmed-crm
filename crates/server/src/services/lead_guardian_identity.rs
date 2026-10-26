@@ -268,6 +268,103 @@ fn identity(
     }
 }
 
+/// The GwG statements of a patient's own request: the newest declaration of
+/// the lead the patient came from or of a lead converted into this patient.
+/// Joined as `g` next to `patients p`; at most one row per patient.
+pub(crate) const PATIENT_GWG_JOIN: &str = r#"LEFT JOIN LATERAL (
+        SELECT d.* FROM lead_gwg_declarations d JOIN leads l ON l.id = d.lead_id
+        WHERE l.id = p.source_lead_id OR l.converted_patient_id = p.id
+        ORDER BY d.updated_at DESC, d.lead_id LIMIT 1
+    ) g ON true"#;
+
+/// The basic identity of a patient (`p`) with their own GwG statements (`g`,
+/// [`PATIENT_GWG_JOIN`]) as one JSON object: what a linked parent's identity
+/// fills in ([`load`]) and what the guardian picker offers
+/// ([`person_details`]), so the dialog shows what the saved parent will have.
+/// Only identity columns: no legal status, medical data, consents or files.
+/// The card's document (`passport_number` with the type, authority, country
+/// and issue date added 2026-10-25) wins; the declaration's document data
+/// fill in only when they describe the same document.
+pub(crate) const PATIENT_IDENTITY_JSON: &str = r#"jsonb_build_object(
+     'first_name', p.first_name, 'last_name', p.last_name,
+     'birth_date', p.birth_date, 'email', p.email, 'phone', p.phone_primary,
+     'citizenships', CASE WHEN cardinality(p.citizenships) > 0
+         THEN to_jsonb(p.citizenships) ELSE to_jsonb(p.nationality) END,
+     'street', p.address_street, 'zip', p.address_zip, 'city', p.address_city,
+     'country', COALESCE(NULLIF(btrim(p.address_country), ''), NULLIF(btrim(p.residence_country), '')),
+     'residence_country', p.residence_country,
+     'birth_place', g.birth_place, 'birth_country', g.birth_country,
+     'id_document_type', CASE WHEN NULLIF(btrim(p.passport_number), '') IS NOT NULL
+         THEN COALESCE(NULLIF(btrim(p.id_document_type), ''), 'passport') ELSE g.id_document_type END,
+     'id_document_number', COALESCE(NULLIF(btrim(p.passport_number), ''), g.id_document_number),
+     'id_issuing_authority', COALESCE(
+         CASE WHEN NULLIF(btrim(p.passport_number), '') IS NOT NULL THEN NULLIF(btrim(p.id_issuing_authority), '') END,
+         CASE WHEN NULLIF(btrim(p.passport_number), '') IS NULL
+             OR btrim(p.passport_number) = btrim(g.id_document_number) THEN g.id_issuing_authority END),
+     'id_issuing_country', COALESCE(
+         CASE WHEN NULLIF(btrim(p.passport_number), '') IS NOT NULL THEN NULLIF(btrim(p.id_issuing_country), '') END,
+         CASE WHEN NULLIF(btrim(p.passport_number), '') IS NULL
+             OR btrim(p.passport_number) = btrim(g.id_document_number) THEN g.id_issuing_country END),
+     'id_issued_on', COALESCE(
+         CASE WHEN NULLIF(btrim(p.passport_number), '') IS NOT NULL THEN p.id_issued_on END,
+         CASE WHEN NULLIF(btrim(p.passport_number), '') IS NULL
+             OR btrim(p.passport_number) = btrim(g.id_document_number) THEN g.id_issued_on END),
+     'id_valid_until', COALESCE(p.passport_expiry, CASE
+         WHEN NULLIF(btrim(p.passport_number), '') IS NULL
+         OR btrim(p.passport_number) = btrim(g.id_document_number) THEN g.id_valid_until END))"#;
+
+/// The person-level keys the guardian picker offers with a candidate.
+pub(crate) const PERSON_DETAIL_KEYS: [&str; 13] = [
+    "street",
+    "zip",
+    "city",
+    "country",
+    "citizenships",
+    "birth_place",
+    "birth_country",
+    "id_document_type",
+    "id_document_number",
+    "id_issuing_authority",
+    "id_issuing_country",
+    "id_issued_on",
+    "id_valid_until",
+];
+
+/// A person's address parts, birth data, citizenships and identity document
+/// as the representative form takes them: trimmed texts (`null` when empty),
+/// countries and citizenships as ISO 3166-1 alpha-2 codes (a patient card's
+/// free-text "Ukraine" becomes "UA"; a value naming no known country is left
+/// out), the same normalisation as a linked parent's identity.
+pub(crate) fn person_details(raw: &Value) -> Value {
+    let mut details = json!({});
+    for key in PERSON_DETAIL_KEYS {
+        if key != "citizenships" {
+            details[key] = json!(text(raw, key));
+        }
+    }
+    normalize_countries(&mut details);
+    details["citizenships"] = json!(
+        codes(raw, "citizenships")
+            .into_iter()
+            .filter(|code| crate::services::citizenships::is_country_code(code))
+            .collect::<Vec<_>>()
+    );
+    details
+}
+
+/// The same keys, all empty: for a role that may not read the person's data.
+pub(crate) fn empty_person_details() -> Value {
+    let mut details = json!({});
+    for key in PERSON_DETAIL_KEYS {
+        details[key] = if key == "citizenships" {
+            json!([])
+        } else {
+            Value::Null
+        };
+    }
+    details
+}
+
 /// Load one lead with the same transaction as its other form data.
 pub async fn load(
     conn: &mut PgConnection,
@@ -409,35 +506,15 @@ async fn load_many_on(
     // Only identity columns are projected from the explicitly linked patient
     // and their own original lead declaration. Whole snapshots, legal status,
     // medical records, consent answers and files never enter the result.
-    let patients: Vec<(Uuid, Value)> = sqlx::query_as(
-        r#"SELECT p.id, jsonb_build_object(
-             'first_name', p.first_name, 'last_name', p.last_name,
-             'birth_date', p.birth_date, 'email', p.email, 'phone', p.phone_primary,
-             'citizenships', CASE WHEN cardinality(p.citizenships) > 0
-                 THEN to_jsonb(p.citizenships) ELSE to_jsonb(p.nationality) END,
-             'street', p.address_street, 'zip', p.address_zip, 'city', p.address_city,
-             'country', COALESCE(NULLIF(btrim(p.address_country), ''), NULLIF(btrim(p.residence_country), '')),
-             'residence_country', p.residence_country,
-             'birth_place', g.birth_place, 'birth_country', g.birth_country,
-             'id_document_type', CASE WHEN NULLIF(btrim(p.passport_number), '') IS NOT NULL
-                 THEN 'passport' ELSE g.id_document_type END,
-             'id_document_number', COALESCE(NULLIF(btrim(p.passport_number), ''), g.id_document_number),
-             'id_issuing_authority', CASE WHEN NULLIF(btrim(p.passport_number), '') IS NULL
-                 OR btrim(p.passport_number) = btrim(g.id_document_number) THEN g.id_issuing_authority END,
-             'id_issuing_country', CASE WHEN NULLIF(btrim(p.passport_number), '') IS NULL
-                 OR btrim(p.passport_number) = btrim(g.id_document_number) THEN g.id_issuing_country END,
-             'id_issued_on', CASE WHEN NULLIF(btrim(p.passport_number), '') IS NULL
-                 OR btrim(p.passport_number) = btrim(g.id_document_number) THEN g.id_issued_on END,
-             'id_valid_until', COALESCE(p.passport_expiry, CASE
-                 WHEN NULLIF(btrim(p.passport_number), '') IS NULL
-                 OR btrim(p.passport_number) = btrim(g.id_document_number) THEN g.id_valid_until END))
-           FROM patients p LEFT JOIN lead_gwg_declarations g ON g.lead_id = p.source_lead_id
-           WHERE p.id = ANY($1) AND p.lifecycle_status <> 'deleted'
-             AND p.legal_status->>'anonymized_at' IS NULL"#,
-    )
-    .bind(patient_ids.into_iter().collect::<Vec<_>>())
-    .fetch_all(&mut *conn)
-    .await?;
+    let sql = format!(
+        "SELECT p.id, {PATIENT_IDENTITY_JSON} FROM patients p {PATIENT_GWG_JOIN}
+         WHERE p.id = ANY($1) AND p.lifecycle_status <> 'deleted'
+           AND p.legal_status->>'anonymized_at' IS NULL"
+    );
+    let patients: Vec<(Uuid, Value)> = sqlx::query_as(&sql)
+        .bind(patient_ids.into_iter().collect::<Vec<_>>())
+        .fetch_all(&mut *conn)
+        .await?;
     let patients: HashMap<Uuid, Value> = patients.into_iter().collect();
     let mut result: HashMap<Uuid, Vec<CanonicalGuardianIdentity>> = HashMap::new();
     for (lead_id, position, contact, row) in eligible {
@@ -481,6 +558,37 @@ mod tests {
         assert_eq!(identity.extras["country"], json!("UA"));
         assert_eq!(identity.extras["birth_country"], Value::Null);
         assert_eq!(identity.residences, vec!["UA".to_string()]);
+    }
+
+    #[test]
+    fn person_details_carry_iso_countries_and_trimmed_texts() {
+        let details = person_details(&json!({
+            "street": " Testova 13 ",
+            "zip": "29000",
+            "city": "Lwiw",
+            "country": "Ukraine",
+            "citizenships": "Ukraine",
+            "birth_place": "",
+            "birth_country": "ua",
+            "id_document_type": "passport",
+            "id_document_number": "FA123456",
+            "id_issuing_country": "Atlantis",
+            "id_issued_on": "2020-01-02",
+            "first_name": "Not a detail",
+        }));
+        assert_eq!(details["street"], "Testova 13");
+        assert_eq!(details["country"], "UA");
+        assert_eq!(details["citizenships"], json!(["UA"]));
+        assert_eq!(details["birth_place"], Value::Null);
+        assert_eq!(details["birth_country"], "UA");
+        assert_eq!(details["id_issuing_country"], Value::Null);
+        assert_eq!(details["id_issued_on"], "2020-01-02");
+        assert!(details.get("first_name").is_none());
+        let empty = empty_person_details();
+        for key in PERSON_DETAIL_KEYS {
+            assert!(empty.get(key).is_some(), "{key} must be present");
+        }
+        assert_eq!(empty["citizenships"], json!([]));
     }
 
     #[test]

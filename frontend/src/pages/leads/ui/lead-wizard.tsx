@@ -139,7 +139,7 @@ import {
   leadSelfDisclosureSourceNote,
   leadSelfDisclosureUnavailableHint,
 } from "../model/lead-self-disclosure";
-import { custodyLabel, representativeName } from "../model/lead-gwg-statements";
+import { custodyLabel, idDocumentTypeLabel, representativeName } from "../model/lead-gwg-statements";
 import {
   TRUSTED_CONTACT_RELATIONS,
   changedRepresentativeDetails,
@@ -164,7 +164,7 @@ import { uploadEach } from "../model/upload-each";
 import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
 import { removeLeadRepresentativeData, removeLeadTrustedContact, updateLeadRepresentativeDetails, type RepresentativeDetails } from "../data/lead-representation-api";
-import { EMPTY_REPRESENTATIVE_DETAILS, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors } from "../model/lead-representative-details";
+import { EMPTY_REPRESENTATIVE_DETAILS, fillEmptyRepresentativeDetails, guardianCandidateDetails, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors } from "../model/lead-representative-details";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import { LeadCustodySelect } from "./lead-custody-select";
 import { LeadGwgSheetActions, gwgSheetBusyKey } from "./lead-gwg-sheet-actions";
@@ -481,6 +481,19 @@ type TrustedContactDraft = {
   address: string;
   /** A representative's citizenships / birth data changed in the dialog, sent with the contact (F-11). */
   representativeDetails?: TrustedContactRepresentativeDetails;
+};
+
+/** What a person picked in the contact dialog brought (see `changeGuardianPatient`). */
+type GuardianCandidatePrefill = {
+  /** `${source}:${id}`: a new pick is a new key. */
+  key: string;
+  /** Empty when the person brought no details: the previous pick's values then leave. */
+  values: RepresentativeDetails;
+  hasDetails: boolean;
+  source: "patient" | "lead";
+  displayId: string | null;
+  /** The patient card's identity document: a linked parent's GwG data take it after the save. */
+  document: { type: string | null; number: string | null; validUntil: string | null } | null;
 };
 
 type AmlRiskTier = "high_risk" | "blacklist";
@@ -3648,6 +3661,10 @@ export function LeadWizard({
   // yet (a new card): kept per contact id and written once the parent is on
   // file (walk-through 2026-10-24, mode «Заполняю сам»).
   const [trustedContactPendingDetails, setTrustedContactPendingDetails] = useState<RepresentativeDetails>(EMPTY_REPRESENTATIVE_DETAILS);
+  // The person picked in the open contact dialog (DEV 2026-10-26): their
+  // address, birth data and citizenships go into the empty fields of the GwG
+  // block, and the dialog says where they come from.
+  const [trustedContactCandidatePrefill, setTrustedContactCandidatePrefill] = useState<GuardianCandidatePrefill | null>(null);
   // The details form of a representative on file in the open contact dialog:
   // its values go with the dialog's own «Сохранить» (F-11).
   const trustedContactDetailsDraftRef = useRef<{ contactId: string; draft: RepresentativeDetails; loaded: RepresentativeDetails } | null>(null);
@@ -6058,6 +6075,7 @@ export function LeadWizard({
     setGuardianSearch("");
     setTrustedContactEditorGuardian(guardian);
     setTrustedContactPendingDetails(EMPTY_REPRESENTATIVE_DETAILS);
+    setTrustedContactCandidatePrefill(null);
     setTrustedContactEditor(emptyTrustedContact());
   };
 
@@ -6070,6 +6088,7 @@ export function LeadWizard({
     setGuardianSearch("");
     setTrustedContactEditorGuardian(guardian);
     setTrustedContactPendingDetails(pendingRepresentativeDetailsRef.current.get(contact.id) ?? EMPTY_REPRESENTATIVE_DETAILS);
+    setTrustedContactCandidatePrefill(null);
     setTrustedContactEditor({ ...contact });
   };
 
@@ -6082,6 +6101,7 @@ export function LeadWizard({
 
   const closeTrustedContactEditor = () => {
     trustedContactDetailsDraftRef.current = null;
+    setTrustedContactCandidatePrefill(null);
     setTrustedContactEditor(null);
     setTrustedContactEditorError("");
     setTrustedContactRelationError("");
@@ -6111,6 +6131,28 @@ export function LeadWizard({
   const changeGuardianPatient = (candidateId: string) => {
     const selected = guardianPatients.find((patient) => `${patient.source}:${patient.id}` === candidateId);
     setSelectedGuardianCandidate(candidateId);
+    // The GwG block takes what the system holds for the person, in its empty
+    // fields only (DEV 2026-10-26: a father picked from the patients left it
+    // empty and staff typed his address again). A field still holding the
+    // previous pick's value follows the new pick.
+    const details = selected ? guardianCandidateDetails(selected) : null;
+    const idDocument = selected?.source === "patient" && !selected.contact_hidden && (selected.id_document_number || selected.id_document_type)
+      ? { type: selected.id_document_type ?? null, number: selected.id_document_number ?? null, validUntil: selected.id_valid_until ?? null }
+      : null;
+    const previous = trustedContactCandidatePrefill?.values ?? null;
+    if (details || previous) {
+      setTrustedContactPendingDetails((current) => (
+        fillEmptyRepresentativeDetails(current, details ?? EMPTY_REPRESENTATIVE_DETAILS, previous).details
+      ));
+    }
+    setTrustedContactCandidatePrefill(selected && (details || idDocument || previous) ? {
+      key: candidateId,
+      values: details ?? EMPTY_REPRESENTATIVE_DETAILS,
+      hasDetails: Boolean(details),
+      source: selected.source,
+      displayId: selected.display_id,
+      document: idDocument,
+    } : null);
     setTrustedContactEditor((current) => current ? {
       ...current,
       relatedPatientId: selected?.patient_record_id ?? "",
@@ -12032,12 +12074,50 @@ ${serviceCommentLines.join("\n")}`
                   const person = leadId && editingTrustedContact
                     ? portalRepresentation?.representatives.find((item) => item.id === trustedContactEditor.id)
                     : undefined;
+                  // Where the filled values come from (DEV 2026-10-26). The patient's
+                  // document is not a field here: the saved parent's GwG data take it
+                  // from the linked card, unless staff stated another document for them.
+                  const prefill = trustedContactCandidatePrefill;
+                  const prefillDocument = prefill?.document
+                    && (!person?.id_document_number || person.id_document_number === prefill.document.number)
+                    ? prefill.document
+                    : null;
+                  const prefillNote = prefill && (prefill.hasDetails || prefillDocument) ? (
+                    <div className="mb-3 space-y-1 text-[11.5px] leading-tight text-muted-foreground" role="status" data-testid="trusted-contact-candidate-prefill">
+                      {prefill.hasDetails ? (
+                        <p>
+                          {prefill.source === "patient"
+                            ? tx(`Данные из карточки пациента ${prefill.displayId ?? ""}`.trim(), `Daten aus der Patientenakte ${prefill.displayId ?? ""}`.trim())
+                            : tx("Данные из лида", "Daten aus dem Lead")}
+                          {tx(" — подставлены в пустые поля.", " – in leere Felder übernommen.")}
+                        </p>
+                      ) : null}
+                      {prefillDocument ? (
+                        <p data-testid="trusted-contact-candidate-document">
+                          {tx("Документ из карточки пациента", "Ausweis aus der Patientenakte")}
+                          {": "}
+                          {[
+                            prefillDocument.type ? idDocumentTypeLabel(prefillDocument.type, tx) : null,
+                            prefillDocument.number ? `№ ${prefillDocument.number}` : null,
+                            prefillDocument.validUntil
+                              ? tx(`действителен до ${formatAppDate(prefillDocument.validUntil)}`, `gültig bis ${formatAppDate(prefillDocument.validUntil)}`)
+                              : null,
+                          ].filter(Boolean).join(" · ")}
+                          {tx(
+                            ". После сохранения он будет в данных документа представителя.",
+                            ". Nach dem Speichern steht er in den Ausweisdaten der Vertretung.",
+                          )}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null;
                   if (!leadId || !person) {
                     // A parent not on file yet (a new card): the same fields, written
                     // once the card is saved and the parent exists on the server.
                     if (!trustedContactEditorGuardian) return null;
                     return (
                       <div className="mt-4 border-t border-border/70 pt-3">
+                        {prefillNote}
                         <PendingRepresentativeDetailsForm
                           value={trustedContactPendingDetails}
                           tx={tx}
@@ -12051,11 +12131,13 @@ ${serviceCommentLines.join("\n")}`
                   return (
                     <>
                     <div className="mt-4 border-t border-border/70 pt-3">
+                      {prefillNote}
                       <LeadRepresentativeDetailsForm
                         person={person}
                         tx={tx}
                         lang={lang}
                         disabled={isBusy}
+                        prefill={prefill}
                         onDraftChange={(details, loaded) => {
                           trustedContactDetailsDraftRef.current = { contactId: person.id, draft: details, loaded };
                         }}

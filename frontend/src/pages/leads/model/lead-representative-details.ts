@@ -3,6 +3,7 @@ import { PERSON_CITY_MAX, oneLine } from "@/lib/person-fields";
 
 import type { LeadRepresentative } from "../data/lead-portal-intake-api";
 import type { RepresentativeDetails } from "../data/lead-representation-api";
+import type { LeadGuardianCandidate } from "../data/leads-api";
 
 /**
  * A representative's birth data, citizenships and address as staff edit them
@@ -73,6 +74,56 @@ export function representativeDetailsErrors(draft: RepresentativeDetails, loaded
   if (oneLine(draft.street) !== oneLine(loaded.street) && oneLine(draft.street).length > 200) errors.street = "too_long";
   if (oneLine(draft.zip) !== oneLine(loaded.zip) && oneLine(draft.zip).length > 20) errors.zip = "too_long";
   return errors;
+}
+
+/**
+ * What a candidate picked in the contact dialog brings for the GwG block
+ * (DEV 2026-10-26: a father picked from the patients left it empty): `null`
+ * for a row whose data the role may not see, or that holds none.
+ */
+export function guardianCandidateDetails(candidate: Pick<LeadGuardianCandidate, "contact_hidden" | "street" | "zip" | "city" | "country" | "citizenships" | "birth_place" | "birth_country">): RepresentativeDetails | null {
+  if (candidate.contact_hidden) return null;
+  const details = representativeDetailsOf({
+    birth_place: candidate.birth_place ?? null,
+    birth_country: candidate.birth_country ?? null,
+    citizenships: candidate.citizenships ?? [],
+    street: candidate.street ?? null,
+    zip: candidate.zip ?? null,
+    city: candidate.city ?? null,
+    country: candidate.country ?? null,
+  });
+  return representativeDetailsChanged(details, EMPTY_REPRESENTATIVE_DETAILS) ? details : null;
+}
+
+/**
+ * The form with a picked candidate's details, only in fields that are empty
+ * — or still hold what an earlier pick (`previous`) put there, so picking
+ * another person replaces that person's values but never what staff typed.
+ * `filled` names the fields that took a value.
+ */
+export function fillEmptyRepresentativeDetails(
+  current: RepresentativeDetails,
+  values: RepresentativeDetails,
+  previous?: RepresentativeDetails | null,
+): { details: RepresentativeDetails; filled: (keyof RepresentativeDetails)[] } {
+  const details = { ...current };
+  const filled: (keyof RepresentativeDetails)[] = [];
+  for (const key of [...TEXT_KEYS, "citizenships"] as const) {
+    const empty = key === "citizenships" ? current.citizenships.length === 0 : oneLine(current[key]) === "";
+    const fromPrevious = Boolean(previous) && !empty && sameDetail(key, current, previous!);
+    if (!empty && !fromPrevious) continue;
+    const hasValue = key === "citizenships" ? values.citizenships.length > 0 : oneLine(values[key]) !== "";
+    if (!hasValue) {
+      // The earlier pick's value goes with that pick.
+      if (fromPrevious) {
+        (details as Record<string, unknown>)[key] = EMPTY_REPRESENTATIVE_DETAILS[key];
+      }
+      continue;
+    }
+    (details as Record<string, unknown>)[key] = key === "citizenships" ? normalizeCitizenships(values.citizenships) : values[key];
+    filled.push(key);
+  }
+  return { details, filled };
 }
 
 /** Nothing entered yet: the form of a parent who is not on file. */

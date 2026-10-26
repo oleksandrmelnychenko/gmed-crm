@@ -222,6 +222,14 @@ type Mock = {
   loginOwners?: Record<string, Json>;
   /** The patient's stored document data (the portal state's identification). */
   patientId?: Json;
+  /** Replaces keys of the mother as the server has her. */
+  annaOverrides?: Json;
+  /**
+   * A parent the wizard save adds is on file afterwards, as the server keeps
+   * it: with no address or birth data of its own (a patient link's values
+   * are the server's merge, not mocked here).
+   */
+  addsNewParents?: boolean;
 };
 
 async function mount(page: Page, mock: Mock) {
@@ -249,9 +257,9 @@ async function mount(page: Page, mock: Mock) {
       custody: "joint",
       custody_stated: false,
       representatives: mock.motherOnly
-        ? [annaPerson]
+        ? [{ ...annaPerson, ...mock.annaOverrides }]
         : [
-            annaPerson,
+            { ...annaPerson, ...mock.annaOverrides },
             mock.benPartialId
               ? {
                   ...benPerson,
@@ -362,6 +370,22 @@ async function mount(page: Page, mock: Mock) {
       const body = request.postDataJSON() as Json;
       calls.updates.push(body);
       if (body.trusted_contacts) state.lead.trusted_contacts = body.trusted_contacts;
+      if (mock.addsNewParents && Array.isArray(body.trusted_contacts)) {
+        const known = new Set(state.representation.representatives.map((person) => person.id));
+        for (const added of body.trusted_contacts as Json[]) {
+          if (known.has(String(added.id)) || !["mother", "father"].includes(String(added.relation))) continue;
+          const [firstName, ...rest] = String(added.name).split(" ");
+          state.representation.representatives.push({
+            id: added.id, slot: "rep2", role: "legal_representative", relation: added.relation,
+            first_name: firstName, last_name: rest.join(" "), date_of_birth: added.birth_date ?? null,
+            birth_place: null, birth_country: null, citizenships: [], street: null, zip: null, city: null, country: null,
+            email: added.email ?? null, phone: added.phone ?? null,
+            id_document_type: null, id_document_number: null, id_issuing_authority: null, id_issuing_country: null,
+            id_issued_on: null, id_valid_until: null, identity_documents: [], authority_documents: [],
+            has_login: false, has_data: false, contact_origin: "staff",
+          });
+        }
+      }
       response = {};
     } else if (contactRemoval && method === "DELETE") {
       calls.removedContacts.push(contactRemoval[1]);
@@ -933,6 +957,8 @@ test("Sales links a patient seen by name and number only and keeps the contact d
   await page.getByRole("option", { name: "Мать (родитель)", exact: true }).click();
   await editor.getByLabel("Выбрать из пациентов или лидов").click();
   await page.getByRole("option", { name: /P-HIDDEN · Hidden Mother/ }).click();
+  // Nothing of the hidden patient's details reaches the dialog.
+  await expect(editor.getByTestId("trusted-contact-candidate-prefill")).toHaveCount(0);
   await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect.poll(() => (calls.updates.at(-1)?.trusted_contacts as Json[] | undefined)?.find((contact) => contact.id === ANNA_ID)?.related_patient_id).toBe(linkedId);
   const written = (calls.updates.at(-1)?.trusted_contacts as Json[]).find((contact) => contact.id === ANNA_ID)!;
@@ -1207,6 +1233,99 @@ test("staff reuse a mother who is still a lead without creating a patient link",
   const written = (calls.updates.at(-1)?.trusted_contacts as Json[]).find(c => c.id === ANNA_ID)!;
   expect(written).toMatchObject({ relation: "mother", email: "existing.leadmother@example.test", birth_date: "1985-05-01" });
   expect(written.related_patient_id ?? null).toBeNull();
+});
+
+// DEV 2026-10-26 (father P-20261025-0019): picking a known patient filled
+// the name and contacts, but the block «Адрес и данные для анкеты GwG» stayed
+// empty and staff typed again what the system holds. Synthetic data.
+const FATHER_ID = "66666666-6666-4666-8666-666666666666";
+const knownFather: Json = {
+  id: FATHER_ID, source: "patient", patient_record_id: FATHER_ID, display_id: "P-20261025-0019",
+  first_name: "Adolf", last_name: "Testov", birth_date: "1980-01-01",
+  email: "adolf.testov@example.test", phone: "+380 32 100001", address: "Testova 13, 29000, Lwiw, Ukraine",
+  contact_hidden: false,
+  street: "Testova 13", zip: "29000", city: "Lwiw", country: "UA", citizenships: ["UA"],
+  birth_place: "Lwiw", birth_country: "UA",
+  id_document_type: "passport", id_document_number: "FA1234567", id_issuing_authority: "Passamt 4610",
+  id_issuing_country: "UA", id_issued_on: "2020-02-03", id_valid_until: "2030-02-02",
+};
+
+test("a father picked from the patients fills the GwG block of a new parent (DEV 2026-10-26)", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", step: "master", motherOnly: true, addsNewParents: true });
+  await page.route("**/api/v1/leads/guardian-candidates**", (route) => route.fulfill({ json: [knownFather] }));
+  const parents = wizard.locator("#lead-wizard-guardian");
+  await wizard.getByRole("button", { name: "Добавить", exact: true }).click();
+  const editor = page.locator("form").filter({ hasText: "Добавить родителя или законного представителя" });
+  const block = editor.getByTestId("lead-representative-details-pending");
+  // What staff typed before picking stays.
+  await block.locator('input[name="city"]').fill("Lviv");
+  await editor.getByLabel("Выбрать из пациентов или лидов").click();
+  await page.getByRole("option", { name: /Adolf Testov/ }).click();
+  await expect(editor.getByLabel("E-Mail", { exact: true })).toHaveValue("adolf.testov@example.test");
+  await expect(block.locator('input[name="street"]')).toHaveValue("Testova 13");
+  await expect(block.locator('input[name="zip"]')).toHaveValue("29000");
+  await expect(block.locator('input[name="city"]')).toHaveValue("Lviv");
+  await expect(block.locator('input[name="birth_place"]')).toHaveValue("Lwiw");
+  await expect(block.getByRole("combobox", { name: "Страна проживания" })).toContainText("Украина");
+  await expect(block.getByRole("combobox", { name: "Страна рождения" })).toContainText("Украина");
+  const note = editor.getByTestId("trusted-contact-candidate-prefill");
+  await expect(note).toContainText("Данные из карточки пациента P-20261025-0019 — подставлены в пустые поля.");
+  await expect(note.getByTestId("trusted-contact-candidate-document")).toContainText("Паспорт · № FA1234567 · действителен до 02.02.2030");
+
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Отец (родитель)", exact: true }).click();
+  await editor.getByRole("button", { name: "Добавить", exact: true }).click();
+  await expect.poll(() => (calls.updates.at(-1)?.trusted_contacts as Json[] | undefined)?.find((contact) => contact.id === FATHER_ID || contact.related_patient_id === FATHER_ID)?.related_patient_id).toBe(FATHER_ID);
+  // Once the father is on file, the block's values are written for him.
+  await expect.poll(() => calls.detailSaves.length).toBe(1);
+  expect(calls.detailSaves[0].body.values).toEqual({
+    street: "Testova 13", zip: "29000", city: "Lviv", country: "UA",
+    birth_place: "Lwiw", birth_country: "UA", citizenships: ["UA"],
+  });
+
+  // Reopened, the dialog shows what the server keeps for him.
+  await parents.getByRole("listitem").filter({ hasText: "Adolf Testov" }).getByRole("button", { name: "Редактировать представителя" }).click();
+  const reopened = page.getByTestId("trusted-contact-editor");
+  const added = calls.detailSaves[0].id;
+  const form = reopened.getByTestId(`lead-representative-details-${added}`);
+  await expect(form.locator('input[name="street"]')).toHaveValue("Testova 13");
+  await expect(form.locator('input[name="city"]')).toHaveValue("Lviv");
+  await expect(form.locator('input[name="birth_place"]')).toHaveValue("Lwiw");
+});
+
+test("a patient picked for a parent on file fills only the empty GwG fields", async ({ page }) => {
+  const { wizard, calls } = await mount(page, {
+    lang: "ru",
+    step: "master",
+    motherOnly: true,
+    annaOverrides: { street: null, zip: null, city: null, country: null },
+  });
+  await page.route("**/api/v1/leads/guardian-candidates**", (route) => route.fulfill({ json: [knownFather] }));
+  await wizard.locator("#lead-wizard-guardian").getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
+  const editor = page.getByTestId("trusted-contact-editor");
+  const form = editor.getByTestId(`lead-representative-details-${ANNA_ID}`);
+  await expect(form.locator('input[name="street"]')).toHaveValue("");
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Мать (родитель)", exact: true }).click();
+  await editor.getByLabel("Выбрать из пациентов или лидов").click();
+  await page.getByRole("option", { name: /Adolf Testov/ }).click();
+  await expect(form.locator('input[name="street"]')).toHaveValue("Testova 13");
+  await expect(form.locator('input[name="city"]')).toHaveValue("Lwiw");
+  // Her own birth place stays.
+  await expect(form.locator('input[name="birth_place"]')).toHaveValue("Kyiv");
+  await expect(editor.getByTestId("trusted-contact-candidate-prefill")).toContainText("Данные из карточки пациента P-20261025-0019");
+  // She has a document of her own: the patient's is not announced for her.
+  await expect(editor.getByTestId("trusted-contact-candidate-document")).toHaveCount(0);
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect.poll(() => calls.detailSaves.length).toBe(1);
+  expect(calls.detailSaves[0]).toMatchObject({
+    id: ANNA_ID,
+    body: {
+      values: { street: "Testova 13", zip: "29000", city: "Lwiw", country: "UA", birth_place: "Kyiv" },
+      base: { street: "", zip: "", city: "", country: "" },
+    },
+  });
 });
 
 test("a parent's typed document data are saved whole and stay in the form", async ({ page }) => {
