@@ -591,7 +591,8 @@ export function ConsentCheckbox({
           aria-label={label}
           className={cn(checkboxClass, "mt-0.5")}
           checked={given}
-          disabled={busy || !consent}
+          // Sent is sent (owner 2026-10-26): a given consent is withdrawn through GMED.
+          disabled={busy || !consent || (Boolean(request.submitted_at) && given)}
           onChange={(event) => void toggle(event.target.checked)}
         />
         <span className="space-y-1">

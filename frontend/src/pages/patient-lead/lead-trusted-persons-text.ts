@@ -37,7 +37,7 @@ const texts = {
     birthDate: "Geburtsdatum", birthDateRequired: "Bitte geben Sie das Geburtsdatum an.", birthDateShort: "geb.",
     legacyContact: (contact: string) => `Bisher angegebener Kontakt: ${contact}. Er bleibt, bis Sie die Angaben dieser Person ändern.`,
     withdraw: "Einwilligung widerrufen", removePerson: "Person entfernen",
-    lockedDecision: "Ihre Entscheidung", lockedWithdrawHint: "Sie können Ihre Einwilligung jederzeit widerrufen oder einzelne Personen entfernen.",
+    lockedDecision: "Ihre Entscheidung", lockedWithdrawHint: "Ändern oder widerrufen können Sie Ihre Einwilligung jederzeit über Ihren Kontakt bei GMED.",
   },
   en: {
     personsHeading: "Named people",
@@ -74,7 +74,7 @@ const texts = {
     birthDate: "Date of birth", birthDateRequired: "Please enter the date of birth.", birthDateShort: "born",
     legacyContact: (contact: string) => `Contact given before: ${contact}. It stays until you change this person's details.`,
     withdraw: "Withdraw consent", removePerson: "Remove person",
-    lockedDecision: "Your decision", lockedWithdrawHint: "You can withdraw your consent or remove individual people at any time.",
+    lockedDecision: "Your decision", lockedWithdrawHint: "You can change or withdraw your consent at any time through your contact at GMED.",
   },
   uk: {
     personsHeading: "Зазначені особи",
@@ -111,7 +111,7 @@ const texts = {
     birthDate: "Дата народження", birthDateRequired: "Вкажіть, будь ласка, дату народження.", birthDateShort: "нар.",
     legacyContact: (contact: string) => `Раніше вказаний контакт: ${contact}. Він збережеться, доки ви не зміните дані цієї особи.`,
     withdraw: "Відкликати згоду", removePerson: "Вилучити особу",
-    lockedDecision: "Ваше рішення", lockedWithdrawHint: "Ви можете будь-коли відкликати згоду або вилучити окремих осіб.",
+    lockedDecision: "Ваше рішення", lockedWithdrawHint: "Змінити або відкликати згоду можна будь-коли через ваш контакт у GMED.",
   },
   ru: {
     personsHeading: "Указанные лица",
@@ -148,7 +148,7 @@ const texts = {
     birthDate: "Дата рождения", birthDateRequired: "Укажите, пожалуйста, дату рождения.", birthDateShort: "род.",
     legacyContact: (contact: string) => `Ранее указанный контакт: ${contact}. Он сохранится, пока вы не измените данные этого лица.`,
     withdraw: "Отозвать согласие", removePerson: "Удалить лицо",
-    lockedDecision: "Ваше решение", lockedWithdrawHint: "Вы можете в любое время отозвать согласие или удалить отдельных лиц.",
+    lockedDecision: "Ваше решение", lockedWithdrawHint: "Изменить или отозвать согласие можно в любое время через вашего контакта в GMED.",
   },
 };
 

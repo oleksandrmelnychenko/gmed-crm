@@ -158,10 +158,8 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   </StatusChip> : null;
   // The other parent's saved choice is named once as a sentence; the own one needs no receipt (A2).
   const savedByOther = request.disclosure && user?.id && request.disclosure.chosen_by !== user.id ? request.disclosure : null;
-  // After the send: the decision read-only, with the withdrawal — "no" for everybody, or one saved
-  // person removed while the consent for the others stays (owner 2026-10-26).
+  // After the send: the decision read-only; changes and withdrawals via GMED (owner 2026-10-26).
   const lockedAllow = draft.allowDisclosure === true;
-  const canRemove = lockedAllow && draft.consentGiven && draft.persons.length > 1;
 
   if (locked) return <section className="space-y-4" data-testid="lead-request-disclosure-step">
     <div role="note" className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200" data-testid="disclosure-locked-hint">
@@ -175,13 +173,9 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
           <span className="font-medium">{lockedAllow ? text.yes : wording.no}</span>
         </p>
         {lockedAllow ? <>
-          <TrustedPersonsList persons={recipientsToSend(draft.persons)} lang={lang} disabled={busy}
-            onRemove={canRemove ? (index) => update({ persons: draft.persons.filter((_, at) => at !== index) }) : undefined} />
-          <p className="text-xs leading-5 text-muted-foreground">{text.lockedWithdrawHint}</p>
-          <Button type="button" variant="outline" className="h-9" disabled={busy} data-testid="disclosure-withdraw"
-            onClick={() => { setConsentReset(false); update({ allowDisclosure: false, consentGiven: false, persons: [], answered: true }); }}>
-            {text.withdraw}
-          </Button>
+          {/* Sent is sent (owner 2026-10-26): no removal or withdrawal here, only via GMED. */}
+          <TrustedPersonsList persons={recipientsToSend(draft.persons)} lang={lang} disabled={busy} />
+          <p className="text-xs leading-5 text-muted-foreground" data-testid="disclosure-locked-via-gmed">{text.lockedWithdrawHint}</p>
         </> : null}
       </div>
     </CabinetSection>

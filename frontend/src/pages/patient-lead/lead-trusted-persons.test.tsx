@@ -356,14 +356,13 @@ describe("the disclosure step after the request is sent (owner 2026-10-26)", () 
   };
   const disclosure = { allow_disclosure: true, consent_given: true, version: DISCLOSURE_VERSION, language: "de", chosen_at: "2026-10-20T08:00:00Z", chosen_by: "lead-1", access_kind: "self" as const, company_name: "GMED" };
 
-  it("shows the decision read-only with the hint and keeps the withdrawal open", () => {
+  it("shows the decision read-only; changes and withdrawals only via GMED (owner 2026-10-26)", () => {
     const html = step({ submitted_at: "2026-10-21T08:00:00Z", disclosure, trusted_persons: [stored, { ...stored, name: "Max Muster" }] });
     expect(html).toContain('data-testid="disclosure-locked-hint"');
     expect(html).toContain("Ihre Anfrage ist bei GMED.");
-    expect(html).toContain('data-testid="disclosure-withdraw"');
-    expect(html).toContain(trustedPersonsText("de").withdraw);
-    // Removing one of several persons is a withdrawal too.
-    expect(html.match(/data-testid="trusted-person-remove"/g)).toHaveLength(2);
+    expect(html).not.toContain('data-testid="disclosure-withdraw"');
+    expect(html).not.toContain('data-testid="trusted-person-remove"');
+    expect(html).toContain("über Ihren Kontakt bei GMED");
     expect(html).toContain("06.05.1970");
     expect(html).not.toContain('data-testid="trusted-persons-editor"');
     expect(html).not.toContain('data-testid="trusted-person-add"');

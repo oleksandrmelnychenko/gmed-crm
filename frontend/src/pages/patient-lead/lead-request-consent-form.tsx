@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
@@ -66,28 +65,12 @@ export function choiceOnlyByGuardian(request: Pick<LeadRequest, "access_kind" | 
  * chooses for the child; the child's form names the parent who chose.
  */
 /** The sent state of the options (owner 2026-10-26). */
-function sentConsentText(lang: string): { note: string; withdraw: string; withdrawHint: string } {
+export function sentConsentText(lang: string): string {
   switch (lang) {
-    case "de": return {
-      note: "Ihre Anfrage ist gesendet: Änderungen nur über Ihren Kontakt bei GMED.",
-      withdraw: "Einwilligung widerrufen",
-      withdrawHint: "Entfernen Sie den Haken bei dem, was Sie widerrufen. Der Widerruf gilt für die Zukunft.",
-    };
-    case "uk": return {
-      note: "Заявку надіслано: змінити вибір можна лише через ваш контакт у GMED.",
-      withdraw: "Відкликати згоду",
-      withdrawHint: "Зніміть позначку з того, що відкликаєте. Відкликання діє на майбутнє.",
-    };
-    case "en": return {
-      note: "Your request has been sent: changes only through your contact at GMED.",
-      withdraw: "Withdraw consent",
-      withdrawHint: "Untick what you withdraw. The withdrawal applies for the future.",
-    };
-    default: return {
-      note: "Заявка отправлена: изменить выбор можно только через вашего контакта в GMED.",
-      withdraw: "Отозвать согласие",
-      withdrawHint: "Снимите отметку с того, что отзываете. Отзыв действует на будущее.",
-    };
+    case "de": return "Ihre Anfrage ist gesendet. Ändern oder widerrufen können Sie Ihre Einwilligung jederzeit über Ihren Kontakt bei GMED.";
+    case "uk": return "Заявку надіслано. Змінити або відкликати згоду можна будь-коли через ваш контакт у GMED.";
+    case "en": return "Your request has been sent. You can change or withdraw your consent at any time through your contact at GMED.";
+    default: return "Заявка отправлена. Изменить или отозвать согласие можно в любое время через вашего контакта в GMED.";
   }
 }
 
@@ -125,10 +108,9 @@ export function ConsentFormChoicesSection({
   }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  // A sent request is read-only (owner 2026-10-26): the options are locked; only a
-  // withdrawal stays open (DSGVO Art. 7 (3)), behind its own button.
+  // A sent request is read-only (owner 2026-10-26: «якщо вже відправили то вже
+  // відправили»): changes and withdrawals go through the contact at GMED.
   const sent = Boolean(request.submitted_at);
-  const [withdrawing, setWithdrawing] = useState(false);
   const ownMinor = choiceOnlyByGuardian(request);
   const namedRecipients = savedDisclosureAllowed(request);
   const version = form?.version;
@@ -223,8 +205,7 @@ export function ConsentFormChoicesSection({
         aria-required={CONSENT_FORM_CORE.includes(key) || undefined}
         className={cn(checkboxClass, "mt-0.5")}
         checked={draft[key]}
-        // After the send: locked; while withdrawing only a saved tick can be taken back.
-        disabled={sent && (!withdrawing || form.choices?.[key] !== true)}
+        disabled={sent}
         data-consent-option={key}
         onChange={(event) => {
           const checked = event.currentTarget.checked;
@@ -260,13 +241,7 @@ export function ConsentFormChoicesSection({
           </fieldset>
           {sent ? (
             <div className="flex flex-wrap items-center gap-3" data-testid="lead-request-consent-form-sent">
-              <p className="text-xs text-muted-foreground">{sentConsentText(lang).note}</p>
-              {withdrawing ? null : (
-                <Button type="button" variant="outline" size="sm" className="h-8" data-testid="lead-request-consent-form-withdraw" onClick={() => setWithdrawing(true)}>
-                  {sentConsentText(lang).withdraw}
-                </Button>
-              )}
-              {withdrawing ? <p className="basis-full text-xs text-muted-foreground">{sentConsentText(lang).withdrawHint}</p> : null}
+              <p className="text-xs text-muted-foreground">{sentConsentText(lang)}</p>
             </div>
           ) : null}
           {!coreTicked ? (
