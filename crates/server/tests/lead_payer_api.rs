@@ -2623,3 +2623,220 @@ async fn a_level_two_payer_is_identified_on_paper_without_a_payer_link() {
         "{status} {refused}"
     );
 }
+
+/// The payer's stored triggers of `keys`: key and whether it is active.
+async fn stored_payer_triggers(pool: &PgPool, lead_id: Uuid, keys: &[&str]) -> Vec<(String, bool)> {
+    let triggers: Option<Value> =
+        sqlx::query_scalar("SELECT triggers FROM lead_risk_assessments WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_optional(pool)
+            .await
+            .unwrap();
+    triggers
+        .and_then(|triggers| triggers.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter(|trigger| {
+            trigger["subject"] == "payer"
+                && keys.contains(&trigger["key"].as_str().unwrap_or_default())
+        })
+        .map(|trigger| {
+            (
+                trigger["key"].as_str().unwrap().to_string(),
+                trigger["active"].as_bool().unwrap_or(false),
+            )
+        })
+        .collect()
+}
+
+/// Staff enter and correct a third-party payer's payment route in the wizard
+/// (owner 2026-10-26): leads.edit only, the payer link's keys and validation
+/// with the field named, no route of a self-payer, the source shown, audited
+/// with the field names only, and counted for the risk at once.
+#[tokio::test]
+async fn staff_enter_and_correct_a_third_party_payers_payment_route() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let declaration_path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration/payment-route");
+    let manager = app.bearer("patient_manager");
+
+    // Not before a third party is declared.
+    let cash = json!({ "payment_method": "cash" });
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(cash.clone())).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "payer_not_third_party");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &declaration_path,
+        &manager,
+        Some(json!({ "payer_kind": "self", "acts_on_own_account": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(cash.clone())).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "payer_not_third_party");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &declaration_path,
+        &manager,
+        Some(third_party_payer()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["declaration"]["payment_route_source"].is_null(),
+        "{body}"
+    );
+    let (status, started) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/risk-assessment/restart"),
+        &app.bearer("ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+
+    // Only leads.edit writes it.
+    for role in ["billing", "concierge"] {
+        let (status, _) =
+            json_request(&app, "POST", &path, &app.bearer(role), Some(cash.clone())).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}");
+    }
+    // The link's validation, field by field; nothing is stored.
+    for (body, field) in [
+        (json!({ "payment_method": "bitcoin" }), "payment_method"),
+        (
+            json!({ "payment_method": "bank_transfer", "account_country": "Germany" }),
+            "account_country",
+        ),
+        (
+            json!({ "payment_method": "card", "account_holder": "x".repeat(201) }),
+            "account_holder",
+        ),
+        (json!({ "via_third_party": "yes" }), "via_third_party"),
+        (json!({ "invoice_vat_id": "ATU12345678" }), "invoice_vat_id"),
+        (json!(["cash"]), "body"),
+    ] {
+        let (status, error) = json_request(&app, "POST", &path, &manager, Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+        assert_eq!(error["error"], "invalid_field", "{error}");
+        assert_eq!(error["field"], field, "{error}");
+    }
+    let (_, unchanged) = json_request(&app, "GET", &declaration_path, &manager, None).await;
+    assert!(
+        unchanged["declaration"]["payment_method"].is_null(),
+        "{unchanged}"
+    );
+
+    // Staff's cash counts at once: T9 fires.
+    let (status, saved) = json_request(&app, "POST", &path, &manager, Some(cash.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["declaration"]["payment_method"], "cash", "{saved}");
+    assert_eq!(
+        saved["declaration"]["payment_route_source"], "staff",
+        "{saved}"
+    );
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), true)]
+    );
+    // Saved again unchanged: no second event.
+    let (status, _) = json_request(&app, "POST", &path, &manager, Some(cash)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Corrected to a bank transfer: T9 stays recorded, no longer active.
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({
+            "payment_method": "bank_transfer",
+            "account_country": "at",
+            "account_holder": "  Erika   Zahler ",
+            "bank_name": "Beispielbank",
+            "via_third_party": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let declaration = &saved["declaration"];
+    assert_eq!(declaration["payment_method"], "bank_transfer", "{saved}");
+    assert_eq!(declaration["account_country"], "AT", "{saved}");
+    assert_eq!(declaration["account_holder"], "Erika Zahler", "{saved}");
+    assert_eq!(declaration["payment_route_source"], "staff", "{saved}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), false)]
+    );
+    // Cash again clears the account, as on the link.
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({ "payment_method": "cash" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert!(saved["declaration"]["account_holder"].is_null(), "{saved}");
+    assert!(saved["declaration"]["bank_name"].is_null(), "{saved}");
+
+    // A staff save of the declaration keeps staff's route and its source.
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &declaration_path,
+        &manager,
+        Some(third_party_payer()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["declaration"]["payment_method"], "cash", "{saved}");
+    assert_eq!(
+        saved["declaration"]["payment_route_source"], "staff",
+        "{saved}"
+    );
+
+    // Audited with the field names only, never a value.
+    let events: Vec<Value> = sqlx::query_scalar(
+        r#"SELECT jsonb_build_object('context', context, 'old', old_value, 'new', new_value)
+           FROM audit_log
+           WHERE action = 'lead_payer_payment_route_updated_by_staff' AND entity_id = $1
+           ORDER BY created_at, id"#,
+    )
+    .bind(lead_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(events.len(), 3, "{events:?}");
+    assert_eq!(events[0]["context"]["fields"], json!(["payment_method"]));
+    assert_eq!(
+        events[1]["context"]["fields"],
+        json!([
+            "payment_method",
+            "account_country",
+            "account_holder",
+            "bank_name",
+            "via_third_party"
+        ])
+    );
+    for event in &events {
+        let text = event.to_string();
+        assert!(
+            !text.contains("Beispielbank") && !text.contains("Zahler"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("\"cash\"") && !text.contains("bank_transfer"),
+            "{text}"
+        );
+    }
+}

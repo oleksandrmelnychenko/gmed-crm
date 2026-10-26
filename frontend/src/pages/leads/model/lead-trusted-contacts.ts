@@ -10,7 +10,10 @@
  * contacts staff did not edit.
  */
 
+import { isValidEmailAddress } from "@/lib/contact-validation";
 import { isAdultOn } from "@/lib/person-fields";
+
+import type { ContactEmailLoginOwner } from "../data/leads-api";
 
 /** The relations the wizard offers for a trusted contact, in the order of its list. */
 export const TRUSTED_CONTACT_RELATIONS = ["mother", "father", "guardian", "representative", "spouse", "relative", "other"] as const;
@@ -360,4 +363,85 @@ export function mergeTrustedContacts<T extends TrustedContactDraft>(
     if (!freshIds.has(contact.id) && editedByStaff(contact)) merged.push(contact);
   }
   return merged;
+}
+
+/** How long the contact editor waits after the last keystroke before it asks whose login an address is. */
+export const CONTACT_EMAIL_CHECK_DEBOUNCE_MS = 400;
+
+/**
+ * The address the contact editor asks the server about (DEV QA V-A6), or
+ * null: only a well-formed address that differs from the stored one, so
+ * opening a saved contact sends no request.
+ */
+export function contactEmailToCheck(email: string, storedEmail?: string | null): string | null {
+  const value = email.trim();
+  if (!value || !isValidEmailAddress(value)) return null;
+  if (storedEmail && storedEmail.trim().toLowerCase() === value.toLowerCase()) return null;
+  return value;
+}
+
+/**
+ * The non-blocking warning under the e-mail field when the address is the
+ * login of another person; saving stays allowed.
+ */
+export function contactEmailLoginWarning(
+  owner: ContactEmailLoginOwner | null,
+  tx: (ru: string, de: string) => string,
+): string | null {
+  if (!owner) return null;
+  if (owner.kind === "staff") {
+    return tx(
+      "Этот адрес — логин сотрудника GMED. Проверьте адрес.",
+      "Diese Adresse ist der Login eines GMED-Mitarbeiters. Bitte prüfen.",
+    );
+  }
+  const who = [owner.patient_number, owner.display_name].filter(Boolean).join(", ");
+  const suffix = who ? ` (${who})` : "";
+  if (owner.kind === "patient") {
+    return tx(
+      `Этот адрес — логин другого пациента${suffix}. Проверьте, тот ли это человек.`,
+      `Diese Adresse ist der Login einer anderen Person${suffix}. Bitte prüfen.`,
+    );
+  }
+  return tx(
+    `Этот адрес — логин другого человека${suffix}. Проверьте, тот ли это человек.`,
+    `Diese Adresse ist der Login einer anderen Person${suffix}. Bitte prüfen.`,
+  );
+}
+
+/**
+ * Debounced "whose login is this address" lookup of the contact editor:
+ * every `update` clears the shown warning at once, and only the answer for
+ * the latest address arrives; a failed lookup shows nothing (the warning is
+ * advice, never a gate).
+ */
+export function createContactEmailLoginCheck(
+  lookup: (email: string) => Promise<ContactEmailLoginOwner | null>,
+  onOwner: (owner: ContactEmailLoginOwner | null) => void,
+  delayMs = CONTACT_EMAIL_CHECK_DEBOUNCE_MS,
+) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let generation = 0;
+  const stop = () => {
+    generation += 1;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+  return {
+    update(email: string, storedEmail?: string | null) {
+      stop();
+      onOwner(null);
+      const target = contactEmailToCheck(email, storedEmail);
+      if (!target) return;
+      const mine = generation;
+      timer = setTimeout(() => {
+        timer = null;
+        lookup(target).then(
+          (owner) => { if (mine === generation) onOwner(owner); },
+          () => { if (mine === generation) onOwner(null); },
+        );
+      }, delayMs);
+    },
+    cancel: stop,
+  };
 }

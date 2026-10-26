@@ -218,6 +218,8 @@ type Mock = {
   idSaveDelayMs?: number;
   /** The portal state asked right after the first document save answers this late. */
   staleIntakeMs?: number;
+  /** Whose login an address is (`POST …/contact-email-check`), by the lower-cased address. */
+  loginOwners?: Record<string, Json>;
   /** The patient's stored document data (the portal state's identification). */
   patientId?: Json;
 };
@@ -287,6 +289,8 @@ async function mount(page: Page, mock: Mock) {
     patientIdSaves: [] as Json[],
     /** Bodies of the staff saves of a representative's address and birth data. */
     detailSaves: [] as Array<{ id: string; body: { values: Json; base: Json } }>,
+    /** Bodies of the login checks of a typed contact e-mail. */
+    emailChecks: [] as Json[],
   };
   let patientIdentification: Json = { birth_place: "Berlin", birth_country: "DE", contact_channels: ["email"], ...mock.patientId };
   let lateIntakeSent = false;
@@ -350,6 +354,10 @@ async function mount(page: Page, mock: Mock) {
       response = { status: "clear", list_version_date: "2026-10-01" };
     } else if (path === `/leads/${leadId}`) {
       response = state.lead;
+    } else if (path === `/leads/${leadId}/contact-email-check` && method === "POST") {
+      const body = request.postDataJSON() as Json;
+      calls.emailChecks.push(body);
+      response = { login_owner: mock.loginOwners?.[String(body.email).toLowerCase()] ?? null };
     } else if (path === `/leads/${leadId}/update` && method === "POST") {
       const body = request.postDataJSON() as Json;
       calls.updates.push(body);
@@ -1121,6 +1129,48 @@ test("a mistyped parent e-mail is named by the app at the field, not by the brow
   await expect(editor.locator("#trusted-contact-email-error")).toHaveText("Введите корректный адрес электронной почты");
   await expect(editor.getByLabel("E-Mail", { exact: true })).toHaveAttribute("aria-invalid", "true");
   expect(calls.updates).toEqual([]);
+});
+
+test("a parent e-mail that is another patient's login is flagged at the field, and saving stays allowed (DEV QA V-A6)", async ({ page }) => {
+  const { wizard, calls } = await mount(page, {
+    lang: "ru",
+    step: "master",
+    loginOwners: {
+      "olga.beispiel@example.com": {
+        kind: "patient",
+        patient_id: "33333333-3333-4333-8333-333333333333",
+        patient_number: "P-2026-0007",
+        lead_id: null,
+        display_name: "Olga Beispiel",
+      },
+    },
+  });
+  await wizard.locator("#lead-wizard-guardian").getByRole("listitem").filter({ hasText: "Anna Muster" }).getByRole("button", { name: "Редактировать представителя" }).click();
+  const editor = page.getByTestId("trusted-contact-editor");
+  const warning = editor.getByTestId("trusted-contact-email-login-warning");
+  const email = editor.getByLabel("E-Mail", { exact: true });
+  // Opening a saved contact asks nothing about its stored address.
+  await expect(email).toHaveValue("anna.muster@example.com");
+  await page.waitForTimeout(600);
+  expect(calls.emailChecks).toEqual([]);
+
+  await email.fill("Olga.Beispiel@example.com");
+  await expect(warning).toHaveText("Этот адрес — логин другого пациента (P-2026-0007, Olga Beispiel). Проверьте, тот ли это человек.");
+  expect(calls.emailChecks).toEqual([{ email: "Olga.Beispiel@example.com", contact_id: ANNA_ID, related_patient_id: null }]);
+
+  // Another address clears the warning at once; an address nobody uses shows none.
+  await email.fill("anna.neu@example.com");
+  await expect(warning).toHaveCount(0);
+  await expect.poll(() => calls.emailChecks.length).toBe(2);
+  await expect(warning).toHaveCount(0);
+
+  // The warning never blocks the save.
+  await email.fill("olga.beispiel@example.com");
+  await expect(warning).toBeVisible();
+  await editor.getByLabel("Кем приходится ребёнку").click();
+  await page.getByRole("option", { name: "Мать (родитель)", exact: true }).click();
+  await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(editor).toHaveCount(0);
 });
 
 test("a parent born less than 18 years ago is refused in the contact editor", async ({ page }) => {

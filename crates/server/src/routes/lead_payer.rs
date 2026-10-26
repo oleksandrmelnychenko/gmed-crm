@@ -44,11 +44,15 @@
 //! the declaration whenever it is read ([`load_declaration`],
 //! [`patient_declaration`]); its columns on this row are history and never
 //! written. Section 8 lives on the row: the cabinet patches it with
-//! [`save_billing_from_portal`]; every other save keeps it
-//! ([`Declaration::carry_billing`]), staff add only the USt-IdNr. and the
-//! Steuernummer. Cash, crypto, another method or a payment through a third
-//! person are compliance flags for staff ([`Declaration::payment_route_flags`]);
-//! they block nothing.
+//! [`save_billing_from_portal`], the payer link with
+//! [`store_payment_route`]; every other save keeps it
+//! ([`Declaration::carry_billing`]). Staff add the USt-IdNr. and the
+//! Steuernummer in the declaration, and enter or correct a third-party
+//! payer's route with an endpoint of its own ([`save_staff_payment_route`],
+//! owner 2026-10-26): the link's keys and validation, counted for the risk at
+//! once; the last writer wins (`payment_route_entered_by`). Cash, crypto,
+//! another method or a payment through a third person are compliance flags
+//! for staff ([`Declaration::payment_route_flags`]); they block nothing.
 //!
 //! The extra step of the cabinet ("Zusätzliche Angaben", owner requests
 //! 2026-10-07) asks two statements that live on this row, patched with
@@ -76,7 +80,7 @@ use axum::{
     extract::{Extension, Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use serde::{Deserialize, Deserializer};
@@ -222,10 +226,15 @@ const INVOICE_VAT_ID_MAX: usize = 20;
 const INVOICE_TAX_NUMBER_MAX: usize = 30;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route(
-        "/leads/{lead_id}/payer-declaration",
-        get(get_payer_declaration).post(save_payer_declaration),
-    )
+    Router::new()
+        .route(
+            "/leads/{lead_id}/payer-declaration",
+            get(get_payer_declaration).post(save_payer_declaration),
+        )
+        .route(
+            "/leads/{lead_id}/payer-declaration/payment-route",
+            post(save_staff_payment_route),
+        )
 }
 
 // ----------------------------------------------------------------------------
@@ -2496,6 +2505,18 @@ async fn get_payer_declaration(
             payload["declaration"][key] = organisation[key].clone();
         }
         payload["declaration"]["organisation_details_locked"] = json!(locked);
+        // Who gave the payment route of section 8: the payer (its link),
+        // staff (the wizard) or the lead (the cabinet); null without one.
+        let entered_by = match payment_route_entered_by(&mut conn, lead_id).await {
+            Ok(entered_by) => entered_by,
+            Err(error) => return database_error(error, "load payment route source"),
+        };
+        payload["declaration"]["payment_route_source"] = json!(
+            payer
+                .declaration
+                .as_ref()
+                .and_then(|declaration| payment_route_source(declaration, entered_by.as_deref()))
+        );
     }
     Json(payload).into_response()
 }
@@ -2826,6 +2847,154 @@ async fn save_payer_declaration(
     get_payer_declaration(State(state), Extension(auth), Path(lead_id)).await
 }
 
+/// `POST /leads/{id}/payer-declaration/payment-route` (leads.edit, owner
+/// 2026-10-26): staff enter or correct a third-party payer's payment route
+/// (section 8) with the keys, the validation and the dependent clearing of
+/// the payer link ([`PortalBillingPatch`], [`apply_payment_route_patch`]); a
+/// left-out key keeps its value, `null` or `""` clears it. The route is
+/// staff's from then on: it counts for the risk at once, also while the
+/// payer's own statement is a draft (the link's route marker goes), until the
+/// payer answers section 8 again through its link — the last writer wins.
+/// Audited with the changed field names only; answers the payer declaration
+/// as `GET` does.
+async fn save_staff_payment_route(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> Response {
+    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
+        return response;
+    }
+    let patch = match PortalBillingPatch::parse(&body) {
+        Ok(patch) => patch,
+        Err(error) => return staff_route_error(error),
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return database_error(error, "begin staff payment route"),
+    };
+    let lead = match sqlx::query(
+        "SELECT converted_patient_id, qualification_status FROM leads WHERE id = $1 FOR UPDATE",
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "Lead not found"),
+        Err(error) => return database_error(error, "lock staff payment route lead"),
+    };
+    if lead
+        .try_get::<Option<Uuid>, _>("converted_patient_id")
+        .unwrap_or_default()
+        .is_some()
+    {
+        return error(
+            StatusCode::CONFLICT,
+            "lead_converted",
+            "The lead is converted; its payer declaration belongs to the patient record",
+        );
+    }
+    if lead
+        .try_get::<String, _>("qualification_status")
+        .unwrap_or_default()
+        == "deleted"
+    {
+        return error(StatusCode::CONFLICT, "lead_deleted", "The lead is deleted");
+    }
+    let current = match load_declaration(&mut tx, lead_id).await {
+        Ok(current) => current,
+        Err(error) => return database_error(error, "load staff payment route declaration"),
+    };
+    // Only a third party's route is staff's to enter: the patient or the
+    // paying parent answer it in the cabinet.
+    let Some(current) = current.filter(Declaration::is_third_party) else {
+        return error(
+            StatusCode::CONFLICT,
+            "payer_not_third_party",
+            "Staff enter the payment route of a third-party payer only",
+        );
+    };
+    let (next, changed) = match apply_payment_route_patch(&current, &patch) {
+        Ok(applied) => applied,
+        Err(error) => return staff_route_error(error),
+    };
+    if changed.is_empty() {
+        drop(tx);
+        return get_payer_declaration(State(state), Extension(auth), Path(lead_id)).await;
+    }
+    if let Err(error) = store_declaration(&mut tx, lead_id, &next, Some(auth.user_id), false).await
+    {
+        return database_error(error, "save staff payment route");
+    }
+    if let Err(error) = set_payment_route_entered_by(&mut tx, lead_id, ROUTE_ENTERED_BY_STAFF).await
+    {
+        return database_error(error, "mark staff payment route");
+    }
+    // The route is no longer the one the payer's link wrote: its triggers
+    // (T8, T9) count at once, the payer's statement sent or not.
+    if let Err(error) = sqlx::query(
+        "UPDATE lead_payer_statements SET payment_route_marker = NULL WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(&mut *tx)
+    .await
+    {
+        return database_error(error, "clear payer link route marker");
+    }
+    let event = audit::domain_event(
+        "lead_payer_payment_route_updated_by_staff",
+        Some(auth.user_id),
+        "lead",
+        Some(lead_id),
+        json!({ "fields": changed, "lead_id": lead_id }),
+    );
+    if let Err(error) = audit::write_in_transaction(&mut tx, &event).await {
+        return database_error(error, "audit staff payment route");
+    }
+    if let Err(error) = crate::risk::store::reassess(
+        &mut tx,
+        lead_id,
+        crate::risk::store::Cause::Staff,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        return database_error(error, "reassess risk after staff payment route");
+    }
+    if let Err(error) = tx.commit().await {
+        return database_error(error, "commit staff payment route");
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.updated",
+        lead_id,
+        json!({ "payer_declaration_updated": true }),
+    )
+    .await;
+    get_payer_declaration(State(state), Extension(auth), Path(lead_id)).await
+}
+
+/// A refused staff route: 422 `invalid_field` naming the field, as the
+/// payer link answers.
+fn staff_route_error(failure: PortalBillingError) -> Response {
+    match failure {
+        PortalBillingError::Invalid { field, message } => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "invalid_field", "field": field, "message": message })),
+        )
+            .into_response(),
+        PortalBillingError::Database(failure) => database_error(failure, "staff payment route"),
+        PortalBillingError::RouteByPayer | PortalBillingError::NotDeclared => error(
+            StatusCode::CONFLICT,
+            "payer_not_third_party",
+            "Staff enter the payment route of a third-party payer only",
+        ),
+    }
+}
+
 /// Whether the payer sent its own answers through the payer link: the
 /// organisation's legal form and register number are then the payer's, and
 /// staff no longer write them (owner decision 2026-10-22).
@@ -2947,6 +3116,23 @@ async fn store_declaration(
                via_third_party_kind = CASE WHEN EXCLUDED.via_third_party IS TRUE
                    THEN lead_payer_declarations.via_third_party_kind ELSE NULL END,
                via_third_party_details = EXCLUDED.via_third_party_details,
+               -- Who gave the route stays while the route stays; a write
+               -- that changes it names its author afterwards (the payer
+               -- link, staff's route endpoint) or leaves none (the cabinet).
+               payment_route_entered_by = CASE
+                   WHEN ROW(EXCLUDED.payment_method, EXCLUDED.payment_method_details,
+                            EXCLUDED.account_country, EXCLUDED.account_holder,
+                            EXCLUDED.bank_name, EXCLUDED.via_third_party,
+                            EXCLUDED.via_third_party_details)
+                        IS NOT DISTINCT FROM
+                        ROW(lead_payer_declarations.payment_method,
+                            lead_payer_declarations.payment_method_details,
+                            lead_payer_declarations.account_country,
+                            lead_payer_declarations.account_holder,
+                            lead_payer_declarations.bank_name,
+                            lead_payer_declarations.via_third_party,
+                            lead_payer_declarations.via_third_party_details)
+                   THEN lead_payer_declarations.payment_route_entered_by ELSE NULL END,
                identity_adopted_at = EXCLUDED.identity_adopted_at,
                identity_adopted_key = EXCLUDED.identity_adopted_key,
                self_funds_source = EXCLUDED.self_funds_source,
@@ -3763,13 +3949,77 @@ pub(crate) fn apply_payment_route_patch(
 }
 
 /// Stores section 8 the payer changed: the identity stays as it is, no reset
-/// rule applies, nobody's login wrote it.
+/// rule applies, nobody's login wrote it. The route is the payer's from now
+/// on (`payment_route_entered_by = payer`): the payer's later answer replaces
+/// what staff entered (last writer wins).
 pub(crate) async fn store_payment_route(
     conn: &mut PgConnection,
     lead_id: Uuid,
     declaration: &Declaration,
 ) -> Result<(), sqlx::Error> {
-    store_declaration(conn, lead_id, declaration, None, false).await
+    store_declaration(conn, lead_id, declaration, None, false).await?;
+    set_payment_route_entered_by(conn, lead_id, ROUTE_ENTERED_BY_PAYER).await
+}
+
+/// `payment_route_entered_by` of the payer's link.
+const ROUTE_ENTERED_BY_PAYER: &str = "payer";
+/// `payment_route_entered_by` of staff's route endpoint.
+const ROUTE_ENTERED_BY_STAFF: &str = "staff";
+
+/// Records who gave the stored route (an empty route has no author).
+async fn set_payment_route_entered_by(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    entered_by: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET payment_route_entered_by = CASE
+               WHEN payment_method IS NULL AND payment_method_details IS NULL
+                    AND account_country IS NULL AND account_holder IS NULL
+                    AND bank_name IS NULL AND via_third_party IS NULL
+                    AND via_third_party_details IS NULL
+               THEN NULL ELSE $2 END
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(entered_by)
+    .execute(conn)
+    .await
+    .map(|_| ())
+}
+
+async fn payment_route_entered_by(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT payment_route_entered_by FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(conn)
+    .await
+    .map(Option::flatten)
+}
+
+/// Who gave the declaration's payment route (`payment_route_source` of the
+/// staff payload): `payer` (its link), `staff` (the route endpoint) or `lead`
+/// (the cabinet); `None` without a route. A route of before the column has
+/// no author recorded: a third party's came from its link (nobody else wrote
+/// it), any other from the cabinet.
+pub(crate) fn payment_route_source(
+    declaration: &Declaration,
+    entered_by: Option<&str>,
+) -> Option<&'static str> {
+    if !declaration.has_payment_route() {
+        return None;
+    }
+    Some(match entered_by {
+        Some(ROUTE_ENTERED_BY_STAFF) => ROUTE_ENTERED_BY_STAFF,
+        Some(ROUTE_ENTERED_BY_PAYER) => ROUTE_ENTERED_BY_PAYER,
+        _ if declaration.is_third_party() => ROUTE_ENTERED_BY_PAYER,
+        _ => "lead",
+    })
 }
 
 /// The declaration is the source of the payer of the lead's orders while the
@@ -4313,6 +4563,17 @@ impl Declaration {
         let before = self.clone();
         self.clear_payment_route();
         changed_billing_fields(&before, self)
+    }
+
+    /// Any answer of section 8 is stored.
+    pub(crate) fn has_payment_route(&self) -> bool {
+        self.payment_method.is_some()
+            || self.payment_method_details.is_some()
+            || self.account_country.is_some()
+            || self.account_holder.is_some()
+            || self.bank_name.is_some()
+            || self.via_third_party.is_some()
+            || self.via_third_party_details.is_some()
     }
 
     /// Section 8 as nobody answered it.

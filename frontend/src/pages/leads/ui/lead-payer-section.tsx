@@ -50,6 +50,7 @@ import { useLeadPayerPackage } from "../model/use-lead-payer-package";
 import { LeadPayerLinkPanel } from "./lead-payer-link-panel";
 import { LeadPayerPackagePanel } from "./lead-payer-package-panel";
 import { LeadPayerPaperPath } from "./lead-payer-paper-path";
+import { LeadPayerPaymentRoute } from "./lead-payer-payment-route";
 import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata";
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
@@ -1250,6 +1251,23 @@ export function LeadPayerDeclarationSection({
                 errorText={errorText}
                 onChanged={onPayerLinkSent}
                 onOpenDocument={onOpenPayerDocument}
+              />
+            ) : null}
+            {/* Staff enter or correct the payer's payment route (owner 2026-10-26); the payer's link answer replaces it. */}
+            {data?.declaration && !payingParent && data.declaration.payer_kind === "third_party" ? (
+              <LeadPayerPaymentRoute
+                leadId={leadId}
+                declaration={data.declaration}
+                canEdit={payerLinkCanEdit ?? canEdit}
+                disabled={disabled}
+                lang={lang}
+                tx={tx}
+                errorText={errorText}
+                onSaved={() => {
+                  // The declaration (and the link's view of the route) are read afresh.
+                  onPayerLinkSent?.();
+                  void payerLink?.reload();
+                }}
               />
             ) : null}
           </div>

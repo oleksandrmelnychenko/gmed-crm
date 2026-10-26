@@ -143,6 +143,8 @@ import { custodyLabel, representativeName } from "../model/lead-gwg-statements";
 import {
   TRUSTED_CONTACT_RELATIONS,
   changedRepresentativeDetails,
+  contactEmailLoginWarning,
+  createContactEmailLoginCheck,
   emailChangedOnSave,
   isLegalGuardianRelation,
   isParentOrGuardianRelation,
@@ -414,7 +416,9 @@ import {
   downloadLeadAttachment,
   fetchLeadDetail,
   fetchLeadReferrerPatients,
+  checkLeadContactEmail,
   fetchLeadGuardianCandidates,
+  type ContactEmailLoginOwner,
   type LeadAttachmentImportRefusal,
   type LeadGuardianCandidate,
   importLeadAttachments,
@@ -3623,6 +3627,8 @@ export function LeadWizard({
   const [trustedContactEmailError, setTrustedContactEmailError] = useState("");
   const [trustedContactPhoneError, setTrustedContactPhoneError] = useState("");
   const [trustedContactBirthDateError, setTrustedContactBirthDateError] = useState("");
+  // Whose login the typed address already is (DEV QA V-A6): a warning, never a gate.
+  const [trustedContactLoginOwner, setTrustedContactLoginOwner] = useState<ContactEmailLoginOwner | null>(null);
   // Whether the editor was opened from the minor's parent / legal representative block.
   const [trustedContactEditorGuardian, setTrustedContactEditorGuardian] = useState(false);
   // Address, birth data and citizenships of a parent the server does not know
@@ -3833,6 +3839,25 @@ export function LeadWizard({
   useEffect(() => {
     setSelectedGuardianCandidate("");
   }, [trustedContactEditor?.id]);
+  // DEV QA V-A6: 400 ms after the e-mail of the open contact changes, ask
+  // whether it is another person's login. The stored address of a saved
+  // contact is not asked about, so opening the editor sends nothing.
+  const trustedContactEditorId = trustedContactEditor?.id ?? null;
+  const trustedContactEditorEmail = trustedContactEditor?.email ?? "";
+  const trustedContactEditorPatientId = trustedContactEditor?.relatedPatientId ?? "";
+  useEffect(() => {
+    if (!open || !leadId || !trustedContactEditorId) {
+      setTrustedContactLoginOwner(null);
+      return;
+    }
+    const check = createContactEmailLoginCheck(
+      (email) => checkLeadContactEmail(leadId, email, trustedContactEditorId, trustedContactEditorPatientId || null),
+      setTrustedContactLoginOwner,
+    );
+    const storedEmail = trustedContactsBaseRef.current.find((contact) => contact.id === trustedContactEditorId)?.email;
+    check.update(trustedContactEditorEmail, storedEmail);
+    return check.cancel;
+  }, [leadId, open, trustedContactEditorEmail, trustedContactEditorId, trustedContactEditorPatientId]);
   const selectedSpecializationItems = useMemo(() => {
     const values = new Set(draft?.specialties ?? []);
     return specialties.filter((item) => values.has(specializationValue(item)));
@@ -11825,6 +11850,15 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchTrustedContactEditor("email", event.target.value)}
                     />
                     {trustedContactEmailError ? null : <EmailDomainWarning email={trustedContactEditor.email} lang={lang} />}
+                    {trustedContactEmailError || !trustedContactLoginOwner ? null : (
+                      <span
+                        role="status"
+                        data-testid="trusted-contact-email-login-warning"
+                        className="mt-1 block text-xs font-normal leading-5 text-amber-800 dark:text-amber-200"
+                      >
+                        {contactEmailLoginWarning(trustedContactLoginOwner, tx)}
+                      </span>
+                    )}
                   </Field>
                   <Field label={tx("Телефон", "Telefon")} error={trustedContactPhoneError || undefined} errorId="trusted-contact-phone-error" htmlFor="trusted-contact-phone">
                     <Input

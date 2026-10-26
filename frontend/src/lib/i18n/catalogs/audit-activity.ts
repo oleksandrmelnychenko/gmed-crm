@@ -144,6 +144,7 @@ const ACTIONS: Record<string, Pair> = {
   lead_portal_update_representation: ["Кабинет: представительство изменено", "Portal: Vertretung geändert"],
   lead_portal_update_representative: ["Кабинет: представитель изменён", "Portal: Vertreter geändert"],
   update_lead_payer_declaration: ["Сведения о плательщике изменены", "Angaben zum Zahler geändert"],
+  lead_payer_payment_route_updated_by_staff: ["Способ оплаты плательщика внесён сотрудником", "Zahlungsweg des Zahlers von GMED eingetragen"],
   payer_link_sent: ["Ссылка плательщику отправлена", "Zahlerlink gesendet"],
   payer_link_send_failed: ["Ссылку плательщику не удалось отправить", "Zahlerlink nicht gesendet"],
   payer_questionnaire_reopened: ["Ответы плательщика открыты для исправления", "Zahlerangaben zur Korrektur geöffnet"],

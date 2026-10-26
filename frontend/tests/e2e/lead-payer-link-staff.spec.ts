@@ -208,6 +208,8 @@ type Calls = {
   sends: Record<string, unknown>[];
   revokes: number;
   estimates: Record<string, unknown>[];
+  /** Bodies of `POST /leads/{id}/payer-declaration/payment-route` (owner 2026-10-26). */
+  routes: Record<string, unknown>[];
 };
 
 type MountOptions = {
@@ -226,7 +228,7 @@ async function mount(
 ) {
   await startClockAt(page);
   const state = { link: initial, declaration: { ...declaration } as Record<string, unknown> };
-  const calls: Calls = { sends: [], revokes: 0, estimates: [] };
+  const calls: Calls = { sends: [], revokes: 0, estimates: [], routes: [] };
   await page.addInitScript((value) => {
     localStorage.setItem("gmed_lang", value);
     localStorage.setItem("gmed_access_token", "lead-payer-link-staff-token");
@@ -261,6 +263,26 @@ async function mount(
         can_review_uploads: true,
         ...portalStatements,
         ...portal,
+      };
+    } else if (path === `/leads/${leadId}/payer-declaration/payment-route` && method === "POST") {
+      // Like the server: the sent keys replace the route, staff are its source now.
+      const body = request.postDataJSON() as Record<string, unknown>;
+      calls.routes.push(body);
+      state.declaration = { ...state.declaration, ...body, payment_route_source: "staff", updated_at: "2026-10-06T12:00:00Z" };
+      response = {
+        declaration: state.declaration,
+        status: {
+          complete: true,
+          missing: [],
+          cost_assumption: { required: false, document_id: null, current: false, signed: false, signed_at: null },
+          order_id: null,
+          order_number: null,
+          client_signed_order: false,
+          agency_signed_order: false,
+          agency_may_sign: false,
+          agency_blocking: [],
+          aml_countries: ["AT"],
+        },
       };
     } else if (path === `/leads/${leadId}/payer-declaration`) {
       response = {
@@ -643,4 +665,41 @@ test("a PEP alone leaves the enhanced check voluntary", async ({ page }) => {
   // Staff may still carry it out: the sheet opens as a voluntary check.
   await section.getByRole("button", { name: "Заполнить проверку" }).click();
   await expect(page.getByTestId("lead-aml-sheet-requirement")).toContainText("Добровольная проверка");
+});
+
+test("staff enter and correct the payer's payment route; the source is shown", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard, calls } = await mount(page, "ru", freshState());
+  const block = wizard.locator("#lead-wizard-payer-declaration").getByTestId("lead-payer-payment-route");
+  await expect(block).toContainText("Способ оплаты плательщика");
+  await expect(block.getByTestId("lead-payer-route-source")).toHaveCount(0);
+  const save = block.getByRole("button", { name: "Сохранить способ оплаты", exact: true });
+  await expect(save).toBeDisabled();
+
+  // A bank transfer asks the account.
+  await block.getByRole("combobox", { name: "Способ оплаты", exact: true }).click();
+  await page.getByRole("option", { name: "Банковский перевод", exact: true }).click();
+  await block.getByRole("combobox", { name: "Страна счёта", exact: true }).click();
+  await page.getByRole("option", { name: "Австрия", exact: true }).click();
+  await block.getByLabel("Владелец счёта").fill("Viktor Zahler");
+  await save.click();
+  await expect(block.getByRole("status")).toHaveText("Способ оплаты сохранён");
+  expect(calls.routes).toEqual([{ payment_method: "bank_transfer", account_country: "AT", account_holder: "Viktor Zahler" }]);
+  await expect(block.getByTestId("lead-payer-route-source")).toHaveText("внесено сотрудником");
+  await expect(save).toBeDisabled();
+
+  // Cash: the account goes, as on the server.
+  await block.getByRole("combobox", { name: "Способ оплаты", exact: true }).click();
+  await page.getByRole("option", { name: "Наличные", exact: true }).click();
+  await expect(block.getByLabel("Владелец счёта")).toHaveCount(0);
+  await save.click();
+  await expect.poll(() => calls.routes.length).toBe(2);
+  expect(calls.routes[1]).toEqual({ payment_method: "cash", account_country: null, account_holder: null });
+  await block.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("lead-payer-payment-route-ru-desktop.png"), animations: "disabled" });
+
+  // On a phone the block must not widen the wizard.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => noOverflow(wizard)).toBe(true);
+  await expect.poll(() => noOverflow(block)).toBe(true);
 });

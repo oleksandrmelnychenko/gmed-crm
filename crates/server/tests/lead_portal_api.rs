@@ -1771,6 +1771,8 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         "cost_estimate_consent_required",
         // Server-computed: the payer link locked the organisation details.
         "organisation_details_locked",
+        // Server-computed: who gave the stored payment route (2026-10-26).
+        "payment_route_source",
         // The lead's own answers of the extra step; staff write the
         // patient's funds only from the AML form (2026-10-23), and who
         // entered them is the server's.

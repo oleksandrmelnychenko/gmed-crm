@@ -176,6 +176,12 @@ export type PayerDeclaration = {
   bank_name?: string | null;
   via_third_party?: boolean | null;
   via_third_party_details?: string | null;
+  /**
+   * Who gave the route last: the payer (its link), staff (the wizard,
+   * 2026-10-26) or the lead (the cabinet); null without a route, absent on
+   * an older server.
+   */
+  payment_route_source?: "payer" | "staff" | "lead" | null;
   patient_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;

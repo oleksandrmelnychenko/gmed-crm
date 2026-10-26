@@ -114,6 +114,38 @@ export type PortalEmailOwner = {
   patient_name: string | null;
 };
 
+/**
+ * Whose login an address typed in the contact editor already is (DEV QA
+ * V-A6): `kind` only, without number or name, for a staff login or a patient
+ * the caller may not read.
+ */
+export type ContactEmailLoginOwner = {
+  kind: "patient" | "lead" | "staff";
+  patient_id: string | null;
+  patient_number: string | null;
+  lead_id: string | null;
+  display_name: string | null;
+};
+
+/**
+ * `POST /leads/{id}/contact-email-check`: a POST so the address never sits in
+ * a URL. `contactId` is the trusted contact the address is typed for (its own
+ * guardian login is not reported), `relatedPatientId` the patient record the
+ * editor links it to.
+ */
+export function checkLeadContactEmail(
+  leadId: string,
+  email: string,
+  contactId?: string | null,
+  relatedPatientId?: string | null,
+) {
+  return postJson<{ login_owner: ContactEmailLoginOwner | null }>(`/leads/${leadId}/contact-email-check`, {
+    email,
+    contact_id: contactId || null,
+    related_patient_id: relatedPatientId || null,
+  }).then((body) => body.login_owner ?? null);
+}
+
 export type LeadPortalAccountState = {
   account: {
     user_id: string;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   TRUSTED_CONTACT_RELATIONS,
@@ -16,7 +16,14 @@ import {
   withoutTrustedContacts,
   type TrustedContactDraft,
 } from "./lead-trusted-contacts";
-import { changedRepresentativeDetails } from "./lead-trusted-contacts";
+import {
+  CONTACT_EMAIL_CHECK_DEBOUNCE_MS,
+  changedRepresentativeDetails,
+  contactEmailLoginWarning,
+  contactEmailToCheck,
+  createContactEmailLoginCheck,
+} from "./lead-trusted-contacts";
+import type { ContactEmailLoginOwner } from "../data/leads-api";
 
 describe("the relation of a trusted contact", () => {
   const ru = (text: string) => text;
@@ -356,5 +363,88 @@ describe("F-11: a representative's citizenships and birth data go with the conta
       { citizenships: ["ru"], birth_place: "Moskau ", birth_country: "" },
     )).toBeUndefined();
     expect(trustedContactsPayload([contact])[0]).not.toHaveProperty("citizenships");
+  });
+});
+
+describe("the login warning of the contact editor (DEV QA V-A6)", () => {
+  const ru = (text: string) => text;
+  const de = (_ru: string, text: string) => text;
+  const patientOwner: ContactEmailLoginOwner = {
+    kind: "patient",
+    patient_id: "p-1",
+    patient_number: "P-2026-0007",
+    lead_id: null,
+    display_name: "Olga Beispiel",
+  };
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("asks only about a well-formed address that is not the stored one", () => {
+    expect(contactEmailToCheck("", null)).toBeNull();
+    expect(contactEmailToCheck("anna@", null)).toBeNull();
+    expect(contactEmailToCheck(" Anna@Example.de ", "anna@example.de")).toBeNull();
+    expect(contactEmailToCheck(" anna@example.de ", "old@example.de")).toBe("anna@example.de");
+    expect(contactEmailToCheck("anna@example.de", undefined)).toBe("anna@example.de");
+  });
+
+  it("names the patient when the server does, and only the kind otherwise", () => {
+    expect(contactEmailLoginWarning(null, ru)).toBeNull();
+    expect(contactEmailLoginWarning(patientOwner, ru)).toBe(
+      "Этот адрес — логин другого пациента (P-2026-0007, Olga Beispiel). Проверьте, тот ли это человек.",
+    );
+    expect(contactEmailLoginWarning(patientOwner, de)).toBe(
+      "Diese Adresse ist der Login einer anderen Person (P-2026-0007, Olga Beispiel). Bitte prüfen.",
+    );
+    expect(contactEmailLoginWarning({ ...patientOwner, patient_id: null, patient_number: null, display_name: null }, ru))
+      .toBe("Этот адрес — логин другого пациента. Проверьте, тот ли это человек.");
+    expect(contactEmailLoginWarning({ ...patientOwner, kind: "staff", patient_number: null, display_name: null }, de))
+      .toBe("Diese Adresse ist der Login eines GMED-Mitarbeiters. Bitte prüfen.");
+    expect(contactEmailLoginWarning({ ...patientOwner, kind: "lead", patient_number: null, display_name: "Anna Muster" }, ru))
+      .toBe("Этот адрес — логин другого человека (Anna Muster). Проверьте, тот ли это человек.");
+  });
+
+  it("waits 400 ms after the last change and clears the warning at once", async () => {
+    const lookup = vi.fn<(email: string) => Promise<ContactEmailLoginOwner | null>>(async () => patientOwner);
+    const shown: (ContactEmailLoginOwner | null)[] = [];
+    const check = createContactEmailLoginCheck(lookup, (owner) => shown.push(owner));
+
+    check.update("anna@exam", null);
+    check.update("anna@example.de", null);
+    await vi.advanceTimersByTimeAsync(CONTACT_EMAIL_CHECK_DEBOUNCE_MS - 1);
+    expect(lookup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(lookup).toHaveBeenCalledWith("anna@example.de");
+    expect(shown.at(-1)).toEqual(patientOwner);
+
+    check.update("anna@example.d", null);
+    expect(shown.at(-1)).toBeNull();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends nothing for the stored address and drops a stale or failed answer", async () => {
+    let resolve: (owner: ContactEmailLoginOwner | null) => void = () => {};
+    const lookup = vi.fn<(email: string) => Promise<ContactEmailLoginOwner | null>>(() => new Promise((done) => { resolve = done; }));
+    const shown: (ContactEmailLoginOwner | null)[] = [];
+    const check = createContactEmailLoginCheck(lookup, (owner) => shown.push(owner));
+
+    check.update("anna@example.de", "anna@example.de");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lookup).not.toHaveBeenCalled();
+
+    check.update("olga@example.de", "anna@example.de");
+    await vi.advanceTimersByTimeAsync(CONTACT_EMAIL_CHECK_DEBOUNCE_MS);
+    expect(lookup).toHaveBeenCalledTimes(1);
+    check.cancel();
+    resolve(patientOwner);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(shown.filter(Boolean)).toEqual([]);
+
+    const failing = createContactEmailLoginCheck(() => Promise.reject(new Error("offline")), (owner) => shown.push(owner));
+    failing.update("olga@example.de", null);
+    await vi.advanceTimersByTimeAsync(CONTACT_EMAIL_CHECK_DEBOUNCE_MS);
+    expect(shown.at(-1)).toBeNull();
   });
 });

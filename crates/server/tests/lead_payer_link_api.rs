@@ -3372,9 +3372,10 @@ async fn a_submitted_payer_cash_is_sticky() {
 }
 
 /// A payment route the link did not write counts at once, also while the
-/// payer's statement is a draft: staff's own route (no API of the wizard
-/// writes section 8 today, so the row is set directly, as staff's tools or a
-/// migration would) fires T9 on the next evaluation; a route the payer wrote
+/// payer's statement is a draft: staff's own route (set directly here, as a
+/// migration would; the wizard's endpoint is tested in
+/// `a_staff_payment_route_counts_at_once_while_the_payer_drafts`) fires T9 on
+/// the next evaluation; a route the payer wrote
 /// and staff changed afterwards is staff's.
 #[tokio::test]
 async fn a_payment_route_not_written_by_the_link_counts_at_once() {
@@ -3427,4 +3428,140 @@ fn bank_transfer() -> Value {
         "account_holder": "Viktor Zahler",
         "bank_name": "Beispielbank"
     })
+}
+
+/// `POST /leads/{id}/payer-declaration/payment-route` as `bearer`.
+async fn staff_route(
+    app: &PayerApp,
+    lead_id: Uuid,
+    bearer: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    with_login(
+        app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration/payment-route"),
+        bearer,
+        Some(body),
+    )
+    .await
+}
+
+/// Staff's payment route in the wizard (owner 2026-10-26) counts at once,
+/// also while the payer's own statement is a draft; the payer's later answer
+/// on the link replaces it (last writer wins) and waits for the submit again.
+#[tokio::test]
+async fn a_staff_payment_route_counts_at_once_while_the_payer_drafts() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, _) = lead_with_payer(&app, "route-wizard").await;
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    consent(&app, &token, &session).await;
+    assert!(assessment_started(pool, lead_id).await);
+    // The payer drafts a bank transfer.
+    let (status, body) = patch(&app, &token, &session, person_answers()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(stored_payer_triggers(pool, lead_id, &["T9"]).await, vec![]);
+    let declaration_path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let (_, read) = with_login(&app, "GET", &declaration_path, &app.manager(), None).await;
+    assert_eq!(
+        read["declaration"]["payment_route_source"], "payer",
+        "{read}"
+    );
+
+    // Read-only roles see it, write nothing.
+    for role in ["ceo_assistant", "billing"] {
+        let (status, body) = staff_route(
+            &app,
+            lead_id,
+            &app.staff(role),
+            json!({ "payment_method": "card" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}: {body}");
+    }
+    let (status, _) = with_login(
+        &app,
+        "GET",
+        &declaration_path,
+        &app.staff("ceo_assistant"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Staff set cash: the route is staff's, T9 fires at once, the payer's
+    // statement still a draft.
+    let (status, saved) = staff_route(
+        &app,
+        lead_id,
+        &app.manager(),
+        json!({ "payment_method": "cash" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert!(saved["declaration"]["bank_name"].is_null(), "{saved}");
+    assert_eq!(
+        saved["declaration"]["payment_route_source"], "staff",
+        "{saved}"
+    );
+    let marker: Option<String> = sqlx::query_scalar(
+        "SELECT payment_route_marker FROM lead_payer_statements WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(marker, None, "the route is no longer the link's");
+    let submitted: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT submitted_at FROM lead_payer_statements WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(
+        submitted.is_none(),
+        "the payer's statement is still a draft"
+    );
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), true)]
+    );
+
+    // Staff change it to a bank transfer: T9 at once inactive.
+    let (status, saved) = staff_route(
+        &app,
+        lead_id,
+        &app.manager(),
+        json!({
+            "payment_method": "bank_transfer",
+            "account_country": "AT",
+            "account_holder": "Viktor Zahler",
+            "bank_name": "Beispielbank"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), false)]
+    );
+
+    // The payer answers section 8 again: the payer's route wins and is the
+    // payer's draft again — its cash waits for the submit.
+    let (status, body) = patch(&app, &token, &session, json!({ "payment_method": "cash" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payment_route"]["payment_method"], "cash", "{body}");
+    let (_, read) = with_login(&app, "GET", &declaration_path, &app.manager(), None).await;
+    assert_eq!(read["declaration"]["payment_method"], "cash", "{read}");
+    assert_eq!(
+        read["declaration"]["payment_route_source"], "payer",
+        "{read}"
+    );
+    assert_eq!(
+        stored_payer_triggers(pool, lead_id, &["T9"]).await,
+        vec![("T9".to_string(), false)],
+        "the payer's draft cash is pending"
+    );
 }
