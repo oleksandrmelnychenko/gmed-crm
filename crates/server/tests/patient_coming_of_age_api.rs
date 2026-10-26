@@ -16,9 +16,12 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+use gmed_server::realtime::LEAD_PORTAL_ACCESS_ENDED;
 use gmed_server::services::coming_of_age::{
-    ComingOfAgeReport, LEAD_NOTIFICATION_KIND, LEAD_NOTIFIED_ACTION, NOTIFICATION_KIND,
-    NOTIFIED_ACTION, REVOKE_REASON, run_on,
+    ADVANCE_NOTICE_DAYS, CAME_OF_AGE_EVENT, ComingOfAgeReport, LEAD_CAME_OF_AGE_EVENT,
+    LEAD_NOTIFICATION_KIND, LEAD_NOTIFIED_ACTION, LEAD_SOON_EVENT, LEAD_SOON_NOTIFICATION_KIND,
+    LEAD_SOON_NOTIFIED_ACTION, NOTIFICATION_KIND, NOTIFIED_ACTION, REVOKE_REASON, SOON_EVENT,
+    SOON_NOTIFICATION_KIND, SOON_NOTIFIED_ACTION, run_advance_notices_on, run_on,
 };
 
 const SECRET: &str = "test-secret-at-least-32-characters-long!!";
@@ -170,6 +173,20 @@ async fn count(pool: &PgPool, sql: &str, id: Uuid) -> i64 {
         .fetch_one(pool)
         .await
         .unwrap()
+}
+
+/// The realtime events of `event_type` about `entity`, as published (and
+/// persisted for the replay): `(target users, payload)`.
+async fn realtime(pool: &PgPool, event_type: &str, entity: Uuid) -> Vec<(Vec<Uuid>, Value)> {
+    sqlx::query_as(
+        "SELECT target_user_ids, payload FROM realtime_events
+         WHERE event_type = $1 AND entity_id = $2 ORDER BY seq",
+    )
+    .bind(event_type)
+    .bind(entity)
+    .fetch_all(pool)
+    .await
+    .unwrap()
 }
 
 #[tokio::test]
@@ -336,10 +353,23 @@ async fn parents_lose_access_on_the_eighteenth_birthday_and_staff_is_told_once()
     .unwrap();
     assert_eq!(recipient, manager, "the patient's own manager is told");
 
+    // Live (owner request 2026-10-26): the patient's open card reloads, the
+    // mother's open cabinet of the converted request hears that it ended.
+    let came_of_age = realtime(pool, CAME_OF_AGE_EVENT, child).await;
+    assert_eq!(came_of_age.len(), 1, "{came_of_age:?}");
+    assert!(came_of_age[0].0.contains(&manager), "{came_of_age:?}");
+    assert_eq!(came_of_age[0].1["reason"], REVOKE_REASON);
+    assert_eq!(came_of_age[0].1["assignments_revoked"], 2);
+    let ended = realtime(pool, LEAD_PORTAL_ACCESS_ENDED, lead).await;
+    assert_eq!(ended.len(), 1, "{ended:?}");
+    assert_eq!(ended[0].0, vec![mother], "only the parent who lost it");
+    assert_eq!(ended[0].1, json!({ "reason": REVOKE_REASON }));
+
     // Idempotent: a second run changes nothing and tells nobody again.
     let again = run_on(&suite.state, today).await.unwrap();
     assert_eq!(again, ComingOfAgeReport::default());
     assert_eq!(count(pool, &notice_sql, child).await, 1);
+    assert_eq!(realtime(pool, CAME_OF_AGE_EVENT, child).await.len(), 1);
     assert_eq!(
         count(
             pool,
@@ -721,6 +751,33 @@ async fn parents_lose_the_access_to_an_open_request_on_the_eighteenth_birthday()
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
 
+    // Live: open wizards reload, both parents' open cabinets hear it ended.
+    let came_of_age = realtime(pool, LEAD_CAME_OF_AGE_EVENT, lead).await;
+    assert_eq!(came_of_age.len(), 1, "{came_of_age:?}");
+    assert!(
+        came_of_age[0].0.contains(&suite.admin_id),
+        "the request's owner"
+    );
+    assert_eq!(came_of_age[0].1["lead_accesses_revoked"], 2);
+    let ended = realtime(pool, LEAD_PORTAL_ACCESS_ENDED, lead).await;
+    assert_eq!(ended.len(), 1, "{ended:?}");
+    let mut targets = ended[0].0.clone();
+    targets.sort();
+    let mut parents = vec![mother, father];
+    parents.sort();
+    assert_eq!(targets, parents, "{ended:?}");
+    assert!(
+        !ended[0].0.contains(&child_login),
+        "the child's own login is not told"
+    );
+    assert_eq!(ended[0].1, json!({ "reason": REVOKE_REASON }));
+    assert!(
+        realtime(pool, LEAD_PORTAL_ACCESS_ENDED, sibling)
+            .await
+            .is_empty(),
+        "the sibling's request stays open"
+    );
+
     // Idempotent: nothing again, nobody told twice.
     let again = run_on(&suite.state, today).await.unwrap();
     assert_eq!(again, ComingOfAgeReport::default());
@@ -736,4 +793,234 @@ async fn parents_lose_the_access_to_an_open_request_on_the_eighteenth_birthday()
         .await,
         1
     );
+}
+
+/// Owner request 2026-10-26: staff hear 30 days ahead that a minor patient
+/// (or an open request of a minor) turns 18 and the parents' access ends,
+/// once per person, with a realtime event for the open card or wizard. A
+/// person further away, already of age, or without a parent's access is not
+/// told; neither is the patient of a request that was told already.
+#[tokio::test]
+async fn staff_hear_thirty_days_ahead_once_that_a_minor_turns_eighteen() {
+    let Some(suite) = support::suite_context(SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let today = gmed_server::app_time::today();
+    let turns_18_in = |days: u64| years_before(today + chrono::Days::new(days), 18);
+
+    let (manager, _) = user(pool, "Manager", "patient_manager").await;
+    let (mother, _) = user(pool, "Anna", "patient").await;
+    let (_, child_email) = user(pool, "Mia", "patient").await;
+    let (_, later_email) = user(pool, "Lena", "patient").await;
+    // Turns 18 in 20 days: inside the window.
+    let child = patient(pool, suite.admin_id, "Mia", turns_18_in(20), &child_email).await;
+    assign(pool, child, manager, suite.admin_id, "manual").await;
+    assign(pool, child, mother, suite.admin_id, "lead_guardian").await;
+    // Turns 18 in 40 days: not yet.
+    let later = patient(pool, suite.admin_id, "Lena", turns_18_in(40), &later_email).await;
+    assign(pool, later, manager, suite.admin_id, "manual").await;
+    assign(pool, later, mother, suite.admin_id, "lead_guardian").await;
+    // Inside the window but no parent has access: nothing ends.
+    let (_, alone_email) = user(pool, "Ole", "patient").await;
+    let alone = patient(pool, suite.admin_id, "Ole", turns_18_in(10), &alone_email).await;
+    assign(pool, alone, manager, suite.admin_id, "manual").await;
+
+    // An open request turning 18 in exactly 30 days, with a parent's access.
+    let open_lead: Uuid = sqlx::query_scalar(
+        "INSERT INTO leads (first_name, last_name, date_of_birth, created_by)
+         VALUES ('Finn', 'Muster', $1, $2) RETURNING id",
+    )
+    .bind(turns_18_in(ADVANCE_NOTICE_DAYS as u64))
+    .bind(suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO lead_portal_access (lead_id, user_id, kind, created_by) VALUES ($1, $2, 'guardian', $3)",
+    )
+    .bind(open_lead)
+    .bind(mother)
+    .bind(suite.admin_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let report = run_advance_notices_on(&suite.state, today).await.unwrap();
+    assert!(report.patients >= 1 && report.leads >= 1, "{report:?}");
+
+    // The patient: the assigned manager, with the day and the days left.
+    let notices: Vec<(Uuid, Option<Value>)> = sqlx::query_as(
+        "SELECT user_id, params FROM user_notifications
+         WHERE kind = $1 AND entity_type = 'patient' AND entity_id = $2",
+    )
+    .bind(SOON_NOTIFICATION_KIND)
+    .bind(child)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].0, manager);
+    let params = notices[0].1.clone().unwrap();
+    assert_eq!(params["days_left"], 20, "{params}");
+    assert_eq!(
+        params["turns_18_on"],
+        (today + chrono::Days::new(20)).to_string(),
+        "{params}"
+    );
+    assert!(
+        params["patient_label"].as_str().unwrap().contains("Mia"),
+        "{params}"
+    );
+    let events = realtime(pool, SOON_EVENT, child).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert!(events[0].0.contains(&manager), "{events:?}");
+    assert_eq!(events[0].1["days_left"], 20);
+    // Not told: too far away, or nobody's access ends.
+    for quiet in [later, alone] {
+        assert_eq!(
+            count(
+                pool,
+                &format!(
+                    "SELECT count(*) FROM user_notifications WHERE kind = '{SOON_NOTIFICATION_KIND}' AND entity_id = $1"
+                ),
+                quiet,
+            )
+            .await,
+            0
+        );
+    }
+
+    // The open request: its owner (and the patient managers) are told.
+    let lead_notice_sql = format!(
+        "SELECT count(*) FROM user_notifications WHERE kind = '{LEAD_SOON_NOTIFICATION_KIND}' AND entity_type = 'lead' AND entity_id = $1"
+    );
+    let lead_notices = count(pool, &lead_notice_sql, open_lead).await;
+    assert!(lead_notices >= 1);
+    let owner_params: Option<Value> = sqlx::query_scalar(
+        "SELECT params FROM user_notifications WHERE kind = $1 AND entity_id = $2 AND user_id = $3",
+    )
+    .bind(LEAD_SOON_NOTIFICATION_KIND)
+    .bind(open_lead)
+    .bind(suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let owner_params = owner_params.unwrap();
+    assert_eq!(owner_params["lead_name"], "Finn Muster");
+    assert_eq!(owner_params["days_left"], ADVANCE_NOTICE_DAYS);
+    let lead_events = realtime(pool, LEAD_SOON_EVENT, open_lead).await;
+    assert_eq!(lead_events.len(), 1, "{lead_events:?}");
+    assert!(
+        lead_events[0].0.contains(&suite.admin_id),
+        "{lead_events:?}"
+    );
+
+    // Once per person: the next day's run and a repeated run tell nobody again.
+    run_advance_notices_on(&suite.state, today).await.unwrap();
+    run_advance_notices_on(&suite.state, today.succ_opt().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        count(
+            pool,
+            &format!(
+                "SELECT count(*) FROM user_notifications WHERE kind = '{SOON_NOTIFICATION_KIND}' AND entity_id = $1"
+            ),
+            child,
+        )
+        .await,
+        1
+    );
+    assert_eq!(count(pool, &lead_notice_sql, open_lead).await, lead_notices);
+    assert_eq!(realtime(pool, SOON_EVENT, child).await.len(), 1);
+    assert_eq!(
+        count(
+            pool,
+            &format!(
+                "SELECT count(*) FROM audit_log WHERE action = '{SOON_NOTIFIED_ACTION}' AND entity_id = $1"
+            ),
+            child,
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        count(
+            pool,
+            &format!(
+                "SELECT count(*) FROM audit_log WHERE action = '{LEAD_SOON_NOTIFIED_ACTION}' AND entity_id = $1"
+            ),
+            open_lead,
+        )
+        .await,
+        1
+    );
+
+    // The request becomes the patient record: the patient is not told again.
+    let (_, converted_email) = user(pool, "Finn", "patient").await;
+    let converted = patient(
+        pool,
+        suite.admin_id,
+        "Finn",
+        turns_18_in(ADVANCE_NOTICE_DAYS as u64),
+        &converted_email,
+    )
+    .await;
+    assign(pool, converted, manager, suite.admin_id, "manual").await;
+    assign(pool, converted, mother, suite.admin_id, "lead_guardian").await;
+    sqlx::query(
+        "UPDATE leads SET converted_patient_id = $2, qualification_status = 'converted' WHERE id = $1",
+    )
+    .bind(open_lead)
+    .bind(converted)
+    .execute(pool)
+    .await
+    .unwrap();
+    run_advance_notices_on(&suite.state, today).await.unwrap();
+    assert_eq!(
+        count(
+            pool,
+            &format!(
+                "SELECT count(*) FROM user_notifications WHERE kind = '{SOON_NOTIFICATION_KIND}' AND entity_id = $1"
+            ),
+            converted,
+        )
+        .await,
+        0
+    );
+}
+
+/// The job trigger for live tests (`POST /e2e/jobs/run`) exists only with
+/// `ENABLE_E2E_SUPPORT` and the secret: without them it answers 404 to
+/// anything, before it reads the body.
+#[tokio::test]
+async fn the_job_trigger_is_not_reachable_without_e2e_support() {
+    if std::env::var_os("ENABLE_E2E_SUPPORT").is_some() {
+        return;
+    }
+    let Some(suite) = support::suite_context(SECRET).await else {
+        return;
+    };
+    for body in [
+        r#"{"job":"coming_of_age"}"#,
+        r#"{"job":"lead_retention"}"#,
+        "not json",
+    ] {
+        let response = suite
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/e2e/jobs/run")
+                    .header("Content-Type", "application/json")
+                    .header("x-e2e-secret", "anything")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{body}");
+    }
 }

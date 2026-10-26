@@ -19,16 +19,17 @@ const SEEDED_MEDICAL_PROVIDER_ID: &str = "c0000000-0000-0000-0000-000000000001";
 const MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY: &str = "treatment_organization";
 
 pub fn public_router() -> Router<AppState> {
-    Router::new().route("/e2e/bootstrap/{scenario}", post(bootstrap_scenario))
+    Router::new()
+        .route("/e2e/bootstrap/{scenario}", post(bootstrap_scenario))
+        .route("/e2e/jobs/run", post(run_job))
 }
 
-async fn bootstrap_scenario(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(scenario): Path<String>,
-) -> axum::response::Response {
+/// The gate of every route here: 404 unless `ENABLE_E2E_SUPPORT` is set and
+/// `E2E_SUPPORT_SECRET` is configured, 401 unless `x-e2e-secret` matches it.
+#[allow(clippy::result_large_err)]
+fn check_e2e_access(headers: &HeaderMap) -> Result<(), axum::response::Response> {
     if !e2e_support_enabled() {
-        return err(StatusCode::NOT_FOUND, "Not found");
+        return Err(err(StatusCode::NOT_FOUND, "Not found"));
     }
 
     // An empty secret is no secret: a request without the header would match.
@@ -36,7 +37,7 @@ async fn bootstrap_scenario(
         .ok()
         .filter(|secret| !secret.trim().is_empty())
     else {
-        return err(StatusCode::NOT_FOUND, "Not found");
+        return Err(err(StatusCode::NOT_FOUND, "Not found"));
     };
 
     let provided_secret = headers
@@ -45,7 +46,88 @@ async fn bootstrap_scenario(
         .unwrap_or_default();
 
     if !secret_matches(provided_secret, &secret) {
-        return err(StatusCode::UNAUTHORIZED, "Invalid E2E support secret");
+        return Err(err(StatusCode::UNAUTHORIZED, "Invalid E2E support secret"));
+    }
+    Ok(())
+}
+
+/// `POST /e2e/jobs/run {"job": "lead_retention" | "coming_of_age"}`: runs a
+/// background job now, as its scheduler would, for live tests of the
+/// signals it sends (owner request 2026-10-26). Same gate as the bootstrap:
+/// never reachable without `ENABLE_E2E_SUPPORT` and the secret. The body is
+/// read only after the gate, so a disabled server answers 404 to anything.
+async fn run_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    if let Err(response) = check_e2e_access(&headers) {
+        return response;
+    }
+    let job = serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|value| value.get("job")?.as_str().map(str::to_string))
+        .unwrap_or_default();
+    match job.as_str() {
+        "lead_retention" => {
+            match crate::routes::leads::auto_purge_unqualified_leads(&state).await {
+                Ok(report) => Json(json!({
+                    "job": job,
+                    "scanned": report.scanned,
+                    "warned": report.warned,
+                    "reminded": report.reminded,
+                    "purged": report.purged,
+                    "blocked": report.blocked,
+                    "errors": report.errors,
+                }))
+                .into_response(),
+                Err(error) => err(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            }
+        }
+        "coming_of_age" => {
+            let today = crate::app_time::today();
+            let birthday = match crate::services::coming_of_age::run_on(&state, today).await {
+                Ok(report) => report,
+                Err(error) => return err(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            };
+            let advance =
+                match crate::services::coming_of_age::run_advance_notices_on(&state, today).await {
+                    Ok(report) => report,
+                    Err(error) => {
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+                    }
+                };
+            Json(json!({
+                "job": job,
+                "as_of": today.to_string(),
+                "patients": birthday.patients,
+                "leads": birthday.leads,
+                "assignments_revoked": birthday.assignments_revoked,
+                "lead_accesses_revoked": birthday.lead_accesses_revoked,
+                "logins_deactivated": birthday.logins_deactivated,
+                "notifications": birthday.notifications,
+                "advance_notice": {
+                    "patients": advance.patients,
+                    "leads": advance.leads,
+                    "notifications": advance.notifications,
+                },
+            }))
+            .into_response()
+        }
+        _ => err(
+            StatusCode::BAD_REQUEST,
+            "Unknown job: use \"lead_retention\" or \"coming_of_age\"",
+        ),
+    }
+}
+
+async fn bootstrap_scenario(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(scenario): Path<String>,
+) -> axum::response::Response {
+    if let Err(response) = check_e2e_access(&headers) {
+        return response;
     }
 
     match scenario.as_str() {

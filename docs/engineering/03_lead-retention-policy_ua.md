@@ -54,9 +54,21 @@ Process map клінік-flow-у також чітко це фіксує: дві
 
 **Нагадування lead-у** (рішення власника 2026-10-24): у той самий момент, якщо sweep справді видалить заявку (та сама умова, без рахунків), lead отримує один нейтральний лист через Mittaro мовою заявки (de/ru/uk/en) з датою видалення і посиланням на вхід у портал; для неповнолітнього — кожен із батьків з активним доступом своєю мовою (`users.preferred_language`, інакше мова заявки). Без адреси листа немає. Рядки `lead_retention_reminder_emails` записуються в одній транзакції до відправки (їх `id` — ключ ідемпотентності листа), а позначка `leads.retention_reminder_sent_at` ставиться лише після того, як провайдер прийняв хоча б один лист; невідправлений (`failed`) лист наступний sweep повторює тим самим рядком і ключем, доки строк ще попереду. Доставка відстежується як для листів входу, bounce → сповіщення `retention_reminder_email_undelivered` персоналу lead-а. Рядки видаляються разом із lead-ом. API повертає `retention_deadline_at` у списку і в картці; UI показує «Удаление через N дн» у колонці «Автоудаление», у шапці картки і банером у wizard-і.
 
+**Сигнали в реальному часі** (запит власника 2026-10-26): персонал бачить обидві події без перезавантаження сторінки.
+
+| Момент | Сповіщення (дзвіночок) | Realtime-подія | Кому |
+| --- | --- | --- | --- |
+| Попередження (≥ 3 дні до видалення) | `lead_retention_warning` (як і раніше) + `notification.created` | `lead.retention_warning`, payload `{ "delete_at": RFC 3339 }` | автор lead-а; якщо його немає чи він деактивований — PM і CEO (`unqualified_lead_recipients`); подія lead-а йде також ролям `ceo`, `ceo_assistant`, `patient_manager`, `concierge`, `sales` (`publish_lead_event`) |
+| Видалення sweep-ом | `lead_purged_by_retention` «Лид удалён автоматически» + `notification.created` | `lead.purged`, payload `{ "reason": "unqualified_lead_retention" }` (і, як раніше, `lead.failed_resolved`) | ті самі співробітники, що отримали попередження |
+| Видалення sweep-ом, кабінет | — | `lead.portal_access_ended`, payload `{ "reason": "lead_purged" }` | лише входи кабінету цієї заявки (вхід lead-а й батьки з активним доступом), прочитані до видалення |
+
+- Сповіщення `lead_purged_by_retention` записується в тій самій транзакції, що й видалення, **без** `entity_type`/`entity_id` і без імені: від lead-а нічого не лишилося, тож посилання немає (`notificationHrefForRole` → `null`), а правило «жодне сповіщення не вказує на видалений lead» (тест `an_unqualified_lead_without_consent_is_purged_with_everything_it_owns`) діє далі. `params`: `reason`, `retention_days`. Тексти RU/DE — `frontend/src/lib/notification-copy.ts`.
+- `lead.portal_access_ended` веб-сокет доставляє лише входам ролі `patient`, названим у `target_user_ids`, і без перевірки доступу до заявки (її вже немає); персоналу — ніколи (`routes/realtime.rs::can_receive_event`). Вхід, який видалення вимкнуло, втрачає сокет на найближчій перевірці сесії; батько, у якого лишилися інші заявки, отримує подію, і кабінет перечитує список (`lead-request-page.tsx`).
+- Frontend: список лідів (`pages/leads/page.tsx`) на `lead.retention_warning` перечитує список (колонка «Автоудаление»), на `lead.purged` одразу прибирає рядок і закриває відкриту картку з повідомленням; відкритий wizard на `lead.retention_warning` перечитує lead (бейдж у шапці), на `lead.purged` замість кроків показує «Лид удалён по сроку хранения» з кнопкою «Закрыть» (`pages/leads/model/lead-time-events.ts`).
+
 **Audit**: подія `auto_purge_lead` з `reason = "unqualified_lead_retention"`, `retention_days`, `gdpr_article = "5(1)(e)"`, `failed_from_status`.
 
-**Тести**: модуль `unqualified_lead_retention_tests` (межі строку) і інтеграційні `an_unqualified_lead_without_consent_is_purged_with_everything_it_owns` та `a_repeat_intake_of_a_consented_patient_is_kept_past_the_unqualified_window` у [`crates/server/tests/leads_api.rs`](../../crates/server/tests/leads_api.rs).
+**Тести**: модуль `unqualified_lead_retention_tests` (межі строку) і інтеграційні `an_unqualified_lead_without_consent_is_purged_with_everything_it_owns`, `a_repeat_intake_of_a_consented_patient_is_kept_past_the_unqualified_window` та `retention_warning_and_purge_are_signalled_live` у [`crates/server/tests/leads_api.rs`](../../crates/server/tests/leads_api.rs); доставка `lead.portal_access_ended` — `a_lost_request_reaches_only_the_cabinet_logins_named` у [`crates/server/tests/websocket_lifecycle_api.rs`](../../crates/server/tests/websocket_lifecycle_api.rs); UI — `frontend/tests/e2e/lead-time-events.spec.ts` (змокований сокет).
 
 ## Архітектура
 
@@ -188,6 +200,8 @@ WHERE action = 'auto_purge_lead'
 GROUP BY 1
 ORDER BY 1;"
 ```
+
+**Запустити sweep зараз (лише тестове середовище).** Маршрут `POST /api/v1/e2e/jobs/run` з тілом `{"job": "lead_retention"}` (або `{"job": "coming_of_age"}` — 18-річчя й попередження за 30 днів) виконує той самий прохід, що й планувальник, і повертає лічильники звіту. Він існує лише за `ENABLE_E2E_SUPPORT=1` і непорожнього `E2E_SUPPORT_SECRET` (заголовок `x-e2e-secret`), інакше відповідає 404 на будь-який запит (`routes/e2e_support.rs`). На 26.10.2026 ні DEV, ні PROD цих змінних не задають (`docker-compose*.yml`, `scripts/deploy-dev-current.sh`), тож на DEV маршрут недоступний, доки змінні не додадуть до `release.env` DEV свідомим рішенням.
 
 Якщо у перший прогін (одразу після деплою нового коду) bulk-anonimization здається великим — це нормально. Раніше нічого не чистило, тож є *legacy backlog* leads, які переживали retention window багато разів. Sweeper закриє їх усіх на першому проході.
 

@@ -4731,6 +4731,187 @@ async fn a_failed_retention_notice_leaves_the_lead_to_be_warned_again() {
     assert!(notices > 0);
 }
 
+/// Owner request 2026-10-26: the retention sweep's signals arrive live. The
+/// staff warning comes with `lead.retention_warning` (open lists and wizards
+/// show the countdown); the deletion with `lead.purged` and a notice to the
+/// same staff that names nobody and points nowhere, and the cabinet logins of
+/// the request hear `lead.portal_access_ended`.
+#[tokio::test]
+async fn retention_warning_and_purge_are_signalled_live() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let policy = gmed_server::routes::leads::UnqualifiedLeadRetention {
+        days: 14,
+        effective_at: chrono::Utc::now() - chrono::Duration::days(90),
+    };
+    let owner = seed_user(pool, &format!("retention-live-{tag}"), "patient_manager").await;
+    let parent = seed_user(pool, &format!("retention-parent-{tag}"), "patient").await;
+    let lead = insert_unqualified_lead(&app, &format!("{tag}-live"), 12).await;
+    sqlx::query("UPDATE leads SET created_by = $2 WHERE id = $1")
+        .bind(lead)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO lead_portal_access (lead_id, user_id, kind, created_by) VALUES ($1, $2, 'guardian', $3)",
+    )
+    .bind(lead)
+    .bind(parent)
+    .bind(owner)
+    .execute(pool)
+    .await
+    .unwrap();
+    let events = |event_type: &'static str| async move {
+        sqlx::query_as::<_, (Vec<Uuid>, Vec<String>, Value)>(
+            "SELECT target_user_ids, role_names, payload FROM realtime_events
+             WHERE event_type = $1 AND entity_id = $2 ORDER BY seq",
+        )
+        .bind(event_type)
+        .bind(lead)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    };
+    let notified_live = |kind_filter: &'static str| async move {
+        sqlx::query_scalar::<_, i64>(&format!(
+            "SELECT count(*) FROM realtime_events
+             WHERE event_type = 'notification.created' AND $1 = ANY(target_user_ids)
+               AND {kind_filter}"
+        ))
+        .bind(owner)
+        .bind(lead.to_string())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+
+    // Three days ahead: the warning, live.
+    let report = gmed_server::routes::leads::purge_unqualified_leads(
+        &app.suite.state,
+        policy,
+        chrono::Utc::now(),
+        Some(&[lead]),
+    )
+    .await
+    .unwrap();
+    assert_eq!((report.warned, report.purged), (1, 0), "{report:?}");
+    let warning = events(gmed_server::routes::leads::LEAD_RETENTION_WARNING_EVENT).await;
+    assert_eq!(warning.len(), 1, "{warning:?}");
+    assert!(warning[0].0.contains(&owner), "{warning:?}");
+    assert!(
+        warning[0].1.iter().any(|role| role == "patient_manager"),
+        "{warning:?}"
+    );
+    let delete_at = warning[0].2["delete_at"].as_str().unwrap();
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(delete_at).is_ok(),
+        "{delete_at}"
+    );
+    assert_eq!(
+        notified_live("payload->>'entity_id' = $2").await,
+        1,
+        "the bell of the owner"
+    );
+    assert!(
+        events(gmed_server::routes::leads::LEAD_PURGED_EVENT)
+            .await
+            .is_empty()
+    );
+
+    // The deadline passed: the deletion, live.
+    sqlx::query(
+        "UPDATE leads SET created_at = now() - interval '15 days',
+                          retention_warning_sent_at = now() - interval '4 days'
+         WHERE id = $1",
+    )
+    .bind(lead)
+    .execute(pool)
+    .await
+    .unwrap();
+    let report = gmed_server::routes::leads::purge_unqualified_leads(
+        &app.suite.state,
+        policy,
+        chrono::Utc::now(),
+        Some(&[lead]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.purged, 1, "{report:?}");
+    let purged = events(gmed_server::routes::leads::LEAD_PURGED_EVENT).await;
+    assert_eq!(purged.len(), 1, "{purged:?}");
+    assert!(purged[0].0.contains(&owner), "{purged:?}");
+    assert_eq!(
+        purged[0].2,
+        json!({ "reason": "unqualified_lead_retention" })
+    );
+    let ended = events(gmed_server::realtime::LEAD_PORTAL_ACCESS_ENDED).await;
+    assert_eq!(ended.len(), 1, "{ended:?}");
+    assert_eq!(
+        ended[0].0,
+        vec![parent],
+        "only the request's cabinet logins"
+    );
+    assert!(ended[0].1.is_empty(), "no staff role: {ended:?}");
+    assert_eq!(ended[0].2, json!({ "reason": "lead_purged" }));
+
+    // The same staff are told, without the person and without a link.
+    let notices: Vec<(String, Option<String>, bool)> = sqlx::query_as(
+        "SELECT title, body, entity_type IS NULL AND entity_id IS NULL FROM user_notifications
+         WHERE kind = $1 AND user_id = $2",
+    )
+    .bind(gmed_server::routes::leads::LEAD_PURGED_NOTIFICATION_KIND)
+    .bind(owner)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    let (title, body, unlinked) = &notices[0];
+    assert!(*unlinked, "{notices:?}");
+    assert!(
+        !format!("{title} {}", body.clone().unwrap_or_default()).contains("Retention"),
+        "{notices:?}"
+    );
+    assert_eq!(
+        notified_live("payload->>'kind' = 'lead_purged_by_retention' AND $2 IS NOT NULL").await,
+        1
+    );
+    // Nothing that points to the lead is left in the bell.
+    let pointing: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications WHERE entity_type = 'lead' AND entity_id = $1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(pointing, 0);
+
+    // A second sweep signals nothing again.
+    gmed_server::routes::leads::purge_unqualified_leads(
+        &app.suite.state,
+        policy,
+        chrono::Utc::now(),
+        Some(&[lead]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        events(gmed_server::routes::leads::LEAD_PURGED_EVENT)
+            .await
+            .len(),
+        1
+    );
+    assert_eq!(
+        events(gmed_server::realtime::LEAD_PORTAL_ACCESS_ENDED)
+            .await
+            .len(),
+        1
+    );
+}
+
 /// QA B-18 a (decision 2026-10-11): a repeat intake of an existing patient
 /// with a valid signed DSGVO consent is not purged after 14 days and shows no
 /// deadline; without such a consent (never signed, or withdrawn) the rule

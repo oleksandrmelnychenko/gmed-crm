@@ -805,6 +805,10 @@ const PATIENT_DETAIL_REALTIME_EVENTS = [
   "patient.assignment_revoked",
   "patient.activated",
   "patient.deactivated",
+  // Timed events of the coming-of-age job (owner request 2026-10-26): the
+  // advance notice 30 days ahead and the end of the parents' access at 18.
+  "patient.coming_of_age_soon",
+  "patient.came_of_age",
   "patient.medication_evidence_review_created",
   "patient.medication_ai_analysis_requested",
   "patient.medication_ai_analysis_ready",

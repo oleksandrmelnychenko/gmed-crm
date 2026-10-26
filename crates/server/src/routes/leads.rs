@@ -11946,6 +11946,17 @@ pub const UNQUALIFIED_LEAD_WARNING_DAYS: i64 = 3;
 
 const UNQUALIFIED_LEAD_PURGE_REASON: &str = "auto_purge_unqualified_retention";
 
+/// Realtime event to staff: the one-time deletion warning of a lead went out
+/// (payload `delete_at`, the instant the sweep deletes it).
+pub const LEAD_RETENTION_WARNING_EVENT: &str = "lead.retention_warning";
+/// Realtime event to staff: the retention sweep deleted the lead (payload
+/// `reason`); open lists drop the row, an open wizard says so.
+pub const LEAD_PURGED_EVENT: &str = "lead.purged";
+/// `user_notifications.kind` of the staff notice after the automatic
+/// deletion. It names neither the lead nor the person and points nowhere
+/// (`entity_type` NULL): nothing of the lead is left to open.
+pub const LEAD_PURGED_NOTIFICATION_KIND: &str = "lead_purged_by_retention";
+
 /// The unqualified-lead rule as configured in `system_settings`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnqualifiedLeadRetention {
@@ -12342,6 +12353,16 @@ async fn purge_unqualified_lead(
         return Ok(UnqualifiedLeadPurge::Skipped);
     };
     let from_status: String = lead.try_get("qualification_status")?;
+    // Read before the purge unlinks them: the cabinet logins whose open page
+    // learns live that the request is gone.
+    let portal_users: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT portal_user_id FROM leads WHERE id = $1 AND portal_user_id IS NOT NULL
+           UNION
+           SELECT user_id FROM lead_portal_access WHERE lead_id = $1 AND revoked_at IS NULL"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&mut *tx)
+    .await?;
 
     // An invoice keeps the lead for accounting (§ 257 HGB, § 147 AO): it is
     // never deleted automatically.
@@ -12438,6 +12459,31 @@ async fn purge_unqualified_lead(
     if purged.result.rows_affected() == 0 {
         return Ok(UnqualifiedLeadPurge::Skipped);
     }
+    // The staff who were warned hear that it happened, in the same
+    // transaction as the deletion. The purge above removed every notice that
+    // pointed to the lead; this one points nowhere and names nobody.
+    let recipients =
+        unqualified_lead_recipients(&mut tx, lead.try_get::<Option<Uuid>, _>("created_by")?)
+            .await?;
+    let mut purged_notices = Vec::with_capacity(recipients.len());
+    for recipient in &recipients {
+        let notification_id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, params)
+               VALUES ($1, $2, $3, $4, $5)
+               RETURNING id"#,
+        )
+        .bind(recipient)
+        .bind(LEAD_PURGED_NOTIFICATION_KIND)
+        .bind("Lead deleted automatically")
+        .bind("Not qualified and no signed consent within the retention period.")
+        .bind(json!({
+            "reason": "unqualified_lead_retention",
+            "retention_days": policy.days,
+        }))
+        .fetch_one(&mut *tx)
+        .await?;
+        purged_notices.push((*recipient, notification_id));
+    }
     tx.commit().await?;
 
     for storage_key in &purged.removed_blobs {
@@ -12460,6 +12506,28 @@ async fn purge_unqualified_lead(
         }),
     )
     .await;
+    crate::realtime::publish_lead_event(
+        state,
+        None,
+        LEAD_PURGED_EVENT,
+        lead_id,
+        json!({ "reason": "unqualified_lead_retention" }),
+    )
+    .await;
+    for (recipient, notification_id) in purged_notices {
+        crate::realtime::publish_notification_event(
+            state,
+            recipient,
+            "notification.created",
+            Some(notification_id),
+            json!({ "kind": LEAD_PURGED_NOTIFICATION_KIND }),
+        )
+        .await;
+    }
+    // A login the purge switched off loses its socket on the next check; a
+    // parent's login that keeps other requests gets the event and reloads.
+    crate::realtime::publish_lead_portal_access_ended(state, lead_id, portal_users, "lead_purged")
+        .await;
     Ok(UnqualifiedLeadPurge::Purged)
 }
 
@@ -12624,6 +12692,16 @@ async fn warn_about_unqualified_lead_deadlines(
         .await?;
         tx.commit().await?;
         publish_lead_retention_notices(state, lead_id, &stored).await;
+        // An open leads list or wizard shows the countdown («Автоудаление»)
+        // of the instant the warning just fixed, without a reload.
+        crate::realtime::publish_lead_event(
+            state,
+            None,
+            LEAD_RETENTION_WARNING_EVENT,
+            lead_id,
+            json!({ "delete_at": delete_at.to_rfc3339() }),
+        )
+        .await;
         warned += 1;
     }
     Ok(warned)

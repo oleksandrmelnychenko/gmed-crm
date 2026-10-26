@@ -12,6 +12,7 @@ import { useRealtimeSubscription } from "@/lib/realtime";
 import { setPortalAccountLabel } from "@/lib/portal-account-label";
 import { publishLeadCabinetLang, readStoredLeadCabinetLang, storeLeadCabinetLang } from "./lead-cabinet-language";
 import { setLeadPortalClosed } from "./lead-portal-closed";
+import { LEAD_PORTAL_ACCESS_ENDED_EVENT } from "@/pages/leads/model/lead-time-events";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
 
@@ -185,6 +186,13 @@ export function LeadRequestPage() {
   useEffect(() => {
     void load();
   }, [load, leadMode]);
+  // A request is gone for this login behind its back (owner request
+  // 2026-10-26): the retention sweep deleted it, or the parents' access ended
+  // on the 18th birthday. The event reaches only the logins that lost it; the
+  // list read again shows the closed state the server words.
+  useRealtimeSubscription([LEAD_PORTAL_ACCESS_ENDED_EVENT], () => {
+    void load();
+  });
 
   // A parent's login that fills in requests for a child only (and is no
   // patient of its own): the side bar names it "parent / legal

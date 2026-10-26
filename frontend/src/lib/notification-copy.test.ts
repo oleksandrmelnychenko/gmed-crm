@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { localizedNotificationCopy, type Notification } from "@/components/topbar-data";
+import { localizedNotificationCopy, notificationHrefForRole, type Notification } from "@/components/topbar-data";
 
 import { notificationCopyFromFacts, type NotificationFacts } from "./notification-copy";
 
@@ -305,5 +305,68 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
     expect(localizedNotificationCopy({ ...row, params: null }, "de").body).toBe(
       "Persönliche Daten: 9 von 11 Angaben, Unterlagen: 2. Der Link für den Zahler kann jetzt gesendet werden.",
     );
+  });
+});
+
+describe("timed lead and patient notices (owner request 2026-10-26)", () => {
+  it("words the automatic deletion of a lead without naming anybody", () => {
+    const item = notice(
+      "lead_purged_by_retention",
+      "Lead deleted automatically",
+      "Not qualified and no signed consent within the retention period.",
+      { reason: "unqualified_lead_retention", retention_days: 14 },
+    );
+    expect(notificationCopyFromFacts(item, "ru")).toEqual({
+      title: "Лид удалён автоматически",
+      body: "Лид не был квалифицирован и не имел подписанного согласия до конца срока хранения. Он удалён вместе со всеми документами.",
+    });
+    expect(notificationCopyFromFacts(item, "de")?.title).toBe("Lead automatisch gelöscht");
+    // No link: nothing of the lead is left to open.
+    const row: Notification = { ...item, id: "p", entity_type: null, entity_id: null, is_read: false, created_at: "" };
+    expect(notificationHrefForRole(row, "patient_manager")).toBeNull();
+  });
+
+  it("tells staff 30 days ahead that a minor patient turns 18", () => {
+    const item = notice(
+      "patient_coming_of_age_soon",
+      "Patient P-0007 · Mia Muster turns 18 in 30 days",
+      "On 2026-11-25 the parents' access ends; the patient needs an own login.",
+      { patient_label: "P-0007 · Mia Muster", turns_18_on: "2026-11-25", days_left: 30 },
+    );
+    expect(notificationCopyFromFacts(item, "ru")).toEqual({
+      title: "Пациенту P-0007 · Mia Muster через 30 дней исполнится 18",
+      body: "25.11.2026 закончится родительский доступ к карте пациента. Нужен собственный вход пациента — выдайте его в таблице пациентов.",
+    });
+    expect(notificationCopyFromFacts(item, "de")).toEqual({
+      title: "Patient P-0007 · Mia Muster wird in 30 Tagen 18",
+      body: "Am 25.11.2026 endet der Zugang der Eltern zur Patientenakte. Der Patient braucht einen eigenen Zugang – bitte in der Patiententabelle anlegen.",
+    });
+    // A late date of birth: fewer days, the right plural.
+    const soon = { ...item, params: { ...item.params, days_left: 1, turns_18_on: "2026-10-27" } };
+    expect(notificationCopyFromFacts(soon, "ru")?.title).toBe("Пациенту P-0007 · Mia Muster через 1 день исполнится 18");
+    expect(notificationCopyFromFacts(soon, "de")?.title).toBe("Patient P-0007 · Mia Muster wird in 1 Tag 18");
+  });
+
+  it("tells staff 30 days ahead that the minor of an open request turns 18", () => {
+    const item = notice(
+      "lead_coming_of_age_soon",
+      "Lead Finn Muster turns 18 in 22 days",
+      "On 2026-11-17 the parents' access to the request ends; the lead needs an own login.",
+      { lead_name: "Finn Muster", turns_18_on: "2026-11-17", days_left: 22 },
+    );
+    expect(notificationCopyFromFacts(item, "ru")).toEqual({
+      title: "Лиду Finn Muster через 22 дня исполнится 18",
+      body: "17.11.2026 закончится доступ родителей к заявке. Нужен собственный вход лида — выдайте его в таблице лидов.",
+    });
+    expect(notificationCopyFromFacts(item, "de")?.title).toBe("Lead Finn Muster wird in 22 Tagen 18");
+    // The bell opens the lead.
+    const row: Notification = { ...item, id: "l", entity_type: "lead", entity_id: "lead-1", is_read: false, created_at: "" };
+    expect(notificationHrefForRole(row, "patient_manager")).toBe("/leads?lead=lead-1");
+    expect(localizedNotificationCopy(row, "ru").title).toMatch(CYRILLIC);
+  });
+
+  it("keeps the stored text of an advance notice without facts", () => {
+    const item = notice("lead_coming_of_age_soon", "Lead turns 18 soon", null);
+    expect(notificationCopyFromFacts(item, "ru")).toBeNull();
   });
 });

@@ -446,3 +446,88 @@ async fn patient_chat_requires_a_subscription_and_closes_before_sending_after_re
     .await
     .expect("revoked chat closes without delivering the queued message");
 }
+
+/// Owner request 2026-10-26: `lead.portal_access_ended` reaches only the
+/// cabinet logins it names — although their access to the request is gone,
+/// which is the point — and neither another login nor staff; the staff's lead
+/// events still stay with staff.
+#[tokio::test]
+async fn a_lost_request_reaches_only_the_cabinet_logins_named() {
+    let Some(server) = TestServer::start().await else {
+        return;
+    };
+    let pool = &server.suite.pool;
+    let state = &server.suite.state;
+    let parent = seed_user(pool, "patient").await;
+    let other = seed_user(pool, "patient").await;
+    let lead = Uuid::new_v4();
+    let after_seq: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(seq), 0) FROM realtime_events")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    gmed_server::realtime::publish_lead_portal_access_ended(
+        state,
+        lead,
+        vec![other],
+        "lead_purged",
+    )
+    .await;
+    gmed_server::realtime::publish_lead_portal_access_ended(
+        state,
+        lead,
+        vec![parent],
+        "patient_came_of_age",
+    )
+    .await;
+    gmed_server::realtime::publish_lead_event(state, None, "lead.purged", lead, json!({})).await;
+    // An event both hear marks the end of the replay.
+    gmed_server::realtime::publish_user_profile_event(state, None, parent, json!({})).await;
+
+    let server = &server;
+    let receive_until_marker = |token: String| async move {
+        let mut client = server
+            .connect_with(&format!("/events/ws?last_seq={after_seq}"), &token)
+            .await;
+        let mut received = Vec::new();
+        loop {
+            let frame = tokio::time::timeout(Duration::from_secs(10), client.next())
+                .await
+                .expect("replayed realtime events")
+                .unwrap()
+                .unwrap();
+            let Message::Text(text) = frame else {
+                continue;
+            };
+            let event: Value = serde_json::from_str(text.as_str()).unwrap();
+            if event["type"] == "user.updated" && event["entity_id"] == parent.to_string() {
+                break;
+            }
+            if event["entity_id"] == lead.to_string() {
+                received.push(event);
+            }
+        }
+        client.close(None).await.unwrap();
+        received
+    };
+
+    let parent_token = jwt::issue_access_token(SECRET, parent, "patient", Uuid::new_v4()).unwrap();
+    let received = receive_until_marker(parent_token).await;
+    assert_eq!(received.len(), 1, "{received:?}");
+    assert_eq!(received[0]["type"], "lead.portal_access_ended");
+    assert_eq!(
+        received[0]["payload"],
+        json!({ "reason": "patient_came_of_age" })
+    );
+
+    let staff = receive_until_marker(server.token.clone()).await;
+    assert!(
+        staff
+            .iter()
+            .all(|event| event["type"] != "lead.portal_access_ended"),
+        "{staff:?}"
+    );
+    assert!(
+        staff.iter().any(|event| event["type"] == "lead.purged"),
+        "{staff:?}"
+    );
+}

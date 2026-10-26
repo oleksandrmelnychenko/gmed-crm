@@ -67,6 +67,8 @@ const PATIENT_REALTIME_EVENTS = [
   "patient.assignment_revoked",
   "patient.activated",
   "patient.deactivated",
+  // The 18th birthday ended the parents' access (owner request 2026-10-26).
+  "patient.came_of_age",
 ] as const;
 
 const PATIENT_PAGE_SIZE = 50;

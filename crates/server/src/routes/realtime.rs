@@ -308,6 +308,13 @@ async fn can_receive_event(
     if !release_workspace_allows_realtime_event(auth.role, &event.event_type) {
         return Ok(false);
     }
+    // The cabinet logins that just lost a request (deleted by the retention
+    // sweep, or the parents' access ended at 18): only the logins named, and
+    // without the access check below, which by now fails by design. It
+    // carries the reason only, never a value; staff have their own events.
+    if event.event_type == crate::realtime::LEAD_PORTAL_ACCESS_ENDED {
+        return Ok(auth.role == Role::Patient && event.target_user_ids.contains(&auth.user_id));
+    }
     // The lead cabinet: `lead.portal_updated` (metadata only: what changed,
     // never a value) reaches the lead's and the parents' logins it names
     // while the login still reaches the request, so a second parent's open

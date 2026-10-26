@@ -152,6 +152,16 @@ const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
       de: "Die E-Mail an den Patienten vor der automatischen Löschung ist nicht angekommen. Bitte den Patienten auf anderem Weg kontaktieren, wenn die Anfrage weitergehen soll.",
     },
   },
+  // The retention sweep deleted a lead the staff were warned about
+  // (crates/server/src/routes/leads.rs, owner request 2026-10-26). It names
+  // nobody: nothing of the lead is left.
+  lead_purged_by_retention: {
+    title: { ru: "Лид удалён автоматически", de: "Lead automatisch gelöscht" },
+    body: {
+      ru: "Лид не был квалифицирован и не имел подписанного согласия до конца срока хранения. Он удалён вместе со всеми документами.",
+      de: "Der Lead war bis zum Ende der Aufbewahrungsfrist nicht qualifiziert und hatte keine unterschriebene Einwilligung. Er wurde mit allen Dokumenten gelöscht.",
+    },
+  },
   lead_portal_follow_up_submitted: {
     title: { ru: "Пациент отправил дополнительные сведения", de: "Patient hat die zusätzlichen Angaben gesendet" },
     body: {
@@ -174,6 +184,37 @@ const DELIVERY_PROBLEM: Record<string, Texts> = {
   suppressed: { ru: "адрес заблокирован у почтового сервиса", de: "die Adresse ist beim Versanddienst gesperrt" },
   complained: { ru: "письмо отмечено как спам", de: "die E-Mail wurde als Spam gemeldet" },
 };
+
+// A minor turns 18 soon: the parents' access ends on that day and the person
+// needs an own login (crates/server/src/services/coming_of_age.rs, owner
+// request 2026-10-26). Old rows without params fall back to the English text.
+function comingOfAgeSoon(item: NotificationFacts, lang: Lang): NotificationCopy | null {
+  const lead = item.kind === "lead_coming_of_age_soon";
+  const name = text(item, lead ? "lead_name" : "patient_label");
+  const days = num(item, "days_left");
+  const date = day(text(item, "turns_18_on"));
+  if (days === null) return null;
+  const daysText = `${days} ${pluralWord(lang, days, { ru: ["день", "дня", "дней"], de: ["Tag", "Tagen"] })}`;
+  const who = name ?? "";
+  const title = lead
+    ? who
+      ? fill({ ru: "Лиду {name} через {days} исполнится 18", de: "Lead {name} wird in {days} 18" }, lang, { name: who, days: daysText })
+      : fill({ ru: "Лиду через {days} исполнится 18", de: "Lead wird in {days} 18" }, lang, { days: daysText })
+    : who
+      ? fill({ ru: "Пациенту {name} через {days} исполнится 18", de: "Patient {name} wird in {days} 18" }, lang, { name: who, days: daysText })
+      : fill({ ru: "Пациенту через {days} исполнится 18", de: "Patient wird in {days} 18" }, lang, { days: daysText });
+  const ends = lead
+    ? date
+      ? fill({ ru: "{date} закончится доступ родителей к заявке.", de: "Am {date} endet der Zugang der Eltern zur Anfrage." }, lang, { date })
+      : pick({ ru: "В день 18-летия закончится доступ родителей к заявке.", de: "Mit dem 18. Geburtstag endet der Zugang der Eltern zur Anfrage." }, lang)
+    : date
+      ? fill({ ru: "{date} закончится родительский доступ к карте пациента.", de: "Am {date} endet der Zugang der Eltern zur Patientenakte." }, lang, { date })
+      : pick({ ru: "В день 18-летия закончится родительский доступ к карте пациента.", de: "Mit dem 18. Geburtstag endet der Zugang der Eltern zur Patientenakte." }, lang);
+  const action = lead
+    ? pick({ ru: "Нужен собственный вход лида — выдайте его в таблице лидов.", de: "Der Lead braucht einen eigenen Zugang – bitte in der Lead-Tabelle anlegen." }, lang)
+    : pick({ ru: "Нужен собственный вход пациента — выдайте его в таблице пациентов.", de: "Der Patient braucht einen eigenen Zugang – bitte in der Patiententabelle anlegen." }, lang);
+  return { title, body: `${ends} ${action}` };
+}
 
 // A sign-in or payer-link e-mail did not arrive (crates/server/src/mail/delivery.rs).
 function emailUndelivered(item: NotificationFacts, lang: Lang): NotificationCopy {
@@ -745,6 +786,9 @@ export function notificationCopyFromFacts(
       return newLead(item, lang);
     case "lead_payer_submitted":
       return leadPayerSubmitted(item, lang);
+    case "patient_coming_of_age_soon":
+    case "lead_coming_of_age_soon":
+      return comingOfAgeSoon(item, lang);
     case "login_email_undelivered":
     case "payer_link_email_undelivered":
       return emailUndelivered(item, lang);

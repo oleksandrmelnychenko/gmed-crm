@@ -189,7 +189,15 @@ import { isValidEmailAddress } from "@/lib/contact-validation";
 import { PERSON_CITY_MAX, PERSON_NAME_MAX, isValidPersonPhone, oneLine, personPhoneAcceptable } from "@/lib/person-fields";
 import { EmailDomainWarning, emailDomainWarningText, knownNoMailEmailError } from "@/components/email-domain-warning";
 import { useEmailDomainStatus } from "@/lib/email-domain-check";
-import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { useDebouncedRealtimeSubscription, useRealtimeSubscription } from "@/lib/realtime";
+import {
+  LEAD_PURGED_EVENT,
+  LEAD_TIME_REFRESH_EVENTS,
+  isLeadPurgedEvent,
+  leadPurgedText,
+  leadPurgedTitle,
+  touchesLeadTimeState,
+} from "../model/lead-time-events";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Banner,
@@ -3429,9 +3437,14 @@ export function LeadWizard({
   );
   // Whether the electronic signature (Skribble) is connected, as the payer package state says; null until known.
   const [signatureEnabled, setSignatureEnabled] = useState<boolean | null>(null);
+  // The retention sweep deleted the lead while the wizard was open
+  // (`lead.purged`, owner request 2026-10-26): the wizard says so instead of
+  // failing every save and load against the deleted lead.
+  const [purgedByRetention, setPurgedByRetention] = useState(false);
   useEffect(() => {
     setConvertedByServer(false);
     setAttachmentImportRefused([]);
+    setPurgedByRetention(false);
   }, [leadId]);
   useEffect(() => {
     const patientId = lead?.converted_patient_id ?? null;
@@ -4541,6 +4554,17 @@ export function LeadWizard({
     clearApiCache("/orders");
     clearApiCache(`/leads/${leadId}`);
     void refreshCommercialState().catch(() => undefined);
+  }, 250);
+
+  useRealtimeSubscription([LEAD_PURGED_EVENT], (event) => {
+    if (open && isLeadPurgedEvent(event, leadId)) setPurgedByRetention(true);
+  });
+  // The deletion warning (the countdown in the header) and the 18th birthday
+  // (the parents' access) change the lead behind the wizard: read it again.
+  useDebouncedRealtimeSubscription(LEAD_TIME_REFRESH_EVENTS, (_event, events) => {
+    if (!open || !leadId || !touchesLeadTimeState(events, leadId)) return;
+    clearApiCache(`/leads/${leadId}`);
+    void refreshLeadState().catch(() => undefined);
   }, 250);
 
   useEffect(() => {
@@ -8192,6 +8216,24 @@ ${serviceCommentLines.join("\n")}`
     payerSamePersonName: payerSamePerson(identification.status)?.name ?? null,
     payerSamePersonUnknown: !identification.loaded,
   });
+  if (purgedByRetention) {
+    // Nothing is left to save or to show: only the notice and the way out.
+    return (
+      <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onOpenChange(false); }}>
+        <DialogContent className="max-w-md" data-testid="lead-wizard-purged">
+          <DialogHeader>
+            <DialogTitle>{leadPurgedTitle(lang === "de" ? "de" : "ru")}</DialogTitle>
+            <DialogDescription>{leadPurgedText(lang === "de" ? "de" : "ru")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" onClick={() => onOpenChange(false)}>
+              {tx("Закрыть", "Schließen")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
   return (
     <WizardDocumentRowErrorProvider value={documentRowError}>
     <PortalUploadsProvider

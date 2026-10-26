@@ -174,6 +174,12 @@ import {
 import { LeadPortalAccessDetail, PortalCredentialsDialog, type PortalCredentials } from "./ui/lead-portal-access";
 import { LeadConfirmDialog } from "./ui/lead-confirm-dialog";
 import { LeadIdentityDocumentsBlock } from "./ui/lead-identity-documents-block";
+import {
+  LEAD_PURGED_EVENT,
+  LEAD_TIME_REFRESH_EVENTS,
+  leadPurgedTitle,
+  purgedLeadIds,
+} from "./model/lead-time-events";
 import { deletedLeadLabel, isAnonymizedLead, leadDisplayName, leadSortName } from "./model/lead-display-name";
 import {
   LEAD_FAILURE_REASONS,
@@ -227,6 +233,10 @@ const LEAD_REALTIME_EVENTS = [
   "lead.promoted_to_console",
   "lead.converted",
   "lead.failed_resolved",
+  // Timed events of the background jobs (owner request 2026-10-26): the
+  // deletion warning, the 18th birthday — and the automatic deletion.
+  ...LEAD_TIME_REFRESH_EVENTS,
+  LEAD_PURGED_EVENT,
 ] as const;
 
 function shouldOpenWizardFromRow(lead: LeadListItem, canConvert: boolean) {
@@ -1357,6 +1367,19 @@ function useLeadsPageContent() {
       dispatchListState((current) => ({
         leads: current.leads.filter((lead) => !convertedLeadIds.has(lead.id)),
       }));
+    }
+    // A lead the retention sweep deleted leaves the list at once; an open
+    // detail of it closes with a notice (the open wizard says so itself).
+    const purgedIds = purgedLeadIds(events);
+    if (purgedIds.size > 0) {
+      dispatchListState((current) => ({
+        leads: current.leads.filter((lead) => !purgedIds.has(lead.id)),
+      }));
+      if (detailOpen && selectedLeadId && purgedIds.has(selectedLeadId) && !wizardLeadId) {
+        setDetailOpen(false);
+        syncLeadQuery(undefined, { replace: true });
+        toast.info(leadPurgedTitle(lang === "de" ? "de" : "ru"));
+      }
     }
     clearApiCache("/leads");
     clearApiCache("/stats/leads");

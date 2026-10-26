@@ -996,6 +996,32 @@ pub async fn publish_lead_event(
     .await;
 }
 
+/// The cabinet logins of a lead lost the request behind their backs: the
+/// retention sweep deleted it (`lead_purged`) or the parents' access ended on
+/// the child's 18th birthday (`patient_came_of_age`). The caller names the
+/// users, read before the access ended: afterwards nothing links them to the
+/// lead any more. The payload carries the reason only; an open cabinet
+/// reloads its list and shows the closed state the server words.
+pub const LEAD_PORTAL_ACCESS_ENDED: &str = "lead.portal_access_ended";
+
+pub async fn publish_lead_portal_access_ended(
+    state: &AppState,
+    lead_id: Uuid,
+    portal_user_ids: Vec<Uuid>,
+    reason: &str,
+) {
+    if portal_user_ids.is_empty() {
+        return;
+    }
+    publish_event(
+        state,
+        RealtimeEvent::new(LEAD_PORTAL_ACCESS_ENDED, "lead", lead_id)
+            .target_users(portal_user_ids)
+            .payload(json!({ "reason": reason })),
+    )
+    .await;
+}
+
 pub async fn publish_message_peer_event(
     state: &AppState,
     target_user_id: Uuid,
