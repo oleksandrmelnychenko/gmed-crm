@@ -266,6 +266,7 @@
 
 .lead-wizard-step-tab:not([aria-selected="true"]):hover {
   background: var(--muted);
+  color: var(--foreground);
 }
 
 .lead-wizard-step-tab[aria-selected="true"] {

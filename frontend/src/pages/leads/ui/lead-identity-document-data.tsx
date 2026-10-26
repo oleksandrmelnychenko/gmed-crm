@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
-import { Check, LoaderCircle } from "lucide-react";
+import { Check, LoaderCircle, UserRound } from "lucide-react";
 
 import { checkboxClass, inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -109,7 +109,7 @@ function FormField({
 }) {
   return (
     <label className={cn("min-w-0 space-y-1.5", className)} onBlur={onBlur}>
-      <span className={cn(tokens.text.label, "block")}>{label}</span>
+      <span className={cn(tokens.text.label, "block font-mono")}>{label}</span>
       {children}
       {error ? (
         <span id={errorId} role="alert" className="block text-xs font-medium text-destructive">
@@ -482,9 +482,12 @@ export function LeadIdentityDocumentDataForm({
         </p>
       ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs text-muted-foreground" data-testid={`${testId}-entered`}>
-          {entered}
-        </span>
+        {entered ? (
+          <StatusChip tone="warning" className="whitespace-normal" data-testid={`${testId}-entered`}>
+            <UserRound aria-hidden="true" />
+            {entered}
+          </StatusChip>
+        ) : null}
         <div className="flex min-h-8 items-center gap-2" aria-live="polite">
           {saveState === "saving" ? (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" role="status" data-testid={`${testId}-saving`}>
@@ -501,7 +504,7 @@ export function LeadIdentityDocumentDataForm({
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
+                variant="default"
                 className="h-8 rounded-lg"
                 disabled={disabled}
                 onClick={() => {

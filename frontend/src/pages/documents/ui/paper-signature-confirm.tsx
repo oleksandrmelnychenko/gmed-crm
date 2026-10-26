@@ -64,7 +64,7 @@ export function PaperSignatureConfirmButton({
     <>
       <Button
         type="button"
-        variant="outline"
+        variant="default"
         size={size}
         disabled={disabled}
         data-paper-signature-confirm={documentId}

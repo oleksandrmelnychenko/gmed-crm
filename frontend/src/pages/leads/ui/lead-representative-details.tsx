@@ -213,7 +213,7 @@ export function RepresentativeDetailsFields({
   const field = (key: keyof RepresentativeDetails) => `${id}-${key}`;
   const text = (key: "street" | "zip" | "city" | "birth_place", label: string, maxLength: number, className?: string) => (
     <label className={className} htmlFor={field(key)}>
-      <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
+      <span className="mb-1 block font-mono text-xs font-medium text-muted-foreground">{label}</span>
       <Input
         id={field(key)}
         name={key}
@@ -240,7 +240,7 @@ export function RepresentativeDetailsFields({
       {text("zip", tx("Индекс", "PLZ"), 20)}
       {text("city", tx("Город", "Ort"), PERSON_CITY_MAX)}
       <div>
-        <span className="mb-1 block text-xs font-medium text-muted-foreground">{tx("Страна", "Land")}</span>
+        <span className="mb-1 block font-mono text-xs font-medium text-muted-foreground">{tx("Страна", "Land")}</span>
         <CountrySelect
           value={draft.country || null}
           lang={lang}
@@ -252,7 +252,7 @@ export function RepresentativeDetailsFields({
       </div>
       {text("birth_place", tx("Место рождения", "Geburtsort"), 200)}
       <div>
-        <span className="mb-1 block text-xs font-medium text-muted-foreground">{tx("Страна рождения", "Geburtsland")}</span>
+        <span className="mb-1 block font-mono text-xs font-medium text-muted-foreground">{tx("Страна рождения", "Geburtsland")}</span>
         <CountrySelect
           value={draft.birth_country || null}
           lang={lang}
@@ -263,7 +263,7 @@ export function RepresentativeDetailsFields({
         />
       </div>
       <div className="sm:col-span-2">
-        <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor={field("citizenships")}>
+        <label className="mb-1 block font-mono text-xs font-medium text-muted-foreground" htmlFor={field("citizenships")}>
           {tx("Гражданства", "Staatsangehörigkeiten")}
         </label>
         <CitizenshipMultiSelect

@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { CheckCheck, Clock3, LoaderCircle, RefreshCw, UserRound, X } from "lucide-react";
+import { CalendarDays, CheckCheck, Clock3, LoaderCircle, RefreshCw, UserRound, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -159,7 +159,7 @@ export function Step1FillModeSwitch({
     <div
       role="radiogroup"
       aria-label={tx("Кто заполняет данные клиента", "Wer füllt die Personendaten aus")}
-      className="inline-flex max-w-full flex-wrap gap-1 rounded-lg border border-border bg-muted/40 p-1"
+      className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5"
       data-testid="step1-fill-mode"
     >
       {options.map((option, index) => (
@@ -171,7 +171,7 @@ export function Step1FillModeSwitch({
           tabIndex={mode === option.value ? 0 : -1}
           disabled={disabled}
           className={cn(
-            "min-h-8 cursor-pointer rounded-md border px-3 py-1.5 text-[13px] leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-60",
+            "min-h-7 cursor-pointer rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-60",
             mode === option.value
               ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-white shadow-sm"
               : "border-transparent bg-card text-muted-foreground hover:border-border hover:bg-muted/70 hover:text-foreground",
@@ -375,9 +375,8 @@ export function PatientUploadMark({ documentId, lang }: { documentId: string; la
       ) : state.canReview ? (
         <Button
           type="button"
-          variant="outline"
-          size="sm"
-          className="h-5 rounded-full px-2 text-[10.5px]"
+          variant="default"
+          size="xs"
           disabled={busy}
           onClick={() => {
             setBusy(true);
@@ -435,14 +434,17 @@ function PortalConsentRecord({ label, consent, tx }: { label: string; consent: L
         <StatusChip tone={!revoked && given ? "success" : "warning"}>
           {revoked ? tx("Отозвано", "Widerrufen") : given ? tx("Дано", "Erteilt") : tx("Не дано", "Nicht erteilt")}
         </StatusChip>
+        {given || revoked ? (
+          <StatusChip tone="warning" className="whitespace-normal">
+            <CalendarDays aria-hidden="true" />
+            <span>
+              {consent?.given_at ? `${tx("Дано:", "Erteilt:")} ${formatAppDateTime(consent.given_at)}` : ""}
+              {consent?.revoked_at ? `${given ? " · " : ""}${tx("Отозвано:", "Widerrufen:")} ${formatAppDateTime(consent.revoked_at)}` : ""}
+              {who ? ` · ${who}` : ""}{consent?.version ? ` · ${tx("версия", "Version")} ${consent.version}` : ""}
+            </span>
+          </StatusChip>
+        ) : null}
       </div>
-      {given || revoked ? (
-        <p className="leading-5 text-muted-foreground">
-          {consent?.given_at ? `${tx("Дано:", "Erteilt:")} ${formatAppDateTime(consent.given_at)}` : ""}
-          {consent?.revoked_at ? ` · ${tx("Отозвано:", "Widerrufen:")} ${formatAppDateTime(consent.revoked_at)}` : ""}
-          {who ? ` · ${who}` : ""}{consent?.version ? ` · ${tx("версия", "Version")} ${consent.version}` : ""}
-        </p>
-      ) : null}
     </div>
   );
 }

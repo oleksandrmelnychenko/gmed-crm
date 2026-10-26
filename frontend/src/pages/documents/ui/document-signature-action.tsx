@@ -48,10 +48,10 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
 
   return <>
     <Button
-      type="button" variant={iconOnly ? "ghost" : "outline"} size={iconOnly ? "icon-sm" : "sm"}
+      type="button" variant={iconOnly ? "ghost" : "default"} size={iconOnly ? "icon-sm" : "sm"}
       title={presentation.label} aria-label={`${label}: ${title}`} disabled={disabled}
       aria-description={summary ? presentation.label : undefined}
-      className={presentation.className} data-signature-status={signed ? "document-signed" : summary?.status ?? "none"}
+      className={iconOnly ? presentation.className : undefined} data-signature-status={signed ? "document-signed" : summary?.status ?? "none"}
       data-document-signature-id={documentId}
       onClick={event => { event.stopPropagation(); setOpen(true); }}
       onKeyDown={event => event.stopPropagation()}

@@ -1,7 +1,7 @@
 import path from "path"
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, searchForWorkspaceRoot } from 'vite'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 import tailwindcss from '@tailwindcss/vite'
@@ -61,6 +61,14 @@ export default defineConfig(({ mode, command }) => {
     },
     server: {
       host: "0.0.0.0",
+      fs: {
+        // Worktrees can share node_modules through a junction. Font URLs use
+        // its real path, which must be served alongside the workspace itself.
+        allow: [
+          searchForWorkspaceRoot(import.meta.dirname),
+          realpathSync(path.resolve(import.meta.dirname, 'node_modules')),
+        ],
+      },
       proxy: {
         '/api': {
           target: proxyTarget,

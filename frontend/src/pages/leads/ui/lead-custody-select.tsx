@@ -71,7 +71,7 @@ export function LeadCustodySelect({
     <div className="max-w-md space-y-1.5" data-testid="lead-custody">
       <label className="block space-y-1.5">
         {/* Visible: without a caption staff read "Оба родителя совместно" as a value without a question (QA 2026-10-22). */}
-        <span className="block text-xs font-medium text-muted-foreground">{label}</span>
+        <span data-wizard-field-label className="block font-mono text-xs font-medium text-muted-foreground">{label}</span>
         <NativeComboboxSelect
           value={value}
           className={selectClass}

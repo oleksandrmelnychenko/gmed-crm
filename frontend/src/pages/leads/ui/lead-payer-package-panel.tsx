@@ -303,7 +303,7 @@ export function LeadPayerPackagePanel({
               <Button
                 type="button"
                 size="sm"
-                variant={actions.prepare === "first" ? "default" : "outline"}
+                variant="default"
                 className="h-8 rounded-lg"
                 disabled={locked}
                 onClick={() => void prepare()}

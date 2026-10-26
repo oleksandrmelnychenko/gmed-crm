@@ -128,7 +128,7 @@ function PayerField({
 }) {
   return (
     <label className={cn("min-w-0 space-y-1.5", className)}>
-      <span className={cn(tokens.text.label, "block")}>
+      <span className={cn(tokens.text.label, "block font-mono")}>
         {label}
         {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
       </span>
@@ -827,6 +827,33 @@ export function LeadPayerDeclarationSection({
   // Only the part of the AML form: the wizard mounts it so while another step is shown.
   if (amlPartOnly) return <>{amlPart}</>;
 
+  const payerKindSwitch = (
+        <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5">
+          {payerKindOptions(minor, form.kind, tx).map(([kind, label]) => (
+            <label
+              key={kind}
+              className="relative min-w-0"
+            >
+              <input
+                type="radio"
+                name={`lead-payer-kind-${leadId}`}
+                className="peer sr-only"
+                value={kind}
+                checked={form.kind === kind}
+                disabled={readOnly}
+                onChange={() => chooseKind(kind)}
+              />
+              <span className={cn(
+                "flex min-h-7 cursor-pointer items-center rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring/30 peer-disabled:cursor-default peer-disabled:opacity-60",
+                form.kind === kind
+                  ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-white shadow-sm"
+                  : "border-transparent bg-card text-muted-foreground hover:border-border hover:bg-muted/70 hover:text-foreground",
+              )}>{label}</span>
+            </label>
+          ))}
+        </div>
+  );
+
   return (
     <div id={PAYER_SECTION_ID} tabIndex={-1} className="focus:outline-none">
       <Section
@@ -840,7 +867,9 @@ export function LeadPayerDeclarationSection({
             {patientMarker && !dirty ? <PatientFieldBadge marker={patientMarker} tx={tx} /> : null}
           </span>
         )}
-        accessory={canEdit && autosave.status !== "idle" ? (
+        accessory={(
+          <div className="flex flex-wrap items-center justify-end gap-2">
+          {canEdit && autosave.status !== "idle" ? (
           <StatusChip
             tone={autosave.status === "error" ? "warning" : autosave.status === "saved" ? "success" : "neutral"}
             role="status"
@@ -854,7 +883,10 @@ export function LeadPayerDeclarationSection({
                   : !form.kind ? tx("Выберите, кто платит", "Bitte wählen, wer zahlt")
                     : tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")}
           </StatusChip>
-        ) : undefined}
+          ) : null}
+          {payerKindSwitch}
+          </div>
+        )}
       >
         {loadError && !data && !(loadError instanceof ApiRequestError && loadError.status === 404)
           ? <Banner tone="error">{errorText(loadError)}</Banner>
@@ -876,7 +908,7 @@ export function LeadPayerDeclarationSection({
             <Button
               type="button"
               size="sm"
-              variant="outline"
+              variant="default"
               className="h-7 shrink-0"
               disabled={readOnly || confirmingPrefill}
               data-testid="lead-payer-prefill-confirm"
@@ -888,29 +920,6 @@ export function LeadPayerDeclarationSection({
           </div>
         ) : null}
 
-        <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg bg-muted/40 p-1">
-          {payerKindOptions(minor, form.kind, tx).map(([kind, label]) => (
-            <label
-              key={kind}
-              className={cn(
-                "flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
-                form.kind === kind ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                readOnly && "cursor-default",
-              )}
-            >
-              <input
-                type="radio"
-                name={`lead-payer-kind-${leadId}`}
-                className="size-3.5 shrink-0 accent-[var(--brand)]"
-                value={kind}
-                checked={form.kind === kind}
-                disabled={readOnly}
-                onChange={() => chooseKind(kind)}
-              />
-              {label}
-            </label>
-          ))}
-        </div>
         {form.kind === "representative" ? (
           <div className="space-y-3" data-testid="lead-payer-representative">
             {representatives.length > 0 ? (
@@ -1275,14 +1284,16 @@ export function LeadPayerDeclarationSection({
 
         {recipientStatements.length > 0 || invoiceTaxEditable ? (
           <div className="space-y-3 border-t border-border/60 pt-3" data-testid="lead-payer-invoice-recipient">
-            <AdminSectionTitle>
-              {tx("Получатель счёта (из кабинета)", "Rechnungsempfänger (aus dem Portal)")}
-            </AdminSectionTitle>
-            {cabinetBilling?.recipient_updated_at ? (
-              <span className="inline-flex" data-testid="lead-payer-recipient-updated">
-                <PatientFieldBadge marker={{ at: cabinetBilling.recipient_updated_at, access_kind: null }} tx={tx} />
-              </span>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <AdminSectionTitle>
+                {tx("Получатель счёта (из кабинета)", "Rechnungsempfänger (aus dem Portal)")}
+              </AdminSectionTitle>
+              {cabinetBilling?.recipient_updated_at ? (
+                <span className="inline-flex" data-testid="lead-payer-recipient-updated">
+                  <PatientFieldBadge marker={{ at: cabinetBilling.recipient_updated_at, access_kind: null }} tx={tx} />
+                </span>
+              ) : null}
+            </div>
             {recipientStatements.length > 0 ? (
               <dl className="grid gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-payer-recipient-snapshot">
                 {recipientStatements.map((row) => (
@@ -1347,7 +1358,7 @@ export function LeadPayerDeclarationSection({
         {autosave.status === "error" ? (
           <div className="space-y-2" data-testid="lead-payer-autosave-error">
             <Banner tone="error">{errorText(autosave.error)}</Banner>
-            <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg text-xs" disabled={readOnly} onClick={() => autosaveRef.current?.retry()}>
+            <Button type="button" variant="default" size="sm" className="h-8 rounded-lg text-xs" disabled={readOnly} onClick={() => autosaveRef.current?.retry()}>
               {tx("Повторить сохранение", "Speichern erneut versuchen")}
             </Button>
           </div>

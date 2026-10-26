@@ -1,5 +1,5 @@
 import { createContext, useContext, useId, useState, type ReactNode } from "react";
-import { ChevronDown, CircleAlert, Download } from "lucide-react";
+import { CalendarDays, ChevronDown, CircleAlert, Download, FileText } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
@@ -63,8 +63,18 @@ import { uploadMoveTargets, type UploadMoveTarget } from "../model/upload-move";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
 const STATEMENT_COLUMNS = "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
-const STATEMENT_CARD = "min-w-0 space-y-3 rounded-xl border border-border/60 bg-background p-3.5";
+const STATEMENT_CARD_COLUMNS = "grid-cols-1 @sm/statement:grid-cols-2 @3xl/statement:grid-cols-3";
+const STATEMENT_CARD = "@container/statement min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3";
 const STATEMENT_SECTION = "space-y-2.5 border-t border-border/50 pt-3";
+
+function StatementHeading({ children }: { children: ReactNode }) {
+  return (
+    <h4 className="flex min-w-0 items-center gap-2 text-[13px] font-semibold leading-5 text-foreground">
+      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+      <span className="min-w-0 break-words">{children}</span>
+    </h4>
+  );
+}
 
 function PatientStatementsPanel({ title, marker, tx, children }: {
   title: string;
@@ -76,8 +86,8 @@ function PatientStatementsPanel({ title, marker, tx, children }: {
   const contentId = useId();
 
   return (
-    <section className="min-w-0 rounded-xl border border-border/70 bg-muted/20" data-testid="lead-gwg-statements">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 p-3.5">
+    <section className="@container/patient-statements min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card" data-testid="lead-gwg-statements">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5">
         <AdminSectionTitle>{title}</AdminSectionTitle>
         {marker ? (
           <div className="order-last w-full sm:order-none sm:w-auto">
@@ -98,7 +108,7 @@ function PatientStatementsPanel({ title, marker, tx, children }: {
           <ChevronDown aria-hidden="true" className={cn("size-4 transition-transform", open && "rotate-180")} />
         </Button>
       </div>
-      <div id={contentId} hidden={!open} className="space-y-3 px-3.5 pb-3.5" data-testid="lead-gwg-statements-content">
+      <div id={contentId} hidden={!open} className="space-y-3 border-t border-border/50 bg-muted/20 p-3" data-testid="lead-gwg-statements-content">
         {children}
       </div>
     </section>
@@ -110,9 +120,9 @@ function StatementGroup({ title, columns, children, card = false, wide = false, 
   title: string; columns: string; children: ReactNode; card?: boolean; wide?: boolean; footer?: ReactNode;
 }) {
   return (
-    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && wide && "md:col-span-2")}>
-      <h4 className="text-xs font-semibold text-foreground">{title}</h4>
-      <dl className={cn("grid gap-x-5 gap-y-2.5", card && !wide ? "grid-cols-1" : columns)}>{children}</dl>
+    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && wide && "col-span-full")}>
+      <StatementHeading>{title}</StatementHeading>
+      <dl className={cn("grid gap-x-4 gap-y-3", card ? STATEMENT_CARD_COLUMNS : columns)}>{children}</dl>
       {footer}
     </div>
   );
@@ -145,7 +155,7 @@ function Statement({
       {/* Long German labels ("Staatsangehörigkeit") wrap inside a narrow column. */}
       <dt
         className={cn(
-          "break-words text-[11.5px] font-medium leading-snug text-foreground/70",
+          "break-words font-mono text-xs font-medium leading-5 text-foreground/75",
           sentence && "max-w-prose",
           hideLabel && "sr-only",
         )}
@@ -154,7 +164,7 @@ function Statement({
       </dt>
       <dd
         className={cn(
-          "mt-0.5 break-words text-[13px] font-medium leading-snug",
+          "mt-0.5 break-words text-sm font-medium leading-5",
           warning ? WARNING_TEXT : "text-foreground",
         )}
       >
@@ -183,7 +193,7 @@ function UploadMoveSelect({ document, slot, tx }: { document: LeadIdentityDocume
   if (targets.length === 0) return null;
   return (
     <select
-      className="ml-2 h-6 max-w-full rounded border border-border bg-background px-1 text-xs text-muted-foreground"
+      className="h-7 max-w-full rounded-md border border-border bg-card px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
       aria-label={tx("Переместить файл", "Datei verschieben")}
       data-testid={`lead-upload-move-${document.id}`}
       value=""
@@ -209,19 +219,24 @@ function UploadedFiles({ documents, tx, onDownload, slot }: {
   slot?: string;
 }) {
   return (
-    <ul className="min-w-0 space-y-1 break-words text-[13px] leading-5 [overflow-wrap:anywhere]">
+    <ul className="min-w-0 space-y-2 break-words text-[13px] leading-5 [overflow-wrap:anywhere]">
       {documents.map((document) => (
-        <li key={document.id}>
+        <li key={document.id} className="min-w-0 space-y-2 rounded-lg border border-border/60 bg-muted/15 p-2.5">
           {onDownload ? (
-            <button type="button" className="inline-flex max-w-full items-start gap-1.5 text-left underline decoration-border underline-offset-4 hover:text-[var(--brand)]" onClick={() => onDownload(document)}>
+            <button type="button" className="inline-flex max-w-full items-start gap-2 text-left font-medium text-foreground underline decoration-border underline-offset-4 hover:text-[var(--brand)]" onClick={() => onDownload(document)}>
               <Download aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
               <span className="min-w-0">{document.file_name || EMPTY_STATEMENT}</span>
             </button>
-          ) : document.file_name || EMPTY_STATEMENT}
-          <span className="font-normal text-muted-foreground">
-            {document.uploaded_at ? ` · ${formatAppDate(document.uploaded_at)}` : ""}
-            {document.reviewed ? ` · ${tx("просмотрен", "geprüft")}` : ""}
-          </span>
+          ) : (
+            <div className="flex min-w-0 items-start gap-2 font-medium text-foreground">
+              <FileText aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0">{document.file_name || EMPTY_STATEMENT}</span>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {document.uploaded_at ? <StatusChip tone="info"><CalendarDays aria-hidden="true" />{formatAppDate(document.uploaded_at)}</StatusChip> : null}
+            {document.reviewed ? <StatusChip tone="success">{tx("просмотрен", "geprüft")}</StatusChip> : null}
+          </div>
           {slot ? <UploadMoveSelect document={document} slot={slot} tx={tx} /> : null}
         </li>
       ))}
@@ -337,15 +352,16 @@ function RepresentationGroup({
 }) {
   const minor = statements.kind === "minor";
   return (
-    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && statements.persons.length > 0 && "md:col-span-2")} data-testid="lead-gwg-representation">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <h4 className="text-xs font-semibold text-foreground">
+    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && statements.persons.length > 0 && "col-span-full")} data-testid="lead-gwg-representation">
+      <div className="flex flex-wrap items-center gap-2">
+        <StatementHeading>
           {minor ? tx("Законные представители", "Gesetzliche Vertreter") : tx("Представительство", "Vertretung")}
-        </h4>
+        </StatementHeading>
         {updatedAt ? (
-          <span className="text-[11px] text-muted-foreground" data-testid="lead-gwg-representation-updated">
+          <StatusChip tone="info" className="whitespace-normal" data-testid="lead-gwg-representation-updated">
+            <CalendarDays aria-hidden="true" />
             {`${tx("изменено в кабинете", "im Portal geändert")} · ${formatAppDateTime(updatedAt)}`}
-          </span>
+          </StatusChip>
         ) : null}
       </div>
       <dl className={cn("grid grid-cols-1 gap-x-5 gap-y-2.5", !card && "sm:grid-cols-2")}>
@@ -434,14 +450,14 @@ function PayerOrganisationGroup({
   card?: boolean;
 }) {
   return (
-    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "md:col-span-2")} data-testid="lead-gwg-payer-organisation">
+    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "col-span-full")} data-testid="lead-gwg-payer-organisation">
       <div className="flex flex-wrap items-center gap-2">
-        <h4 className="text-xs font-semibold text-foreground">
+        <StatementHeading>
           {tx("Плательщик — данные организации из кабинета", "Zahler – Organisationsangaben aus dem Portal")}
-        </h4>
+        </StatementHeading>
         {marker ? <PatientFieldBadge marker={marker} tx={tx} /> : null}
       </div>
-      <dl className={cn("grid gap-x-5 gap-y-2.5", card ? "grid-cols-1 sm:grid-cols-2" : STATEMENT_COLUMNS)}>
+      <dl className={cn("grid gap-x-4 gap-y-3", card ? STATEMENT_CARD_COLUMNS : STATEMENT_COLUMNS)}>
         {payerOrganisationStatements(mask, tx).map((row) => (
           <Statement key={row.key} label={row.label} testId={`lead-gwg-payer-organisation-${row.key}`}>
             {row.value}
@@ -482,11 +498,11 @@ function BillingGroup({
   const payerAnswered = Boolean(payerLink?.submitted_at);
   const statements = billingStatements(billing, tx, lang, payerAnswered, minor);
   return (
-    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "md:col-span-2")} data-testid="lead-gwg-billing">
+    <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "col-span-full")} data-testid="lead-gwg-billing">
       <div className="flex flex-wrap items-center gap-2">
-        <h4 className="text-xs font-semibold text-foreground">
+        <StatementHeading>
           {tx("Счёт и оплата", "Rechnung und Zahlung")}
-        </h4>
+        </StatementHeading>
         {updatedAt ? (
           <span className="inline-flex" data-testid="lead-gwg-billing-updated">
             <PatientFieldBadge marker={{ at: updatedAt, access_kind: null }} tx={tx} />
@@ -499,7 +515,7 @@ function BillingGroup({
           </span>
         ) : null}
       </div>
-      <dl className={cn("grid gap-x-5 gap-y-2.5", card ? "grid-cols-1 sm:grid-cols-2" : STATEMENT_COLUMNS)}>
+      <dl className={cn("grid gap-x-4 gap-y-3", card ? STATEMENT_CARD_COLUMNS : STATEMENT_COLUMNS)}>
         {statements.invoice.map((statement) => (
           <BillingStatementRow key={statement.key} statement={statement} />
         ))}
@@ -510,7 +526,7 @@ function BillingGroup({
         </p>
       ) : null}
       {statements.payment.length > 0 ? (
-        <dl className={cn("grid gap-x-5 gap-y-2.5", card ? "grid-cols-1 sm:grid-cols-2" : STATEMENT_COLUMNS)}>
+        <dl className={cn("grid gap-x-4 gap-y-3 border-t border-border/50 pt-3", card ? STATEMENT_CARD_COLUMNS : STATEMENT_COLUMNS)}>
           {statements.payment.map((statement) => (
             <BillingStatementRow
               key={statement.key}
@@ -1022,7 +1038,8 @@ function LeadGwgStatementsBody({
     <PatientStatementsPanel key={intake.lead_id} title={title} marker={{ at: intake.identification_updated_at, access_kind: null }} tx={tx}>
       <ChangedSinceSubmitLine intake={intake} tx={tx} />
 
-      <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="lead-gwg-statements-grid">
+      <div className="grid grid-cols-1 items-start gap-3 @3xl/patient-statements:grid-cols-2" data-testid="lead-gwg-statements-grid">
+        <div className="min-w-0 space-y-3">
         <StatementGroup card title={tx("Личность", "Person")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Обращение", "Anrede")}>{salutationLabel(identification.salutation, tx)}</Statement>
           {birthRows.map((item) => (
@@ -1040,10 +1057,12 @@ function LeadGwgStatementsBody({
             {contactChannelsLabel(identification.contact_channels, tx)}
           </Statement>
         </StatementGroup>
+        {representation && representation.persons.length === 0 ? representationGroup : null}
+        </div>
 
         <StatementGroup card title={tx("Документ, удостоверяющий личность", "Ausweisdokument")} columns={STATEMENT_COLUMNS}
           footer={identityDocumentEnteredLine(identification, tx) || identification.id_document_unreadable ? (
-            <p className="border-t border-border/50 pt-2 text-[11px] text-muted-foreground" data-testid="lead-gwg-id-entered-by">
+            <StatusChip tone="warning" className="whitespace-normal" data-testid="lead-gwg-id-entered-by">
               {identityDocumentEnteredLine(identification, tx)}
               {identification.id_document_unreadable ? (
                 <span className={cn("font-medium", WARNING_TEXT)}>
@@ -1051,7 +1070,7 @@ function LeadGwgStatementsBody({
                   {tx("документ нечитаем", "Ausweis unleserlich")}
                 </span>
               ) : null}
-            </p>
+            </StatusChip>
           ) : null}
         >
           <Statement label={tx("Вид документа", "Art des Dokuments")}>
@@ -1073,7 +1092,7 @@ function LeadGwgStatementsBody({
           </Statement>
         </StatementGroup>
 
-        {representationGroup}
+        {representation && representation.persons.length > 0 ? representationGroup : null}
 
         {ownAccountShown || paymentBackgroundShown ? (
           <StatementGroup
@@ -1136,11 +1155,14 @@ function LeadGwgStatementsBody({
         ) : null}
       </div>
 
-      <p className="border-t border-border/50 pt-3 text-xs text-muted-foreground" data-testid="lead-gwg-declared-correct">
-        {identification.declared_correct_at
+      <div className="border-t border-border/50 pt-3" data-testid="lead-gwg-declared-correct">
+        <StatusChip tone={identification.declared_correct_at ? "info" : "neutral"} className="whitespace-normal">
+          <CalendarDays aria-hidden="true" />
+          <span>{identification.declared_correct_at
           ? `${tx("Подтвердил правильность:", "Richtigkeit bestätigt am")} ${formatAppDateTime(identification.declared_correct_at)}`
-          : `${tx("Подтвердил правильность:", "Richtigkeit bestätigt:")} ${tx("ещё нет", "noch nicht")}`}
-      </p>
+          : `${tx("Подтвердил правильность:", "Richtigkeit bestätigt:")} ${tx("ещё нет", "noch nicht")}`}</span>
+        </StatusChip>
+      </div>
     </PatientStatementsPanel>
   );
 }

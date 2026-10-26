@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CircleAlert, LoaderCircle } from "lucide-react";
+import { CircleAlert, Info, LoaderCircle } from "lucide-react";
 
 import { StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -106,6 +106,7 @@ export function LeadIdentificationStatusView({
       <ul className="space-y-2">
         {persons.map(({ subject, role, detail, person, canConfirm, paymentExpected, paidByThirdParty, wide, note }) => {
           const confirmed = Boolean(person.own_account_payment);
+          const signature = qualifiedSignatureLabel(person, tx);
           // Cash or a payment through a third party, or a parent who does not
           // pay (only signs): no own-account payment to confirm.
           const expected = paymentExpected && !hinted.has(subject);
@@ -124,12 +125,12 @@ export function LeadIdentificationStatusView({
                 {role}
                 {detail ? <StatusChip className={cn(PARENT_ROLE_CHIP_CLASS, "whitespace-normal")}>{detail}</StatusChip> : null}
               </span>
-              <Label label={qualifiedSignatureLabel(person, tx)} testId={`lead-identification-qes-${subject}`} />
+              <Label label={person.qes ? signature : { ...signature, tone: "error" }} testId={`lead-identification-qes-${subject}`} />
               <Label label={ownAccountPaymentLabel(person, tx, expected, paidByThirdParty)} testId={`lead-identification-payment-${subject}`} />
               {canEdit && canConfirm && (confirmed || expected) ? (
                 <Button
                   type="button"
-                  variant={confirmed ? "ghost" : "outline"}
+                  variant={confirmed ? "ghost" : "default"}
                   size="xs"
                   disabled={disabled || busy !== null}
                   aria-label={`${confirmed ? tx("Отменить", "Zurücknehmen") : tx("Подтвердить платёж", "Zahlung bestätigen")} — ${role}`}
@@ -162,20 +163,11 @@ export function LeadIdentificationStatusView({
       {errorMessage ? (
         <p role="alert" className="text-xs text-destructive" data-testid="lead-identification-error">{errorMessage}</p>
       ) : null}
-      {/* A reminder while a signed person's payment is still awaited; once
-          nothing is awaited it is a plain note (DEV QA 2026-10-22: the amber
-          reminder stood next to a confirmed payment). GMED applies § 12 GwG
-          voluntarily (owner 2026-10-22: no obliged entity under § 2 GwG). */}
-      <p data-testid="lead-identification-rule" data-pending={paymentPending ? "true" : "false"}>
-        {paymentPending ? (
-          <StatusChip tone="warning" className="items-start whitespace-normal text-left">
-            <CircleAlert aria-hidden="true" className="mt-0.5" />
-            <span>{identificationRuleText(tx)}</span>
-          </StatusChip>
-        ) : (
-          <span className="text-xs leading-5 text-muted-foreground">{identificationRuleText(tx)}</span>
-        )}
-      </p>
+      {/* This is an informational rule; payment status remains on each person above. */}
+      <StatusChip tone="warning" className="w-full items-start whitespace-normal rounded-xl px-3 py-2 text-left" data-testid="lead-identification-rule" data-pending={paymentPending ? "true" : "false"}>
+        <Info aria-hidden="true" className="mt-0.5" />
+        <span className="min-w-0 leading-5">{identificationRuleText(tx)}</span>
+      </StatusChip>
     </div>
   );
 }

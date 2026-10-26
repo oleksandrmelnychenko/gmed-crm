@@ -214,7 +214,7 @@ export function LeadPayerPaperPath({
               <Button
                 type="button"
                 size="xs"
-                variant={selfDisclosure ? "outline" : "default"}
+                variant="default"
                 disabled={locked}
                 data-testid="lead-payer-paper-generate"
                 onClick={() => void generate()}
@@ -274,7 +274,7 @@ export function LeadPayerPaperPath({
               <Button
                 type="button"
                 size="xs"
-                variant="outline"
+                variant="default"
                 disabled={locked}
                 data-testid="lead-payer-paper-upload-open"
                 onClick={() => {
@@ -291,7 +291,7 @@ export function LeadPayerPaperPath({
           {mayFile && uploadOpen ? (
             <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3" data-testid="lead-payer-paper-upload-form">
               <label className="block min-w-0 space-y-1.5">
-                <span className={cn(tokens.text.label, "block")}>
+                <span className={cn(tokens.text.label, "block font-mono")}>
                   {tx("Скан или фото документа", "Scan oder Foto des Ausweises")}
                   <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
                 </span>
@@ -309,7 +309,7 @@ export function LeadPayerPaperPath({
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="min-w-0 space-y-1.5">
-                  <span className={cn(tokens.text.label, "block")}>{tx("Вид документа", "Art des Ausweises")}</span>
+                  <span className={cn(tokens.text.label, "block font-mono")}>{tx("Вид документа", "Art des Ausweises")}</span>
                   <select
                     className={selectClass}
                     value={fields.type}
@@ -324,7 +324,7 @@ export function LeadPayerPaperPath({
                   </select>
                 </label>
                 <label className="min-w-0 space-y-1.5">
-                  <span className={cn(tokens.text.label, "block")}>{tx("Номер", "Nummer")}</span>
+                  <span className={cn(tokens.text.label, "block font-mono")}>{tx("Номер", "Nummer")}</span>
                   <Input
                     className={inputClass}
                     value={fields.number}
@@ -337,7 +337,7 @@ export function LeadPayerPaperPath({
                 </label>
                 {/* The same country list as every other issuing country (QA 2026-10-25, F-F3). */}
                 <label className="min-w-0 space-y-1.5" data-testid="lead-payer-paper-id-country">
-                  <span className={cn(tokens.text.label, "block")}>{tx("Страна выдачи", "Ausstellungsstaat")}</span>
+                  <span className={cn(tokens.text.label, "block font-mono")}>{tx("Страна выдачи", "Ausstellungsstaat")}</span>
                   <CountrySelect
                     value={fields.issuingCountry}
                     lang={lang}
@@ -349,7 +349,7 @@ export function LeadPayerPaperPath({
                   />
                 </label>
                 <label className="min-w-0 space-y-1.5">
-                  <span className={cn(tokens.text.label, "block")}>{tx("Действителен до", "Gültig bis")}</span>
+                  <span className={cn(tokens.text.label, "block font-mono")}>{tx("Действителен до", "Gültig bis")}</span>
                   <Input
                     type="date"
                     className={inputClass}

@@ -31,7 +31,7 @@ import {
 function RouteField({ label, error, children, className }: { label: string; error?: string; children: ReactNode; className?: string }) {
   return (
     <label className={cn("min-w-0 space-y-1.5", className)}>
-      <span className={cn(tokens.text.label, "block")}>{label}</span>
+      <span className={cn(tokens.text.label, "block font-mono")}>{label}</span>
       {children}
       {error ? <span className="block text-xs text-destructive" role="alert">{error}</span> : null}
     </label>
