@@ -59,6 +59,13 @@ function render(
 }
 
 /** The markup of one statement, found by its test id. */
+/** One uploaded file of a list: its name, then its date and "reviewed" chips up to the end of the item. */
+function fileItem(html: string, fileName: string): string {
+  const start = html.indexOf(fileName);
+  expect(start, fileName).toBeGreaterThan(-1);
+  return html.slice(start, html.indexOf("</li>", start));
+}
+
 function statement(html: string, testId: string): string {
   const start = html.indexOf(`data-testid="${testId}"`);
   if (start < 0) return "";
@@ -173,15 +180,18 @@ describe("LeadGwgStatements", () => {
       "01.05.2021",
       "30.04.2031",
       "pass-front.pdf",
-      " · 05.10.2026",
       "pass-back.jpg",
-      " · 04.10.2026 · просмотрен",
       "Юридические вопросы",
       "My brother pays for the treatment",
       "Подтвердил правильность: 05.10.2026 11:30",
     ]) {
       expect(html).toContain(text);
     }
+    // Each file shows its upload date and, once staff opened it, a "reviewed" chip (owner 2026-10-26).
+    expect(fileItem(html, "pass-front.pdf")).toContain("05.10.2026");
+    expect(fileItem(html, "pass-front.pdf")).not.toContain("просмотрен");
+    expect(fileItem(html, "pass-back.jpg")).toContain("04.10.2026");
+    expect(fileItem(html, "pass-back.jpg")).toContain("просмотрен");
     expect(statement(html, "lead-gwg-id-valid-until")).not.toContain('data-warning="true"');
     expect(html).not.toContain("lead-gwg-statements-empty");
     // Nothing can be edited.
@@ -475,12 +485,14 @@ describe("LeadGwgStatements: who acts for the lead", () => {
       "Passamt 8031, Украина",
       "01.05.2021",
       "anna-pass.pdf",
-      " · 05.10.2026 · просмотрен",
       "sorgerecht.pdf",
-      " · 04.10.2026",
     ]) {
       expect(anna).toContain(text);
     }
+    expect(fileItem(anna, "anna-pass.pdf")).toContain("05.10.2026");
+    expect(fileItem(anna, "anna-pass.pdf")).toContain("просмотрен");
+    expect(fileItem(anna, "sorgerecht.pdf")).toContain("04.10.2026");
+    expect(fileItem(anna, "sorgerecht.pdf")).not.toContain("просмотрен");
     expect(anna).not.toContain("в кабинете ещё не заполнено");
     // Her passport ran out the day before.
     const expired = statement(html, `lead-gwg-representative-valid-until-${ANNA_ID}`);

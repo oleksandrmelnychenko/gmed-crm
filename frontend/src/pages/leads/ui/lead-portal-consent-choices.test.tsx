@@ -16,6 +16,13 @@ const savedForm = normalizeLeadPortalConsentForm({
     channel_email: false, channel_threema: true, channel_whatsapp: false, channel_telegram: false },
 });
 
+/** One person of the list «Лица и учреждения», where the trusted persons are shown since 2026-10-26 (owner). */
+const personRow = (person: Parameters<typeof CabinetPersonRow>[0]["person"], translate: typeof tx = tx, lang = "ru") =>
+  renderToStaticMarkup(<ul><CabinetPersonRow person={person} tx={translate} lang={lang} /></ul>);
+/** A chip with a lucide icon followed by the text. */
+const chip = (icon: string, text: string) =>
+  new RegExp(`lucide-${icon}[^>]*>(?:(?!</span>).)*</svg>${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</span>`);
+
 describe("portal consent facts in the staff wizard", () => {
   it("shows the stored trusted list independently of a consent choice and does not grant permission", () => {
     const intake = state({ trusted_persons: [{ name: "Eva Muster", relation: "friend", contact: "eva@example.com" }] });
@@ -39,15 +46,16 @@ describe("portal consent facts in the staff wizard", () => {
     ]);
     expect(persons[0]).toMatchObject({ phone: "+49 151 000000", birth_date: "1975-04-03" });
     expect(persons[1].birth_date).toBeUndefined();
-    const rows = (translate: typeof tx, lang: string) => renderToStaticMarkup(
-      <ul>{persons.map((person) => <CabinetPersonRow key={person.name} person={person} tx={translate} lang={lang} />)}</ul>,
-    );
-    const html = rows(de, "de");
-    expect(html).toContain("geb. 03.04.1975");
-    expect(html).toContain("Tel. +49 151 000000");
-    expect(html).toContain("Tel. +49 40 1234567");
-    expect(html).toContain("oma@example.test");
-    expect(rows(tx, "ru")).toContain("род. 03.04.1975");
+    // Since 2026-10-26 (owner) the date of birth and the phone are chips with a calendar and a phone icon.
+    const [olga, praxis, oma] = persons.map((person) => personRow(person, de, "de"));
+    expect(olga).toMatch(chip("calendar-days", "03.04.1975"));
+    expect(olga).toMatch(chip("phone", "+49 151 000000"));
+    expect(praxis).toMatch(chip("phone", "+49 40 1234567"));
+    expect(praxis).not.toContain("lucide-calendar-days");
+    expect(praxis).not.toContain("not a date");
+    expect(oma).toContain("lucide-mail");
+    expect(oma).toContain("oma@example.test");
+    expect(personRow(persons[0], tx, "ru")).toMatch(chip("calendar-days", "03.04.1975"));
   });
   it("shows medical consent independently of files, with grant and revocation dates", () => {
     const intake = state({ uploads: [], consents: [{ id: "health", type: "health_data_processing", given_at: "2026-10-11T09:00:00Z", revoked_at: "2026-10-12T09:00:00Z", version: "v1", access_kind: "guardian" }] });
@@ -126,16 +134,22 @@ describe("portal consent facts in the staff wizard", () => {
     const [receiptHtml, formHtml] = html.split('data-testid="portal-consent-choices"');
     expect(receiptHtml).toContain("Original Parent (Родитель / представитель)");
     expect(receiptHtml).toContain("11.10.2026");
-    expect(receiptHtml).toContain("GMED GmbH · версия 2026-10-14 · DE");
+    // Company, version and language are separate chips since 2026-10-26 (owner).
+    expect(receiptHtml).toContain("<span>GMED GmbH</span>");
+    expect(receiptHtml).toContain("<span>версия 2026-10-14</span>");
+    expect(receiptHtml).toMatch(chip("languages", "DE"));
     expect(receiptHtml).toContain("Original consent text. &lt;script&gt;");
-    expect(receiptHtml).toContain("Объём информации: Только даты приёмов");
+    // The person and the scope stand once, in «Лица и учреждения»; the receipt only points there.
+    expect(receiptHtml).toContain("portal-trusted-persons-pointer");
+    expect(receiptHtml).not.toContain("Eva Muster");
+    expect(personRow(intake.trusted_persons![0])).toMatch(/Объём информации:<\/span><span[^>]*>Только даты приёмов<\/span>/);
     expect(receiptHtml).not.toContain("Anna Muster");
     expect(formHtml).toContain("Anna Muster (Vormund)");
     expect(formHtml).toContain("12.10.2026");
     expect(receiptHtml).toMatch(/data-testid="portal-disclosure-decision" class="[^"]*border-emerald-200/);
     expect(receiptHtml).toMatch(/data-testid="portal-disclosure-consent" class="[^"]*border-emerald-200/);
     expect(html).not.toMatch(/<(?:button|input|script)\b/);
-    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain("Auskunftsumfang: Только даты приёмов");
+    expect(personRow(intake.trusted_persons![0], de, "de")).toMatch(/Auskunftsumfang:<\/span><span[^>]*>Только даты приёмов<\/span>/);
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={{ ...intake, identification_hidden: true }} tx={tx} />)).toBe("");
   });
 
@@ -147,10 +161,12 @@ describe("portal consent facts in the staff wizard", () => {
         { name: "Max Muster", relation: "friend", scope_codes: ["all"], scope: "ignored legacy" },
       ]),
     });
-    const html = renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={tx} />);
-    expect(html).toContain("Объём информации: медицинская, финансовая");
-    expect(html).toContain("Объём информации: вся информация");
-    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain("Auskunftsumfang: medizinische, finanzielle");
+    // One chip per chosen scope, in the persons list (owner 2026-10-26).
+    const [eva, max] = intake.trusted_persons!.map((person) => personRow(person));
+    expect(eva).toMatch(/Объём информации:<\/span><span[^>]*>медицинская<\/span><span[^>]*>финансовая<\/span>/);
+    expect(max).toMatch(/Объём информации:<\/span><span[^>]*>вся информация<\/span><\/div>/);
+    expect(max).not.toContain("ignored legacy");
+    expect(personRow(intake.trusted_persons![0], de, "de")).toMatch(/Auskunftsumfang:<\/span><span[^>]*>medizinische<\/span><span[^>]*>finanzielle<\/span>/);
   });
 
   it("renders an explicit No as the person's neutral choice, never as a missing consent", () => {
@@ -162,9 +178,15 @@ describe("portal consent facts in the staff wizard", () => {
     expect(html).not.toContain("Не дано");
     expect(html).not.toContain("portal-disclosure-consent");
     expect(html).toContain("Это допустимый ответ");
-    expect(html).toContain("Выбор зафиксирован: Пациент");
+    // Who chose is a chip of the receipt since 2026-10-26 (owner).
+    expect(html.slice(html.indexOf("portal-disclosure-audit"))).toMatch(chip("user-round", "<span>Пациент"));
     expect(html).not.toMatch(/data-testid="portal-disclosure-decision" class="[^"]*border-amber-200/);
-    expect(html).not.toContain("border-amber-200");
+    // The decision area has no amber status; the only amber chip is the chooser of the receipt (style, owner 2026-10-26).
+    const receiptAt = html.indexOf('data-testid="portal-disclosure-receipt"');
+    expect(receiptAt).toBeGreaterThan(0);
+    expect(html.slice(0, receiptAt)).not.toContain("border-amber-200");
+    expect(html.match(/border-amber-200/g)).toHaveLength(1);
+    expect(html.slice(html.indexOf("portal-disclosure-audit"))).toMatch(/^portal-disclosure-audit"><span class="[^"]*border-amber-200/);
     expect(html).not.toContain("portal-trusted-persons");
     expect(html).not.toContain("portal-consent-choices");
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain(">Nein – nicht erlaubt</span>");
@@ -188,7 +210,9 @@ describe("portal consent facts in the staff wizard", () => {
     const receiptHtml = html.split('data-testid="portal-consent-choices"')[0];
     expect(receiptHtml).toContain(">Не отвечено</span>");
     expect(receiptHtml).toContain(">Не зафиксировано</span>");
-    expect(receiptHtml).toContain("Объём информации: Не указан");
+    // No invented scope: the person is in «Лица и учреждения», with the scope "не указан".
+    expect(receiptHtml).not.toContain("Historic Person");
+    expect(personRow({ name: "Historic Person", relation: "friend", contact: null })).toMatch(/Объём информации:<\/span><span[^>]*>не указан<\/span>/);
     expect(receiptHtml).toMatch(/data-testid="portal-disclosure-decision" class="[^"]*border-amber-200/);
     expect(receiptHtml).not.toContain("portal-disclosure-receipt");
     expect(receiptHtml).not.toContain("Anna Muster");
@@ -200,7 +224,7 @@ describe("portal consent facts in the staff wizard", () => {
     })} tx={tx} />);
     expect(html).toContain(">Да</span>");
     expect(html).toContain(">Не зафиксировано</span>");
-    expect(html).toContain("Выбор зафиксирован: Родитель / представитель");
+    expect(html.slice(html.indexOf("portal-disclosure-audit"))).toMatch(chip("user-round", "<span>Родитель / представитель"));
     expect(html).not.toContain("border-emerald-200");
   });
 });

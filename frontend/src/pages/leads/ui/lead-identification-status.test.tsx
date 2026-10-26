@@ -123,7 +123,8 @@ describe("LeadIdentificationStatusView", () => {
     const payer = line(html, "payer");
     expect(payer).toContain("Плательщик");
     expect(payer).toContain("Квалифицированной подписи ещё нет");
-    expect(payer).toContain('data-tone="neutral"');
+    // A missing qualified signature is marked red since 2026-10-26 (owner).
+    expect(payer).toContain('data-testid="lead-identification-qes-payer" data-tone="error"');
     expect(payer).toContain("Подтвердить платёж");
     // Nobody signed and waits for a payment: the rule is a plain note.
     expect(html).toContain('data-pending="false"');

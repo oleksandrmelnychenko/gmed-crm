@@ -108,7 +108,7 @@ describe("payer page texts", () => {
     expect(de.confirmLabel).toMatch(/^Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe/);
     expect(de.confirmLabel).toContain("nicht aus strafbaren Handlungen stammen");
     // Owner 2026-10-26: lawful origin in RU/UK/EN, and the company may refuse or end the cooperation.
-    expect(de.confirmLabel).toMatch(/strafbaren Handlungen stammen\. Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden\.$/);
+    expect(de.confirmLabel).toMatch(/strafbaren Handlungen stammen\. Mir ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden\.$/);
     expect(payerLinkText("ru").confirmLabel).toContain("Я подтверждаю, что средства для оплаты имеют законное происхождение. Мне известно, что GMED – Agentur für Patientenbetreuung вправе отказать в сотрудничестве или прекратить его");
     expect(payerLinkText("uk").confirmLabel).toContain("Я підтверджую, що кошти для оплати мають законне походження. Мені відомо, що GMED – Agentur für Patientenbetreuung має право відмовити у співпраці");
     expect(payerLinkText("en").confirmLabel).toContain("are of lawful origin. I am aware that GMED – Agentur für Patientenbetreuung is entitled to refuse or end the cooperation");

@@ -123,10 +123,14 @@ describe("lead cabinet steps", () => {
       "follow_up",
       "disclosure",
       "documents",
+      // The service questionnaire comes last, only when the server offers it (owner 2026-10-27).
+      "services",
       "send",
     ]);
     // "contact" is part of the first tab, the declarations are follow-up block L (owner 2026-10-09).
     expect(visibleSteps(request())).toEqual(["person", "identity", "billing", "disclosure", "documents", "send"]);
+    const servicesOffered = { services: [], service_comments: {}, program_date_from: "", notes: "" };
+    expect(visibleSteps({ ...request(), service_preferences: servicesOffered })).toEqual(["person", "identity", "billing", "disclosure", "documents", "services", "send"]);
     const sent = "2026-10-07T09:00:00Z";
     expect(visibleSteps(request({ submitted_at: sent, follow_up: undefined }))).not.toContain("follow_up");
     expect(visibleSteps(request({ submitted_at: sent, follow_up: followUp({ blocks: ["A"] }) }))).toContain("follow_up");

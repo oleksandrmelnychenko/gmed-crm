@@ -286,7 +286,10 @@ pub fn router() -> Router<AppState> {
         // The patient's (or guardian's) own requests.
         .route("/me/lead-requests", get(list_my_lead_requests))
         .route("/me/lead-requests/{lead_id}", get(get_my_lead_request))
-        .route("/me/lead-requests/{lead_id}/services", post(services::update))
+        .route(
+            "/me/lead-requests/{lead_id}/services",
+            post(services::update),
+        )
         .route(
             "/me/lead-requests/{lead_id}/personal-data",
             post(update_my_personal_data),

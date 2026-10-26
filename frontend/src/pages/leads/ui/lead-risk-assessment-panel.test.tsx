@@ -127,7 +127,8 @@ describe("LeadRiskAssessmentPanel", () => {
         decisions: [{ id: "d1", kind: "proposal", proposal_state: "withdrawn", decision: "reject", reason: "Mittelherkunft unklar", level: 3, decided_by_name: "Test CEO", decided_at: "2026-10-07T10:00:00Z" }],
       }),
     );
-    expect(listed).toContain("(предложение · отозвано)");
+    // The state is a chip next to the decision since 2026-10-26 (owner).
+    expect(listed).toContain(">предложение · отозвано<");
   });
 
   it("is read-only for a non-reviewer", () => {
