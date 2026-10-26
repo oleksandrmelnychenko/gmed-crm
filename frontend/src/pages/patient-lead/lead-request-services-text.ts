@@ -2,9 +2,9 @@ import { asLeadCabinetLang } from "./lead-request-text";
 
 const TEXT = {
   ru: {
-    period: "Период программы", from: "Начало программы", to: "Окончание программы",
+    period: "Период программы", from: "Начало программы",
     services: "Запрошенные услуги", notes: "Общий комментарий", comment: "Комментарий к услуге",
-    optional: "Необязательно", invalidPeriod: "Окончание программы не может быть раньше начала.",
+    optional: "Необязательно",
     options: {
       driver: "Услуги водителя и трансфер", concierge: "Консьерж-сервис",
       interpreter_support: "Поддержка переводчика", "medical-transport": "Наземный медицинский транспорт",
@@ -13,9 +13,9 @@ const TEXT = {
     },
   },
   uk: {
-    period: "Період програми", from: "Початок програми", to: "Завершення програми",
+    period: "Період програми", from: "Початок програми",
     services: "Потрібні послуги", notes: "Загальний коментар", comment: "Коментар до послуги",
-    optional: "Необов’язково", invalidPeriod: "Завершення програми не може бути раніше початку.",
+    optional: "Необов’язково",
     options: {
       driver: "Послуги водія та трансфер", concierge: "Консьєрж-сервіс",
       interpreter_support: "Підтримка перекладача", "medical-transport": "Наземний медичний транспорт",
@@ -24,9 +24,9 @@ const TEXT = {
     },
   },
   de: {
-    period: "Programmzeitraum", from: "Programmbeginn", to: "Programmende",
+    period: "Programmzeitraum", from: "Programmbeginn",
     services: "Gewünschte Leistungen", notes: "Allgemeiner Kommentar", comment: "Kommentar zur Leistung",
-    optional: "Optional", invalidPeriod: "Das Programmende darf nicht vor dem Beginn liegen.",
+    optional: "Optional",
     options: {
       driver: "Fahrdienst und Transfer", concierge: "Concierge-Service",
       interpreter_support: "Dolmetscherunterstützung", "medical-transport": "Bodengebundener Krankentransport",
@@ -35,9 +35,9 @@ const TEXT = {
     },
   },
   en: {
-    period: "Programme period", from: "Programme start", to: "Programme end",
+    period: "Programme period", from: "Programme start",
     services: "Requested services", notes: "General comment", comment: "Comment on this service",
-    optional: "Optional", invalidPeriod: "The programme cannot end before it starts.",
+    optional: "Optional",
     options: {
       driver: "Driver and transfer services", concierge: "Concierge service",
       interpreter_support: "Interpreter support", "medical-transport": "Ground medical transport",

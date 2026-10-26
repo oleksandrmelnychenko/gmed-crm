@@ -15,7 +15,7 @@ import { servicesText } from "./lead-request-services-text";
 function draftOf(value?: LeadServicePreferences): LeadServicePreferences {
   return {
     services: value?.services ?? [], service_comments: value?.service_comments ?? {},
-    program_date_from: value?.program_date_from ?? "", program_date_to: value?.program_date_to ?? "",
+    program_date_from: value?.program_date_from ?? "",
     notes: value?.notes ?? "",
   };
 }
@@ -23,7 +23,7 @@ function draftOf(value?: LeadServicePreferences): LeadServicePreferences {
 function difference(before: LeadServicePreferences, after: LeadServicePreferences): Partial<LeadServicePreferences> {
   const patch: Partial<LeadServicePreferences> = {};
   if (JSON.stringify(before.services) !== JSON.stringify(after.services)) patch.services = after.services;
-  for (const key of ["program_date_from", "program_date_to", "notes"] as const) {
+  for (const key of ["program_date_from", "notes"] as const) {
     if (before[key] !== after[key]) patch[key] = after[key];
   }
   const comments = Object.fromEntries(
@@ -43,7 +43,6 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
   const [state, setState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
   const locked = Boolean(request.submitted_at);
-  const invalidPeriod = Boolean(draft.program_date_from && draft.program_date_to && draft.program_date_to < draft.program_date_from);
 
   const save = useCallback((snapshot: LeadServicePreferences) => {
     if (locked) return true;
@@ -65,11 +64,6 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
         setState((current) => current === "error" ? "saved" : current);
         return true;
       }
-      if (snapshot.program_date_from && snapshot.program_date_to && snapshot.program_date_to < snapshot.program_date_from) {
-        setState("error");
-        setError(wording.invalidPeriod);
-        return false;
-      }
       setState("saving");
       setError(null);
       try {
@@ -88,7 +82,7 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
         return false;
       }
     });
-  }, [enqueue, locked, onChange, request.lead_id, text, wording.invalidPeriod]);
+  }, [enqueue, locked, onChange, request.lead_id, text]);
 
   useAutosave(draft, save);
   useServerDraftSync({ incoming: draftOf(request.service_preferences), draft, savedRef, queuedDraftRef, setDraft,
@@ -107,21 +101,13 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
     <StepFrame testId="lead-request-services" step="services" request={request} text={text} missing={missing} nav={nav} saveState={state}>
       {error && !locked ? <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
         <span>{error}</span>
-        {!invalidPeriod ? <Button type="button" size="sm" onClick={() => void save(draft)}>{text.retry}</Button> : null}
+        <Button type="button" size="sm" onClick={() => void save(draft)}>{text.retry}</Button>
       </div> : null}
       <CabinetSection title={wording.period} accessory={<StatusChip>{wording.optional}</StatusChip>}>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {(["program_date_from", "program_date_to"] as const).map((field) => (
-            <LabeledField key={field} id={`lead-request-service-${field}`} label={field === "program_date_from" ? wording.from : wording.to}
-              className={fieldStyle} error={field === "program_date_to" && invalidPeriod ? wording.invalidPeriod : undefined}>
-              <Input id={`lead-request-service-${field}`} type="date" className="h-10 bg-background"
-                min={field === "program_date_to" ? draft.program_date_from || undefined : undefined}
-                aria-invalid={field === "program_date_to" && invalidPeriod || undefined}
-                aria-describedby={field === "program_date_to" && invalidPeriod ? `lead-request-service-${field}-error` : undefined}
-                value={draft[field]} onChange={(event) => setDraft((current) => ({ ...current, [field]: event.target.value }))} />
-            </LabeledField>
-          ))}
-        </div>
+        <LabeledField id="lead-request-service-program_date_from" label={wording.from} className={cn(fieldStyle, "max-w-sm")}>
+          <Input id="lead-request-service-program_date_from" type="date" className="h-10 bg-background"
+            value={draft.program_date_from} onChange={(event) => setDraft((current) => ({ ...current, program_date_from: event.target.value }))} />
+        </LabeledField>
       </CabinetSection>
       <CabinetSection title={wording.services} accessory={<StatusChip tone={draft.services.length ? "info" : "neutral"}>{draft.services.length}</StatusChip>}>
         <div id="lead-request-service-services" className="grid gap-2.5 sm:grid-cols-2">

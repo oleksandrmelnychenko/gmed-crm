@@ -163,9 +163,10 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
         </span>
       </p> : null}
       {/* The persons themselves are listed once, in «Лица и учреждения» (owner 2026-10-26). */}
-      {persons.length > 0 ? <p className="text-xs leading-5 text-muted-foreground" data-testid="portal-trusted-persons-pointer">
-        {tx("Получатели информации", "Auskunftsberechtigte")} · {persons.length} — {tx("в списке «Лица и учреждения» ниже", "in der Liste „Personen und Einrichtungen“ unten")}
-      </p> : null}
+      {persons.length > 0 ? <StatusChip tone="warning" className="items-start rounded-lg px-3 py-2 whitespace-normal" data-testid="portal-trusted-persons-pointer">
+        <Info aria-hidden="true" className="mt-0.5" />
+        <span>{tx("Получатели информации", "Auskunftsberechtigte")} · {persons.length} — {tx("в списке «Лица и учреждения» ниже", "in der Liste „Personen und Einrichtungen“ unten")}</span>
+      </StatusChip> : null}
       </div>
       {disclosure ? <ConsentDetails title={tx("Кто подтвердил · версия и текст согласия", "Bestätigung · Version und Einwilligungstext")} testId="portal-disclosure-receipt">
         <div className="flex flex-wrap items-center gap-1.5" data-testid="portal-disclosure-audit">

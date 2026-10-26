@@ -261,7 +261,7 @@ export function stepDone(
   if (step === "send") return Boolean(request.submitted_at) && !changedSinceSubmit(request);
   if (step === "services") {
     const value = request.service_preferences;
-    return Boolean(value && (value.services.length || value.notes.trim() || value.program_date_from || value.program_date_to));
+    return Boolean(value && (value.services.length || value.notes.trim() || value.program_date_from));
   }
   // Not answered counts as "no" (owner decision 2026-10-22) for the sending; the step is
   // "filled in" only with an own, valid decision.

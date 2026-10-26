@@ -620,7 +620,6 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     const wording = servicesText(lang);
     group("services", text.steps.services, [
       [wording.from, services.program_date_from ? formatAppDate(services.program_date_from) : ""],
-      [wording.to, services.program_date_to ? formatAppDate(services.program_date_to) : ""],
       [wording.services, services.services.map((key) => wording.options[key as keyof typeof wording.options] ?? key).join(", ")],
       ...services.services.flatMap((key): Entry[] => services.service_comments[key]?.trim()
         ? [[wording.options[key as keyof typeof wording.options] ?? key, services.service_comments[key]]] : []),

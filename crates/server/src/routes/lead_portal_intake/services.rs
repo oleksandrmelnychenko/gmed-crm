@@ -57,7 +57,6 @@ pub(super) fn payload(row: &PgRow) -> Value {
         "service_comments": comments,
         "notes": row.try_get::<Option<String>, _>("notes").ok().flatten().unwrap_or_default(),
         "program_date_from": wizard.get("program_date_from").and_then(Value::as_str).unwrap_or(""),
-        "program_date_to": wizard.get("program_date_to").and_then(Value::as_str).unwrap_or(""),
     })
 }
 
@@ -68,7 +67,6 @@ pub(super) struct ServicePatch {
     service_comments: Option<BTreeMap<String, String>>,
     notes: Option<String>,
     program_date_from: Option<String>,
-    program_date_to: Option<String>,
 }
 
 fn comment(value: &str, field: &'static str) -> Result<String, FieldError> {
@@ -136,18 +134,10 @@ pub(super) async fn update(
     }
     comments.retain(|key, _| selected.iter().any(|v| v == canonical(key)));
     let mut from = current["program_date_from"].as_str().unwrap_or("").to_owned();
-    let mut to = current["program_date_to"].as_str().unwrap_or("").to_owned();
-    for (input, field, target) in [
-        (&patch.program_date_from, "program_date_from", &mut from),
-        (&patch.program_date_to, "program_date_to", &mut to),
-    ] {
-        if let Some(value) = input {
-            *target = match date(value, field) { Ok(value) => value, Err(error) => return error.into_response() };
-        }
-    }
-    if (patch.program_date_from.is_some() || patch.program_date_to.is_some())
-        && !from.is_empty() && !to.is_empty() && to < from {
-        return field_error("program_date_to", "End precedes start").into_response();
+    if let Some(value) = &patch.program_date_from {
+        from = match date(value, "program_date_from") {
+            Ok(value) => value, Err(error) => return error.into_response(),
+        };
     }
     let notes = match patch.notes.as_deref() {
         Some(value) => match comment(value, "notes") { Ok(value) => value, Err(error) => return error.into_response() },
@@ -156,8 +146,8 @@ pub(super) async fn update(
     let next = json!({ "services": selected.iter().filter(|v| OPTIONS.contains(&v.as_str())).collect::<Vec<_>>(),
         "service_comments": comments.iter().filter(|(k, _)| OPTIONS.contains(&canonical(k)))
             .map(|(k, v)| (canonical(k).to_owned(), v.clone())).collect::<Map<String, Value>>(),
-        "program_date_from": from, "program_date_to": to, "notes": notes });
-    let changed: Vec<&str> = ["services", "service_comments", "program_date_from", "program_date_to", "notes"]
+        "program_date_from": from, "notes": notes });
+    let changed: Vec<&str> = ["services", "service_comments", "program_date_from", "notes"]
         .into_iter().filter(|key| current[*key] != next[*key]).collect();
     if changed.is_empty() {
         drop(tx);
@@ -168,7 +158,7 @@ pub(super) async fn update(
     if !wizard.is_object() { wizard = json!({}); }
     wizard["service_comments"] = json!(comments);
     wizard["program_date_from"] = json!(from);
-    wizard["program_date_to"] = json!(to);
+    // The cabinet asks for the start only; preserve any end date set by staff.
     let now = match portal_update_time(&mut tx).await {
         Ok(now) => now, Err(error) => return internal(error, "service questionnaire time"),
     };

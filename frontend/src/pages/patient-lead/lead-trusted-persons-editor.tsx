@@ -43,7 +43,10 @@ export function TrustedPersonsList({ persons, lang, onRemove, disabled = false }
               <span className="min-w-0 [overflow-wrap:anywhere]">{contact}</span>
             </StatusChip>)}
           </div>
-          {scopeLabels.length ? <div className="flex flex-wrap gap-1.5">{scopeLabels.map((scope) => <StatusChip key={scope} tone="info">{scope}</StatusChip>)}</div> : null}
+          {scopeLabels.length ? <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-xs font-medium text-foreground/80">{fields.scope}:</span>
+            {scopeLabels.map((scope) => <StatusChip key={scope} tone="info">{scope}</StatusChip>)}
+          </div> : null}
         </div>
         {onRemove ? <Button type="button" variant="ghost" size="sm" className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" disabled={disabled}
           aria-label={`${fields.removePerson}: ${person.name}`} title={fields.removePerson} data-testid="trusted-person-remove" onClick={() => onRemove(index)}>

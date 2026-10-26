@@ -836,7 +836,6 @@ export type LeadServicePreferences = {
   services: string[];
   service_comments: Record<string, string>;
   program_date_from: string;
-  program_date_to: string;
   notes: string;
 };
 

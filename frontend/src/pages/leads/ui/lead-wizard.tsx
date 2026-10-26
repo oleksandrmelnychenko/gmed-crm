@@ -46,6 +46,7 @@ import {
   Archive,
   ArrowLeft,
   ArrowRight,
+  CalendarDays,
   Check,
   ChevronDown,
   CircleAlert,
@@ -60,6 +61,7 @@ import {
   Info,
   LoaderCircle,
   Mail,
+  MapPin,
   MessageSquareText,
   Pencil,
   Phone,
@@ -78,7 +80,7 @@ import {
 
 import { AdminSectionTitle, AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { AdminDialogScaffold, AdminFormSection } from "@/components/admin-dialog-scaffold";
-import { TrustedContactRole } from "./trusted-contact-role";
+import { PARENT_ROLE_CHIP_CLASS, TrustedContactRole } from "./trusted-contact-role";
 import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -10078,55 +10080,61 @@ ${serviceCommentLines.join("\n")}`
                         </AdminSectionTitle>
                         <CountBadge>{peopleRows.length}</CountBadge>
                       </div>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground" data-testid="consent-form-recipients">
-                        <span className="font-medium text-foreground">{tx("В форму согласия попадут:", "In die Einverständniserklärung kommen:")}</span>{" "}
-                        {formRecipients.names.length > 0 ? formRecipients.names.join(", ") : tx("никто", "niemand")}
-                        {" · "}
-                        {formRecipients.source === "cabinet"
-                          ? tx("по выбору клиента в кабинете", "nach Wahl des Kunden im Kundenkabinett")
-                          : tx("контакты GMED — клиент в кабинете не выбирал", "Kontakte von GMED – keine Wahl im Kundenkabinett")}
-                      </p>
                     </div>
                     <Button type="button" variant="default" size="sm" onClick={() => openNewTrustedContact()}>
                       <Plus aria-hidden="true" className="size-3.5" />
                       {tx("Добавить контакт", "Kontakt hinzufügen")}
                     </Button>
                   </div>
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/30 px-3 py-2.5 text-xs" data-testid="consent-form-recipients">
+                    <FileText aria-hidden="true" className="size-3.5 shrink-0 text-foreground" />
+                    <span className="font-mono text-foreground/80">{tx("В форму согласия попадут:", "In die Einverständniserklärung kommen:")}</span>
+                    {formRecipients.names.length > 0
+                      ? formRecipients.names.map((name, index) => <StatusChip key={`${index}:${name}`} tone="warning" className="whitespace-normal"><UserRound aria-hidden="true" /><span className="min-w-0 break-words">{name}</span></StatusChip>)
+                      : <StatusChip>{tx("никто", "niemand")}</StatusChip>}
+                    <StatusChip tone={formRecipients.source === "cabinet" ? "info" : "neutral"} className="whitespace-normal">
+                      {formRecipients.source === "cabinet"
+                        ? tx("по выбору клиента в кабинете", "nach Wahl des Kunden im Kundenkabinett")
+                        : tx("контакты GMED — клиент в кабинете не выбирал", "Kontakte von GMED – keine Wahl im Kundenkabinett")}
+                    </StatusChip>
+                  </div>
                   {peopleRows.length === 0 ? (
                     <EmptyCell>
                       {tx("Лица и учреждения пока не добавлены", "Noch keine Personen oder Einrichtungen hinzugefügt")}
                     </EmptyCell>
                   ) : (
-                    <ul aria-label={tx("Лица и учреждения", "Personen und Einrichtungen")} className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
+                    <ul aria-label={tx("Лица и учреждения", "Personen und Einrichtungen")} className="space-y-2">
                       {peopleRows.map((row) => {
                         const contact = row.contact;
                         if (!contact) {
                           return row.cabinet ? <CabinetPersonRow key={row.key} person={row.cabinet} tx={tx} lang={lang} /> : null;
                         }
                         return (
-                        <li key={row.key} className="flex items-start gap-3 px-3 py-3">
+                        <li key={row.key} className="flex flex-wrap items-start gap-3 rounded-xl border border-border/60 bg-card p-3">
                           <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                              <span className="break-words text-sm font-medium text-foreground">{contact.name}</span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <UserRound aria-hidden="true" className="size-4 shrink-0 text-foreground" />
+                              <span className="min-w-0 break-words text-sm font-semibold text-foreground">{contact.name}</span>
                               {contact.relation ? (
-                                <TrustedContactRole relation={contact.relation} tx={tx} />
+                                <StatusChip className={PARENT_ROLE_CHIP_CLASS}>{trustedContactRelationLabel(contact.relation, tx)}</StatusChip>
                               ) : null}
                               {gwgDataContactIds.has(contact.id) ? (
-                                <Badge variant="outline" className="border-border bg-muted/40 text-[10px] text-muted-foreground" data-testid="trusted-contact-gwg-badge">
+                                <StatusChip tone="info" data-testid="trusted-contact-gwg-badge">
                                   {tx("Представитель (GwG)", "Vertreter/in (GwG)")}
-                                </Badge>
+                                </StatusChip>
                               ) : null}
                               {row.cabinet ? <CabinetRecipientBadge tx={tx} /> : null}
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-foreground">
-                              {contact.birthDate ? <span>{germanDocumentDate(contact.birthDate)}</span> : null}
+                              {contact.birthDate ? <StatusChip tone="info"><CalendarDays aria-hidden="true" />{germanDocumentDate(contact.birthDate)}</StatusChip> : null}
                               {contact.email ? <StatusChip tone="warning" className="whitespace-normal"><Mail aria-hidden="true" /><span className="min-w-0 break-all">{contact.email}</span></StatusChip> : null}
                               {contact.phone ? <StatusChip tone="warning"><Phone aria-hidden="true" />{contact.phone}</StatusChip> : null}
-                              {contact.address ? <span className="break-words">{contact.address}</span> : null}
+                              {contact.address ? <span className="inline-flex min-w-0 items-start gap-1.5 text-sm"><MapPin aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /><span className="break-words">{contact.address}</span></span> : null}
                               {contact.scopeCodes?.length ? (
-                                <span data-testid="trusted-contact-scope-summary">
-                                  {tx("Объём информации:", "Auskunftsumfang:")} {staffScopeSummary(contact.scopeCodes, lang === "de" ? "de" : "ru")}
-                                </span>
+                                <div className="flex w-full flex-wrap items-center gap-2" data-testid="trusted-contact-scope-summary">
+                                  <span className="font-mono text-xs text-foreground/80">{tx("Объём информации:", "Auskunftsumfang:")}</span>
+                                  {normalizeScopeCodes(contact.scopeCodes).map((code) => <StatusChip key={code} tone="info">{staffScopeSummary([code], lang === "de" ? "de" : "ru")}</StatusChip>)}
+                                </div>
                               ) : null}
                             </div>
                             {row.cabinet ? <CabinetPersonDetails person={row.cabinet} tx={tx} lang={lang} /> : null}
