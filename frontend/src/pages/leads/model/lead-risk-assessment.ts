@@ -984,15 +984,15 @@ export function gwgSheetSignatureNotice(details: unknown, tx: Tx): string | null
  * Where staff complete a person's missing data (walk-through 2026-10-24: the
  * refusal sent staff to «Данные клиента» without naming the parent's card): a
  * parent in the block «Родитель или законный представитель» of the client
- * step, an adult's representative or Betreuer in «Контакты и представители»
+ * step, an adult's representative or Betreuer in «Лица и учреждения»
  * of the documents step — the card's form «Адрес и данные для анкеты GwG».
  */
 export function representativeCardPlace(missing: unknown, tx: Tx): string {
   const keys = Array.isArray(missing) ? missing.filter((key): key is string => typeof key === "string") : [];
   if (keys.some((key) => key.startsWith("agent_") || key.startsWith("guardian_"))) {
     return tx(
-      "шаг «Документы», блок «Контакты и представители» — кнопка ✎ у этого лица, раздел «Адрес и данные для анкеты GwG»",
-      "Schritt „Unterlagen“, Block „Kontakte und Vertretung“ – Stift bei dieser Person, Abschnitt „Anschrift und Angaben für den GwG-Bogen“",
+      "шаг «Документы», блок «Лица и учреждения» — кнопка ✎ у этого лица, раздел «Адрес и данные для анкеты GwG»",
+      "Schritt „Unterlagen“, Block „Personen und Einrichtungen“ – Stift bei dieser Person, Abschnitt „Anschrift und Angaben für den GwG-Bogen“",
     );
   }
   if (keys.length > 0 && keys.every((key) => key.startsWith("patient_"))) {

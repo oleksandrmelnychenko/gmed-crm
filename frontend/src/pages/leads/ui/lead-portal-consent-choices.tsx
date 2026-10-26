@@ -162,13 +162,10 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
             "Wahl des Kunden: keine Auskunft an Dritte. Das ist eine gültige Antwort – eine gesonderte Einwilligung ist nicht nötig, sie blockiert nichts; in der Einverständniserklärung bleibt die Übermittlung an genannte Personen unangekreuzt.")}
         </span>
       </p> : null}
-      {persons.length > 0 ? <div className="space-y-3" data-testid="portal-trusted-persons">
-        <div className="flex flex-wrap items-center gap-2">
-          <h4 className="text-sm font-semibold">{tx("Получатели информации (Auskunft an Dritte)", "Auskunftsberechtigte (Auskunft an Dritte)")}</h4>
-          <span className="rounded-md bg-muted px-1.5 py-0.5 text-sm tabular-nums text-foreground">{persons.length}</span>
-        </div>
-        <RecipientCards persons={persons} relationLabels={relationLabels} tx={tx} />
-      </div> : null}
+      {/* The persons themselves are listed once, in «Лица и учреждения» (owner 2026-10-26). */}
+      {persons.length > 0 ? <p className="text-xs leading-5 text-muted-foreground" data-testid="portal-trusted-persons-pointer">
+        {tx("Получатели информации", "Auskunftsberechtigte")} · {persons.length} — {tx("в списке «Лица и учреждения» ниже", "in der Liste „Personen und Einrichtungen“ unten")}
+      </p> : null}
       </div>
       {disclosure ? <ConsentDetails title={tx("Кто подтвердил · версия и текст согласия", "Bestätigung · Version und Einwilligungstext")} testId="portal-disclosure-receipt">
         <div className="flex flex-wrap items-center gap-1.5" data-testid="portal-disclosure-audit">

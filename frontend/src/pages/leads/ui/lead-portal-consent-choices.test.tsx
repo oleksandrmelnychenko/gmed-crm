@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { normalizeLeadPortalIntake, type LeadPortalIntake } from "../data/lead-portal-intake-api";
 import { normalizeConsentRecipients, normalizeLeadPortalConsentForm, normalizeLeadPortalDisclosure } from "../model/lead-portal-consents";
+import { CabinetPersonRow } from "./lead-cabinet-person-row";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { PortalHealthConsentLine, PortalInquiryConsentLine } from "./lead-wizard-portal-intake";
 
@@ -19,11 +20,15 @@ describe("portal consent facts in the staff wizard", () => {
   it("shows the stored trusted list independently of a consent choice and does not grant permission", () => {
     const intake = state({ trusted_persons: [{ name: "Eva Muster", relation: "friend", contact: "eva@example.com" }] });
     const html = renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={tx} />);
-    expect(html).toContain("Получатели информации (Auskunft an Dritte)");
-    expect(html).toContain("друг / знакомый");
-    expect(html).toContain("Eva Muster");
+    // The persons are listed once, in «Лица и учреждения»; here only a pointer (owner 2026-10-26).
+    expect(html).toContain("в списке «Лица и учреждения» ниже");
+    expect(html).not.toContain("Eva Muster");
     expect(html).not.toContain(">Разрешено<");
-    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain("Freund/in / Bekannte/r");
+    const row = renderToStaticMarkup(<ul><CabinetPersonRow person={intake.trusted_persons![0]} tx={tx} lang="ru" /></ul>);
+    expect(row).toContain("друг / знакомый");
+    expect(row).toContain("Eva Muster");
+    expect(row).toContain("изменить может только он");
+    expect(renderToStaticMarkup(<ul><CabinetPersonRow person={intake.trusted_persons![0]} tx={de} lang="de" /></ul>)).toContain("Freund/in / Bekannte/r");
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={{ ...intake, identification_hidden: true }} tx={tx} />)).toBe("");
   });
   it("shows the date of birth and the phone a trusted person calls from, so staff can check a caller (owner 2026-10-26)", () => {
@@ -34,12 +39,15 @@ describe("portal consent facts in the staff wizard", () => {
     ]);
     expect(persons[0]).toMatchObject({ phone: "+49 151 000000", birth_date: "1975-04-03" });
     expect(persons[1].birth_date).toBeUndefined();
-    const html = renderToStaticMarkup(<PortalConsentChoiceView intake={state({ trusted_persons: persons })} tx={de} />);
+    const rows = (translate: typeof tx, lang: string) => renderToStaticMarkup(
+      <ul>{persons.map((person) => <CabinetPersonRow key={person.name} person={person} tx={translate} lang={lang} />)}</ul>,
+    );
+    const html = rows(de, "de");
     expect(html).toContain("geb. 03.04.1975");
     expect(html).toContain("Tel. +49 151 000000");
     expect(html).toContain("Tel. +49 40 1234567");
     expect(html).toContain("oma@example.test");
-    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={state({ trusted_persons: persons })} tx={tx} />)).toContain("род. 03.04.1975");
+    expect(rows(tx, "ru")).toContain("род. 03.04.1975");
   });
   it("shows medical consent independently of files, with grant and revocation dates", () => {
     const intake = state({ uploads: [], consents: [{ id: "health", type: "health_data_processing", given_at: "2026-10-11T09:00:00Z", revoked_at: "2026-10-12T09:00:00Z", version: "v1", access_kind: "guardian" }] });

@@ -843,7 +843,7 @@ test("the GwG data of a contact are removed before the contact itself", async ({
   await page.setViewportSize({ width: 1440, height: 1100 });
   const { wizard, statements, calls } = await mount(page, { lang: "ru" });
 
-  const contacts = wizard.getByRole("list", { name: "Контакты и представители" });
+  const contacts = wizard.getByRole("list", { name: "Лица и учреждения" });
   const anna = contacts.getByRole("listitem").filter({ hasText: "Anna Muster" });
   await expect(anna.getByTestId("trusted-contact-gwg-badge")).toHaveText("Представитель (GwG)");
   // Staff may now remove the whole contact directly, or clear only its GwG data.

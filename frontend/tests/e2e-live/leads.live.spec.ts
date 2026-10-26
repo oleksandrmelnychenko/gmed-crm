@@ -352,9 +352,9 @@ test.describe("lead live workflows", () => {
       wizard.getByRole("heading", { name: "Schweigepflichtsentbindung" }),
     ).toBeVisible();
     await expect(
-      wizard.getByText("Kontakte und Vertretung", { exact: true }),
+      wizard.getByText("Personen und Einrichtungen", { exact: true }),
     ).toBeVisible();
-    const trustedContacts = wizard.getByRole("list", { name: "Kontakte und Vertretung" });
+    const trustedContacts = wizard.getByRole("list", { name: "Personen und Einrichtungen" });
     await expect(trustedContacts.getByText("Alex Beispiel", { exact: true })).toBeVisible();
     await expect(trustedContacts.getByText("Maria Beispiel", { exact: true })).toBeVisible();
 

@@ -202,7 +202,7 @@ describe("lead request summary", () => {
       "Zahler",
       "Weitere Fragen",
       "Auskunft an Dritte",
-      "Ihre Unterlagen",
+      "Ihre Unterlagen (freiwillig)",
     ]);
     // The default, not an answer the person gave (QA 2026-10-24, A-1).
     expect(rows(groups, "disclosure")).toEqual({ "Soll eine weitere Person Auskunft erhalten dürfen?": "Nein (Voreinstellung)" });

@@ -433,7 +433,7 @@ describe("the contract gate names the missing parent details (staff report 2026-
     // Walk-through 2026-10-24: the text names the parent's card, not only «Данные клиента».
     expect(riskGateErrorText(error, ru)).toContain("блок «Родитель или законный представитель» — кнопка ✎ у родителя, раздел «Адрес и данные для анкеты GwG»");
     expect(riskGateErrorText(error, de)).toContain("Block „Elternteil oder gesetzlicher Vertreter“");
-    expect(representativeCardPlace(["agent_street"], ru)).toContain("«Контакты и представители»");
+    expect(representativeCardPlace(["agent_street"], ru)).toContain("«Лица и учреждения»");
     expect(representativeCardPlace(["patient_id_valid_until"], ru)).toBe("шаг «Данные клиента»");
   });
 

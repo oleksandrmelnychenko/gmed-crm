@@ -364,6 +364,8 @@ import {
   toggleScopeCode,
   type ConsentRecipientScope,
 } from "@/lib/consent-recipient-scope";
+import { CabinetPersonDetails, CabinetPersonRow, CabinetRecipientBadge } from "./lead-cabinet-person-row";
+import { cabinetPeople, consentFormRecipients, mergeLeadPeople } from "../model/lead-people";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { LeadIdentityDocumentData } from "./lead-identity-document-data";
 import { LeadRepresentativeDetailsForm, PendingRepresentativeDetailsForm } from "./lead-representative-details";
@@ -10053,29 +10055,56 @@ ${serviceCommentLines.join("\n")}`
                     </StatusChip>
                   ) : null}
                 </div>
-                <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3 sm:p-4">
+                {(() => {
+                  // One list of everybody the forms name (owner 2026-10-26): staff
+                  // contacts and representatives, and the persons the client named
+                  // in the cabinet (read-only), each person once.
+                  const peopleRows = mergeLeadPeople(
+                    draft.trustedContacts,
+                    cabinetPeople(step1Portal.intake?.trusted_persons, step1Portal.intake?.consent_form),
+                  );
+                  const formRecipients = consentFormRecipients(
+                    step1Portal.intake?.consent_form,
+                    draft.trustedContacts,
+                    isMinor(draft.birthDate, new Date()),
+                  );
+                  return (
+                <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3 sm:p-4" data-testid="lead-people">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <AdminSectionTitle className="text-sm">
-                          {tx("Контакты и представители", "Kontakte und Vertretung")}
+                          {tx("Лица и учреждения", "Personen und Einrichtungen")}
                         </AdminSectionTitle>
-                        <CountBadge>{draft.trustedContacts.length}</CountBadge>
+                        <CountBadge>{peopleRows.length}</CountBadge>
                       </div>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground" data-testid="consent-form-recipients">
+                        <span className="font-medium text-foreground">{tx("В форму согласия попадут:", "In die Einverständniserklärung kommen:")}</span>{" "}
+                        {formRecipients.names.length > 0 ? formRecipients.names.join(", ") : tx("никто", "niemand")}
+                        {" · "}
+                        {formRecipients.source === "cabinet"
+                          ? tx("по выбору клиента в кабинете", "nach Wahl des Kunden im Kundenkabinett")
+                          : tx("контакты GMED — клиент в кабинете не выбирал", "Kontakte von GMED – keine Wahl im Kundenkabinett")}
+                      </p>
                     </div>
                     <Button type="button" variant="default" size="sm" onClick={() => openNewTrustedContact()}>
                       <Plus aria-hidden="true" className="size-3.5" />
                       {tx("Добавить контакт", "Kontakt hinzufügen")}
                     </Button>
                   </div>
-                  {draft.trustedContacts.length === 0 ? (
+                  {peopleRows.length === 0 ? (
                     <EmptyCell>
-                      {tx("Контакты и представители пока не добавлены", "Noch keine Kontakte oder Vertretungen hinzugefügt")}
+                      {tx("Лица и учреждения пока не добавлены", "Noch keine Personen oder Einrichtungen hinzugefügt")}
                     </EmptyCell>
                   ) : (
-                    <ul aria-label={tx("Контакты и представители", "Kontakte und Vertretung")} className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
-                      {draft.trustedContacts.map((contact) => (
-                        <li key={contact.id} className="flex items-start gap-3 px-3 py-3">
+                    <ul aria-label={tx("Лица и учреждения", "Personen und Einrichtungen")} className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
+                      {peopleRows.map((row) => {
+                        const contact = row.contact;
+                        if (!contact) {
+                          return row.cabinet ? <CabinetPersonRow key={row.key} person={row.cabinet} tx={tx} lang={lang} /> : null;
+                        }
+                        return (
+                        <li key={row.key} className="flex items-start gap-3 px-3 py-3">
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                               <span className="break-words text-sm font-medium text-foreground">{contact.name}</span>
@@ -10087,6 +10116,7 @@ ${serviceCommentLines.join("\n")}`
                                   {tx("Представитель (GwG)", "Vertreter/in (GwG)")}
                                 </Badge>
                               ) : null}
+                              {row.cabinet ? <CabinetRecipientBadge tx={tx} /> : null}
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-foreground">
                               {contact.birthDate ? <span>{germanDocumentDate(contact.birthDate)}</span> : null}
@@ -10099,6 +10129,7 @@ ${serviceCommentLines.join("\n")}`
                                 </span>
                               ) : null}
                             </div>
+                            {row.cabinet ? <CabinetPersonDetails person={row.cabinet} tx={tx} lang={lang} /> : null}
                             {serverContactError?.contactId === contact.id ? (
                               <p role="alert" className="mt-1 text-xs font-medium text-destructive" data-testid="trusted-contact-server-error">
                                 {serverContactError.message}
@@ -10163,10 +10194,13 @@ ${serviceCommentLines.join("\n")}`
                             </Button>
                           </div>
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
+                  );
+                })()}
                 <WizardDocumentRows
                   documents={wizardDocuments.privacy_consents}
                   complianceKind="dsgvo"
