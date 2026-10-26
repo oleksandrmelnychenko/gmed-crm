@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, Info, LoaderCircle, LogOut, Pencil, Send, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Info, LoaderCircle, LogOut, Pencil, Send, Upload } from "lucide-react";
 
 import { Banner, SuccessBanner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
@@ -120,7 +121,7 @@ export function SendStep({
   }
 
   return (
-    <section className="space-y-6" data-testid="lead-request-send">
+    <section className="flex flex-col gap-4" data-testid="lead-request-send">
       {request.submitted_at ? (
         <>
           <SuccessBanner>
@@ -147,21 +148,21 @@ export function SendStep({
             </div>
           ) : null}
           <SentLockHint text={text} />
-          <Section title={text.nextTitle}>
-            <ol className="space-y-2.5 text-sm" data-testid="lead-request-next-steps">
+          <Section compact title={text.nextTitle}>
+            <ol className="space-y-1.5 text-sm" data-testid="lead-request-next-steps">
               {/* "Nothing is needed meanwhile" only while no follow-up block is open (QA 2026-10-10). */}
               {[
                 ...text.nextSteps,
-                followUpOpen ? text.nextAfterChange : `${text.nextNothingRequired} ${text.nextAfterChange}`,
+                ...(!followUpOpen ? [text.nextNothingRequired] : []),
               ].map((item, index) => (
-                <li key={item} className="flex items-start gap-3">
+                <li key={item} className="flex min-h-6 items-start gap-2.5">
                   <span
                     aria-hidden="true"
-                    className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--brand-soft)] font-mono text-[11px] font-medium text-[var(--brand)]"
+                    className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] font-mono text-[11px] font-semibold text-white"
                   >
                     {index + 1}
                   </span>
-                  <span className="leading-snug">{item}</span>
+                  <span className="min-w-0 leading-6 text-foreground">{item}</span>
                 </li>
               ))}
             </ol>
@@ -260,9 +261,10 @@ export function SendStep({
                   {sendable ? <RequiredMark /> : null}
                 </span>
                 {!sendable && declaredAt ? (
-                  <span className="block text-xs text-muted-foreground">
+                  <StatusChip tone="info" className="mt-1">
+                    <CalendarDays aria-hidden="true" />
                     {text.declarationGivenAt(formatAppDateTime(declaredAt))}
-                  </span>
+                  </StatusChip>
                 ) : null}
               </span>
             </label>
@@ -277,12 +279,12 @@ export function SendStep({
       <StepFooter>
         {request.submitted_at ? (
           // Sent already: documents can still be added; the form itself is read-only.
-          <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onEdit("documents")} data-testid="lead-request-go-add-documents">
+          <Button type="button" className="h-9 gap-1.5" onClick={() => onEdit("documents")} data-testid="lead-request-go-add-documents">
             <Upload aria-hidden="true" className="size-3.5" />
             {text.addDocumentsAfterSend}
           </Button>
         ) : (
-          <Button type="button" variant="outline" className="h-9" onClick={() => onEdit("documents")}>
+          <Button type="button" variant="outline" className="h-9" onClick={() => onEdit(request.service_preferences ? "services" : "documents")}>
             <ArrowLeft aria-hidden="true" className="size-3.5" />
             {text.back}
           </Button>
@@ -314,10 +316,13 @@ export function SendStep({
 /** The statements of the request, read-only and grouped like the form. */
 function RequestSummary({ groups }: { groups: SummaryGroup[] }) {
   return (
-    <div className="divide-y divide-border rounded-lg border border-border" data-testid="lead-request-summary">
+    <div className="space-y-3" data-testid="lead-request-summary">
       {groups.map((group) => (
-        <section key={group.id} className="px-3 py-2.5" data-testid={`lead-request-summary-${group.id}`}>
-          <h4 className="text-xs font-semibold text-foreground">{group.title}</h4>
+        <section key={group.id} className="rounded-lg border border-border/60 bg-card p-3" data-testid={`lead-request-summary-${group.id}`}>
+          <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            {group.title}
+          </h4>
           {group.rows.length === 0 && !group.parts?.length ? (
             <p className="mt-1 text-sm text-muted-foreground">{group.empty}</p>
           ) : (
@@ -335,7 +340,7 @@ function RequestSummary({ groups }: { groups: SummaryGroup[] }) {
               className="mt-2.5 border-t border-dashed border-border pt-2"
               data-testid={`lead-request-summary-${group.id}-${part.id}`}
             >
-              <h5 className="text-xs font-medium text-foreground">{part.title}</h5>
+              <h5 className="text-sm font-medium text-foreground">{part.title}</h5>
               {part.rows.length === 0 ? (
                 <p className="mt-1 text-sm text-muted-foreground">{group.empty}</p>
               ) : (
@@ -365,12 +370,12 @@ export function SummaryRows({ rows }: { rows: SummaryRow[] }) {
     );
   }
   return (
-    <dl className="mt-1.5 space-y-1.5 text-sm">
+    <dl className="mt-3 space-y-2 text-sm">
       {rows.map((row, index) => (
         // Stacked on a phone, label beside value from the tablet width on. A label
         // can repeat (several trusted persons), so the position keys the row.
         <div key={`${row.label}-${index}`} className="sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-4">
-          <dt className="text-xs leading-5 text-muted-foreground">{row.label}</dt>
+          <dt className="font-mono text-xs leading-5 text-foreground/75">{row.label}</dt>
           <dd className="min-w-0 whitespace-pre-line break-words">{row.value}</dd>
         </div>
       ))}

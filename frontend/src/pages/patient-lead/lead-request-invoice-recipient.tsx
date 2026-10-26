@@ -321,17 +321,13 @@ export function InvoiceRecipientSection({
               {text.recipient.question}
               <RequiredMark />
             </p>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5">
               {RECIPIENT_ANSWERS.map((answer) => {
                 const checked = draft.recipient === answer;
                 return (
                   <label
                     key={answer}
-                    className={cn(
-                      "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-sm leading-snug sm:flex-1",
-                      checked ? "border-[var(--brand)] bg-muted/40" : "border-border",
-                      locked && "cursor-not-allowed opacity-70",
-                    )}
+                    className={cn("relative min-w-0 max-w-full", locked ? "cursor-default" : "cursor-pointer")}
                   >
                     <input
                       type="radio"
@@ -340,7 +336,7 @@ export function InvoiceRecipientSection({
                       value={answer}
                       // Named by the visible answer, never by the raw value (labels audit 2026-10-26, S1).
                       aria-label={options[answer]}
-                      className={cn(checkboxClass, "mt-0.5 rounded-full")}
+                      className="peer sr-only"
                       checked={checked}
                       disabled={locked}
                       onChange={() => {
@@ -349,7 +345,14 @@ export function InvoiceRecipientSection({
                         update((current) => withOwnParent(withRecipientAnswer(current, answer), ownParent?.id));
                       }}
                     />
-                    <span className="min-w-0">{options[answer]}</span>
+                    <span className={cn(
+                      "flex min-h-7 items-center rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring/30",
+                      checked
+                        ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-white shadow-sm"
+                        : "border-transparent bg-card text-muted-foreground peer-enabled:hover:border-border peer-enabled:hover:bg-muted/70 peer-enabled:hover:text-foreground",
+                    )}>
+                      {options[answer]}
+                    </span>
                   </label>
                 );
               })}

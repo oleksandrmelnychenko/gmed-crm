@@ -655,3 +655,34 @@ phone, relationship_kind, relationship, payment_reason }`; персонал ще
   `representative_identity`) і лише показуються персоналу, ніколи не
   записуються.
 - Тести: `crates/server/tests/lead_source_person_api.rs`.
+
+## Після надсилання: заявка лише для читання (рішення власника 2026-10-26)
+
+**Блокування.** Щойно заявку надіслано (`leads.portal_submitted_at`), базова форма кабінету (кроки 1–7) — лише для читання, і для власного входу ліда, і для входу батьків / представника. Кнопки «Erneut senden» більше немає. Замість полів кожен крок показує одну підказку: «Ihre Anfrage ist bei GMED. Möchten Sie etwas ändern? Schreiben Sie Ihrem Kontakt bei GMED oder rufen Sie an.» (RU/UK/EN — `sentLockedHint`). Зміни вносить персонал у візарді, як і раніше.
+
+**Сервер.** Кожен запис кабінету, що змінює базову форму, після надсилання відповідає 409 `request_already_sent` (`lead_portal_intake::AfterSend`, `refused_after_send`): `personal-data`; `trusted-persons` і `consent-choices` (крім відкликання); `identification` з `request_reason`. Ендпоінти, через які відповідають і блоки дозапиту (`payer`, `billing`, `enhanced-details`, `identification`, `representation`, `representatives/*`, `country-questions`, `funds-proof`, `relationship-proof`, файли представників), відкриті лише поки GMED запитує блок (`follow_up.required`). Повторний `submit` нічого не змінює й повертає заявку.
+
+**Що лишається відкритим:**
+- блоки дозапиту GMED (крок «Ergänzende Angaben», власне «надіслати») і анкета платника-батька/матері; власний спосіб оплати платника-батька/матері (`payment_route_by = guardian`) — це його відповідь, вона йде до GMED разом зі збереженням (маркер `sent_with_save`, без повторного надсилання);
+- нова копія документа, що посвідчує особу, яку GMED не прийняв (`follow_up.refused_identity_documents`), — крок «Ausweis» не блокується;
+- відкликання згод: згоди ст. 9 / обробки запиту, вибір у формі згоди лише в бік зменшення (`ConsentChoices::only_withdraws`), «Auskunft an Dritte» — «Ні» або видалення осіб зі списку;
+- дослання документів (див. нижче).
+
+**«Dokumente nachreichen».** На кроці документів після надсилання кнопка «Dokumente nachreichen» (RU «Дослать документы», UK «Додати документи», EN «Add documents») додає медичні документи до заявки без повторного надсилання. Надіслані й дослані документи лід не видаляє (`can_delete = false`, DELETE → 409). Персонал отримує одне непрочитане сповіщення на пакет файлів `lead_portal_documents_added` («Лид доложил документы» / «Lead hat Dokumente nachgereicht») і realtime `lead.portal_updated` (`added_after_submit: true`); у візарді такий файл позначено «Nach dem Senden nachgereicht» / «Дослано после отправки» (`uploads[].added_after_submit`).
+
+**`changed_since_submit`** тепер означає лише ще не надіслані відповіді блоків дозапиту: зміни рахуються від пізнішого з `portal_submitted_at` і `follow_up_answered_at`. Не рахуються: дослані медичні документи, нові копії посвідчення, довірені особи (після надсилання — лише відкликання), відповідь платника-батька з `sent_with_save`. Позначки змін полів після надсилання (`portal_field_updates`) персонал і далі бачить у візарді.
+
+**«Abschließen und abmelden».** На екрані «надіслано» основна кнопка «Abschließen und abmelden» (RU «Завершить и выйти», UK «Завершити й вийти», EN «Finish and sign out») виконує звичайний вихід (`explicit`); сторінка входу один раз показує «Vielen Dank – Ihre Anfrage ist bei GMED.» мовою кабінету (`rememberSignOutNotice` у `login-redirect.ts`, sessionStorage).
+
+**Довірені особи (Anlage 1).** Замість довільного «контакту» — обов'язковий «Telefonnummer, von der diese Person uns anruft» з (i): «Auskunft am Telefon geben wir nur, wenn die Person von dieser Nummer anruft und ihr Geburtsdatum nennt. …». Обов'язкова дата народження для осіб (не для `family_doctor` / `clinic`; сервер її відкидає для установ). Обсяг — прапорці «Alle Informationen / Medizinische / Organisatorische / Finanzielle» (`all` знімає інші й навпаки), щонайменше один. Сервер: `ConsentRecipient.phone`, `ConsentRecipient.birth_date` (serde default для старих рядків), `missing_person_field` → 422 `consent_recipients_invalid` з `field` (`phone` / `birth_date` / `scope_codes`) і `index`. Збережена раніше особа без змін зберігає свій `contact` (показано лише для читання) до першого редагування. Друк: «Name (Beziehung), geb. DD.MM.YYYY, Tel. …; Umfang der Auskunft: …» в Anlage 1 і в Patientenformular; персонал у візарді бачить телефон і дату народження, щоб перевірити того, хто телефонує.
+
+
+## Програма й послуги в заявці (2026-10-26)
+
+У «Ваша заявка» перед перевіркою й надсиланням є необов’язковий крок «Програма й послуги»: бажані дати програми, вісім варіантів послуг, коментар до кожної вибраної послуги та загальний коментар. «Нічого з переліченого» та «Поки не знаю» виключають решту варіантів. Порожній опитувальник не блокує надсилання. Введений період перевіряється: кінець не раніше початку.
+
+Кабінет використовує спільні з вкладкою «Сервисная история» поля leads.services, needs_interpreter, notes та wizard_state.program_date_from / program_date_to / service_comments. Відповідь API містить лише ці поля у service_preferences, решта wizard_state не розкривається. Старі нестандартні коди послуг співробітника зберігаються; вибір «нічого» або «поки не знаю» очищає перелік.
+
+POST /me/lead-requests/{lead_id}/services приймає часткові зміни: перевіряє роль patient та особистий/батьківський доступ до конкретної заявки під блокуванням рядка, обмежує коментарі 4000 символами й перелік відомими кодами. Зміни, маркер service_preferences в portal_field_updates та аудит записуються однією транзакцією. Після commit надсилається lead.portal_updated. Після надсилання заявки маршрут закритий через AfterSend::Closed, як інша базова форма.
+
+Форма використовує спільну чергу автозбереження, зберігає перед «Далі» та зміною кроку, показує помилку з можливістю повторити збереження. Відповіді також показуються в підсумку. На сервері без service_preferences крок не показується. Тексти доступні DE / RU / UK / EN.

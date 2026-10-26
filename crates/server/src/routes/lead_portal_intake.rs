@@ -88,6 +88,8 @@ use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
+mod services;
+
 /// Version of the consent texts below. A new wording needs a new version; a
 /// consent to an older version does not count any more.
 pub(crate) const HEALTH_CONSENT_VERSION: &str = "2026-10-13";
@@ -284,6 +286,7 @@ pub fn router() -> Router<AppState> {
         // The patient's (or guardian's) own requests.
         .route("/me/lead-requests", get(list_my_lead_requests))
         .route("/me/lead-requests/{lead_id}", get(get_my_lead_request))
+        .route("/me/lead-requests/{lead_id}/services", post(services::update))
         .route(
             "/me/lead-requests/{lead_id}/personal-data",
             post(update_my_personal_data),
@@ -2950,6 +2953,7 @@ pub(crate) async fn request_payload(
     crate::risk::cabinet::reassess_for_cabinet(&state.db, lead_id, user_id).await?;
     let row = sqlx::query(&format!(
         r#"SELECT {PERSONAL_DATA_COLUMNS}, l.created_at, l.qualification_status,
+                  l.services, l.needs_interpreter, l.notes, l.wizard_state,
                   l.compliance_status, l.portal_submitted_at,
                   ({CHANGED_SINCE_SUBMIT_SQL}) AS changed_since_submit
            FROM leads l
@@ -3247,6 +3251,7 @@ pub(crate) async fn request_payload(
         "access_kind": kind.as_str(),
         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").ok(),
         "personal_data": data.to_json(),
+        "service_preferences": services::payload(&row),
         "progress": {
             "filled": data.filled_count(),
             "total": PROGRESS_FIELDS.len(),

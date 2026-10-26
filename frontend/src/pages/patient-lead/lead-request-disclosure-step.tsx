@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { CONSENT_RECIPIENTS_INVALID, LEAD_REQUEST_ACCESS_CHANGED, LEAD_REQUEST_GUARDIAN_ONLY, saveLeadTrustedPersons } from "./lead-request-api";
 import { choiceOnlyByGuardian, choosesForChild } from "./lead-request-consent-form";
-import { AutosaveFlushContext, CabinetSection, StepFooter, errorBody } from "./lead-request-parts";
+import { AutosaveFlushContext, CabinetSection, InfoNote, StepFooter, errorBody } from "./lead-request-parts";
 import type { StepProps } from "./lead-request-step-forms";
 import { asLeadCabinetLang } from "./lead-request-text";
 import { TrustedPersonsEditor, TrustedPersonsList } from "./lead-trusted-persons-editor";
@@ -161,21 +161,23 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   // After the send: the decision read-only; changes and withdrawals via GMED (owner 2026-10-26).
   const lockedAllow = draft.allowDisclosure === true;
 
-  if (locked) return <section className="space-y-4" data-testid="lead-request-disclosure-step">
-    <div role="note" className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200" data-testid="disclosure-locked-hint">
+  if (locked) return <section className="flex flex-col gap-4" data-testid="lead-request-disclosure-step">
+    <StatusChip tone="success" role="note" className="items-start gap-2 px-3 py-1.5" data-testid="disclosure-locked-hint">
       <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-      <p>{common.sentLockedHint}</p>
-    </div>
-    <CabinetSection title={text.title} accessory={state}>
+      <span>{common.sentLockedHint}</span>
+    </StatusChip>
+    <CabinetSection compact title={text.title} accessory={state}>
       <div className="space-y-3" data-testid="disclosure-locked">
-        <p className="text-sm leading-6" data-testid="disclosure-locked-decision">
-          <span className="text-muted-foreground">{text.lockedDecision}: </span>
-          <span className="font-medium">{lockedAllow ? text.yes : wording.no}</span>
-        </p>
+        <div className="flex flex-wrap items-center gap-2" data-testid="disclosure-locked-decision">
+          <span className="font-mono text-xs font-medium text-foreground/75">{text.lockedDecision}:</span>
+          <StatusChip tone={lockedAllow ? "success" : "neutral"}>{lockedAllow ? text.yes : wording.no}</StatusChip>
+        </div>
         {lockedAllow ? <>
           {/* Sent is sent (owner 2026-10-26): no removal or withdrawal here, only via GMED. */}
           <TrustedPersonsList persons={recipientsToSend(draft.persons)} lang={lang} disabled={busy} />
-          <p className="text-xs leading-5 text-muted-foreground" data-testid="disclosure-locked-via-gmed">{text.lockedWithdrawHint}</p>
+          <div data-testid="disclosure-locked-via-gmed">
+            <InfoNote>{text.lockedWithdrawHint}</InfoNote>
+          </div>
         </> : null}
       </div>
     </CabinetSection>
@@ -187,7 +189,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     </StepFooter>
   </section>;
 
-  return <section className="space-y-4" data-testid="lead-request-disclosure-step">
+  return <section className="flex flex-col gap-4" data-testid="lead-request-disclosure-step">
     <CabinetSection title={text.title} accessory={state}>
       <div className="space-y-4" data-testid="trusted-persons-form">
         {/* A child's parents read "your child … to you as parents" in the introduction already (B10). */}
@@ -195,13 +197,13 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
           <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <p>{text.representativeContext(personName)}</p>
         </div> : null}
-        <p className="text-sm leading-6 text-muted-foreground">{wording.introduction}</p>
+        <p className="text-sm leading-6 text-foreground/85">{wording.introduction}</p>
         <fieldset className="space-y-3" disabled={busy}>
           <legend className="mb-3 text-sm font-semibold">{text.question}</legend>
           <div className="grid gap-2.5 xl:grid-cols-2">
             {[false, true].map((allow) => <label key={String(allow)} className={cn(
-              "flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border p-3.5 text-sm leading-6 transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
-              draft.allowDisclosure === allow ? "border-[var(--brand)] bg-[var(--brand)] font-medium text-white" : "border-border bg-card hover:border-[var(--brand)]",
+              "flex min-w-0 cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 text-sm leading-6 transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
+              draft.allowDisclosure === allow ? "border-[var(--brand)] bg-[var(--brand)] font-medium text-white" : "border-border bg-card hover:border-[var(--brand)] hover:bg-muted/40",
               busy && "cursor-wait",
             )}>
               <input type="radio" name={`disclosure-${request.lead_id}`} aria-label={allow ? text.yes : wording.no} className="mt-1 size-4 shrink-0 accent-current" checked={draft.allowDisclosure === allow} data-testid={allow ? "disclosure-yes" : "disclosure-no"} onChange={() => { setConsentReset(false); update({ allowDisclosure: allow, consentGiven: false, answered: true }); }}

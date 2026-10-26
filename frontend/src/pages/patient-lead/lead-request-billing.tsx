@@ -4,11 +4,9 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import {
-  checkboxClass,
   inputClass,
   selectClass,
   textareaClass,
-  tokens,
 } from "@/components/record-workspace/primitives/design-tokens";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
@@ -384,20 +382,20 @@ export function BillingSections({
             className="space-y-1.5"
             data-testid="lead-request-invoice-to"
           >
-            <p id="lead-request-invoice_to-label" className={cn(tokens.text.label, "block")}>
+            <p id="lead-request-invoice_to-label" className="block font-mono text-xs font-medium leading-5 text-foreground/75">
               {text.billingFields.invoice_to}
               <RequiredMark />
             </p>
-            {/* Stacked: the answers are sentences, and the cabinet is used on phones. */}
-            <div className="flex flex-col gap-2">
+            {/* Sentence options stack on phones and share the row when there is room. */}
+            <div className="grid gap-2 sm:grid-cols-2">
               {invoiceTargets(context).map((target) => {
                 const checked = draft.invoice_to === target;
                 return (
                   <label
                     key={target}
                     className={cn(
-                      "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-sm leading-snug",
-                      checked ? "border-[var(--brand)] bg-muted/40" : "border-border",
+                      "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 text-sm leading-5 transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
+                      checked ? "border-[var(--brand)] bg-[var(--brand)] text-white" : "border-border bg-card hover:bg-muted/40",
                     )}
                   >
                     {/* Named by the visible answer, never by the raw value. */}
@@ -407,7 +405,7 @@ export function BillingSections({
                       name="lead-request-invoice_to"
                       value={target}
                       aria-label={invoiceToLabel(text, target, guardian, context.routeBy)}
-                      className={cn(checkboxClass, "mt-0.5 rounded-full")}
+                      className="mt-0.5 size-4 shrink-0 accent-current"
                       checked={checked}
                       onChange={() => form.update((current) => withInvoiceTo(current, target))}
                     />

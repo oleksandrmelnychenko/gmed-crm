@@ -26,6 +26,7 @@ export const STEP_IDS = [
   "follow_up",
   "disclosure",
   "documents",
+  "services",
   "send",
 ] as const;
 
@@ -132,11 +133,12 @@ export function hasBaseFormInput(field: string): boolean {
 }
 
 /** The steps shown for this request, in their order. */
-export function visibleSteps(request: Pick<LeadRequest, "follow_up" | "submitted_at">): StepId[] {
+export function visibleSteps(request: Pick<LeadRequest, "follow_up" | "submitted_at" | "service_preferences">): StepId[] {
   // "contact" is part of the first step (owner 2026-10-09): one tab with the consent and the person.
   // "declarations" moved to follow-up block L (owner 2026-10-09): only with the enhanced check.
   return STEP_IDS.filter(
-    (step) => step !== "contact" && step !== "declarations" && (step !== "follow_up" || followUpShown(request)),
+    (step) => step !== "contact" && step !== "declarations" && (step !== "follow_up" || followUpShown(request))
+      && (step !== "services" || request.service_preferences !== undefined),
   );
 }
 
@@ -252,11 +254,15 @@ export function documentsTouched(
  */
 export function stepDone(
   request: Pick<LeadRequest, "progress" | "follow_up" | "consents" | "submitted_at" | "changed_since_submit" | "documents" | "disclosure" | "consent_form"> &
-    Partial<Pick<LeadRequest, "identification">>,
+    Partial<Pick<LeadRequest, "identification" | "service_preferences">>,
   step: StepId,
   missing: Record<StepId, string[]> = missingByStep(request),
 ): boolean {
   if (step === "send") return Boolean(request.submitted_at) && !changedSinceSubmit(request);
+  if (step === "services") {
+    const value = request.service_preferences;
+    return Boolean(value && (value.services.length || value.notes.trim() || value.program_date_from || value.program_date_to));
+  }
   // Not answered counts as "no" (owner decision 2026-10-22) for the sending; the step is
   // "filled in" only with an own, valid decision.
   if (step === "disclosure") return Boolean(request.disclosure) && disclosureProblem(disclosureDraft(request)) === null;

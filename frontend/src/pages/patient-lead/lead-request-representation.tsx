@@ -8,7 +8,7 @@ import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { StatusChip } from "@/components/ui/status-chip";
 import { nameNeedsLatinSpelling, suggestPassportSpelling } from "./name-transliteration";
-import { inputClass, selectClass, tokens } from "@/components/record-workspace/primitives/design-tokens";
+import { inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { ApiRequestError } from "@/lib/api";
@@ -459,10 +459,6 @@ export function RepresentativeUpload({
 
   return (
     <div className="space-y-2" data-testid={`${id}-upload`}>
-      <p id={`${id}-label`} className={tokens.text.label}>
-        {label}
-        {required ? <RequiredMark /> : null}
-      </p>
       <input
         ref={fileInput}
         id={`${id}-files`}
@@ -478,23 +474,29 @@ export function RepresentativeUpload({
           void uploadFiles(files);
         }}
       />
-      <Button
-        type="button"
-        variant="outline"
-        className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
-        // Several uploads share the wording of the button: each is named with what it is for.
-        aria-label={`${label}: ${text.uploadButton}`}
-        disabled={!ready || uploading}
-        onClick={() => fileInput.current?.click()}
-      >
-        {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
-        {uploading ? text.uploading : text.uploadButton}
-      </Button>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p id={`${id}-label`} className="font-mono text-xs font-medium leading-5 text-foreground/75">
+          {label}
+          {required ? <RequiredMark /> : null}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {consentReady && person ? <StatusChip tone="warning">{text.identityUploadHint}</StatusChip> : null}
+          <Button
+            type="button"
+            className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
+            // Several uploads share the wording of the button: each is named with what it is for.
+            aria-label={`${label}: ${text.uploadButton}`}
+            disabled={!ready || uploading}
+            onClick={() => fileInput.current?.click()}
+          >
+            {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
+            {uploading ? text.uploading : text.uploadButton}
+          </Button>
+        </div>
+      </div>
       {!consentReady ? (
         consentNoteAbove ? null : <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
-      ) : (
-        <p className="text-xs text-muted-foreground">{person ? text.identityUploadHint : text.representativeUploadNeedsPerson}</p>
-      )}
+      ) : !person ? <ConsentNeededNote>{text.representativeUploadNeedsPerson}</ConsentNeededNote> : null}
       {full ? <p className="text-xs text-muted-foreground">{text.tooManyDocuments(request.max_documents)}</p> : null}
       {errors.map((message) => (
         <p key={message} role="alert" className="text-xs text-destructive">

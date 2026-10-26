@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Info, Plus, Trash2, UserRound } from "lucide-react";
+import { CalendarDays, Info, Mail, Phone, Plus, Trash2, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { checkboxClass, inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
-import { CONSENT_RECIPIENT_SCOPES, checkedScopeCodes, scopeOptionLabel, toggleScopeCode } from "@/lib/consent-recipient-scope";
+import { CONSENT_RECIPIENT_SCOPES, cabinetScopeSummary, checkedScopeCodes, normalizeScopeCodes, scopeOptionLabel, toggleScopeCode } from "@/lib/consent-recipient-scope";
 import { isValidPersonPhone } from "@/lib/person-fields";
 import { cn } from "@/lib/utils";
 import { CONSENT_RECIPIENT_RELATIONS, MAX_CONSENT_RECIPIENTS, type ConsentRecipient, type ConsentRecipientRelation } from "./lead-request-api";
@@ -27,12 +28,22 @@ export function TrustedPersonsList({ persons, lang, onRemove, disabled = false }
   return <ul className="space-y-2 text-sm" data-testid="trusted-persons-list">
     {persons.map((person, index) => {
       const born = formatBirthDate(person.birth_date);
+      const scopes = normalizeScopeCodes(person.scope_codes);
+      const scopeLabels = scopes.length ? scopes.map((code) => cabinetScopeSummary([code], lang)) : [personScope(person, lang)].filter(Boolean);
+      const contacts = [...new Set([person.phone?.trim(), person.contact?.trim()].filter((value): value is string => Boolean(value)))];
       return <li key={index} className="flex items-start justify-between gap-3 break-words rounded-lg border border-border/60 bg-card px-3 py-2">
-        <div className="min-w-0">
-          <span className="font-medium">{person.name}</span>{" · "}{text.recipientRelations[person.relation] ?? text.recipientRelations.other}
-          {born ? <span className="text-muted-foreground"> · {fields.birthDateShort} {born}</span> : null}
-          {person.phone ? <span className="text-muted-foreground"> · {person.phone}</span> : person.contact ? <span className="text-muted-foreground"> · {person.contact}</span> : null}
-          {personScope(person, lang) ? <p className="mt-1 text-muted-foreground">{personScope(person, lang)}</p> : null}
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <UserRound aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="font-semibold text-foreground [overflow-wrap:anywhere]">{person.name}</span>
+            <StatusChip className="border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">{text.recipientRelations[person.relation] ?? text.recipientRelations.other}</StatusChip>
+            {born ? <StatusChip tone="info"><CalendarDays aria-hidden="true" />{fields.birthDateShort} {born}</StatusChip> : null}
+            {contacts.map((contact) => <StatusChip key={contact} tone="warning">
+              {contact.includes("@") ? <Mail aria-hidden="true" /> : <Phone aria-hidden="true" />}
+              <span className="min-w-0 [overflow-wrap:anywhere]">{contact}</span>
+            </StatusChip>)}
+          </div>
+          {scopeLabels.length ? <div className="flex flex-wrap gap-1.5">{scopeLabels.map((scope) => <StatusChip key={scope} tone="info">{scope}</StatusChip>)}</div> : null}
         </div>
         {onRemove ? <Button type="button" variant="ghost" size="sm" className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" disabled={disabled}
           aria-label={`${fields.removePerson}: ${person.name}`} title={fields.removePerson} data-testid="trusted-person-remove" onClick={() => onRemove(index)}>

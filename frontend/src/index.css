@@ -293,6 +293,60 @@
   cursor: not-allowed;
 }
 
+/* The cabinet ends at its footer without extra scroll space below it. */
+#main-content:has(.patient-request-wizard) {
+  padding-bottom: 0;
+}
+
+/* Sent forms stay read-only, but their values must remain readable. */
+.patient-request-wizard {
+  --cabinet-disabled-text: color-mix(in oklch, var(--foreground) 80%, var(--card));
+  --cabinet-disabled-border: color-mix(in oklch, var(--foreground) 18%, var(--card));
+}
+
+.patient-request-wizard :is(input, textarea, select, button):disabled,
+.patient-request-wizard [aria-disabled="true"] {
+  opacity: 1;
+  color: var(--cabinet-disabled-text);
+  -webkit-text-fill-color: var(--cabinet-disabled-text);
+}
+
+.patient-request-wizard :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select, button):disabled,
+.patient-request-wizard [role="combobox"][aria-disabled="true"] {
+  background-color: var(--muted);
+  border-color: var(--cabinet-disabled-border);
+  box-shadow: none;
+}
+
+.patient-request-wizard :is(input, textarea):disabled::placeholder {
+  color: var(--muted-foreground);
+  -webkit-text-fill-color: var(--muted-foreground);
+  opacity: 1;
+}
+
+.patient-request-wizard :is(.MuiPickersTextField-root, .MuiPickersInputBase-root).Mui-disabled,
+.patient-request-wizard fieldset:disabled .MuiPickersInputBase-root {
+  opacity: 1;
+  color: var(--cabinet-disabled-text);
+}
+
+.patient-request-wizard .MuiPickersInputBase-root.Mui-disabled,
+.patient-request-wizard fieldset:disabled .MuiPickersInputBase-root {
+  background-color: var(--muted);
+}
+
+.patient-request-wizard .Mui-disabled :is(.MuiPickersSectionList-sectionContent, .MuiPickersInputBase-sectionContent, .MuiPickersInputBase-input),
+.patient-request-wizard fieldset:disabled :is(.MuiPickersSectionList-sectionContent, .MuiPickersInputBase-sectionContent, .MuiPickersInputBase-input) {
+  color: var(--cabinet-disabled-text);
+  -webkit-text-fill-color: var(--cabinet-disabled-text);
+  opacity: 1;
+}
+
+.patient-request-wizard .Mui-disabled .MuiPickersOutlinedInput-notchedOutline,
+.patient-request-wizard fieldset:disabled .MuiPickersOutlinedInput-notchedOutline {
+  border-color: var(--cabinet-disabled-border) !important;
+}
+
 /* Lead cabinet (patient side): the wizard step tabs; on phones the three
    steps share the width, icon above the label, instead of scrolling. */
 @media (max-width: 639px) {

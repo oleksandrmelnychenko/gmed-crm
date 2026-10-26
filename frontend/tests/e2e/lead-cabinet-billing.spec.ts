@@ -656,25 +656,11 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await expect(page.getByTestId("lead-request-sent")).toContainText("05.10.2026");
     expect(calls.submits).toBe(1);
 
-    // "I pay myself": the answer "to the payer" is taken back and the route is asked again, empty.
-    // Who pays is part of step 3 since 2026-10-11.
+    // Sent: the form is read-only (owner 2026-10-26); GMED changes who pays.
     await step(page, "billing");
-    await choose(page, page.getByTestId("lead-request-payer").getByRole("combobox", { name: "Wer ist der Zahler?" }), "Ich selbst");
-    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_kind: "self" });
-    await expect(answers(billing)).toHaveText(["Ich", "Eine andere Person (andere Anschrift)"]);
-    await expect(billing.getByRole("radio", { name: "Ich", exact: true })).not.toBeChecked();
-    const route = page.getByTestId("lead-request-payment-route");
-    await expect(route).toBeVisible();
-    await expect(route.getByRole("combobox", { name: METHOD_QUESTION })).toContainText("Auswählen");
-    await expect(page.getByTestId("lead-request-payment-route-by-payer")).toHaveCount(0);
-    // Nothing of the two sections was sent by the cabinet for that change.
+    await expect(page.getByTestId("lead-request-sent-locked")).toBeVisible();
+    await expect(page.getByTestId("lead-request-payer").getByRole("combobox", { name: "Wer ist der Zahler?" })).toBeDisabled();
     expect(calls.billing).toEqual([{ invoice_to: "payer" }]);
-    await page.locator('[data-step="send"]').click();
-    await expect(missing.getByRole("listitem")).toHaveText([
-      INVOICE_QUESTION,
-      METHOD_QUESTION,
-      "Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister?",
-    ]);
   });
 
   test("a parent who pays reads 'to me (I pay)' and answers the payment route with the own name offered", async ({ page }) => {

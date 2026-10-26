@@ -15,6 +15,7 @@ import { setLeadPortalClosed } from "./lead-portal-closed";
 import { LEAD_PORTAL_ACCESS_ENDED_EVENT } from "@/pages/leads/model/lead-time-events";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
+import { ServicesStep } from "./lead-request-services-step";
 
 import {
   LEAD_REQUEST_ACCESS_CHANGED,
@@ -353,7 +354,7 @@ export function LeadCabinetFrame({
   return (
     <CabinetLanguageContext.Provider value={switchContext}>
       <ComboboxTextContext.Provider value={comboboxTextFor(lang)}>
-      <div className="mx-auto w-full max-w-[96rem] space-y-5 pb-16" data-testid="lead-cabinet">
+      <div className="mx-auto w-full max-w-[96rem] space-y-5" data-testid="lead-cabinet">
         {claimed === 0 ? (
           <div className="flex justify-end">
             <CabinetLanguageSwitch lang={lang} onLang={onLang} />
@@ -606,10 +607,11 @@ function LeadRequestView({
     <ServerConflictContext.Provider value={conflictRegistry}>
     <RequestPatchContext.Provider value={patchRequest}>
       {/* `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer. */}
-      <article ref={topRef} className="flex min-h-[calc(100dvh-9rem)] flex-col overflow-clip rounded-xl border border-border bg-card shadow-sm" data-testid="lead-request">
+      <article ref={topRef} className="patient-request-wizard flex min-h-[calc(100dvh-9rem)] min-w-0 flex-col overflow-clip rounded-xl border border-border/60 bg-card" data-testid="lead-request">
         {/* The title and the deadline share one line (wrapping on a phone). */}
-        <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-4 py-4 sm:px-5">
-          <h1 className="text-lg font-semibold leading-tight">
+        <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 px-4 py-3 sm:px-5">
+          <h1 className="flex items-center gap-2.5 text-base font-semibold leading-tight">
+            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             {/* "Request for your child" only for a parent of a minor, "the child you represent" for its
                 guardian (Vormund); an adult's representative reads "Request for <name>". */}
             {guardian ? guardianCabinetTitle(text, request, patientName) : text.title}
@@ -619,7 +621,7 @@ function LeadRequestView({
                 (DSGVO signed, qualified). After sending it stays, worded as what happens then (R-11). */}
             {deadline ? (
               <div
-                className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+                className="flex max-w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
                 data-testid="lead-request-deadline"
               >
                 <Clock aria-hidden="true" className="size-4 shrink-0" />
@@ -630,7 +632,7 @@ function LeadRequestView({
           </div>
         </header>
 
-        <div className="flex-1 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <StepNavBar
             request={request}
             text={text}
@@ -645,7 +647,7 @@ function LeadRequestView({
           <div
             key={step}
             ref={stepRef}
-            className="min-w-0 bg-muted/40 px-4 pt-5 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 lg:flex lg:flex-col lg:[&>section]:flex lg:[&>section]:flex-1 lg:[&>section]:flex-col"
+            className="flex min-w-0 flex-1 flex-col bg-muted px-4 pt-4 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 [&>section]:flex [&>section]:flex-1 [&>section]:flex-col"
             data-testid="lead-request-step"
             data-current-step={step}
           >
@@ -669,6 +671,7 @@ function LeadRequestView({
               />
             ) : null}
             {step === "documents" ? <DocumentsStep {...props} /> : null}
+            {step === "services" ? <ServicesStep {...props} /> : null}
             {step === "disclosure" ? <DisclosureStep {...props} /> : null}
             {step === "send" ? (
               <SendStep
@@ -690,9 +693,8 @@ function LeadRequestView({
 }
 
 /**
- * The step tabs (contract 6): on a computer a column beside the form, on a
- * tablet a wrapping row, on a phone a row of numbered dots with the current step's
- * name below — one step at a time, no horizontal scrolling of the page. A
+ * The step tabs use the staff wizard's compact orange navigation above the form.
+ * Only the tab strip scrolls horizontally; phones show numbered dots and the current title. A
  * tab whose "next" showed what is missing (or every tab once the summary was
  * opened) carries a badge with the count of what its step still misses; a
  * complete step carries a check. Every step can be opened at any time.
@@ -715,21 +717,28 @@ function StepNavBar({
   onSelect: (step: StepId) => void;
 }) {
   const position = steps.indexOf(current);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const tabs = tabsRef.current;
+    const selected = tabs?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!tabs || !selected) return;
+    // Move only this horizontal strip; never scroll the page or its sticky footer.
+    const strip = tabs.getBoundingClientRect();
+    const item = selected.getBoundingClientRect();
+    if (item.left < strip.left) tabs.scrollLeft += item.left - strip.left;
+    else if (item.right > strip.right) tabs.scrollLeft += item.right - strip.right;
+  }, [current]);
   return (
     <nav
       aria-label={text.stepsLabel}
-      className="border-b border-border px-3 py-2.5 sm:px-4 lg:border-b-0 lg:border-r lg:px-3 lg:py-4"
+      className="min-w-0 shrink-0 border-b border-border/60 bg-card px-3 py-2.5 sm:px-4"
       data-testid="lead-request-steps"
     >
       <div
+        ref={tabsRef}
         role="tablist"
         aria-label={text.stepsLabel}
-        className={cn(
-          "flex items-center gap-0.5 sm:gap-1 lg:sticky lg:top-4 lg:flex-col lg:items-stretch lg:gap-0.5",
-          // A phone shows the dots side by side over the whole width; a tablet wraps the named tabs
-          // onto a second line instead of cutting or scrolling them (QA 2026-10-10).
-          "max-sm:justify-between sm:flex-wrap lg:flex-nowrap",
-        )}
+        className="lead-wizard-step-tabs flex w-full min-w-0 items-center overflow-x-auto overscroll-x-contain py-0.5 [scrollbar-width:thin] max-sm:justify-between"
       >
         {steps.map((id, index) => {
           const selected = id === current;
@@ -744,11 +753,10 @@ function StepNavBar({
               aria-selected={selected}
               aria-current={selected ? "step" : undefined}
               className={cn(
-                "relative flex shrink-0 items-center gap-2 rounded-lg px-1 py-1.5 text-left text-xs font-medium",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-2.5 lg:w-full lg:py-2",
+                "lead-wizard-step-tab relative shrink-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                 selected
                   ? "bg-[var(--brand)] font-semibold text-white"
-                  : "text-foreground hover:bg-muted/60",
+                  : "text-foreground hover:bg-muted",
               )}
               onClick={() => onSelect(id)}
             >
@@ -765,7 +773,7 @@ function StepNavBar({
               >
                 {done && !selected ? <Check className="size-3.5" /> : index + 1}
               </span>
-              <span className="whitespace-nowrap max-sm:sr-only lg:min-w-0 lg:flex-1 lg:whitespace-normal lg:leading-snug">
+              <span className="whitespace-nowrap max-sm:sr-only">
                 {text.steps[id]}
               </span>
               {count > 0 ? (
@@ -775,7 +783,7 @@ function StepNavBar({
                     data-testid="lead-request-step-badge"
                     className={cn(
                       "inline-flex min-w-4 items-center justify-center rounded-full px-1 py-0.5 font-mono text-[10px] leading-none",
-                      "max-sm:absolute max-sm:-right-0.5 max-sm:-top-0.5",
+                      "max-sm:absolute max-sm:right-0 max-sm:top-0",
                       "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100",
                     )}
                   >

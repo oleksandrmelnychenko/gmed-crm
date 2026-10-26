@@ -289,7 +289,7 @@ export function FollowUpStep({
   };
 
   return (
-    <section className="space-y-6" data-testid="lead-request-follow-up">
+    <section className="flex flex-col gap-4" data-testid="lead-request-follow-up">
       {/* GMED asked once more after an answer: check and send again (no reason named). */}
       {requestedAgainAt ? (
         <p role="status" className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-relaxed text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200" data-testid="lead-request-follow-up-requested-again">

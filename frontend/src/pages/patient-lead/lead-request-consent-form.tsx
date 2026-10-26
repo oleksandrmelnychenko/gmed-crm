@@ -19,7 +19,7 @@ import {
 } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { leadRequestText } from "./lead-request-text";
-import { CabinetGoToContext, CabinetSection as Section, RequiredMark, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
+import { CabinetGoToContext, CabinetSection as Section, InfoNote, RequiredMark, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
 import type { SaveState } from "./lead-request-model";
 
 import { disclosureDefaultsToNo, storedTrustedPersons, trustedPersonsPath } from "./lead-trusted-persons-model";
@@ -197,7 +197,7 @@ export function ConsentFormChoicesSection({
   );
 
   const option = (key: keyof ConsentFormChoices) => (
-    <label key={key} className="flex items-start gap-3 text-sm">
+    <label key={key} className="flex cursor-pointer items-start gap-3 rounded-lg bg-card py-2 text-sm transition-colors hover:bg-muted/30 focus-within:ring-2 focus-within:ring-ring">
       <input
         type="checkbox"
         // Named by the visible text, never by the raw value «on» (labels audit 2026-10-26, S1).
@@ -231,13 +231,13 @@ export function ConsentFormChoicesSection({
     <div data-testid="lead-request-consent-form">
       <Section title={text.title}>
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">{text.intro}</p>
+          <InfoNote>{text.intro}</InfoNote>
           <div className="space-y-2">{CONSENT_FORM_CORE.map(option)}</div>
           {recipientsBlock}
           <fieldset className="space-y-2">
-            <legend className="text-sm">{text.channelsTitle}</legend>
-            <div className="grid gap-2 pl-7 sm:grid-cols-2">{CONSENT_FORM_CHANNELS.map(option)}</div>
-            <p className="pl-7 text-xs text-muted-foreground">{text.channelsRisk}</p>
+            <legend className="mb-2 font-mono text-xs font-medium text-foreground/75">{text.channelsTitle}</legend>
+            <div className="grid gap-2 sm:grid-cols-2">{CONSENT_FORM_CHANNELS.map(option)}</div>
+            <p className="text-xs leading-5 text-foreground/75">{text.channelsRisk}</p>
           </fieldset>
           {sent ? (
             <div className="flex flex-wrap items-center gap-3" data-testid="lead-request-consent-form-sent">

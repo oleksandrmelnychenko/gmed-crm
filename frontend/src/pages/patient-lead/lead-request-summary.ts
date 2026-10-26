@@ -1,4 +1,5 @@
 import { countryLabel } from "@/components/ui/country-select";
+import { servicesText } from "./lead-request-services-text";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
@@ -70,6 +71,7 @@ export type SummaryGroupId =
   | "follow_up"
   | "request"
   | "documents"
+  | "services"
   | "disclosure"
   | "consent_form";
 
@@ -612,6 +614,19 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     text.sectionUpload,
     request.documents.map((document) => ["", document.file_name ?? "—"]),
   );
+
+  if (request.service_preferences) {
+    const services = request.service_preferences;
+    const wording = servicesText(lang);
+    group("services", text.steps.services, [
+      [wording.from, services.program_date_from ? formatAppDate(services.program_date_from) : ""],
+      [wording.to, services.program_date_to ? formatAppDate(services.program_date_to) : ""],
+      [wording.services, services.services.map((key) => wording.options[key as keyof typeof wording.options] ?? key).join(", ")],
+      ...services.services.flatMap((key): Entry[] => services.service_comments[key]?.trim()
+        ? [[wording.options[key as keyof typeof wording.options] ?? key, services.service_comments[key]]] : []),
+      [wording.notes, services.notes],
+    ]);
+  }
 
   // The choices of Anlage 1, the last part of step "documents", in the order of
   // the form (the server's JSON keys come in any order); the channels as one row.

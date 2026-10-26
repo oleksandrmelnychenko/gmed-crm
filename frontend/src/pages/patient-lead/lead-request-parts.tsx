@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowRight, Check, CircleAlert, FileText, Info, LoaderCircle, Lock, Trash2, Upload } from "lucide-react";
+import { ArrowRight, CalendarDays, Check, CircleAlert, FileText, Info, LoaderCircle, Lock, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { checkboxClass, selectClass, tokens } from "@/components/record-workspace/primitives/design-tokens";
+import { checkboxClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
 import { ApiRequestError } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
@@ -297,33 +298,35 @@ export function CabinetSection({
   accessory,
   children,
   className,
+  compact = false,
 }: {
   title: ReactNode;
   accessory?: ReactNode;
   children: ReactNode;
   className?: string;
+  compact?: boolean;
 }) {
   return (
-    <section className={cn("overflow-hidden rounded-xl border border-border bg-card shadow-xs", className)}>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+    <section className={cn("min-w-0 overflow-hidden rounded-xl border border-border/60 bg-card", className)}>
+      <div className={cn("flex flex-wrap items-center justify-between gap-2", compact ? "px-3 pt-3" : "px-4 pt-4")}>
         <div className="flex min-w-0 items-center gap-2">
           <div aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className={cn(tokens.text.sectionTitle, "min-w-0 max-w-full break-words")}>{title}</h3>
+          <h3 className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground">{title}</h3>
         </div>
         {accessory ? <div className="min-w-0 max-w-full">{accessory}</div> : null}
       </div>
-      <div className="space-y-2.5 p-4">{children}</div>
+      <div className={cn("space-y-3", compact ? "p-3" : "p-4")}>{children}</div>
     </section>
   );
 }
 
-/** "Consent given on …" as a green chip (owner 2026-10-09). */
+/** Consent metadata uses the same amber chip as the staff wizard. */
 export function ConsentGivenChip({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex w-fit items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+    <StatusChip tone="warning">
       <Check aria-hidden="true" className="size-3 shrink-0" />
       {children}
-    </span>
+    </StatusChip>
   );
 }
 
@@ -357,14 +360,16 @@ export function StepFooter({
   children: ReactNode;
 }) {
   return (
-    // The page scrolls with a bottom padding; the `after` strip covers the form that would show through it.
-    <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-border lg:mt-auto bg-card px-4 py-3 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-5 after:bg-card sm:-mx-5 sm:px-5">
-      {status ? (
-        <div className="mb-2 flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-          {status}
-        </div>
-      ) : null}
-      <div className="flex flex-wrap items-center justify-between gap-2">{children}</div>
+    // The step's flex gap separates content from the sticky bar without a scrolling colour strip.
+    <div className="sticky bottom-0 z-10 -mx-4 mt-auto shrink-0 bg-card sm:-mx-5">
+      <div className="border-t border-border/60 bg-card px-4 py-2.5 sm:px-5">
+        {status ? (
+          <div className="mb-1.5 flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+            {status}
+          </div>
+        ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">{children}</div>
+      </div>
     </div>
   );
 }
@@ -443,7 +448,7 @@ export function LabeledField({
   const dismissServerChanged = useServerConflictDismiss(id);
   const shownError = error ?? (required ? stepMissing : undefined);
   const labelElement = (
-    <label htmlFor={id} className={cn(question ? "text-sm leading-snug text-foreground" : tokens.text.label, "block")}>
+    <label htmlFor={id} data-cabinet-field-label={!question || undefined} className={cn(question ? "text-sm leading-snug text-foreground" : "font-mono text-xs font-medium leading-5 text-foreground/75", "block")}>
       {label}
       {required ? <RequiredMark /> : null}
     </label>
@@ -512,20 +517,17 @@ export function YesNoSelect({
 export function SaveIndicator({ state, text }: { state: SaveState; text: LeadRequestText }) {
   if (state === "idle") return null;
   return (
-    <span
+    <StatusChip
       role="status"
       aria-live="polite"
       data-testid="lead-request-save-state"
-      className={cn(
-        "inline-flex items-center gap-1.5 text-xs",
-        state === "error" ? "text-destructive" : "text-muted-foreground",
-      )}
+      tone={state === "error" ? "error" : state === "saved" ? "success" : "info"}
     >
       {state === "saving" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}
       {state === "saved" ? <Check aria-hidden="true" className="size-3.5 text-emerald-600" /> : null}
       {state === "error" ? <CircleAlert aria-hidden="true" className="size-3.5" /> : null}
       {state === "saving" ? text.saving : state === "saved" ? text.saved : text.notSaved}
-    </span>
+    </StatusChip>
   );
 }
 
@@ -584,8 +586,8 @@ export function ConsentCheckbox({
   }
 
   return (
-    <div className="rounded-lg border border-border bg-muted/10 px-3 py-3" data-testid={testId}>
-      <label className="flex items-start gap-3 text-sm">
+    <div data-testid={testId}>
+      <label className="flex items-start gap-2.5 text-sm">
         <input
           type="checkbox"
           aria-label={label}
@@ -595,16 +597,18 @@ export function ConsentCheckbox({
           disabled={busy || !consent || (Boolean(request.submitted_at) && given)}
           onChange={(event) => void toggle(event.target.checked)}
         />
-        <span className="space-y-1">
-          <span className="block leading-snug">{label}</span>
-          {privacyLink ? (
-            <a href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
-              {text.privacyLink}
-            </a>
-          ) : null}
-          {given && consent?.given_at ? (
-            <span className="block pt-0.5">
-              <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(consent.given_at))}</ConsentGivenChip>
+        <span className={cn("min-w-0", privacyLink ? "space-y-1.5" : "flex flex-wrap items-center gap-x-3 gap-y-1")}>
+          <span className={cn("leading-snug", privacyLink && "block")}>{label}</span>
+          {privacyLink || (given && consent?.given_at) ? (
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {privacyLink ? (
+                <a href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline underline-offset-2">
+                  {text.privacyLink}
+                </a>
+              ) : null}
+              {given && consent?.given_at ? (
+                <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(consent.given_at))}</ConsentGivenChip>
+              ) : null}
             </span>
           ) : null}
         </span>
@@ -761,7 +765,7 @@ export function FileUploadField({
 
   return (
     <div className="space-y-2" data-testid={testId}>
-      <p id={`${id}-label`} className={tokens.text.label}>
+      <p id={`${id}-label`} className="font-mono text-xs font-medium leading-5 text-foreground/75">
         {label}
         {required ? <RequiredMark /> : null}
       </p>
@@ -780,21 +784,21 @@ export function FileUploadField({
           void uploadFiles(files);
         }}
       />
-      <Button
-        type="button"
-        variant="outline"
-        className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
-        disabled={!consentReady || uploading}
-        onClick={() => fileInput.current?.click()}
-      >
-        {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
-        {uploading ? text.uploading : buttonLabel}
-      </Button>
-      {consentReady ? (
-        <p className="text-xs leading-5 text-muted-foreground">{hint}</p>
-      ) : consentNoteAbove ? null : (
+      <div className="flex flex-wrap items-center gap-2">
+        {consentReady ? <StatusChip tone="warning">{hint}</StatusChip> : null}
+        <Button
+          type="button"
+          className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
+          disabled={!consentReady || uploading}
+          onClick={() => fileInput.current?.click()}
+        >
+          {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
+          {uploading ? text.uploading : buttonLabel}
+        </Button>
+      </div>
+      {!consentReady && !consentNoteAbove ? (
         <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
-      )}
+      ) : null}
       {errors.map((message) => (
         <p key={message} role="alert" className="text-xs text-destructive">
           {message}
@@ -821,24 +825,25 @@ export function FileUploadField({
  */
 export function SentLockHint({ text, className }: { text: LeadRequestText; className?: string }) {
   return (
-    <div
+    <StatusChip
+      tone="success"
       role="note"
       className={cn(
-        "flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200",
+        "items-start gap-2 px-3 py-1.5",
         className,
       )}
       data-testid="lead-request-sent-locked"
     >
       <Lock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-      <p>{text.sentLockedHint}</p>
-    </div>
+      <span>{text.sentLockedHint}</span>
+    </StatusChip>
   );
 }
 
-/** A short neutral note with an info icon (no warning colour). */
+/** The wizard's compact information panel. */
 export function InfoNote({ children, testId }: { children: ReactNode; testId?: string }) {
   return (
-    <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground" data-testid={testId}>
+    <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid={testId}>
       <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
       <span>{children}</span>
     </p>
@@ -890,18 +895,17 @@ export function UploadedFileList({
   // Nothing uploaded yet: no empty frame (owner 2026-10-09); the list stays for its test id.
   if (documents.length === 0) return <ul hidden data-testid={testId} aria-label={emptyText} />;
   return (
-    <ul className="divide-y divide-border rounded-lg border border-border" data-testid={testId}>
+    <ul className="divide-y divide-border/60 rounded-lg border border-border/60 bg-card" data-testid={testId}>
       {documents.length === 0 ? null : (
         documents.map((document) => (
-          <li key={document.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+          <li key={document.id} className="flex items-center gap-2.5 px-3 py-2 text-sm">
             <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate">{document.file_name ?? "—"}</span>
-              {/* The upload date as a violet chip (owner 2026-10-09); no file size (owner 2026-10-26, C4). */}
-              <span className="mt-0.5 inline-flex w-fit items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/30 dark:text-violet-200">
-                {formatAppDateTime(document.uploaded_at)}
-                {document.added_after_submit ? ` · ${text.addedAfterSend}` : ""}
-                {document.reviewed ? ` · ${text.documentTakenOver}` : ""}
+            <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="min-w-0 break-words leading-5 [overflow-wrap:anywhere]">{document.file_name ?? "—"}</span>
+              <span className="flex flex-wrap items-center gap-1.5">
+                <StatusChip tone="info"><CalendarDays aria-hidden="true" />{formatAppDateTime(document.uploaded_at)}</StatusChip>
+                {document.added_after_submit ? <StatusChip tone="warning">{text.addedAfterSend}</StatusChip> : null}
+                {document.reviewed ? <StatusChip tone="success"><Check aria-hidden="true" />{text.documentTakenOver}</StatusChip> : null}
               </span>
             </span>
             {document.can_delete ? (
@@ -909,7 +913,7 @@ export function UploadedFileList({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 gap-1 text-xs"
+                className="h-8 shrink-0 gap-1 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => onRemove(document.id)}
               >
                 <Trash2 aria-hidden="true" className="size-3.5" />

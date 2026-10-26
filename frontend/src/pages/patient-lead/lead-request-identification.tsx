@@ -7,12 +7,12 @@ import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
 import {
   checkboxClass,
   inputClass,
   selectClass,
   textareaClass,
-  tokens,
 } from "@/components/record-workspace/primitives/design-tokens";
 import { cn } from "@/lib/utils";
 
@@ -332,7 +332,7 @@ export function IdentificationCountrySelect({
 export function ContactChannelsField({ form, text }: { form: IdentificationForm; text: LeadRequestText }) {
   return (
     <div role="group" aria-labelledby="lead-request-contact_channels-label" data-testid="lead-request-contact-channels">
-      <p id="lead-request-contact_channels-label" className={tokens.text.label}>
+      <p id="lead-request-contact_channels-label" className="font-mono text-xs font-medium leading-5 text-foreground/75">
         {text.identificationFields.contact_channels}
       </p>
       <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
@@ -429,10 +429,6 @@ export function IdentityDocumentSection({
     <>
       {intro ? <p className="text-sm leading-6 text-muted-foreground">{intro}</p> : null}
       <div className="space-y-2" data-testid="lead-request-identity-upload">
-        <p className={tokens.text.label}>
-          {request.minor ? text.childIdentityFiles : text.identityFiles}
-          <RequiredMark />
-        </p>
         <input
           ref={fileInput}
           id="lead-request-identity-files"
@@ -440,6 +436,7 @@ export function IdentityDocumentSection({
           multiple
           accept={LEAD_UPLOAD_ACCEPT}
           className="sr-only"
+          aria-labelledby="lead-request-identity-files-label"
           disabled={!consentReady || uploading || full}
           onChange={(event) => {
             const files = Array.from(event.currentTarget.files ?? []);
@@ -447,22 +444,28 @@ export function IdentityDocumentSection({
             void uploadFiles(files);
           }}
         />
-        <Button
-          type="button"
-          variant="outline"
-          // The label is a sentence: on a phone it may wrap instead of widening the page.
-          className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
-          disabled={!consentReady || uploading || full}
-          onClick={() => fileInput.current?.click()}
-        >
-          {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
-          {uploading ? text.uploading : request.minor ? text.childIdentityUploadButton : text.identityUploadButton}
-        </Button>
-        {consentReady ? (
-          <p className="text-xs text-muted-foreground">{request.minor ? text.childIdentityUploadHint : text.identityUploadHint}</p>
-        ) : consentNoteAbove ? null : (
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <p id="lead-request-identity-files-label" className="font-mono text-xs font-medium leading-5 text-foreground/75">
+            {request.minor ? text.childIdentityFiles : text.identityFiles}
+            <RequiredMark />
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {consentReady ? <StatusChip tone="warning">{request.minor ? text.childIdentityUploadHint : text.identityUploadHint}</StatusChip> : null}
+            <Button
+              type="button"
+              // The label is a sentence: on a phone it may wrap instead of widening the page.
+              className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
+              disabled={!consentReady || uploading || full}
+              onClick={() => fileInput.current?.click()}
+            >
+              {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
+              {uploading ? text.uploading : request.minor ? text.childIdentityUploadButton : text.identityUploadButton}
+            </Button>
+          </div>
+        </div>
+        {!consentReady && !consentNoteAbove ? (
           <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
-        )}
+        ) : null}
         {full ? <p className="text-xs text-muted-foreground">{text.tooManyDocuments(request.max_documents)}</p> : null}
         {errors.map((message) => (
           <p key={message} role="alert" className="text-xs text-destructive">
@@ -481,7 +484,7 @@ export function IdentityDocumentSection({
     </>
   );
   // Inside a follow-up block the block's own section carries the title.
-  return bare ? body : <Section title={title ?? (request.minor ? text.childSections.identity : text.sectionIdentity)}>{body}</Section>;
+  return bare ? body : <Section compact title={title ?? (request.minor ? text.childSections.identity : text.sectionIdentity)}>{body}</Section>;
 }
 
 /**

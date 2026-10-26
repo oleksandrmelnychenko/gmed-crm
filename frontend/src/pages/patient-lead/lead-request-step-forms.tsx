@@ -135,7 +135,7 @@ function usePartStates() {
  * the save state, "back" and "next". `extraMissing` adds words that are no
  * key of the list (the consent in the first step).
  */
-function StepFrame({
+export function StepFrame({
   testId,
   step,
   request,
@@ -199,14 +199,14 @@ function StepFrame({
     nav.onNext?.();
   };
   return (
-    <section className="space-y-6" data-testid={testId}>
+    <section className="flex flex-col gap-4" data-testid={testId}>
       {locked ? <SentLockHint text={text} /> : null}
       {showMissing ? <MissingList title={text.stepMissingTitle} labels={labels} fields={fields} step={step} testId="lead-request-step-missing" /> : null}
       <MissingShownContext.Provider value={showMissing}>
         <StepMissingContext.Provider value={stepMissing}>
           {open}
           {locked ? (
-            <fieldset disabled className="m-0 min-w-0 space-y-6 border-0 p-0" data-testid="lead-request-step-locked">
+            <fieldset disabled className="m-0 min-w-0 space-y-4 border-0 p-0" data-testid="lead-request-step-locked">
               {children}
             </fieldset>
           ) : (
@@ -385,7 +385,6 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
             <Button
               type="button"
               size="xs"
-              variant="outline"
               data-testid={`lead-request-${field}-latin-apply`}
               onClick={() => set(field, suggestion)}
             >
@@ -408,7 +407,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
   const consentSection = (
     <>
       {/* Privacy first (spec section 0): the consent the request and the upload of the identity document need. */}
-      <Section title={text.sectionConsent}>
+      <Section title={text.sectionConsent} className="[&>div:first-child]:px-3 [&>div:first-child]:pt-3 [&>div:last-child]:p-3">
         <ConsentCheckbox
           request={request}
           purpose={INQUIRY_CONSENT}
@@ -797,10 +796,10 @@ export function OwnRepresentativeDocumentSection({
   );
   return (
     <div id={SECTION_ANCHORS.ownDocument} className="scroll-mt-4" data-testid="lead-request-own-document">
-      <Section title={text.ownRepresentativeDocumentTitle}>
+      <Section compact title={text.ownRepresentativeDocumentTitle}>
         {me && slot ? (
           <div className="space-y-2">
-            <p className="text-xs leading-5 text-muted-foreground">{text.ownRepresentativeDocumentHint}</p>
+            <InfoNote>{text.ownRepresentativeDocumentHint}</InfoNote>
             <RepresentativeUpload
               request={request}
               slot={slot}
@@ -855,10 +854,10 @@ export function OtherParentDocumentSection({
   const name = person ? [person.first_name, person.last_name].filter(Boolean).join(" ") : "";
   return (
     <div className="scroll-mt-4" data-testid="lead-request-other-parent-document">
-      <Section title={text.otherParentDocumentTitle(name)}>
+      <Section compact title={text.otherParentDocumentTitle(name)}>
         {person ? (
           <div className="space-y-2">
-            <p className="text-xs leading-5 text-muted-foreground">{text.otherParentDocumentHint}</p>
+            <InfoNote>{text.otherParentDocumentHint}</InfoNote>
             <RepresentativeUpload
               request={request}
               slot={slot}
@@ -1180,7 +1179,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
   const sent = Boolean(request.submitted_at);
   const consentSection = (
     <Section title={text.healthConsentTitle}>
-      <p className="whitespace-pre-line rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+      <p className="whitespace-pre-line rounded-lg border border-border/60 bg-muted/20 px-3 py-3 text-sm leading-6 text-foreground/85">
         {consentText(request, HEALTH_CONSENT, lang)}
       </p>
       <ConsentCheckbox
@@ -1208,7 +1207,6 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
   ) : null;
   const uploadSection = (
     <Section title={childSectionTitle(text, "upload", request.minor)}>
-      <p className="text-sm text-muted-foreground">{text.documentsIntro}</p>
       <div className="space-y-2">
         <input
           ref={fileInput}
@@ -1224,17 +1222,19 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
             void uploadFiles(files);
           }}
         />
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full gap-2 sm:w-auto"
-          disabled={!consentReady || uploading || full}
-          onClick={() => fileInput.current?.click()}
-          data-testid={sent ? "lead-request-add-documents" : undefined}
-        >
-          {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
-          {uploading ? text.uploading : sent ? text.addDocumentsAfterSend : text.uploadButton}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusChip tone="warning">{text.documentsIntro}</StatusChip>
+          <Button
+            type="button"
+            className="w-full gap-2 sm:w-auto"
+            disabled={!consentReady || uploading || full}
+            onClick={() => fileInput.current?.click()}
+            data-testid={sent ? "lead-request-add-documents" : undefined}
+          >
+            {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
+            {uploading ? text.uploading : sent ? text.addDocumentsAfterSend : text.uploadButton}
+          </Button>
+        </div>
         {sent ? <InfoNote testId="lead-request-add-documents-note">{text.addedAfterSendNote}</InfoNote> : null}
         {full ? <p className="text-xs text-muted-foreground">{text.maxDocuments(request.max_documents)}</p> : null}
         {errors.map((message) => (

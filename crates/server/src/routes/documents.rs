@@ -26726,9 +26726,9 @@ fn build_payer_self_disclosure_pdf(
     admin_block(
         &mut layout,
         if organisation {
-            "Wir bestätigen, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen. Uns ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
+            "Wir bestätigen, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen. Uns ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
         } else {
-            "Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen. Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
+            "Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen. Mir ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
         },
         0.0,
         2.0,
@@ -26777,9 +26777,9 @@ fn build_payer_self_disclosure_pdf(
         // Owner text 2026-10-26: refusal or end of the cooperation when the
         // information is missing or insufficient.
         if organisation {
-            "Wir versichern, dass die vorstehenden Angaben vollständig und richtig sind. Ändern sie sich während der Geschäftsbeziehung, teilen wir dies GMED unverzüglich mit. Uns ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
+            "Wir versichern, dass die vorstehenden Angaben vollständig und richtig sind. Ändern sie sich während der Geschäftsbeziehung, teilen wir dies GMED unverzüglich mit. Uns ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
         } else {
-            "Ich versichere, dass die vorstehenden Angaben vollständig und richtig sind. Ändern sie sich während der Geschäftsbeziehung, teile ich dies GMED unverzüglich mit. Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
+            "Ich versichere, dass die vorstehenden Angaben vollständig und richtig sind. Ändern sie sich während der Geschäftsbeziehung, teile ich dies GMED unverzüglich mit. Mir ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
         },
         0.0,
         2.0,
@@ -28262,13 +28262,13 @@ fn build_lead_self_disclosure_pdf(
     };
     // The last sentence is the owner's text of 2026-10-26.
     let declaration = if betreuer.is_some() {
-        "Ich versichere als rechtliche/r Betreuer/in der oben bezeichneten Person, dass die Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit. Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
+        "Ich versichere als rechtliche/r Betreuer/in der oben bezeichneten Person, dass die Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit. Mir ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
     } else if !minor {
-        "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit. Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
+        "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit. Mir ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
     } else if signers.len() > 1 {
-        "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind. Änderungen teilen wir der GMED unverzüglich mit. Uns ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
+        "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind. Änderungen teilen wir der GMED unverzüglich mit. Uns ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
     } else {
-        "Ich versichere als gesetzliche/r Vertreter/in, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit. Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
+        "Ich versichere als gesetzliche/r Vertreter/in, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit. Mir ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden."
     };
     // The heading, the declaration and the signatures stay on one page: the
     // signature line never stands alone on the last page (QA 2026-10-12).
@@ -39647,7 +39647,7 @@ mod tests {
             "8. Versicherung",
             "Ich versichere, dass die vorstehenden Angaben vollständig und richtig sind",
             "teile ich dies GMED unverzüglich mit.",
-            "Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist",
+            "Mir ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist",
             "Unterschrift Zahlende Person (Kostenübernehmer/in)",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
@@ -40294,7 +40294,7 @@ mod tests {
             "7. Auskunft an Dritte",
             "8. Versicherung",
             "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit.",
-            "Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden",
+            "Mir ist bekannt, dass GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden",
             "Anna Maria Muster",
             "Unterschrift Patient/in",
             // The signer's place like the consent forms (the lead's city the

@@ -831,12 +831,23 @@ export type BillingKey = Exclude<
 /** Only the changed keys: `""` clears a text or a choice, `null` an answer. */
 export type BillingPatch = Partial<Record<BillingKey, string | boolean | null>>;
 
+/** The optional questionnaire shared with the staff service-history step. */
+export type LeadServicePreferences = {
+  services: string[];
+  service_comments: Record<string, string>;
+  program_date_from: string;
+  program_date_to: string;
+  notes: string;
+};
+
 /** One request (lead) the login fills in: its own or, as a parent, a child's. */
 export type LeadRequest = {
   lead_id: string;
   access_kind: "self" | "guardian";
   created_at: string;
   personal_data: LeadRequestPersonalData;
+  /** Programme and requested services, shared with the staff wizard; absent on older servers. */
+  service_preferences?: LeadServicePreferences;
   progress: {
     filled: number;
     total: number;
@@ -895,6 +906,13 @@ export type LeadRequest = {
 export type PersonalDataPatch = Partial<Record<keyof LeadRequestPersonalData, string | string[]>>;
 
 const base = (leadId: string) => `/me/lead-requests/${encodeURIComponent(leadId)}`;
+
+export function saveLeadServices(leadId: string, patch: Partial<LeadServicePreferences>): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/services`, {
+    method: "POST",
+    body: JSON.stringify(patch),
+  });
+}
 
 export function fetchMyLeadRequest(leadId: string): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(base(leadId), { forceFresh: true });
