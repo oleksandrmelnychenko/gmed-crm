@@ -352,6 +352,15 @@ import {
 } from "../model/pep-review";
 import { enhancedFundsProofOutstanding } from "../model/lead-gwg-statements";
 import { LeadRiskAssessmentPanel } from "./lead-risk-assessment-panel";
+import {
+  CONSENT_RECIPIENT_SCOPES,
+  checkedScopeCodes,
+  normalizeScopeCodes,
+  scopeOptionLabel,
+  staffScopeSummary,
+  toggleScopeCode,
+  type ConsentRecipientScope,
+} from "@/lib/consent-recipient-scope";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { LeadIdentityDocumentData } from "./lead-identity-document-data";
 import { LeadRepresentativeDetailsForm, PendingRepresentativeDetailsForm } from "./lead-representative-details";
@@ -482,6 +491,8 @@ type TrustedContactDraft = {
   relation: string;
   birthDate: string;
   address: string;
+  /** Scope of information printed on the consent form next to the contact (owner 2026-10-26). */
+  scopeCodes?: ConsentRecipientScope[];
   /** A representative's citizenships / birth data changed in the dialog, sent with the contact (F-11). */
   representativeDetails?: TrustedContactRepresentativeDetails;
 };
@@ -1074,6 +1085,7 @@ function trustedContactsFromLead(lead: LeadDetail): TrustedContactDraft[] {
           relation: contact.relation ?? "",
           birthDate: contact.birth_date ?? "",
           address: contact.address ?? "",
+          scopeCodes: normalizeScopeCodes(contact.scope_codes ?? []),
         }];
       })
     : [];
@@ -10074,6 +10086,11 @@ ${serviceCommentLines.join("\n")}`
                               {contact.email ? <span className="break-all">{contact.email}</span> : null}
                               {contact.phone ? <span>{contact.phone}</span> : null}
                               {contact.address ? <span className="break-words">{contact.address}</span> : null}
+                              {contact.scopeCodes?.length ? (
+                                <span data-testid="trusted-contact-scope-summary">
+                                  {tx("Объём информации:", "Auskunftsumfang:")} {staffScopeSummary(contact.scopeCodes, lang === "de" ? "de" : "ru")}
+                                </span>
+                              ) : null}
                             </div>
                             {serverContactError?.contactId === contact.id ? (
                               <p role="alert" className="mt-1 text-xs font-medium text-destructive" data-testid="trusted-contact-server-error">
@@ -12122,6 +12139,30 @@ ${serviceCommentLines.join("\n")}`
                     );
                   })()}
                 </div>
+                {/* What the person may be told: printed on the consent form next to the
+                    contact while the client named no recipients in the cabinet; the
+                    same choices as the cabinet's trusted persons (owner 2026-10-26). */}
+                <fieldset className="space-y-1 border-t border-border/60 pt-3" data-testid="trusted-contact-scope">
+                  <legend className="text-sm font-medium text-foreground">
+                    {tx("Объём информации (для формы согласия)", "Umfang der Auskunft (für die Einverständniserklärung)")}
+                  </legend>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {tx(
+                      "Печатается в форме согласия рядом с этим лицом, если клиент не выбрал получателей сам в кабинете. Выбор клиента всегда важнее.",
+                      "Wird in der Einverständniserklärung neben dieser Person gedruckt, wenn der Kunde im Kundenkabinett keine Empfänger selbst gewählt hat. Die Wahl des Kunden geht immer vor.",
+                    )}
+                  </p>
+                  {CONSENT_RECIPIENT_SCOPES.map((code) => (
+                    <ToggleRow
+                      key={code}
+                      id={`trusted-contact-scope-${code}`}
+                      withDivider={false}
+                      label={scopeOptionLabel(code, lang === "de" ? "de" : "ru")}
+                      checked={checkedScopeCodes(trustedContactEditor.scopeCodes ?? []).includes(code)}
+                      onChange={() => patchTrustedContactEditor("scopeCodes", toggleScopeCode(trustedContactEditor.scopeCodes ?? [], code))}
+                    />
+                  ))}
+                </fieldset>
                 {(() => {
                   // A representative on file: staff correct the parts the GwG sheet
                   // prints (owner 2026-10-24) and upload the identity document

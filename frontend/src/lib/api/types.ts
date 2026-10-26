@@ -284,6 +284,8 @@ export interface LeadTrustedContact {
   relation: string | null;
   birth_date: string | null;
   address: string | null;
+  /** Scope of information for the consent form (codes of `CONSENT_RECIPIENT_SCOPES`), staff-recorded. */
+  scope_codes?: string[] | null;
 }
 
 export interface StatusCount {

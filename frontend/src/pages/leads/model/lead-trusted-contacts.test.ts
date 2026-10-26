@@ -448,3 +448,23 @@ describe("the login warning of the contact editor (DEV QA V-A6)", () => {
     expect(shown.at(-1)).toBeNull();
   });
 });
+
+describe("scope of information of a staff contact", () => {
+  const base = {
+    id: "c1", relatedPatientId: "", relatedPatientLabel: "", name: "Inga Kurz", phone: "", email: "",
+    relation: "spouse", birthDate: "", address: "",
+  };
+
+  it("sends the chosen scope in canonical order and nothing when none is chosen", () => {
+    expect(trustedContactsPayload([{ ...base, scopeCodes: ["financial", "medical"] }])[0].scope_codes).toEqual(["medical", "financial"]);
+    expect(trustedContactsPayload([{ ...base, scopeCodes: ["medical", "all"] }])[0].scope_codes).toEqual(["all"]);
+    expect("scope_codes" in trustedContactsPayload([{ ...base, scopeCodes: [] }])[0]).toBe(false);
+    expect("scope_codes" in trustedContactsPayload([base])[0]).toBe(false);
+  });
+
+  it("counts a changed scope as a staff change of the contacts", () => {
+    const stored = trustedContactsPayload([base]);
+    expect(trustedContactsChanged(trustedContactsPayload([{ ...base, scopeCodes: ["medical"] }]), stored)).toBe(true);
+    expect(trustedContactsChanged(trustedContactsPayload([{ ...base, scopeCodes: [] }]), stored)).toBe(false);
+  });
+});

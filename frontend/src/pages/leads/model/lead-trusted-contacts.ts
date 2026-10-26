@@ -11,6 +11,7 @@
  */
 
 import { isValidEmailAddress } from "@/lib/contact-validation";
+import { normalizeScopeCodes, type ConsentRecipientScope } from "@/lib/consent-recipient-scope";
 import { isAdultOn } from "@/lib/person-fields";
 
 import type { ContactEmailLoginOwner } from "../data/leads-api";
@@ -187,6 +188,11 @@ export type TrustedContactDraft = {
   birthDate: string;
   address: string;
   /**
+   * What the person may be told, printed next to the contact on the consent
+   * form when the client named no recipients in the cabinet (owner 2026-10-26).
+   */
+  scopeCodes?: ConsentRecipientScope[];
+  /**
    * A representative's citizenships and birth data staff changed in the
    * contact dialog: sent with the contact by the wizard save (F-11, QA
    * 2026-10-25), only the keys staff changed. The address parts stay on
@@ -212,6 +218,8 @@ export type TrustedContactPayload = {
   relation: string | null;
   birth_date: string | null;
   address: string | null;
+  /** Sent only when chosen; left out, the server stores none. */
+  scope_codes?: ConsentRecipientScope[];
 } & TrustedContactRepresentativeDetails;
 
 export function trustedContactsPayload(contacts: readonly TrustedContactDraft[]): TrustedContactPayload[] {
@@ -224,8 +232,14 @@ export function trustedContactsPayload(contacts: readonly TrustedContactDraft[])
     relation: contact.relation.trim() || null,
     birth_date: contact.birthDate || null,
     address: contact.address.trim() || null,
+    ...scopePayload(contact.scopeCodes),
     ...representativeDetailsPayload(contact.representativeDetails),
   }));
+}
+
+function scopePayload(codes: readonly ConsentRecipientScope[] | undefined): { scope_codes?: ConsentRecipientScope[] } {
+  const scope = normalizeScopeCodes(codes ?? []);
+  return scope.length > 0 ? { scope_codes: scope } : {};
 }
 
 /** Only the keys staff changed; a cleared text is `null` (the server clears it then). */
@@ -282,6 +296,7 @@ function sameContact(left: TrustedContactPayload, right: TrustedContactPayload):
     && left.relation === right.relation
     && left.birth_date === right.birth_date
     && left.address === right.address
+    && (left.scope_codes ?? []).join() === (right.scope_codes ?? []).join()
     && REPRESENTATIVE_DETAIL_KEYS.every((key) => sentDetail(left, key) === sentDetail(right, key))
   );
 }

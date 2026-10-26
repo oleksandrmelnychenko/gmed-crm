@@ -449,7 +449,7 @@ impl ConsentRecipient {
 }
 
 /// German wording of scope codes, joined naturally ("a, b und c").
-fn scope_codes_label(codes: &[String]) -> String {
+pub(crate) fn scope_codes_label(codes: &[String]) -> String {
     if codes.iter().any(|code| code == "all") {
         return "alle Informationen".into();
     }
@@ -473,7 +473,7 @@ fn scope_codes_label(codes: &[String]) -> String {
 
 /// Scope codes as they are stored: known codes only, in the order of
 /// [`RECIPIENT_SCOPES`], without repeats; `["all"]` when `all` is among them.
-fn clean_scope_codes(codes: &[String]) -> Result<Vec<String>, &'static str> {
+pub(crate) fn clean_scope_codes(codes: &[String]) -> Result<Vec<String>, &'static str> {
     let mut chosen = Vec::new();
     for code in codes {
         let code = code.trim();

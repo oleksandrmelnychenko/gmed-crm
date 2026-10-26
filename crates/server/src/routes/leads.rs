@@ -409,6 +409,11 @@ struct TrustedContactRequest {
     relation: Option<String>,
     birth_date: Option<String>,
     address: Option<String>,
+    /// What the contact may be told when the consent form names the staff
+    /// contacts (the person made no choice in the cabinet): codes of
+    /// [`crate::consent_choices::RECIPIENT_SCOPES`] (owner 2026-10-26).
+    #[serde(default)]
+    scope_codes: Option<Vec<String>>,
     /// A representative's citizenships and birth data, sent with the contact
     /// by a wizard save (`POST /leads/{id}/update`, F-11 QA 2026-10-25): not
     /// part of the entry, written to the representative's row
@@ -699,7 +704,13 @@ fn normalize_trusted_contacts(contacts: &[TrustedContactRequest]) -> Result<Valu
             return Err("Invalid trusted contact email");
         }
 
-        normalized.push(json!({
+        let scope_codes = match contact.scope_codes.as_deref() {
+            Some(codes) => crate::consent_choices::clean_scope_codes(codes)
+                .map_err(|_| "Invalid trusted contact scope_codes")?,
+            None => Vec::new(),
+        };
+
+        let mut entry = json!({
             "id": id,
             "related_patient_id": contact.related_patient_id,
             "name": name,
@@ -708,7 +719,12 @@ fn normalize_trusted_contacts(contacts: &[TrustedContactRequest]) -> Result<Valu
             "relation": normalized_contact_text(contact.relation.as_deref()),
             "birth_date": birth_date,
             "address": normalized_contact_text(contact.address.as_deref()),
-        }));
+        });
+        // Stored only when chosen: older entries keep their exact shape.
+        if !scope_codes.is_empty() {
+            entry["scope_codes"] = json!(scope_codes);
+        }
+        normalized.push(entry);
     }
 
     Ok(Value::Array(normalized))
@@ -13656,6 +13672,7 @@ mod lead_conversion_readiness_tests {
             relation: Some("mother".to_string()),
             birth_date: Some(birth_date.to_string()),
             address: None,
+            scope_codes: None,
             citizenships: None,
             birth_place: None,
             birth_country: None,

@@ -19830,7 +19830,23 @@ fn trusted_contact_recipients_binding(contacts: &Value) -> Option<String> {
             if let Some(phone) = value("phone") {
                 parts.push(format!("Tel.: {phone}"));
             }
-            Some(parts.join(", "))
+            // The scope staff recorded for the contact, worded like the
+            // cabinet's recipients (owner 2026-10-26).
+            let scope_codes: Vec<String> = contact
+                .get("scope_codes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect();
+            let scope = crate::consent_choices::scope_codes_label(&scope_codes);
+            let line = parts.join(", ");
+            Some(if scope.is_empty() {
+                line
+            } else {
+                format!("{line}; Umfang der Auskunft: {scope}")
+            })
         })
         .collect::<Vec<_>>();
 
@@ -39111,6 +39127,26 @@ mod tests {
         assert!(!privacy_information_text.contains("Heorhii Hudiiev, geb. am 12.12.1994"));
         assert!(!privacy_information_text.contains("Anna Beispiel"));
         assert!(!privacy_information_text.contains('?'));
+    }
+
+    #[test]
+    fn staff_contact_lines_name_the_scope_of_information() {
+        let lines = crate::routes::documents::trusted_contact_recipients_binding(&json!([
+            {"name": "Inga Kurz", "phone": "+49 170 1", "scope_codes": ["medical", "organisational"]},
+            {"name": "Max Muster", "scope_codes": ["all"]},
+            {"name": "Ohne Umfang"}
+        ]))
+        .expect("lines");
+        let lines: Vec<&str> = lines.lines().collect();
+        assert_eq!(
+            lines[0],
+            "Inga Kurz, Tel.: +49 170 1; Umfang der Auskunft: medizinische und organisatorische Informationen"
+        );
+        assert_eq!(
+            lines[1],
+            "Max Muster; Umfang der Auskunft: alle Informationen"
+        );
+        assert_eq!(lines[2], "Ohne Umfang");
     }
 
     #[test]
