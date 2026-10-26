@@ -47,4 +47,4 @@ const TEXT = {
   },
 };
 
-export function servicesText(lang: string) { return TEXT[asLeadCabinetLang(lang)]; }
+export function servicesText(lang: string) { return TEXT[asLeadCabinetLang(lang) ?? "ru"]; }
