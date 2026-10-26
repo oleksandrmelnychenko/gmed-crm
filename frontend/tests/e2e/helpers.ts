@@ -15,6 +15,16 @@ export async function startClockAt(page: Page, now: Date = E2E_NOW) {
 }
 
 /**
+ * Checks a radio that is visually hidden inside its label (segmented controls and
+ * radio cards, owner UI polish 2026-10-27): the radio itself is not hit-testable, so
+ * the visible label is clicked, as a person would, and the radio must end up checked.
+ */
+export async function checkLabelledRadio(radio: Locator) {
+  await radio.locator("xpath=ancestor::label[1]").click();
+  await expect(radio).toBeChecked();
+}
+
+/**
  * Accessible names of the sections of an MUI date/time field. The pickers
  * speak the UI language (Russian or German), so these match both.
  */

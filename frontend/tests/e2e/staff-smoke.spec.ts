@@ -3617,7 +3617,8 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByText("Einverständniserklärung zur Datenübermittlung", { exact: true })).toBeVisible();
     // Staff no longer preset the form's boxes (channels, transfer): only the person's own
     // choice in the cabinet ticks them (2026-10-12).
-    await expect(wizard.getByTestId("privacy-consents-own-choice-note")).toContainText("Kundenkabinett");
+    // The long explanatory note went with the owner polish (57309ea3); the boxes stay absent.
+    await expect(wizard.getByTestId("privacy-consents-own-choice-note")).toHaveCount(0);
     await expect(wizard.getByText("Kommunikationswege im Dokument", { exact: true })).toHaveCount(0);
     await expect(wizard.getByRole("checkbox", { name: "WhatsApp", exact: true })).toHaveCount(0);
     await expect(wizard.getByText("Unterlagen und Anamnese vervollständigen")).toHaveCount(0);

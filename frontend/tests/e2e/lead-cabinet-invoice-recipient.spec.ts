@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { startClockAt } from "./helpers";
+import { checkLabelledRadio, startClockAt } from "./helpers";
 import type { LeadRequestRepresentation } from "../../src/pages/patient-lead/lead-request-api";
 
 // Lead cabinet, step 3 "Versicherung & Rechnung" (owner spec 2026-10-11): the
@@ -582,7 +582,7 @@ test("'Ich' of a signed-in parent is that parent: no parent question, also with 
   await page.goto("/");
   await step(page, "billing");
   const stepBox = page.getByTestId("lead-request-step-billing");
-  await stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }).check();
+  await checkLabelledRadio(stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }));
   await expect.poll(() => request.billing.recipient.representative_id).toBe(FATHER);
   expect(calls.billing[0]).toMatchObject({ invoice_recipient: "self", recipient_representative_id: FATHER });
   await expect(page.getByRole("combobox", { name: "Welcher Elternteil erhält die Rechnung?" })).toHaveCount(0);
@@ -685,7 +685,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await page.goto("/");
     await step(page, "billing");
     const stepBox = page.getByTestId("lead-request-step-billing");
-    await stepBox.getByRole("radio", { name: "Ich", exact: true }).check();
+    await checkLabelledRadio(stepBox.getByRole("radio", { name: "Ich", exact: true }));
     // "The recipient is also the payer" is ticked by default and saved as an answer.
     await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toBeChecked();
     await expect.poll(() => calls.billing).toEqual([{ invoice_recipient: "self", invoice_recipient_is_payer: true }]);
@@ -714,7 +714,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await step(page, "billing");
     const stepBox = page.getByTestId("lead-request-step-billing");
     const party = page.getByTestId("lead-request-recipient-party");
-    await stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }).check();
+    await checkLabelledRadio(stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }));
     // Unticked: the organisation receives the invoice without paying it.
     const isPayer = stepBox.getByRole("checkbox", { name: IS_PAYER });
     await expect(isPayer).toBeChecked();
@@ -775,7 +775,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await step(page, "billing");
     const stepBox = page.getByTestId("lead-request-step-billing");
     const party = page.getByTestId("lead-request-recipient-party");
-    await stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }).check();
+    await checkLabelledRadio(stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }));
     await choose(page, party.getByRole("combobox", { name: "Rechnungsempfänger ist" }), "Eine Privatperson");
     await party.getByRole("textbox", { name: "Vorname" }).fill("Viktor");
     await party.getByRole("textbox", { name: "Nachname" }).fill("Zahler");
@@ -822,7 +822,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await step(page, "billing");
     const stepBox = page.getByTestId("lead-request-step-billing");
     await expect(stepBox.getByRole("combobox", { name: "Hat Ihr Kind eine Krankenversicherung?" })).toBeVisible();
-    await stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }).check();
+    await checkLabelledRadio(stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }));
     await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toBeChecked();
     // The parent pays as the representative, never as a third party; the server names her.
     await expect.poll(() => request.payer?.payer_kind).toBe("representative");
@@ -843,7 +843,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await step(page, "billing");
     const stepBox = page.getByTestId("lead-request-step-billing");
     const party = page.getByTestId("lead-request-recipient-party");
-    await stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }).check();
+    await checkLabelledRadio(stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }));
     await stepBox.getByRole("checkbox", { name: IS_PAYER }).uncheck();
     await expect.poll(() => request.billing.invoice_recipient_is_payer).toBe(false);
     await choose(page, party.getByRole("combobox", { name: "Rechnungsempfänger ist" }), "Eine Privatperson");
@@ -1027,7 +1027,7 @@ test("changing the default checked recipient cannot replace an existing payer un
   await page.goto("/");
   await step(page, "billing");
   const box = page.getByTestId("lead-request-step-billing");
-  await box.getByRole("radio", { name: "Eine andere Person oder Organisation" }).check();
+  await checkLabelledRadio(box.getByRole("radio", { name: "Eine andere Person oder Organisation" }));
   const party = page.getByTestId("lead-request-recipient-party");
   await choose(page, party.getByRole("combobox", { name: "Rechnungsempfänger ist" }), "Eine Privatperson");
   await party.getByRole("textbox", { name: "Vorname" }).fill("A");
@@ -1065,7 +1065,7 @@ test("the other parent pays: named as that representative, never as a third part
   await page.goto("/");
   await step(page, "billing");
   const stepBox = page.getByTestId("lead-request-step-billing");
-  await stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }).check();
+  await checkLabelledRadio(stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }));
   await stepBox.getByRole("checkbox", { name: IS_PAYER }).uncheck();
   await choose(page, stepBox.getByRole("combobox", { name: PAYER_TYPE }), "Der andere Elternteil (Ben Muster)");
   await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "representative", payer_representative_id: FATHER });
@@ -1083,7 +1083,7 @@ test("an unanswered recipient says so at the question after Next (QA 2026-10-22)
   await page.getByRole("button", { name: "Weiter", exact: true }).click();
   await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "billing");
   await expect(stepBox.getByTestId("lead-request-invoice-recipient").getByRole("alert")).toHaveText("Pflichtfeld");
-  await stepBox.getByRole("radio", { name: "Ich", exact: true }).check();
+  await checkLabelledRadio(stepBox.getByRole("radio", { name: "Ich", exact: true }));
   await expect(stepBox.getByTestId("lead-request-invoice-recipient").getByRole("alert")).toHaveCount(0);
 });
 

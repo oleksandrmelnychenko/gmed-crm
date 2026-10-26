@@ -581,7 +581,7 @@ test("the payer's answers stand after invoice and payment: a PEP in amber, level
     await expect(group).toContainText(text);
   }
   await expect(group.getByTestId("lead-gwg-payer-email")).toContainText("viktor.zahler@example.com · bestätigt am 06.10.2026 12:05");
-  await expect(group.getByTestId("lead-gwg-payer-identity_documents")).toContainText("viktor-pass.pdf · 06.10.2026");
+  await expect(group.getByTestId("lead-gwg-payer-identity_documents")).toContainText("viktor-pass.pdf06.10.2026"); // upload date as a chip (57309ea3)
   await expect(group.getByTestId("lead-gwg-payer-funds_sources")).toContainText("Gehalt / nichtselbständige Arbeit, Ersparnisse");
   const pep = group.getByTestId("lead-gwg-payer-answer-pep_self");
   await expect(pep).toHaveAttribute("data-warning", "true");

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { startClockAt } from "./helpers";
+import { checkLabelledRadio, startClockAt } from "./helpers";
 
 // "Кто платит" of a minor and the invoice recipient in the staff wizard
 // (owner decisions 2026-10-19 / 2026-10-11, QA 2026-10-22): a minor never
@@ -156,7 +156,7 @@ test("a minor's 'patient pays himself' of before asks for the paying parent; the
   await page.screenshot({ path: testInfo.outputPath("lead-payer-minor-self-ru-desktop.png"), animations: "disabled" });
 
   // Choosing the parent clears the warning.
-  await section.getByRole("radio", { name: "Платит родитель / законный представитель" }).check();
+  await checkLabelledRadio(section.getByRole("radio", { name: "Платит родитель / законный представитель" }));
   await expect(section).not.toContainText("Ребёнок не платит сам");
 });
 

@@ -171,7 +171,8 @@ test("staff read the lead's GwG statements beside the identification sheet", asy
   const validUntil = block.getByTestId("lead-gwg-id-valid-until");
   await expect(validUntil).toContainText("30.04.2025 · срок истёк");
   await expect(validUntil).toHaveAttribute("data-warning", "true");
-  await expect(block.getByTestId("lead-gwg-identity-documents")).toContainText("pass-front.pdf · 05.10.2026");
+  // File name, then the upload date as a chip (owner UI polish 57309ea3).
+  await expect(block.getByTestId("lead-gwg-identity-documents").getByRole("listitem")).toContainText(["pass-front.pdf05.10.2026"]);
 
   // Own economic interest comes from the payer declaration.
   await expect(block.getByTestId("lead-gwg-own-account")).toContainText("Нет");
@@ -280,8 +281,9 @@ test("an adult's answers about a representative stand after the identity documen
     "Musterweg 1, 10115 Berlin, Германия",
     "Удостоверение личности",
     "31.01.2032",
-    "ben-ausweis.jpg · 05.10.2026",
-    "vollmacht.pdf · 05.10.2026 · просмотрен",
+    // File name, then the upload date and the review state as chips (owner UI polish 57309ea3).
+    "ben-ausweis.jpg05.10.2026",
+    "vollmacht.pdf05.10.2026просмотрен",
   ]) {
     await expect(person).toContainText(text);
   }

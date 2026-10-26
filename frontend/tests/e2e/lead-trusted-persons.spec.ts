@@ -343,7 +343,7 @@ test("No clears existing people and records an explicit refusal without changing
   await expect(page.getByTestId("trusted-persons-editor")).toHaveCount(0);
 });
 
-test("after the request is sent the decision is read-only; withdrawing and removing a person stay open", async ({ page }) => {
+test("after the request is sent the decision is read-only; changes and withdrawals only via GMED", async ({ page }) => {
   const item = request(); item.disclosure = receipt(); item.submitted_at = "2026-10-20T09:00:00Z";
   item.trusted_persons = [
     { name: "Eva Friend", relation: "friend", phone: PHONE, birth_date: BORN, scope_codes: ["medical"] },
@@ -359,17 +359,13 @@ test("after the request is sent the decision is read-only; withdrawing and remov
   await expect(list).toContainText("06.05.1970");
   await expect(list).toContainText(PHONE);
   await expect(list).toContainText("max@example.com");
-  // Removing one person keeps the consent for the other: exactly the saved person goes back.
-  await page.getByRole("button", { name: "Remove person: Eva Friend", exact: true }).click();
-  await expect(page.getByTestId("trusted-persons-save-state")).toHaveText("Saved");
-  expect(calls.at(-1)?.persons).toEqual([{ name: "Max Friend", relation: "friend", contact: "max@example.com", phone: null, birth_date: null, scope_codes: ["all"] }]);
-  expect(calls.at(-1)?.allow_disclosure).toBe(true);
-  // Withdrawing: no information to anybody.
-  await page.getByTestId("disclosure-withdraw").click();
+  // Sent is sent (owner 2026-10-26): no removal or withdrawal in the cabinet, only through GMED.
+  await expect(page.getByTestId("trusted-person-remove")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove person: Eva Friend", exact: true })).toHaveCount(0);
   await expect(page.getByTestId("disclosure-withdraw")).toHaveCount(0);
-  await expect.poll(() => calls.at(-1)?.allow_disclosure).toBe(false);
-  expect(calls.at(-1)).toMatchObject({ persons: [], allow_disclosure: false, consent_given: false });
-  await expect(page.getByTestId("disclosure-locked-decision")).toContainText("No");
+  await expect(page.getByTestId("disclosure-locked-via-gmed")).toHaveText("You can change or withdraw your consent at any time through your contact at GMED.");
+  await expect(page.getByTestId("disclosure-locked-decision")).toBeVisible();
+  expect(calls).toEqual([]);
 });
 
 test("a legacy list is retained without preselecting the new decision or consent", async ({ page }) => {

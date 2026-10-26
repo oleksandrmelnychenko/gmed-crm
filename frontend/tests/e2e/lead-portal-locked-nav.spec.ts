@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { checkLabelledRadio } from "./helpers";
 
 // Synthetic API mocks only. The locked menu records interest in current
 // catalogue packages; it must never load a patient module or activate access.
@@ -161,7 +162,7 @@ test.describe("Lead portal locked menu and package interest", () => {
       expect([...new Set(reads)]).toEqual(["/me/lead-requests"]);
       await chooseRequest(page, "Anna Synthetic");
       await expect(dialog.getByRole("radio")).toHaveCount(4);
-      await dialog.getByRole("radio", { name: "GMED Reserve Junior", exact: true }).check();
+      await checkLabelledRadio(dialog.getByRole("radio", { name: "GMED Reserve Junior", exact: true }));
       const overlay = page.locator('[data-slot="dialog-overlay"]').last();
       await expect(overlay).toBeVisible();
       expect(await overlay.evaluate((element) => getComputedStyle(element).backgroundColor))
@@ -194,7 +195,7 @@ test.describe("Lead portal locked menu and package interest", () => {
     await expect(dialog.getByRole("radio", { name: "GMED Reserve Junior", exact: true })).toBeVisible();
     await expect(dialog.getByRole("radio", { name: "GMED Reserve Adult", exact: true })).toBeVisible();
     await chooseRequest(page, "Ben Synthetic");
-    await dialog.getByRole("radio", { name: "GMED Reserve Junior · Ben", exact: true }).check();
+    await checkLabelledRadio(dialog.getByRole("radio", { name: "GMED Reserve Junior · Ben", exact: true }));
     await page.getByTestId("lead-portal-plan-submit").click();
     await expect(dialog).toContainText("Ваш запрос отправлен в GMED.");
     expect(posts).toEqual([{ path: "/me/lead-requests/child-ben/plan-requests", body: { package_id: PACKAGES[1].id, module_id: "services" } }]);
@@ -208,7 +209,7 @@ test.describe("Lead portal locked menu and package interest", () => {
     await page.getByTestId(LOCKED).click();
     const dialog = page.getByTestId("lead-portal-plan-dialog");
     await expect(page.getByTestId("lead-portal-plan-request-name")).toHaveText("Anna Synthetic");
-    await dialog.getByRole("radio", { name: "GMED Reserve Junior", exact: true }).check();
+    await checkLabelledRadio(dialog.getByRole("radio", { name: "GMED Reserve Junior", exact: true }));
     await expect(page.getByTestId("lead-portal-plan-submit")).toBeDisabled();
     await expect(page.getByTestId("lead-portal-plan-submit")).toHaveText("Уже запрошен");
     expect(posts).toEqual([]);
@@ -234,7 +235,7 @@ test.describe("Lead portal locked menu and package interest", () => {
     await page.getByTestId(LOCKED).click();
     const dialog = page.getByTestId("lead-portal-plan-dialog");
     await chooseRequest(page, "Anna Synthetic");
-    await dialog.getByRole("radio", { name: "GMED One", exact: true }).check();
+    await checkLabelledRadio(dialog.getByRole("radio", { name: "GMED One", exact: true }));
     await page.getByTestId("lead-portal-plan-submit").click();
     await expect(dialog.getByRole("alert")).toContainText("Не удалось отправить запрос");
     await expect(dialog.getByRole("radio", { name: "GMED One", exact: true })).toBeChecked();
@@ -256,7 +257,7 @@ test.describe("Lead portal locked menu and package interest", () => {
     releaseSecond();
     await expect(page.locator("#lead-portal-plan-request")).toContainText("Anna Synthetic");
     await expect(page.getByRole("radio", { name: "GMED One · Ben", exact: true })).toHaveCount(0);
-    await page.getByRole("radio", { name: "GMED One", exact: true }).check();
+    await checkLabelledRadio(page.getByRole("radio", { name: "GMED One", exact: true }));
     await page.getByTestId("lead-portal-plan-submit").click();
     await expect.poll(() => posts.length).toBe(1);
     expect(posts[0].path).toBe("/me/lead-requests/child-anna/plan-requests");
@@ -271,7 +272,7 @@ test.describe("Lead portal locked menu and package interest", () => {
     const dialog = page.getByTestId("lead-portal-plan-dialog");
     await chooseRequest(page, "Anna Synthetic");
     await expect(dialog.getByRole("radio")).toHaveCount(4);
-    await dialog.getByRole("radio", { name: "GMED Reserve Adult", exact: true }).check();
+    await checkLabelledRadio(dialog.getByRole("radio", { name: "GMED Reserve Adult", exact: true }));
     const bounds = await dialog.boundingBox();
     expect(bounds?.x).toBeGreaterThanOrEqual(0);
     expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(390);

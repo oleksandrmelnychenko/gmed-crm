@@ -800,7 +800,9 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await tab(page, "send").click();
     await expect(page.getByTestId("lead-request-follow-up-open")).toContainText("Bitte ergänzen Sie noch einige Angaben.");
     await expect(page.getByTestId("lead-request-follow-up-open")).not.toContainText("Wir benötigen");
-    await expect(page.getByTestId("lead-request-next-steps")).toContainText("ergänzen Sie Ihre Anfrage und senden Sie sie erneut");
+    // Sent is sent (owner 2026-10-27): no "change and send again" line; the open block is the only pointer.
+    await expect(page.getByTestId("lead-request-next-steps")).toContainText("Wir melden uns bei Ihnen");
+    await expect(page.getByTestId("lead-request-next-steps")).not.toContainText("senden Sie sie erneut");
     await expect(page.getByTestId("lead-request-next-steps")).not.toContainText("Bis dahin müssen Sie nichts weiter tun.");
     await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toHaveCount(0);
     await page.getByTestId("lead-request-follow-up-open").getByRole("button").click();
@@ -1049,14 +1051,14 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await tab(page, "person").click();
     const person = page.getByTestId("lead-request-step-person");
     await expect(person).toBeVisible();
-    // Three fields side by side, the steps in a column beside the form.
+    // Three fields side by side; the steps are a compact tab strip above the form (owner UI polish 2026-10-27).
     const first = await page.locator("#lead-request-first_name").boundingBox();
     const last = await page.locator("#lead-request-last_name").boundingBox();
     const middle = await page.locator("#lead-request-middle_name").boundingBox();
     expect(first && last && middle).toBeTruthy();
     const nav = await page.getByTestId("lead-request-steps").boundingBox();
     const form = await page.getByTestId("lead-request-step").boundingBox();
-    expect(nav && form && nav.x + nav.width <= form.x + 1).toBe(true);
+    expect(nav && form && nav.y + nav.height <= form.y + 1).toBe(true);
     const columns = new Set(
       await Promise.all(
         ["#lead-request-salutation", "#lead-request-first_name", "#lead-request-last_name"].map(async (selector) =>

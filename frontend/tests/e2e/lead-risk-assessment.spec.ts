@@ -281,7 +281,9 @@ test("level 2: staff see points and level, request more and release with a reaso
   await expect(panel).toBeVisible();
   await expect(panel.getByTestId("lead-risk-level")).toHaveText("Уровень 2");
   await expect(panel.getByTestId("lead-risk-status")).toHaveText("Нужно решение");
-  await expect(panel.getByTestId("lead-risk-points")).toContainText("4 (большее из: пациент 4 · плательщик 3)");
+  // Points as chips; the full sentence stays the accessible name (owner style 593be890).
+  await expect(panel.getByTestId("lead-risk-points")).toHaveAttribute("aria-label", "4 (большее из: пациент 4 · плательщик 3)");
+  await expect(panel.getByTestId("lead-risk-points")).toContainText("Баллы · максимум:4Пациент:4Плательщик:3");
   await expect(panel.getByTestId("lead-risk-trigger-T1").filter({ visible: true })).toContainText("Гражданство пациента в списке стран · список 1");
   await expect(panel.getByTestId("lead-risk-trigger-T5").filter({ visible: true })).toContainText("Плательщик не супруг(а), родитель или ребёнок");
   await expect(panel.getByTestId("lead-risk-block-A")).toContainText("не хватает: источник средств");

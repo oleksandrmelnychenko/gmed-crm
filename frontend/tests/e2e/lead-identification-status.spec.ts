@@ -221,7 +221,8 @@ test("without a qualified signature the labels say so, and only the patient is l
   const patient = row("contract_partner");
   await expect(patient.line).toContainText("Пациент");
   await expect(patient.qes).toHaveText("Квалифицированной подписи ещё нет");
-  await expect(patient.qes).toHaveAttribute("data-tone", "neutral");
+  // A missing qualified signature reads as an error (owner style 22e852ce).
+  await expect(patient.qes).toHaveAttribute("data-tone", "error");
   // The payment label is always there, with the button to confirm it.
   await expect(patient.payment).toHaveText("Ожидается платёж с собственного счёта");
   await expect(patient.payment).toHaveAttribute("data-tone", "warning");

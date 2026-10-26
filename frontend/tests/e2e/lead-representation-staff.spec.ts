@@ -571,7 +571,7 @@ test("staff read who represents a minor, as the cabinet knows it", async ({ page
     "FA7654321",
     "Passamt 8031, Украина",
     "01.05.2015",
-    "anna-pass.pdf · 05.10.2026 · просмотрен",
+    "anna-pass.pdf05.10.2026просмотрен", // date and review state as chips (57309ea3)
   ]) {
     await expect(anna).toContainText(text);
   }
@@ -583,14 +583,14 @@ test("staff read who represents a minor, as the cabinet knows it", async ({ page
   const ben = group.getByTestId(`lead-gwg-representative-${BEN_ID}`);
   await expect(ben).toContainText("Ben Muster");
   await expect(ben).toContainText("Удостоверение личности");
-  await expect(ben).toContainText("ben-ausweis.jpg · 05.10.2026");
+  await expect(ben).toContainText("ben-ausweis.jpg05.10.2026"); // upload date as a chip (57309ea3)
   await expect(ben.getByTestId("lead-gwg-representative-login")).toHaveCount(0);
   await expect(ben.getByTestId(`lead-gwg-representative-valid-until-${BEN_ID}`)).not.toHaveAttribute("data-warning", "true");
   await expect(ben.getByTestId(`lead-gwg-representative-authority-documents-${BEN_ID}`)).toContainText("—");
 
-  // Desktop cards use four columns; the data stays read-only below the disclosure control.
+  // Desktop cards use two columns (container query, owner style 2112cb11); the data stays read-only below the disclosure control.
   const grid = statements.getByTestId("lead-gwg-statements-grid");
-  await expect.poll(() => grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").length)).toBe(4);
+  await expect.poll(() => grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").length)).toBe(2);
   const content = statements.getByTestId("lead-gwg-statements-content");
   // The only control is "move to slot" next to a not yet accepted cabinet upload (2026-10-24).
   await expect(content.locator("input, textarea, select:not([data-testid^='lead-upload-move-']), button")).toHaveCount(0);
