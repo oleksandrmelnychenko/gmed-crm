@@ -267,7 +267,8 @@ import {
   orderClientSignatureState,
   shouldReloadDocumentsAfterGenerationError,
   signatureNeedsProof,
-  versionsSameForm,
+  isMedicalUpload,
+  isReplaceableFormVersion,
 } from "../model/wizard-document-signing";
 import {
   daysUntilRetentionDeadline,
@@ -2374,6 +2375,8 @@ function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
     return "privacy_consents";
   }
 
+  // Guessing by the file name is for staff scans of the forms only.
+  if (isMedicalUpload(item)) return null;
   const classification = [item.art, item.category, item.auto_name, item.original_filename]
     .filter(Boolean)
     .join(" ")
@@ -6904,7 +6907,7 @@ export function LeadWizard({
         order_id: order?.id,
         replace_document_id: sortWizardDocumentsNewestFirst(
           wizardDocuments[templateId].filter((document) => (
-            versionsSameForm(document.generated_template_id, generatedTemplateId)
+            isReplaceableFormVersion(document, generatedTemplateId)
           )),
         ).find((document) => document.is_latest_version)?.id,
         language: "de",
