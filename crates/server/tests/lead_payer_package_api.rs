@@ -1550,7 +1550,13 @@ async fn a_change_makes_the_package_outdated_and_it_is_prepared_again() {
     assert_eq!(incomplete["error"], "onboarding_package_incomplete");
     assert_eq!(incomplete["onboarding_manifest"]["expected_count"], 6);
 
-    // The client chooses the core consents before their PDFs are generated.
+    // The client chooses the core consents before their PDFs are generated —
+    // before the request is sent (after it only a withdrawal, owner 2026-10-26).
+    sqlx::query("UPDATE leads SET portal_submitted_at = NULL WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
     let (status, chosen) = with_login(
         &app,
         "POST",

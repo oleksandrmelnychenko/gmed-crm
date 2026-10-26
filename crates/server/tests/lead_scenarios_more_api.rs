@@ -914,7 +914,6 @@ async fn scenario_staff_and_parent_edit_the_same_request_at_once() {
     let (lead, mother, father) = (request.lead, request.mother, request.father);
     let base = request.base();
     let anna = request.anna.clone();
-    submit(&app, lead, &anna).await;
 
     // The wizard loaded the lead; meanwhile the mother corrects her phone in
     // the cabinet. Staff then save the father's date of birth with the list
@@ -947,10 +946,20 @@ async fn scenario_staff_and_parent_edit_the_same_request_at_once() {
     );
     let view = app.cabinet(lead, &anna).await;
     assert_eq!(representative(&view, mother)["phone"], "+49 30 111111");
-    // The mother's change marks the request changed; the staff save does
-    // not add to it.
-    assert_eq!(view["changed_since_submit"], true, "{view}");
+    // Not sent yet: nothing to send again. Once sent, the form is read-only
+    // for the parents (owner 2026-10-26); staff keep editing.
+    assert_eq!(view["changed_since_submit"], false, "{view}");
     submit(&app, lead, &anna).await;
+    let (code, refused) = app
+        .call(
+            "POST",
+            &format!("{base}/representatives/{mother}"),
+            &anna,
+            Some(json!({ "phone": "+49 30 333333" })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "request_already_sent", "{refused}");
     let (code, saved) = wizard_save_contacts(
         &app,
         lead,
@@ -966,6 +975,12 @@ async fn scenario_staff_and_parent_edit_the_same_request_at_once() {
         false,
         "a staff change is no change of the parents"
     );
+    // The parallel edits below are of a draft again.
+    sqlx::query("UPDATE leads SET portal_submitted_at = NULL WHERE id = $1")
+        .bind(lead)
+        .execute(app.pool())
+        .await
+        .unwrap();
 
     // Staff confirm the custody while the mother changes it in the cabinet
     // at the same moment: whichever comes first, the staff's value stands
