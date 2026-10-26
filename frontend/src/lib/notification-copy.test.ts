@@ -54,6 +54,12 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
     expect(notificationCopyFromFacts(proposed, "de")?.body).toContain("Vier-Augen-Prinzip");
   });
 
+  it("translates the documents a lead added to the sent request", () => {
+    const item = notice("lead_portal_documents_added", "Lead added documents", "The lead added documents to the sent request.");
+    expect(notificationCopyFromFacts(item, "ru")?.title).toBe("Лид доложил документы");
+    expect(notificationCopyFromFacts(item, "de")?.title).toBe("Lead hat Dokumente nachgereicht");
+  });
+
   it("translates the follow-up submission of the lead cabinet", () => {
     const item = notice(
       "lead_portal_follow_up_submitted",

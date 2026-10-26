@@ -443,6 +443,7 @@ function PayerQuestionnaireForm({
         <label className="flex items-start gap-3 text-sm">
           <input
             type="checkbox"
+            aria-label={text.payerNoticeAck}
             className={cn(checkboxClass, "mt-0.5")}
             // Ticked at once while the acknowledgement is on its way.
             checked={acknowledged || noticeBusy}
@@ -470,6 +471,7 @@ function PayerQuestionnaireForm({
               <label key={channel} className="inline-flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
+                  aria-label={text.contactChannelOptions[channel]}
                   className={checkboxClass}
                   checked={channels.includes(channel)}
                   disabled={noticeBusy || submitted || submitting}
@@ -581,6 +583,7 @@ function PayerQuestionnaireForm({
                   <label key={source} className="inline-flex items-start gap-2 text-sm leading-snug">
                     <input
                       type="checkbox"
+                      aria-label={text.fundsSourceOptions[source]}
                       className={cn(checkboxClass, "mt-0.5")}
                       checked={draft.funds_sources.includes(source)}
                       onChange={(event) => setDraft((current) => withFundsSource(current, source, event.target.checked))}
@@ -649,7 +652,6 @@ function PayerQuestionnaireForm({
               <UploadedFileList
                 documents={proofDocuments}
                 text={text}
-                lang={lang}
                 emptyText={text.noPayerFundsProof}
                 testId="lead-request-payer-funds-proof-list"
                 onRemove={(documentId) => void remove(documentId)}
@@ -713,6 +715,7 @@ function PayerQuestionnaireForm({
           <label className="flex items-start gap-3 text-sm">
             <input
               type="checkbox"
+              aria-label={text.payerDeclarationLabel}
               className={cn(checkboxClass, "mt-0.5")}
               checked={declared}
               disabled={!acknowledged || submitting}

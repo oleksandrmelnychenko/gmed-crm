@@ -59,6 +59,26 @@ const LEAD_CONSENT_FORM_TEMPLATES: ReadonlySet<string> = new Set<LeadConsentForm
  * so a changed date of birth or custody versions the existing form instead of adding a second one.
  * An uploaded document without a template stays a candidate, as before.
  */
+/**
+ * A medical document the client uploaded (cabinet or staff upload) is never
+ * one of the wizard's forms, whatever its file is called: a client's
+ * «Datenschutzhinweis … .pdf» was taken for the consent form and the consent
+ * button tried to replace the upload (DEV 2026-10-26, lead Andreas Kurz).
+ */
+export function isMedicalUpload(document: Pick<DocumentItem, "art" | "category">): boolean {
+  return document.art?.trim().toLowerCase() === "patient_medical_upload"
+    || document.category?.trim().toLowerCase() === "medical";
+}
+
+/** A new version replaces only a form GMED generated, never an uploaded scan or file. */
+export function isReplaceableFormVersion(
+  document: Pick<DocumentItem, "generated_template_id">,
+  templateId: string,
+): boolean {
+  return Boolean(document.generated_template_id?.trim())
+    && versionsSameForm(document.generated_template_id, templateId);
+}
+
 export function versionsSameForm(documentTemplateId: string | null | undefined, templateId: string): boolean {
   if (!documentTemplateId) return true;
   if (documentTemplateId === templateId) return true;

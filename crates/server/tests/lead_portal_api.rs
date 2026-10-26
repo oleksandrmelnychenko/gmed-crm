@@ -274,6 +274,37 @@ async fn fill_in_complete_request(app: &axum::Router, lead_id: Uuid, bearer: &st
     body
 }
 
+/// Staff change the citizenships in the wizard: the sent cabinet form is
+/// read-only since 2026-10-26 (owner). Returns the request as the cabinet
+/// reads it next (the read reassesses).
+async fn staff_change_citizenships(
+    app: &TestApp,
+    lead: Uuid,
+    patient: &str,
+    citizenships: &[&str],
+) -> (StatusCode, Value) {
+    sqlx::query("UPDATE leads SET citizenships = $2 WHERE id = $1")
+        .bind(lead)
+        .bind(citizenships.iter().map(|code| code.to_string()).collect::<Vec<_>>())
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    json_request(
+        &app.suite.app,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead}"),
+        patient,
+        None,
+    )
+    .await
+}
+
+/// A cabinet write after the send: 409 `request_already_sent`.
+fn assert_sent_lock(status: StatusCode, body: &Value) {
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "request_already_sent", "{body}");
+}
+
 async fn audit_count(pool: &PgPool, action: &str, entity_id: Uuid) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE action = $1 AND entity_id = $2")
         .bind(action)
@@ -413,6 +444,7 @@ async fn cabinet_submission_protects_health_identity_and_base_changes() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // The sent base form is read-only (owner 2026-10-26).
     let (status, body) = json_request(
         router,
         "POST",
@@ -421,14 +453,7 @@ async fn cabinet_submission_protects_health_identity_and_base_changes() {
         Some(json!({"city": "Hamburg"})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    sqlx::query("INSERT INTO lead_risk_assessments (lead_id, status, follow_up_answered_at) VALUES ($1, 'clear', clock_timestamp()) ON CONFLICT (lead_id) DO UPDATE SET follow_up_answered_at = clock_timestamp()")
-        .bind(lead).execute(&app.suite.pool).await.unwrap();
-    let (_, body) = json_request(router, "GET", &base, &patient, None).await;
-    assert_eq!(
-        body["changed_since_submit"], true,
-        "A follow-up must not consume a base form edit: {body}"
-    );
+    assert_sent_lock(status, &body);
     // A staff-held passport remains valid evidence without a current cabinet upload.
     sqlx::query("UPDATE documents SET compliance_kind = 'identity' WHERE id = $1")
         .bind(Uuid::parse_str(document).unwrap())
@@ -1306,8 +1331,24 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     assert_eq!(body["changed_since_submit"], false, "{body}");
     assert_eq!(intake["changed_since_submit"], false, "{intake}");
 
-    // The insurance block of wizard step 1 is the patient's to fill in too.
+    // The sent base form is read-only (owner 2026-10-26).
     let personal_data = format!("/api/v1/me/lead-requests/{lead_id}/personal-data");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &personal_data,
+        &patient,
+        Some(json!({ "has_insurance": "no" })),
+    )
+    .await;
+    assert_sent_lock(status, &body);
+    // The insurance block of wizard step 1 is the patient's to fill in too
+    // (of a draft: the request back to unsent for this part).
+    sqlx::query("UPDATE leads SET portal_submitted_at = NULL WHERE id = $1")
+        .bind(lead_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
     let (status, insured) = json_request(
         router,
         "POST",
@@ -1329,20 +1370,6 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         "Allianz Care"
     );
     assert_eq!(insured["progress"]["total"], 12);
-    let marker_follows_submission: bool = sqlx::query_scalar(
-        "SELECT (portal_field_updates->'has_insurance'->>'at')::timestamptz > portal_submitted_at
-         FROM leads WHERE id = $1",
-    )
-    .bind(lead_id)
-    .fetch_one(&app.suite.pool)
-    .await
-    .unwrap();
-    assert!(
-        marker_follows_submission,
-        "the database clock orders a cabinet edit after submission"
-    );
-    // A change after sending is what "send again" is for.
-    assert_eq!(insured["changed_since_submit"], true, "{insured}");
     let (_, intake) = json_request(
         router,
         "GET",
@@ -1355,19 +1382,6 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         intake["patient_fields"]["insurance_provider"]["access_kind"], "self",
         "{intake}"
     );
-    // Staff see that the answers shown were changed after sending (QA
-    // 2026-10-06, A X2) — every role that reads the intake.
-    assert_eq!(intake["changed_since_submit"], true, "{intake}");
-    let (status, sales_intake) = json_request(
-        router,
-        "GET",
-        &format!("/api/v1/leads/{lead_id}/portal-intake"),
-        &app.staff("sales"),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{sales_intake}");
-    assert_eq!(sales_intake["changed_since_submit"], true, "{sales_intake}");
 
     let (status, self_payer) = json_request(
         router,
@@ -1407,10 +1421,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     let (status, resent) = json_request(router, "POST", &submit, &patient, declared()).await;
     assert_eq!(status, StatusCode::OK, "{resent}");
     assert_eq!(resent["changed_since_submit"], false, "{resent}");
-
-    // A changed statement after sending is a reason to send again as well;
-    // the earlier confirmation keeps its time until then.
-    let confirmed_at = resent["identification"]["declared_correct_at"].clone();
+    // After the send a statement is no longer changed in the cabinet.
     let (status, changed) = json_request(
         router,
         "POST",
@@ -1419,12 +1430,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         Some(json!({ "former_names": "Sofia Beispiel" })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{changed}");
-    assert_eq!(changed["changed_since_submit"], true, "{changed}");
-    assert_eq!(
-        changed["identification"]["declared_correct_at"], confirmed_at,
-        "{changed}"
-    );
+    assert_sent_lock(status, &changed);
 }
 
 /// A minor lead with a mother as trusted contact; returns (lead, contact id).
@@ -2798,6 +2804,10 @@ async fn purging_a_lead_clears_the_portal_intake() {
             .unwrap();
     assert_eq!(statements, 1);
 
+    // After the send the cabinet answers who acts for the lead only while staff
+    // request block G (owner 2026-10-26: the sent form is read-only).
+    sqlx::query("UPDATE lead_risk_assessments SET requested_blocks=ARRAY['G'], follow_up_answered_at=NULL WHERE lead_id=$1")
+        .bind(lead_id).execute(&app.suite.pool).await.unwrap();
     // Somebody acts for the patient after all: the person, the copy of that
     // person's identity document and the power of attorney are part of what
     // the request holds. Not court-appointed: an authorised representative
@@ -2871,20 +2881,33 @@ async fn purging_a_lead_clears_the_portal_intake() {
             .await
             .unwrap();
     assert_eq!(recipients, 1);
-    // The trusted persons of the cabinet (2026-10-14).
+    // The trusted persons of the cabinet (2026-10-14), named while the request
+    // was a draft (after the send only a withdrawal, owner 2026-10-26).
+    let sent_at: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("UPDATE leads l SET portal_submitted_at = NULL FROM leads o WHERE l.id = o.id AND l.id = $1 RETURNING o.portal_submitted_at")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
     let (status, body) = json_request(
         router,
         "POST",
         &format!("/api/v1/me/lead-requests/{lead_id}/trusted-persons"),
         &patient,
         Some(confirmed_disclosure(
-            json!([{ "name": "Oma Lena", "relation": "relative",
+            json!([{ "name": "Oma Lena", "relation": "relative", "phone": "+49 30 5550101", "birth_date": "1950-01-02",
             "scope_codes": ["medical"] }]),
             true,
         )),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    sqlx::query("UPDATE leads SET portal_submitted_at = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(sent_at)
+        .execute(pool)
+        .await
+        .unwrap();
 
     let (status, choices) = choose(
         router,
@@ -3342,6 +3365,17 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["submitted_at"].is_string(), "{body}");
     assert_eq!(body["payer"]["contact_consent_at"], consent_at, "{body}");
+
+    // The sent form is read-only (owner 2026-10-26); the payer edits below are
+    // of a draft again.
+    let (status, body) =
+        json_request(router, "POST", &payer, &patient, Some(company(agreed.clone()))).await;
+    assert_sent_lock(status, &body);
+    sqlx::query("UPDATE leads SET portal_submitted_at = NULL WHERE id = $1")
+        .bind(lead_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
 
     // The lead can take the consent back; it is then missing again.
     let mut withdrawn = employer.clone();
@@ -5538,14 +5572,7 @@ async fn country_preview_blocks_first_submission_until_answers_are_complete_with
     .await
     .unwrap();
     assert_eq!(answered, 1);
-    let (status, changed) = json_request(
-        router,
-        "POST",
-        &format!("{request}/personal-data"),
-        &patient,
-        Some(json!({ "citizenships": ["DE"] })),
-    )
-    .await;
+    let (status, changed) = staff_change_citizenships(&app, lead, &patient, &["DE"]).await;
     assert_eq!(status, StatusCode::OK, "{changed}");
     // F only at level 1 (one level per lead, owner 2026-10-24).
     assert_eq!(
@@ -5565,26 +5592,7 @@ async fn country_preview_blocks_first_submission_until_answers_are_complete_with
             .fetch_one(pool)
             .await
             .unwrap();
-    // Not sent yet: T1 stays exactly as sent (owner decision 2026-10-25
-    // «Рахувати лише відправлене»).
-    assert_eq!(stored[0]["key"], "T1", "{stored}");
-    assert_eq!(stored[0]["active"], true, "{stored}");
-    // Sent again: the ratchet keeps T1, inactive since then.
-    let (status, resent) = json_request(
-        router,
-        "POST",
-        &format!("{request}/submit"),
-        &patient,
-        declared(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{resent}");
-    let stored: Value =
-        sqlx::query_scalar("SELECT triggers FROM lead_risk_assessments WHERE lead_id=$1")
-            .bind(lead)
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    // Staff's change counts at once: the ratchet keeps T1, inactive since then.
     assert_eq!(stored[0]["key"], "T1", "{stored}");
     assert_eq!(stored[0]["active"], false, "{stored}");
 }
@@ -5621,7 +5629,9 @@ async fn a_post_submission_country_change_counts_once_sent_with_its_answers() {
     .await;
     assert_eq!(status, StatusCode::OK, "{sent}");
     assert_eq!(sent["follow_up"]["required"], false, "{sent}");
-    let (status, pending) = json_request(
+    // The cabinet no longer changes the sent form (owner 2026-10-26); staff
+    // change the citizenship in the wizard.
+    let (status, refused) = json_request(
         router,
         "POST",
         &format!("{request}/personal-data"),
@@ -5629,20 +5639,13 @@ async fn a_post_submission_country_change_counts_once_sent_with_its_answers() {
         Some(json!({ "citizenships": ["CA"] })),
     )
     .await;
+    assert_sent_lock(status, &refused);
+    let (status, pending) = staff_change_citizenships(&app, lead, &patient, &["CA"]).await;
     assert_eq!(status, StatusCode::OK, "{pending}");
     assert_eq!(pending["follow_up"]["before_submit"], false, "{pending}");
     // A list-1 country is level 1: the residence (F) is asked, nothing of the
     // enhanced check (A, K, L) — one level per lead, owner 2026-10-24.
     assert_eq!(pending["follow_up"]["blocks"], json!(["F"]), "{pending}");
-    // Not sent yet: nothing is scored and nothing held (owner decision
-    // 2026-10-25 «Рахувати лише відправлене»).
-    let (points, level, risk_status): (i32, i16, String) =
-        sqlx::query_as("SELECT points,level,status FROM lead_risk_assessments WHERE lead_id=$1")
-            .bind(lead)
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    assert_eq!((points, level, risk_status.as_str()), (0, 1, "clear"));
     let qualify = format!("/api/v1/leads/{lead}/qualify");
     // The residence alone completes the follow-up: no source of funds, no
     // proof, no birth data and no legal questions at level 1.
@@ -5739,14 +5742,7 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
 
     // A black-list citizenship: block F appears at once — and nothing about
     // why.
-    let (status, body) = json_request(
-        router,
-        "POST",
-        &format!("{request}/personal-data"),
-        &patient,
-        Some(json!({ "citizenships": ["DE", "KP"] })),
-    )
-    .await;
+    let (status, body) = staff_change_citizenships(&app, lead_id, &patient, &["DE", "KP"]).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["follow_up"]["required"], true, "{body}");
     // Level 2 also opens the birth data (K) and the legal questions (L), owner 2026-10-09,
@@ -6129,37 +6125,10 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     assert_eq!(status, StatusCode::OK, "{queue}");
     assert!(queue.to_string().contains(&lead_id.to_string()), "{queue}");
 
+    // No second send (owner 2026-10-26): a retry records nothing.
     let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // Two sends, two audit rows; the second one counts the two proofs. The
-    // rows are not told apart by `created_at` (two transactions can share an
-    // instant under load), so look for the row with the count.
-    let mut counted: Vec<Value> = Vec::new();
-    for _ in 0..50 {
-        counted = sqlx::query_scalar(
-            r#"SELECT context FROM audit_log
-               WHERE action = 'lead_portal_submit' AND entity_id = $1"#,
-        )
-        .bind(lead_id)
-        .fetch_all(pool)
-        .await
-        .unwrap();
-        if counted.len() >= 2
-            && counted
-                .iter()
-                .any(|context| context["self_funds_documents"] == 2)
-        {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    assert_eq!(counted.len(), 2, "{counted:?}");
-    assert!(
-        counted
-            .iter()
-            .any(|context| context["self_funds_documents"] == 2),
-        "{counted:?}"
-    );
+    assert_eq!(audit_count(pool, "lead_portal_submit", lead_id).await, 1);
 
     // A third party pays after all: the own source goes.
     let (status, body) = json_request(
@@ -6301,14 +6270,7 @@ async fn sending_the_request_also_sends_follow_up_blocks_that_are_complete() {
     assert_eq!(body["follow_up"]["required"], false, "{body}");
 
     // A black-list citizenship opens A and F (K and L are answered already).
-    let (status, body) = json_request(
-        router,
-        "POST",
-        &format!("{request}/personal-data"),
-        &patient,
-        Some(json!({ "citizenships": ["DE", "KP"] })),
-    )
-    .await;
+    let (status, body) = staff_change_citizenships(&app, lead_id, &patient, &["DE", "KP"]).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["follow_up"]["required"], true, "{body}");
     assert!(body["follow_up"]["answered_at"].is_null(), "{body}");
@@ -6358,8 +6320,8 @@ async fn sending_the_request_also_sends_follow_up_blocks_that_are_complete() {
     }
     assert!(body["follow_up"]["answered_at"].is_null(), "{body}");
 
-    // "Send to the manager" sends them too.
-    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    // After the send the follow-up goes with its own send (owner 2026-10-26).
+    let (status, body) = json_request(router, "POST", &format!("{request}/follow-up/submit"), &patient, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["follow_up"]["answered_at"].is_string(), "{body}");
     let (status, answered): (String, bool) = sqlx::query_as(
@@ -6381,7 +6343,7 @@ async fn sending_the_request_also_sends_follow_up_blocks_that_are_complete() {
     assert_eq!(events, 1);
 
     // Sent once more: recorded already, nothing new.
-    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    let (status, body) = json_request(router, "POST", &format!("{request}/follow-up/submit"), &patient, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let events: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM lead_risk_events WHERE lead_id = $1 AND kind = 'follow_up_answered'",
@@ -7051,7 +7013,7 @@ async fn a_minors_own_login_is_closed_while_the_parents_have_access() {
     let recipients = json!([{
         "name": "Praxis Dr. Beispiel",
         "relation": "family_doctor",
-        "contact": "praxis.consent@example.com",
+        "phone": "+49 30 5550199",
         "scope_codes": ["medical"]
     }]);
     let (status, body) = save_disclosure(
@@ -7380,7 +7342,7 @@ async fn a_minors_own_login_is_closed_while_the_parents_have_access() {
 }
 
 #[tokio::test]
-async fn unchanged_submission_is_idempotent_but_a_real_edit_can_be_resubmitted() {
+async fn a_sent_request_is_read_only_but_takes_added_documents_and_withdrawals() {
     let Some(app) = test_app().await else { return };
     let (lead, _, patient) = lead_with_login(&app, "Retry", "retry.submit@example.com").await;
     fill_in_complete_request(&app.suite.app, lead, &patient).await;
@@ -7403,20 +7365,148 @@ async fn unchanged_submission_is_idempotent_but_a_real_edit_can_be_resubmitted()
     assert_eq!(a.0, StatusCode::OK, "{}", a.1);
     assert_eq!(b.0, StatusCode::OK, "{}", b.1);
     assert_eq!(snapshot(app.suite.pool.clone()).await, before);
-    let (status, saved) = json_request(
+    let request = format!("/api/v1/me/lead-requests/{lead}");
+
+    // The sent base form is read-only (owner 2026-10-26): every part of it
+    // answers 409 `request_already_sent` and keeps the stored answer.
+    for (part, body) in [
+        ("personal-data", json!({ "city": "Bonn" })),
+        ("payer", json!({ "payer_kind": "self", "acts_on_own_account": false })),
+        ("billing", json!({ "payment_method": "card" })),
+        ("identification", json!({ "birth_place": "Lviv" })),
+        ("identification", json!({ "request_reason": "Etwas anderes" })),
+        (
+            "representation",
+            json!({ "has_representative": true, "under_guardianship": false }),
+        ),
+        (
+            "trusted-persons",
+            json!({ "persons": [{ "name": "Neue Person", "relation": "friend",
+                    "phone": "+49 30 7654321", "birth_date": "1970-01-01",
+                    "scope_codes": ["all"] }],
+                "allow_disclosure": true, "consent_given": true,
+                "version": "2026-10-14", "language": "de" }),
+        ),
+        (
+            "consent-choices",
+            json!({ "choices": { "agency_processing": true, "doctors_to_agency": true,
+                    "data_system": true }, "version": "2026-10-12", "language": "de" }),
+        ),
+    ] {
+        let (status, body) = json_request(
+            &app.suite.app,
+            "POST",
+            &format!("{request}/{part}"),
+            &patient,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{part}: {body}");
+        assert_eq!(body["code"], "request_already_sent", "{part}: {body}");
+    }
+    let city: Option<String> = sqlx::query_scalar("SELECT city FROM leads WHERE id = $1")
+        .bind(lead)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    assert_eq!(city.as_deref(), Some("Berlin"));
+    // A copy of the identity document only while GMED refused one or asks a block.
+    let (status, body) = upload_file(
         &app.suite.app,
-        "POST",
-        &format!("/api/v1/me/lead-requests/{lead}/personal-data"),
+        &format!("{request}/identity-document"),
         &patient,
-        Some(json!({"city": "Bonn"})),
+        "pass-neu.pdf",
+        "application/pdf",
+        b"%PDF-1.4\n% another identity copy\n%%EOF\n",
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "request_already_sent", "{body}");
+    // Withdrawing a decision stays open: no disclosure to anybody.
+    let (status, body) = json_request(
+        &app.suite.app,
+        "POST",
+        &format!("{request}/trusted-persons"),
+        &patient,
+        Some(json!({ "persons": [], "allow_disclosure": false, "consent_given": false,
+            "version": "2026-10-14", "language": "de" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // «Dokumente nachreichen»: medical documents are added without a new
+    // send, staff get one notice per batch, the files stay with the request.
+    let (status, added) = upload(
+        &app.suite.app,
+        &format!("{request}/documents"),
+        &patient,
+        b"%PDF-1.4\n% added finding one\n%%EOF\n",
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{added}");
+    let (status, body) = upload(
+        &app.suite.app,
+        &format!("{request}/documents"),
+        &patient,
+        b"%PDF-1.4\n% added finding two\n%%EOF\n",
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["changed_since_submit"], false, "{body}");
+    let notices: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications
+         WHERE entity_id = $1 AND kind = 'lead_portal_documents_added' AND user_id = $2",
+    )
+    .bind(lead)
+    .bind(app.patient_manager_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(notices, 1, "one unread notice per batch");
+    let (status, intake) = json_request(
+        &app.suite.app,
+        "GET",
+        &format!("/api/v1/leads/{lead}/portal-intake"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    let uploads = intake["uploads"].as_array().unwrap();
+    assert_eq!(uploads.len(), 2, "{intake}");
+    assert!(
+        uploads.iter().all(|upload| upload["added_after_submit"] == true),
+        "{intake}"
+    );
+    assert_eq!(intake["changed_since_submit"], false, "{intake}");
+    let document_id = body["documents"][0]["id"].as_str().unwrap().to_string();
+    let (status, body) = json_request(
+        &app.suite.app,
+        "DELETE",
+        &format!("{request}/documents/{document_id}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "request_already_sent", "{body}");
+
+    // No second send: a retry changes nothing.
     let (status, resent) = json_request(&app.suite.app, "POST", &path, &patient, declared()).await;
     assert_eq!(status, StatusCode::OK, "{resent}");
     let after = snapshot(app.suite.pool.clone()).await;
-    assert!(after.0 > before.0);
-    assert_eq!(after.2, before.2 + 1);
+    assert_eq!((after.0, after.1, after.2), (before.0, before.1, before.2));
+
+    // A consent can always be withdrawn.
+    let (status, body) = json_request(
+        &app.suite.app,
+        "POST",
+        &format!("{request}/consent/revoke"),
+        &patient,
+        Some(json!({ "purpose": "health_data_processing" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 #[tokio::test]
@@ -7853,7 +7943,7 @@ async fn wait_for_cabinet_lead_lock(pool: &PgPool, blocker_pid: i32) {
 }
 
 #[tokio::test]
-async fn consent_choice_after_waiting_for_submission_is_a_new_change() {
+async fn consent_choice_after_waiting_for_submission_is_refused() {
     let Some(app) = test_app().await else { return };
     let pool = &app.suite.pool;
     let (lead, _, patient) = lead_with_login(&app, "Choice", "choice.clock@example.com").await;
@@ -7896,23 +7986,10 @@ async fn consent_choice_after_waiting_for_submission_is_a_new_change() {
         .await
         .unwrap();
     sending.commit().await.unwrap();
+    // The choice is judged after the lock: the request is sent by then, and
+    // a new choice after the send is refused (owner 2026-10-26).
     let (status, body) = choice.await.unwrap();
-    assert_eq!(status, StatusCode::CREATED, "{body}");
-    let newer: bool = sqlx::query_scalar(
-        "SELECT c.chosen_at > l.portal_submitted_at FROM consent_form_choices c
-         JOIN leads l ON l.id=c.lead_id WHERE l.id=$1 ORDER BY c.seq DESC LIMIT 1",
-    )
-    .bind(lead)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert!(
-        newer,
-        "the choice time must be taken after acquiring the lock"
-    );
-    let (status, current) = json_request(&app.suite.app, "GET", &base, &patient, None).await;
-    assert_eq!(status, StatusCode::OK, "{current}");
-    assert_eq!(current["changed_since_submit"], true, "{current}");
+    assert_sent_lock(status, &body);
 }
 
 #[tokio::test]
@@ -8046,6 +8123,19 @@ async fn representative_follow_up_tracks_files_and_requires_current_inquiry_cons
         Some(json!({"has_representative": true, "under_guardianship": false})),
     )
     .await;
+    assert_sent_lock(status, &body);
+    // After the send the cabinet answers who acts for the lead only while staff
+    // request block G (owner 2026-10-26: the sent form is read-only).
+    sqlx::query("UPDATE lead_risk_assessments SET requested_blocks=ARRAY['G'], follow_up_answered_at=NULL WHERE lead_id=$1")
+        .bind(lead).execute(&app.suite.pool).await.unwrap();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/representation"),
+        &patient,
+        Some(json!({"has_representative": true, "under_guardianship": false})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let agent = Uuid::new_v4();
     let person = format!("{base}/representatives/{agent}");
@@ -8159,7 +8249,8 @@ fn confirmed_disclosure(persons: Value, allow: bool) -> Value {
 
 /// A trusted person with one scope code (owner 2026-10-19).
 fn disclosure_person(name: &str, scope_code: &str) -> Value {
-    json!({ "name":name, "relation":"friend", "scope_codes":[scope_code] })
+    json!({ "name":name, "relation":"friend", "phone":"+49 30 5550100",
+        "birth_date":"1970-05-06", "scope_codes":[scope_code] })
 }
 
 async fn save_disclosure(
@@ -8205,8 +8296,8 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
     let pm = app.staff("patient_manager");
     let (lead, user, patient) = lead_with_login(&app, "Form", "form.disclosure@example.com").await;
     let persons = json!([
-        { "name": "Max Named", "relation": "friend", "contact": "max@example.test", "scope_codes": ["financial"] },
-        { "name": "Olga Named", "relation": "relative", "contact": "+49 151 000000", "scope_codes": ["medical", "organisational"] }
+        { "name": "Max Named", "relation": "friend", "phone": "+49 30 5550102", "birth_date": "1970-05-06", "scope_codes": ["financial"] },
+        { "name": "Olga Named", "relation": "relative", "phone": "+49 151 000000", "birth_date": "1955-07-08", "scope_codes": ["medical", "organisational"] }
     ]);
     // The contact is a phone number or an e-mail address, nothing else (QA 2026-10-22).
     let (status, refused) = save_disclosure(
@@ -8230,7 +8321,7 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{decision}");
-    let choices = json!({"agency_processing":true,"doctors_to_agency":true,"data_system":true,"named_recipients":true});
+    let choices = json!({"agency_processing":true,"doctors_to_agency":true,"data_system":true,"named_recipients":true,"channel_email":true});
     let (status, chosen) = choose(router, lead, &patient, &choices).await;
     assert_eq!(status, StatusCode::CREATED, "{chosen}");
     sqlx::query("UPDATE leads SET portal_submitted_at=clock_timestamp(),portal_submitted_by=$2,portal_field_updates='{}' WHERE id=$1")
@@ -8259,17 +8350,18 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
         assert_eq!(recorded["disclosure"], decision["disclosure"], "{recorded}");
         let text = document_pdf_text(router, id, &pm).await;
         for person in persons.as_array().unwrap() {
-            for field in ["name", "contact"] {
+            for field in ["name", "phone"] {
                 assert!(
                     text.contains(person[field].as_str().unwrap()),
                     "{field}: {text}"
                 );
             }
         }
-        // The chosen scope is printed in words right with each person.
+        // Date of birth, the phone the person calls from and the scope in
+        // words right with each person (owner 2026-10-26).
         for scope in [
-            "max@example.test; Umfang der Auskunft: finanzielle Informationen",
-            "+49 151 000000; Umfang der Auskunft: medizinische und organisatorische Informationen",
+            "geb. 06.05.1970, Tel. +49 30 5550102; Umfang der Auskunft: finanzielle Informationen",
+            "geb. 08.07.1955, Tel. +49 151 000000; Umfang der Auskunft: medizinische und organisatorische Informationen",
         ] {
             assert!(text.contains(scope), "{scope}: {text}");
         }
@@ -8293,8 +8385,9 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
         source_context,signers,provider_account,test_mode,status,level,minimum_level)
         VALUES($1,$2,$3,$4,'{}','[]','trusted-persons-test',true,'pending','QES','QES')"#)
         .bind(invitation).bind(form).bind(app.patient_manager_id).bind("a".repeat(64)).execute(pool).await.unwrap();
+    // After the send an option can only be withdrawn (owner 2026-10-26).
     let mut channel_change = choices.clone();
-    channel_change["channel_email"] = json!(true);
+    channel_change["channel_email"] = json!(false);
     let (status, changed) = choose(router, lead, &patient, &channel_change).await;
     assert_eq!(status, StatusCode::CREATED, "{changed}");
     let (_, current) = json_request(
@@ -8316,7 +8409,18 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
         pending, "pending",
         "channel edits must preserve this invitation"
     );
-    let changed_persons = json!([{ "name": "Different Named", "relation": "spouse", "contact": "other@example.test", "scope_codes": ["medical"] }]);
+    // After the send a person can only be removed (a withdrawal); a new one is refused.
+    let (status, refused) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(json!([{ "name": "Different Named", "relation": "spouse",
+            "phone": "+49 30 5550103", "birth_date": "1980-01-01", "scope_codes": ["medical"] }]), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "request_already_sent", "{refused}");
+    let changed_persons = json!([persons[1].clone()]);
     let (status, changed) = save_disclosure(
         router,
         lead,
@@ -8371,7 +8475,7 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
     );
     let text = document_pdf_text(router, form, &pm).await;
     assert!(
-        text.contains("Max Named") && !text.contains("Different Named"),
+        text.contains("Max Named"),
         "old PDFs remain immutable: {text}"
     );
 }
@@ -8429,6 +8533,22 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
         assert_eq!(body["code"], "invalid_field", "{body}");
         assert_eq!(body["field"], "scope_codes", "{body}");
+    }
+    // A person named since 2026-10-26 (owner): the phone number they call
+    // from, and the date of birth unless an institution.
+    for (person, field) in [
+        (json!({ "name":"Max","relation":"friend","birth_date":"1970-05-06","scope_codes":["all"] }), "phone"),
+        (json!({ "name":"Max","relation":"friend","phone":"12-34","birth_date":"1970-05-06","scope_codes":["all"] }), "phone"),
+        (json!({ "name":"Max","relation":"friend","phone":"+49 30 5550104","scope_codes":["all"] }), "birth_date"),
+        (json!({ "name":"Max","relation":"friend","phone":"+49 30 5550104","birth_date":"2999-01-01","scope_codes":["all"] }), "birth_date"),
+        (json!({ "name":"Praxis","relation":"family_doctor","scope_codes":["medical"] }), "phone"),
+    ] {
+        let (status, body) =
+            save_disclosure(router, lead, &patient, confirmed_disclosure(json!([person]), true)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "consent_recipients_invalid", "{body}");
+        assert_eq!(body["field"], field, "{body}");
+        assert_eq!(body["index"], 0, "{body}");
     }
     for (invalid, code) in [
         (
@@ -8492,10 +8612,17 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
             .await
             .unwrap();
     assert_eq!(rows, 0, "refusals create no decision receipt");
-    let cleaned =
-        json!([{ "name":"Max Muster","relation":"friend","scope_codes":["medical","financial"] }]);
+    // An institution needs the phone, but has no date of birth.
+    let cleaned = json!([
+        { "name":"Max Muster","relation":"friend","phone":"+49 30 5550104","birth_date":"1970-05-06",
+          "scope_codes":["medical","financial"] },
+        { "name":"Klinik Nord","relation":"clinic","phone":"+49 40 1234567","scope_codes":["medical"] }
+    ]);
     let (status,body)=save_disclosure(router,lead,&patient,confirmed_disclosure(
-        json!([{ "name":"  Max   Muster ","relation":" friend ","contact":"","scope":"medizin","scope_codes":["financial"," medical","medical"] }]),true)).await;
+        json!([{ "name":"  Max   Muster ","relation":" friend ","contact":"","phone":" +49  30 5550104 ",
+            "birth_date":"1970-05-06","scope":"medizin","scope_codes":["financial"," medical","medical"] },
+            { "name":"Klinik Nord","relation":"clinic","phone":"+49 40 1234567","birth_date":"1990-01-01",
+              "scope_codes":["medical"] }]),true)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["trusted_persons"], cleaned, "{body}");
     assert_disclosure_receipt(&body["disclosure"], true, user, "self");
@@ -8533,7 +8660,7 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
     let (context,marker):(Value,Value)=sqlx::query_as(r#"SELECT
         (SELECT context FROM audit_log WHERE action='lead_portal_trusted_persons_saved' AND entity_id=$1),
         portal_field_updates->'trusted_persons' FROM leads WHERE id=$1"#).bind(lead).fetch_one(pool).await.unwrap();
-    assert_eq!(context["count"], 1, "{context}");
+    assert_eq!(context["count"], 2, "{context}");
     assert_eq!(context["access_kind"], "self", "{context}");
     assert!(
         !context.to_string().contains("Max") && !context.to_string().contains("Medizinische"),
@@ -8551,6 +8678,26 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
     assert_eq!(status, StatusCode::OK, "{staff}");
     assert_eq!(staff["trusted_persons"], cleaned, "{staff}");
     assert_eq!(staff["disclosure"], body["disclosure"], "{staff}");
+    // A person saved before 2026-10-26 keeps the legacy contact while it is
+    // unchanged; edited, it needs the phone and the date of birth.
+    let legacy = json!([{ "name":"Oma Legacy","relation":"relative","contact":"oma@example.test",
+        "scope_codes":["medical"] }]);
+    sqlx::query("UPDATE leads SET portal_trusted_persons=$2 WHERE id=$1")
+        .bind(lead)
+        .bind(&legacy)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, kept) =
+        save_disclosure(router, lead, &patient, confirmed_disclosure(legacy.clone(), true)).await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept["trusted_persons"], legacy, "{kept}");
+    let mut edited = legacy.clone();
+    edited[0]["scope_codes"] = json!(["all"]);
+    let (status, refused) =
+        save_disclosure(router, lead, &patient, confirmed_disclosure(edited, true)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["field"], "phone", "{refused}");
     let (status, staff) = json_request(
         router,
         "GET",
@@ -8726,7 +8873,8 @@ async fn a_no_disclosure_decision_preserves_core_flags_and_invalidates_old_invit
     let mut expected = chosen;
     expected["named_recipients"] = json!(false);
     assert_eq!(body["consent_form"]["choices"], expected, "{body}");
-    assert_eq!(body["changed_since_submit"], true, "{body}");
+    // A withdrawal after the send needs no new send (owner 2026-10-26).
+    assert_eq!(body["changed_since_submit"], false, "{body}");
     let unchanged: Value =
         sqlx::query_scalar("SELECT to_jsonb(c) FROM consent_form_choices c WHERE id=$1")
             .bind(old_choice["id"].as_str().unwrap().parse::<Uuid>().unwrap())
@@ -8762,7 +8910,7 @@ async fn a_no_disclosure_decision_preserves_core_flags_and_invalidates_old_invit
         None,
     )
     .await;
-    assert_eq!(staff["changed_since_submit"], true, "{staff}");
+    assert_eq!(staff["changed_since_submit"], false, "{staff}");
 }
 
 #[tokio::test]

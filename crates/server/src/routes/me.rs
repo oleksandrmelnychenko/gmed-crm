@@ -156,6 +156,9 @@ async fn get_me(
                 "portal_mode": portal_mode,
                 "lead_portal": lead_portal,
                 "patients": patients,
+                // Minutes without input before the browser signs out (CEO
+                // setting, 0 = off); every signed-in role reads it here.
+                "idle_logout_minutes": settings.idle_logout_minutes,
             }))
             .into_response()
         }

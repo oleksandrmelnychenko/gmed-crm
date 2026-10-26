@@ -15,7 +15,7 @@ export type ConsentFormText = {
   options: Record<keyof ConsentFormChoices, string>;
   channelsTitle: string;
   channelsRisk: string;
-  /** Marks the three consents the service runs on. */
+  /** Marks the three consents the service runs on: read by screen readers next to the `*`. */
   required: string;
   /** Why the three are needed; shown while one of them is not ticked. */
   coreHint: string;
@@ -23,11 +23,18 @@ export type ConsentFormText = {
   coreRequired: string;
   save: string;
   saving: string;
-  savedAt: (date: string) => string;
   /** The choice the other parent or guardian saved (QA 2026-10-12, A3-01). */
   savedByOtherAt: (date: string) => string;
-  notSaved: string;
   unsaved: string;
+  /**
+   * One line for the step-4 answer «Auskunft an Dritte» instead of repeating it (owner 2026-10-26, C3):
+   * «Auskunft an Dritte: Nein · ändern».
+   */
+  disclosureLabel: string;
+  disclosureNo: string;
+  disclosureYes: (persons: number) => string;
+  disclosureUnanswered: string;
+  disclosureChange: string;
   /** The own login of a minor: only a parent or the guardian chooses (QA 2026-10-12, A3-01). */
   byGuardianOnly: string;
   /** The named recipients (owner 2026-10-12), shown while "named recipients" is ticked. */
@@ -47,8 +54,17 @@ export type ConsentFormText = {
 
 type ChildTexts = Pick<ConsentFormText, "intro" | "options" | "channelsTitle" | "coreHint" | "recipientsHint">;
 
+/** Russian / Ukrainian plural: one, few (2–4), many. */
+function slavicPlural(count: number, one: string, few: string, many: string): string {
+  const tens = count % 100;
+  const units = count % 10;
+  if (tens >= 11 && tens <= 14) return many;
+  if (units === 1) return one;
+  return units >= 2 && units <= 4 ? few : many;
+}
+
 const de: ConsentFormText = {
-  title: "Einverständniserklärung zur Datenübermittlung (Anlage 1)",
+  title: "Einwilligung zur Datenübermittlung",
   intro:
     "Wählen Sie selbst, wozu Sie einwilligen. Im Formular, das Sie später elektronisch unterschreiben, ist nur angekreuzt, was Sie hier wählen – GMED kreuzt nichts für Sie an. Ohne Ihre Auswahl unterschreiben Sie das Formular auf Papier und kreuzen dort selbst an.",
   options: {
@@ -67,17 +83,18 @@ const de: ConsentFormText = {
   channelsTitle: "Meine Daten und Unterlagen dürfen über diese Kommunikationswege eingeholt oder übermittelt werden:",
   channelsRisk: "Die Übermittlung sensibler Daten per E-Mail oder Messenger ist mit Risiken verbunden.",
   required: "erforderlich",
-  coreHint:
-    "Ihre Auswahl wird automatisch gespeichert, sobald Sie die drei erforderlichen Einwilligungen angekreuzt haben. Möchten Sie sie nicht geben, sprechen Sie bitte mit GMED.",
+  coreHint: "Diese drei Einwilligungen brauchen wir für Ihre Anfrage.",
   coreRequired: "Bitte kreuzen Sie die drei erforderlichen Einwilligungen an.",
   save: "Auswahl speichern",
   saving: "Wird gespeichert…",
-  savedAt: (date) =>
-    `Ihre Auswahl vom ${date} ist gespeichert. Sie können sie jederzeit ändern; ein schon erstelltes Formular erstellt GMED dann neu.`,
   savedByOtherAt: (date) =>
     `Die Auswahl vom ${date} hat der andere Elternteil bzw. Vertreter gespeichert. Speichern Sie Ihre eigene Auswahl, gilt diese; unterschreiben muss, wer zuletzt gewählt hat.`,
-  notSaved: "Noch keine Auswahl gespeichert.",
   unsaved: "Ihre Änderungen sind noch nicht gespeichert.",
+  disclosureLabel: "Auskunft an Dritte",
+  disclosureNo: "Nein",
+  disclosureYes: (persons) => (persons > 0 ? `Ja, ${persons} ${persons === 1 ? "Person" : "Personen"}` : "Ja"),
+  disclosureUnanswered: "noch nicht beantwortet",
+  disclosureChange: "ändern",
   byGuardianOnly:
     "Für Minderjährige wählen die Eltern bzw. der Vormund mit ihrem eigenen Zugang, wozu sie einwilligen. Hier ist nichts auszuwählen.",
   recipientsTitle: "Auskunftsberechtigte (Auskunft an Dritte)",
@@ -109,13 +126,12 @@ const deChild: ChildTexts = {
     channel_telegram: "Telegram",
   },
   channelsTitle: "Die Daten und Unterlagen meines Kindes dürfen über diese Kommunikationswege eingeholt oder übermittelt werden:",
-  coreHint:
-    "Ihre Auswahl für Ihr Kind wird automatisch gespeichert, sobald Sie die drei erforderlichen Einwilligungen angekreuzt haben. Möchten Sie sie nicht geben, sprechen Sie bitte mit GMED.",
+  coreHint: "Diese drei Einwilligungen brauchen wir für die Anfrage Ihres Kindes.",
   recipientsHint: "Nennen Sie, an wen GMED die Daten Ihres Kindes übermitteln darf (höchstens 5). Sich selbst als Eltern bzw. Vormund müssen Sie hier nicht nennen.",
 };
 
 const en: ConsentFormText = {
-  title: "Consent to data transfer (Annex 1)",
+  title: "Consent to data transfer",
   intro:
     "Choose yourself what you consent to. The form you later sign electronically shows ticked only what you choose here – GMED ticks nothing for you. Without your choice you sign the form on paper and tick the boxes there yourself.",
   options: {
@@ -133,17 +149,18 @@ const en: ConsentFormText = {
   channelsTitle: "My data and documents may be obtained or passed on through these channels:",
   channelsRisk: "Sending sensitive data by e-mail or messenger carries risks.",
   required: "required",
-  coreHint:
-    "Your choice is saved automatically once you tick the three required consents. If you do not wish to give them, please contact GMED.",
+  coreHint: "We need these three consents for your request.",
   coreRequired: "Please tick the three required consents.",
   save: "Save my choice",
   saving: "Saving…",
-  savedAt: (date) =>
-    `Your choice of ${date} is saved. You can change it at any time; GMED staff then prepare a form already made anew.`,
   savedByOtherAt: (date) =>
     `The choice of ${date} was saved by the other parent or representative. If you save your own choice, yours counts; whoever chose last signs.`,
-  notSaved: "No choice saved yet.",
   unsaved: "Your changes are not saved yet.",
+  disclosureLabel: "Information for third parties",
+  disclosureNo: "No",
+  disclosureYes: (persons) => (persons > 0 ? `Yes, ${persons} ${persons === 1 ? "person" : "people"}` : "Yes"),
+  disclosureUnanswered: "not answered yet",
+  disclosureChange: "change",
   byGuardianOnly:
     "For a minor, the parents or the guardian choose what they consent to with their own access. There is nothing to choose here.",
   recipientsTitle: "Information recipients (Auskunft an Dritte)",
@@ -173,13 +190,12 @@ const enChild: ChildTexts = {
     channel_telegram: "Telegram",
   },
   channelsTitle: "My child's data and documents may be obtained or passed on through these channels:",
-  coreHint:
-    "Your choice for your child is saved automatically once you tick the three required consents. If you do not wish to give them, please contact GMED.",
+  coreHint: "We need these three consents for your child's request.",
   recipientsHint: "Name who GMED may pass your child's data on to (at most 5). You need not name yourself as parent or guardian.",
 };
 
 const uk: ConsentFormText = {
-  title: "Згода на передачу даних (додаток 1)",
+  title: "Згода на передачу даних",
   intro:
     "Оберіть самі, на що ви погоджуєтеся. У формі, яку ви згодом підпишете електронно, позначено лише те, що ви оберете тут, — GMED нічого не позначає за вас. Без вашого вибору ви підписуєте форму на папері й позначаєте там самі.",
   options: {
@@ -197,17 +213,18 @@ const uk: ConsentFormText = {
   channelsTitle: "Мої дані та документи можна отримувати або передавати цими каналами:",
   channelsRisk: "Передача чутливих даних електронною поштою чи месенджером пов’язана з ризиками.",
   required: "обов’язково",
-  coreHint:
-    "Вибір зберігається автоматично, коли ви позначите три обов’язкові згоди. Якщо ви не хочете їх давати, зв’яжіться з GMED.",
+  coreHint: "Ці три згоди потрібні для вашої заявки.",
   coreRequired: "Позначте, будь ласка, три обов’язкові згоди.",
   save: "Зберегти вибір",
   saving: "Зберігаємо…",
-  savedAt: (date) =>
-    `Ваш вибір від ${date} збережено. Ви можете змінити його будь-коли; уже створену форму працівник GMED тоді створить заново.`,
   savedByOtherAt: (date) =>
     `Вибір від ${date} зберіг другий з батьків або представник. Якщо ви збережете власний вибір, діятиме ваш; підписує той, хто обрав останнім.`,
-  notSaved: "Вибір ще не збережено.",
   unsaved: "Зміни ще не збережено.",
+  disclosureLabel: "Довідки третім особам",
+  disclosureNo: "Ні",
+  disclosureYes: (persons) => (persons > 0 ? `Так, ${persons} ${slavicPlural(persons, "особа", "особи", "осіб")}` : "Так"),
+  disclosureUnanswered: "ще немає відповіді",
+  disclosureChange: "змінити",
   byGuardianOnly:
     "За неповнолітнього батьки або опікун обирають, на що погоджуються, через свій власний доступ. Тут нічого обирати не потрібно.",
   recipientsTitle: "Отримувачі інформації (Auskunft an Dritte)",
@@ -237,13 +254,12 @@ const ukChild: ChildTexts = {
     channel_telegram: "Telegram",
   },
   channelsTitle: "Дані та документи моєї дитини можна отримувати або передавати цими каналами:",
-  coreHint:
-    "Вибір для вашої дитини зберігається автоматично, коли ви позначите три обов’язкові згоди. Якщо ви не хочете їх давати, зв’яжіться з GMED.",
+  coreHint: "Ці три згоди потрібні для заявки вашої дитини.",
   recipientsHint: "Вкажіть, кому GMED може передавати дані вашої дитини (не більше 5). Себе як батька, матір чи опікуна вказувати не потрібно.",
 };
 
 const ru: ConsentFormText = {
-  title: "Согласие на передачу данных (приложение 1)",
+  title: "Согласие на передачу данных",
   intro:
     "Выберите сами, на что вы соглашаетесь. В форме, которую вы позже подпишете электронно, отмечено только то, что вы выберете здесь, — GMED ничего не отмечает за вас. Без вашего выбора вы подписываете форму на бумаге и отмечаете там сами.",
   options: {
@@ -261,17 +277,18 @@ const ru: ConsentFormText = {
   channelsTitle: "Мои данные и документы можно получать или передавать по этим каналам:",
   channelsRisk: "Передача чувствительных данных по электронной почте или в мессенджере связана с рисками.",
   required: "обязательно",
-  coreHint:
-    "Выбор сохраняется автоматически, когда вы отметите три обязательных согласия. Если вы не хотите их давать, свяжитесь с GMED.",
+  coreHint: "Эти три согласия нужны для вашей заявки.",
   coreRequired: "Отметьте, пожалуйста, три обязательных согласия.",
   save: "Сохранить выбор",
   saving: "Сохраняем…",
-  savedAt: (date) =>
-    `Ваш выбор от ${date} сохранён. Вы можете изменить его в любой момент; уже созданную форму сотрудник GMED тогда создаст заново.`,
   savedByOtherAt: (date) =>
     `Выбор от ${date} сохранил другой родитель или представитель. Если вы сохраните свой выбор, будет действовать ваш; подписывает тот, кто выбрал последним.`,
-  notSaved: "Выбор ещё не сохранён.",
   unsaved: "Изменения ещё не сохранены.",
+  disclosureLabel: "Справки третьим лицам",
+  disclosureNo: "Нет",
+  disclosureYes: (persons) => (persons > 0 ? `Да, ${persons} ${slavicPlural(persons, "человек", "человека", "человек")}` : "Да"),
+  disclosureUnanswered: "ещё не отвечено",
+  disclosureChange: "изменить",
   byGuardianOnly:
     "За несовершеннолетнего родители или опекун выбирают, на что они соглашаются, через свой собственный доступ. Здесь ничего выбирать не нужно.",
   recipientsTitle: "Получатели информации (Auskunft an Dritte)",
@@ -301,8 +318,7 @@ const ruChild: ChildTexts = {
     channel_telegram: "Telegram",
   },
   channelsTitle: "Данные и документы моего ребёнка можно получать или передавать по этим каналам:",
-  coreHint:
-    "Выбор для вашего ребёнка сохраняется автоматически, когда вы отметите три обязательных согласия. Если вы не хотите их давать, свяжитесь с GMED.",
+  coreHint: "Эти три согласия нужны для заявки вашего ребёнка.",
   recipientsHint: "Укажите, кому GMED может передавать данные вашего ребёнка (не более 5). Себя как родителя или опекуна указывать не нужно.",
 };
 

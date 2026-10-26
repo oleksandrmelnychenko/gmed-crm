@@ -92,6 +92,7 @@ export function PrivacyStep({
             <label key={channel} className="inline-flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
+                aria-label={text.contactChannels[channel]}
                 className={checkboxClass}
                 checked={channels.includes(channel)}
                 disabled={busy}
@@ -112,6 +113,7 @@ export function PrivacyStep({
         <label className="flex items-start gap-3 text-sm">
           <input
             type="checkbox"
+            aria-label={text.privacyAck}
             className={cn(checkboxClass, "mt-0.5")}
             checked={acknowledged || checked}
             disabled={acknowledged || busy}
@@ -288,7 +290,7 @@ export function DetailsStep({ context, email }: { context: StepContext; email: s
 // ---------------------------------------------------------------------------
 
 export function IdentityStep({ context, uploads }: { context: StepContext; uploads: UploadControl }) {
-  const { text, lang } = context;
+  const { text } = context;
   const organisation = isOrganisation(context.payerType);
   return (
     <div className="space-y-5" data-testid="payer-link-step-identity">
@@ -326,7 +328,6 @@ export function IdentityStep({ context, uploads }: { context: StepContext; uploa
         errors={uploads.errors}
         disabled={false}
         text={text}
-        lang={lang}
         testId="payer-link-identity-upload"
         onFiles={uploads.upload}
         onRemove={uploads.remove}

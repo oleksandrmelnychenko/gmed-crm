@@ -525,9 +525,9 @@ impl Scn {
             Some(json!({
                 "persons": [
                     { "name": "Ludmila Øresund-Großmann", "relation": "relative",
-                      "contact": "+49 89 1234567", "scope_codes": ["medical"] },
+                      "phone": "+49 89 1234567", "birth_date": "1961-03-04", "scope_codes": ["medical"] },
                     { "name": "Олександра Петрівна Ковальчук", "relation": "friend",
-                      "scope_codes": ["all"] }
+                      "phone": "+380 44 1234567", "birth_date": "1988-11-12", "scope_codes": ["all"] }
                 ],
                 "allow_disclosure": true, "consent_given": true,
                 "version": "2026-10-14", "language": "de"

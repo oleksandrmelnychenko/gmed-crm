@@ -522,7 +522,8 @@ async function setup(page: Page, options: {
 
 const step = (page: Page, id: string) => page.locator(`[data-step="${id}"]`).click();
 const RECIPIENT = "Wer ist Rechnungsempfänger?";
-const IS_PAYER = "Der Rechnungsempfänger ist auch der Zahler";
+// In the person's words (labels audit 2026-10-26, B3): "I pay myself" for "me", "this person also pays" for another.
+const IS_PAYER = /^(Ich zahle selbst|Diese Person zahlt auch)$/;
 const WHO_PAYS = "Wer ist der Zahler?";
 const PAYER_TYPE = "Zahler ist";
 const PATIENT_PAYS = "Zahler bin ich";
@@ -778,7 +779,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await choose(page, party.getByRole("combobox", { name: "Rechnungsempfänger ist" }), "Eine Privatperson");
     await party.getByRole("textbox", { name: "Vorname" }).fill("Viktor");
     await party.getByRole("textbox", { name: "Nachname" }).fill("Zahler");
-    await choose(page, party.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" }), "Freund/in");
+    await choose(page, party.getByRole("combobox", { name: "Beziehung zu Ihnen" }), "Freund/in");
     await party.getByRole("textbox", { name: "Straße und Hausnummer" }).fill("Ring 1");
     await party.getByRole("textbox", { name: "Postleitzahl" }).fill("1010");
     await party.getByRole("textbox", { name: "Ort" }).fill("Wien");
@@ -1039,7 +1040,7 @@ test("changing the default checked recipient cannot replace an existing payer un
   await expect(page.getByTestId("lead-request-payer-cost-estimate-consent")).toHaveCount(0);
   await party.getByRole("textbox", { name: "Vorname" }).fill("Another");
   await party.getByRole("textbox", { name: "Nachname" }).fill("Recipient");
-  await choose(page, party.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" }), "Freund/in");
+  await choose(page, party.getByRole("combobox", { name: "Beziehung zu Ihnen" }), "Freund/in");
   await party.getByRole("textbox", { name: "Straße und Hausnummer" }).fill("Testweg 1");
   await party.getByRole("textbox", { name: "Postleitzahl" }).fill("10115");
   await party.getByRole("textbox", { name: "Ort" }).fill("Berlin");

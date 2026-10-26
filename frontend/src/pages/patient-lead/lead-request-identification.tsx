@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useContext, useRef, useState, type ReactNode } from "react";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { LoaderCircle, Upload } from "lucide-react";
 
@@ -48,6 +48,7 @@ import {
 import {
   CabinetSection as Section,
   ConsentNeededNote,
+  ConsentNoteAboveContext,
   LabeledField,
   RequiredMark,
   UploadedFileList,
@@ -339,6 +340,8 @@ export function ContactChannelsField({ form, text }: { form: IdentificationForm;
           <label key={channel} className="inline-flex items-center gap-2 text-sm">
             <input
               type="checkbox"
+              // Named by the visible text, never by the raw value «on» (labels audit 2026-10-26, S1).
+              aria-label={text.contactChannelOptions[channel]}
               className={checkboxClass}
               checked={form.draft.contact_channels.includes(channel)}
               onChange={(event) => form.update((current) => withContactChannel(current, channel, event.target.checked))}
@@ -360,7 +363,6 @@ export function ContactChannelsField({ form, text }: { form: IdentificationForm;
 export function IdentityDocumentSection({
   request,
   text,
-  lang,
   enqueue,
   onChange,
   title,
@@ -370,7 +372,6 @@ export function IdentityDocumentSection({
 }: {
   request: LeadRequest;
   text: LeadRequestText;
-  lang: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   title?: string;
@@ -380,6 +381,7 @@ export function IdentityDocumentSection({
   documents?: LeadRequest["identity_documents"];
 }) {
   const consentReady = consentGiven(request, INQUIRY_CONSENT);
+  const consentNoteAbove = useContext(ConsentNoteAboveContext);
   // The copies count to the request's file limit like the medical documents.
   const full = uploadLimitReached(request);
   const [uploading, setUploading] = useState(false);
@@ -458,7 +460,7 @@ export function IdentityDocumentSection({
         </Button>
         {consentReady ? (
           <p className="text-xs text-muted-foreground">{request.minor ? text.childIdentityUploadHint : text.identityUploadHint}</p>
-        ) : (
+        ) : consentNoteAbove ? null : (
           <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
         )}
         {full ? <p className="text-xs text-muted-foreground">{text.tooManyDocuments(request.max_documents)}</p> : null}
@@ -471,7 +473,6 @@ export function IdentityDocumentSection({
           documents={shownDocuments.current}
           refused={shownDocuments.refused}
           text={text}
-          lang={lang}
           emptyText={text.noIdentityDocuments}
           testId="lead-request-identity-list"
           onRemove={(documentId) => void remove(documentId)}

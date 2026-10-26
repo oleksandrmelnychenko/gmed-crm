@@ -838,7 +838,8 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(page.getByRole("option")).toHaveCount(0);
 
     // The parent at the form is the first representative: filled in, with the sign-in address that cannot be changed here.
-    await expect(first.getByRole("heading", { name: "1. Vertreter/in – Sie" })).toBeVisible();
+    // "Sie" and "Anderer Elternteil", no place numbers (labels audit 2026-10-26, B5).
+    await expect(first.getByRole("heading", { name: "Sie", exact: true })).toBeVisible();
     await expect(first.getByRole("textbox", { name: "Vorname" })).toHaveValue("Anna");
     await expect(first.getByRole("textbox", { name: "Nachname" })).toHaveValue("Muster");
     await expect(page.locator("#lead-request-rep1_date_of_birth")).toHaveValue("02.03.1985");
@@ -863,7 +864,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     ]);
 
     // The other parent: an empty form, without filler hints (QA 2026-10-10).
-    await expect(second.getByRole("heading", { name: "2. Vertreter/in – anderer Elternteil" })).toBeVisible();
+    await expect(second.getByRole("heading", { name: "Anderer Elternteil", exact: true })).toBeVisible();
     await expect(second).not.toContainText("Bitte informieren Sie diese Person");
     await expect(second).not.toContainText("An diese Adresse senden wir die Einladung zur Unterschrift.");
     await expect(second.getByRole("textbox", { name: "Nachname" })).toHaveValue("");
@@ -900,17 +901,19 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     // The summary shows both parents; what is missing carries the caption of the person.
     await page.locator('[data-step="send"]').click();
     const missing = page.getByTestId("lead-request-missing");
-    await expect(missing).not.toContainText("1. Vertreter/in: Geburtsort");
-    await expect(missing).toContainText("1. Vertreter/in: Foto oder Scan des Ausweises");
-    await expect(missing).not.toContainText("2. Vertreter/in: Geburtsdatum");
-    await expect(missing).toContainText("2. Vertreter/in: Telefon");
-    await expect(missing).not.toContainText("1. Vertreter/in: Straße und Hausnummer");
-    await expect(missing).not.toContainText("2. Vertreter/in: E-Mail");
-    await expect(missing).not.toContainText("2. Vertreter/in: Foto oder Scan des Ausweises");
+    await expect(missing).not.toContainText("Sie: Geburtsort");
+    await expect(missing).toContainText("Sie: Foto oder Scan des Ausweises");
+    await expect(missing).not.toContainText("Anderer Elternteil: Geburtsdatum");
+    await expect(missing).toContainText("Anderer Elternteil: Telefon");
+    await expect(missing).not.toContainText("Sie: Straße und Hausnummer");
+    await expect(missing).not.toContainText("Anderer Elternteil: E-Mail");
+    await expect(missing).not.toContainText("Anderer Elternteil: Foto oder Scan des Ausweises");
+    await expect(missing).not.toContainText("Vertreter/in");
     const summary = page.getByTestId("lead-request-summary-representation");
     await expect(summary).toContainText("Gesetzliche Vertreter");
     await expect(summary).toContainText("Beide Eltern gemeinsam");
-    await expect(page.getByTestId("lead-request-summary-representation-rep1")).toContainText("1. Vertreter/in – Sie");
+    await expect(page.getByTestId("lead-request-summary-representation-rep1")).toContainText("Sie");
+    await expect(page.getByTestId("lead-request-summary-representation-rep1")).not.toContainText("Vertreter/in");
     await expect(page.getByTestId("lead-request-summary-representation-rep2")).toContainText("ben.muster@example.com");
     await expect(page.getByTestId("lead-request-summary-representation-rep2")).toContainText("ausweis.jpg");
 
@@ -936,7 +939,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(soleCustody).toContainText("Nachweis des alleinigen Sorgerechts");
     await expect(soleCustody).not.toContainText("*");
     await page.locator('[data-step="send"]').click();
-    await expect(missing).not.toContainText("2. Vertreter/in");
+    await expect(missing).not.toContainText("Anderer Elternteil");
     await expect(missing).not.toContainText("Nachweis des alleinigen Sorgerechts");
     await expect(summary).toContainText("Ein Elternteil allein (alleiniges Sorgerecht)");
     await expect(page.getByTestId("lead-request-summary-representation-rep2")).toHaveCount(0);
@@ -952,7 +955,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(appointment).toContainText("Bestallungsurkunde");
     await expect(appointment).toContainText("*");
     await page.locator('[data-step="send"]').click();
-    await expect(missing).toContainText("1. Vertreter/in: Bestallungsurkunde");
+    await expect(missing).toContainText("Sie: Bestallungsurkunde");
     await step(page, "person");
     await page.locator("#lead-request-rep1-authority-files").setInputFiles(proof);
     await expect(page.getByTestId("lead-request-rep1-authority-list")).toContainText("nachweis.pdf");
@@ -1061,12 +1064,14 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(second.getByRole("textbox", { name: "Vorname" })).toHaveValue("Ben");
     await expect(second.getByRole("textbox", { name: "E-Mail" })).toHaveValue("ben.muster@example.com");
     await expect(second.getByRole("button", { name: "Entfernen" })).toHaveCount(0);
-    // GMED entered that person: name and date of birth are read-only here, and the form says why.
+    // GMED entered that person: name and date of birth are read-only here, and one line above
+    // the parents says why for every greyed-out field (labels audit 2026-10-26, B6).
     await expect(second.getByRole("textbox", { name: "Vorname" })).toBeDisabled();
     await expect(page.locator("#lead-request-rep2_date_of_birth")).toBeDisabled();
-    await expect(page.getByTestId("lead-request-rep2-identity-locked")).toHaveText(
-      "Name und Geburtsdatum dieser Person ändert nur sie selbst oder GMED.",
+    await expect(page.getByTestId("lead-request-representation-locked")).toHaveText(
+      "Grau hinterlegte Felder ändert GMED – schreiben Sie uns, falls etwas nicht stimmt.",
     );
+    await expect(page.getByTestId("lead-request-rep2-identity-locked")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-rep1-identity-locked")).toHaveCount(0);
     await expect(note).toHaveCount(0);
     expect(calls.answers).toEqual([{ custody: "joint" }]);

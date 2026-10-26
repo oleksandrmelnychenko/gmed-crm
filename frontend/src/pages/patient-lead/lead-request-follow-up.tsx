@@ -89,6 +89,11 @@ import { extraFieldLabel, extraWorkSubject, followUpFieldLabel, type LeadRequest
 
 type Part = "identification" | "funds" | "billing" | "representation" | "payer" | "representative_questions";
 
+/** The note "the payer states the funds on the own link" is the only content of block A (a minor's request). */
+function payerNoteAlone(request: Pick<LeadRequest, "payer_questionnaire">, asks: ReturnType<typeof blockAAsks>): boolean {
+  return asks.payer_states_funds && !request.payer_questionnaire && !asks.occupation && !asks.sector;
+}
+
 /**
  * The heading of a block. A asks the profession and the sector only, unless
  * it asks a source of funds here or a third party states it on the own link
@@ -102,7 +107,9 @@ function followUpBlockTitle(
 ): string {
   if (block === "A") {
     const asks = blockAAsks(request);
-    const funds = asks.funds || asks.payer_funds || (asks.payer_states_funds && !request.payer_questionnaire);
+    // A third party states the funds on the own link: block A then asks the work only and says
+    // so (labels audit 2026-10-26, B11); "source of funds" only while that is asked or the note stands alone.
+    const funds = asks.funds || asks.payer_funds || (payerNoteAlone(request, asks));
     return funds ? text.followUpBlocks.A : text.followUpBlockAWork;
   }
   if (block === "R" && !request.minor) return text.followUpBlockRAdult;
@@ -121,8 +128,6 @@ export function FollowUpStep({
   onNext,
   missingShown: showMissing,
   onShowMissing,
-  index,
-  total,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -134,8 +139,6 @@ export function FollowUpStep({
   /** Whether "next" or "send" of this step was pressed: the page keeps it for the step bar. */
   missingShown: boolean;
   onShowMissing: () => void;
-  index: number;
-  total: number;
 }) {
   const guardian = request.access_kind === "guardian";
   const blocks = openFollowUpBlocks(request);
@@ -207,11 +210,11 @@ export function FollowUpStep({
   const blockContent = (block: FollowUpBlock): ReactNode => {
     switch (block) {
       case "A":
-        return <FundsBlock request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} onSaveState={onFundsState} />;
+        return <FundsBlock request={request} text={text} enqueue={enqueue} onChange={onChange} onSaveState={onFundsState} />;
       case "R":
         return <RepresentativeQuestionsBlock request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} onSaveState={onRepresentativeQuestionsState} />;
       case "B":
-        return <RelationshipBlock request={request} form={identification} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />;
+        return <RelationshipBlock request={request} form={identification} text={text} enqueue={enqueue} onChange={onChange} />;
       case "C":
         return request.billing ? (
           <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4">
@@ -253,7 +256,6 @@ export function FollowUpStep({
           <IdentityDocumentSection
             request={request}
             text={text}
-            lang={lang}
             enqueue={enqueue}
             onChange={onChange}
             documents={request.follow_up?.identity_documents}
@@ -330,9 +332,6 @@ export function FollowUpStep({
       {!inquiryConsent ? <Banner tone="warning">{text.inquiryConsentMissing}</Banner> : null}
 
       <StepFooter
-        index={index}
-        total={total}
-        text={text}
         status={<SaveIndicator state={combinedSaveState(Object.values(states))} text={text} />}
       >
         <Button type="button" variant="outline" className="h-9" onClick={onBack}>
@@ -378,14 +377,12 @@ type Refused = Partial<Record<keyof ExtraAnswers, string>>;
 function FundsBlock({
   request,
   text,
-  lang,
   enqueue,
   onChange,
   onSaveState,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
-  lang: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
@@ -550,8 +547,8 @@ function FundsBlock({
         {asks.sector && !asks.occupation && request.payer_questionnaire?.available ? (
           <p className={cn("text-xs leading-5 text-muted-foreground", FULL_ROW)}>{text.extraOccupationElsewhere}</p>
         ) : null}
-        {/* A third party states the funds on the own link; the paying parent in the own payer section (note above). */}
-        {asks.payer_states_funds && !request.payer_questionnaire ? (
+        {/* A third party states the funds on the own link: said only when block A asks nothing else (B11). */}
+        {payerNoteAlone(request, asks) ? (
           <p
             role="note"
             className={cn("rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm leading-5 text-muted-foreground", FULL_ROW)}
@@ -572,7 +569,6 @@ function FundsBlock({
           documents={extra?.funds_proof_documents ?? []}
           consentReady={consentReady}
           text={text}
-          lang={lang}
           enqueue={enqueue}
           upload={async (file) => onChange(await uploadLeadFundsProof(leadId, file))}
           remove={async (documentId) => onChange(await enqueue(() => withdrawLeadDocument(leadId, documentId)))}
@@ -588,14 +584,12 @@ function RelationshipBlock({
   request,
   form,
   text,
-  lang,
   enqueue,
   onChange,
 }: {
   request: LeadRequest;
   form: IdentificationForm;
   text: LeadRequestText;
-  lang: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
 }) {
@@ -628,7 +622,6 @@ function RelationshipBlock({
           documents={request.follow_up.relationship_proof_documents}
           consentReady={consentGiven(request, INQUIRY_CONSENT)}
           text={text}
-          lang={lang}
           enqueue={enqueue}
           upload={async (file) => onChange(await uploadLeadRelationshipProof(leadId, file))}
           remove={async (documentId) => onChange(await enqueue(() => withdrawLeadDocument(leadId, documentId)))}

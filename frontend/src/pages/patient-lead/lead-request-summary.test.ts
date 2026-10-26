@@ -31,7 +31,12 @@ it("shows saved consent choices and explicit recipients in the submission summar
   expect(summary[wording.recipientsTitle]).toContain("Example Relative");
   expect(summary[wording.recipientsTitle]).toContain("relative@example.test");
   expect(summary[wording.recipientsTitle]).toContain("Rechnungen");
+  // The other parent's choice is named; the own one has no save-time row (labels audit 2026-10-26, A3).
   expect(summary[de.saved]).toContain("13.10.2026");
+  const own = requestSummary(request({ consent_form: { version: "2026-10-12", chosen_at: "2026-10-13T08:00:00Z", chosen_by_me: true,
+    choices: { agency_processing: true, doctors_to_agency: true, data_system: true, named_recipients: false,
+      channel_email: true, channel_threema: false, channel_whatsapp: false, channel_telegram: false } } }), de, "de");
+  expect(rows(own, "consent_form")[de.saved]).toBeUndefined();
 });
 
 it("shows disclosure, actor and per-person scope before any core consent choice exists", () => {
@@ -42,12 +47,20 @@ it("shows disclosure, actor and per-person scope before any core consent choice 
   const summary = rows(groups, "disclosure");
   expect(summary[wording.question]).toBe("Ja");
   expect(summary[wording.consentHeading]).toBe("Ja · Example Clinic");
-  expect(summary[de.saved]).toContain("Parent Muster");
-  expect(summary[de.saved]).toContain("14.10.2026");
+  // No "saved · time · author" row (labels audit 2026-10-26, A3).
+  expect(summary[de.saved]).toBeUndefined();
   const people = groups.find(group => group.id === "disclosure")?.parts;
   expect(people?.[0].title).toBe("Eva Friend");
   expect(people?.[0].rows).toContainEqual({ label: wording.scope, value: "Nur Rechnungen" });
+  // A legacy contact stays visible while the person has no phone.
+  expect(people?.[0].rows).toContainEqual({ label: wording.contact, value: "eva@example.test" });
   expect(groups.find(group => group.id === "consent_form")).toBeUndefined();
+  // Owner 2026-10-26: the date of birth and the phone the person calls from replace the contact.
+  const named = requestSummary({ ...item, trusted_persons: [{ name: "Eva Friend", relation: "friend", phone: "+49 30 5550100", birth_date: "1970-05-06", scope_codes: ["all"] }] }, de, "de")
+    .find(group => group.id === "disclosure")?.parts?.[0].rows;
+  expect(named).toContainEqual({ label: wording.birthDate, value: "06.05.1970" });
+  expect(named).toContainEqual({ label: wording.phone, value: "+49 30 5550100" });
+  expect(named?.map((row) => row.label)).not.toContain(wording.contact);
   const no = requestSummary({ ...item, disclosure: { ...disclosure, allow_disclosure: false, consent_given: false } }, de, "de").find(group => group.id === "disclosure");
   expect(no?.rows).toContainEqual({ label: wording.question, value: "Nein" });
   // After "no" there is no consent to show, not "consent: no".
@@ -74,7 +87,7 @@ it("names the parent who pays as the representative, never as a private person",
   });
   expect(rows(requestSummary(paying("p-1", "Anna"), de, "de"), "payer")).toEqual({ "Wer ist der Zahler?": "Ich (als Elternteil) – Anna Testov" });
   expect(rows(requestSummary(paying("p-2", "Ivan"), de, "de"), "payer")).toEqual({
-    "Wer ist der Zahler?": "2. Vertreter/in – anderer Elternteil – Ivan Testov",
+    "Wer ist der Zahler?": "Anderer Elternteil – Ivan Testov",
   });
 });
 
@@ -233,7 +246,7 @@ describe("lead request summary", () => {
       Nachname: "Zahler",
       Geburtsdatum: "03.02.1960",
       "Staatsangehörigkeit(en)": "Ukraine",
-      "Beziehung zur Patientin / zum Patienten": "Elternteil",
+      "Beziehung zu Ihnen": "Elternteil",
       Ort: "München",
       Wohnsitzland: "Deutschland",
       "Einverständnis zur Kontaktaufnahme": "Zugestimmt am 05.10.2026 11:25",
@@ -309,7 +322,7 @@ describe("lead request summary", () => {
       "Wer ist der Zahler?": "Eine andere Person oder Organisation",
       "Art des Zahlers":"Unternehmen",
       "Name des Unternehmens": "Beispiel GmbH",
-      "Beziehung zur Patientin / zum Patienten": "Arbeitgeber",
+      "Beziehung zu Ihnen": "Arbeitgeber",
       "Sitz (Straße und Hausnummer)": "Musterstraße 1",
       Ort: "München",
       "Land des Sitzes": "Deutschland",
@@ -337,14 +350,14 @@ describe("lead request summary", () => {
       "Type of payer": "Insurer",
       "Name of the insurer": "Beispiel GmbH",
       // "Other" is shown in the person's own words.
-      "Relationship to the patient": "Auslandskrankenversicherung",
+      "Relationship to you": "Auslandskrankenversicherung",
       "Country of the registered office": "Germany",
     });
     // "Other" without the words yet, and a text stored before the list existed.
     const other = request({ payer: { ...request().payer!, relationship_kind: "other", relationship: null } });
-    expect(rows(requestSummary(other, de, "de"), "payer")["Beziehung zur Patientin / zum Patienten"]).toBe("Sonstige");
+    expect(rows(requestSummary(other, de, "de"), "payer")["Beziehung zu Ihnen"]).toBe("Sonstige");
     const before = request({ payer: { ...request().payer!, relationship_kind: null, relationship: "Vater" } });
-    expect(rows(requestSummary(before, de, "de"), "payer")["Beziehung zur Patientin / zum Patienten"]).toBe("Vater");
+    expect(rows(requestSummary(before, de, "de"), "payer")["Beziehung zu Ihnen"]).toBe("Vater");
   });
 
   it("shows a parent's own answer 'I pay' as it was given", () => {
@@ -389,7 +402,7 @@ describe("lead request summary", () => {
       "Art des Zahlers":"Privatperson",
       Vorname: "Viktor",
       Nachname: "Zahler",
-      "Beziehung zur Patientin / zum Patienten": "Elternteil",
+      "Beziehung zu Ihnen": "Elternteil",
       "Einverständnis zur Kontaktaufnahme": "Zugestimmt am 05.10.2026 11:25",
       "Handeln Sie im eigenen wirtschaftlichen Interesse?": "Nein",
       "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)": "Viktor Zahler, 03.02.1960, Kyiv",
@@ -459,7 +472,7 @@ describe("lead request summary", () => {
       Nachname: "Zahler",
       Geburtsdatum: "03.02.1960",
       "Staatsangehörigkeit(en)": "Ukraine",
-      "Beziehung zur Patientin / zum Patienten": "Vater",
+      "Beziehung zu Ihnen": "Vater",
       Ort: "München",
       Wohnsitzland: "Deutschland",
       "Handeln Sie im eigenen wirtschaftlichen Interesse?": "Nein",
@@ -540,7 +553,7 @@ describe("lead request summary", () => {
       Land: "Deutschland",
       "E-Mail": "rechnung@example.com",
       "Warum erfolgt die Zahlung über die Organisation?": "Der Arbeitgeber erhält die Rechnung.",
-      "Der Rechnungsempfänger ist auch der Zahler": "Nein",
+      "Diese Person zahlt auch": "Nein",
     });
     // Who pays: one answer, no type row; section 7 is not listed again.
     expect(rows(groups, "payer")).toMatchObject({ "Wer ist der Zahler?": "Ich selbst" });
@@ -564,7 +577,7 @@ describe("lead request summary", () => {
     expect(rows(payingGroups, "billing")).toEqual({
       "Wer ist Rechnungsempfänger?": "Eine andere Person oder Organisation",
       "Rechnungsempfänger ist": "Eine Organisation",
-      "Der Rechnungsempfänger ist auch der Zahler": "Ja",
+      "Diese Person zahlt auch": "Ja",
     });
     expect(rows(payingGroups, "payer")).toMatchObject({
       "Wer ist der Zahler?": "Eine Organisation",
@@ -758,7 +771,7 @@ describe("lead request summary", () => {
     expect(joint?.rows).toEqual([{ label: "Wer vertritt das Kind?", value: "Beide Eltern gemeinsam" }]);
     // Nobody answered yet: the server still lists the custody as missing, the summary states no answer.
     expect(minor("joint", false)?.rows).toEqual([]);
-    expect(joint?.parts?.map((part) => part.title)).toEqual(["1. Vertreter/in – Sie", "2. Vertreter/in – anderer Elternteil"]);
+    expect(joint?.parts?.map((part) => part.title)).toEqual(["Sie", "Anderer Elternteil"]);
     // Parents with joint custody show no proof: a file from an earlier answer is not listed.
     expect(joint?.parts?.[0].rows).toEqual([
       { label: "Vorname", value: "Anna" },
@@ -870,7 +883,7 @@ describe("lead request summary", () => {
     );
     expect(rows(payer, "billing")).toEqual({
       "Wer ist Rechnungsempfänger?": "Die zahlende Person / Organisation",
-      Zahlungsweg: "gibt die zahlende Person an",
+      Zahlungsart: "klärt GMED mit der zahlenden Person",
     });
     // A paying parent reads "to me (I pay)"; a parent reads "to me" as "to the patient".
     const parent = requestSummary(

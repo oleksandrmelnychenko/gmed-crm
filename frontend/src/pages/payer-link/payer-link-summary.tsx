@@ -238,7 +238,7 @@ export function AnswersSummary({
           {group.documents ? (
             <div className="space-y-1.5">
               <p className="text-xs text-muted-foreground">{group.documents.label}</p>
-              <DocumentList documents={group.documents.items} text={text} lang={lang} emptyText={text.noDocuments} />
+              <DocumentList documents={group.documents.items} text={text} emptyText={text.noDocuments} />
             </div>
           ) : null}
         </section>
@@ -328,6 +328,7 @@ export function SummaryStep({
         <label className="flex items-start gap-3 text-sm">
           <input
             type="checkbox"
+            aria-label={text.confirmLabel}
             className={cn(checkboxClass, "mt-0.5")}
             checked={confirmed}
             disabled={submitting}

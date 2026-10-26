@@ -7,7 +7,7 @@ import { selectClass, tokens } from "@/components/record-workspace/primitives/de
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useUnsavedGuard } from "@/lib/use-unsaved-guard";
 import { cn } from "@/lib/utils";
-import { LEAD_UPLOAD_ACCEPT, formatFileSize } from "@/pages/patient-lead/lead-request-model";
+import { LEAD_UPLOAD_ACCEPT } from "@/pages/patient-lead/lead-request-model";
 
 import type { PayerDocument } from "./payer-link-api";
 import type { PayerLinkText } from "./payer-link-text";
@@ -188,7 +188,6 @@ export function UploadBlock({
   errors,
   disabled,
   text,
-  lang,
   testId,
   onFiles,
   onRemove,
@@ -204,7 +203,6 @@ export function UploadBlock({
   errors: readonly string[];
   disabled: boolean;
   text: PayerLinkText;
-  lang: string;
   testId: string;
   onFiles: (files: File[]) => void;
   onRemove: (documentId: string) => void;
@@ -263,7 +261,7 @@ export function UploadBlock({
       ))}
       {/* Nothing uploaded yet: no "no file yet" line (QA 2026-10-10), as in the lead cabinet. */}
       {documents.length > 0 ? (
-        <DocumentList documents={documents} text={text} lang={lang} emptyText="" onRemove={onRemove} />
+        <DocumentList documents={documents} text={text} emptyText="" onRemove={onRemove} />
       ) : null}
     </div>
   );
@@ -273,13 +271,11 @@ export function UploadBlock({
 export function DocumentList({
   documents,
   text,
-  lang,
   emptyText,
   onRemove,
 }: {
   documents: readonly PayerDocument[];
   text: PayerLinkText;
-  lang: string;
   emptyText: string;
   onRemove?: (documentId: string) => void;
 }) {
@@ -294,7 +290,7 @@ export function DocumentList({
             <span className="min-w-0 flex-1">
               <span className="block truncate">{document.file_name ?? "—"}</span>
               <span className="block text-xs text-muted-foreground">
-                {[formatAppDateTime(document.uploaded_at), formatFileSize(document.size_bytes, lang)].filter(Boolean).join(" · ")}
+                {formatAppDateTime(document.uploaded_at)}
                 {document.reviewed ? ` · ${text.documentReviewed}` : ""}
               </span>
             </span>

@@ -127,18 +127,21 @@ describe("who the form asks for", () => {
   });
 
   it("captions each person, and says who the parent at the form and the other parent are", () => {
+    // "You" and "Other parent", no place numbers (labels audit 2026-10-26, B5).
     expect(de.representativeCaptions).toEqual({
-      rep1: "1. Vertreter/in",
-      rep2: "2. Vertreter/in",
+      rep1: "Vertreter/in",
+      rep2: "Anderer Elternteil",
       agent: "Angaben zur vertretenden Person",
       guardian: "Betreuer/in",
     });
-    expect(representativeHeading(de, "rep1", true)).toBe("1. Vertreter/in – Sie");
-    expect(representativeHeading(de, "rep1")).toBe("1. Vertreter/in");
-    expect(representativeHeading(de, "rep2")).toBe("2. Vertreter/in – anderer Elternteil");
+    expect(representativeHeading(de, "rep1", true)).toBe("Sie");
+    expect(representativeHeading(de, "rep2", true)).toBe("Sie");
+    expect(representativeHeading(de, "rep1")).toBe("Vertreter/in");
+    expect(representativeHeading(de, "rep2")).toBe("Anderer Elternteil");
     expect(representativeHeading(de, "agent")).toBe("Angaben zur vertretenden Person");
     expect(representativeHeading(de, "guardian")).toBe("Betreuer/in");
-    expect(representativeHeading(leadRequestText("en"), "rep1", true)).toBe("1st representative – you");
+    expect(representativeHeading(leadRequestText("en"), "rep1", true)).toBe("You");
+    expect(representativeHeading(leadRequestText("ru"), "rep2")).toBe("Другой родитель");
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);
       expect(new Set(Object.values(text.representativeCaptions)).size).toBe(4);
@@ -149,8 +152,8 @@ describe("who the form asks for", () => {
     expect(representativeHeading(de, "rep1", true, "guardian")).toBe("Vormund / Pfleger/in – Sie");
     expect(representativeHeading(de, "rep1", false, "guardian")).toBe("Vormund / Pfleger/in");
     // Parents keep their captions.
-    expect(representativeHeading(de, "rep1", true, "joint")).toBe("1. Vertreter/in – Sie");
-    expect(representativeHeading(de, "rep1", true, "sole_parent")).toBe("1. Vertreter/in – Sie");
+    expect(representativeHeading(de, "rep1", true, "joint")).toBe("Sie");
+    expect(representativeHeading(de, "rep1", true, "sole_parent")).toBe("Sie");
     expect(representativeHeading(leadRequestText("en"), "rep1", true, "guardian")).toBe("Guardian / custodian – you");
     expect(representativeHeading(leadRequestText("uk"), "rep1", true, "guardian")).toBe("Опікун / піклувальник – ви");
     expect(representativeHeading(leadRequestText("ru"), "rep1", true, "guardian")).toBe("Опекун / попечитель – вы");
@@ -461,11 +464,11 @@ describe("what is missing about the representation", () => {
       "payer_kind",
     ]);
     expect(missing.map((field) => submitFieldLabel(de, field, true))).toEqual([
-      "1. Vertreter/in: Staatsangehörigkeit(en)",
-      "1. Vertreter/in: Bestallungsurkunde",
-      "2. Vertreter/in: Nachname",
-      "2. Vertreter/in: E-Mail",
-      "2. Vertreter/in: Foto oder Scan des Ausweises",
+      "Vertreter/in: Staatsangehörigkeit(en)",
+      "Vertreter/in: Bestallungsurkunde",
+      "Anderer Elternteil: Nachname",
+      "Anderer Elternteil: E-Mail",
+      "Anderer Elternteil: Foto oder Scan des Ausweises",
       "Ausweisdokument: Foto oder Scan des Ausweises",
       "Wer ist der Zahler?",
     ]);
@@ -495,7 +498,7 @@ describe("what is missing about the representation", () => {
       "Betreuer/in: Bestellungsurkunde oder Betreuerausweis",
     ]);
     expect(submitFieldLabel(leadRequestText("en"), "agent_last_name")).toBe("Representative's details: Last name");
-    expect(submitFieldLabel(leadRequestText("uk"), "rep2_phone")).toBe("2-й представник: Телефон");
+    expect(submitFieldLabel(leadRequestText("uk"), "rep2_phone")).toBe("Другий з батьків: Телефон");
     expect(submitFieldLabel(leadRequestText("ru"), "guardian_zip")).toBe("Представитель, назначенный судом (Betreuer): Почтовый индекс");
   });
 });

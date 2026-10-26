@@ -18,6 +18,7 @@ import {
   getStoredAccessToken,
   persistAuthTokens,
 } from "@/lib/auth-storage";
+import { SessionIdleWarning } from "@/components/idle-warning-dialog";
 import { resolveIdleLogoutMinutes, useIdleLogout } from "@/lib/idle-logout";
 import { getLang, uiText, useLang, type Lang } from "@/lib/i18n";
 import { clearSecurePersistedState } from "@/lib/secure-persist";
@@ -58,6 +59,8 @@ export interface User {
   lead_portal?: { requests: number } | null;
   /** Active patient records the portal account may explicitly select. */
   patients?: PortalPatient[];
+  /** Sign-out after this many minutes without input (CEO setting; 0 = off). */
+  idle_logout_minutes?: number | null;
 }
 
 /** Why the last session ended in this tab (null: never signed out here). */
@@ -590,15 +593,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // person at this browser starts on their own dashboard (QA E-24).
   const logout = () => endSession("explicit");
 
-  useIdleLogout(
+  // The server setting wins; the build-time value is the fallback for a server without it.
+  const idle = useIdleLogout(
     Boolean(user),
     () => void endSession("idle"),
-    resolveIdleLogoutMinutes(import.meta.env.VITE_IDLE_LOGOUT_MINUTES),
+    resolveIdleLogoutMinutes(import.meta.env.VITE_IDLE_LOGOUT_MINUTES, user?.idle_logout_minutes),
   );
 
   return (
     <AuthContext.Provider value={{ user, loading, signOut, login, logout, completeTotp, checkPending, refreshUser }}>
       {children}
+      {user ? (
+        <SessionIdleWarning
+          user={user}
+          deadline={idle.warningDeadline}
+          onStay={idle.stayActive}
+          onSignOut={() => void logout()}
+        />
+      ) : null}
     </AuthContext.Provider>
   );
 }

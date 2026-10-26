@@ -3,7 +3,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
-import { disclosureDefaultsToNo, personScope, storedTrustedPersons } from "./lead-trusted-persons-model";
+import { disclosureDefaultsToNo, formatBirthDate, personScope, storedTrustedPersons } from "./lead-trusted-persons-model";
 import { REPRESENTATIVE_COUNTRY_FIELDS } from "./lead-request-representative-questions-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
@@ -42,6 +42,7 @@ import {
   extraFieldLabel,
   extraWorkSubject,
   followUpFieldLabel,
+  recipientFieldLabel,
   recipientOptions,
   hasInsuranceLabel,
   invoiceToLabel,
@@ -345,7 +346,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       [organisation ? text.recipient.organisationName : text.recipient.missingPrefix, name],
       [text.recipient.legalForm, organisation ? party?.legal_form : ""],
       [text.recipient.contactName, organisation ? party?.contact_name : ""],
-      [text.recipient.relationship, organisation ? "" : relationship],
+      [recipientFieldLabel(text, "relationship_kind", guardian), organisation ? "" : relationship],
       [text.fields.street_address, party?.street],
       [text.fields.zip_code, party?.zip],
       [text.fields.city, party?.city],
@@ -353,7 +354,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       [third ? text.recipient.email : text.billingFields.invoice_email, paying && third ? "" : recipient?.email],
       [text.recipient.phone, party?.phone],
       [text.recipient.paymentReason, organisation ? party?.payment_reason : ""],
-      [text.recipient.isPayer, yesNo(billing.invoice_recipient_is_payer)],
+      [billing.invoice_recipient === "self" ? text.recipient.isPayerSelf : third ? text.recipient.isPayerThirdParty : text.recipient.isPayer, yesNo(billing.invoice_recipient_is_payer)],
     ]);
   }
 
@@ -466,7 +467,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
           [label("invoice_country"), other ? country(billing.invoice_country) : ""],
           [label("invoice_email"), billing.invoice_to === "payer" ? "" : billing.invoice_email],
         ];
-    group(flowKnown ? "payment" : "billing", flowKnown ? text.sectionPaymentRoute : text.sectionBillingSummary, [
+    // Nothing asked here: the one row sits under "invoice and payment", not under a heading it repeats (B7).
+    group(flowKnown ? "payment" : "billing", flowKnown && routeAsked ? text.sectionPaymentRoute : text.sectionBillingSummary, [
       ...section7,
       ...(routeAsked
         ? ([
@@ -485,7 +487,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
             ],
           ] satisfies Array<[string, string | null | undefined]>)
         : [[
-            text.sectionPaymentRoute,
+            text.paymentMethodRow,
             // The other parent pays and answers it in the own access (owner 2026-10-23).
             guardian && request.payer?.payer_kind === "representative" ? text.paymentRouteByOtherParentShort : text.paymentRouteByPayerShort,
           ] satisfies [string, string]]),
@@ -580,11 +582,13 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         [wording.question, yesNo(disclosure.allow_disclosure)],
         // The consent is asked only after "yes": after "no" there is nothing to consent to.
         [wording.consentHeading, disclosure.allow_disclosure ? [yesNo(disclosure.consent_given), disclosure.company_name].filter(Boolean).join(" · ") : ""],
-        [text.saved, [formatAppDateTime(disclosure.chosen_at), disclosure.chosen_by_name].filter(Boolean).join(" · ")],
+        // No "saved · time · author" row: save metadata is not part of the answer (labels audit 2026-10-26, A3).
       ]),
       parts: disclosure.allow_disclosure ? storedTrustedPersons(request).map((person, index) => ({
         id: `disclosure-person-${index}`, title: person.name,
-        rows: entered([[wording.relation, relations[person.relation]], [wording.contact, person.contact], [wording.scope, personScope(person, lang)]]),
+        // Date of birth and the phone the person calls from (owner 2026-10-26); a legacy contact while there is no phone.
+        rows: entered([[wording.relation, relations[person.relation]], [wording.birthDate, formatBirthDate(person.birth_date)], [wording.phone, person.phone],
+          [wording.contact, person.phone ? "" : person.contact], [wording.scope, personScope(person, lang)]]),
       })) : [],
     });
   } else if (disclosureDefaultsToNo(request)) {
@@ -623,9 +627,9 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         ? channels.filter((key) => choices[key]).map((key) => wording.options[key]).join(", ") || "—"
         : ""],
       ...(!request.disclosure && choices.named_recipients ? storedTrustedPersons(request).map((person): Entry =>
-        [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], person.contact, personScope(person, lang)].filter(Boolean).join(" · ")]) : []),
-      // Under "Saved" the date only, not the sentence "your choice … is saved" again; the other parent's choice says so.
-      [text.saved, consent.chosen_at ? (consent.chosen_by_me === false ? wording.savedByOtherAt(formatAppDateTime(consent.chosen_at)) : formatAppDateTime(consent.chosen_at)) : ""],
+        [wording.recipientsTitle, [person.name, wording.recipientRelations[person.relation], formatBirthDate(person.birth_date), person.phone || person.contact, personScope(person, lang)].filter(Boolean).join(" · ")]) : []),
+      // No save time of the own choice (labels audit 2026-10-26, A3); only the other parent's choice is named.
+      [text.saved, consent.chosen_at && consent.chosen_by_me === false ? wording.savedByOtherAt(formatAppDateTime(consent.chosen_at)) : ""],
     ]);
   }
 

@@ -16,6 +16,9 @@ export type ConsentRecipientRelation = (typeof CONSENT_RECIPIENT_RELATIONS)[numb
 /** A person or institution the person named for "named recipients". */
 export type LeadPortalConsentRecipient = {
   name: string; relation: string; contact: string | null;
+  /** The phone the person calls GMED from and the date of birth ("YYYY-MM-DD"): staff check a caller by both (owner 2026-10-26). */
+  phone?: string | null;
+  birth_date?: string | null;
   /** Free text of persons named before 2026-10-19. */
   scope?: string | null;
   /** The chosen scope (owner 2026-10-19); absent for legacy persons. */
@@ -76,7 +79,13 @@ export function normalizeConsentRecipients(value: unknown): LeadPortalConsentRec
     const contact = typeof raw.contact === "string" && raw.contact.trim() ? raw.contact.trim() : null;
     const scope = typeof raw.scope === "string" && raw.scope.trim() ? raw.scope.trim() : null;
     const scopeCodes = normalizeScopeCodes(raw.scope_codes);
-    return [{ name, relation: typeof raw.relation === "string" ? raw.relation : "other", contact, scope, ...(scopeCodes.length > 0 ? { scope_codes: scopeCodes } : {}) }];
+    const phone = typeof raw.phone === "string" && raw.phone.trim() ? raw.phone.trim() : null;
+    const birthDate = typeof raw.birth_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.birth_date.trim()) ? raw.birth_date.trim() : null;
+    return [{
+      name, relation: typeof raw.relation === "string" ? raw.relation : "other", contact, scope,
+      ...(phone ? { phone } : {}), ...(birthDate ? { birth_date: birthDate } : {}),
+      ...(scopeCodes.length > 0 ? { scope_codes: scopeCodes } : {}),
+    }];
   });
 }
 

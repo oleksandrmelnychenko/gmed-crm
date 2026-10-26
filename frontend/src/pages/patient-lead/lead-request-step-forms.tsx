@@ -53,14 +53,17 @@ import {
 import {
   CabinetSection as Section,
   ConsentNeededNote,
+  ConsentNoteAboveContext,
   ConsentCheckbox,
   FormField,
   GoToSectionButton,
+  InfoNote,
   LabeledField,
   MissingList,
   MissingShownContext,
   SECTION_ANCHORS,
   SaveIndicator,
+  SentLockHint,
   StepMissingContext,
   StepFooter,
   UploadedFileList,
@@ -77,7 +80,7 @@ import { missingFieldKeys, missingListKeys, recipientIsPayer } from "./lead-requ
 import { draftFromRecipient, flowOf, knowsRecipient, payerChoices, payerFitsFlow } from "./lead-request-recipient-model";
 import { RepresentationSection, RepresentativeUpload } from "./lead-request-representation";
 import { useServerDraftSync } from "./lead-request-server-sync";
-import { inquiryConsentMissing, type StepId } from "./lead-request-steps";
+import { inquiryConsentMissing, refusedIdentityUploadKeys, type StepId } from "./lead-request-steps";
 import { asLeadCabinetLang, childSectionTitle, hasInsuranceLabel, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // The steps of the lead cabinet that hold the base form (trigger flow
@@ -141,6 +144,8 @@ function StepFrame({
   extraMissing = [],
   nav,
   saveState,
+  open,
+  lockExempt = false,
   children,
 }: {
   testId: string;
@@ -151,8 +156,17 @@ function StepFrame({
   extraMissing?: readonly { label: string; field: string | null }[];
   nav: StepNav;
   saveState?: SaveState;
+  /**
+   * What stays open after the send (owner 2026-10-26): the consents (to withdraw them), adding
+   * documents, the paying parent's questionnaire. Shown above the read-only form.
+   */
+  open?: ReactNode;
+  /** The step stays editable after the send (a new copy of an identity document GMED refused). */
+  lockExempt?: boolean;
   children: ReactNode;
 }) {
+  // The sent request is read-only (owner 2026-10-26); the server refuses changes as well.
+  const locked = Boolean(request.submitted_at) && !lockExempt;
   const guardian = request.access_kind === "guardian";
   // "1st representative – you": a parent sees which of the two persons is meant.
   const who = {
@@ -172,7 +186,7 @@ function StepFrame({
   // The yellow list of what is missing appears only after "Next" (owner 2026-10-09): the first
   // press with something missing shows it and stays, the next press goes on. The page keeps
   // which steps showed it, for the badges of the step bar.
-  const showMissing = nav.missingShown;
+  const showMissing = nav.missingShown && !locked;
   // The empty required fields say so below themselves too, once "Next" was pressed. A payer key
   // of the recipient who pays (`payer_email`) marks the recipient's field, where it is answered.
   const missingKey = fields.filter(Boolean).join("|");
@@ -186,14 +200,21 @@ function StepFrame({
   };
   return (
     <section className="space-y-6" data-testid={testId}>
+      {locked ? <SentLockHint text={text} /> : null}
       {showMissing ? <MissingList title={text.stepMissingTitle} labels={labels} fields={fields} step={step} testId="lead-request-step-missing" /> : null}
       <MissingShownContext.Provider value={showMissing}>
-        <StepMissingContext.Provider value={stepMissing}>{children}</StepMissingContext.Provider>
+        <StepMissingContext.Provider value={stepMissing}>
+          {open}
+          {locked ? (
+            <fieldset disabled className="m-0 min-w-0 space-y-6 border-0 p-0" data-testid="lead-request-step-locked">
+              {children}
+            </fieldset>
+          ) : (
+            children
+          )}
+        </StepMissingContext.Provider>
       </MissingShownContext.Provider>
       <StepFooter
-        index={nav.index}
-        total={nav.total}
-        text={text}
         status={saveState ? <SaveIndicator state={saveState} text={text} /> : undefined}
       >
         <Button type="button" variant="outline" className="h-9" disabled={!nav.onBack} onClick={() => nav.onBack?.()}>
@@ -382,17 +403,10 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
       "aria-describedby": [props["aria-describedby"], showNamePassportHint ? "lead-request-name-passport-hint" : null, nameNeedsLatin(field) ? `lead-request-${field}-latin-hint` : null].filter(Boolean).join(" "),
     };
   };
-  return (
-    <StepFrame
-      testId="lead-request-step-person"
-      step="person"
-      request={request}
-      text={text}
-      missing={missing}
-      extraMissing={consentMissing}
-      nav={nav}
-      saveState={parts.state}
-    >
+  // After the send the consent stays open (to withdraw it); the rest is read-only.
+  const sent = Boolean(request.submitted_at);
+  const consentSection = (
+    <>
       {/* Privacy first (spec section 0): the consent the request and the upload of the identity document need. */}
       <Section title={text.sectionConsent}>
         <ConsentCheckbox
@@ -407,6 +421,21 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
           privacyLink
         />
       </Section>
+    </>
+  );
+  return (
+    <StepFrame
+      testId="lead-request-step-person"
+      step="person"
+      request={request}
+      text={text}
+      missing={missing}
+      extraMissing={consentMissing}
+      nav={nav}
+      saveState={parts.state}
+      open={sent ? consentSection : undefined}
+    >
+      {sent ? null : consentSection}
 
       <Section title={childSectionTitle(text, "person", request.minor)}>
         {showNamePassportHint ? (
@@ -717,18 +746,21 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
 }
 
 /** Step 3 "Ausweis": a photo or scan of the identity document only; GMED enters its data. */
-export function IdentityStep({ request, text, lang, enqueue, onChange, missing, nav }: StepProps) {
+export function IdentityStep({ request, text, enqueue, onChange, missing, nav }: StepProps) {
   // A parent's login for a minor uploads two documents here: the child's and the own one
   // (owner report 2026-10-21: "I uploaded my passport and my child's" — only the child's arrived).
   const parentOfMinor = request.access_kind === "guardian" && request.minor && Boolean(request.representation);
+  // Three uploads on one step: "consent first" is said once above them (labels audit 2026-10-26, A6).
+  const consentNoteAbove = parentOfMinor && !consentGiven(request, INQUIRY_CONSENT);
   return (
-    <StepFrame testId="lead-request-step-identity" step="identity" request={request} text={text} missing={missing} nav={nav}>
+    <StepFrame testId="lead-request-step-identity" step="identity" request={request} text={text} missing={missing} nav={nav} lockExempt={refusedIdentityUploadKeys(request).length > 0}>
+      <ConsentNoteAboveContext.Provider value={consentNoteAbove}>
+      {consentNoteAbove ? <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote> : null}
       {request.identification !== undefined ? (
         <div data-testid="lead-request-identity">
           <IdentityDocumentSection
             request={request}
             text={text}
-            lang={lang}
             enqueue={enqueue}
             onChange={onChange}
             title={parentOfMinor ? text.childDocumentTitle : undefined}
@@ -736,11 +768,12 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
         </div>
       ) : null}
       {parentOfMinor ? (
-        <OwnRepresentativeDocumentSection request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
+        <OwnRepresentativeDocumentSection request={request} text={text} enqueue={enqueue} onChange={onChange} />
       ) : null}
       {parentOfMinor ? (
-        <OtherParentDocumentSection request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
+        <OtherParentDocumentSection request={request} text={text} enqueue={enqueue} onChange={onChange} />
       ) : null}
+      </ConsentNoteAboveContext.Provider>
     </StepFrame>
   );
 }
@@ -754,10 +787,9 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
 export function OwnRepresentativeDocumentSection({
   request,
   text,
-  lang,
   enqueue,
   onChange,
-}: Pick<StepProps, "request" | "text" | "lang" | "enqueue" | "onChange">) {
+}: Pick<StepProps, "request" | "text" | "enqueue" | "onChange">) {
   const me = request.representation?.representatives.find((person) => person.mine && person.slot !== null) ?? null;
   const slot = me?.slot ?? null;
   const required = slot !== null && (
@@ -778,7 +810,6 @@ export function OwnRepresentativeDocumentSection({
               person={me}
               documents={me.identity_documents}
               text={text}
-              lang={lang}
               enqueue={enqueue}
               onChange={onChange}
             />
@@ -812,10 +843,9 @@ export function OwnRepresentativeDocumentSection({
 export function OtherParentDocumentSection({
   request,
   text,
-  lang,
   enqueue,
   onChange,
-}: Pick<StepProps, "request" | "text" | "lang" | "enqueue" | "onChange">) {
+}: Pick<StepProps, "request" | "text" | "enqueue" | "onChange">) {
   const representation = request.representation;
   const mine = representation?.representatives.find((person) => person.mine && person.slot !== null)?.slot ?? null;
   const slot = mine === "rep2" ? "rep1" : mine === "rep1" && representation?.custody === "joint" ? "rep2" : null;
@@ -838,7 +868,6 @@ export function OtherParentDocumentSection({
               person={person}
               documents={person.identity_documents}
               text={text}
-              lang={lang}
               enqueue={enqueue}
               onChange={onChange}
             />
@@ -887,8 +916,44 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
   const recipient = draftFromRecipient(request.billing);
   const payerNamed = Boolean(request.payer) && (!flowKnown || payerFitsFlow(flowOf(recipient), request.payer, recipient,
     payerAnswer(request.payer, request.payer_self_template) === "guardian" || request.billing?.payment_route_by === "guardian", request.representation?.representatives));
+  // The paying parent answers the own payment route also after the send (the server allows it).
+  const ownRouteAfterSend = Boolean(request.submitted_at) && request.billing?.payment_route_by === "guardian";
+  const paymentRoute = request.billing ? (
+    <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-6">
+      <BillingSections
+        request={request}
+        billing={request.billing}
+        text={text}
+        lang={lang}
+        enqueue={enqueue}
+        onChange={onChange}
+        onSaveState={parts.on("billing")}
+        part="method"
+      />
+    </div>
+  ) : null;
+  const payerQuestionnaire = request.payer_questionnaire ? (
+    <PayerQuestionnaireSection
+      request={request}
+      text={text}
+      lang={lang}
+      enqueue={enqueue}
+      onChange={onChange}
+      onSaveState={parts.on("payerQuestionnaire")}
+    />
+  ) : null;
   return (
-    <StepFrame testId="lead-request-step-billing" step="billing" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
+    <StepFrame
+      testId="lead-request-step-billing"
+      step="billing"
+      request={request}
+      text={text}
+      missing={missing}
+      nav={nav}
+      saveState={parts.state}
+      // After the send the paying parent's own questions and payment route stay open (owner 2026-10-26).
+      open={request.submitted_at && (request.payer_questionnaire || ownRouteAfterSend) ? <>{ownRouteAfterSend ? paymentRoute : null}{request.payer_questionnaire ? payerQuestionnaire : null}</> : undefined}
+    >
       <Section title={childSectionTitle(text, "insurance", request.minor)}>
         <div className={GRID} data-testid="lead-request-insurance">
           <LabeledField
@@ -904,7 +969,8 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
               value={draft.has_insurance}
               onChange={(event) => setDraft((current) => withInsuranceAnswer(current, event.target.value))}
             >
-              <option value="">{text.notStated}</option>
+              {/* The empty choice reads like every other select, not like a saved "no answer" (B2). */}
+              <option value="">{text.choose}</option>
               <option value="yes">{text.insuranceAnswerOptions.yes}</option>
               <option value="no">{text.insuranceAnswerOptions.no}</option>
             </NativeComboboxSelect>
@@ -1012,7 +1078,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
         />
       ) : null}
       {/* How the patient side will pay: once the payer is named. The details are follow-up block C. */}
-      {request.billing && flowKnown && payerNamed && request.follow_up !== undefined ? (
+      {request.billing && flowKnown && payerNamed && request.follow_up !== undefined && !ownRouteAfterSend ? (
         <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-6">
           <BillingSections
             request={request}
@@ -1027,16 +1093,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
         </div>
       ) : null}
       {/* The parent who pays answers the payer-only questions (phase 3a); set for that login only. */}
-      {request.payer_questionnaire ? (
-        <PayerQuestionnaireSection
-          request={request}
-          text={text}
-          lang={lang}
-          enqueue={enqueue}
-          onChange={onChange}
-          onSaveState={parts.on("payerQuestionnaire")}
-        />
-      ) : null}
+      {request.payer_questionnaire && !request.submitted_at ? payerQuestionnaire : null}
       {/* An older server still asks the payment route with the base form. */}
       {request.billing && request.follow_up === undefined ? (
         <div id={SECTION_ANCHORS.paymentRoute} className="scroll-mt-4 space-y-6">
@@ -1118,84 +1175,108 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
     }
   }
 
+  // After the send (owner 2026-10-26): the reason is read-only, documents are added
+  // («Dokumente nachreichen») without a new send, the consents stay open to withdraw.
+  const sent = Boolean(request.submitted_at);
+  const consentSection = (
+    <Section title={text.healthConsentTitle}>
+      <p className="whitespace-pre-line rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+        {consentText(request, HEALTH_CONSENT, lang)}
+      </p>
+      <ConsentCheckbox
+        request={request}
+        purpose={HEALTH_CONSENT}
+        text={text}
+        lang={lang}
+        label={text.healthConsentLabel}
+        enqueue={enqueue}
+        onChange={onChange}
+        testId="lead-request-health-consent"
+      />
+      {/* The reason and the uploads below wait for this consent: said once, here (labels audit 2026-10-26, A6). */}
+      {!consentReady ? <ConsentNeededNote>{text.healthConsentRequired}</ConsentNeededNote> : null}
+    </Section>
+  );
+  const reasonSection = asksReason ? (
+    <Section title={childSectionTitle(text, "request", request.minor)}>
+      <div data-testid="lead-request-reason">
+        <IdentificationFormField form={identification} field="request_reason" text={text}>
+          <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={5} disabled={!consentReady} />
+        </IdentificationFormField>
+      </div>
+    </Section>
+  ) : null;
+  const uploadSection = (
+    <Section title={childSectionTitle(text, "upload", request.minor)}>
+      <p className="text-sm text-muted-foreground">{text.documentsIntro}</p>
+      <div className="space-y-2">
+        <input
+          ref={fileInput}
+          id="lead-request-files"
+          type="file"
+          multiple
+          accept={LEAD_UPLOAD_ACCEPT}
+          className="sr-only"
+          disabled={!consentReady || uploading || full}
+          onChange={(event) => {
+            const files = Array.from(event.currentTarget.files ?? []);
+            event.currentTarget.value = "";
+            void uploadFiles(files);
+          }}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full gap-2 sm:w-auto"
+          disabled={!consentReady || uploading || full}
+          onClick={() => fileInput.current?.click()}
+          data-testid={sent ? "lead-request-add-documents" : undefined}
+        >
+          {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
+          {uploading ? text.uploading : sent ? text.addDocumentsAfterSend : text.uploadButton}
+        </Button>
+        {sent ? <InfoNote testId="lead-request-add-documents-note">{text.addedAfterSendNote}</InfoNote> : null}
+        {full ? <p className="text-xs text-muted-foreground">{text.maxDocuments(request.max_documents)}</p> : null}
+        {errors.map((message) => (
+          <p key={message} role="alert" className="text-xs text-destructive">
+            {message}
+          </p>
+        ))}
+      </div>
+      <UploadedFileList
+        documents={request.documents}
+        text={text}
+        emptyText={text.noDocuments}
+        testId="lead-request-document-list"
+        onRemove={(documentId) => void remove(documentId)}
+      />
+    </Section>
+  );
+  // The person's own choice of the consent form options (2026-10-12).
+  const choicesSection = (
+    <ConsentFormChoicesSection request={request} lang={lang} enqueue={enqueue} onChange={onChange} onSaveState={parts.on("consentForm")} />
+  );
   return (
-    <StepFrame testId="lead-request-documents" step="documents" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
-      {/* Nothing here is required before the contract (QA 2026-10-24, A-1): said once, neutrally. */}
-      <p className="text-sm text-muted-foreground" data-testid="lead-request-documents-optional">{text.documentsOptional}</p>
-      <Section title={text.healthConsentTitle}>
-        <p className="whitespace-pre-line rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-          {consentText(request, HEALTH_CONSENT, lang)}
-        </p>
-        <ConsentCheckbox
-          request={request}
-          purpose={HEALTH_CONSENT}
-          text={text}
-          lang={lang}
-          label={text.healthConsentLabel}
-          enqueue={enqueue}
-          onChange={onChange}
-          testId="lead-request-health-consent"
-        />
-      </Section>
-
-      {asksReason ? (
-        <Section title={childSectionTitle(text, "request", request.minor)}>
-          <div data-testid="lead-request-reason">
-            <IdentificationFormField form={identification} field="request_reason" text={text}>
-              <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={5} disabled={!consentReady} />
-            </IdentificationFormField>
-            {!consentReady ? <p className="text-xs text-muted-foreground">{text.healthConsentRequired}</p> : null}
-          </div>
-        </Section>
-      ) : null}
-
-      <Section title={childSectionTitle(text, "upload", request.minor)}>
-        <p className="text-sm text-muted-foreground">{text.documentsIntro}</p>
-        <div className="space-y-2">
-          <input
-            ref={fileInput}
-            id="lead-request-files"
-            type="file"
-            multiple
-            accept={LEAD_UPLOAD_ACCEPT}
-            className="sr-only"
-            disabled={!consentReady || uploading || full}
-            onChange={(event) => {
-              const files = Array.from(event.currentTarget.files ?? []);
-              event.currentTarget.value = "";
-              void uploadFiles(files);
-            }}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full gap-2 sm:w-auto"
-            disabled={!consentReady || uploading || full}
-            onClick={() => fileInput.current?.click()}
-          >
-            {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
-            {uploading ? text.uploading : text.uploadButton}
-          </Button>
-          {!consentReady ? <ConsentNeededNote>{text.uploadNeedsConsent}</ConsentNeededNote> : null}
-          {full ? <p className="text-xs text-muted-foreground">{text.maxDocuments(request.max_documents)}</p> : null}
-          {errors.map((message) => (
-            <p key={message} role="alert" className="text-xs text-destructive">
-              {message}
-            </p>
-          ))}
-        </div>
-        <UploadedFileList
-          documents={request.documents}
-          text={text}
-          lang={lang}
-          emptyText={text.noDocuments}
-          testId="lead-request-document-list"
-          onRemove={(documentId) => void remove(documentId)}
-        />
-      </Section>
-
-      {/* The person's own choice of the consent form options (2026-10-12). */}
-      <ConsentFormChoicesSection request={request} lang={lang} enqueue={enqueue} onChange={onChange} onSaveState={parts.on("consentForm")} />
+    <StepFrame
+      testId="lead-request-documents"
+      step="documents"
+      request={request}
+      text={text}
+      missing={missing}
+      nav={nav}
+      saveState={parts.state}
+      open={sent ? <>{consentSection}{uploadSection}{choicesSection}</> : undefined}
+    >
+      {sent ? reasonSection : (
+        <>
+          {/* Nothing here is required before the contract (QA 2026-10-24, A-1): said once, neutrally. */}
+          <p className="text-sm text-muted-foreground" data-testid="lead-request-documents-optional">{text.documentsOptional}</p>
+          {consentSection}
+          {reasonSection}
+          {uploadSection}
+          {choicesSection}
+        </>
+      )}
     </StepFrame>
   );
 }

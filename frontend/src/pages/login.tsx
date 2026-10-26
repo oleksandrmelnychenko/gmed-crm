@@ -1,6 +1,7 @@
 import {
   useEffect,
   useReducer,
+  useState,
   useRef,
   type FormEvent,
   type SetStateAction,
@@ -10,6 +11,7 @@ import {
   AlertCircle,
   ArrowRight,
   ArrowUpLeft,
+  CheckCircle2,
   Clock,
   Eye,
   EyeOff,
@@ -18,7 +20,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { AuthLoginError, useAuth, PendingLoginError, TotpRequiredError, type User } from "@/lib/auth";
-import { resolveLoginRedirect, signOutReasonOf } from "@/lib/login-redirect";
+import { clearSignOutNotice, readSignOutNotice, resolveLoginRedirect, signOutReasonOf } from "@/lib/login-redirect";
 import { useLang } from "@/lib/i18n";
 import { getBuildLoginDefaults } from "@/pages/login-defaults";
 import { resolveRequestedLoginLanguage } from "@/pages/login-language";
@@ -114,6 +116,9 @@ export function LoginPage() {
         ? "/account/two-factor-required"
         : resolveLoginRedirect(location.state, me.id);
   const endedSession = signOutReasonOf(location.state);
+  // The thank-you after the lead cabinet's «Abschließen und abmelden»: shown once, then forgotten.
+  const [signOutNotice] = useState(() => (endedSession === "explicit" ? readSignOutNotice() : null));
+  useEffect(() => clearSignOutNotice(), []);
 
   const requestedLanguage = new URLSearchParams(location.search).get("lang");
 
@@ -344,6 +349,13 @@ export function LoginPage() {
               </div>
               <FieldError id="login-password-error" message={fieldErrors.password} />
             </div>
+
+            {!error && signOutNotice ? (
+              <div className="gmed-login-notice" role="status" data-testid="login-sign-out-notice">
+                <CheckCircle2 aria-hidden="true" />
+                <span>{signOutNotice}</span>
+              </div>
+            ) : null}
 
             {!error && (endedSession === "expired" || endedSession === "idle") ? (
               <div className="gmed-login-notice" role="status" data-testid="login-session-ended">

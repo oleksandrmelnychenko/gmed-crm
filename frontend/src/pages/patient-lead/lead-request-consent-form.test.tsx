@@ -37,16 +37,23 @@ describe("consent form choices in the lead cabinet", () => {
         onChange={() => undefined}
       />,
     );
-    expect(markup).toContain("Einverständniserklärung zur Datenübermittlung (Anlage 1)");
+    // No document number in the title, no save-state sentence of its own (labels audit 2026-10-26, B8).
+    expect(markup).toContain("Einwilligung zur Datenübermittlung");
+    expect(markup).not.toContain("Anlage 1");
     expect(markup.match(/type="checkbox"/g)).toHaveLength(7);
     expect(markup).not.toContain('checked=""');
-    expect(markup).toContain("Noch keine Auswahl gespeichert.");
+    expect(markup).not.toContain("Noch keine Auswahl gespeichert.");
     expect(markup).toContain("GMED kreuzt nichts für Sie an");
-    // An empty choice is no consent; automatic saving waits for the three.
-    expect(markup.match(/\(erforderlich\)/g)).toHaveLength(3);
+    // An empty choice is no consent: the three are marked with the `*` of every required field,
+    // the word only for screen readers.
+    expect(markup.match(/data-consent-required=""/g)).toHaveLength(3);
+    expect(markup.match(/aria-required="true"/g)).toHaveLength(3);
+    expect(markup).not.toMatch(/>\(erforderlich\)</);
     expect(markup).toContain('data-testid="lead-request-consent-form-core-hint"');
+    expect(markup).toContain("Diese drei Einwilligungen brauchen wir für Ihre Anfrage.");
     expect(markup).not.toContain("lead-request-consent-form-save");
-    expect(markup).toContain("automatisch gespeichert");
+    // Every checkbox is named by its visible text, not by the value «on» (S1).
+    expect(markup).toContain('aria-label="Meine Unterlagen dürfen im EDV-System von GMED gespeichert und verarbeitet werden."');
   });
 
   it("knows the three consents the service runs on", () => {
@@ -83,7 +90,7 @@ describe("consent form choices in the lead cabinet", () => {
     expect(consentFormText("de", true).options.data_system).toContain("meines Kindes");
   });
 
-  it("shows the saved choice with its date", () => {
+  it("shows the saved choice without a receipt of its own (labels audit 2026-10-26, B8)", () => {
     const markup = renderToStaticMarkup(
       <ConsentFormChoicesSection
         request={request({
@@ -97,10 +104,8 @@ describe("consent form choices in the lead cabinet", () => {
       />,
     );
     expect(markup.match(/checked=""/g)).toHaveLength(2);
-    expect(markup).toContain("Ваш выбор от 12.10.2026");
-    // Staff make the new form; nothing is re-created by itself (QA 2026-10-12).
-    expect(markup).toContain("уже созданную форму сотрудник GMED тогда создаст заново");
-    expect(markup).not.toContain("будет создана заново");
+    expect(markup).not.toContain("Ваш выбор от 12.10.2026");
+    expect(markup).not.toContain("сотрудник GMED");
   });
 
   it("lets a minor's own login choose nothing (QA 2026-10-12, A3-01)", () => {
@@ -162,9 +167,17 @@ describe("consent form choices in the lead cabinet", () => {
       for (const key of Object.keys(NO_CONSENT_FORM_CHOICES) as (keyof typeof NO_CONSENT_FORM_CHOICES)[]) {
         expect(text.options[key].trim(), `${lang} ${key}`).not.toBe("");
       }
-      expect(text.savedAt("12.10.2026")).toContain("12.10.2026");
+      expect(text.disclosureLabel.trim(), lang).not.toBe("");
+      expect(text.title, lang).not.toMatch(/Anlage|Annex|додаток|приложение/);
     }
-    expect(consentFormText("uk").title).toBe("Згода на передачу даних (додаток 1)");
+    expect(consentFormText("uk").title).toBe("Згода на передачу даних");
+    // One line for the step-4 answer, with the count of the named persons (owner 2026-10-26, C3).
+    expect(consentFormText("de").disclosureYes(1)).toBe("Ja, 1 Person");
+    expect(consentFormText("ru").disclosureYes(2)).toBe("Да, 2 человека");
+    expect(consentFormText("ru").disclosureYes(5)).toBe("Да, 5 человек");
+    expect(consentFormText("uk").disclosureYes(3)).toBe("Так, 3 особи");
+    expect(consentFormText("uk").disclosureYes(11)).toBe("Так, 11 осіб");
+    expect(consentFormText("en").disclosureYes(2)).toBe("Yes, 2 people");
   });
 });
 
@@ -173,9 +186,10 @@ describe("read-only disclosure decision", () => {
     const item = request({ version: "v1", chosen_at: null, choices: { ...CORE, named_recipients: true }, recipients: [{ name: "Old Recipient", relation: "friend" }] });
     expect(savedDisclosureAllowed(item)).toBe(true);
     const html = renderToStaticMarkup(<ConsentFormChoicesSection request={item} lang="en" enqueue={queue} onChange={() => undefined} />);
-    expect(html).toContain("Not answered yet");
+    // One line, not the step-4 answer repeated as a block (owner 2026-10-26, C3).
+    expect(html).toContain("Information for third parties: not answered yet");
     expect(html).toContain("An earlier choice is on record");
-    expect(html).toContain("Old Recipient");
+    expect(html).not.toContain("Old Recipient");
     expect(html).not.toContain('data-consent-option="named_recipients"');
     expect(html).toContain('href="/request?lead=lead-1&amp;step=disclosure"');
     expect(consentFormChanged({ ...CORE, named_recipients: true }, CORE)).toBe(false);
@@ -184,8 +198,9 @@ describe("read-only disclosure decision", () => {
     const item = { ...request({ version: "v1", chosen_at: null, choices: null }), trusted_persons: [{ name: "Current Friend", relation: "friend" as const, scope: "Invoices only" }], disclosure: { allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "en", chosen_at: "2026-10-14T08:00:00Z", chosen_by: "guardian", access_kind: "guardian" as const, company_name: "Example Clinic" } };
     expect(savedDisclosureAllowed(item)).toBe(true);
     const html = renderToStaticMarkup(<ConsentFormChoicesSection request={item} lang="en" enqueue={queue} onChange={() => undefined} />);
-    expect(html).toContain("Disclosure permitted");
-    expect(html).toContain("Invoices only");
+    expect(html).toContain("Information for third parties: Yes, 1 person");
+    expect(html).not.toContain("Invoices only");
+    expect(html).toContain(">change</a>");
     expect(html).not.toContain('checked=""');
     expect(html).not.toContain('data-consent-option="named_recipients"');
     expect(savedDisclosureAllowed({ ...item, disclosure: { ...item.disclosure, allow_disclosure: false, consent_given: false } })).toBe(false);

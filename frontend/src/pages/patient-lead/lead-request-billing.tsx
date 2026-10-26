@@ -406,12 +406,12 @@ export function BillingSections({
                       id={`lead-request-invoice_to-${target}`}
                       name="lead-request-invoice_to"
                       value={target}
-                      aria-labelledby={`lead-request-invoice_to-${target}-label`}
+                      aria-label={invoiceToLabel(text, target, guardian, context.routeBy)}
                       className={cn(checkboxClass, "mt-0.5 rounded-full")}
                       checked={checked}
                       onChange={() => form.update((current) => withInvoiceTo(current, target))}
                     />
-                    <span id={`lead-request-invoice_to-${target}-label`} className="min-w-0">
+                    <span className="min-w-0">
                       {invoiceToLabel(text, target, guardian, context.routeBy)}
                     </span>
                   </label>
@@ -464,12 +464,14 @@ export function BillingSections({
         </Section>
       ) : null}
 
+      {/* Nothing to answer here: one muted line, not a card of its own (labels audit 2026-10-26, B7). */}
       {part === "method" && !asksPaymentRoute(context.routeBy) ? (
-        <Section title={text.sectionPaymentRoute}><p role="note" className="text-sm text-muted-foreground" data-testid="lead-request-payment-route-by-payer">{routeNote}</p></Section>
+        <p role="note" className="px-1 text-sm text-muted-foreground" data-testid="lead-request-payment-route-by-payer">{routeNote}</p>
       ) : null}
 
+      {/* Nothing to answer: the note stands as one muted line, not as a card (labels audit 2026-10-26, B7). */}
       {part === "route" ? (
-      <RouteFrame bare={bare} title={text.sectionPaymentRoute}>
+      <RouteFrame bare={bare || !asksPaymentRoute(context.routeBy)} title={text.sectionPaymentRoute}>
         {asksPaymentRoute(context.routeBy) ? (
           <div className="space-y-4" data-testid="lead-request-payment-route">
             <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -531,7 +533,7 @@ export function BillingSections({
         ) : (
           <p
             role="note"
-            className="rounded-lg border border-border bg-muted/10 px-3 py-2 text-sm leading-snug text-muted-foreground"
+            className="px-1 text-sm leading-snug text-muted-foreground"
             data-testid="lead-request-payment-route-by-payer"
           >
             {routeNote}

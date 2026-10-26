@@ -40,6 +40,19 @@ function ConsentDetails({ title, children, testId }: { title: string; children: 
   );
 }
 
+/**
+ * Date of birth (DD.MM.YYYY) and the phone a trusted person calls from — staff check a caller by
+ * both (owner 2026-10-26) — then a legacy contact as given.
+ */
+function recipientFacts(person: LeadPortalConsentRecipient, tx: Tx): string {
+  const born = /^(\d{4})-(\d{2})-(\d{2})$/.exec(person.birth_date ?? "");
+  return [
+    born ? `${tx("род.", "geb.")} ${born[3]}.${born[2]}.${born[1]}` : null,
+    person.phone ? `${tx("тел.", "Tel.")} ${person.phone}` : null,
+    person.contact,
+  ].filter(Boolean).map((fact) => ` · ${fact}`).join("");
+}
+
 function RecipientCards({ persons, relationLabels, tx, testId }: {
   persons: LeadPortalConsentRecipient[];
   relationLabels: Record<ConsentRecipientRelation, string>;
@@ -59,8 +72,8 @@ function RecipientCards({ persons, relationLabels, tx, testId }: {
               </StatusChip>
             </div>
           </div>
-          {person.contact ? <div className="space-y-1 text-sm leading-5">
-            <p className="text-foreground">{person.contact}</p>
+          {recipientFacts(person, tx) ? <div className="space-y-1 text-sm leading-5" data-testid="portal-trusted-person-facts">
+            <p className="text-foreground">{recipientFacts(person, tx).replace(/^ · /, "")}</p>
           </div> : null}
           <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2.5 text-sm leading-5 text-foreground">
             <span>{tx("Объём информации:", "Auskunftsumfang:")}</span>

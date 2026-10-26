@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowRight, Check, CircleAlert, FileText, LoaderCircle, Trash2, Upload } from "lucide-react";
+import { ArrowRight, Check, CircleAlert, FileText, Info, LoaderCircle, Lock, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -18,7 +18,6 @@ import {
 import {
   LEAD_UPLOAD_ACCEPT,
   consentGiven,
-  formatFileSize,
   type PersonalField,
   type RefusedIdentityCopy,
   type SaveState,
@@ -87,6 +86,12 @@ export function GoToSectionButton({
  * 2026-10-09, QA 2026-10-10).
  */
 export const MissingShownContext = createContext(false);
+
+/**
+ * The step says "consent first" once above its uploads (labels audit 2026-10-26, A6): an upload
+ * inside it stays disabled without repeating the note.
+ */
+export const ConsentNoteAboveContext = createContext(false);
 
 /**
  * The keys the step on screen still misses, once its "Next" was pressed, and
@@ -283,8 +288,6 @@ export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => Prom
   }, []);
 }
 
-const STEP_COUNT = 8;
-
 /**
  * A section of the cabinet as a card (owner 2026-10-09): a header line with the
  * marker and the title, the fields below, on the grey background of the step.
@@ -342,27 +345,25 @@ export function ConsentNeededNote({ children }: { children: ReactNode }) {
 }
 
 /** The bottom bar of a step, as in the staff lead wizard: progress and save state above the buttons. */
+/**
+ * The buttons of a step and its save state. No "step n of m" here: the step list
+ * (desktop) or the line under the dots (phone) says it once (labels audit 2026-10-26, A5).
+ */
 export function StepFooter({
-  index,
-  total = STEP_COUNT,
-  text,
   status,
   children,
 }: {
-  index: number;
-  /** Nine with the follow-up step. */
-  total?: number;
-  text: LeadRequestText;
   status?: ReactNode;
   children: ReactNode;
 }) {
   return (
     // The page scrolls with a bottom padding; the `after` strip covers the form that would show through it.
     <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-border lg:mt-auto bg-card px-4 py-3 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-5 after:bg-card sm:-mx-5 sm:px-5">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-        <span>{text.stepOf(index, total)}</span>
-        {status}
-      </div>
+      {status ? (
+        <div className="mb-2 flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          {status}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">{children}</div>
     </div>
   );
@@ -587,6 +588,7 @@ export function ConsentCheckbox({
       <label className="flex items-start gap-3 text-sm">
         <input
           type="checkbox"
+          aria-label={label}
           className={cn(checkboxClass, "mt-0.5")}
           checked={given}
           disabled={busy || !consent}
@@ -705,7 +707,6 @@ export function FileUploadField({
   documents,
   consentReady,
   text,
-  lang,
   enqueue,
   upload,
   remove,
@@ -720,7 +721,6 @@ export function FileUploadField({
   documents: readonly LeadRequestDocument[];
   consentReady: boolean;
   text: LeadRequestText;
-  lang: string;
   enqueue: RequestQueue;
   /** Direct upload: the field queues the complete selection as one operation. */
   upload: (file: File) => Promise<void>;
@@ -728,6 +728,7 @@ export function FileUploadField({
   testId: string;
 }) {
   const [uploading, setUploading] = useState(false);
+  const consentNoteAbove = useContext(ConsentNoteAboveContext);
   const [errors, setErrors] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
@@ -790,7 +791,7 @@ export function FileUploadField({
       </Button>
       {consentReady ? (
         <p className="text-xs leading-5 text-muted-foreground">{hint}</p>
-      ) : (
+      ) : consentNoteAbove ? null : (
         <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
       )}
       {errors.map((message) => (
@@ -801,7 +802,6 @@ export function FileUploadField({
       <UploadedFileList
         documents={documents}
         text={text}
-        lang={lang}
         emptyText={emptyText}
         testId={`${testId}-list`}
         onRemove={(documentId) => {
@@ -814,10 +814,39 @@ export function FileUploadField({
 }
 
 /** The uploaded files of a kind (medical documents, copies of the identity document) with "remove". */
+/**
+ * The sent request is read-only (owner 2026-10-26): one hint where the form
+ * would be edited — changes go through the person's contact at GMED.
+ */
+export function SentLockHint({ text, className }: { text: LeadRequestText; className?: string }) {
+  return (
+    <div
+      role="note"
+      className={cn(
+        "flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200",
+        className,
+      )}
+      data-testid="lead-request-sent-locked"
+    >
+      <Lock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <p>{text.sentLockedHint}</p>
+    </div>
+  );
+}
+
+/** A short neutral note with an info icon (no warning colour). */
+export function InfoNote({ children, testId }: { children: ReactNode; testId?: string }) {
+  return (
+    <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground" data-testid={testId}>
+      <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
 export function UploadedFileList({
   documents,
   text,
-  lang,
   emptyText,
   testId,
   onRemove,
@@ -825,7 +854,6 @@ export function UploadedFileList({
 }: {
   documents: readonly LeadRequestDocument[];
   text: LeadRequestText;
-  lang: string;
   emptyText: string;
   testId: string;
   onRemove: (documentId: string) => void;
@@ -868,9 +896,10 @@ export function UploadedFileList({
             <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1">
               <span className="block truncate">{document.file_name ?? "—"}</span>
-              {/* Date and size as a violet chip (owner 2026-10-09). */}
+              {/* The upload date as a violet chip (owner 2026-10-09); no file size (owner 2026-10-26, C4). */}
               <span className="mt-0.5 inline-flex w-fit items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/30 dark:text-violet-200">
-                {[formatAppDateTime(document.uploaded_at), formatFileSize(document.size_bytes, lang)].filter(Boolean).join(" · ")}
+                {formatAppDateTime(document.uploaded_at)}
+                {document.added_after_submit ? ` · ${text.addedAfterSend}` : ""}
                 {document.reviewed ? ` · ${text.documentTakenOver}` : ""}
               </span>
             </span>

@@ -630,13 +630,15 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await expect(answers(billing)).toHaveText(["Ich", "Die zahlende Person / Organisation", "Eine andere Person (andere Anschrift)"]);
     // Section 8 asks nothing: the payer says how the treatment is paid.
     await expect(page.getByTestId("lead-request-payment-route")).toHaveCount(0);
+    // One muted line, no card of its own (labels audit 2026-10-26, B7).
     await expect(page.getByTestId("lead-request-payment-route-by-payer")).toHaveText(
-      "Den Zahlungsweg gibt die zahlende Person / Organisation selbst an; GMED wendet sich dazu an sie.",
+      "Die Zahlungsart klärt GMED mit der zahlenden Person.",
     );
+    await expect(page.getByRole("heading", { name: "Zahlungsweg", exact: true })).toHaveCount(0);
     await page.locator('[data-step="send"]').click();
     await expect(missing.getByRole("listitem")).toHaveText([INVOICE_QUESTION]);
-    await expect(page.getByTestId("lead-request-summary-billing").locator("dt")).toHaveText(["Zahlungsweg"]);
-    await expect(page.getByTestId("lead-request-summary-billing").locator("dd")).toHaveText(["gibt die zahlende Person an"]);
+    await expect(page.getByTestId("lead-request-summary-billing").locator("dt")).toHaveText(["Zahlungsart"]);
+    await expect(page.getByTestId("lead-request-summary-billing").locator("dd")).toHaveText(["klärt GMED mit der zahlenden Person"]);
 
     // To the payer: no e-mail for invoices (the payer's address is on file).
     await step(page, "billing");
@@ -647,7 +649,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await expect(missing).toHaveCount(0);
     await expect(page.getByTestId("lead-request-summary-billing").locator("dd")).toHaveText([
       "Die zahlende Person / Organisation",
-      "gibt die zahlende Person an",
+      "klärt GMED mit der zahlenden Person",
     ]);
     await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
     await page.getByTestId("lead-request-submit").click();
@@ -737,7 +739,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await page.locator('[data-step="send"]').click();
     await expect(missing).toHaveCount(0);
     const summary = page.getByTestId("lead-request-summary-billing");
-    await expect(summary.locator("dd")).toHaveText([TO_PATIENT, "gibt die zahlende Person an"]);
+    await expect(summary.locator("dd")).toHaveText([TO_PATIENT, "klärt GMED mit der zahlenden Person"]);
     await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
     await page.getByTestId("lead-request-submit").click();
     await expect(page.getByTestId("lead-request-sent")).toContainText("05.10.2026");

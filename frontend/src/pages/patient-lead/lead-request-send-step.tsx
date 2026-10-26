@@ -1,16 +1,18 @@
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, CircleAlert, Info, LoaderCircle, Pencil, Send, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, Info, LoaderCircle, LogOut, Pencil, Send, Upload } from "lucide-react";
 
 import { Banner, SuccessBanner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDateTime } from "@/lib/app-time-zone";
+import { useAuth } from "@/lib/auth";
+import { rememberSignOutNotice } from "@/lib/login-redirect";
 import { cn } from "@/lib/utils";
 
 import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, submitLeadRequest, type LeadRequest } from "./lead-request-api";
 import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown, missingOfRefusal } from "./lead-request-follow-up-model";
-import { canSubmit, changedSinceSubmit, consentGiven, type SubmitField } from "./lead-request-model";
-import { CabinetSection as Section, MissingItemLink, RequiredMark, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
+import { canSubmit, consentGiven, type SubmitField } from "./lead-request-model";
+import { CabinetSection as Section, MissingItemLink, RequiredMark, SentLockHint, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
 import { missingListKeys, recipientIsPayer, type CabinetTarget } from "./lead-request-field-target";
 import { hasBaseFormInput, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
 import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
@@ -27,8 +29,6 @@ export function SendStep({
   enqueue,
   onChange,
   onEdit,
-  index = 8,
-  total = 8,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -37,13 +37,18 @@ export function SendStep({
   onChange: (request: LeadRequest) => void;
   /** Opens a step and shows the field a missing item names (`CabinetGoTo`). */
   onEdit: (step: Step, target?: CabinetTarget) => void;
-  index?: number;
-  total?: number;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const { logout } = useAuth();
   const guardian = request.access_kind === "guardian";
+  // "You: …" and "Other parent: …" in the lists, as on the steps (labels audit 2026-10-26, B5).
+  const who = {
+    mineSlot: request.representation?.representatives.find((person) => person.mine)?.slot ?? null,
+    custody: request.representation?.custody ?? null,
+  };
   // Base fields and live country questions share the first submission.
   // Staff follow-up after submission retains its separate send action.
   const byStep = missingByStep(request);
@@ -63,12 +68,23 @@ export function SendStep({
   const followUpOpen = Boolean(request.submitted_at) && followUpShown(request) && !followUpAnswered(request);
   const ready = canSubmit(request, INQUIRY_CONSENT);
   const sent = Boolean(request.submitted_at);
-  // Sent and unchanged: there is nothing to send. Sent and changed: send again.
-  const changed = changedSinceSubmit(request);
-  const sendable = !sent || changed;
+  // The request is sent once (owner 2026-10-26): afterwards it is read-only, documents are
+  // added on their step, and what GMED asks later goes with the follow-up's own send.
+  const sendable = !sent;
   // A server that knows the GwG statements wants them confirmed with every sending.
   const needsDeclaration = request.identification !== undefined;
   const declaredAt = request.identification?.declared_correct_at ?? null;
+
+  // «Abschließen und abmelden»: the usual sign-out; the login page thanks once.
+  async function finish() {
+    setSigningOut(true);
+    rememberSignOutNotice(text.signedOutThanks);
+    try {
+      await logout();
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   async function send() {
     if (needsDeclaration && !confirmed) return;
@@ -130,16 +146,7 @@ export function SendStep({
               </Button>
             </div>
           ) : null}
-          {changed ? (
-            <div
-              role="status"
-              className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-              data-testid="lead-request-changed"
-            >
-              <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-              <p>{text.changedAfterSend}</p>
-            </div>
-          ) : null}
+          <SentLockHint text={text} />
           <Section title={text.nextTitle}>
             <ol className="space-y-2.5 text-sm" data-testid="lead-request-next-steps">
               {/* "Nothing is needed meanwhile" only while no follow-up block is open (QA 2026-10-10). */}
@@ -183,7 +190,7 @@ export function SendStep({
             {otherMissing.length > 0 ? <div data-testid="lead-request-missing-other">
               <p className="text-xs font-semibold">{text.furtherDetails}</p>
               <ul className="list-disc space-y-0.5 pl-5">{otherMissing.map((field) => <li key={field}>
-                {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor)}
+                {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor, who)}
               </li>)}</ul>
             </div> : null}
             {missingSteps.map((step) => (
@@ -199,7 +206,7 @@ export function SendStep({
                   {byStep[step].map((field) => (
                     <li key={field} className="break-words">
                       <MissingItemLink field={field} onClick={() => onEdit(step, { field })}>
-                        {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor)}
+                        {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor, who)}
                       </MissingItemLink>
                     </li>
                   ))}
@@ -240,6 +247,7 @@ export function SendStep({
               {/* Sent and unchanged: the confirmation given with that sending is shown, not asked again. */}
               <input
                 type="checkbox"
+                aria-label={text.declarationLabel}
                 className={cn(checkboxClass, "mt-0.5")}
                 checked={sendable ? confirmed : true}
                 disabled={!sendable || busy}
@@ -266,25 +274,25 @@ export function SendStep({
         </Section>
       ) : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
-      <StepFooter index={index} total={total} text={text}>
+      <StepFooter>
         {request.submitted_at ? (
-          // Sent already: changing the request is the secondary path, not the next step.
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onEdit("person")}>
-              <Pencil aria-hidden="true" className="size-3.5" />
-              {text.editData}
-            </Button>
-            <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onEdit("documents")}>
-              <Upload aria-hidden="true" className="size-3.5" />
-              {text.addDocuments}
-            </Button>
-          </div>
+          // Sent already: documents can still be added; the form itself is read-only.
+          <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onEdit("documents")} data-testid="lead-request-go-add-documents">
+            <Upload aria-hidden="true" className="size-3.5" />
+            {text.addDocumentsAfterSend}
+          </Button>
         ) : (
           <Button type="button" variant="outline" className="h-9" onClick={() => onEdit("documents")}>
             <ArrowLeft aria-hidden="true" className="size-3.5" />
             {text.back}
           </Button>
         )}
+        {sent ? (
+          <Button type="button" className="h-9 gap-2" disabled={signingOut} onClick={() => void finish()} data-testid="lead-request-finish">
+            {signingOut ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <LogOut aria-hidden="true" className="size-3.5" />}
+            {text.finishAndSignOut}
+          </Button>
+        ) : null}
         {sendable ? (
           <Button
             type="button"
@@ -295,7 +303,7 @@ export function SendStep({
             data-testid="lead-request-submit"
           >
             {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Send aria-hidden="true" className="size-3.5" />}
-            {busy ? text.sending : sent ? text.sendAgain : text.sendButton}
+            {busy ? text.sending : text.sendButton}
           </Button>
         ) : null}
       </StepFooter>

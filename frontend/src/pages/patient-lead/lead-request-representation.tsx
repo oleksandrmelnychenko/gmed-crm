@@ -44,6 +44,7 @@ import {
 import {
   CabinetSection as Section,
   ConsentNeededNote,
+  ConsentNoteAboveContext,
   LabeledField,
   MissingShownContext,
   RequiredMark,
@@ -391,7 +392,6 @@ export function RepresentativeUpload({
   person,
   documents,
   text,
-  lang,
   enqueue,
   onChange,
 }: {
@@ -404,11 +404,11 @@ export function RepresentativeUpload({
   person: LeadRequestRepresentative | null;
   documents: readonly LeadRequestDocument[];
   text: LeadRequestText;
-  lang: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
 }) {
   const consentReady = consentGiven(request, INQUIRY_CONSENT);
+  const consentNoteAbove = useContext(ConsentNoteAboveContext);
   // A representative's files count to the request's file limit like the medical documents.
   const full = uploadLimitReached(request);
   const ready = consentReady && person !== null && !full;
@@ -491,7 +491,7 @@ export function RepresentativeUpload({
         {uploading ? text.uploading : text.uploadButton}
       </Button>
       {!consentReady ? (
-        <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
+        consentNoteAbove ? null : <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
       ) : (
         <p className="text-xs text-muted-foreground">{person ? text.identityUploadHint : text.representativeUploadNeedsPerson}</p>
       )}
@@ -505,7 +505,6 @@ export function RepresentativeUpload({
         documents={shown.current}
         refused={shown.refused}
         text={text}
-        lang={lang}
         emptyText={kind === "identity" ? text.noIdentityDocuments : text.noAuthorityDocuments}
         testId={`${id}-list`}
         onRemove={(documentId) => void remove(documentId)}
@@ -543,8 +542,14 @@ function RepresentativeBlock({
   onEntries,
   onRemoved,
   isShown,
+  hintsAbove = false,
 }: {
   request: LeadRequest;
+  /**
+   * The section above says once what is greyed out and how names are written (labels audit
+   * 2026-10-26, B5/B6): the block repeats neither.
+   */
+  hintsAbove?: boolean;
   childAddress?: Pick<LeadRequestPersonalData, "street_address" | "zip_code" | "city" | "country">;
   slot: RepresentativeSlot;
   /** The person on the server; `null` until the first save of this form has created it. */
@@ -597,9 +602,10 @@ function RepresentativeBlock({
   const locked = Boolean(person?.email_locked);
   // GMED entered the other parent's address: GMED changes it (owner 2026-10-23).
   const staffEmail = person?.email_locked_reason === "staff";
-  const otherHasLogin = locked && !staffEmail;
   // The other parent gets an own access only when GMED invites them; nothing is linked by itself.
-  const inviteHint = minor && custody !== "guardian" && request.access_kind === "guardian" && !person?.mine && !otherHasLogin;
+  // Asked only while the address is still missing: not under one GMED entered (labels audit 2026-10-26, A9).
+  const inviteHint = minor && custody !== "guardian" && request.access_kind === "guardian" && !person?.mine && !locked
+    && !(person?.email ?? "").trim();
   const proof = authorityProofOf(slot, custody);
   const fieldId = (field: RepresentativeField) => `lead-request-${slot}_${field}`;
   // The other parent this login entered stays editable (QA 2026-10-23: the date of birth locked after the first save).
@@ -712,15 +718,17 @@ function RepresentativeBlock({
       </div>
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="sm:col-span-2 lg:col-span-3">
-          {identityLocked ? (
+          {identityLocked && !hintsAbove ? (
             <p className="mb-2 text-xs text-muted-foreground" data-testid={`lead-request-${slot}-identity-locked`}>
               {text.representativeIdentityLocked}
             </p>
           ) : null}
-          <StatusChip tone="warning" className="items-start whitespace-normal rounded-lg px-2.5 py-1.5">
-            <CircleAlert aria-hidden="true" className="mt-[3px]" />
-            <span>{text.namePassportHint}</span>
-          </StatusChip>
+          {hintsAbove ? null : (
+            <StatusChip tone="warning" className="items-start whitespace-normal rounded-lg px-2.5 py-1.5">
+              <CircleAlert aria-hidden="true" className="mt-[3px]" />
+              <span>{text.namePassportHint}</span>
+            </StatusChip>
+          )}
           {(["first_name", "last_name"] as const).map((field) => {
             const suggestion = suggestPassportSpelling(form.draft[field], lang);
             return nameNeedsLatinSpelling(form.draft[field]) ? (
@@ -789,7 +797,7 @@ function RepresentativeBlock({
               onChange={(event) => form.set("email", event.target.value)}
             />
             {form.errorFor("email") ? null : <EmailDomainWarning email={form.draft.email} lang={lang} enabled={!locked} />}
-            {staffEmail && !form.errorFor("email") ? (
+            {staffEmail && !hintsAbove && !form.errorFor("email") ? (
               <p className="text-xs text-muted-foreground" data-testid={`lead-request-${slot}-email-staff`}>
                 {text.representativeEmailStaff}
               </p>
@@ -815,7 +823,6 @@ function RepresentativeBlock({
           person={person}
           documents={person?.identity_documents ?? []}
           text={text}
-          lang={lang}
           enqueue={enqueue}
           onChange={onChange}
         />
@@ -830,7 +837,6 @@ function RepresentativeBlock({
           person={person}
           documents={person?.authority_documents ?? []}
           text={text}
-          lang={lang}
           enqueue={enqueue}
           onChange={onChange}
         />
@@ -1035,8 +1041,18 @@ export function RepresentationSection({
       onEntries={onEntries}
       onRemoved={onRemoved}
       isShown={isShown}
+      hintsAbove={minor && mode !== "follow_up"}
     />
   );
+  // Name and date of birth of another login, the address GMED entered and the custody GMED stated
+  // are greyed out: one line says so for the whole section instead of one note per field (B6).
+  const lockedByGmed = custodyByStaff || shown.some((slot) => {
+    const person = representativeInSlot(representation, slot);
+    return Boolean(person) && (
+      person?.email_locked_reason === "staff"
+      || (request.access_kind === "guardian" && !person?.mine && (person?.identity_locked ?? true))
+    );
+  });
   const problems =
     problem === null ? null : (
       <p role="alert" className="text-xs text-destructive" data-testid="lead-request-representation-problem">
@@ -1069,6 +1085,11 @@ export function RepresentationSection({
       ) : undefined}>
         <div className="space-y-4" data-testid="lead-request-representation">
           {representation.document_stage === false && !showDocumentDetails ? <p className="text-sm leading-relaxed text-muted-foreground">{draft.custody === "guardian" ? text.parentShortFormIntroVormund : text.parentShortFormIntro}</p> : null}
+          {lockedByGmed ? <p className="text-xs text-muted-foreground" data-testid="lead-request-representation-locked">{text.representativeLockedByGmed}</p> : null}
+          <StatusChip tone="warning" className="items-start whitespace-normal rounded-lg px-2.5 py-1.5" data-testid="lead-request-representation-name-hint">
+            <CircleAlert aria-hidden="true" className="mt-[3px]" />
+            <span>{text.namePassportHint}</span>
+          </StatusChip>
           {/* The server lists `custody` as missing until it is stated. Staff's statement is read-only
               here (owner decision 2026-10-22): the parent writes to GMED instead. */}
           {custodyByStaff ? (
@@ -1077,7 +1098,6 @@ export function RepresentationSection({
               <p className="text-sm text-foreground" data-testid="lead-request-custody-value">
                 {text.custodyOptions[representation.custody ?? "joint"]}
               </p>
-              <p className="text-xs text-muted-foreground">{text.custodySetByStaffHint}</p>
             </div>
           ) : (
           <LabeledField id="lead-request-custody" label={text.custodyQuestion} required>

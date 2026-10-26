@@ -33,6 +33,8 @@ export type LeadPortalUpload = {
   consent_given_at: string | null;
   consent_revoked_at: string | null;
   consent_version: string | null;
+  /** Added to the sent request («Dokumente nachreichen», owner 2026-10-26). */
+  added_after_submit?: boolean;
 };
 
 export type LeadGuardianLink = {

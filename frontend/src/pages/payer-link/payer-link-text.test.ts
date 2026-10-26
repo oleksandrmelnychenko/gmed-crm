@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { PAYER_FIELDS, PAYER_STEPS } from "./payer-link-model";
 import { PAYER_LINK_TEXTS, fieldLabel, missingLabel, payerLinkText, stepTitle, type PayerLinkText } from "./payer-link-text";
+import { leadRequestText } from "@/pages/patient-lead/lead-request-text";
 
 /** Every leaf of a text object as "path → kind" (functions are called with sample arguments). */
 function shape(value: unknown, path = ""): Record<string, string> {
@@ -86,7 +87,9 @@ describe("payer page texts", () => {
     expect(de.namedYou("Mia Muster", true)).toBe(
       "Mia Muster hat Ihre Organisation als zahlende Partei für eine Anfrage bei GMED benannt.",
     );
-    expect(de.privacyNotice("Mia Muster", true)[0]).toContain("Ihre Organisation als zahlende Partei");
+    // Art. 14: the source of the data, without repeating "named you" of the header (labels audit 2026-10-26, B14).
+    expect(de.privacyNotice("Mia Muster", true)[0]).toBe("Name und Kontaktdaten Ihrer Organisation haben wir von Mia Muster erhalten.");
+    expect(de.privacyNotice("Mia Muster")[0]).toBe("Ihren Namen und Ihre Kontaktdaten haben wir von Mia Muster erhalten.");
     for (const lang of ["de", "en", "uk", "ru"]) {
       const text = payerLinkText(lang);
       expect(text.namedYou("Mia Muster", true)).not.toBe(text.namedYou("Mia Muster"));
@@ -104,6 +107,14 @@ describe("payer page texts", () => {
     expect(de.fields.relationship_kind).toBe("Beziehung zur Patientin / zum Patienten");
     expect(de.confirmLabel).toMatch(/^Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe/);
     expect(de.confirmLabel).toContain("nicht aus strafbaren Handlungen stammen");
+    // Owner 2026-10-26: lawful origin in RU/UK/EN, and the company may refuse or end the cooperation.
+    expect(de.confirmLabel).toMatch(/strafbaren Handlungen stammen\. Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden\.$/);
+    expect(payerLinkText("ru").confirmLabel).toContain("Я подтверждаю, что средства для оплаты имеют законное происхождение. Мне известно, что GMED – Agentur für Patientenbetreuung вправе отказать в сотрудничестве или прекратить его");
+    expect(payerLinkText("uk").confirmLabel).toContain("Я підтверджую, що кошти для оплати мають законне походження. Мені відомо, що GMED – Agentur für Patientenbetreuung має право відмовити у співпраці");
+    expect(payerLinkText("en").confirmLabel).toContain("are of lawful origin. I am aware that GMED – Agentur für Patientenbetreuung is entitled to refuse or end the cooperation");
+    for (const lang of ["de", "en", "uk", "ru"]) {
+      expect(leadRequestText(lang).declarationLabel, lang).toBe(payerLinkText(lang).confirmLabel);
+    }
     expect(de.submit).toBe("Absenden");
     expect(`${de.thanksTitle} ${de.thanksBody}`).toBe("Vielen Dank. Ihre Angaben sind bei GMED eingegangen.");
     expect(de.steps.funds).toBe("Beziehung und Herkunft der Mittel");

@@ -18,10 +18,12 @@ import { leadShellText } from "@/pages/patient-lead/lead-shell-text";
 type RequestChoice = { id: string; name: string };
 
 /** The dialog speaks the cabinet language (DE, EN, UA, RU), like the side bar that opens it. */
-export function LeadPortalPlanDialog({ lang, moduleId, moduleLabel, onClose }: {
+export function LeadPortalPlanDialog({ lang, moduleId, moduleLabel, features, onClose }: {
   lang: LeadCabinetLang;
   moduleId: string;
   moduleLabel: string;
+  /** The portal's areas, listed when the one entry "what comes after your request" opens it (owner 2026-10-26, C1). */
+  features?: readonly string[];
   onClose: () => void;
 }) {
   const text = leadShellText(lang).planDialog;
@@ -111,8 +113,8 @@ export function LeadPortalPlanDialog({ lang, moduleId, moduleLabel, onClose }: {
     <Dialog open dirty={false} allowImplicitDismissal onOpenChange={(open) => { if (!open) onClose(); }}>
       <AdminDialogScaffold
         testId="lead-portal-plan-dialog"
-        title={`${text.title}: ${moduleLabel}`}
-        description={text.locked}
+        title={features ? moduleLabel : `${text.title}: ${moduleLabel}`}
+        description={features ? text.featuresIntro : text.locked}
         maxWidthClassName="sm:max-w-[680px]"
         footer={<div className="flex flex-wrap justify-end gap-2 p-3">
           <Button type="button" variant="outline" onClick={onClose}>{text.close}</Button>
@@ -123,6 +125,12 @@ export function LeadPortalPlanDialog({ lang, moduleId, moduleLabel, onClose }: {
           </Button>
         </div>}
       >
+        {features ? <ul className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-2" data-testid="lead-portal-plan-features">
+          {features.map((feature) => <li key={feature} className="flex min-w-0 items-start gap-2">
+            <LockKeyhole aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 break-words">{feature}</span>
+          </li>)}
+        </ul> : null}
         <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-800">
           <p className="flex items-start gap-2"><LockKeyhole className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{text.explanation}</p>
           <p className="font-medium">{text.disclaimer}</p>
@@ -152,7 +160,7 @@ export function LeadPortalPlanDialog({ lang, moduleId, moduleLabel, onClose }: {
               packageId === plan.id ? "border-primary bg-primary text-white" : "border-border bg-card hover:border-primary",
               saving && "pointer-events-none",
             )}>
-              <input type="radio" name="lead-portal-plan" value={plan.id} checked={packageId === plan.id}
+              <input type="radio" name="lead-portal-plan" value={plan.id} aria-label={plan.name} checked={packageId === plan.id}
                 disabled={saving} className="mt-0.5 shrink-0 accent-[var(--brand)]"
                 onChange={() => { setPackageId(plan.id); setResult(null); setError(null); }} />
               <span className="min-w-0 break-words font-medium">{plan.name}</span>

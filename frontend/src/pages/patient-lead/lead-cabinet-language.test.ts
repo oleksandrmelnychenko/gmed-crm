@@ -53,7 +53,12 @@ const KEPT_WORDS = new Set([
   "GMED", "Mia", "Muster", "E-mail", "e-mail", "WhatsApp", "Threema", "Telegram", "Skribble", "PDF", "JPG", "PNG", "HEIC", "iPhone",
   "ID", "IBAN", "USt-IdNr", "DSGVO", "GDPR", "Betreuer", "Betreuerausweis", "Auskunft", "an", "Dritte", "Anna",
   "Ivanova", "Hanna", "Ivanenko", "name", "example", "de", "EUR",
+  // The agency's name, kept in German in every language (owner 2026-10-26).
+  "Agentur", "für", "Patientenbetreuung",
 ]);
+
+/** The agency's own name keeps its German dash in every language. */
+const AGENCY_NAME = "GMED – Agentur für Patientenbetreuung";
 
 /** Words that tell a lead or payer about an internal check (tipping-off): never in their texts. */
 const TIPPING_OFF =
@@ -125,7 +130,7 @@ describe("lead cabinet and payer link: language", () => {
   });
 
   it("puts a dash (—) between Ukrainian and Russian clauses and no space or three dots for an ellipsis", () => {
-    expect(offenders(["uk", "ru"], (text) => /\p{L}\s[–-]\s\p{L}/u.test(text))).toEqual([]);
+    expect(offenders(["uk", "ru"], (text) => /\p{L}\s[–-]\s\p{L}/u.test(text.replaceAll(AGENCY_NAME, "GMED")))).toEqual([]);
     expect(offenders(LANGS, (text) => /\s…|\.\.\./.test(text))).toEqual([]);
   });
 
