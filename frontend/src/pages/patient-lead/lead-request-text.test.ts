@@ -46,7 +46,9 @@ describe("a child's cabinet by who signs in (QA 2026-10-24)", () => {
       expect(guardianCabinetTitle(text, vormundLogin, "Mia")).not.toContain(text.titleGuardian);
       expect(hasInsuranceLabel(text, vormundLogin)).toBe(text.hasInsuranceVormund);
       expect(hasInsuranceLabel(text, parentLogin)).toBe(text.hasInsuranceGuardian);
-      expect(text.parentShortFormIntroVormund).not.toBe(text.parentShortFormIntro);
+      // One short sentence that fits parents and a guardian alike (labels audit 2026-10-26, A8/B5).
+      expect(text.parentShortFormIntroVormund).not.toMatch(/gespeichert|сохранён|збережені|saved/i);
+      expect(text.parentShortFormIntro.split(/[.!?]\s/)).toHaveLength(1);
     }
     expect(submitFieldLabel(de, "has_insurance", true, null, true, { custody: "guardian" })).toBe("Hat das Kind eine Krankenversicherung?");
   });
@@ -188,7 +190,9 @@ describe("lead cabinet languages", () => {
     expect(payerFieldLabel(de, "payer_street", false, "insurance")).toBe("Sitz (Straße und Hausnummer)");
     expect(payerFieldLabel(de, "payer_country")).toBe("Wohnsitzland");
     expect(payerFieldLabel(de, "payer_country", false, "company")).toBe("Land des Sitzes");
-    expect(payerFieldLabel(de, "payer_relationship_kind")).toBe("Beziehung zur Patientin / zum Patienten");
+    // The patient in the own login is asked about "you"; a parent about the patient (labels audit 2026-10-26, B13).
+    expect(payerFieldLabel(de, "payer_relationship_kind")).toBe("Beziehung zu Ihnen");
+    expect(payerFieldLabel(de, "payer_relationship_kind", true)).toBe("Beziehung zur Patientin / zum Patienten");
     // The name passed on to the payer is the patient's: a parent reads it so.
     expect(payerFieldLabel(de, "payer_contact_consent")).toBe(
       "Ich bin einverstanden, dass GMED diese Person bzw. Organisation wegen der Kostenübernahme kontaktiert und ihr meinen Namen mitteilt.",
@@ -210,13 +214,18 @@ describe("lead cabinet languages", () => {
     const missing = (lang: string, payerType: string) => {
       const text = leadRequestText(lang);
       return [
-        submitFieldLabel(text, "payer_organisation_name", false, payerType),
-        submitFieldLabel(text, "payer_country", false, payerType),
-        submitFieldLabel(text, "payer_relationship_kind", false, payerType),
-        submitFieldLabel(text, "payer_relationship", false, payerType),
-        submitFieldLabel(text, "payer_contact_consent", false, payerType),
+        submitFieldLabel(text, "payer_organisation_name", true, payerType),
+        submitFieldLabel(text, "payer_country", true, payerType),
+        submitFieldLabel(text, "payer_relationship_kind", true, payerType),
+        submitFieldLabel(text, "payer_relationship", true, payerType),
+        submitFieldLabel(text, "payer_contact_consent", true, payerType),
       ];
     };
+    // The patient's own login reads the relationship "to you".
+    expect(submitFieldLabel(leadRequestText("de"), "payer_relationship", false, "person")).toBe(
+      "Zahler: Beziehung zu Ihnen – In welcher Beziehung genau?",
+    );
+    expect(submitFieldLabel(leadRequestText("ru"), "payer_relationship_kind", false, "person")).toBe("Плательщик: Кем вам приходится?");
     expect(missing("de", "company")).toEqual([
       "Zahler: Name des Unternehmens",
       "Zahler: Land des Sitzes",
@@ -539,11 +548,15 @@ describe("lead cabinet languages", () => {
     expect(ru.recipient.relationship).toBe("Кем приходится пациенту?");
     expect(ru.recipient.paymentReason).toBe("Почему оплата через организацию?");
     expect(ru.recipient.isPayer).toBe("Получатель счёта является плательщиком");
+    // The box itself speaks the person's words (labels audit 2026-10-26, B3).
+    expect(ru.recipient.isPayerSelf).toBe("Я оплачиваю сам(а)");
+    expect(leadRequestText("de").recipient.isPayerThirdParty).toBe("Diese Person zahlt auch");
     expect(ru.hasRepresentativeQuestion).toBe("Действует ли кто-то от вашего имени?");
     // Insurance is no answer of the cabinet: a person or an organisation.
     expect(Object.keys(ru.recipient.payerOptions)).toEqual(["self", "guardian", "other_parent", "person", "organisation"]);
     expect(submitFieldLabel(ru, "invoice_recipient_is_payer")).toBe("Получатель счёта является плательщиком");
-    expect(submitFieldLabel(ru, "recipient_relationship_kind")).toBe("Получатель счёта: Кем приходится пациенту?");
+    expect(submitFieldLabel(ru, "recipient_relationship_kind")).toBe("Получатель счёта: Кем вам приходится?");
+    expect(submitFieldLabel(ru, "recipient_relationship_kind", true)).toBe("Получатель счёта: Кем приходится пациенту?");
     expect(submitFieldLabel(leadRequestText("de"), "recipient_city")).toBe("Rechnungsempfänger: Ort");
     expect(submitFieldLabel(leadRequestText("de"), "payer_payment_reason")).toBe(
       "Zahler: Warum erfolgt die Zahlung über die Organisation?",

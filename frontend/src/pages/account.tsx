@@ -83,6 +83,7 @@ export function AccountPage() {
 function ProfileSection() {
   const { l, lang, setLangFromProfile } = useProfileLanguage();
   const { user, refreshUser } = useAuth();
+  const portalUser = user?.role === "patient";
   const [profile, setProfile] = useState<AccountProfile | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -160,13 +161,16 @@ function ProfileSection() {
       <form className="space-y-4" onSubmit={(event) => void submit(event)} data-testid="account-profile-form">
         {error ? <Banner tone="error">{error}</Banner> : null}
         {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
-        <div className="grid gap-3 rounded-lg border border-border bg-muted/30 p-3 sm:grid-cols-2">
+        <div className={`grid gap-3 rounded-lg border border-border bg-muted/30 p-3${portalUser ? "" : " sm:grid-cols-2"}`}>
           <Field label={l("account_profile_email")} htmlFor="account-email">
             <Input id="account-email" value={profile?.email ?? ""} readOnly disabled className="h-9 rounded-lg border-transparent bg-transparent px-0 text-foreground disabled:opacity-100" />
           </Field>
-          <Field label={l("account_profile_role")} htmlFor="account-role">
-            <Input id="account-role" value={profile?.role ?? ""} readOnly disabled className="h-9 rounded-lg border-transparent bg-transparent px-0 font-mono text-xs text-foreground disabled:opacity-100" />
-          </Field>
+          {/* A raw role code means nothing to a lead, parent or patient. */}
+          {portalUser ? null : (
+            <Field label={l("account_profile_role")} htmlFor="account-role">
+              <Input id="account-role" value={profile?.role ?? ""} readOnly disabled className="h-9 rounded-lg border-transparent bg-transparent px-0 font-mono text-xs text-foreground disabled:opacity-100" />
+            </Field>
+          )}
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label={l("account_profile_name")} htmlFor="account-name" required>

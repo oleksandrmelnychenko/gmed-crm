@@ -652,7 +652,8 @@ function LeadRequestView({
           >
             {/* Changed since sending (QA 2026-10-24): said on every step, also after a reload on the
                 step the person was on, with the way to send again. Step "send" says it itself. */}
-            {step !== "send" && changedSinceSubmit(request) ? (
+            {/* The follow-up step has its own intro and "send" (labels audit 2026-10-26, B12). */}
+            {step !== "send" && step !== "follow_up" && changedSinceSubmit(request) ? (
               <div
                 role="status"
                 className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
@@ -684,8 +685,6 @@ function LeadRequestView({
                 onNext={() => nav.onNext?.()}
                 missingShown={nav.missingShown || (!request.submitted_at && sendOpened)}
                 onShowMissing={nav.onShowMissing}
-                index={nav.index}
-                total={nav.total}
               />
             ) : null}
             {step === "documents" ? <DocumentsStep {...props} /> : null}
@@ -698,8 +697,6 @@ function LeadRequestView({
                 enqueue={enqueue}
                 onChange={updateRequest}
                 onEdit={goTo}
-                index={nav.index}
-                total={nav.total}
               />
             ) : null}
           </div>
@@ -806,7 +803,7 @@ function StepNavBar({
                   <span className="sr-only">{text.stepMissingBadge(count)}</span>
                 </>
               ) : done ? (
-                <span className="sr-only">{text.stepComplete}</span>
+                <span className="sr-only">{id === "send" && request.submitted_at ? text.stepSent : text.stepComplete}</span>
               ) : null}
             </button>
           );

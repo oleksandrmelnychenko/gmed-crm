@@ -132,7 +132,8 @@ test("automatic save keeps failed drafts; Next retries and reload restores decis
   await page.reload();
   await expect(page.getByTestId("disclosure-yes")).toBeChecked();
   await expect(page.getByTestId("disclosure-consent")).toBeChecked();
-  await expect(page.getByTestId("disclosure-receipt")).toContainText("Guardian Muster");
+  // The own save has no receipt line; the chip says "Saved" (labels audit 2026-10-26, A2).
+  await expect(page.getByTestId("disclosure-receipt")).toHaveCount(0);
   await expect(page.getByTestId("trusted-person-editor").getByLabel("Scope of information", { exact: true })).toContainText("Medical information");
 });
 
@@ -227,7 +228,9 @@ test("a free-text scope from before is shown and must be chosen again", async ({
 test("switching children saves the current decision and keeps each child's people separate", async ({ page }) => {
   const { calls } = await setup(page, { requests: [request(), request("child-b", "Ben")], selected: "child-b", patientMode: true });
   await expect(page.locator("#portal-patient")).toHaveCount(0);
-  await expect(page.getByText("You are deciding as a parent", { exact: false })).toContainText("Ben Muster");
+  // The parents read "your child" in the introduction; no second paragraph saying it again (labels audit 2026-10-26, B10).
+  await expect(page.getByText("You are deciding as a parent", { exact: false })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /Ben Muster/ }).first()).toBeVisible();
   await addFriend(page, "Ben Friend");
   await page.getByRole("tab", { name: "Anna Muster", exact: true }).click();
   await expect(page.getByTestId("trusted-person-editor")).toHaveCount(0);
@@ -276,10 +279,12 @@ test("another guardian can confirm the saved people while the original actor sta
   const { calls } = await setup(page, { requests: [item] });
   await expect(page.getByTestId("disclosure-yes")).toBeChecked();
   await expect(page.getByTestId("disclosure-consent")).not.toBeChecked();
-  await expect(page.getByTestId("disclosure-receipt")).toContainText("Other Guardian");
+  // The other parent's save is named as a sentence (labels audit 2026-10-26, A2).
+  await expect(page.getByTestId("disclosure-receipt")).toContainText("This choice was saved by Other Guardian on");
   await expect(page.getByTestId("trusted-persons-save")).toHaveCount(0);
   await page.getByTestId("disclosure-consent").check();
-  await expect(page.getByTestId("disclosure-receipt")).toContainText("Guardian Muster");
+  // Now the own choice: no receipt line any more.
+  await expect(page.getByTestId("disclosure-receipt")).toHaveCount(0);
   expect(calls[0].persons[0].scope_codes).toEqual(["financial"]);
 });
 

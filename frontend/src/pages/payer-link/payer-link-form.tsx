@@ -642,7 +642,6 @@ function DraftForm({
           </Button>
         ) : null}
       </div>
-      <p className="text-xs text-muted-foreground">{text.autosaveNote}</p>
     </fieldset>
   );
 }

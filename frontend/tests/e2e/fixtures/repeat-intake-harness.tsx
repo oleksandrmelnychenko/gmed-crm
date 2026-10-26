@@ -1,6 +1,7 @@
 import { RepeatIntakePicker } from "../../../src/pages/patients/ui/workspace/repeat-intake-picker";
 import { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { Toaster } from "../../../src/components/ui/toast";
@@ -45,6 +46,8 @@ function Harness() {
 // update; reuse its root so the previous dialog portal unmounts normally.
 const host = window as typeof window & { repeatIntakeRoot?: ReturnType<typeof createRoot> };
 host.repeatIntakeRoot ??= createRoot(document.getElementById("root")!);
+// The app renders the wizard inside its router; its links (e.g. "open the
+// patient file" on a converted lead) need one.
 host.repeatIntakeRoot.render(
-  <AuthProvider><LocalizationProvider dateAdapter={AdapterDayjs}><Harness /></LocalizationProvider></AuthProvider>,
+  <MemoryRouter><AuthProvider><LocalizationProvider dateAdapter={AdapterDayjs}><Harness /></LocalizationProvider></AuthProvider></MemoryRouter>,
 );

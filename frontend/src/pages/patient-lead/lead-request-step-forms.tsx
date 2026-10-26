@@ -53,6 +53,7 @@ import {
 import {
   CabinetSection as Section,
   ConsentNeededNote,
+  ConsentNoteAboveContext,
   ConsentCheckbox,
   FormField,
   GoToSectionButton,
@@ -191,9 +192,6 @@ function StepFrame({
         <StepMissingContext.Provider value={stepMissing}>{children}</StepMissingContext.Provider>
       </MissingShownContext.Provider>
       <StepFooter
-        index={nav.index}
-        total={nav.total}
-        text={text}
         status={saveState ? <SaveIndicator state={saveState} text={text} /> : undefined}
       >
         <Button type="button" variant="outline" className="h-9" disabled={!nav.onBack} onClick={() => nav.onBack?.()}>
@@ -717,18 +715,21 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
 }
 
 /** Step 3 "Ausweis": a photo or scan of the identity document only; GMED enters its data. */
-export function IdentityStep({ request, text, lang, enqueue, onChange, missing, nav }: StepProps) {
+export function IdentityStep({ request, text, enqueue, onChange, missing, nav }: StepProps) {
   // A parent's login for a minor uploads two documents here: the child's and the own one
   // (owner report 2026-10-21: "I uploaded my passport and my child's" — only the child's arrived).
   const parentOfMinor = request.access_kind === "guardian" && request.minor && Boolean(request.representation);
+  // Three uploads on one step: "consent first" is said once above them (labels audit 2026-10-26, A6).
+  const consentNoteAbove = parentOfMinor && !consentGiven(request, INQUIRY_CONSENT);
   return (
     <StepFrame testId="lead-request-step-identity" step="identity" request={request} text={text} missing={missing} nav={nav}>
+      <ConsentNoteAboveContext.Provider value={consentNoteAbove}>
+      {consentNoteAbove ? <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote> : null}
       {request.identification !== undefined ? (
         <div data-testid="lead-request-identity">
           <IdentityDocumentSection
             request={request}
             text={text}
-            lang={lang}
             enqueue={enqueue}
             onChange={onChange}
             title={parentOfMinor ? text.childDocumentTitle : undefined}
@@ -736,11 +737,12 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
         </div>
       ) : null}
       {parentOfMinor ? (
-        <OwnRepresentativeDocumentSection request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
+        <OwnRepresentativeDocumentSection request={request} text={text} enqueue={enqueue} onChange={onChange} />
       ) : null}
       {parentOfMinor ? (
-        <OtherParentDocumentSection request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} />
+        <OtherParentDocumentSection request={request} text={text} enqueue={enqueue} onChange={onChange} />
       ) : null}
+      </ConsentNoteAboveContext.Provider>
     </StepFrame>
   );
 }
@@ -754,10 +756,9 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
 export function OwnRepresentativeDocumentSection({
   request,
   text,
-  lang,
   enqueue,
   onChange,
-}: Pick<StepProps, "request" | "text" | "lang" | "enqueue" | "onChange">) {
+}: Pick<StepProps, "request" | "text" | "enqueue" | "onChange">) {
   const me = request.representation?.representatives.find((person) => person.mine && person.slot !== null) ?? null;
   const slot = me?.slot ?? null;
   const required = slot !== null && (
@@ -778,7 +779,6 @@ export function OwnRepresentativeDocumentSection({
               person={me}
               documents={me.identity_documents}
               text={text}
-              lang={lang}
               enqueue={enqueue}
               onChange={onChange}
             />
@@ -812,10 +812,9 @@ export function OwnRepresentativeDocumentSection({
 export function OtherParentDocumentSection({
   request,
   text,
-  lang,
   enqueue,
   onChange,
-}: Pick<StepProps, "request" | "text" | "lang" | "enqueue" | "onChange">) {
+}: Pick<StepProps, "request" | "text" | "enqueue" | "onChange">) {
   const representation = request.representation;
   const mine = representation?.representatives.find((person) => person.mine && person.slot !== null)?.slot ?? null;
   const slot = mine === "rep2" ? "rep1" : mine === "rep1" && representation?.custody === "joint" ? "rep2" : null;
@@ -838,7 +837,6 @@ export function OtherParentDocumentSection({
               person={person}
               documents={person.identity_documents}
               text={text}
-              lang={lang}
               enqueue={enqueue}
               onChange={onChange}
             />
@@ -904,7 +902,8 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
               value={draft.has_insurance}
               onChange={(event) => setDraft((current) => withInsuranceAnswer(current, event.target.value))}
             >
-              <option value="">{text.notStated}</option>
+              {/* The empty choice reads like every other select, not like a saved "no answer" (B2). */}
+              <option value="">{text.choose}</option>
               <option value="yes">{text.insuranceAnswerOptions.yes}</option>
               <option value="no">{text.insuranceAnswerOptions.no}</option>
             </NativeComboboxSelect>
@@ -1136,6 +1135,8 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
           onChange={onChange}
           testId="lead-request-health-consent"
         />
+        {/* The reason and the uploads below wait for this consent: said once, here (labels audit 2026-10-26, A6). */}
+        {!consentReady ? <ConsentNeededNote>{text.healthConsentRequired}</ConsentNeededNote> : null}
       </Section>
 
       {asksReason ? (
@@ -1144,7 +1145,6 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
             <IdentificationFormField form={identification} field="request_reason" text={text}>
               <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={5} disabled={!consentReady} />
             </IdentificationFormField>
-            {!consentReady ? <p className="text-xs text-muted-foreground">{text.healthConsentRequired}</p> : null}
           </div>
         </Section>
       ) : null}
@@ -1176,7 +1176,6 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
             {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
             {uploading ? text.uploading : text.uploadButton}
           </Button>
-          {!consentReady ? <ConsentNeededNote>{text.uploadNeedsConsent}</ConsentNeededNote> : null}
           {full ? <p className="text-xs text-muted-foreground">{text.maxDocuments(request.max_documents)}</p> : null}
           {errors.map((message) => (
             <p key={message} role="alert" className="text-xs text-destructive">
@@ -1187,7 +1186,6 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
         <UploadedFileList
           documents={request.documents}
           text={text}
-          lang={lang}
           emptyText={text.noDocuments}
           testId="lead-request-document-list"
           onRemove={(documentId) => void remove(documentId)}

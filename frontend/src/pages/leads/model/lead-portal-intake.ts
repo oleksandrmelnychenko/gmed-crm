@@ -79,6 +79,25 @@ export function patientDataPendingFields(
   ];
 }
 
+/**
+ * Step 1 errors with the two fields the prospect patient waits for: in
+ * «Заполнит пациент» mode they are not required to save the lead, but step 1
+ * stays open while either is empty (owner 2026-10-26).
+ */
+export function withPatientDataPending<K extends string>(
+  relaxed: Partial<Record<K, string>>,
+  strict: Partial<Record<K, string>>,
+  pending: boolean,
+): Partial<Record<K, string>> {
+  if (!pending) return relaxed;
+  const next = { ...relaxed };
+  for (const key of ["birthDate", "legalSex"] as const) {
+    const message = strict[key as K];
+    if (message && !next[key as K]) next[key as K] = message;
+  }
+  return next;
+}
+
 function comparable(value: unknown): string {
   return Array.isArray(value) ? value.join(",") : String(value ?? "").trim();
 }

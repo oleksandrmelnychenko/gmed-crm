@@ -362,6 +362,7 @@ import { LeadIdentificationStatus } from "./lead-identification-status";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
 import {
+  legalSexOptionElements,
   PatientDataPendingNotice,
   PatientUpdatedBanner,
   PortalInquiryConsentLine,
@@ -394,6 +395,7 @@ import {
   patientDataPending,
   patientDataPendingFields,
   relaxMasterErrors,
+  withPatientDataPending,
 } from "../model/lead-portal-intake";
 import { LeadSigningPackagePanel } from "./lead-signing-package-panel";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
@@ -3720,6 +3722,9 @@ export function LeadWizard({
   const currentAutosaveSignatureRef = useRef("");
   const lastSavedAutosaveSignatureRef = useRef("");
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // Saves the lead's pending autosave now (not after the debounce) and waits
+  // for the save under way; set below once `persistSnapshot` exists.
+  const flushLeadAutosaveRef = useRef<() => Promise<void>>(async () => {});
   const creationKeyRef = useRef(creationKey ?? crypto.randomUUID());
   const clinicalBaselineRef = useRef<PatientClinicalProfile | null>(null);
   const [clinicalAccessDenied, setClinicalAccessDenied] = useState(false);
@@ -5213,9 +5218,12 @@ export function LeadWizard({
   // field empty that the stepper counts while the server's release list does
   // not (QA 2026-10-24, A-4: "Данные клиента — не завершено" with no marker
   // in the step); the step names these fields itself.
+  // In «Заполнит пациент» mode date of birth and legal sex are not required to
+  // save the lead, but the step stays open without them (owner 2026-10-26):
+  // the medical part waits for both, so the step names them too.
   const masterOpenIssues = useMemo(
-    () => (leadId ? masterValidationIssues(masterErrors, tx) : []),
-    [leadId, masterErrors, tx],
+    () => (leadId ? masterValidationIssues(withPatientDataPending(masterErrors, strictMasterErrors, waitingForPatientData), tx) : []),
+    [leadId, masterErrors, strictMasterErrors, tx, waitingForPatientData],
   );
   const orderIssues = useMemo(() => orderValidationIssues(draft, tx), [draft, tx]);
   const validationIssues = useMemo<ValidationIssue[]>(() => {
@@ -5263,6 +5271,10 @@ export function LeadWizard({
     if (!options && prospectPatientIdRef.current && caseIdRef.current) {
       return { patientId: prospectPatientIdRef.current, caseId: caseIdRef.current };
     }
+    // The prospect patient is made from the stored lead: a legal sex or birth
+    // date just chosen (the step-2 notice, step 1) reaches the server first
+    // (owner 2026-10-26).
+    await flushLeadAutosaveRef.current();
     const response = await createLeadProspect(leadId, {
       attach_patient_id: existingPatient?.id ?? options?.attachPatientId,
       force_create: existingPatient ? false : options?.forceCreate,
@@ -5527,6 +5539,8 @@ export function LeadWizard({
 
     const run = async () => {
       if (!force && currentAutosaveSignatureRef.current !== signature) return;
+      // A flush (the step-2 notice, a prospect patient) saved it already.
+      if (!force && lastSavedAutosaveSignatureRef.current === signature) return;
 
       let targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
       let stage = "lead-create";
@@ -5768,6 +5782,22 @@ export function LeadWizard({
     open,
     persistSnapshot,
   ]);
+
+  const autosaveSnapshotRef = useRef<AutosaveSnapshot | null>(autosaveSnapshot);
+  useEffect(() => {
+    autosaveSnapshotRef.current = autosaveSnapshot;
+  }, [autosaveSnapshot]);
+  useEffect(() => {
+    flushLeadAutosaveRef.current = async () => {
+      await saveQueueRef.current;
+      const snapshot = autosaveSnapshotRef.current;
+      if (!snapshot || !leadId || leadConverted) return;
+      const signature = autosaveSnapshotSignature(snapshot);
+      if (signature === lastSavedAutosaveSignatureRef.current) return;
+      currentAutosaveSignatureRef.current = signature;
+      await persistSnapshot(snapshot, true, signature);
+    };
+  }, [leadConverted, leadId, persistSnapshot]);
 
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setError("");
@@ -8101,7 +8131,9 @@ ${serviceCommentLines.join("\n")}`
   const completionBlockerCount = openBlockingReasons.length
     + (!quoteAndPrepaymentReady && !(lead?.readiness.blocking_reasons ?? []).some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? 1 : 0);
   const isStepReady = (id: string) => {
-    if (id === "master_data") return Boolean(draft && Object.keys(masterErrors).length === 0);
+    // Date of birth and legal sex keep step 1 open even when the patient fills
+    // them in the portal (owner 2026-10-26): no tick while either is missing.
+    if (id === "master_data") return Boolean(draft && Object.keys(masterErrors).length === 0 && !waitingForPatientData);
     // Nothing in the medical step is required: the reason of the request is
     // optional since 2026-10-19 (owner), as in the server's readiness.
     if (id === "medical") return readiness.get("medical") ?? true;
@@ -8880,11 +8912,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("legalSex", event.target.value)}
                     className={cn(selectClass, visibleMasterError("legalSex") && "border-destructive")}
                   >
-                    <option value="">{tx("Выберите", "Auswählen")}</option>
-                    <option value="female">{tx("Женский", "Weiblich")}</option>
-                    <option value="male">{tx("Мужской", "Männlich")}</option>
-                    <option value="diverse">{tx("Другой", "Divers")}</option>
-                    <option value="no_entry">{tx("Без указания", "Keine Angabe")}</option>
+                    {legalSexOptionElements(tx)}
                   </NativeComboboxSelect>
                 </Field>
                 <Field
@@ -9403,7 +9431,31 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 )}
               >
-                {clinicalAccessDenied ? <Banner tone="warning">{tx("У вашей роли нет доступа к медицинской карте. Медицинскую часть заполняет уполномоченный сотрудник; остальные этапы обращения доступны.", "Ihre Rolle hat keinen Zugriff auf die Patientenakte. Den medizinischen Teil bearbeitet eine berechtigte Person; die übrigen Schritte bleiben verfügbar.")}</Banner> : waitingForPatientData ? <PatientDataPendingNotice onOpenStep1={() => setStep("master_data")} tx={tx} missing={patientDataPendingFields(draft)} /> : <LeadMedicalIntakeForm
+                {clinicalAccessDenied ? <Banner tone="warning">{tx("У вашей роли нет доступа к медицинской карте. Медицинскую часть заполняет уполномоченный сотрудник; остальные этапы обращения доступны.", "Ihre Rolle hat keinen Zugriff auf die Patientenakte. Den medizinischen Teil bearbeitet eine berechtigte Person; die übrigen Schritte bleiben verfügbar.")}</Banner> : waitingForPatientData ? <PatientDataPendingNotice
+                  onOpenStep1={() => setStep("master_data")}
+                  tx={tx}
+                  missing={patientDataPendingFields(draft)}
+                  patientCanFill={step1Portal.mode === "patient"}
+                  disabled={isBusy}
+                  legalSex={draft.legalSex}
+                  onLegalSexChange={(value) => {
+                    touchMasterField("legalSex");
+                    patch("legalSex", value);
+                    // Saved at once (as on closing the wizard), so the
+                    // prospect patient finds it on the server.
+                    void save(step, false, { ...draft, legalSex: value });
+                  }}
+                  birthDate={draft.birthDate}
+                  onBirthDateChange={(value) => {
+                    patch("birthDate", value);
+                    void save(step, false, { ...draft, birthDate: value });
+                  }}
+                  onBirthDateBlur={() => touchMasterField("birthDate")}
+                  onBirthDatePickerValidation={setBirthDateEntryError}
+                  birthDateError={birthDateError}
+                  birthDateMin={EARLIEST_BIRTH_DATE}
+                  birthDateMax={appDateKey()}
+                /> : <LeadMedicalIntakeForm
                   lead={lead}
                   tx={tx}
                   lang={lang}

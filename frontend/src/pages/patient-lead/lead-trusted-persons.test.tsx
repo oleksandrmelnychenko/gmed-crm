@@ -147,7 +147,7 @@ describe("trusted persons independent of consent", () => {
     const text = consentFormText(lang);
     for (const relation of CONSENT_RECIPIENT_RELATIONS) expect(text.recipientRelations[relation]).toBeTruthy();
     const copy = trustedPersonsText(lang);
-    expect(copy.guardianContext("Anna Muster")).toContain("Anna Muster");
+    expect(copy.representativeContext("Anna Muster")).toContain("Anna Muster");
     expect(copy.representativeContext("Anna Muster")).toContain("Anna Muster");
     expect(copy.consent("Example Clinic")).toContain("Example Clinic");
     expect(copy.footer).toBeTruthy();

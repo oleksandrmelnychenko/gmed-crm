@@ -9,6 +9,9 @@ const PACKAGES = [
   { id: "package-treatment", package_key: "treatment", name: "Organisation der Behandlung", description: null, kind: "treatment" },
 ];
 const MODULES = ["dashboard", "notifications", "chat", "appointments", "recommendations", "documents", "subscriptions", "invoices", "feedback", "privacy"];
+// One entry for the portal to come instead of ten locked ones (owner 2026-10-26, C1); the
+// interest is recorded for the whole portal, which the server knows as "services".
+const LOCKED = "lead-portal-locked-after_request";
 type Options = {
   lang?: "ru" | "de";
   mode?: "lead" | "patient";
@@ -35,7 +38,7 @@ async function setup(page: Page, options: Options = {}) {
   let releaseSecond: (() => void) | undefined;
   const receipt = {
     id: "interest-1", package_id: PACKAGES[1].id, subscription_kind: "gmed_reserve",
-    module_id: "invoices", requested_at: "2026-10-15T10:00:00Z", status: "pending",
+    module_id: "services", requested_at: "2026-10-15T10:00:00Z", status: "pending",
   };
   await page.addInitScript((lang) => {
     localStorage.setItem("gmed_lang", lang);
@@ -132,20 +135,24 @@ test.describe("Lead portal locked menu and package interest", () => {
       await page.setViewportSize({ width: 1440, height: 900 });
       const { reads, posts, unexpected } = await setup(page, { lang });
       const nav = page.locator("nav");
-      await expect(nav).toContainText(lang === "de" ? "Anfrageportal" : "Кабинет заявки");
+      // No second product name under the name (labels audit 2026-10-26, B1).
+      await expect(nav).not.toContainText(lang === "de" ? "Anfrageportal" : "Кабинет заявки");
       for (const path of ["/", "/account", "/legal"]) await expect(nav.locator(`a[href="${path}"]`)).toBeVisible();
-      for (const module of MODULES) {
-        const control = nav.getByTestId(`lead-portal-locked-${module}`);
-        await expect(control).toBeVisible();
-        await expect(control).toHaveAttribute("aria-haspopup", "dialog");
-        await expect(control).not.toHaveAttribute("href");
-      }
+      const control = nav.getByTestId(LOCKED);
+      await expect(control).toBeVisible();
+      await expect(control).toContainText(lang === "de" ? "Was nach der Anfrage kommt" : "Что будет после заявки");
+      await expect(control).toHaveAttribute("aria-haspopup", "dialog");
+      await expect(control).not.toHaveAttribute("href");
+      for (const module of MODULES) await expect(nav.getByTestId(`lead-portal-locked-${module}`)).toHaveCount(0);
       await expect(nav.locator('a[href="/services"]')).toHaveCount(0);
       await expect(nav.getByTestId("lead-portal-locked-services")).toHaveCount(0);
       expect(reads).toEqual([]);
-      await nav.getByTestId("lead-portal-locked-dashboard").click();
+      await control.click();
       const dialog = page.getByTestId("lead-portal-plan-dialog");
       await expect(dialog).toBeVisible();
+      // The dialog lists the portal's areas the entry stands for.
+      await expect(dialog.getByTestId("lead-portal-plan-features").getByRole("listitem")).toHaveCount(MODULES.length);
+      await expect(dialog.getByTestId("lead-portal-plan-features")).toContainText(lang === "de" ? "Meine Rechnungen" : "Мои счета");
       await expect(dialog).toContainText(lang === "de" ? "Die Anfrage aktiviert kein Paket" : "Запрос не активирует пакет");
       await expect(dialog.getByRole("radio")).toHaveCount(0);
       await expect(page.getByTestId("lead-portal-plan-submit")).toBeDisabled();
@@ -181,7 +188,7 @@ test.describe("Lead portal locked menu and package interest", () => {
 
   test("uses exact catalogue variants and submits only chosen child's package interest", async ({ page }) => {
     const { posts, unexpected } = await setup(page);
-    await page.getByTestId("lead-portal-locked-invoices").click();
+    await page.getByTestId(LOCKED).click();
     const dialog = page.getByTestId("lead-portal-plan-dialog");
     await chooseRequest(page, "Anna Synthetic");
     await expect(dialog.getByRole("radio", { name: "GMED Reserve Junior", exact: true })).toBeVisible();
@@ -190,7 +197,7 @@ test.describe("Lead portal locked menu and package interest", () => {
     await dialog.getByRole("radio", { name: "GMED Reserve Junior · Ben", exact: true }).check();
     await page.getByTestId("lead-portal-plan-submit").click();
     await expect(dialog).toContainText("Ваш запрос отправлен в GMED.");
-    expect(posts).toEqual([{ path: "/me/lead-requests/child-ben/plan-requests", body: { package_id: PACKAGES[1].id, module_id: "invoices" } }]);
+    expect(posts).toEqual([{ path: "/me/lead-requests/child-ben/plan-requests", body: { package_id: PACKAGES[1].id, module_id: "services" } }]);
     await expect(page.getByTestId("lead-portal-plan-submit")).toBeDisabled();
     await expect(page).toHaveURL(/\/legal$/);
     expect(unexpected).toEqual([]);
@@ -198,7 +205,7 @@ test.describe("Lead portal locked menu and package interest", () => {
 
   test("existing pending interest is shown without sending a duplicate", async ({ page }) => {
     const { posts } = await setup(page, { pending: true, singleRequest: true });
-    await page.getByTestId("lead-portal-locked-invoices").click();
+    await page.getByTestId(LOCKED).click();
     const dialog = page.getByTestId("lead-portal-plan-dialog");
     await expect(page.getByTestId("lead-portal-plan-request-name")).toHaveText("Anna Synthetic");
     await dialog.getByRole("radio", { name: "GMED Reserve Junior", exact: true }).check();
@@ -209,7 +216,7 @@ test.describe("Lead portal locked menu and package interest", () => {
 
   test("catalogue failure can recover and an empty catalogue never invents plans", async ({ page }) => {
     const { posts } = await setup(page, { failLoad: true, empty: true });
-    await page.getByTestId("lead-portal-locked-subscriptions").click();
+    await page.getByTestId(LOCKED).click();
     const dialog = page.getByTestId("lead-portal-plan-dialog");
     await chooseRequest(page, "Anna Synthetic");
     await expect(dialog.getByRole("alert")).toContainText("Не удалось загрузить пакеты");
@@ -224,7 +231,7 @@ test.describe("Lead portal locked menu and package interest", () => {
 
   test("a refused request retains its selection and requires explicit retry", async ({ page }) => {
     const { posts } = await setup(page, { failSubmit: true });
-    await page.getByTestId("lead-portal-locked-chat").click();
+    await page.getByTestId(LOCKED).click();
     const dialog = page.getByTestId("lead-portal-plan-dialog");
     await chooseRequest(page, "Anna Synthetic");
     await dialog.getByRole("radio", { name: "GMED One", exact: true }).check();
@@ -239,7 +246,7 @@ test.describe("Lead portal locked menu and package interest", () => {
 
   test("late catalogue of a previous child cannot replace the current child's choices", async ({ page }) => {
     const { reads, posts, releaseSecond } = await setup(page, { delaySecondChild: true });
-    await page.getByTestId("lead-portal-locked-documents").click();
+    await page.getByTestId(LOCKED).click();
     await chooseRequest(page, "Anna Synthetic");
     await expect(page.getByTestId("lead-portal-plan-dialog").getByRole("radio")).toHaveCount(4);
     await chooseRequest(page, "Ben Synthetic");
@@ -260,7 +267,7 @@ test.describe("Lead portal locked menu and package interest", () => {
     // On compact widths the nav intentionally starts closed.
     const { posts } = await setup(page);
     await page.getByRole("button", { name: "Переключить боковую панель", exact: true }).first().click();
-    await page.getByTestId("lead-portal-locked-subscriptions").click();
+    await page.getByTestId(LOCKED).click();
     const dialog = page.getByTestId("lead-portal-plan-dialog");
     await chooseRequest(page, "Anna Synthetic");
     await expect(dialog.getByRole("radio")).toHaveCount(4);

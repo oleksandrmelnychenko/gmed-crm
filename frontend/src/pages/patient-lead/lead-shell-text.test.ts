@@ -4,7 +4,7 @@ import { de as appDe } from "@/lib/i18n/de";
 import { ru as appRu } from "@/lib/i18n/ru";
 
 import { leadRequestText } from "./lead-request-text";
-import { leadShellNavLabel, leadShellText, type LeadShellText } from "./lead-shell-text";
+import { leadPortalFeatureLabels, leadShellNavLabel, leadShellText, type LeadShellText } from "./lead-shell-text";
 
 /**
  * The shell around the lead cabinet (side bar, top bar, locked-entry dialog) speaks the cabinet
@@ -65,7 +65,8 @@ describe("lead cabinet shell texts", () => {
 
   it("repeats the app catalogs in German and Russian, so those shells read as before", () => {
     const catalogs = { de: appDe, ru: appRu } as const;
-    const navKeys: Record<keyof LeadShellText["nav"], keyof typeof appDe> = {
+    // "after_request" is the cabinet's own entry (owner 2026-10-26, C1): no catalog key.
+    const navKeys: Record<Exclude<keyof LeadShellText["nav"], "after_request">, keyof typeof appDe> = {
       lead_request: "nav_my_request",
       account: "nav_account",
       legal: "nav_legal_notice",
@@ -91,8 +92,16 @@ describe("lead cabinet shell texts", () => {
         expect(shell.nav[id as keyof LeadShellText["nav"]], `${lang} ${id}`).toBe(catalog[key]);
       }
     }
-    expect(leadShellText("de").accountCaption).toBe("Anfrageportal");
-    expect(leadShellText("ru").accountCaption).toBe("Кабинет заявки");
+    // No second product name under the lead's own name (labels audit 2026-10-26, B1).
+    expect(leadShellText("de")).not.toHaveProperty("accountCaption");
+    expect(leadShellText("de").nav.after_request).toBe("Was nach der Anfrage kommt");
+    expect(leadShellText("ru").nav.after_request).toBe("Что будет после заявки");
+    expect(leadShellText("uk").nav.after_request).toBe("Що буде після заявки");
+    expect(leadShellText("en").nav.after_request).toBe("What comes after your request");
+    expect(leadPortalFeatureLabels("de")).toEqual([
+      "Dashboard", "Meine Benachrichtigungen", "Chat", "Meine Termine", "Meine Empfehlungen",
+      "Meine Dokumente", "Meine Abonnements", "Meine Rechnungen", "Mein Feedback", "Datenschutz",
+    ]);
     expect(leadShellText("de").locked).toBe("Gesperrt");
     expect(leadShellText("ru").locked).toBe("Закрыто");
   });

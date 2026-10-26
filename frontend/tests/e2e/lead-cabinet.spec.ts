@@ -893,7 +893,9 @@ test.describe("lead cabinet", () => {
     await expect(nav.getByRole("link", { name: "Konto" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Meine Dokumente" })).toHaveCount(0);
     await expect(page.getByTitle("Benachrichtigungen", { exact: true })).toHaveCount(0);
-    await expect(nav.getByTestId("lead-portal-locked-notifications")).toHaveAttribute("aria-haspopup", "dialog");
+    // One entry for the portal to come, not ten locked ones (owner 2026-10-26, C1).
+    await expect(nav.getByTestId("lead-portal-locked-after_request")).toHaveAttribute("aria-haspopup", "dialog");
+    await expect(nav.getByTestId("lead-portal-locked-notifications")).toHaveCount(0);
 
     // Other portal pages lead back to the request page.
     await page.goto("/documents");
@@ -1083,12 +1085,16 @@ test.describe("lead cabinet", () => {
     await page.goto("/");
     await step(page, "documents");
     const block = page.getByTestId("lead-request-consent-form");
-    await expect(block).toContainText("Einverständniserklärung zur Datenübermittlung (Anlage 1)");
+    // No document number in the title (labels audit 2026-10-26, B8).
+    await expect(block).toContainText("Einwilligung zur Datenübermittlung");
+    await expect(block).not.toContainText("Anlage 1");
+    // The step-4 answer as one line with a jump back (owner 2026-10-26, C3).
+    await expect(block.getByTestId("disclosure-saved-status")).toHaveText("Auskunft an Dritte: Nein");
     // Three core consents and four channels; third-party disclosure is chosen on its own page.
     await expect(block.getByRole("checkbox")).toHaveCount(7);
     await expect(block.getByTestId("lead-request-consent-recipients").getByRole("link")).toHaveAttribute("href", /step=disclosure/);
     for (const box of await block.getByRole("checkbox").all()) await expect(box).not.toBeChecked();
-    await expect(block).toContainText("Noch keine Auswahl gespeichert.");
+    await expect(block).not.toContainText("Noch keine Auswahl gespeichert.");
     const save = page.getByTestId("lead-request-consent-form-save");
     // An empty or partial choice is no consent (QA 2026-10-12, A2-02): saving waits for the three
     // consents the service runs on.
@@ -1100,8 +1106,9 @@ test.describe("lead cabinet", () => {
     await block.getByRole("checkbox", { name: /beauftragte Mitarbeitende/ }).check();
     await block.getByRole("checkbox", { name: /EDV-System/ }).check();
     await expect(page.getByTestId("lead-request-consent-form-core-hint")).toHaveCount(0);
-    await expect(block).toContainText("Ihre Auswahl vom 12.10.2026");
-    await expect(block).toContainText("ein schon erstelltes Formular erstellt GMED dann neu");
+    // Saved: the step's save indicator says so; no receipt sentence of its own (B8).
+    await expect.poll(() => calls.consentChoices.length).toBe(1);
+    await expect(block).not.toContainText("Ihre Auswahl vom 12.10.2026");
     expect(calls.consentChoices).toEqual([
       {
         version: "2026-10-12",
@@ -1165,8 +1172,7 @@ test.describe("lead cabinet", () => {
       await block.getByRole("checkbox", { name }).check();
     }
     await block.getByRole("checkbox", { name: "E-Mail", exact: true }).check();
-    await expect(block).toContainText("Ihre Auswahl vom 12.10.2026");
-    expect(calls.consentChoices).toHaveLength(1);
+    await expect.poll(() => calls.consentChoices.length).toBe(1);
     expect(calls.consentChoices[0]?.choices).toMatchObject({
       agency_processing: true,
       doctors_to_agency: true,
@@ -1232,7 +1238,7 @@ test.describe("lead cabinet", () => {
     await expect(missing).toContainText("Zahler: Vorname");
     await expect(missing).toContainText("Zahler: Nachname");
     await expect(missing).toContainText("Zahler: Staatsangehörigkeit(en)");
-    await expect(missing).toContainText("Zahler: Beziehung zur Patientin / zum Patienten");
+    await expect(missing).toContainText("Zahler: Beziehung zu Ihnen");
     await expect(missing).toContainText("Zahler: Einverständnis zur Kontaktaufnahme");
 
     await step(page, "billing");
@@ -1257,7 +1263,7 @@ test.describe("lead cabinet", () => {
       contact_consent: false,
     });
     // The relationship is chosen from the list, and the payer may be contacted only with the consent.
-    await choose(page, payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" }), "Elternteil");
+    await choose(page, payer.getByRole("combobox", { name: "Beziehung zu Ihnen" }), "Elternteil");
     await payer.getByTestId("lead-request-payer-consent").getByRole("checkbox").check();
     await expect.poll(() => calls.payer.at(-1)).toMatchObject({ relationship_kind: "parent", contact_consent: true });
     await step(page, "send");
@@ -1306,7 +1312,7 @@ test.describe("lead cabinet", () => {
     await expect(page.locator("#lead-request-payer_citizenships")).toHaveCount(0);
     // Why the payment goes through it, instead of a relationship to the patient (owner 2026-10-11).
     await expect(reason).toBeVisible();
-    await expect(payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" })).toHaveCount(0);
+    await expect(payer.getByRole("combobox", { name: "Beziehung zu Ihnen" })).toHaveCount(0);
     await expect(payer.getByRole("textbox", { name: "Name der Organisation" })).toBeVisible();
     await expect(payer.getByRole("textbox", { name: "Rechtsform" })).toBeVisible();
     await expect(payer.getByRole("textbox", { name: "Registernummer (falls vorhanden)" })).toBeVisible();
@@ -1332,7 +1338,7 @@ test.describe("lead cabinet", () => {
     await expect(missing).toContainText("Zahler: E-Mail");
     await expect(missing).toContainText("Zahler: Land des Sitzes");
     await expect(missing).toContainText("Warum erfolgt die Zahlung über die Organisation?");
-    await expect(missing).not.toContainText("Beziehung zur Patientin / zum Patienten");
+    await expect(missing).not.toContainText("Beziehung zu Ihnen");
     await expect(missing).not.toContainText("Zahler: Vorname");
     await expect(missing).not.toContainText("Zahler: Staatsangehörigkeit(en)");
 
@@ -1401,7 +1407,7 @@ test.describe("lead cabinet", () => {
     await page.goto("/");
     await step(page, "billing");
     const payer = page.getByTestId("lead-request-payer");
-    const relationship = payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" });
+    const relationship = payer.getByRole("combobox", { name: "Beziehung zu Ihnen" });
     const inWords = payer.getByRole("textbox", { name: "In welcher Beziehung genau?" });
     const missing = page.getByTestId("lead-request-missing");
 
@@ -1432,14 +1438,14 @@ test.describe("lead cabinet", () => {
       contact_consent: false,
     });
     await page.locator('[data-step="send"]').click();
-    await expect(missing).toContainText("Zahler: Beziehung zur Patientin / zum Patienten – In welcher Beziehung genau?");
+    await expect(missing).toContainText("Zahler: Beziehung zu Ihnen – In welcher Beziehung genau?");
 
     await step(page, "billing");
     await expect(relationship).toContainText("Sonstige");
     await inWords.fill("Nachbar");
     await expect.poll(() => calls.payer.at(-1)).toMatchObject({ relationship_kind: "other", relationship: "Nachbar" });
     await page.locator('[data-step="send"]').click();
-    await expect(missing).not.toContainText("Beziehung zur Patientin / zum Patienten");
+    await expect(missing).not.toContainText("Beziehung zu Ihnen");
     await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Nachbar");
 
     // A relationship of the list needs no words: the text goes with the answer.
@@ -1847,7 +1853,7 @@ test.describe("lead cabinet", () => {
     await expect(payer.getByRole("combobox", { name: "Art des Zahlers" })).toHaveCount(0);
     await expect(payer.getByTestId("lead-request-payer-consent")).toHaveCount(0);
     await payer.getByRole("textbox", { name: "Nachname" }).fill("Zahler");
-    await payer.getByRole("textbox", { name: "Beziehung zur Patientin / zum Patienten" }).fill("Vater");
+    await payer.getByRole("textbox", { name: "Beziehung zu Ihnen" }).fill("Vater");
     await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "third_party", last_name: "Zahler", relationship: "Vater" });
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
     await page.locator('[data-step="send"]').click();
@@ -2023,7 +2029,7 @@ test.describe("lead cabinet", () => {
     // Nothing is missing, yet nothing is sent without the confirmation.
     await expect(page.getByTestId("lead-request-missing")).toHaveCount(0);
     await expect(declaration).toContainText(
-      "Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe und dass sie richtig und vollständig sind. Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen.",
+      "Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe und dass sie richtig und vollständig sind. Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen. Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden.",
     );
     // No reporting duty is mentioned any more (owner 2026-10-22).
     await expect(declaration).not.toContainText("Meldepflicht");
@@ -2467,7 +2473,7 @@ test.describe("lead cabinet", () => {
     // A private person: more fields, the same width; the list of relationships opens inside the screen.
     await choose(page, payer.getByRole("combobox", { name: WHO_PAYS }), "Eine Privatperson");
     await expect(payer.getByRole("textbox", { name: "Nachname" })).toBeVisible();
-    await payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" }).click();
+    await payer.getByRole("combobox", { name: "Beziehung zu Ihnen" }).click();
     const optionEdge = await page
       .getByRole("option", { name: "Anderer Verwandter" })
       .evaluate((node) => node.getBoundingClientRect().right);

@@ -128,20 +128,26 @@ describe("the other parent's address (owner 2026-10-23)", () => {
     );
   }
 
-  it("tells the parent that GMED invites the other parent", () => {
-    const html = renderWith([mother, father]);
+  it("tells the parent that GMED invites the other parent while the address is missing", () => {
+    const html = renderWith([mother, { ...father, email: null }]);
     expect(html).toContain("lead-request-rep2-invite-hint");
     expect(html).toContain("когда GMED пригласит его");
     expect(html).not.toContain("lead-request-rep1-invite-hint");
     expect(html).not.toContain("lead-request-rep2-email-staff");
+    // The address typed in: nothing more to ask for (labels audit 2026-10-26, A9).
+    expect(renderWith([mother, { ...father, email: "ben@example.com" }])).not.toContain("lead-request-rep2-invite-hint");
   });
 
-  it("shows the address GMED entered read-only with who changes it", () => {
+  it("shows the address GMED entered read-only, said once for the section", () => {
     const html = renderWith([mother, { ...father, email: "ben@example.com", email_locked: true, email_locked_reason: "staff" }]);
-    expect(html).toContain("lead-request-rep2-email-staff");
-    expect(html).toContain("изменяет его GMED");
+    // One line above the parents instead of a note per field (labels audit 2026-10-26, B6/A9).
+    expect(html).not.toContain("lead-request-rep2-email-staff");
+    expect(html).toContain('data-testid="lead-request-representation-locked"');
+    expect(html).toContain("Серые поля меняет GMED");
     expect(html).toMatch(/<input[^>]*id="lead-request-rep2_email"[^>]*readOnly/i);
-    expect(html).toContain("lead-request-rep2-invite-hint");
+    expect(html).not.toContain("lead-request-rep2-invite-hint");
+    // The Latin-name hint once for the section, not once per parent (B5).
+    expect(html.match(/латинскими буквами/g)).toHaveLength(1);
   });
 
   it("drops the invitation once the other parent has an own login", () => {

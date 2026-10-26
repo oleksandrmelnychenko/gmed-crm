@@ -23,7 +23,7 @@ for (const asLead of [false, true]) for (const width of [1440, 390]) test(`wizar
     await tabs.nth(index).click();
     await expect(tabs.nth(index)).toHaveAttribute("aria-selected", "true");
     await expect(wizard.getByRole("tabpanel")).not.toBeEmpty();
-    await expect(wizard.getByRole("tabpanel").locator(":scope > section").first()).toBeInViewport();
+    await expect(wizard.getByRole("tabpanel").locator(":scope > fieldset > section").first()).toBeInViewport();
     await expect(wizard.getByRole("heading", { name: "Anna Beispiel", exact: true })).toBeInViewport();
     expect(errors).toEqual([]);
   }
@@ -31,7 +31,7 @@ for (const asLead of [false, true]) for (const width of [1440, 390]) test(`wizar
     await tabs.last().click();
     await wizard.getByTestId("completion-blockers").getByRole("button", { name: reason, exact: true }).click();
     await expect(tabs.last()).toHaveAttribute("aria-selected", "false");
-    await expect(wizard.getByRole("tabpanel").locator(":scope > section").first()).toBeInViewport();
+    await expect(wizard.getByRole("tabpanel").locator(":scope > fieldset > section").first()).toBeInViewport();
     await expect(wizard.getByRole("heading", { name: "Anna Beispiel", exact: true })).toBeInViewport();
     await expect(wizard.getByRole("button", { name: "Назад", exact: true })).toBeInViewport();
     if (reason === "Подтвердите документ, удостоверяющий личность") {

@@ -11,8 +11,6 @@ import { asLeadCabinetLang, type LeadCabinetLang } from "./lead-request-text";
 export interface LeadShellText {
   /** Caption next to the wordmark ("GMED Patientenportal" for screen readers). */
   portalName: string;
-  /** Under the name in the side bar: what this login is. */
-  accountCaption: string;
   toggleSidebar: string;
   skipToContent: string;
   /** Suffix of a locked patient-portal entry ("Dashboard — Gesperrt"). */
@@ -23,6 +21,8 @@ export interface LeadShellText {
   /** The dialog behind a locked entry: interest in a package. */
   planDialog: {
     title: string;
+    /** Above the list of the portal's areas (the one entry "what comes after your request"). */
+    featuresIntro: string;
     locked: string;
     explanation: string;
     disclaimer: string;
@@ -57,11 +57,28 @@ export type LeadShellNavId =
   | "subscriptions"
   | "invoices"
   | "feedback"
-  | "privacy";
+  | "privacy"
+  | "after_request";
+
+/** The one side-bar entry for the patient portal to come (owner 2026-10-26, C1). */
+export const LEAD_PORTAL_AFTER_REQUEST = "after_request";
+
+/** The areas of the patient portal a lead gets later, listed in the dialog of that entry. */
+const PORTAL_FEATURES = [
+  "dashboard",
+  "notifications",
+  "chat",
+  "appointments",
+  "recommendations",
+  "documents",
+  "subscriptions",
+  "invoices",
+  "feedback",
+  "privacy",
+] as const satisfies readonly LeadShellNavId[];
 
 const de: LeadShellText = {
   portalName: "Patientenportal",
-  accountCaption: "Anfrageportal",
   toggleSidebar: "Seitenleiste umschalten",
   skipToContent: "Zum Inhalt springen",
   locked: "Gesperrt",
@@ -80,9 +97,11 @@ const de: LeadShellText = {
     invoices: "Meine Rechnungen",
     feedback: "Mein Feedback",
     privacy: "Datenschutz",
+    after_request: "Was nach der Anfrage kommt",
   },
   planDialog: {
     title: "Patientenbereich",
+    featuresIntro: "Nach der Aufnahme als Patient finden Sie hier:",
     locked: "Dieser Bereich ist noch gesperrt.",
     explanation:
       "Er wird nach der Aufnahme als Patient und der Freigabe des Zugangs verfügbar. Sie können GMED jetzt Ihr Interesse an einem Paket mitteilen.",
@@ -107,7 +126,6 @@ const de: LeadShellText = {
 
 const ru: LeadShellText = {
   portalName: "Портал пациента",
-  accountCaption: "Кабинет заявки",
   toggleSidebar: "Переключить боковую панель",
   skipToContent: "Перейти к содержанию",
   locked: "Закрыто",
@@ -126,9 +144,11 @@ const ru: LeadShellText = {
     invoices: "Мои счета",
     feedback: "Мои отзывы",
     privacy: "Конфиденциальность",
+    after_request: "Что будет после заявки",
   },
   planDialog: {
     title: "Раздел пациента",
+    featuresIntro: "После оформления пациента здесь будут:",
     locked: "Этот раздел пока закрыт.",
     explanation:
       "Он станет доступен после оформления пациента и подтверждения доступа. Сейчас можно сообщить GMED о желании оформить пакет.",
@@ -153,7 +173,6 @@ const ru: LeadShellText = {
 
 const uk: LeadShellText = {
   portalName: "Портал пацієнта",
-  accountCaption: "Кабінет заявки",
   toggleSidebar: "Перемкнути бічну панель",
   skipToContent: "Перейти до вмісту",
   locked: "Заблоковано",
@@ -172,9 +191,11 @@ const uk: LeadShellText = {
     invoices: "Мої рахунки",
     feedback: "Мої відгуки",
     privacy: "Конфіденційність",
+    after_request: "Що буде після заявки",
   },
   planDialog: {
     title: "Розділ пацієнта",
+    featuresIntro: "Після оформлення як пацієнта тут будуть:",
     locked: "Цей розділ поки заблоковано.",
     explanation:
       "Він стане доступним після оформлення як пацієнта та надання доступу. Ви можете вже зараз повідомити GMED про свій інтерес до пакета.",
@@ -199,7 +220,6 @@ const uk: LeadShellText = {
 
 const en: LeadShellText = {
   portalName: "Patient portal",
-  accountCaption: "Request portal",
   toggleSidebar: "Toggle sidebar",
   skipToContent: "Skip to content",
   locked: "Locked",
@@ -218,9 +238,11 @@ const en: LeadShellText = {
     invoices: "My invoices",
     feedback: "My feedback",
     privacy: "Privacy",
+    after_request: "What comes after your request",
   },
   planDialog: {
     title: "Patient area",
+    featuresIntro: "Once you are admitted as a patient, you will find here:",
     locked: "This area is still locked.",
     explanation:
       "It becomes available once you are admitted as a patient and your access has been released. You can let GMED know now which package you are interested in.",
@@ -255,6 +277,12 @@ export function leadShellText(lang: LeadCabinetLang | string | null | undefined)
     default:
       return ru;
   }
+}
+
+/** The names of the patient portal's areas in the cabinet language. */
+export function leadPortalFeatureLabels(lang: LeadCabinetLang | string | null | undefined): string[] {
+  const text = leadShellText(lang);
+  return PORTAL_FEATURES.map((id) => text.nav[id]);
 }
 
 /** The side-bar label of a nav item by id; an id outside the cabinet falls back to `fallback`. */

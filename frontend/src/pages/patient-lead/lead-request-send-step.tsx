@@ -27,8 +27,6 @@ export function SendStep({
   enqueue,
   onChange,
   onEdit,
-  index = 8,
-  total = 8,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -37,13 +35,16 @@ export function SendStep({
   onChange: (request: LeadRequest) => void;
   /** Opens a step and shows the field a missing item names (`CabinetGoTo`). */
   onEdit: (step: Step, target?: CabinetTarget) => void;
-  index?: number;
-  total?: number;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const guardian = request.access_kind === "guardian";
+  // "You: …" and "Other parent: …" in the lists, as on the steps (labels audit 2026-10-26, B5).
+  const who = {
+    mineSlot: request.representation?.representatives.find((person) => person.mine)?.slot ?? null,
+    custody: request.representation?.custody ?? null,
+  };
   // Base fields and live country questions share the first submission.
   // Staff follow-up after submission retains its separate send action.
   const byStep = missingByStep(request);
@@ -183,7 +184,7 @@ export function SendStep({
             {otherMissing.length > 0 ? <div data-testid="lead-request-missing-other">
               <p className="text-xs font-semibold">{text.furtherDetails}</p>
               <ul className="list-disc space-y-0.5 pl-5">{otherMissing.map((field) => <li key={field}>
-                {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor)}
+                {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor, who)}
               </li>)}</ul>
             </div> : null}
             {missingSteps.map((step) => (
@@ -199,7 +200,7 @@ export function SendStep({
                   {byStep[step].map((field) => (
                     <li key={field} className="break-words">
                       <MissingItemLink field={field} onClick={() => onEdit(step, { field })}>
-                        {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor)}
+                        {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type, request.minor, who)}
                       </MissingItemLink>
                     </li>
                   ))}
@@ -240,6 +241,7 @@ export function SendStep({
               {/* Sent and unchanged: the confirmation given with that sending is shown, not asked again. */}
               <input
                 type="checkbox"
+                aria-label={text.declarationLabel}
                 className={cn(checkboxClass, "mt-0.5")}
                 checked={sendable ? confirmed : true}
                 disabled={!sendable || busy}
@@ -266,7 +268,7 @@ export function SendStep({
         </Section>
       ) : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
-      <StepFooter index={index} total={total} text={text}>
+      <StepFooter>
         {request.submitted_at ? (
           // Sent already: changing the request is the secondary path, not the next step.
           <div className="flex flex-wrap gap-2">

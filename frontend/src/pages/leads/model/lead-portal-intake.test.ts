@@ -8,6 +8,7 @@ import {
   mergePatientUpdates,
   patientDataPending,
   patientDataPendingFields,
+  withPatientDataPending,
   patientMarkerFor,
   portalProgressText,
   relaxMasterErrors,
@@ -46,6 +47,13 @@ describe("wizard step 1 in 'the patient fills it in' mode", () => {
     expect(patientDataPendingFields({ birthDate: "", legalSex: "female" })).toEqual(["birthDate"]);
     expect(patientDataPendingFields({ birthDate: "", legalSex: "" })).toEqual(["birthDate", "legalSex"]);
     expect(patientDataPendingFields(null)).toEqual([]);
+  });
+
+  it("keeps step 1 open for the two fields the prospect patient waits for", () => {
+    const strict = { birthDate: "required", legalSex: "required", phone: "required" };
+    expect(withPatientDataPending({}, strict, true)).toEqual({ birthDate: "required", legalSex: "required" });
+    expect(withPatientDataPending({}, strict, false)).toEqual({});
+    expect(withPatientDataPending({ legalSex: "own" }, strict, true)).toEqual({ legalSex: "own", birthDate: "required" });
   });
 });
 
