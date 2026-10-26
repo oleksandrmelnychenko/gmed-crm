@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
@@ -64,6 +65,32 @@ export function choiceOnlyByGuardian(request: Pick<LeadRequest, "access_kind" | 
  * an empty or partial "choice" is no consent, so "save" waits for them. A parent of a minor
  * chooses for the child; the child's form names the parent who chose.
  */
+/** The sent state of the options (owner 2026-10-26). */
+function sentConsentText(lang: string): { note: string; withdraw: string; withdrawHint: string } {
+  switch (lang) {
+    case "de": return {
+      note: "Ihre Anfrage ist gesendet: Änderungen nur über Ihren Kontakt bei GMED.",
+      withdraw: "Einwilligung widerrufen",
+      withdrawHint: "Entfernen Sie den Haken bei dem, was Sie widerrufen. Der Widerruf gilt für die Zukunft.",
+    };
+    case "uk": return {
+      note: "Заявку надіслано: змінити вибір можна лише через ваш контакт у GMED.",
+      withdraw: "Відкликати згоду",
+      withdrawHint: "Зніміть позначку з того, що відкликаєте. Відкликання діє на майбутнє.",
+    };
+    case "en": return {
+      note: "Your request has been sent: changes only through your contact at GMED.",
+      withdraw: "Withdraw consent",
+      withdrawHint: "Untick what you withdraw. The withdrawal applies for the future.",
+    };
+    default: return {
+      note: "Заявка отправлена: изменить выбор можно только через вашего контакта в GMED.",
+      withdraw: "Отозвать согласие",
+      withdrawHint: "Снимите отметку с того, что отзываете. Отзыв действует на будущее.",
+    };
+  }
+}
+
 export function ConsentFormChoicesSection({
   request,
   lang,
@@ -98,6 +125,10 @@ export function ConsentFormChoicesSection({
   }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // A sent request is read-only (owner 2026-10-26): the options are locked; only a
+  // withdrawal stays open (DSGVO Art. 7 (3)), behind its own button.
+  const sent = Boolean(request.submitted_at);
+  const [withdrawing, setWithdrawing] = useState(false);
   const ownMinor = choiceOnlyByGuardian(request);
   const namedRecipients = savedDisclosureAllowed(request);
   const version = form?.version;
@@ -163,9 +194,9 @@ export function ConsentFormChoicesSection({
     <div className="space-y-1" data-testid="lead-request-consent-recipients">
       <p className="text-sm">
         <span data-testid="disclosure-saved-status">{text.disclosureLabel}: {disclosureAnswer}</span>
-        <span aria-hidden="true" className="text-muted-foreground"> · </span>
+        {sent ? null : <span aria-hidden="true" className="text-muted-foreground"> · </span>}
         {/* Inside the cabinet the step opens in place (the choices here are saved first), not by a page load. */}
-        <a
+        {sent ? null : <a
           className="font-medium text-[var(--brand)] underline underline-offset-4"
           href={trustedPersonsPath(request.lead_id)}
           aria-label={personsText.edit}
@@ -177,7 +208,7 @@ export function ConsentFormChoicesSection({
           }}
         >
           {text.disclosureChange}
-        </a>
+        </a>}
       </p>
       {!request.disclosure && form.choices?.named_recipients ? <p className="text-xs text-muted-foreground">{personsText.legacy}</p> : null}
     </div>
@@ -192,6 +223,8 @@ export function ConsentFormChoicesSection({
         aria-required={CONSENT_FORM_CORE.includes(key) || undefined}
         className={cn(checkboxClass, "mt-0.5")}
         checked={draft[key]}
+        // After the send: locked; while withdrawing only a saved tick can be taken back.
+        disabled={sent && (!withdrawing || form.choices?.[key] !== true)}
         data-consent-option={key}
         onChange={(event) => {
           const checked = event.currentTarget.checked;
@@ -225,6 +258,17 @@ export function ConsentFormChoicesSection({
             <div className="grid gap-2 pl-7 sm:grid-cols-2">{CONSENT_FORM_CHANNELS.map(option)}</div>
             <p className="pl-7 text-xs text-muted-foreground">{text.channelsRisk}</p>
           </fieldset>
+          {sent ? (
+            <div className="flex flex-wrap items-center gap-3" data-testid="lead-request-consent-form-sent">
+              <p className="text-xs text-muted-foreground">{sentConsentText(lang).note}</p>
+              {withdrawing ? null : (
+                <Button type="button" variant="outline" size="sm" className="h-8" data-testid="lead-request-consent-form-withdraw" onClick={() => setWithdrawing(true)}>
+                  {sentConsentText(lang).withdraw}
+                </Button>
+              )}
+              {withdrawing ? <p className="basis-full text-xs text-muted-foreground">{sentConsentText(lang).withdrawHint}</p> : null}
+            </div>
+          ) : null}
           {!coreTicked ? (
             <p className="text-xs text-muted-foreground" data-testid="lead-request-consent-form-core-hint">
               {text.coreHint}
