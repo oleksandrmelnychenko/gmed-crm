@@ -285,7 +285,12 @@ async fn staff_change_citizenships(
 ) -> (StatusCode, Value) {
     sqlx::query("UPDATE leads SET citizenships = $2 WHERE id = $1")
         .bind(lead)
-        .bind(citizenships.iter().map(|code| code.to_string()).collect::<Vec<_>>())
+        .bind(
+            citizenships
+                .iter()
+                .map(|code| code.to_string())
+                .collect::<Vec<_>>(),
+        )
         .execute(&app.suite.pool)
         .await
         .unwrap();
@@ -2902,12 +2907,6 @@ async fn purging_a_lead_clears_the_portal_intake() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    sqlx::query("UPDATE leads SET portal_submitted_at = $2 WHERE id = $1")
-        .bind(lead_id)
-        .bind(sent_at)
-        .execute(pool)
-        .await
-        .unwrap();
 
     let (status, choices) = choose(
         router,
@@ -2918,6 +2917,12 @@ async fn purging_a_lead_clears_the_portal_intake() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{choices}");
+    sqlx::query("UPDATE leads SET portal_submitted_at = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(sent_at)
+        .execute(pool)
+        .await
+        .unwrap();
     let (status, body) = json_request(
         router,
         "POST",
@@ -3368,8 +3373,14 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
 
     // The sent form is read-only (owner 2026-10-26); the payer edits below are
     // of a draft again.
-    let (status, body) =
-        json_request(router, "POST", &payer, &patient, Some(company(agreed.clone()))).await;
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(company(agreed.clone())),
+    )
+    .await;
     assert_sent_lock(status, &body);
     sqlx::query("UPDATE leads SET portal_submitted_at = NULL WHERE id = $1")
         .bind(lead_id)
@@ -6321,7 +6332,14 @@ async fn sending_the_request_also_sends_follow_up_blocks_that_are_complete() {
     assert!(body["follow_up"]["answered_at"].is_null(), "{body}");
 
     // After the send the follow-up goes with its own send (owner 2026-10-26).
-    let (status, body) = json_request(router, "POST", &format!("{request}/follow-up/submit"), &patient, None).await;
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/follow-up/submit"),
+        &patient,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["follow_up"]["answered_at"].is_string(), "{body}");
     let (status, answered): (String, bool) = sqlx::query_as(
@@ -6343,7 +6361,14 @@ async fn sending_the_request_also_sends_follow_up_blocks_that_are_complete() {
     assert_eq!(events, 1);
 
     // Sent once more: recorded already, nothing new.
-    let (status, body) = json_request(router, "POST", &format!("{request}/follow-up/submit"), &patient, None).await;
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/follow-up/submit"),
+        &patient,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let events: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM lead_risk_events WHERE lead_id = $1 AND kind = 'follow_up_answered'",
@@ -7371,10 +7396,16 @@ async fn a_sent_request_is_read_only_but_takes_added_documents_and_withdrawals()
     // answers 409 `request_already_sent` and keeps the stored answer.
     for (part, body) in [
         ("personal-data", json!({ "city": "Bonn" })),
-        ("payer", json!({ "payer_kind": "self", "acts_on_own_account": false })),
+        (
+            "payer",
+            json!({ "payer_kind": "self", "acts_on_own_account": false }),
+        ),
         ("billing", json!({ "payment_method": "card" })),
         ("identification", json!({ "birth_place": "Lviv" })),
-        ("identification", json!({ "request_reason": "Etwas anderes" })),
+        (
+            "identification",
+            json!({ "request_reason": "Etwas anderes" }),
+        ),
         (
             "representation",
             json!({ "has_representative": true, "under_guardianship": false }),
@@ -7428,8 +7459,10 @@ async fn a_sent_request_is_read_only_but_takes_added_documents_and_withdrawals()
         "POST",
         &format!("{request}/trusted-persons"),
         &patient,
-        Some(json!({ "persons": [], "allow_disclosure": false, "consent_given": false,
-            "version": "2026-10-14", "language": "de" })),
+        Some(
+            json!({ "persons": [], "allow_disclosure": false, "consent_given": false,
+            "version": "2026-10-14", "language": "de" }),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -7475,7 +7508,9 @@ async fn a_sent_request_is_read_only_but_takes_added_documents_and_withdrawals()
     let uploads = intake["uploads"].as_array().unwrap();
     assert_eq!(uploads.len(), 2, "{intake}");
     assert!(
-        uploads.iter().all(|upload| upload["added_after_submit"] == true),
+        uploads
+            .iter()
+            .all(|upload| upload["added_after_submit"] == true),
         "{intake}"
     );
     assert_eq!(intake["changed_since_submit"], false, "{intake}");
@@ -8414,8 +8449,11 @@ async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_sta
         router,
         lead,
         &patient,
-        confirmed_disclosure(json!([{ "name": "Different Named", "relation": "spouse",
-            "phone": "+49 30 5550103", "birth_date": "1980-01-01", "scope_codes": ["medical"] }]), true),
+        confirmed_disclosure(
+            json!([{ "name": "Different Named", "relation": "spouse",
+            "phone": "+49 30 5550103", "birth_date": "1980-01-01", "scope_codes": ["medical"] }]),
+            true,
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
@@ -8537,14 +8575,34 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
     // A person named since 2026-10-26 (owner): the phone number they call
     // from, and the date of birth unless an institution.
     for (person, field) in [
-        (json!({ "name":"Max","relation":"friend","birth_date":"1970-05-06","scope_codes":["all"] }), "phone"),
-        (json!({ "name":"Max","relation":"friend","phone":"12-34","birth_date":"1970-05-06","scope_codes":["all"] }), "phone"),
-        (json!({ "name":"Max","relation":"friend","phone":"+49 30 5550104","scope_codes":["all"] }), "birth_date"),
-        (json!({ "name":"Max","relation":"friend","phone":"+49 30 5550104","birth_date":"2999-01-01","scope_codes":["all"] }), "birth_date"),
-        (json!({ "name":"Praxis","relation":"family_doctor","scope_codes":["medical"] }), "phone"),
+        (
+            json!({ "name":"Max","relation":"friend","birth_date":"1970-05-06","scope_codes":["all"] }),
+            "phone",
+        ),
+        (
+            json!({ "name":"Max","relation":"friend","phone":"12-34","birth_date":"1970-05-06","scope_codes":["all"] }),
+            "phone",
+        ),
+        (
+            json!({ "name":"Max","relation":"friend","phone":"+49 30 5550104","scope_codes":["all"] }),
+            "birth_date",
+        ),
+        (
+            json!({ "name":"Max","relation":"friend","phone":"+49 30 5550104","birth_date":"2999-01-01","scope_codes":["all"] }),
+            "birth_date",
+        ),
+        (
+            json!({ "name":"Praxis","relation":"family_doctor","scope_codes":["medical"] }),
+            "phone",
+        ),
     ] {
-        let (status, body) =
-            save_disclosure(router, lead, &patient, confirmed_disclosure(json!([person]), true)).await;
+        let (status, body) = save_disclosure(
+            router,
+            lead,
+            &patient,
+            confirmed_disclosure(json!([person]), true),
+        )
+        .await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
         assert_eq!(body["code"], "consent_recipients_invalid", "{body}");
         assert_eq!(body["field"], field, "{body}");
@@ -8688,8 +8746,13 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
         .execute(pool)
         .await
         .unwrap();
-    let (status, kept) =
-        save_disclosure(router, lead, &patient, confirmed_disclosure(legacy.clone(), true)).await;
+    let (status, kept) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(legacy.clone(), true),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{kept}");
     assert_eq!(kept["trusted_persons"], legacy, "{kept}");
     let mut edited = legacy.clone();

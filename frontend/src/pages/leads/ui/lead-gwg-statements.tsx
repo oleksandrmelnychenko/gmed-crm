@@ -418,7 +418,7 @@ function RepresentationGroup({
 }
 
 /** One row of sections 7–8: the answer, what the lead added to it, amber when staff must look at it. */
-function BillingStatementRow({ statement, className }: { statement: BillingStatement; className?: string }) {
+function BillingStatementRow({ statement, className, source }: { statement: BillingStatement; className?: string; source?: ReactNode }) {
   return (
     <Statement
       label={statement.label}
@@ -432,6 +432,7 @@ function BillingStatementRow({ statement, className }: { statement: BillingState
             {statement.value}
           </span>
           {statement.details ? <span className="mt-0.5 block whitespace-pre-line">{statement.details}</span> : null}
+          {source ? <span className="mt-1.5 flex flex-wrap items-center gap-1.5">{source}</span> : null}
         </>
       ) : null}
     </Statement>
@@ -508,16 +509,18 @@ function BillingGroup({
             <PatientFieldBadge marker={{ at: updatedAt, access_kind: null }} tx={tx} />
           </span>
         ) : null}
-        {billing.recipient_updated_at ? (
-          <span className="inline-flex max-w-full flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="lead-gwg-recipient-updated">
-            {tx("Получатель счёта:", "Rechnungsempfänger:")}
-            <PatientFieldBadge marker={{ at: billing.recipient_updated_at, access_kind: null }} tx={tx} />
-          </span>
-        ) : null}
       </div>
       <dl className={cn("grid gap-x-4 gap-y-3", card ? STATEMENT_CARD_COLUMNS : STATEMENT_COLUMNS)}>
         {statements.invoice.map((statement) => (
-          <BillingStatementRow key={statement.key} statement={statement} />
+          <BillingStatementRow
+            key={statement.key}
+            statement={statement}
+            source={statement.key === "invoice_recipient" && billing.recipient_updated_at ? (
+              <span className="inline-flex max-w-full" data-testid="lead-gwg-recipient-updated">
+                <PatientFieldBadge marker={{ at: billing.recipient_updated_at, access_kind: null }} tx={tx} />
+              </span>
+            ) : undefined}
+          />
         ))}
       </dl>
       {statements.byPayer ? (

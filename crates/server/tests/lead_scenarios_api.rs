@@ -984,36 +984,25 @@ async fn scenario_both_parents_edit_the_same_request() {
         .await;
     }
 
-    // The mother sends; the father changes his phone afterwards: both see
-    // "send again". He sends himself, after his own request consent.
+    // The mother sends; afterwards the request is read-only for both parents
+    // (owner 2026-10-26): the father's change is refused, nothing to send again.
     submit(&app, &request, &anna).await;
-    app.ok(
-        StatusCode::OK,
-        "POST",
-        &format!("{base}/representatives/{father}"),
-        &ben,
-        Some(json!({ "phone": "+49 30 999999" })),
-    )
-    .await;
-    for login in [&anna, &ben] {
-        assert_eq!(app.cabinet(lead, login).await["changed_since_submit"], true);
-    }
     let (code, refused) = app
         .call(
             "POST",
-            &format!("{base}/submit"),
+            &format!("{base}/representatives/{father}"),
             &ben,
-            Some(json!({ "declared_correct": true })),
+            Some(json!({ "phone": "+49 30 999999" })),
         )
         .await;
-    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
-    assert_eq!(refused["code"], "inquiry_consent_required", "{refused}");
-    app.consent(lead, &ben, "lead_inquiry_processing").await;
-    submit(&app, &request, &ben).await;
-    assert_eq!(
-        app.cabinet(lead, &anna).await["changed_since_submit"],
-        false
-    );
+    assert_eq!(code, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "request_already_sent", "{refused}");
+    for login in [&anna, &ben] {
+        assert_eq!(
+            app.cabinet(lead, login).await["changed_since_submit"],
+            false
+        );
+    }
 
     // Staff upload another scan of the father's identity document in the
     // wizard after sending (the parents' own scan is on file, the same bytes
@@ -1080,7 +1069,8 @@ async fn scenario_the_paying_parent_answers_the_payment_method() {
     assert!(sent["submitted_at"].is_string(), "{sent}");
     assert_eq!(sent["changed_since_submit"], false, "{sent}");
 
-    // The father answers it in his own cabinet and sends again.
+    // The father answers it in his own cabinet after the send: his own part
+    // stays open and goes to GMED with the save (owner 2026-10-26).
     app.consent(lead, &ben, "lead_inquiry_processing").await;
     let answered = app
         .ok(
@@ -1096,7 +1086,7 @@ async fn scenario_the_paying_parent_answers_the_payment_method() {
         )
         .await;
     assert_eq!(missing(&answered), Vec::<String>::new(), "{answered}");
-    assert_eq!(answered["changed_since_submit"], true, "{answered}");
+    assert_eq!(answered["changed_since_submit"], false, "{answered}");
     // The mother's open cabinet is told (metadata only) and reads it again.
     let targets: Vec<Uuid> = sqlx::query_scalar(
         "SELECT target_user_ids FROM realtime_events
@@ -1110,7 +1100,7 @@ async fn scenario_the_paying_parent_answers_the_payment_method() {
     .unwrap();
     assert!(targets.contains(&request.mother_login), "{targets:?}");
     let hers = app.cabinet(lead, &anna).await;
-    assert_eq!(hers["changed_since_submit"], true, "{hers}");
+    assert_eq!(hers["changed_since_submit"], false, "{hers}");
     assert_eq!(hers["billing"]["payment_method"], Value::Null, "{hers}");
 
     let sent = submit(&app, &request, &ben).await;

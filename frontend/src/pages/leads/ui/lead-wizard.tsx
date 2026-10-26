@@ -9848,10 +9848,11 @@ ${serviceCommentLines.join("\n")}`
                   title={(
                     // One row: the check and whether it is required (owner 2026-10-19: more compact).
                     <span className="flex flex-wrap items-center gap-2" data-testid="lead-wizard-enhanced-check-status">
-                      <StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>{enhancedCheckTitle(tx)}</StatusChip>
-                      <span className={cn("text-xs font-medium", amlRequired ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground")}>
+                      <span className="text-sm font-semibold text-foreground">{enhancedCheckTitle(tx)}</span>
+                      <StatusChip tone={amlRequired ? "error" : "info"} className="whitespace-normal">
+                        <ShieldCheck aria-hidden="true" />
                         {enhancedCheckRequirementLabel(amlRequired, tx)}
-                      </span>
+                      </StatusChip>
                     </span>
                   )}
                   accessory={(
@@ -10042,30 +10043,16 @@ ${serviceCommentLines.join("\n")}`
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={privacyConsentGiven} disabled={isBusy || cabinetConsents.privacy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Согласие на обработку запроса получено на бумаге", "Einwilligung zur Bearbeitung der Anfrage auf Papier erhalten")} />
                   <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={healthcareConsentGiven} disabled={isBusy || cabinetConsents.healthcare} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
                   {cabinetConsents.privacy || cabinetConsents.healthcare ? (
-                    <p data-testid="cabinet-consents-note" className="flex items-start gap-2 pt-1 text-xs leading-5 text-muted-foreground">
+                    <StatusChip tone="warning" className="w-full items-start whitespace-normal rounded-xl px-3 py-2" data-testid="cabinet-consents-note">
                       <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                      {cabinetConsents.privacy && cabinetConsents.healthcare
+                      <span className="min-w-0 leading-5">{cabinetConsents.privacy && cabinetConsents.healthcare
                         ? tx("Оба согласия даны в кабинете — отдельная отметка не нужна.", "Beide Einwilligungen wurden im Kundenkabinett erteilt – keine gesonderte Bestätigung nötig.")
                         : cabinetConsents.privacy
                           ? tx("Согласие на обработку запроса дано в кабинете. Согласие на медицинские данные отметьте, только если получили его иначе (например, на бумаге).", "Die Einwilligung zur Bearbeitung der Anfrage liegt aus dem Kundenkabinett vor. Die Einwilligung zu Gesundheitsdaten nur bestätigen, wenn sie anders (z. B. auf Papier) vorliegt.")
-                          : tx("Согласие на медицинские данные дано в кабинете. Согласие на обработку запроса отметьте, только если получили его на бумаге.", "Die Einwilligung zu Gesundheitsdaten liegt aus dem Kundenkabinett vor. Die Einwilligung zur Bearbeitung der Anfrage nur bestätigen, wenn sie auf Papier vorliegt.")}
-                    </p>
+                          : tx("Согласие на медицинские данные дано в кабинете. Согласие на обработку запроса отметьте, только если получили его на бумаге.", "Die Einwilligung zu Gesundheitsdaten liegt aus dem Kundenkabinett vor. Die Einwilligung zur Bearbeitung der Anfrage nur bestätigen, wenn sie auf Papier vorliegt.")}</span>
+                    </StatusChip>
                   ) : null}
                 </div>
-                {/* The form's boxes (transfer, communication channels) are ticked only by the
-                    person's own choice in the cabinet (2026-10-12), never preset here. */}
-                <p data-testid="privacy-consents-own-choice-note" className="flex items-start gap-2 rounded-lg border border-border/70 bg-muted/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                  <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                  <span>{isMinor(draft.birthDate, new Date())
-                    ? tx(
-                      "Для несовершеннолетнего форма «Согласие (ребёнок)»: заявляют и подписывают родители или опекун, данные — ребёнка. Варианты согласия отмечает родитель или опекун в кабинете (блок «Согласие на передачу данных»); его выбор сохраняется в системе, и подписать форму электронно должен он. Без выбора форма печатается с пустыми полями для бумажной подписи.",
-                      "Für Minderjährige die „Einverständniserklärung (Kind)“: Die Sorgeberechtigten bzw. der Vormund erklären und unterschreiben, betroffen sind die Daten des Kindes. Die Optionen kreuzt ein Elternteil bzw. der Vormund im Kundenkabinett an (Block „Einverständniserklärung zur Datenübermittlung“); die Auswahl wird im System dokumentiert, und diese Person muss elektronisch unterschreiben. Ohne Auswahl wird es mit leeren Kästchen für die Unterschrift auf Papier gedruckt.",
-                    )
-                    : tx(
-                      "Варианты согласия в форме (передача данных, каналы связи) отмечает только сам клиент — в кабинете, блок «Согласие на передачу данных». Без его выбора форма печатается с пустыми полями: клиент отмечает их на бумаге.",
-                      "Die Optionen im Formular (Datenübermittlung, Kommunikationswege) kreuzt nur der Kunde selbst an – im Kundenkabinett, Block „Einverständniserklärung zur Datenübermittlung“. Ohne seine Auswahl wird das Formular mit leeren Kästchen gedruckt, die er auf Papier ankreuzt.",
-                    )}</span>
-                </p>
                 <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3 sm:p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">

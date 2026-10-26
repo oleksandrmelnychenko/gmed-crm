@@ -2713,6 +2713,12 @@ async fn issuing_a_paying_parent_cabinet_login_revokes_an_older_payer_link() {
     let mut payer = viktor();
     payer["email"] = json!(email);
     payer["relationship_kind"] = json!("parent");
+    // Named again before the send (the sent form is read-only, owner 2026-10-26).
+    sqlx::query("UPDATE leads SET portal_submitted_at = NULL WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
     name_payer(&app, lead_id, &patient, payer).await;
     submit_request(&app, lead_id).await;
     let (token, _) = send_link(&app, lead_id, json!({})).await;
