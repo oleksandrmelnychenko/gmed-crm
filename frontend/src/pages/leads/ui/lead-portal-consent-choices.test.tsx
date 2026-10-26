@@ -26,6 +26,21 @@ describe("portal consent facts in the staff wizard", () => {
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={intake} tx={de} />)).toContain("Freund/in / Bekannte/r");
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={{ ...intake, identification_hidden: true }} tx={tx} />)).toBe("");
   });
+  it("shows the date of birth and the phone a trusted person calls from, so staff can check a caller (owner 2026-10-26)", () => {
+    const persons = normalizeConsentRecipients([
+      { name: "Olga Muster", relation: "spouse", phone: " +49 151 000000 ", birth_date: "1975-04-03", scope_codes: ["all"] },
+      { name: "Praxis Nord", relation: "clinic", phone: "+49 40 1234567", birth_date: "not a date", scope_codes: ["medical"] },
+      { name: "Oma Legacy", relation: "relative", contact: "oma@example.test", scope_codes: ["medical"] },
+    ]);
+    expect(persons[0]).toMatchObject({ phone: "+49 151 000000", birth_date: "1975-04-03" });
+    expect(persons[1].birth_date).toBeUndefined();
+    const html = renderToStaticMarkup(<PortalConsentChoiceView intake={state({ trusted_persons: persons })} tx={de} />);
+    expect(html).toContain("geb. 03.04.1975");
+    expect(html).toContain("Tel. +49 151 000000");
+    expect(html).toContain("Tel. +49 40 1234567");
+    expect(html).toContain("oma@example.test");
+    expect(renderToStaticMarkup(<PortalConsentChoiceView intake={state({ trusted_persons: persons })} tx={tx} />)).toContain("род. 03.04.1975");
+  });
   it("shows medical consent independently of files, with grant and revocation dates", () => {
     const intake = state({ uploads: [], consents: [{ id: "health", type: "health_data_processing", given_at: "2026-10-11T09:00:00Z", revoked_at: "2026-10-12T09:00:00Z", version: "v1", access_kind: "guardian" }] });
     const html = renderToStaticMarkup(<PortalHealthConsentLine intake={intake} tx={tx} />);

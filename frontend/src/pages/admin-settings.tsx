@@ -156,6 +156,8 @@ const TOKEN_SETTING_FIELDS: SettingFieldMeta[] = [
   { key: "refresh_token_days", labelKey: "settings_refresh_token_days", inputType: "number", min: 1 },
   { key: "max_sessions_per_user", labelKey: "settings_max_sessions", inputType: "number", min: 1 },
   { key: "session_idle_days", labelKey: "settings_idle_days", inputType: "number", min: 1 },
+  // Sign-out after minutes without input (15–720, 0 = off); changed by the CEO.
+  { key: "idle_logout_minutes", labelKey: "settings_idle_logout_minutes", inputType: "number", min: 0 },
   { key: "password_expire_days", labelKey: "settings_password_expire_days", inputType: "number", min: 0 },
 ];
 

@@ -57,9 +57,12 @@ import {
   FileText,
   HeartPulse,
   History,
+  Info,
   LoaderCircle,
+  Mail,
   MessageSquareText,
   Pencil,
+  Phone,
   Plus,
   ReceiptText,
   RefreshCw,
@@ -267,7 +270,8 @@ import {
   orderClientSignatureState,
   shouldReloadDocumentsAfterGenerationError,
   signatureNeedsProof,
-  versionsSameForm,
+  isMedicalUpload,
+  isReplaceableFormVersion,
 } from "../model/wizard-document-signing";
 import {
   daysUntilRetentionDeadline,
@@ -362,6 +366,7 @@ import { LeadIdentificationStatus } from "./lead-identification-status";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
 import {
+  legalSexOptionElements,
   PatientDataPendingNotice,
   PatientUpdatedBanner,
   PortalInquiryConsentLine,
@@ -394,6 +399,7 @@ import {
   patientDataPending,
   patientDataPendingFields,
   relaxMasterErrors,
+  withPatientDataPending,
 } from "../model/lead-portal-intake";
 import { LeadSigningPackagePanel } from "./lead-signing-package-panel";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
@@ -2372,6 +2378,8 @@ function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
     return "privacy_consents";
   }
 
+  // Guessing by the file name is for staff scans of the forms only.
+  if (isMedicalUpload(item)) return null;
   const classification = [item.art, item.category, item.auto_name, item.original_filename]
     .filter(Boolean)
     .join(" ")
@@ -3119,9 +3127,9 @@ function Field({
     <>
       <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         {htmlFor ? (
-          <label htmlFor={htmlFor} className={cn(tokens.text.label, "block")}>{caption}</label>
+          <label htmlFor={htmlFor} data-wizard-field-label className={cn(tokens.text.label, "block font-mono")}>{caption}</label>
         ) : (
-          <span className={cn(tokens.text.label, "block")}>{caption}</span>
+          <span data-wizard-field-label className={cn(tokens.text.label, "block font-mono")}>{caption}</span>
         )}
         <span className="ml-auto flex min-w-0 justify-end">
           <Step1PortalFieldNote errorId={errorId} portalField={portalField} />
@@ -3292,7 +3300,7 @@ function WizardDocumentRows({
             ) : complianceKind && !signed && onSign ? (
               <Button
                 type="button"
-                variant="outline"
+                variant="default"
                 size="xs"
                 aria-busy={busy === `sign-${document.id}`}
                 disabled={disabled}
@@ -3720,6 +3728,9 @@ export function LeadWizard({
   const currentAutosaveSignatureRef = useRef("");
   const lastSavedAutosaveSignatureRef = useRef("");
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // Saves the lead's pending autosave now (not after the debounce) and waits
+  // for the save under way; set below once `persistSnapshot` exists.
+  const flushLeadAutosaveRef = useRef<() => Promise<void>>(async () => {});
   const creationKeyRef = useRef(creationKey ?? crypto.randomUUID());
   const clinicalBaselineRef = useRef<PatientClinicalProfile | null>(null);
   const [clinicalAccessDenied, setClinicalAccessDenied] = useState(false);
@@ -5213,9 +5224,12 @@ export function LeadWizard({
   // field empty that the stepper counts while the server's release list does
   // not (QA 2026-10-24, A-4: "Данные клиента — не завершено" with no marker
   // in the step); the step names these fields itself.
+  // In «Заполнит пациент» mode date of birth and legal sex are not required to
+  // save the lead, but the step stays open without them (owner 2026-10-26):
+  // the medical part waits for both, so the step names them too.
   const masterOpenIssues = useMemo(
-    () => (leadId ? masterValidationIssues(masterErrors, tx) : []),
-    [leadId, masterErrors, tx],
+    () => (leadId ? masterValidationIssues(withPatientDataPending(masterErrors, strictMasterErrors, waitingForPatientData), tx) : []),
+    [leadId, masterErrors, strictMasterErrors, tx, waitingForPatientData],
   );
   const orderIssues = useMemo(() => orderValidationIssues(draft, tx), [draft, tx]);
   const validationIssues = useMemo<ValidationIssue[]>(() => {
@@ -5263,6 +5277,10 @@ export function LeadWizard({
     if (!options && prospectPatientIdRef.current && caseIdRef.current) {
       return { patientId: prospectPatientIdRef.current, caseId: caseIdRef.current };
     }
+    // The prospect patient is made from the stored lead: a legal sex or birth
+    // date just chosen (the step-2 notice, step 1) reaches the server first
+    // (owner 2026-10-26).
+    await flushLeadAutosaveRef.current();
     const response = await createLeadProspect(leadId, {
       attach_patient_id: existingPatient?.id ?? options?.attachPatientId,
       force_create: existingPatient ? false : options?.forceCreate,
@@ -5527,6 +5545,8 @@ export function LeadWizard({
 
     const run = async () => {
       if (!force && currentAutosaveSignatureRef.current !== signature) return;
+      // A flush (the step-2 notice, a prospect patient) saved it already.
+      if (!force && lastSavedAutosaveSignatureRef.current === signature) return;
 
       let targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
       let stage = "lead-create";
@@ -5768,6 +5788,22 @@ export function LeadWizard({
     open,
     persistSnapshot,
   ]);
+
+  const autosaveSnapshotRef = useRef<AutosaveSnapshot | null>(autosaveSnapshot);
+  useEffect(() => {
+    autosaveSnapshotRef.current = autosaveSnapshot;
+  }, [autosaveSnapshot]);
+  useEffect(() => {
+    flushLeadAutosaveRef.current = async () => {
+      await saveQueueRef.current;
+      const snapshot = autosaveSnapshotRef.current;
+      if (!snapshot || !leadId || leadConverted) return;
+      const signature = autosaveSnapshotSignature(snapshot);
+      if (signature === lastSavedAutosaveSignatureRef.current) return;
+      currentAutosaveSignatureRef.current = signature;
+      await persistSnapshot(snapshot, true, signature);
+    };
+  }, [leadConverted, leadId, persistSnapshot]);
 
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setError("");
@@ -6874,7 +6910,7 @@ export function LeadWizard({
         order_id: order?.id,
         replace_document_id: sortWizardDocumentsNewestFirst(
           wizardDocuments[templateId].filter((document) => (
-            versionsSameForm(document.generated_template_id, generatedTemplateId)
+            isReplaceableFormVersion(document, generatedTemplateId)
           )),
         ).find((document) => document.is_latest_version)?.id,
         language: "de",
@@ -7848,8 +7884,19 @@ ${serviceCommentLines.join("\n")}`
       );
       const card = form?.closest("details");
       if (card) card.open = true;
-      form?.scrollIntoView({ block: "center" });
-      form?.querySelector<HTMLElement>("select, input")?.focus();
+      const panel = stepPanelRef.current;
+      if (!form || !panel?.contains(form)) return;
+      // Scroll only the step body. Scrolling/focusing through the modal's
+      // ancestors can push its header and footer out of their fixed positions.
+      const field = form.querySelector<HTMLElement>("select, input");
+      const target = field ?? form;
+      const panelRect = panel.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      panel.scrollTo({
+        top: panel.scrollTop + targetRect.top - panelRect.top
+          - Math.max(0, (panel.clientHeight - targetRect.height) / 2),
+      });
+      field?.focus({ preventScroll: true });
     }));
   }
 
@@ -7964,7 +8011,7 @@ ${serviceCommentLines.join("\n")}`
       })),
   ] : [];
   const patientDocumentReview = repeatPatientId ? <>
-    {patientReview.error ? <Banner tone="error"><p>{tx("Не удалось проверить документы пациента", "Patientendokumente konnten nicht geprüft werden")}: {patientReview.error}</p><Button type="button" variant="outline" size="sm" onClick={() => void patientReview.refresh().catch(() => undefined)}>{tx("Повторить", "Erneut versuchen")}</Button></Banner> : null}
+    {patientReview.error ? <Banner tone="error"><p>{tx("Не удалось проверить документы пациента", "Patientendokumente konnten nicht geprüft werden")}: {patientReview.error}</p><Button type="button" variant="default" size="sm" onClick={() => void patientReview.refresh().catch(() => undefined)}>{tx("Повторить", "Erneut versuchen")}</Button></Banner> : null}
     {patientReview.loading ? <p role="status" className="text-xs text-muted-foreground">{tx("Проверка документов пациента…", "Patientendokumente werden geprüft…")}</p> : null}
     {patientReview.readiness ? <OrderPatientDocumentReview readiness={patientReview.readiness} documents={[...patientReview.documents, ...documents]} dateTo={draft?.programDateTo || null} lang={lang} busy={isBusy || patientReview.loading} requestRows={requestReviewRows}
       onRefresh={() => void Promise.all([patientReview.refresh(), refreshLeadState()]).catch(showWizardError)}
@@ -7978,7 +8025,7 @@ ${serviceCommentLines.join("\n")}`
     {periodWarningBanner ? <div className="mb-3">{periodWarningBanner}</div> : null}
     <OrderExistingContractsTable contracts={reviewContracts} selectedId={contract?.id ?? null} lang={lang} busy={isBusy || patientReview.loading}
       onSelect={id => { if (reviewContracts.some(item => item.id === id)) setDraft(current => current ? { ...current, frameworkContractId: id } : current); }} />
-    {inheritedContract ? <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "" } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
+    {inheritedContract ? <Button type="button" size="sm" variant="default" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "" } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
   </Section> : null;
   // "Кто платит" in the documents step; its own interest and source of funds
   // are edited in the AML form (owner 2026-10-19). With `amlPartOnly` only
@@ -8101,7 +8148,9 @@ ${serviceCommentLines.join("\n")}`
   const completionBlockerCount = openBlockingReasons.length
     + (!quoteAndPrepaymentReady && !(lead?.readiness.blocking_reasons ?? []).some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? 1 : 0);
   const isStepReady = (id: string) => {
-    if (id === "master_data") return Boolean(draft && Object.keys(masterErrors).length === 0);
+    // Date of birth and legal sex keep step 1 open even when the patient fills
+    // them in the portal (owner 2026-10-26): no tick while either is missing.
+    if (id === "master_data") return Boolean(draft && Object.keys(masterErrors).length === 0 && !waitingForPatientData);
     // Nothing in the medical step is required: the reason of the request is
     // optional since 2026-10-19 (owner), as in the server's readiness.
     if (id === "medical") return readiness.get("medical") ?? true;
@@ -8319,7 +8368,7 @@ ${serviceCommentLines.join("\n")}`
         overlayClassName="bg-black/40"
         showOverlay={!documentPreview}
         showCloseButton={!saveInProgress}
-        className="flex h-[94vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(96vh,68rem)] sm:w-[91vw] sm:max-w-[91vw] sm:pb-0"
+        className="flex h-[94vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-clip rounded-lg p-0 [&_dt]:font-mono [&_[data-wizard-field-label]]:font-mono sm:h-[min(96vh,68rem)] sm:w-[91vw] sm:max-w-[91vw] sm:pb-0"
       >
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
         <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-3 pr-14 sm:gap-4 sm:px-5 sm:pr-14">
@@ -8371,7 +8420,7 @@ ${serviceCommentLines.join("\n")}`
             {leadId && lead && ["not_qualified", "archived"].includes(lead.qualification_status) ? (
               <Button
                 type="button"
-                variant="ghost"
+                variant="default"
                 size="sm"
                 className="h-8"
                 disabled={loading || isBusy}
@@ -8880,11 +8929,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("legalSex", event.target.value)}
                     className={cn(selectClass, visibleMasterError("legalSex") && "border-destructive")}
                   >
-                    <option value="">{tx("Выберите", "Auswählen")}</option>
-                    <option value="female">{tx("Женский", "Weiblich")}</option>
-                    <option value="male">{tx("Мужской", "Männlich")}</option>
-                    <option value="diverse">{tx("Другой", "Divers")}</option>
-                    <option value="no_entry">{tx("Без указания", "Keine Angabe")}</option>
+                    {legalSexOptionElements(tx)}
                   </NativeComboboxSelect>
                 </Field>
                 <Field
@@ -9093,7 +9138,7 @@ ${serviceCommentLines.join("\n")}`
                       {leadId ? (
                         <Button
                           type="button"
-                          variant={amlRequired ? "destructive" : "outline"}
+                          variant="default"
                           size="sm"
                           className="h-8 shrink-0 rounded-lg"
                           disabled={isBusy}
@@ -9132,7 +9177,7 @@ ${serviceCommentLines.join("\n")}`
                 <Section
                   title={tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
                   accessory={(
-                    <Button type="button" size="sm" variant={draft.trustedContacts.some((contact) => isParentOrGuardianRelation(contact.relation)) ? "outline" : "default"} onClick={() => openNewTrustedContact(true)}>
+                    <Button type="button" size="sm" variant="default" onClick={() => openNewTrustedContact(true)}>
                       <Plus aria-hidden="true" className="size-3.5" />
                       {tx("Добавить", "Hinzufügen")}
                     </Button>
@@ -9172,7 +9217,7 @@ ${serviceCommentLines.join("\n")}`
                       // Before the lead exists: sent with its creation, so a
                       // child under guardianship can name the guardian at once.
                       <label className="block max-w-md space-y-1.5" data-testid="lead-new-custody">
-                        <span className="block text-xs font-medium text-muted-foreground">{tx("Кто представляет ребёнка", "Wer vertritt das Kind")}</span>
+                        <span data-wizard-field-label className="block font-mono text-xs font-medium text-muted-foreground">{tx("Кто представляет ребёнка", "Wer vertritt das Kind")}</span>
                         <NativeComboboxSelect
                           value={newLeadCustody}
                           className={selectClass}
@@ -9403,7 +9448,31 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 )}
               >
-                {clinicalAccessDenied ? <Banner tone="warning">{tx("У вашей роли нет доступа к медицинской карте. Медицинскую часть заполняет уполномоченный сотрудник; остальные этапы обращения доступны.", "Ihre Rolle hat keinen Zugriff auf die Patientenakte. Den medizinischen Teil bearbeitet eine berechtigte Person; die übrigen Schritte bleiben verfügbar.")}</Banner> : waitingForPatientData ? <PatientDataPendingNotice onOpenStep1={() => setStep("master_data")} tx={tx} missing={patientDataPendingFields(draft)} /> : <LeadMedicalIntakeForm
+                {clinicalAccessDenied ? <Banner tone="warning">{tx("У вашей роли нет доступа к медицинской карте. Медицинскую часть заполняет уполномоченный сотрудник; остальные этапы обращения доступны.", "Ihre Rolle hat keinen Zugriff auf die Patientenakte. Den medizinischen Teil bearbeitet eine berechtigte Person; die übrigen Schritte bleiben verfügbar.")}</Banner> : waitingForPatientData ? <PatientDataPendingNotice
+                  onOpenStep1={() => setStep("master_data")}
+                  tx={tx}
+                  missing={patientDataPendingFields(draft)}
+                  patientCanFill={step1Portal.mode === "patient"}
+                  disabled={isBusy}
+                  legalSex={draft.legalSex}
+                  onLegalSexChange={(value) => {
+                    touchMasterField("legalSex");
+                    patch("legalSex", value);
+                    // Saved at once (as on closing the wizard), so the
+                    // prospect patient finds it on the server.
+                    void save(step, false, { ...draft, legalSex: value });
+                  }}
+                  birthDate={draft.birthDate}
+                  onBirthDateChange={(value) => {
+                    patch("birthDate", value);
+                    void save(step, false, { ...draft, birthDate: value });
+                  }}
+                  onBirthDateBlur={() => touchMasterField("birthDate")}
+                  onBirthDatePickerValidation={setBirthDateEntryError}
+                  birthDateError={birthDateError}
+                  birthDateMin={EARLIEST_BIRTH_DATE}
+                  birthDateMax={appDateKey()}
+                /> : <LeadMedicalIntakeForm
                   lead={lead}
                   tx={tx}
                   lang={lang}
@@ -9432,7 +9501,10 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Медицинские документы", "Medizinische Unterlagen")}
                   accessory={hasMedicalRecords ? (
-                    <span className="inline-flex">
+                    <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                      <StatusChip tone="warning" className="whitespace-normal">
+                        {tx("PDF, JPG или PNG · до 25 МБ · можно выбрать несколько файлов", "PDF, JPG oder PNG · bis 25 MB · mehrere Dateien möglich")}
+                      </StatusChip>
                       <input
                         id="lead-file-medical"
                         type="file"
@@ -9474,9 +9546,6 @@ ${serviceCommentLines.join("\n")}`
                   </label>
                   {hasMedicalRecords ? (
                     <>
-                      <p className="text-xs text-muted-foreground">
-                        {tx("PDF, JPG или PNG · до 25 МБ · можно выбрать несколько файлов", "PDF, JPG oder PNG · bis 25 MB · mehrere Dateien möglich")}
-                      </p>
                       <WizardDocumentRows
                         documents={medicalDocuments}
                         emptyLabel={tx("Файлы не загружены", "Keine Dateien hochgeladen")}
@@ -9602,7 +9671,7 @@ ${serviceCommentLines.join("\n")}`
                           <div className="space-y-1.5 border-t border-border px-3 pb-3 pt-2.5">
                             <label
                               htmlFor={commentId}
-                              className={cn(tokens.text.label, "block")}
+                              className={cn(tokens.text.label, "block font-mono")}
                             >
                               {commentLabel}
                             </label>
@@ -9776,7 +9845,7 @@ ${serviceCommentLines.join("\n")}`
                   accessory={(
                     <Button
                       type="button"
-                      variant={amlRequired ? "default" : "outline"}
+                      variant="default"
                       size="sm"
                       className="h-8 rounded-lg"
                       disabled={isBusy}
@@ -9840,7 +9909,7 @@ ${serviceCommentLines.join("\n")}`
                     accessory={(
                       <Button
                         type="button"
-                        variant={wizardDocuments.lead_self_disclosure.length > 0 ? "outline" : "default"}
+                        variant="default"
                         size="sm"
                         className="h-8 rounded-lg"
                         disabled={isBusy || !leadRequestSent}
@@ -9861,9 +9930,10 @@ ${serviceCommentLines.join("\n")}`
                         {leadSelfDisclosureRequirementLabel(selfDisclosureRequirement, tx)}
                       </StatusChip>
                     ) : null}
-                    <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-wizard-self-disclosure-source">
-                      {leadFormSourceNote}
-                    </p>
+                    <StatusChip tone="warning" className="w-full items-start whitespace-normal rounded-xl px-3 py-2" data-testid="lead-wizard-self-disclosure-source">
+                      <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                      <span>{leadFormSourceNote}</span>
+                    </StatusChip>
                     {leadFormUnavailableHint ? (
                       <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-wizard-self-disclosure-hint">
                         <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
@@ -9892,7 +9962,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
                   accessory={isMinor(draft.birthDate, new Date()) ? undefined : (
-                    <Button type="button" variant={wizardDocuments.confidentiality_release.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
                       {busy === "generate-confidentiality_release" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {wizardDocuments.confidentiality_release.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                     </Button>
@@ -9900,7 +9970,9 @@ ${serviceCommentLines.join("\n")}`
                 >
                 {/* For a minor the child's consent form carries the release (owner decision 2026-10-12);
                     the adult form in the child's name is refused (QA 2026-10-12, A2-06). */}
-                <p className="text-xs text-muted-foreground" data-testid="lead-wizard-confidentiality-release-note">
+                <StatusChip tone="warning" className="w-full items-start whitespace-normal rounded-xl px-3 py-2" data-testid="lead-wizard-confidentiality-release-note">
+                  <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                  <span>
                   {isMinor(draft.birthDate, new Date())
                     ? tx(
                       "Для несовершеннолетнего освобождение от медицинской тайны входит в согласие для ребёнка ниже: его подписывают родители или опекун.",
@@ -9910,7 +9982,8 @@ ${serviceCommentLines.join("\n")}`
                       "Разрешение лечащим врачам и медицинским учреждениям раскрывать сведения, составляющие медицинскую тайну.",
                       "Entbindung der behandelnden Ärzte und medizinischen Einrichtungen von der Schweigepflicht.",
                     )}
-                </p>
+                  </span>
+                </StatusChip>
                 <WizardDocumentRows
                   documents={wizardDocuments.confidentiality_release}
                   complianceKind="confidentiality_release"
@@ -9938,7 +10011,7 @@ ${serviceCommentLines.join("\n")}`
                     )
                     : tx("Согласие на использование и передачу персональных и медицинских данных", "Einverständniserklärung zur Datenübermittlung")}
                   accessory={(
-                    <Button type="button" variant={wizardDocuments.privacy_consents.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
                       {busy === "generate-privacy_consents" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {wizardDocuments.privacy_consents.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                     </Button>
@@ -9957,7 +10030,8 @@ ${serviceCommentLines.join("\n")}`
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={privacyConsentGiven} disabled={isBusy || cabinetConsents.privacy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Согласие на обработку запроса получено на бумаге", "Einwilligung zur Bearbeitung der Anfrage auf Papier erhalten")} />
                   <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={healthcareConsentGiven} disabled={isBusy || cabinetConsents.healthcare} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
                   {cabinetConsents.privacy || cabinetConsents.healthcare ? (
-                    <p data-testid="cabinet-consents-note" className="pt-1 text-xs leading-5 text-muted-foreground">
+                    <p data-testid="cabinet-consents-note" className="flex items-start gap-2 pt-1 text-xs leading-5 text-muted-foreground">
+                      <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                       {cabinetConsents.privacy && cabinetConsents.healthcare
                         ? tx("Оба согласия даны в кабинете — отдельная отметка не нужна.", "Beide Einwilligungen wurden im Kundenkabinett erteilt – keine gesonderte Bestätigung nötig.")
                         : cabinetConsents.privacy
@@ -9968,8 +10042,9 @@ ${serviceCommentLines.join("\n")}`
                 </div>
                 {/* The form's boxes (transfer, communication channels) are ticked only by the
                     person's own choice in the cabinet (2026-10-12), never preset here. */}
-                <p data-testid="privacy-consents-own-choice-note" className="rounded-lg border border-border/70 bg-muted/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                  {isMinor(draft.birthDate, new Date())
+                <p data-testid="privacy-consents-own-choice-note" className="flex items-start gap-2 rounded-lg border border-border/70 bg-muted/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                  <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                  <span>{isMinor(draft.birthDate, new Date())
                     ? tx(
                       "Для несовершеннолетнего форма «Согласие (ребёнок)»: заявляют и подписывают родители или опекун, данные — ребёнка. Варианты согласия отмечает родитель или опекун в кабинете (блок «Согласие на передачу данных»); его выбор сохраняется в системе, и подписать форму электронно должен он. Без выбора форма печатается с пустыми полями для бумажной подписи.",
                       "Für Minderjährige die „Einverständniserklärung (Kind)“: Die Sorgeberechtigten bzw. der Vormund erklären und unterschreiben, betroffen sind die Daten des Kindes. Die Optionen kreuzt ein Elternteil bzw. der Vormund im Kundenkabinett an (Block „Einverständniserklärung zur Datenübermittlung“); die Auswahl wird im System dokumentiert, und diese Person muss elektronisch unterschreiben. Ohne Auswahl wird es mit leeren Kästchen für die Unterschrift auf Papier gedruckt.",
@@ -9977,19 +10052,19 @@ ${serviceCommentLines.join("\n")}`
                     : tx(
                       "Варианты согласия в форме (передача данных, каналы связи) отмечает только сам клиент — в кабинете, блок «Согласие на передачу данных». Без его выбора форма печатается с пустыми полями: клиент отмечает их на бумаге.",
                       "Die Optionen im Formular (Datenübermittlung, Kommunikationswege) kreuzt nur der Kunde selbst an – im Kundenkabinett, Block „Einverständniserklärung zur Datenübermittlung“. Ohne seine Auswahl wird das Formular mit leeren Kästchen gedruckt, die er auf Papier ankreuzt.",
-                    )}
+                    )}</span>
                 </p>
-                <div className="space-y-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3 sm:p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className={cn(tokens.text.label, "font-semibold")}>
+                        <AdminSectionTitle className="text-sm">
                           {tx("Контакты и представители", "Kontakte und Vertretung")}
-                        </span>
+                        </AdminSectionTitle>
                         <CountBadge>{draft.trustedContacts.length}</CountBadge>
                       </div>
                     </div>
-                    <Button type="button" variant="outline" size="sm" onClick={() => openNewTrustedContact()}>
+                    <Button type="button" variant="default" size="sm" onClick={() => openNewTrustedContact()}>
                       <Plus aria-hidden="true" className="size-3.5" />
                       {tx("Добавить контакт", "Kontakt hinzufügen")}
                     </Button>
@@ -10014,10 +10089,10 @@ ${serviceCommentLines.join("\n")}`
                                 </Badge>
                               ) : null}
                             </div>
-                            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-foreground">
                               {contact.birthDate ? <span>{germanDocumentDate(contact.birthDate)}</span> : null}
-                              {contact.email ? <span className="break-all">{contact.email}</span> : null}
-                              {contact.phone ? <span>{contact.phone}</span> : null}
+                              {contact.email ? <StatusChip tone="warning" className="whitespace-normal"><Mail aria-hidden="true" /><span className="min-w-0 break-all">{contact.email}</span></StatusChip> : null}
+                              {contact.phone ? <StatusChip tone="warning"><Phone aria-hidden="true" />{contact.phone}</StatusChip> : null}
                               {contact.address ? <span className="break-words">{contact.address}</span> : null}
                             </div>
                             {serverContactError?.contactId === contact.id ? (
@@ -10032,7 +10107,7 @@ ${serviceCommentLines.join("\n")}`
                               // GMED already holds; documents are regenerated and re-signed.
                               <Button
                                 type="button"
-                                variant="ghost"
+                                variant="default"
                                 size="icon-sm"
                                 title={newRequestForPersonLabel(tx)}
                                 aria-label={`${newRequestForPersonLabel(tx)}: ${contact.name}`}
@@ -10109,7 +10184,7 @@ ${serviceCommentLines.join("\n")}`
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Информационный лист о защите персональных данных", "Informationsblatt zum Datenschutz")}
                 accessory={(
-                  <Button type="button" variant={wizardDocuments.privacy_information.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
+                  <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
                     {busy === "generate-privacy_information" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                     {wizardDocuments.privacy_information.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                   </Button>
@@ -10134,7 +10209,10 @@ ${serviceCommentLines.join("\n")}`
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Документ, удостоверяющий личность", "Ausweisdokument")}
                 accessory={(
-                  <span className="inline-flex">
+                  <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                    <StatusChip tone="warning">
+                      {tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}
+                    </StatusChip>
                     <input
                       id="lead-file-identity"
                       type="file"
@@ -10152,7 +10230,7 @@ ${serviceCommentLines.join("\n")}`
                     <label
                       htmlFor="lead-file-identity"
                       className={cn(
-                        buttonVariants({ variant: wizardDocuments.identity.length > 0 ? "outline" : "default", size: "sm" }),
+                        buttonVariants({ variant: "default", size: "sm" }),
                         "h-8 rounded-lg peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
                         isBusy && "pointer-events-none opacity-50",
                       )}
@@ -10163,9 +10241,6 @@ ${serviceCommentLines.join("\n")}`
                   </span>
                 )}
               >
-                <StatusChip>
-                  {tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}
-                </StatusChip>
                 {/* Trigger flow 2026-10-07: staff enter the document data from the scan; the lead only uploads it. */}
                 {(() => {
                   // The lead's cabinet uploads are the scan too: listed by the
@@ -10582,12 +10657,22 @@ ${serviceCommentLines.join("\n")}`
                 >
                 {!inheritedContract && !lines.some(validLine) ? (
                   // Walk-through 2026-10-24: the button was disabled without a word.
-                  <p id="lead-framework-contract-needs-position" data-testid="lead-framework-contract-needs-position" className="mb-3 text-xs text-muted-foreground">
-                    {tx(
-                      "Договор создаётся после того, как в «Позиции заказа» ниже добавлена хотя бы одна услуга.",
-                      "Der Vertrag wird erstellt, sobald unter „Auftragspositionen“ unten mindestens eine Leistung erfasst ist.",
-                    )}
-                  </p>
+                  <StatusChip tone="warning" id="lead-framework-contract-needs-position" data-testid="lead-framework-contract-needs-position" className="mb-3 w-full items-start rounded-xl px-3 py-2">
+                    <CircleAlert aria-hidden="true" className="mt-0.5" />
+                    <span className="min-w-0 leading-5">
+                      {tx(
+                        "Договор создаётся после того, как в «Позиции заказа» ниже добавлена хотя бы одна услуга.",
+                        "Der Vertrag wird erstellt, sobald unter „Auftragspositionen“ unten mindestens eine Leistung erfasst ist.",
+                      )}
+                      <button
+                        type="button"
+                        className="ml-2 rounded-sm font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                        onClick={() => openValidationIssue({ key: "contract-services", step: "commercial", message: "", fieldId: ORDER_SERVICE_SELECT_ID })}
+                      >
+                        {tx("К позициям заказа", "Zu den Auftragspositionen")}
+                      </button>
+                    </span>
+                  </StatusChip>
                 ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={tx("Начало действия договора", "Vertragsbeginn")} htmlFor="lead-contract-valid-from">
@@ -10805,12 +10890,36 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Документ заказа", "Einzelauftrag")}
                   accessory={leadConverted ? null : (
-                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} aria-describedby={!lines.some(validLine) ? "lead-order-document-needs-services" : undefined} onClick={() => void generateCommercialDocument("single_order")}>
                       {busy === "generate-single_order" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.single_order.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>
                   )}
                 >
+                {!leadConverted && !lines.some(validLine) ? (
+                  <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" id="lead-order-document-needs-services" data-testid="lead-order-document-needs-services">
+                    <CircleAlert aria-hidden="true" className="mt-0.5" />
+                    <span className="min-w-0 leading-5">
+                      {lines.length > 0
+                        ? tx("Проверьте позиции заказа: нужна хотя бы одна услуга с описанием, количеством больше нуля, корректной ценой и НДС.", "Prüfen Sie die Auftragspositionen: Mindestens eine Leistung mit Beschreibung, einer Menge größer als null sowie gültigem Preis und Steuersatz ist erforderlich.")
+                        : draft.specialties.length === 0
+                          ? tx("Сначала выберите специализацию и добавьте хотя бы одну услугу в «Позиции заказа» — после этого можно создать документ заказа.", "Wählen Sie zuerst eine Fachrichtung und fügen Sie unter „Auftragspositionen“ mindestens eine Leistung hinzu. Danach kann der Einzelauftrag erstellt werden.")
+                          : tx("Сначала добавьте хотя бы одну услугу в «Позиции заказа» — после этого можно создать документ заказа.", "Fügen Sie unter „Auftragspositionen“ zuerst mindestens eine Leistung hinzu. Danach kann der Einzelauftrag erstellt werden.")}
+                      <button
+                        type="button"
+                        className="ml-2 rounded-sm font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                        onClick={() => openValidationIssue({
+                          key: "order-service",
+                          step: draft.specialties.length === 0 && lines.length === 0 ? "order" : "commercial",
+                          message: "",
+                          fieldId: draft.specialties.length === 0 && lines.length === 0 ? SERVICE_SPECIALTIES_ID : ORDER_SERVICE_SELECT_ID,
+                        })}
+                      >
+                        {draft.specialties.length === 0 && lines.length === 0 ? tx("К специализации", "Zur Fachrichtung") : tx("К позициям заказа", "Zu den Auftragspositionen")}
+                      </button>
+                    </span>
+                  </StatusChip>
+                ) : null}
                 <WizardDocumentRows
                   documents={commercialDocuments.single_order}
                   emptyLabel=""
@@ -10864,7 +10973,26 @@ ${serviceCommentLines.join("\n")}`
                             ? tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")
                             : tx("Юридическая подпись заказа ещё не подтверждена", "Rechtswirksame Auftragsunterschrift noch nicht bestätigt")}
                         />
-                        <p className={cn("text-xs", manualOnly ? "text-amber-800 dark:text-amber-300" : "text-muted-foreground")}>
+                        {needsDocument && !manualOnly && !signedPatient && !demoSignatureChecks.includes("order_signed_patient") ? (
+                          <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-order-signature-needs-document">
+                            <CircleAlert aria-hidden="true" className="mt-0.5" />
+                            <span className="min-w-0 leading-5">
+                              {tx(
+                                "Сначала создайте документ заказа. Юридическое подтверждение — завершённое электронное подписание пакета или скан подписанного экземпляра.",
+                                "Erstellen Sie zuerst den Einzelauftrag. Als rechtswirksamer Nachweis gilt die abgeschlossene elektronische Paketunterzeichnung oder der Scan des unterschriebenen Exemplars.",
+                              )}
+                              <button
+                                type="button"
+                                className="ml-2 rounded-sm font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                                onClick={() => openValidationIssue({ key: "order-document", step: "commercial", message: "", fieldId: ORDER_DOCUMENT_ID })}
+                              >
+                                {tx("К документу заказа", "Zum Einzelauftrag")}
+                              </button>
+                            </span>
+                          </StatusChip>
+                        ) : (
+                        <p className={cn("flex items-start gap-2 text-xs leading-5", manualOnly ? "text-amber-800 dark:text-amber-300" : "text-muted-foreground")}>
+                          <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                           {demoSignatureChecks.includes("order_signed_patient")
                             ? tx("Тестовая подпись зачтена для оформления на DEV.", "Testunterschrift für die Aufnahme auf DEV angerechnet.")
                             : manualOnly
@@ -10874,16 +11002,12 @@ ${serviceCommentLines.join("\n")}`
                               )
                             : signedPatient
                               ? tx("По подписанному документу заказа.", "Laut unterschriebenem Einzelauftrag.")
-                              : needsDocument
-                                ? tx(
-                                    "Сначала создайте документ заказа. Юридическое подтверждение — завершённое электронное подписание пакета или скан подписанного экземпляра.",
-                                    "Erstellen Sie zuerst den Einzelauftrag. Als rechtswirksamer Nachweis gilt die abgeschlossene elektronische Paketunterzeichnung oder der Scan des unterschriebenen Exemplars.",
-                                  )
-                                : tx(
+                              : tx(
                                     "Юридическое подтверждение — завершённое электронное подписание пакета или скан подписанного экземпляра («Подписано на бумаге»). Тестовая подпись (DEMO) подписью заказа не считается.",
                                     "Als rechtswirksamer Nachweis gilt die abgeschlossene elektronische Paketunterzeichnung oder der Scan des unterschriebenen Exemplars („Auf Papier unterschrieben“). Eine Testunterschrift (DEMO) gilt nicht als Auftragsunterschrift.",
                                   )}
                         </p>
+                        )}
                         {signedVersionNote ? (
                           <p
                             data-testid="lead-order-signed-version"
@@ -11025,7 +11149,7 @@ ${serviceCommentLines.join("\n")}`
                   ) : (
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="default"
                       size="sm"
                       disabled={isBusy || !leadId}
                       onClick={addEstimatedOutlays}
@@ -11038,7 +11162,7 @@ ${serviceCommentLines.join("\n")}`
                 {quote ? (
                   <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
-                      <dt className={tokens.text.label}>
+                      <dt className={cn(tokens.text.label, "font-mono")}>
                         {tx("Статус", "Status")}
                       </dt>
                       <dd className="mt-1 text-xs font-medium text-foreground">
@@ -11058,7 +11182,7 @@ ${serviceCommentLines.join("\n")}`
                       </dd>
                     </div>
                     <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
-                      <dt className={tokens.text.label}>
+                      <dt className={cn(tokens.text.label, "font-mono")}>
                         {tx("Сумма", "Betrag")}
                       </dt>
                       <dd className="mt-1 whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-foreground">
@@ -11066,7 +11190,7 @@ ${serviceCommentLines.join("\n")}`
                       </dd>
                     </div>
                     <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
-                      <dt className={tokens.text.label}>
+                      <dt className={cn(tokens.text.label, "font-mono")}>
                         {tx("Предоплата", "Vorauszahlung")}
                       </dt>
                       <dd className="mt-1 whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
@@ -11074,7 +11198,7 @@ ${serviceCommentLines.join("\n")}`
                       </dd>
                     </div>
                     <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
-                      <dt className={tokens.text.label}>
+                      <dt className={cn(tokens.text.label, "font-mono")}>
                         {tx("Остаток", "Restbetrag")}
                       </dt>
                       <dd className="mt-1 whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
@@ -11279,9 +11403,15 @@ ${serviceCommentLines.join("\n")}`
                     </Button>
                   )}
                 >
+                {commercialDocuments.order_cost_estimate.length === 0 ? (
+                  <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-order-estimate-not-created">
+                    <CircleAlert aria-hidden="true" className="mt-0.5" />
+                    <span className="min-w-0 font-semibold leading-5">{tx("Смета к заказу ещё не создана", "Kostenvoranschlag zum Einzelauftrag wurde noch nicht erstellt")}</span>
+                  </StatusChip>
+                ) : null}
                 <WizardDocumentRows
                   documents={commercialDocuments.order_cost_estimate}
-                  emptyLabel={tx("Смета к заказу ещё не создана", "Kostenvoranschlag zum Einzelauftrag wurde noch nicht erstellt")}
+                  emptyLabel=""
                   lang={lang}
                   busy={busy}
                   disabled={isBusy}
@@ -11502,7 +11632,7 @@ ${serviceCommentLines.join("\n")}`
                   {existingParentPatientId ? <StaffLink to={`/patients/${encodeURIComponent(existingParentPatientId)}`} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-2")} onClick={() => onOpenChange(false)}>{tx("Открыть пациента", "Patientenakte öffnen")}</StaffLink> : null}
                 </div>
                 {autosaveStatus === "error" ? (
-                  <Button type="button" variant="outline" size="xs" disabled={isBusy || loading} onClick={() => void save()}>
+                  <Button type="button" variant="default" size="xs" disabled={isBusy || loading} onClick={() => void save()}>
                     <RefreshCw aria-hidden="true" className="size-3" />
                     {tx("Повторить", "Erneut versuchen")}
                   </Button>
@@ -11563,7 +11693,7 @@ ${serviceCommentLines.join("\n")}`
                   </Button>
                 ) : null}
                 {nextStep ? (
-                  <Button type="button" variant={step === "commercial" ? "outline" : "default"} className="h-9" disabled={loading || isBusy} onClick={() => navigateToStep(nextStep.id)}>
+                  <Button type="button" variant="default" className="h-9" disabled={loading || isBusy} onClick={() => navigateToStep(nextStep.id)}>
                     {busy === "save" || busy === "intake" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}
                     {step === "commercial" ? tx("Проверить готовность", "Bereitschaft prüfen") : tx("Далее", "Weiter")}
                     <ArrowRight aria-hidden="true" className="size-3.5" />

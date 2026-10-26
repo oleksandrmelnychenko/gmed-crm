@@ -4,6 +4,8 @@ import {
   canSignWizardDocument,
   documentSignedFor,
   documentVersionExistsErrorText,
+  isMedicalUpload,
+  isReplaceableFormVersion,
   leadConsentFormTemplate,
   orderClientSignatureState,
   shouldReloadDocumentsAfterGenerationError,
@@ -178,5 +180,23 @@ describe("signature proof", () => {
     expect(documentSignedFor({ ...signed, compliance_kind: "enhanced_due_diligence" }, "enhanced_due_diligence")).toBe(true);
     expect(documentSignedFor({ signed_at: null, compliance_kind: "other" }, "other")).toBe(false);
     expect(documentSignedFor(signed, null)).toBe(false);
+  });
+});
+
+describe("client uploads are never a form version", () => {
+  it("does not take a client's medical upload for a form by its file name", () => {
+    expect(isMedicalUpload({ art: "patient_medical_upload", category: "medical" })).toBe(true);
+    expect(isMedicalUpload({ art: "other", category: "medical" })).toBe(true);
+    expect(isMedicalUpload({ art: "dsgvo", category: "compliance" })).toBe(false);
+    expect(isMedicalUpload({ art: "identity", category: null })).toBe(false);
+  });
+
+  it("replaces only a generated version of the same form", () => {
+    expect(isReplaceableFormVersion({ generated_template_id: "privacy_consents" }, "privacy_consents")).toBe(true);
+    expect(isReplaceableFormVersion({ generated_template_id: "consent_data_release_child" }, "privacy_consents")).toBe(true);
+    // An uploaded scan or file has no template: the server refuses to replace it.
+    expect(isReplaceableFormVersion({ generated_template_id: null }, "privacy_consents")).toBe(false);
+    expect(isReplaceableFormVersion({ generated_template_id: "" }, "privacy_consents")).toBe(false);
+    expect(isReplaceableFormVersion({ generated_template_id: "privacy_information" }, "privacy_consents")).toBe(false);
   });
 });

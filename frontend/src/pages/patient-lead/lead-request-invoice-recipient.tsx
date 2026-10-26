@@ -260,7 +260,7 @@ export function InvoiceRecipientSection({
   });
   const labeled = (field: keyof RecipientDraft, required = false, className?: string) => ({
     id: `lead-request-recipient_${field}`,
-    label: recipientFieldLabel(text, field),
+    label: recipientFieldLabel(text, field, guardian),
     error: errorFor(field),
     required,
     className,
@@ -338,6 +338,8 @@ export function InvoiceRecipientSection({
                       id={`lead-request-invoice_recipient-${answer}`}
                       name="lead-request-invoice_recipient"
                       value={answer}
+                      // Named by the visible answer, never by the raw value (labels audit 2026-10-26, S1).
+                      aria-label={options[answer]}
                       className={cn(checkboxClass, "mt-0.5 rounded-full")}
                       checked={checked}
                       disabled={locked}
@@ -428,7 +430,7 @@ export function InvoiceRecipientSection({
                       {draft.relationship_kind === "other" ? (
                         <LabeledField
                           id="lead-request-recipient_relationship"
-                          label={text.payerRelationshipOther}
+                          label={guardian ? text.payerRelationshipOther : text.payerRelationshipOtherToYou}
                           error={errorFor("relationship")}
                           required
                         >
@@ -503,13 +505,15 @@ export function InvoiceRecipientSection({
               >
                 <input
                   {...control("is_payer")}
+                  aria-label={flow.recipient === "self" ? text.recipient.isPayerSelf : text.recipient.isPayerThirdParty}
                   type="checkbox"
                   className={cn(checkboxClass, "mt-0.5")}
                   checked={draft.is_payer === "yes"}
                   disabled={locked}
                   onChange={(event) => answerIsPayer(event.target.checked ? "yes" : "no")}
                 />
-                <span className="min-w-0">{text.recipient.isPayer}</span>
+                {/* In the person's words, not "the invoice recipient is the payer" (labels audit 2026-10-26, B3). */}
+                <span className="min-w-0">{flow.recipient === "self" ? text.recipient.isPayerSelf : text.recipient.isPayerThirdParty}</span>
               </label>
               {errorFor("is_payer") ? (
                 <p id="lead-request-recipient_is_payer-error" role="alert" className="text-xs text-destructive">
@@ -542,6 +546,7 @@ export function InvoiceRecipientSection({
                       id={`lead-request-payer_party-${value}`}
                       name="lead-request-payer_party"
                       value={value}
+                      aria-label={(guardian && request.minor ? text.recipient.payerPartyGuardian : text.recipient.payerParty)[value]}
                       className={cn(checkboxClass, "mt-0.5 rounded-full")}
                       checked={checked}
                       onChange={() => setPartyChoice(value)}
@@ -778,7 +783,9 @@ function RecipientPayer({
       }),
     [base, extras, messengerSameAsPhone, recipient],
   );
-  const replacementPending = Boolean(request.payer) && !fits && !replacementConfirmed;
+  // Only a named payer saved before is replaced after a confirmation: the own "I pay" is no
+  // previous payer to warn about (labels audit 2026-10-26, B4).
+  const replacementPending = Boolean(request.payer) && request.payer?.payer_kind !== "self" && !fits && !replacementConfirmed;
   const readyToReplace = recipientPayerReady(recipient);
   const sameIdentity = fits && payerIdentityKey(draftFromPayer(request.payer)) === payerIdentityKey(draft);
   const { fieldError } = usePayerAutosave({ request, draft, enqueue, onChange, onSaveState, enabled: !replacementPending && (fits || readyToReplace) });

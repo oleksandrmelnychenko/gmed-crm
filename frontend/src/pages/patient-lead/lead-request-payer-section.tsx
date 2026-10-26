@@ -581,7 +581,7 @@ export function PayerSection({
                       {draft.relationship_kind === "other" ? (
                         <LabeledField
                           id="lead-request-payer_relationship"
-                          label={text.payerRelationshipOther}
+                          label={guardian ? text.payerRelationshipOther : text.payerRelationshipOtherToYou}
                           error={errorFor("payer_relationship")}
                           required
                         >
@@ -765,6 +765,7 @@ export function MessengerField({
         <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           <input
             type="checkbox"
+            aria-label={text.payerMessengerSameAsPhone}
             className={checkboxClass}
             checked={sameAsPhone}
             data-testid="lead-request-payer-messenger-same"
@@ -811,6 +812,7 @@ export function PayerContactConsent({
         <input
           type="checkbox"
           id="lead-request-payer_contact_consent"
+          aria-label={payerFieldLabel(text, "payer_contact_consent", guardian)}
           className={cn(checkboxClass, "mt-0.5")}
           checked={checked}
           aria-invalid={Boolean(error) || undefined}
@@ -902,6 +904,7 @@ export function CostEstimateConsent({
         <input
           type="checkbox"
           id={id}
+          aria-label={text.payerCostEstimateConsentLabel}
           className={cn(checkboxClass, "mt-0.5")}
           checked={checked}
           disabled={pending !== null}

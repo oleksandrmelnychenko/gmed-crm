@@ -6,14 +6,13 @@ async function open(page: Page) {
 }
 test("clean consent draft adopts other parent's new choices and recipients", async ({ page }) => {
   await open(page);
-  const recipient = page.getByTestId("trusted-persons-list");
-  await expect(recipient).toContainText("First Recipient");
-  await expect(recipient).toContainText("Invoices only");
+  // The step-4 answer as one line, the people are listed on step 4 only (owner 2026-10-26, C3).
+  await expect(page.getByTestId("trusted-persons-list")).toHaveCount(0);
   await expect(page.locator('[data-consent-option="named_recipients"]')).toHaveCount(0);
-  await expect(page.getByTestId("disclosure-saved-status")).toHaveText("Disclosure permitted");
+  await expect(page.getByTestId("disclosure-saved-status")).toHaveText("Information for third parties: Yes, 1 person");
   await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
   await page.getByRole("button", { name: "Refresh other parent" }).click();
-  await expect(recipient).toContainText("Second Recipient");
+  await expect(page.getByTestId("lead-request-consent-form-state")).toContainText("was saved by the other parent or representative");
   await expect(page.locator('[data-consent-option="channel_email"]')).toBeChecked();
   await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
 });
@@ -41,18 +40,18 @@ test("saving channels keeps disclosure read-only and asks the server for canonic
   await page.locator('[data-consent-option="channel_email"]').check();
   release();
   await expect.poll(() => bodies.length).toBe(2);
-  await expect(page.getByTestId("lead-request-consent-form-state")).toContainText("Your choice of");
+  // The own saved choice has no receipt sentence of its own (labels audit 2026-10-26, B8).
+  await expect(page.getByTestId("lead-request-consent-form-state")).not.toContainText("Your choice of");
   await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
   expect(body).toMatchObject({ choices: { named_recipients: true, channel_threema: true, channel_email: true }, recipients: [] });
   await expect(page.locator('[data-consent-option="channel_email"]')).toBeChecked();
-  await expect(page.getByTestId("trusted-persons-list")).toContainText("Invoices only");
+  await expect(page.getByTestId("disclosure-saved-status")).toHaveText("Information for third parties: Yes, 1 person");
 });
 test("locally edited consent draft survives a newer server choice", async ({ page }) => {
   await open(page);
-  const recipient = page.getByTestId("trusted-persons-list");
   await page.locator('[data-consent-option="channel_threema"]').check();
   await page.getByRole("button", { name: "Refresh other parent" }).click();
-  await expect(recipient).toContainText("Second Recipient");
+  await expect(page.getByTestId("lead-request-consent-form-state")).toContainText(/not saved yet|was saved by the other parent/);
   await expect(page.locator('[data-consent-option="channel_threema"]')).toBeChecked();
   await expect(page.locator('[data-consent-option="channel_email"]')).not.toBeChecked();
   await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);

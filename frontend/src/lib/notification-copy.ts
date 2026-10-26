@@ -169,6 +169,15 @@ const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
       de: "Die zusätzlichen Angaben zur Anfrage sind eingegangen.",
     },
   },
+  // The lead added documents to the sent request (crates/server/src/routes/lead_portal_intake.rs,
+  // «Dokumente nachreichen», owner 2026-10-26); one unread notice per batch.
+  lead_portal_documents_added: {
+    title: { ru: "Лид доложил документы", de: "Lead hat Dokumente nachgereicht" },
+    body: {
+      ru: "Лид добавил документы к уже отправленной заявке.",
+      de: "Der Lead hat der gesendeten Anfrage Dokumente hinzugefügt.",
+    },
+  },
   translation_request: {
     title: { ru: "Пациент запросил перевод документа", de: "Patient hat eine Übersetzung angefragt" },
     body: {

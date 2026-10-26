@@ -161,6 +161,7 @@ export function OwnersStep({ context }: { context: StepContext }) {
         <input
           type="checkbox"
           id={fieldId("beneficial_owners_none")}
+          aria-label={text.fields.beneficial_owners_none}
           className={cn(checkboxClass, "mt-0.5")}
           checked={none}
           onChange={(event) => form.update((draft) => withOwnersNone(draft, event.target.checked))}
@@ -225,7 +226,7 @@ export function FundsStep({
   proofRequired: boolean;
   uploads: UploadControl;
 }) {
-  const { form, text, lang } = context;
+  const { form, text } = context;
   const organisation = isOrganisation(context.payerType);
   return (
     <div className="space-y-5" data-testid="payer-link-step-funds">
@@ -276,6 +277,8 @@ export function FundsStep({
             <label key={source} className="flex items-start gap-2 text-sm leading-snug">
               <input
                 type="checkbox"
+                // Named by the visible text, never by the raw value «on» (labels audit 2026-10-26, S1).
+                aria-label={text.fundsSources[source]}
                 className={cn(checkboxClass, "mt-0.5")}
                 checked={form.draft.funds_sources.includes(source)}
                 onChange={(event) =>
@@ -304,7 +307,8 @@ export function FundsStep({
         id="payer-link-funds-files"
         label={text.fundsProof}
         required={proofRequired}
-        badge={proofRequired ? text.fundsProofRequired : text.fundsProofOptional}
+        // Required: the `*` says it; only the optional case gets a word (labels audit 2026-10-26, A7).
+        badge={proofRequired ? undefined : text.fundsProofOptional}
         hint={text.fundsProofHint}
         buttonLabel={text.fundsProofButton}
         documents={uploads.documents}
@@ -312,7 +316,6 @@ export function FundsStep({
         errors={uploads.errors}
         disabled={false}
         text={text}
-        lang={lang}
         testId="payer-link-funds-upload"
         onFiles={uploads.upload}
         onRemove={uploads.remove}

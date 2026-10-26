@@ -19,11 +19,10 @@ import {
 } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { leadRequestText } from "./lead-request-text";
-import { CabinetGoToContext, CabinetSection as Section, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
+import { CabinetGoToContext, CabinetSection as Section, RequiredMark, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
 import type { SaveState } from "./lead-request-model";
 
 import { disclosureDefaultsToNo, storedTrustedPersons, trustedPersonsPath } from "./lead-trusted-persons-model";
-import { TrustedPersonsList } from "./lead-trusted-persons-editor";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 
 export function savedDisclosureAllowed(request: Pick<LeadRequest, "disclosure" | "consent_form">): boolean {
@@ -156,37 +155,41 @@ export function ConsentFormChoicesSection({
   const changed = consentFormChanged(draft, form.choices);
   const coreTicked = hasCoreConsents(draft);
 
+  // The step-4 answer as one line with a jump back, not repeated as a block (owner 2026-10-26, C3).
+  // Not answered counts as "no" (owner decision 2026-10-22). The printed form is unchanged.
+  const disclosureAnswer = !request.disclosure && !disclosureDefaultsToNo(request) ? text.disclosureUnanswered
+    : savedDisclosureAllowed(request) ? text.disclosureYes(recipients.length) : text.disclosureNo;
   const recipientsBlock = (
-    <fieldset className="space-y-3 rounded-lg border border-border/60 p-3" data-testid="lead-request-consent-recipients">
-      <legend className="px-1 text-sm font-medium">{personsText.title}</legend>
-      <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs", request.disclosure?.allow_disclosure && request.disclosure.consent_given ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-        // "No" is a valid, optional answer: neutral, never a warning.
-        // Not answered counts as "no" (owner decision 2026-10-22).
-        : request.disclosure?.allow_disclosure === false || disclosureDefaultsToNo(request) ? "border-border bg-muted/40 text-muted-foreground" : "border-amber-200 bg-amber-50 text-amber-800")} data-testid="disclosure-saved-status">
-        {!request.disclosure && !disclosureDefaultsToNo(request) ? personsText.unanswered : savedDisclosureAllowed(request) ? personsText.allowed : personsText.denied}
-      </span>
-      {recipients.length > 0 ? <TrustedPersonsList persons={recipients} lang={lang} /> : null}
+    <div className="space-y-1" data-testid="lead-request-consent-recipients">
+      <p className="text-sm">
+        <span data-testid="disclosure-saved-status">{text.disclosureLabel}: {disclosureAnswer}</span>
+        <span aria-hidden="true" className="text-muted-foreground"> · </span>
+        {/* Inside the cabinet the step opens in place (the choices here are saved first), not by a page load. */}
+        <a
+          className="font-medium text-[var(--brand)] underline underline-offset-4"
+          href={trustedPersonsPath(request.lead_id)}
+          aria-label={personsText.edit}
+          data-testid="lead-request-consent-recipients-edit"
+          onClick={(event) => {
+            if (!goTo || event.metaKey || event.ctrlKey || event.shiftKey) return;
+            event.preventDefault();
+            goTo("disclosure");
+          }}
+        >
+          {text.disclosureChange}
+        </a>
+      </p>
       {!request.disclosure && form.choices?.named_recipients ? <p className="text-xs text-muted-foreground">{personsText.legacy}</p> : null}
-      {/* Inside the cabinet the step opens in place (the choices here are saved first), not by a page load. */}
-      <a
-        className="block w-fit text-sm font-medium text-[var(--brand)] underline underline-offset-4"
-        href={trustedPersonsPath(request.lead_id)}
-        data-testid="lead-request-consent-recipients-edit"
-        onClick={(event) => {
-          if (!goTo || event.metaKey || event.ctrlKey || event.shiftKey) return;
-          event.preventDefault();
-          goTo("disclosure");
-        }}
-      >
-        {personsText.edit}
-      </a>
-    </fieldset>
+    </div>
   );
 
   const option = (key: keyof ConsentFormChoices) => (
     <label key={key} className="flex items-start gap-3 text-sm">
       <input
         type="checkbox"
+        // Named by the visible text, never by the raw value «on» (labels audit 2026-10-26, S1).
+        aria-label={text.options[key]}
+        aria-required={CONSENT_FORM_CORE.includes(key) || undefined}
         className={cn(checkboxClass, "mt-0.5")}
         checked={draft[key]}
         data-consent-option={key}
@@ -199,9 +202,11 @@ export function ConsentFormChoicesSection({
       />
       <span className="leading-relaxed">
         {text.options[key]}
+        {/* The same `*` as every other required field, not a word chip (labels audit 2026-10-26, B8). */}
         {CONSENT_FORM_CORE.includes(key) ? (
-          <span className="ml-1 text-xs text-muted-foreground" data-consent-required="">
-            ({text.required})
+          <span data-consent-required="">
+            <RequiredMark />
+            <span className="sr-only"> ({text.required})</span>
           </span>
         ) : null}
       </span>
@@ -227,14 +232,13 @@ export function ConsentFormChoicesSection({
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
             {busy ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}
+            {/* The step's save indicator covers the own choice; only the other parent's choice is named (B8). */}
             <p className="text-xs text-muted-foreground" aria-live="polite" data-testid="lead-request-consent-form-state">
               {busy ? text.saving : changed
                 ? text.unsaved
-                : form.chosen_at
-                  ? form.chosen_by_me === false
-                    ? text.savedByOtherAt(formatAppDateTime(form.chosen_at))
-                    : text.savedAt(formatAppDateTime(form.chosen_at))
-                  : text.notSaved}
+                : form.chosen_at && form.chosen_by_me === false
+                  ? text.savedByOtherAt(formatAppDateTime(form.chosen_at))
+                  : ""}
             </p>
           </div>
           {error ? (

@@ -233,7 +233,7 @@ export function LeadPayerLinkPanel({
                 <Button
                   type="button"
                   size="sm"
-                  variant={actions.highlight ? "default" : actions.sendKind === "resend" ? "outline" : "default"}
+                  variant="default"
                   className={cn("h-8 rounded-lg text-xs", actions.highlight && "ring-2 ring-[var(--brand)]/40 ring-offset-1")}
                   disabled={locked || !actions.sendEnabled}
                   data-highlight={actions.highlight ? "true" : undefined}

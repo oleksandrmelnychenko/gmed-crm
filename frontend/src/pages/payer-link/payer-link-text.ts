@@ -97,7 +97,6 @@ export type PayerLinkText = {
   saving: string;
   saved: string;
   notSaved: string;
-  autosaveNote: string;
   choose: string;
   invalidField: string;
   /** A phone with fewer than six digits or other characters than + ( ) - / and spaces. */
@@ -160,7 +159,6 @@ export type PayerLinkText = {
   fundsSources: Record<FundsSource, string>;
   fundsDescriptionHint: string;
   fundsProof: string;
-  fundsProofRequired: string;
   fundsProofOptional: string;
   fundsProofHint: string;
   fundsProofButton: string;
@@ -265,7 +263,6 @@ const de: PayerLinkText = {
   saving: "Wird gespeichert…",
   saved: "Gespeichert",
   notSaved: "Nicht gespeichert",
-  autosaveNote: "Ihre Angaben werden automatisch gespeichert.",
   choose: "Auswählen",
   invalidField: "Bitte prüfen Sie diese Angabe.",
   invalidPhone: "Bitte geben Sie eine gültige Telefonnummer ein: mindestens 6 Ziffern, erlaubt sind nur +, Leerzeichen, ( ) - /.",
@@ -280,9 +277,10 @@ const de: PayerLinkText = {
     id_valid_until_before_issue: "„Gültig bis“ muss nach dem Ausstellungsdatum liegen.",
   },
   privacyNotice: (patient, organisation) => [
+    // Art. 14: where the data come from. "Named you as the payer" stands in the header already (labels audit 2026-10-26, B14).
     organisation
-      ? `${patient} hat Ihre Organisation als zahlende Partei benannt und uns dafür ihren Namen und ihre Kontaktdaten mitgeteilt.`
-      : `${patient} hat Sie als zahlende Person benannt und uns dafür Ihren Namen und Ihre Kontaktdaten mitgeteilt.`,
+      ? `Name und Kontaktdaten Ihrer Organisation haben wir von ${patient} erhalten.`
+      : `Ihren Namen und Ihre Kontaktdaten haben wir von ${patient} erhalten.`,
     // lawyer review pending (2026-10-22)
     "Verantwortlich für die Verarbeitung Ihrer Daten ist GMED. Wir verarbeiten Ihre Angaben, um die Kostenübernahme zu klären, um Rechnungen zu stellen und um Ihre Identität und die Herkunft der Zahlung zu prüfen; diese Prüfung nimmt GMED freiwillig nach ihren eigenen Compliance-Regeln vor. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und f DSGVO.",
     // lawyer review pending (2026-10-22)
@@ -456,7 +454,6 @@ const de: PayerLinkText = {
   },
   fundsDescriptionHint: "Bei „Sonstiges“ bitte beschreiben, sonst freiwillig.",
   fundsProof: "Nachweis der Herkunft der Mittel",
-  fundsProofRequired: "erforderlich",
   fundsProofOptional: "freiwillig",
   fundsProofHint:
     "Zum Beispiel Kontoauszug, Gehaltsabrechnung, Kaufvertrag oder Erbschein. PDF, JPG oder PNG, bis 25 MB pro Datei.",
@@ -476,7 +473,7 @@ const de: PayerLinkText = {
   goToStep: "Ergänzen",
   edit: "Ändern",
   // lawyer review pending (2026-10-22)
-  confirmLabel: "Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe und dass sie richtig und vollständig sind. Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen.",
+  confirmLabel: "Ich versichere, dass ich die vorstehenden Angaben nach bestem Wissen und Gewissen gemacht habe und dass sie richtig und vollständig sind. Ich bestätige, dass die für die Bezahlung verwendeten Mittel nicht aus strafbaren Handlungen stammen. Mir ist bekannt, dass die GMED – Agentur für Patientenbetreuung berechtigt ist, die Zusammenarbeit abzulehnen oder zu beenden, wenn die Angaben nicht oder nur unzureichend gemacht werden.",
   submit: "Absenden",
   submitting: "Wird gesendet…",
   submitNeedsConfirm: "Bitte bestätigen Sie, dass Ihre Angaben vollständig und richtig sind.",
@@ -565,7 +562,6 @@ const en: PayerLinkText = {
   saving: "Saving…",
   saved: "Saved",
   notSaved: "Not saved",
-  autosaveNote: "Your details are saved automatically.",
   choose: "Select",
   invalidField: "Please check this entry.",
   invalidPhone: "Please enter a valid phone number: at least 6 digits; only +, spaces, ( ) - / are allowed.",
@@ -581,8 +577,8 @@ const en: PayerLinkText = {
   },
   privacyNotice: (patient, organisation) => [
     organisation
-      ? `${patient} has named your organisation as the paying party and gave us its name and contact details for this purpose.`
-      : `${patient} has named you as the paying person and gave us your name and contact details for this purpose.`,
+      ? `We received your organisation's name and contact details from ${patient}.`
+      : `We received your name and contact details from ${patient}.`,
     // lawyer review pending (2026-10-22)
     "GMED is responsible for processing your data. We process your details to arrange the covering of the costs, to issue invoices and to check your identity and the origin of the payment; GMED carries out this check voluntarily under its own compliance rules. The legal basis is Art. 6(1)(b) and (f) GDPR.",
     // lawyer review pending (2026-10-22)
@@ -756,7 +752,6 @@ const en: PayerLinkText = {
   },
   fundsDescriptionHint: "If you choose “Other”, please describe; otherwise optional.",
   fundsProof: "Proof of the source of funds",
-  fundsProofRequired: "required",
   fundsProofOptional: "optional",
   fundsProofHint:
     "For example a bank statement, a payslip, a sales contract or a certificate of inheritance. PDF, JPG or PNG, up to 25 MB per file.",
@@ -776,7 +771,7 @@ const en: PayerLinkText = {
   goToStep: "Complete",
   edit: "Edit",
   // lawyer review pending (2026-10-22)
-  confirmLabel: "I declare that I have given the above information to the best of my knowledge and belief and that it is correct and complete. I confirm that the funds used for payment do not originate from criminal acts.",
+  confirmLabel: "I declare that I have given the above information to the best of my knowledge and belief and that it is correct and complete. I confirm that the funds used for payment are of lawful origin. I am aware that GMED – Agentur für Patientenbetreuung is entitled to refuse or end the cooperation if the information is not provided or is provided only insufficiently.",
   submit: "Send",
   submitting: "Sending…",
   submitNeedsConfirm: "Please confirm that your details are complete and correct.",
@@ -863,7 +858,6 @@ const uk: PayerLinkText = {
   saving: "Зберігається…",
   saved: "Збережено",
   notSaved: "Не збережено",
-  autosaveNote: "Ваші дані зберігаються автоматично.",
   choose: "Виберіть",
   invalidField: "Будь ласка, перевірте це поле.",
   invalidPhone: "Введіть коректний номер телефону: щонайменше 6 цифр, допустимі лише +, пробіли, ( ) - /.",
@@ -879,8 +873,8 @@ const uk: PayerLinkText = {
   },
   privacyNotice: (patient, organisation) => [
     organisation
-      ? `${patient} вказав(-ла) вашу організацію як платника і для цього повідомив(-ла) нам її назву та контактні дані.`
-      : `${patient} вказав(-ла) вас платником і для цього повідомив(-ла) нам ваше ім’я та контактні дані.`,
+      ? `Назву та контакти вашої організації ми отримали від ${patient}.`
+      : `Ваше ім’я та контакти ми отримали від ${patient}.`,
     // lawyer review pending (2026-10-22)
     "Відповідальним за обробку ваших даних є GMED. Ми обробляємо ваші дані, щоб узгодити оплату витрат, виставляти рахунки та перевірити вашу особу й походження оплати; цю перевірку GMED проводить добровільно за власними правилами комплаєнсу. Правова підстава — ст. 6 абз. 1 літ. b і f DSGVO (GDPR).",
     // lawyer review pending (2026-10-22)
@@ -1059,7 +1053,6 @@ const uk: PayerLinkText = {
   },
   fundsDescriptionHint: "Для «Інше» опишіть, будь ласка; в інших випадках необов’язково.",
   fundsProof: "Підтвердження походження коштів",
-  fundsProofRequired: "обов’язково",
   fundsProofOptional: "необов’язково",
   fundsProofHint:
     "Наприклад, банківська виписка, розрахунковий листок, договір купівлі-продажу або свідоцтво про спадщину. PDF, JPG або PNG, до 25 МБ на файл.",
@@ -1078,7 +1071,7 @@ const uk: PayerLinkText = {
   goToStep: "Доповнити",
   edit: "Змінити",
   // lawyer review pending (2026-10-22)
-  confirmLabel: "Я запевняю, що вказав(-ла) наведені вище відомості сумлінно та наскільки мені відомо і що вони правильні й повні. Я підтверджую, що кошти, використані для оплати, не отримані злочинним шляхом.",
+  confirmLabel: "Я запевняю, що вказав(-ла) наведені вище відомості сумлінно та наскільки мені відомо і що вони правильні й повні. Я підтверджую, що кошти для оплати мають законне походження. Мені відомо, що GMED – Agentur für Patientenbetreuung має право відмовити у співпраці або припинити її, якщо відомості не надано або надано не в повному обсязі.",
   submit: "Надіслати",
   submitting: "Надсилається…",
   submitNeedsConfirm: "Будь ласка, підтвердьте, що ваші дані повні й правильні.",
@@ -1165,7 +1158,6 @@ const ru: PayerLinkText = {
   saving: "Сохраняется…",
   saved: "Сохранено",
   notSaved: "Не сохранено",
-  autosaveNote: "Ваши данные сохраняются автоматически.",
   choose: "Выберите",
   invalidField: "Пожалуйста, проверьте это поле.",
   invalidPhone: "Введите корректный номер телефона: не менее 6 цифр, допустимы только +, пробелы, ( ) - /.",
@@ -1181,8 +1173,8 @@ const ru: PayerLinkText = {
   },
   privacyNotice: (patient, organisation) => [
     organisation
-      ? `${patient} указал(а) вашу организацию как плательщика и для этого сообщил(а) нам её название и контактные данные.`
-      : `${patient} указал(а) вас плательщиком и для этого сообщил(а) нам ваше имя и контактные данные.`,
+      ? `Название и контакты вашей организации мы получили от ${patient}.`
+      : `Ваше имя и контакты мы получили от ${patient}.`,
     // lawyer review pending (2026-10-22)
     "Ответственным за обработку ваших данных является GMED. Мы обрабатываем ваши данные, чтобы согласовать оплату расходов, выставлять счета и проверить вашу личность и происхождение оплаты; эту проверку GMED проводит добровольно по собственным правилам комплаенса. Правовое основание — ст. 6 абз. 1 лит. b и f DSGVO (GDPR).",
     // lawyer review pending (2026-10-22)
@@ -1361,7 +1353,6 @@ const ru: PayerLinkText = {
   },
   fundsDescriptionHint: "Для «Другое» опишите, пожалуйста; в остальных случаях необязательно.",
   fundsProof: "Подтверждение происхождения средств",
-  fundsProofRequired: "обязательно",
   fundsProofOptional: "необязательно",
   fundsProofHint:
     "Например, банковская выписка, расчётный листок, договор купли-продажи или свидетельство о наследстве. PDF, JPG или PNG, до 25 МБ на файл.",
@@ -1380,7 +1371,7 @@ const ru: PayerLinkText = {
   goToStep: "Дополнить",
   edit: "Изменить",
   // lawyer review pending (2026-10-22)
-  confirmLabel: "Я заверяю, что указал(а) приведённые выше сведения добросовестно и в меру своих знаний и что они верны и полны. Я подтверждаю, что средства, используемые для оплаты, не получены преступным путём.",
+  confirmLabel: "Я заверяю, что указал(а) приведённые выше сведения добросовестно и в меру своих знаний и что они верны и полны. Я подтверждаю, что средства для оплаты имеют законное происхождение. Мне известно, что GMED – Agentur für Patientenbetreuung вправе отказать в сотрудничестве или прекратить его, если сведения не предоставлены или предоставлены не в полном объёме.",
   submit: "Отправить",
   submitting: "Отправляется…",
   submitNeedsConfirm: "Пожалуйста, подтвердите, что ваши данные полные и верные.",

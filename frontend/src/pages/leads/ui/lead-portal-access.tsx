@@ -301,9 +301,9 @@ export function LeadPortalAccessDetail({
           {canOffer ? (
             <Button
               type="button"
-              variant={canReset ? "outline" : "default"}
+              variant="default"
               size="sm"
-              className={cn("h-auto min-h-8 w-full gap-1.5 whitespace-normal rounded-lg px-2.5 py-1.5 text-xs shadow-xs", canReset && "border-foreground/20 bg-card hover:bg-accent")}
+              className={cn("h-auto min-h-8 w-full gap-1.5 whitespace-normal rounded-lg px-2.5 py-1.5 text-xs shadow-xs")}
               disabled={busy}
               onClick={() => (canReset ? setConfirmOpen(true) : void issue())}
             >
@@ -320,9 +320,9 @@ export function LeadPortalAccessDetail({
           {canOffer ? (
             <Button
               type="button"
-              variant={canReset ? "default" : "outline"}
+              variant="default"
               size="sm"
-              className={cn("h-auto min-h-8 w-full gap-1.5 whitespace-normal rounded-lg px-2.5 py-1.5 text-xs shadow-xs", !canReset && "border-foreground/20 bg-card hover:bg-accent")}
+              className={cn("h-auto min-h-8 w-full gap-1.5 whitespace-normal rounded-lg px-2.5 py-1.5 text-xs shadow-xs")}
               disabled={busy || emailInfo === undefined}
               onClick={() => {
                 setEmailNotice("");
@@ -337,9 +337,9 @@ export function LeadPortalAccessDetail({
           {canIssue && minor !== true ? (
             <Button
               type="button"
-              variant="outline"
+              variant="default"
               size="sm"
-              className="h-auto min-h-8 w-full gap-1.5 whitespace-normal rounded-lg border-foreground/20 bg-card px-2.5 py-1.5 text-xs shadow-xs hover:bg-accent @[32rem]:col-start-3"
+              className="h-auto min-h-8 w-full gap-1.5 whitespace-normal rounded-lg px-2.5 py-1.5 text-xs shadow-xs @[32rem]:col-start-3"
               disabled={!canOfferSheet || busy || sheetBusy}
               title={de ? "Dokumentationsbogen natürliche Personen (GwG), aus der Anfrage ausgefüllt" : "Лист идентификации по GwG, заполненный из заявки"}
               onClick={() => void downloadGwgSheet()}
@@ -960,7 +960,7 @@ export function LeadGuardianAccess({
               <span className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="default"
                   size="sm"
                   className="h-7 gap-1.5 rounded-md border-slate-300 bg-background px-2.5 text-xs text-foreground hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
                   disabled={busy !== null}

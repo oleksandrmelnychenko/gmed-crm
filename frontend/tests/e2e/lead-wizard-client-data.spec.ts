@@ -7,6 +7,8 @@ import { chooseComboboxOption } from "./helpers";
 // contacts. Mocked API, synthetic data.
 
 const leadId = "00000000-0000-0000-0000-000000000222";
+const PROSPECT_ID = "33333333-3333-4333-8333-333333333333";
+const PROSPECT_CASE_ID = "44444444-4444-4444-8444-444444444444";
 const ANNA_ID = "11111111-1111-4111-8111-111111111111";
 const BEN_ID = "22222222-2222-4222-8222-222222222222";
 const shots = process.env.LEAD_QA_SHOTS;
@@ -85,11 +87,14 @@ type Mock = {
   failFillMode?: boolean;
   /** The first read of the portal state answers only once this settles. */
   holdFirstIntake?: Promise<void>;
+  /** Who fills in the data when the wizard opens (default: staff). */
+  fillMode?: "staff" | "patient";
 };
 
 async function mount(page: Page, mock: Mock) {
-  const state = { lead: { ...(mock.lead ?? adultLead) } as Json, fillMode: "staff" };
-  const calls = { updates: [] as Json[], creates: [] as Json[], fillModes: [] as Json[], intakeReads: 0 };
+  const state = { lead: { ...(mock.lead ?? adultLead) } as Json, fillMode: mock.fillMode ?? "staff" };
+  const calls = { updates: [] as Json[], creates: [] as Json[], fillModes: [] as Json[], intakeReads: 0, writes: [] as string[] };
+  const clinical: Json = { revision: 1, narrative: null, diagnoses: [], medications: [], examinations: [], procedures: [], verlauf: [], allergien: [], cave: [] };
   let failUpdate = mock.failUpdate;
   await page.addInitScript((value) => {
     localStorage.setItem("gmed_lang", value);
@@ -113,6 +118,7 @@ async function mount(page: Page, mock: Mock) {
     } else if (path === `/leads/${leadId}/update` && method === "POST") {
       const body = request.postDataJSON() as Json;
       calls.updates.push(body);
+      calls.writes.push("update");
       if (failUpdate) {
         const failure = failUpdate;
         failUpdate = undefined;
@@ -154,6 +160,23 @@ async function mount(page: Page, mock: Mock) {
         identity_documents: [],
         representation: mock.representation ?? null,
       };
+    } else if (path === `/leads/${leadId}/prospect` && method === "POST") {
+      // The prospect patient is made from the stored lead (patient_first).
+      calls.writes.push("prospect");
+      state.lead = { ...state.lead, prospect_patient_id: PROSPECT_ID, prospect_case_id: PROSPECT_CASE_ID };
+      response = { patient_id: PROSPECT_ID, case_id: PROSPECT_CASE_ID, case_code: "CASE-1", lifecycle_status: "prospect", already_exists: false, attached: false };
+    } else if (path === `/patients/${PROSPECT_ID}/clinical`) {
+      response = clinical;
+    } else if (path.startsWith(`/patients/${PROSPECT_ID}/`) && method === "POST") {
+      const section = path.replace(`/patients/${PROSPECT_ID}/`, "");
+      calls.writes.push(`patient:${section}`);
+      clinical.revision = Number(clinical.revision) + 1;
+      if (section === "narrative") {
+        clinical.narrative = { ...(request.postDataJSON() as Json), id: "narrative-1", is_active: true, specializations: [] };
+        response = clinical.narrative;
+      } else {
+        response = { ok: true };
+      }
     } else if (path === "/orders" && method === "POST") {
       response = { id: "order-1" };
     }
@@ -486,6 +509,63 @@ test("the medical tab gets its tick only once something in it is filled", async 
   await medicalTab.click();
   await page.getByRole("dialog").first().getByLabel("Направивший врач").fill("Dr. Weber");
   await expect(medicalTab).toContainText("выполнено");
+});
+
+test("the medical step asks for the missing legal sex in place and then opens the anamnesis", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard, calls } = await mount(page, { lang: "ru", fillMode: "patient", lead: { ...adultLead, legal_sex: null } });
+  const clientTab = page.locator('[data-step="master_data"]');
+  // The patient fills in the portal, but without the legal sex step 1 is not done.
+  await expect(page.getByTestId("step1-fill-mode").getByRole("radio", { name: "Заполнит пациент" })).toHaveAttribute("aria-checked", "true");
+  await expect(clientTab).toContainText("не завершено");
+  await expect(clientTab).not.toContainText("выполнено");
+  await expect(page.getByTestId("lead-master-data-open-fields")).toContainText("Пол согласно документам");
+
+  await page.locator('[data-step="medical"]').click();
+  const notice = wizard.getByTestId("patient-data-pending");
+  await expect(notice).toContainText("Чтобы открыть медицинскую часть (анамнез, диагнозы, аллергии, препараты), укажите пол согласно документам.");
+  await expect(notice).toContainText("Пациент может указать его и сам в портале.");
+  await expect(notice.getByRole("button", { name: "К данным клиента" })).toBeVisible();
+  await expect(wizard.getByRole("heading", { name: "Анамнез", exact: true })).toHaveCount(0);
+  await shot(page, "medical-pending-legal-sex");
+
+  await chooseComboboxOption(page, notice.locator("#lead-wizard-pending-legal-sex"), "Женский");
+  // The medical form opens in place: still step 2, the notice is gone.
+  await expect(wizard.getByRole("heading", { name: "Анамнез", exact: true })).toBeVisible();
+  await expect(notice).toHaveCount(0);
+  await expect(page.locator('[data-step="medical"]')).toHaveAttribute("aria-selected", "true");
+  // Saved through the autosave as on step 1, and step 1 is done now.
+  await expect.poll(() => calls.updates.at(-1)?.legal_sex).toBe("female");
+  await expect(clientTab).toContainText("выполнено");
+});
+
+test("a legal sex chosen in the medical step is stored before the anamnesis creates the prospect patient", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard, calls } = await mount(page, { lang: "ru", fillMode: "patient", lead: { ...adultLead, legal_sex: null } });
+  await page.locator('[data-step="medical"]').click();
+  const notice = wizard.getByTestId("patient-data-pending");
+  await chooseComboboxOption(page, notice.locator("#lead-wizard-pending-legal-sex"), "Женский");
+  // At once, well inside the autosave delay: the anamnesis is entered and saved.
+  const anamnese = wizard.getByRole("heading", { name: "Анамнез", exact: true }).locator("..").locator("..");
+  await anamnese.getByRole("button", { name: "Новая версия" }).click();
+  const sheet = page.getByRole("dialog", { name: "Новая версия: Анамнез" });
+  await sheet.getByRole("textbox", { name: "Актуальный анамнез" }).fill("Боли в колене три недели");
+  await sheet.getByRole("button", { name: "Сохранить" }).click();
+  await expect.poll(() => calls.writes).toContain("patient:narrative");
+  // The lead with its legal sex reached the server before the prospect patient was made.
+  const firstUpdate = calls.writes.indexOf("update");
+  expect(firstUpdate).toBeGreaterThanOrEqual(0);
+  expect(firstUpdate).toBeLessThan(calls.writes.indexOf("prospect"));
+  expect(calls.updates[0]).toMatchObject({ legal_sex: "female" });
+  expect(calls.writes.indexOf("prospect")).toBeLessThan(calls.writes.indexOf("patient:narrative"));
+  await expect(sheet).toHaveCount(0);
+  await expect(wizard.getByText("Боли в колене три недели")).toBeVisible();
+  await expect(wizard.getByRole("alert")).toHaveCount(0);
+  // The debounced autosave does not send the same state a second time
+  // (a later update carries the anamnesis summary, a new state).
+  await page.waitForTimeout(1200);
+  expect(calls.writes.slice(0, calls.writes.indexOf("prospect"))).toEqual(["update"]);
+  expect(calls.updates.slice(1).every((update) => JSON.stringify(update) !== JSON.stringify(calls.updates[0]))).toBe(true);
 });
 
 test("on a phone the step bar keeps the active step in view", async ({ page }) => {

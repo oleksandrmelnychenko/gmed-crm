@@ -2703,6 +2703,13 @@ pub(crate) async fn update_my_representation(
         Ok(None) => return intake::not_found(),
         Err(error) => return intake::internal(error, "lock request"),
     };
+    // After the send only while GMED requests a follow-up block (owner 2026-10-26).
+    if let Some(refusal) =
+        intake::after_send_refusal(&mut tx, lead_id, auth.user_id, intake::AfterSend::FollowUp)
+            .await
+    {
+        return refusal;
+    }
     let loaded = match load(&mut tx, lead_id).await {
         Ok(Some(loaded)) => loaded,
         Ok(None) => return intake::not_found(),
@@ -2964,6 +2971,13 @@ pub(crate) async fn upsert_my_representative(
         Ok(None) => return intake::not_found(),
         Err(error) => return intake::internal(error, "lock request"),
     };
+    // After the send only while GMED requests a follow-up block (owner 2026-10-26).
+    if let Some(refusal) =
+        intake::after_send_refusal(&mut tx, lead_id, auth.user_id, intake::AfterSend::FollowUp)
+            .await
+    {
+        return refusal;
+    }
     let loaded = match load(&mut tx, lead_id).await {
         Ok(Some(loaded)) => loaded,
         Ok(None) => return intake::not_found(),
@@ -3235,6 +3249,13 @@ pub(crate) async fn remove_my_representative(
         Ok(None) => return intake::not_found(),
         Err(error) => return intake::internal(error, "lock request"),
     };
+    // After the send only while GMED requests a follow-up block (owner 2026-10-26).
+    if let Some(refusal) =
+        intake::after_send_refusal(&mut tx, lead_id, auth.user_id, intake::AfterSend::FollowUp)
+            .await
+    {
+        return refusal;
+    }
     let loaded = match load(&mut tx, lead_id).await {
         Ok(Some(loaded)) => loaded,
         Ok(None) => return intake::not_found(),
@@ -3721,6 +3742,13 @@ pub(crate) async fn save_my_country_questions(
         Ok(None) => return intake::not_found(),
         Err(error) => return intake::internal(error, "lock representative questions"),
     };
+    // After the send only while GMED requests a follow-up block (owner 2026-10-26).
+    if let Some(refusal) =
+        intake::after_send_refusal(&mut tx, lead_id, auth.user_id, intake::AfterSend::FollowUp)
+            .await
+    {
+        return refusal;
+    }
     let loaded = match load(&mut tx, lead_id).await {
         Ok(Some(loaded)) => loaded,
         Ok(None) => return intake::not_found(),

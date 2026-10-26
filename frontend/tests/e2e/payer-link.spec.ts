@@ -1415,7 +1415,8 @@ test.describe("payer link", () => {
 
     // The proof is asked from the start: the form opens at the funds.
     await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
-    await expect(page.getByTestId("payer-link-funds-upload-badge")).toHaveText("erforderlich");
+    // Required: the `*` says it, no word chip next to it (labels audit 2026-10-26, A7).
+    await expect(page.getByTestId("payer-link-funds-upload-badge")).toHaveCount(0);
     // Nothing yellow before "Weiter"; the first press names what the step misses and stays,
     // the second goes on (owner rule, QA 2026-10-10).
     await expect(page.getByTestId("payer-link-step-missing")).toHaveCount(0);
@@ -1449,7 +1450,8 @@ test.describe("payer link", () => {
 
     await missing.getByRole("button", { name: "Ergänzen" }).click();
     await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
-    await expect(page.getByTestId("payer-link-funds-upload-badge")).toHaveText("erforderlich");
+    // Required: the `*` says it, no word chip next to it (labels audit 2026-10-26, A7).
+    await expect(page.getByTestId("payer-link-funds-upload-badge")).toHaveCount(0);
     await page.locator("#payer-link-funds-files").setInputFiles({
       name: "kontoauszug.pdf",
       mimeType: "application/pdf",

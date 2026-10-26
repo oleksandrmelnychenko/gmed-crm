@@ -52,7 +52,7 @@ import { useNavState } from "@/lib/nav-state";
 import { usePortalAccountLabel } from "@/lib/portal-account-label";
 import { useLeadPortalClosed } from "@/pages/patient-lead/lead-portal-closed";
 import { useLeadCabinetLangState } from "@/pages/patient-lead/lead-cabinet-language";
-import { leadShellNavLabel, leadShellText } from "@/pages/patient-lead/lead-shell-text";
+import { LEAD_PORTAL_AFTER_REQUEST, leadPortalFeatureLabels, leadShellNavLabel, leadShellText } from "@/pages/patient-lead/lead-shell-text";
 import {
   canAccessStaffRoute,
   isLeadPortalUser,
@@ -124,6 +124,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   medications: Pill,
   recommendations: ClipboardList,
   services: ConciergeBell,
+  after_request: PackageCheck,
   subscriptions: PackageCheck,
   privacy: Shield,
   incidents: ShieldAlert,
@@ -194,14 +195,13 @@ export function NavPanel() {
     Boolean(user) && !isPatientPortal,
     Boolean(user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities)),
   );
+  // One entry for the patient portal to come opens the dialog that lists it (owner 2026-10-26, C1):
+  // not ten locked entries that dominate the navigation of somebody who has not even sent the request.
   const patientPortalNav = isPatientPortal
     ? isLeadPortal
       ? [
           ...listLeadPortalNavItems().filter((item) => item.id !== "account" && item.id !== "legal").map(toPatientNavItem),
-          ...(leadPortalClosed
-            ? []
-            : listPatientPortalNavItems().filter((item) => !["services", "account", "legal"].includes(item.id))
-              .map((item) => ({ ...toPatientNavItem(item), locked: true }))),
+          ...(leadPortalClosed ? [] : [{ id: LEAD_PORTAL_AFTER_REQUEST, to: "#", labelKey: LEAD_PORTAL_AFTER_REQUEST, locked: true }]),
           ...listLeadPortalNavItems().filter((item) => item.id === "account" || item.id === "legal").map(toPatientNavItem),
         ].map(withShellLabel)
       : listPatientPortalNavItems({ leadRequests: Boolean(user?.lead_portal?.requests) })
@@ -240,7 +240,9 @@ export function NavPanel() {
           <UserCard
             name={user.name}
             role={user.role}
-            roleText={shellPending ? null : portalAccountLabel || shellText?.accountCaption || null}
+            // The lead cabinet names a parent's login; a lead's own name stands alone (labels audit 2026-10-26, B1).
+            roleText={shellPending ? null : portalAccountLabel || null}
+            hideRole={isLeadPortal && !portalAccountLabel}
             tr={tr}
             translations={t}
             collapsed={collapsed}
@@ -297,8 +299,10 @@ export function NavPanel() {
     {isLeadPortal && lockedModule ? <LeadPortalPlanDialog
       key={lockedModule.id}
       lang={cabinetLang}
-      moduleId={lockedModule.id}
+      // The whole portal, not one module: the server knows it as "services".
+      moduleId={lockedModule.id === LEAD_PORTAL_AFTER_REQUEST ? "services" : lockedModule.id}
       moduleLabel={lockedModule.label}
+      features={lockedModule.id === LEAD_PORTAL_AFTER_REQUEST ? leadPortalFeatureLabels(cabinetLang) : undefined}
       onClose={() => setLockedModule(null)}
     /> : null}
     {!isLeadPortal && lockedModule ? <PortalSubscriptionLock label={lockedModule.label} onClose={() => setLockedModule(null)} /> : null}
@@ -513,6 +517,7 @@ function UserCard({
   name,
   role,
   roleText: roleTextOverride,
+  hideRole = false,
   tr,
   translations,
   collapsed,
@@ -521,6 +526,8 @@ function UserCard({
   role: string;
   /** Said instead of the role name (a parent's login in the lead cabinet). */
   roleText?: string | null;
+  /** The name alone, without a caption (a lead's own login). */
+  hideRole?: boolean;
   tr: Record<string, string>;
   translations: UnknownTranslations;
   collapsed: boolean;
@@ -530,7 +537,7 @@ function UserCard({
   if (collapsed) {
     return (
       <div
-        title={`${name} - ${roleText}`}
+        title={hideRole ? name : `${name} - ${roleText}`}
         className="flex items-center justify-center size-10 mx-auto rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white"
       >
         {userInitials(name)}
@@ -544,7 +551,7 @@ function UserCard({
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[13px] font-semibold text-foreground leading-tight">{name}</p>
-        <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mt-0.5">{roleText}</p>
+        {hideRole ? null : <p className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mt-0.5">{roleText}</p>}
       </div>
     </div>
   );

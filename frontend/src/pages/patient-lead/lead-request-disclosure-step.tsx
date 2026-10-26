@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CircleAlert, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleAlert, Info, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
@@ -12,8 +12,8 @@ import { choiceOnlyByGuardian, choosesForChild } from "./lead-request-consent-fo
 import { AutosaveFlushContext, CabinetSection, StepFooter, errorBody } from "./lead-request-parts";
 import type { StepProps } from "./lead-request-step-forms";
 import { asLeadCabinetLang } from "./lead-request-text";
-import { TrustedPersonsEditor } from "./lead-trusted-persons-editor";
-import { disclosureChanged, disclosureDefaultsToNo, disclosureDraft, disclosureProblem, disclosureToSend, mergeDisclosureDraft, type DisclosureDraft } from "./lead-trusted-persons-model";
+import { TrustedPersonsEditor, TrustedPersonsList } from "./lead-trusted-persons-editor";
+import { disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, draftIndexOfSent, mergeDisclosureDraft, onlyWithdraws, recipientFieldOfServer, recipientsToSend, type DisclosureDraft, type RecipientField } from "./lead-trusted-persons-model";
 import { disclosureConsentText, disclosureSubject, disclosureWording, trustedPersonsText } from "./lead-trusted-persons-text";
 
 export function DisclosureStep({ request, text: common, lang, enqueue, onChange, nav }: StepProps) {
@@ -34,6 +34,11 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   // The consent refers to the final list: a change of the list unticks it, and the step says so
   // once, until the box is ticked again (QA 2026-10-24, A-8).
   const [consentReset, setConsentReset] = useState(false);
+  // The person and field the server refused (422 `consent_recipients_invalid` with `field`/`index`).
+  const [serverProblem, setServerProblem] = useState<{ index: number; field: RecipientField } | null>(null);
+  // Sent requests are read-only (owner 2026-10-26); only a withdrawal stays open: "no" for
+  // everybody, or a saved person removed.
+  const locked = Boolean(request.submitted_at);
   // A blank row is there already: "add a person" would be wrong, what is missing in it is meant.
   const problemMessage = (current: NonNullable<typeof problem>) =>
     current === "consent" ? text.consentRequired
@@ -66,6 +71,11 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       setError(problemMessage(problemNow));
       return false;
     }
+    // After the send only a withdrawal is saved; the server refuses anything else too.
+    if (base.submitted_at && !onlyWithdraws(current, base)) {
+      setError(common.sentLockedHint);
+      return false;
+    }
     setBusy(true);
     setError("");
     const pending = (async () => {
@@ -77,11 +87,19 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
         draftRef.current = merged;
         requestRef.current = saved;
         setDraft(merged);
+        setServerProblem(null);
         onChange(saved);
         return true;
       } catch (cause) {
-        const code = errorBody(cause)?.code;
-        setError(code === CONSENT_RECIPIENTS_INVALID ? text.invalid
+        const body = errorBody(cause);
+        const code = body?.code;
+        // The person and field the server named, marked at that field (owner 2026-10-26).
+        const field = code === CONSENT_RECIPIENTS_INVALID ? recipientFieldOfServer(body?.field) : null;
+        const index = field ? draftIndexOfSent(current.persons, body?.index) : null;
+        setServerProblem(field && index !== null ? { index, field } : null);
+        if (field && index !== null) setAttempted(true);
+        setError(code === "request_already_sent" ? common.sentLockedHint
+          : code === CONSENT_RECIPIENTS_INVALID ? text.invalid
           : code === "disclosure_consent_required" ? text.consentRequired
           : code === "disclosure_version_outdated" ? text.outdated
           : code === "consent_recipients_required" ? text.required
@@ -97,7 +115,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     })();
     saving.current = pending;
     return pending;
-  }, [ownMinor, problemMessage, text, enqueue, lang, user?.id, onChange, common.errors.request_failed]);
+  }, [ownMinor, problemMessage, text, enqueue, lang, user?.id, onChange, common.errors.request_failed, common.sentLockedHint]);
 
   // Leaving via a tab, Next or another child's request saves a valid choice
   // in the shared queue. A failed/incomplete draft stays visible for correction.
@@ -127,24 +145,61 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     draftRef.current = next;
     setDraft(next);
     setError("");
+    setServerProblem(null);
   }
 
   if (ownMinor) return <p className="text-sm text-muted-foreground" data-testid="lead-request-guardian-only">{common.guardianOnly}</p>;
 
-  // Not answered counts as "no" (owner decision 2026-10-22): no information to third parties. The
-  // chip says so neutrally, as a default, not as an answer given (QA 2026-10-24, A-1).
-  const defaultNo = disclosureDefaultsToNo(request);
-  const state = <StatusChip tone={changed ? "warning" : request.disclosure ? "success" : "neutral"} role="status" data-testid="trusted-persons-save-state">
-    {!changed && request.disclosure ? <Check aria-hidden="true" /> : null}
-    {busy ? common.saving : changed ? text.unsaved : request.disclosure ? text.saved : defaultNo ? `${text.denied} (${text.byDefault})` : text.unanswered}
-  </StatusChip>;
+  // Only a save state gets a chip: the chosen radio already shows the answer, also the default
+  // "no" (owner decision 2026-10-22), so no "(default)" chip next to it (labels audit 2026-10-26, A4/B9).
+  const state = busy || changed || request.disclosure ? <StatusChip tone={busy || changed ? "warning" : "success"} role="status" data-testid="trusted-persons-save-state">
+    {!busy && !changed ? <Check aria-hidden="true" /> : null}
+    {busy ? common.saving : changed ? text.unsaved : text.saved}
+  </StatusChip> : null;
+  // The other parent's saved choice is named once as a sentence; the own one needs no receipt (A2).
+  const savedByOther = request.disclosure && user?.id && request.disclosure.chosen_by !== user.id ? request.disclosure : null;
+  // After the send: the decision read-only, with the withdrawal — "no" for everybody, or one saved
+  // person removed while the consent for the others stays (owner 2026-10-26).
+  const lockedAllow = draft.allowDisclosure === true;
+  const canRemove = lockedAllow && draft.consentGiven && draft.persons.length > 1;
+
+  if (locked) return <section className="space-y-4" data-testid="lead-request-disclosure-step">
+    <div role="note" className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200" data-testid="disclosure-locked-hint">
+      <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <p>{common.sentLockedHint}</p>
+    </div>
+    <CabinetSection title={text.title} accessory={state}>
+      <div className="space-y-3" data-testid="disclosure-locked">
+        <p className="text-sm leading-6" data-testid="disclosure-locked-decision">
+          <span className="text-muted-foreground">{text.lockedDecision}: </span>
+          <span className="font-medium">{lockedAllow ? text.yes : wording.no}</span>
+        </p>
+        {lockedAllow ? <>
+          <TrustedPersonsList persons={recipientsToSend(draft.persons)} lang={lang} disabled={busy}
+            onRemove={canRemove ? (index) => update({ persons: draft.persons.filter((_, at) => at !== index) }) : undefined} />
+          <p className="text-xs leading-5 text-muted-foreground">{text.lockedWithdrawHint}</p>
+          <Button type="button" variant="outline" className="h-9" disabled={busy} data-testid="disclosure-withdraw"
+            onClick={() => { setConsentReset(false); update({ allowDisclosure: false, consentGiven: false, persons: [], answered: true }); }}>
+            {text.withdraw}
+          </Button>
+        </> : null}
+      </div>
+    </CabinetSection>
+    {error ? <StatusChip tone="error" role="alert" className="rounded-lg px-3 py-2 text-sm"><CircleAlert aria-hidden="true" />{error}</StatusChip> : null}
+    {savedByOther ? <p className="px-1 text-xs leading-5 text-muted-foreground" data-testid="disclosure-receipt">{text.savedByOther(savedByOther.chosen_by_name?.trim() || text.otherParent, formatAppDateTime(savedByOther.chosen_at))}</p> : null}
+    <StepFooter>
+      <Button type="button" variant="outline" className="h-9" disabled={busy || !nav.onBack} onClick={() => nav.onBack?.()}><ArrowLeft aria-hidden="true" className="size-3.5" />{common.back}</Button>
+      <Button type="button" className="h-9" disabled={busy || !nav.onNext} onClick={() => nav.onNext?.()}>{common.next}<ArrowRight aria-hidden="true" className="size-3.5" /></Button>
+    </StepFooter>
+  </section>;
 
   return <section className="space-y-4" data-testid="lead-request-disclosure-step">
     <CabinetSection title={text.title} accessory={state}>
       <div className="space-y-4" data-testid="trusted-persons-form">
-        {request.access_kind === "guardian" ? <div className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-muted/40 p-3 text-sm leading-6">
+        {/* A child's parents read "your child … to you as parents" in the introduction already (B10). */}
+        {request.access_kind === "guardian" && !choosesForChild(request) ? <div className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-muted/40 p-3 text-sm leading-6">
           <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <p>{choosesForChild(request) ? text.guardianContext(personName) : text.representativeContext(personName)}</p>
+          <p>{text.representativeContext(personName)}</p>
         </div> : null}
         <p className="text-sm leading-6 text-muted-foreground">{wording.introduction}</p>
         <fieldset className="space-y-3" disabled={busy}>
@@ -155,7 +210,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
               draft.allowDisclosure === allow ? "border-[var(--brand)] bg-[var(--brand)] font-medium text-white" : "border-border bg-card hover:border-[var(--brand)]",
               busy && "cursor-wait",
             )}>
-              <input type="radio" name={`disclosure-${request.lead_id}`} className="mt-1 size-4 shrink-0 accent-current" checked={draft.allowDisclosure === allow} data-testid={allow ? "disclosure-yes" : "disclosure-no"} onChange={() => { setConsentReset(false); update({ allowDisclosure: allow, consentGiven: false, answered: true }); }}
+              <input type="radio" name={`disclosure-${request.lead_id}`} aria-label={allow ? text.yes : wording.no} className="mt-1 size-4 shrink-0 accent-current" checked={draft.allowDisclosure === allow} data-testid={allow ? "disclosure-yes" : "disclosure-no"} onChange={() => { setConsentReset(false); update({ allowDisclosure: allow, consentGiven: false, answered: true }); }}
                 // The default "no" is shown as chosen already: a click on it changes nothing, yet
                 // it is the person's own answer and is saved as such (QA 2026-10-25, E-13).
                 onClick={() => { if (draftRef.current.allowDisclosure === allow && !draftRef.current.answered) update({ answered: true }); }} />
@@ -168,14 +223,14 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
 
     {draft.allowDisclosure === true ? <>
       <CabinetSection title={text.personsHeading}>
-        <TrustedPersonsEditor persons={draft.persons} lang={lang} disabled={busy} showErrors={attempted} onChange={(persons) => {
+        <TrustedPersonsEditor persons={draft.persons} lang={lang} disabled={busy} showErrors={attempted} serverProblem={serverProblem} onChange={(persons) => {
           if (draftRef.current.consentGiven) setConsentReset(true);
           update({ persons, consentGiven: false });
         }} />
       </CabinetSection>
       <CabinetSection title={text.consentHeading}>
         <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border/60 bg-muted/25 p-3.5 text-sm leading-6">
-          <input type="checkbox" className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} disabled={busy} data-testid="disclosure-consent" onChange={(event) => { setConsentReset(false); update({ consentGiven: event.currentTarget.checked }); }} />
+          <input type="checkbox" aria-label={disclosureConsentText(lang, companyName, disclosureSubject(request))} className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} disabled={busy} data-testid="disclosure-consent" onChange={(event) => { setConsentReset(false); update({ consentGiven: event.currentTarget.checked }); }} />
           <span>{disclosureConsentText(lang, companyName, disclosureSubject(request))}</span>
         </label>
         {consentReset && !draft.consentGiven ? <p role="status" className="px-1 text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="disclosure-consent-reset">{text.consentReset}</p> : null}
@@ -186,9 +241,9 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     {error || (changed && problem) ? <StatusChip tone={error ? "error" : "warning"} role={error ? "alert" : "status"} className="rounded-lg px-3 py-2 text-sm">
       <CircleAlert aria-hidden="true" />{error || problemMessage(problem!)}
     </StatusChip> : null}
-    <p className="px-1 text-xs leading-5 text-muted-foreground">{text.footer}</p>
-    {request.disclosure ? <p className="px-1 font-mono text-[11px] leading-5 text-muted-foreground" data-testid="disclosure-receipt">{text.saved} · {formatAppDateTime(request.disclosure.chosen_at)}{request.disclosure.chosen_by_name ? ` · ${request.disclosure.chosen_by_name}` : ""}</p> : null}
-    <StepFooter index={nav.index} total={nav.total} text={common}>
+    {draft.allowDisclosure === true ? <p className="px-1 text-xs leading-5 text-muted-foreground">{text.footer}</p> : null}
+    {savedByOther ? <p className="px-1 text-xs leading-5 text-muted-foreground" data-testid="disclosure-receipt">{text.savedByOther(savedByOther.chosen_by_name?.trim() || text.otherParent, formatAppDateTime(savedByOther.chosen_at))}</p> : null}
+    <StepFooter>
       <Button type="button" variant="outline" className="h-9" disabled={busy || !nav.onBack} onClick={() => nav.onBack?.()}><ArrowLeft aria-hidden="true" className="size-3.5" />{common.back}</Button>
       <Button type="button" className="h-9" disabled={busy || !nav.onNext} onClick={() => nav.onNext?.()}>{common.next}<ArrowRight aria-hidden="true" className="size-3.5" /></Button>
     </StepFooter>

@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Check, LoaderCircle, RotateCcw, ShieldAlert, Undo2, X } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, History, Info, LoaderCircle, RotateCcw, ShieldAlert, Undo2, UserRound, X } from "lucide-react";
 
 import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
 
-import { Section, StatusBadge, checkboxClass, tokens } from "@/components/ui-shell";
+import { Section, checkboxClass, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { countryLabel } from "@/components/ui/country-select";
 import { leadRequestText } from "@/pages/patient-lead/lead-request-text";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
@@ -47,7 +48,7 @@ import {
 } from "../model/lead-risk-assessment";
 import type { LeadRiskController } from "../model/use-lead-risk-assessment";
 
-const SECTION_CLASS = "rounded-xl border border-border/70 bg-card p-4";
+const SECTION_CLASS = "@container/risk rounded-xl border border-border/70 bg-card p-3.5";
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
 
 type DialogState =
@@ -57,18 +58,14 @@ type DialogState =
   | null;
 
 function Caption({ children }: { children: string }) {
-  return <h4 className="text-xs font-semibold text-foreground">{children}</h4>;
+  return <h4 className="text-sm font-semibold text-foreground">{children}</h4>;
 }
 
 function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: Tx }) {
   const score = riskDisplayedScore(assessment);
   const representatives = assessment.representatives ?? [];
   if (score.triggers.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground" data-testid="lead-risk-no-triggers">
-        {tx("Триггеры не сработали", "Keine Auslöser")}
-      </p>
-    );
+    return null;
   }
   const columns: ColumnDef<RiskTrigger>[] = [
     {
@@ -172,20 +169,22 @@ function DecisionLine({ decision, tx }: { decision: RiskDecision; tx: Tx }) {
         ? `${tx("предложение", "Vorschlag")} · ${proposalState}`
         : null;
   return (
-    <li className="space-y-0.5" data-testid="lead-risk-decision">
-      <div className="flex flex-wrap gap-x-2 text-foreground">
-        <span className="tabular-nums text-muted-foreground">{formatAppDateTime(decision.decided_at) || "—"}</span>
-        <span className="font-medium">{riskDecisionLabel(decision.decision, tx)}</span>
-        {kind ? <span className="text-muted-foreground">({kind})</span> : null}
-        {decision.level ? <span className="text-muted-foreground">· {riskLevelLabel(decision.level, tx)}</span> : null}
-        {decision.decided_by_name ? <span className="text-muted-foreground">· {decision.decided_by_name}</span> : null}
+    <li className="space-y-2 rounded-lg border border-border/60 bg-card p-3" data-testid="lead-risk-decision">
+      <div className="flex flex-wrap items-center gap-2 text-foreground">
+        <span className="font-semibold">{riskDecisionLabel(decision.decision, tx)}</span>
+        {kind ? <StatusChip className="text-foreground">{kind}</StatusChip> : null}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <StatusChip tone="info"><CalendarDays aria-hidden="true" /><time dateTime={decision.decided_at ?? undefined}>{formatAppDateTime(decision.decided_at) || "—"}</time></StatusChip>
+        {decision.level ? <StatusChip tone={riskLevelTone(decision.level)}>{riskLevelLabel(decision.level, tx)}</StatusChip> : null}
+        {decision.decided_by_name ? <StatusChip className="text-foreground"><UserRound aria-hidden="true" />{decision.decided_by_name}</StatusChip> : null}
       </div>
       {decision.blocks.length > 0 ? (
-        <div className="text-muted-foreground">
+        <div className="text-sm leading-5 text-foreground">
           {tx("Блоки", "Blöcke")}: {decision.blocks.map((key) => `${key} ${riskBlockLabel(key, tx)}`).join(", ")}
         </div>
       ) : null}
-      {decision.reason ? <div className="whitespace-pre-line text-foreground">{decision.reason}</div> : null}
+      {decision.reason ? <div className="whitespace-pre-line text-sm leading-6 text-foreground">{decision.reason}</div> : null}
     </li>
   );
 }
@@ -310,7 +309,7 @@ export function LeadRiskAssessmentPanel({
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant="default"
             className="h-8 rounded-lg"
             disabled={disabled || restarting}
             onClick={() => void restart()}
@@ -323,19 +322,28 @@ export function LeadRiskAssessmentPanel({
       >
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex" data-testid="lead-risk-level" data-level={score.level}>
-            <StatusBadge tone={riskLevelTone(score.level)}>{riskLevelLabel(score.level, tx)}</StatusBadge>
+            <StatusChip tone={riskLevelTone(score.level)}>{riskLevelLabel(score.level, tx)}</StatusChip>
           </span>
           {score.knockout ? (
             <span className="inline-flex" data-testid="lead-risk-knockout">
-              <StatusBadge tone="error">K.o.</StatusBadge>
+              <StatusChip tone="error">K.o.</StatusChip>
             </span>
           ) : null}
           <span className="inline-flex" data-testid="lead-risk-status">
-            <StatusBadge tone={riskStatusTone(assessment.status)}>{riskStatusLabel(assessment.status, tx)}</StatusBadge>
+            <StatusChip tone={riskStatusTone(assessment.status)}>{riskStatusLabel(assessment.status, tx)}</StatusChip>
           </span>
-          <span className="text-xs text-muted-foreground" data-testid="lead-risk-points">
-            {tx("Баллы", "Punkte")}: <span className="font-semibold text-foreground tabular-nums">{riskPointsLine(score, tx)}</span>
-          </span>
+        <dl className="flex flex-wrap items-center gap-2" data-testid="lead-risk-points" aria-label={riskPointsLine(score, tx)}>
+          {[
+            [tx("Баллы · максимум", "Punkte · Höchstwert"), score.points],
+            [score.triggers.some((trigger) => trigger.subject === "representative") ? tx("Пациент и представители", "Patient und Vertreter") : tx("Пациент", "Patient"), score.patient_points],
+            [tx("Плательщик", "Zahler/in"), score.payer_points],
+          ].map(([label, value]) => (
+            <div key={label} className="flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/20 px-2 py-0.5 text-xs leading-5 text-foreground">
+              <dt>{label}:</dt>
+              <dd className="font-semibold tabular-nums">{value}</dd>
+            </div>
+          ))}
+        </dl>
         </div>
 
         {preview ? (
@@ -371,7 +379,7 @@ export function LeadRiskAssessmentPanel({
                     return [<div key={field} className="min-w-0">
                       <dt className="text-xs text-muted-foreground">{field === "pep_self" ? tx("PEP: представитель", "PEP: Vertreter") : riskMissingLabel(field, tx)}</dt>
                       <dd className="mt-1 whitespace-pre-wrap break-words text-sm">
-                        {question ? <StatusBadge tone={value === true ? "warning" : "success"}>{value === true ? tx("Да", "Ja") : tx("Нет", "Nein")}</StatusBadge>
+                        {question ? <StatusChip tone={value === true ? "warning" : "success"}>{value === true ? tx("Да", "Ja") : tx("Нет", "Nein")}</StatusChip>
                           : field === "stay_reason" ? cabinetText.stayReasonOptions[value as keyof typeof cabinetText.stayReasonOptions] ?? String(value)
                             : field === "sanctions_link_kind" ? cabinetText.sanctionsLinkKindOptions[value as keyof typeof cabinetText.sanctionsLinkKindOptions] ?? String(value)
                               : field === "pep_country" || field === "birth_country" ? countryLabel(String(value), lang) : String(value)}
@@ -480,14 +488,15 @@ export function LeadRiskAssessmentPanel({
         ) : null}
 
         {decisions.length > 0 ? (
-          <div className="space-y-1.5" data-testid="lead-risk-actions">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border/50 pt-2.5" data-testid="lead-risk-actions">
             {decisions.some((decision) => decision !== "request_more") ? (
-              <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-risk-decision-hint">
-                {tx(
+              <StatusChip tone="warning" className="min-w-0 flex-[1_1_26rem] items-start whitespace-normal rounded-xl px-3 py-2" data-testid="lead-risk-decision-hint">
+                <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                <span>{tx(
                   "Решение вступает в силу сразу, на любом уровне. Причина обязательна (минимум 10 символов).",
                   "Die Entscheidung wird sofort wirksam, auf jeder Stufe. Eine Begründung ist Pflicht (mindestens 10 Zeichen).",
-                )}
-              </p>
+                )}</span>
+              </StatusChip>
             ) : null}
             <div className="flex flex-wrap gap-2">
               {decisions.map((decision) => (
@@ -495,7 +504,8 @@ export function LeadRiskAssessmentPanel({
                   key={decision}
                   type="button"
                   size="sm"
-                  variant={decision === "release" ? "default" : decision === "reject" ? "destructive" : "outline"}
+                  className="h-8"
+                  variant={decision === "reject" ? "destructive" : "default"}
                   disabled={disabled}
                   onClick={() => openDecision(decision)}
                   data-testid={`lead-risk-decide-${decision}`}
@@ -516,12 +526,14 @@ export function LeadRiskAssessmentPanel({
         ) : null}
 
         {assessment.decisions.length > 0 || assessment.history.length > 0 ? (
-          <details className="text-xs" data-testid="lead-risk-history">
-            <summary className={cn("cursor-pointer select-none", tokens.text.label)}>
-              {tx("Решения и история", "Entscheidungen und Verlauf")}
+          <details className="group/risk-history overflow-hidden rounded-lg border border-border/60 text-sm" data-testid="lead-risk-history">
+            <summary className="flex cursor-pointer list-none items-center gap-2 bg-muted/20 px-3 py-2 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+              <History aria-hidden="true" className="size-4 shrink-0" />
+              <span className="flex-1">{tx("Решения и история", "Entscheidungen und Verlauf")}</span>
+              <ChevronDown aria-hidden="true" className="size-4 shrink-0 transition-transform group-open/risk-history:rotate-180" />
             </summary>
-            <div className="mt-2 grid gap-4 md:grid-cols-2">
-              <div className="space-y-1.5">
+            <div className="grid gap-4 border-t border-border/60 bg-muted/10 p-3 @3xl/risk:grid-cols-2">
+              <div className="min-w-0 space-y-3">
                 <Caption>{tx("Решения", "Entscheidungen")}</Caption>
                 {assessment.decisions.length > 0 ? (
                   <ul className="space-y-2">
@@ -530,20 +542,22 @@ export function LeadRiskAssessmentPanel({
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-muted-foreground">{tx("Решений ещё нет", "Noch keine Entscheidungen")}</p>
+                  <p className="rounded-lg border border-dashed border-border bg-card p-3 text-sm text-foreground">{tx("Решений ещё нет", "Noch keine Entscheidungen")}</p>
                 )}
               </div>
-              <div className="space-y-1.5">
+              <div className="min-w-0 space-y-3">
                 <Caption>{tx("История", "Verlauf")}</Caption>
-                <ul className="space-y-1">
+                <ul className="space-y-2">
                   {assessment.history.map((event) => (
-                    <li key={event.id} className="flex flex-wrap gap-x-2" data-testid="lead-risk-event">
-                      <span className="tabular-nums text-muted-foreground">{formatAppDateTime(event.at) || "—"}</span>
-                      <span className="font-medium text-foreground">{riskEventLabel(event, tx)}</span>
-                      {event.level ? <span className="text-muted-foreground">· {riskLevelLabel(event.level, tx)}</span> : null}
-                      {event.points !== null ? <span className="text-muted-foreground">· {event.points} {tx("б.", "P.")}</span> : null}
-                      {event.cause ? <span className="text-muted-foreground">· {riskCauseLabel(event.cause, tx)}</span> : null}
-                      {event.actor_name ? <span className="text-muted-foreground">· {event.actor_name}</span> : null}
+                    <li key={event.id} className="space-y-2 rounded-lg border border-border/60 bg-card p-3" data-testid="lead-risk-event">
+                      <p className="font-semibold text-foreground">{riskEventLabel(event, tx)}</p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusChip tone="info"><CalendarDays aria-hidden="true" /><time dateTime={event.at ?? undefined}>{formatAppDateTime(event.at) || "—"}</time></StatusChip>
+                        {event.level ? <StatusChip tone={riskLevelTone(event.level)}>{riskLevelLabel(event.level, tx)}</StatusChip> : null}
+                        {event.points !== null ? <StatusChip className="text-foreground">{event.points} {tx("б.", "P.")}</StatusChip> : null}
+                        {event.cause ? <StatusChip className="text-foreground">{riskCauseLabel(event.cause, tx)}</StatusChip> : null}
+                        {event.actor_name ? <StatusChip className="text-foreground"><UserRound aria-hidden="true" />{event.actor_name}</StatusChip> : null}
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -585,7 +599,7 @@ export function LeadRiskAssessmentPanel({
       >
         {dialog?.kind === "decide" && dialog.decision === "request_more" ? (
           <fieldset className="space-y-1.5" data-testid="lead-risk-block-chooser">
-            <legend className={cn(tokens.text.label, "mb-1")}>{tx("Какие сведения запросить", "Welche Angaben anfordern")}</legend>
+            <legend className={cn(tokens.text.label, "mb-1 font-mono")}>{tx("Какие сведения запросить", "Welche Angaben anfordern")}</legend>
             <div className="grid gap-1 sm:grid-cols-2">
               {RISK_BLOCK_KEYS.map((key) => (
                 <label key={key} className="flex cursor-pointer items-center gap-2 text-sm">

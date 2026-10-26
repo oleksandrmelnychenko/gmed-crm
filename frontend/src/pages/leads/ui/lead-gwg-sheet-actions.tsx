@@ -80,7 +80,7 @@ export function LeadGwgSheetActions({
         <Button
           key={button.subject}
           type="button"
-          variant={button.subject === "payer" ? "outline" : "default"}
+          variant="default"
           size="sm"
           className="h-8 max-w-full rounded-lg"
           disabled={disabled}

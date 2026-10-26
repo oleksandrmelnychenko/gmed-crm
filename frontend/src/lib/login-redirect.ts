@@ -50,6 +50,38 @@ export function resolveLoginRedirect(state: unknown, userId: string | null | und
   return from;
 }
 
+const SIGN_OUT_NOTICE_KEY = "gmed.sign-out-notice";
+
+/**
+ * A thank-you the login page shows once after a deliberate sign-out (the lead
+ * cabinet's «Abschließen und abmelden», owner 2026-10-26), in the language the
+ * person used. Kept for this tab only; best effort.
+ */
+export function rememberSignOutNotice(text: string): void {
+  try {
+    window.sessionStorage.setItem(SIGN_OUT_NOTICE_KEY, text);
+  } catch {
+    /* No storage: no thank-you. */
+  }
+}
+
+/** The notice of [rememberSignOutNotice], if any; [clearSignOutNotice] removes it. */
+export function readSignOutNotice(): string | null {
+  try {
+    return window.sessionStorage.getItem(SIGN_OUT_NOTICE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function clearSignOutNotice(): void {
+  try {
+    window.sessionStorage.removeItem(SIGN_OUT_NOTICE_KEY);
+  } catch {
+    /* Nothing to clear. */
+  }
+}
+
 /** Why the previous session ended, for the notice on the login page. */
 export function signOutReasonOf(state: unknown): SignOutReason | null {
   const { reason } = asState(state);

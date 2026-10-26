@@ -1,75 +1,108 @@
 import { useState } from "react";
-import { Plus, Trash2, UserRound } from "lucide-react";
+import { Info, Plus, Trash2, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import { inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
-import { CONSENT_RECIPIENT_SCOPES, cabinetScopeSummary, checkedScopeCodes, scopeOptionLabel, toggleScopeCode, type ConsentRecipientScope } from "@/lib/consent-recipient-scope";
+import { checkboxClass, inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
+import { appDateKey } from "@/lib/app-time-zone";
+import { CONSENT_RECIPIENT_SCOPES, checkedScopeCodes, scopeOptionLabel, toggleScopeCode } from "@/lib/consent-recipient-scope";
+import { isValidPersonPhone } from "@/lib/person-fields";
+import { cn } from "@/lib/utils";
 import { CONSENT_RECIPIENT_RELATIONS, MAX_CONSENT_RECIPIENTS, type ConsentRecipient, type ConsentRecipientRelation } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
-import { contactValid, personScope, recipientProblems, type RecipientDraft, type RecipientField } from "./lead-trusted-persons-model";
+import { asLeadCabinetLang } from "./lead-request-text";
+import { blankRecipient, formatBirthDate, isInstitution, personScope, recipientProblems, typedRecipient, unchangedStored, type RecipientDraft, type RecipientField } from "./lead-trusted-persons-model";
 import { trustedPersonsText } from "./lead-trusted-persons-text";
 
-export function TrustedPersonsList({ persons, lang }: { persons: readonly ConsentRecipient[]; lang: string }) {
+/**
+ * The saved persons, read-only: name, relationship, date of birth and the phone they call from
+ * (owner 2026-10-26: staff check a caller by both), a legacy contact as given, and the scope.
+ * `onRemove` (after the request is sent) offers to remove a person — a withdrawal.
+ */
+export function TrustedPersonsList({ persons, lang, onRemove, disabled = false }: {
+  persons: readonly ConsentRecipient[]; lang: string; onRemove?: (index: number) => void; disabled?: boolean;
+}) {
   const text = consentFormText(lang);
+  const fields = trustedPersonsText(lang);
   return <ul className="space-y-2 text-sm" data-testid="trusted-persons-list">
-    {persons.map((person, index) => <li key={index} className="break-words rounded-lg border border-border/60 bg-card px-3 py-2">
-      <span className="font-medium">{person.name}</span>{" · "}{text.recipientRelations[person.relation] ?? text.recipientRelations.other}
-      {person.contact ? <span className="text-muted-foreground"> · {person.contact}</span> : null}
-      {personScope(person, lang) ? <p className="mt-1 text-muted-foreground">{personScope(person, lang)}</p> : null}
-    </li>)}
+    {persons.map((person, index) => {
+      const born = formatBirthDate(person.birth_date);
+      return <li key={index} className="flex items-start justify-between gap-3 break-words rounded-lg border border-border/60 bg-card px-3 py-2">
+        <div className="min-w-0">
+          <span className="font-medium">{person.name}</span>{" · "}{text.recipientRelations[person.relation] ?? text.recipientRelations.other}
+          {born ? <span className="text-muted-foreground"> · {fields.birthDateShort} {born}</span> : null}
+          {person.phone ? <span className="text-muted-foreground"> · {person.phone}</span> : person.contact ? <span className="text-muted-foreground"> · {person.contact}</span> : null}
+          {personScope(person, lang) ? <p className="mt-1 text-muted-foreground">{personScope(person, lang)}</p> : null}
+        </div>
+        {onRemove ? <Button type="button" variant="ghost" size="sm" className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" disabled={disabled}
+          aria-label={`${fields.removePerson}: ${person.name}`} title={fields.removePerson} data-testid="trusted-person-remove" onClick={() => onRemove(index)}>
+          <Trash2 aria-hidden="true" className="size-3.5" />
+        </Button> : null}
+      </li>;
+    })}
   </ul>;
 }
 
-/** Multi-select with check marks: `all` ticks every option, unticking another one drops `all`. */
-export function ScopeSelect({ value, onChange, lang, disabled = false, invalid = false, id }: {
-  value: readonly ConsentRecipientScope[]; onChange: (next: ConsentRecipientScope[]) => void; lang: string; disabled?: boolean; invalid?: boolean; id?: string;
-}) {
-  const fields = trustedPersonsText(lang);
-  const summary = cabinetScopeSummary(value, lang);
-  return <NativeComboboxSelect id={id} className={selectClass} value="" disabled={disabled} aria-invalid={invalid || undefined}
-    selectedValues={checkedScopeCodes(value)} showValueIndicator={false} hidePlaceholderOption keepOpenOnSelect title={summary || fields.scopePlaceholder} aria-label={fields.scope}
-    onChange={(event) => { if (event.target.value) onChange(toggleScopeCode(value, event.target.value as ConsentRecipientScope)); }}>
-    <option value="">{summary || fields.scopePlaceholder}</option>
-    {CONSENT_RECIPIENT_SCOPES.map((code) => <option key={code} value={code}>{scopeOptionLabel(code, lang)}</option>)}
-  </NativeComboboxSelect>;
+/**
+ * The (i) beside the phone label: why GMED asks for the number (owner 2026-10-26). A toggle button
+ * with the explanation right below the label, so it never leaves a phone screen; Escape closes it.
+ */
+function PhoneInfo({ index, label, info }: { index: number; label: string; info: string }) {
+  const [open, setOpen] = useState(false);
+  const id = `trusted-person-phone-info-${index}`;
+  return <>
+    <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={label} title={label} aria-expanded={open} aria-controls={id} data-testid="trusted-person-phone-info"
+      onClick={() => setOpen((current) => !current)} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}>
+      <Info aria-hidden="true" className="size-3.5" />
+    </button>
+    {open ? <p id={id} role="note" className="basis-full rounded-lg border border-border/70 bg-muted/40 px-3 py-2 leading-5 text-foreground" data-testid="trusted-person-phone-info-text">{info}</p> : null}
+  </>;
 }
-
-const typed = (person: RecipientDraft) => Boolean(person.name.trim() || person.relation || person.contact.trim() || person.scopeCodes.length > 0);
 
 /**
  * `showErrors` (after "Next" or a tab could not save the choice) marks each
- * missing or wrong entry at its field; a contact that is neither a phone
- * number nor an e-mail address is named as soon as the field is left.
+ * missing or wrong entry at its field; a phone number that is not one is named
+ * as soon as the field is left. `serverProblem` marks the field the server
+ * refused. A saved person shown unchanged keeps its legacy contact (read-only)
+ * and needs no phone or date of birth until it is edited (owner 2026-10-26).
  */
-export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false, showErrors = false }: {
+export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false, showErrors = false, serverProblem = null }: {
   persons: readonly RecipientDraft[]; onChange: (persons: RecipientDraft[]) => void; lang: string; disabled?: boolean; showErrors?: boolean;
+  serverProblem?: { index: number; field: RecipientField } | null;
 }) {
   const text = consentFormText(lang);
   const fields = trustedPersonsText(lang);
-  const [leftContact, setLeftContact] = useState<ReadonlySet<number>>(() => new Set());
+  const today = appDateKey();
+  const [leftPhone, setLeftPhone] = useState<ReadonlySet<number>>(() => new Set());
   const update = (index: number, patch: Partial<RecipientDraft>) => onChange(persons.map((person, at) => at === index ? { ...person, ...patch } : person));
   // An empty row is no person (it is dropped on saving) unless it is the only one.
-  const anyTyped = persons.some(typed);
+  const anyTyped = persons.some(typedRecipient);
   const problemsOf = (person: RecipientDraft, index: number): ReadonlySet<RecipientField> => {
-    const all = recipientProblems(person);
-    if (showErrors && (typed(person) || !anyTyped)) return new Set(all);
-    return new Set(leftContact.has(index) && !contactValid(person.contact) ? ["contact"] : []);
+    const all = recipientProblems(person, today);
+    const shown = new Set<RecipientField>(showErrors && (typedRecipient(person) || !anyTyped) ? all : []);
+    if (leftPhone.has(index) && person.phone.trim() && !isValidPersonPhone(person.phone)) shown.add("phone");
+    if (serverProblem?.index === index) shown.add(serverProblem.field);
+    return shown;
+  };
+  const messages: Record<RecipientField, string> = {
+    name: fields.nameRequired, relation: fields.relationRequired, phone: fields.phoneRequired, birth_date: fields.birthDateRequired, scope: fields.scopeRequired,
   };
   const message = (field: RecipientField, problems: ReadonlySet<RecipientField>, index: number) => problems.has(field)
-    ? <p className="text-destructive" role="alert" id={`trusted-person-${field}-${index}-error`} data-testid={`trusted-person-${field}-error`}>
-      {{ name: fields.nameRequired, relation: fields.relationRequired, contact: fields.contactInvalid, scope: fields.scopeRequired }[field]}
-    </p>
+    ? <p className="text-destructive" role="alert" id={`trusted-person-${field}-${index}-error`} data-testid={`trusted-person-${field}-error`}>{messages[field]}</p>
     : null;
   const removeAt = (index: number) => {
     onChange(persons.filter((_, at) => at !== index));
-    setLeftContact((current) => new Set([...current].filter((at) => at !== index).map((at) => (at > index ? at - 1 : at))));
+    setLeftPhone((current) => new Set([...current].filter((at) => at !== index).map((at) => (at > index ? at - 1 : at))));
   };
   return <div className="space-y-3" data-testid="trusted-persons-editor">
     {persons.length === 0 ? <div className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-muted/25 px-3 py-4 text-sm text-muted-foreground"><UserRound aria-hidden="true" className="size-4 shrink-0" /><p>{fields.empty}</p></div> : null}
     {persons.map((person, index) => {
       const problems = problemsOf(person, index);
       const describedBy = (field: RecipientField) => (problems.has(field) ? `trusted-person-${field}-${index}-error` : undefined);
+      const legacyContact = person.contact.trim() && unchangedStored(person) ? person.contact.trim() : "";
+      const institution = isInstitution(person.relation);
+      const checked = checkedScopeCodes(person.scopeCodes);
       return <div key={index} className="overflow-hidden rounded-xl border border-border/70 bg-card" data-testid="trusted-person-editor">
       <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-muted/30 px-3 py-2">
         <span className="flex min-w-0 items-center gap-2 text-xs font-medium"><span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border/70 bg-card font-mono text-[11px] text-muted-foreground">{String(index + 1).padStart(2, "0")}</span><span className="truncate">{person.name || fields.name}</span></span>
@@ -86,23 +119,48 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
         </NativeComboboxSelect>
         {message("relation", problems, index)}
       </label>
-      <label className="min-w-0 space-y-1.5 text-xs"><span className="text-muted-foreground">{fields.contact}</span>
-        <Input className={inputClass} value={person.contact} maxLength={120} disabled={disabled} autoComplete="off" aria-invalid={problems.has("contact") || undefined} aria-describedby={describedBy("contact")}
-          onBlur={() => setLeftContact((current) => (current.has(index) ? current : new Set(current).add(index)))}
-          onChange={(event) => update(index, { contact: event.target.value })} />
-        {message("contact", problems, index)}
-      </label>
-      <div className="min-w-0 space-y-1.5 text-xs sm:col-span-2"><label htmlFor={`trusted-person-scope-${index}`} className="text-muted-foreground">{fields.scope}</label>
-        <ScopeSelect id={`trusted-person-scope-${index}`} value={person.scopeCodes} lang={lang} disabled={disabled} invalid={problems.has("scope") || (person.scopeCodes.length === 0 && Boolean(person.scope.trim()))}
-          onChange={(scopeCodes) => update(index, { scopeCodes })} />
+      <div className="min-w-0 space-y-1.5 text-xs">
+        <div className="flex flex-wrap items-start gap-x-1.5 gap-y-1.5">
+          <label htmlFor={`trusted-person-phone-${index}`} className="min-w-0 flex-1 text-muted-foreground">{fields.phone}</label>
+          <PhoneInfo index={index} label={fields.phoneInfoLabel} info={fields.phoneInfo} />
+        </div>
+        <Input id={`trusted-person-phone-${index}`} className={inputClass} type="tel" inputMode="tel" value={person.phone} maxLength={40} disabled={disabled} autoComplete="off" required
+          aria-invalid={problems.has("phone") || undefined} aria-describedby={[describedBy("phone"), legacyContact ? `trusted-person-contact-${index}` : null].filter(Boolean).join(" ") || undefined}
+          data-testid="trusted-person-phone"
+          onBlur={() => setLeftPhone((current) => (current.has(index) ? current : new Set(current).add(index)))}
+          onChange={(event) => update(index, { phone: event.target.value })} />
+        {legacyContact ? <p id={`trusted-person-contact-${index}`} className="text-muted-foreground" data-testid="trusted-person-legacy-contact">{fields.legacyContact(legacyContact)}</p> : null}
+        {message("phone", problems, index)}
+      </div>
+      {institution ? null : <div className="min-w-0 space-y-1.5 text-xs">
+        <label htmlFor={`trusted-person-birth-date-${index}`} className="text-muted-foreground">{fields.birthDate}</label>
+        <Input id={`trusted-person-birth-date-${index}`} key={`trusted-person-birth-date-${index}-${lang}`} className={inputClass} type="date" pickerLang={asLeadCabinetLang(lang) ?? undefined}
+          min="1900-01-01" max={today} value={person.birthDate} disabled={disabled} autoComplete="off" required
+          aria-invalid={problems.has("birth_date") || undefined} aria-describedby={describedBy("birth_date")} data-testid="trusted-person-birth-date"
+          onChange={(event) => update(index, { birthDate: event.target.value })} />
+        {message("birth_date", problems, index)}
+      </div>}
+      <fieldset className="min-w-0 space-y-1.5 text-xs sm:col-span-2" aria-invalid={problems.has("scope") || undefined} aria-describedby={describedBy("scope")} data-testid="trusted-person-scope">
+        <legend className="mb-1.5 text-muted-foreground">{fields.scope}</legend>
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          {CONSENT_RECIPIENT_SCOPES.map((code) => <label key={code} className={cn(
+            "flex min-w-0 cursor-pointer items-start gap-2.5 rounded-lg border px-2.5 py-2 text-sm leading-5",
+            checked.includes(code) ? "border-[var(--brand)] bg-[var(--brand-soft)]" : "border-border/70 bg-card",
+            disabled && "cursor-not-allowed opacity-70",
+          )}>
+            <input type="checkbox" className={cn(checkboxClass, "mt-0.5 shrink-0")} checked={checked.includes(code)} disabled={disabled}
+              data-testid={`trusted-person-scope-${code}`} onChange={() => update(index, { scopeCodes: toggleScopeCode(person.scopeCodes, code) })} />
+            <span>{scopeOptionLabel(code, lang)}</span>
+          </label>)}
+        </div>
         {person.scopeCodes.length === 0 && person.scope.trim()
           ? <p className="text-amber-700 dark:text-amber-400" data-testid="trusted-person-scope-legacy">{fields.scopeLegacy(person.scope.trim())}</p>
           : message("scope", problems, index) ?? <p className="text-muted-foreground">{fields.scopeHint}</p>}
-      </div>
+      </fieldset>
       </div>
     </div>;
     })}
-    {persons.length < MAX_CONSENT_RECIPIENTS ? <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" disabled={disabled} data-testid="trusted-person-add" onClick={() => onChange([...persons, { name: "", relation: "", contact: "", scope: "", scopeCodes: [] }])}>
+    {persons.length < MAX_CONSENT_RECIPIENTS ? <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" disabled={disabled} data-testid="trusted-person-add" onClick={() => onChange([...persons, blankRecipient()])}>
       <Plus aria-hidden="true" className="size-3.5" />{text.addRecipient}
     </Button> : <p className="text-xs text-muted-foreground" data-testid="trusted-person-max">{fields.maxReached}</p>}
   </div>;

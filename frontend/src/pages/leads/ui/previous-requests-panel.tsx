@@ -51,7 +51,7 @@ export function PreviousRequestsPanel({ requests, currentConcern, tx, specialtyL
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
+                variant="default"
                 className="shrink-0"
                 disabled={inUse}
                 aria-label={`${tx("Взять причину обращения от", "Anliegen übernehmen vom")} ${formatIntakeDate(request.created_at)}`}

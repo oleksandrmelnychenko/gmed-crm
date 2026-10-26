@@ -1,8 +1,11 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { CheckCheck, Clock3, LoaderCircle, RefreshCw, UserRound, X } from "lucide-react";
+import { CalendarDays, CheckCheck, Clock3, LoaderCircle, RefreshCw, UserRound, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { Input } from "@/components/ui/input";
+import { inputClass, selectClass } from "@/components/ui-shell";
 import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
@@ -159,7 +162,7 @@ export function Step1FillModeSwitch({
     <div
       role="radiogroup"
       aria-label={tx("Кто заполняет данные клиента", "Wer füllt die Personendaten aus")}
-      className="inline-flex max-w-full flex-wrap gap-1 rounded-lg border border-border bg-muted/40 p-1"
+      className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5"
       data-testid="step1-fill-mode"
     >
       {options.map((option, index) => (
@@ -171,7 +174,7 @@ export function Step1FillModeSwitch({
           tabIndex={mode === option.value ? 0 : -1}
           disabled={disabled}
           className={cn(
-            "min-h-8 cursor-pointer rounded-md border px-3 py-1.5 text-[13px] leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-60",
+            "min-h-7 cursor-pointer rounded-md border px-2.5 py-1 text-xs leading-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-60",
             mode === option.value
               ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-white shadow-sm"
               : "border-transparent bg-card text-muted-foreground hover:border-border hover:bg-muted/70 hover:text-foreground",
@@ -249,49 +252,149 @@ export function PatientUpdatedBanner({ at, onClose, tx }: { at: string; onClose:
   );
 }
 
+/** The options of «Пол согласно документам», as step 1 and the step-2 notice offer them. */
+export function legalSexOptionElements(tx: Tx) {
+  return [
+    <option key="" value="">{tx("Выберите", "Auswählen")}</option>,
+    <option key="female" value="female">{tx("Женский", "Weiblich")}</option>,
+    <option key="male" value="male">{tx("Мужской", "Männlich")}</option>,
+    <option key="diverse" value="diverse">{tx("Другой", "Divers")}</option>,
+    <option key="no_entry" value="no_entry">{tx("Без указания", "Keine Angabe")}</option>,
+  ];
+}
+
+export const PENDING_LEGAL_SEX_ID = "lead-wizard-pending-legal-sex";
+export const PENDING_BIRTH_DATE_ID = "lead-wizard-pending-birth-date";
+
 /**
  * Later steps that need the prospect patient wait for date of birth and legal
- * sex; the notice names only what is still empty (`missing`, both when absent).
+ * sex; the notice names only what is still empty (`missing`, both when absent)
+ * and asks for it in place (owner 2026-10-26: staff did not find the anamnesis
+ * behind «Ждём данные пациента»). The values go into the wizard draft through
+ * the callbacks, as on step 1; once both are there the medical form replaces
+ * the notice.
  */
 export function PatientDataPendingNotice({
   onOpenStep1,
   tx,
   missing = ["birthDate", "legalSex"],
+  patientCanFill = true,
+  legalSex = "",
+  onLegalSexChange,
+  birthDate = "",
+  onBirthDateChange,
+  onBirthDateBlur,
+  onBirthDatePickerValidation,
+  birthDateError,
+  birthDateMin,
+  birthDateMax,
+  disabled = false,
 }: {
   onOpenStep1: () => void;
   tx: Tx;
   missing?: ReadonlyArray<"birthDate" | "legalSex">;
+  /** The lead fills the cabinet: the patient may enter the value there too. */
+  patientCanFill?: boolean;
+  legalSex?: string;
+  onLegalSexChange?: (value: string) => void;
+  birthDate?: string;
+  onBirthDateChange?: (value: string) => void;
+  onBirthDateBlur?: () => void;
+  onBirthDatePickerValidation?: (error: string | null) => void;
+  birthDateError?: string;
+  birthDateMin?: string;
+  birthDateMax?: string;
+  disabled?: boolean;
 }) {
-  const birthDate = missing.includes("birthDate");
-  const legalSex = missing.includes("legalSex");
-  const what = birthDate && legalSex
-    ? tx("дату рождения и пол согласно документам", "Geburtsdatum und Geschlecht")
-    : birthDate
+  const needsBirthDate = missing.includes("birthDate");
+  const needsLegalSex = missing.includes("legalSex");
+  const what = needsBirthDate && needsLegalSex
+    ? tx("дату рождения и пол согласно документам", "Geburtsdatum und Geschlecht laut Dokument")
+    : needsBirthDate
       ? tx("дату рождения", "das Geburtsdatum")
       : tx("пол согласно документам", "das Geschlecht laut Dokument");
-  const fields = birthDate && legalSex
-    ? tx("эти поля", "diese Felder")
-    : tx("это поле", "dieses Feld");
+  const pronoun = needsBirthDate && needsLegalSex
+    ? tx("их", "sie")
+    : needsBirthDate
+      ? tx("её", "es")
+      : tx("его", "es");
+  const birthDateErrorId = `${PENDING_BIRTH_DATE_ID}-error`;
   return (
-    <StatusChip
-      tone="warning"
+    <div
       role="status"
       data-testid="patient-data-pending"
-      className="w-full items-start rounded-xl px-3 py-2"
+      className="flex w-full items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
     >
       <Clock3 aria-hidden="true" className="mt-[3px] size-3.5 shrink-0" />
-      <span className="flex min-w-0 flex-1 flex-col items-start gap-2 sm:flex-row sm:gap-3">
-        <span className="min-w-0 flex-1 leading-5">
-          {tx(
-            `Ждём данные пациента: ${what} пациент заполнит в портале. Медицинская часть станет доступна после этого — или заполните ${fields} сами на шаге «Данные клиента».`,
-            `Warten auf die Daten des Patienten: ${what} trägt der Patient im Portal ein. Danach ist der medizinische Teil verfügbar – oder Sie füllen ${fields} selbst unter „Personendaten“ aus.`,
-          )}
-        </span>
-        <Button type="button" variant="outline" size="sm" className="h-7 shrink-0 text-xs" onClick={onOpenStep1}>
-          {tx("К данным клиента", "Zu den Personendaten")}
-        </Button>
-      </span>
-    </StatusChip>
+      <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+        <div className="flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:gap-3">
+          <div className="min-w-0 flex-1 leading-5">
+            <p>
+              {tx(
+                `Чтобы открыть медицинскую часть (анамнез, диагнозы, аллергии, препараты), укажите ${what}.`,
+                `Um den medizinischen Teil (Anamnese, Diagnosen, Allergien, Medikamente) zu öffnen, geben Sie ${what} an.`,
+              )}
+            </p>
+            {patientCanFill ? (
+              <p data-testid="patient-data-pending-portal" className="font-normal text-amber-800/80 dark:text-amber-200/75">
+                {tx(
+                  `Пациент может указать ${pronoun} и сам в портале.`,
+                  `Der Patient kann ${pronoun} auch selbst im Portal angeben.`,
+                )}
+              </p>
+            ) : null}
+          </div>
+          <Button type="button" variant="link" size="sm" className="h-7 shrink-0 px-0 text-xs text-amber-900 dark:text-amber-200" onClick={onOpenStep1}>
+            {tx("К данным клиента", "Zu den Personendaten")}
+          </Button>
+        </div>
+        <div className="grid gap-3 font-normal text-foreground sm:grid-cols-2">
+          {needsBirthDate && onBirthDateChange ? (
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={PENDING_BIRTH_DATE_ID} className="font-mono text-xs font-medium text-amber-950 dark:text-amber-100">
+                {tx("Дата рождения", "Geburtsdatum")}
+              </label>
+              <Input
+                id={PENDING_BIRTH_DATE_ID}
+                name="pending_birth_date"
+                type="date"
+                min={birthDateMin}
+                max={birthDateMax}
+                disabled={disabled}
+                onPickerValidation={onBirthDatePickerValidation}
+                aria-invalid={Boolean(birthDateError)}
+                aria-describedby={birthDateError ? birthDateErrorId : undefined}
+                className={cn(inputClass, "bg-background", birthDateError && "border-destructive")}
+                value={birthDate}
+                onBlur={() => onBirthDateBlur?.()}
+                onChange={(event) => onBirthDateChange(event.target.value)}
+              />
+              {birthDateError ? (
+                <p id={birthDateErrorId} className="text-xs text-destructive">{birthDateError}</p>
+              ) : null}
+            </div>
+          ) : null}
+          {needsLegalSex && onLegalSexChange ? (
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={PENDING_LEGAL_SEX_ID} className="font-mono text-xs font-medium text-amber-950 dark:text-amber-100">
+                {tx("Пол согласно документам", "Geschlecht laut Dokument")}
+              </label>
+              <NativeComboboxSelect
+                id={PENDING_LEGAL_SEX_ID}
+                name="pending_legal_sex"
+                aria-label={tx("Пол согласно документам", "Geschlecht laut Dokument")}
+                value={legalSex}
+                disabled={disabled}
+                onChange={(event) => onLegalSexChange(event.target.value)}
+                className={cn(selectClass, "bg-background")}
+              >
+                {legalSexOptionElements(tx)}
+              </NativeComboboxSelect>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -356,6 +459,15 @@ export function PatientUploadMark({ documentId, lang }: { documentId: string; la
         {de ? "Vom Patienten hochgeladen" : "Загружено пациентом"}
         {upload.uploaded_at ? ` · ${formatAppDateTime(upload.uploaded_at)}` : ""}
       </Badge>
+      {upload.added_after_submit ? (
+        <Badge
+          variant="outline"
+          data-testid="patient-upload-added-after-submit"
+          className="h-5 rounded-full border-violet-200 bg-violet-50 px-1.5 text-[10.5px] font-medium text-violet-800"
+        >
+          {de ? "Nach dem Senden nachgereicht" : "Дослано после отправки"}
+        </Badge>
+      ) : null}
       <Badge
         variant="outline"
         title={upload.consent_given_at ? formatAppDateTime(upload.consent_given_at) : undefined}
@@ -375,9 +487,8 @@ export function PatientUploadMark({ documentId, lang }: { documentId: string; la
       ) : state.canReview ? (
         <Button
           type="button"
-          variant="outline"
-          size="sm"
-          className="h-5 rounded-full px-2 text-[10.5px]"
+          variant="default"
+          size="xs"
           disabled={busy}
           onClick={() => {
             setBusy(true);
@@ -435,14 +546,17 @@ function PortalConsentRecord({ label, consent, tx }: { label: string; consent: L
         <StatusChip tone={!revoked && given ? "success" : "warning"}>
           {revoked ? tx("Отозвано", "Widerrufen") : given ? tx("Дано", "Erteilt") : tx("Не дано", "Nicht erteilt")}
         </StatusChip>
+        {given || revoked ? (
+          <StatusChip tone="warning" className="whitespace-normal">
+            <CalendarDays aria-hidden="true" />
+            <span>
+              {consent?.given_at ? `${tx("Дано:", "Erteilt:")} ${formatAppDateTime(consent.given_at)}` : ""}
+              {consent?.revoked_at ? `${given ? " · " : ""}${tx("Отозвано:", "Widerrufen:")} ${formatAppDateTime(consent.revoked_at)}` : ""}
+              {who ? ` · ${who}` : ""}{consent?.version ? ` · ${tx("версия", "Version")} ${consent.version}` : ""}
+            </span>
+          </StatusChip>
+        ) : null}
       </div>
-      {given || revoked ? (
-        <p className="leading-5 text-muted-foreground">
-          {consent?.given_at ? `${tx("Дано:", "Erteilt:")} ${formatAppDateTime(consent.given_at)}` : ""}
-          {consent?.revoked_at ? ` · ${tx("Отозвано:", "Widerrufen:")} ${formatAppDateTime(consent.revoked_at)}` : ""}
-          {who ? ` · ${who}` : ""}{consent?.version ? ` · ${tx("версия", "Version")} ${consent.version}` : ""}
-        </p>
-      ) : null}
     </div>
   );
 }

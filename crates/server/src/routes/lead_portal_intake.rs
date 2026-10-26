@@ -731,6 +731,107 @@ pub(crate) async fn my_lead_access(
 }
 
 // ----------------------------------------------------------------------------
+// The lock after sending (owner 2026-10-26)
+// ----------------------------------------------------------------------------
+
+/// Refusal code of a cabinet write that would change the sent request.
+pub(crate) const REQUEST_ALREADY_SENT: &str = "request_already_sent";
+
+/// What a cabinet write may still change once the request is sent (owner
+/// decision 2026-10-26): the base form is read-only for the lead and its
+/// parents; changes go through the lead's contact at GMED, who edits in the
+/// wizard. Still open: the follow-up blocks GMED requested, a new copy of an
+/// identity document GMED refused, documents added to the request, and every
+/// consent withdrawal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AfterSend {
+    /// Part of the base form only (personal data, the trusted persons, the
+    /// consent form options): refused after the send.
+    Closed,
+    /// Also answers a follow-up block (payer, billing, statements, the
+    /// representation, the proofs): open while GMED requests a block.
+    FollowUp,
+    /// A copy of an identity document: open while GMED requests a block or
+    /// refused a copy.
+    IdentityCopy,
+    /// A document added to the sent request: always open.
+    Added,
+}
+
+/// 409 [`REQUEST_ALREADY_SENT`].
+pub(crate) fn request_already_sent() -> axum::response::Response {
+    coded(
+        StatusCode::CONFLICT,
+        REQUEST_ALREADY_SENT,
+        "The request is with GMED; ask your contact at GMED to change it",
+        json!({}),
+    )
+}
+
+/// Whether the request of `lead_id` was sent from the cabinet.
+pub(crate) async fn request_sent(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    Ok(sqlx::query_scalar::<_, bool>(
+        "SELECT portal_submitted_at IS NOT NULL FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .unwrap_or(false))
+}
+
+/// Whether GMED currently requests a follow-up block from the cabinet.
+pub(crate) async fn follow_up_open(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    caller: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let follow_up = crate::risk::cabinet::follow_up_json(conn, lead_id, caller).await?;
+    Ok(follow_up["required"] == json!(true))
+}
+
+/// Whether a cabinet write of the kind `open` is refused because the request
+/// is sent ([`AfterSend`]). Called with the lead locked.
+pub(crate) async fn refused_after_send(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    caller: Uuid,
+    open: AfterSend,
+) -> Result<bool, sqlx::Error> {
+    if open == AfterSend::Added || !request_sent(conn, lead_id).await? {
+        return Ok(false);
+    }
+    Ok(match open {
+        AfterSend::Closed => true,
+        AfterSend::Added => false,
+        AfterSend::FollowUp => !follow_up_open(conn, lead_id, caller).await?,
+        AfterSend::IdentityCopy => {
+            !follow_up_open(conn, lead_id, caller).await?
+                && refused_identity_uploads(&mut *conn, lead_id, crate::app_time::today())
+                    .await?
+                    .is_empty()
+        }
+    })
+}
+
+/// [`refused_after_send`] as a handler's answer: `Some` with the 409 (or a
+/// 500) when the write is refused.
+pub(crate) async fn after_send_refusal(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    caller: Uuid,
+    open: AfterSend,
+) -> Option<axum::response::Response> {
+    match refused_after_send(conn, lead_id, caller, open).await {
+        Ok(false) => None,
+        Ok(true) => Some(request_already_sent()),
+        Err(error) => Some(internal(error, "check the sent request")),
+    }
+}
+
+// ----------------------------------------------------------------------------
 // Personal data of step 1
 // ----------------------------------------------------------------------------
 
@@ -1908,6 +2009,22 @@ pub(crate) const RELATIONSHIP_PROOF_KIND: &str = "relationship_proof";
 pub(crate) const PAYER_UPLOAD_KINDS: [&str; 2] = ["payer_identity", "payer_funds_proof"];
 
 impl UploadKind {
+    /// What an upload of this kind may still do after the request is sent
+    /// (owner 2026-10-26): medical documents are added to the request, a
+    /// copy of an identity document replaces one GMED refused or answers a
+    /// follow-up block, the proofs answer a follow-up block.
+    pub(crate) fn after_send(self) -> AfterSend {
+        match self {
+            UploadKind::Medical => AfterSend::Added,
+            UploadKind::Identity | UploadKind::RepresentativeIdentity => AfterSend::IdentityCopy,
+            UploadKind::RepresentativeAuthority
+            | UploadKind::SelfFundsProof
+            | UploadKind::RelationshipProof
+            | UploadKind::PayerIdentity
+            | UploadKind::PayerFundsProof => AfterSend::FollowUp,
+        }
+    }
+
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             UploadKind::Medical => "medical",
@@ -2782,12 +2899,17 @@ where
     }))
 }
 
-/// `changed_since_submit` of the lead `l`: the patient changed the data or
-/// the documents after sending and has not sent again — only then "send
-/// again" makes sense. The cabinet's request and the staff intake (QA
-/// 2026-10-06, A X2) read the same expression. Sending the answers of the
-/// follow-up blocks counts as sending too (QA 2026-10-10): what the lead
-/// answered there was sent with them.
+/// `changed_since_submit` of the lead `l`: the lead changed answers after
+/// the last send and has not sent them yet. The cabinet's request and the
+/// staff intake (QA 2026-10-06, A X2) read the same expression; the
+/// Patientenformular waits for it. Since 2026-10-26 (owner) the sent base
+/// form is read-only: after the send the lead changes answers only in the
+/// follow-up blocks GMED requested, and sends them with the follow-up — so
+/// every change counts from the later of the send and the follow-up's
+/// answer. Not a change to send: medical documents added to the sent request
+/// («Dokumente nachreichen»), a new copy of an identity document (staff
+/// confirm it in place), the trusted persons (after the send only a
+/// withdrawal), the payer's files and staff's own uploads.
 pub(super) const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NOT NULL AND (
     EXISTS (
         SELECT 1
@@ -2795,26 +2917,24 @@ pub(super) const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NO
             CASE WHEN jsonb_typeof(l.portal_field_updates) = 'object'
                  THEN l.portal_field_updates ELSE '{}'::jsonb END
         ) AS field(name, entry)
-        WHERE (field.entry->>'at')::timestamptz > CASE
-            WHEN field.name IN ('enhanced_details', 'statements', 'representative_questions') THEN GREATEST(
+        WHERE field.name <> 'trusted_persons'
+          -- The paying parent's own payment route after the send goes with its save.
+          AND NOT COALESCE((field.entry->>'sent_with_save')::boolean, false)
+          AND (field.entry->>'at')::timestamptz > GREATEST(
                 l.portal_submitted_at,
                 (SELECT ra.follow_up_answered_at FROM lead_risk_assessments ra WHERE ra.lead_id = l.id)
-            ) ELSE l.portal_submitted_at END
+            )
     )
     OR EXISTS (
         SELECT 1 FROM lead_portal_uploads pu
         WHERE pu.lead_id = l.id
-          -- The payer's files are not part of the request.
-          AND pu.kind NOT IN ('payer_identity', 'payer_funds_proof')
-          -- Staff's own uploads (a representative's ID copy or proof of
-          -- authority from the wizard) are no change by the lead: they never
-          -- ask the lead to send again nor block the Patientenformular.
+          AND pu.kind NOT IN ('payer_identity', 'payer_funds_proof', 'medical', 'identity',
+                              'representative_identity')
           AND pu.access_kind <> 'staff'
-          AND GREATEST(pu.created_at, pu.withdrawn_at) > CASE
-            WHEN pu.kind IN ('self_funds_proof', 'relationship_proof') THEN GREATEST(
+          AND GREATEST(pu.created_at, pu.withdrawn_at) > GREATEST(
                 l.portal_submitted_at,
                 (SELECT ra.follow_up_answered_at FROM lead_risk_assessments ra WHERE ra.lead_id = l.id)
-            ) ELSE l.portal_submitted_at END
+            )
     )
 )"#;
 
@@ -2905,7 +3025,15 @@ pub(crate) async fn request_payload(
     .fetch_all(&state.db)
     .await?;
     // Medical documents and copies of the identity document are two lists.
+    // After the send (owner 2026-10-26) a medical document stays with the
+    // request; another file goes only while GMED requests a follow-up block.
+    let sent_at = row
+        .try_get::<Option<DateTime<Utc>>, _>("portal_submitted_at")
+        .ok()
+        .flatten();
+    let follow_up_requested = follow_up["required"] == json!(true);
     let uploads_of = |kind: UploadKind| -> Vec<Value> {
+        let removable_after_send = kind != UploadKind::Medical && follow_up_requested;
         uploads
             .iter()
             .filter(|upload| {
@@ -2934,7 +3062,12 @@ pub(crate) async fn request_payload(
                     "uploaded_at": upload.try_get::<DateTime<Utc>, _>("created_at").ok(),
                     "uploaded_by_me": mine,
                     "reviewed": reviewed,
+                    // Added to the sent request («Dokumente nachreichen»).
+                    "added_after_submit": sent_at
+                        .zip(upload.try_get::<DateTime<Utc>, _>("created_at").ok())
+                        .is_some_and(|(sent, uploaded)| uploaded > sent),
                     "can_delete": mine && !reviewed && !moved
+                        && (sent_at.is_none() || removable_after_send)
                         && upload.try_get::<Option<Uuid>, _>("lead_id").ok().flatten() == Some(lead_id)
                         && !upload.try_get::<bool, _>("shared").unwrap_or(true)
                         && !upload.try_get::<bool, _>("in_review").unwrap_or(true),
@@ -3398,6 +3531,12 @@ async fn update_my_personal_data(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    // The sent request is read-only for the lead (owner 2026-10-26).
+    if let Some(refusal) =
+        after_send_refusal(&mut tx, lead_id, auth.user_id, AfterSend::Closed).await
+    {
+        return refusal;
+    }
     let current = PersonalData::from_row(&row);
     let today = crate::app_time::today();
     let next = match apply_personal_data_patch(&current, &patch, today) {
@@ -3612,6 +3751,12 @@ async fn update_my_payer(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    // After the send only while GMED requests a follow-up block (owner 2026-10-26).
+    if let Some(refusal) =
+        after_send_refusal(&mut tx, lead_id, auth.user_id, AfterSend::FollowUp).await
+    {
+        return refusal;
+    }
     if input.payer_kind.trim() == lead_payer::PAYER_KIND_SELF
         && crate::routes::leads::is_minor_on(
             PersonalData::from_row(&lead).date_of_birth,
@@ -3989,6 +4134,18 @@ async fn update_my_billing(
         &representation.representation,
         Some(auth.user_id),
     );
+    // After the send only while GMED requests a follow-up block — or the
+    // paying parent's own payment route, which is that parent's answer, not
+    // the sent form's (owner 2026-10-26: the paying parent's part stays open).
+    // Such an answer goes to GMED with its save: there is no second send.
+    let sent_with_save =
+        match refused_after_send(&mut tx, lead_id, auth.user_id, AfterSend::FollowUp).await {
+            Ok(outside_follow_up) => outside_follow_up,
+            Err(error) => return internal(error, "check the sent request"),
+        };
+    if sent_with_save && !(route_by == PaymentRouteBy::Guardian && recipient_body.is_empty()) {
+        return request_already_sent();
+    }
     if !block_c.is_empty() {
         if payer.is_none() {
             return coded(
@@ -4151,7 +4308,10 @@ async fn update_my_billing(
     let mut markers = Map::new();
     if saved.is_some() || !synced.is_empty() {
         match billing_marker(&mut tx, lead_id, auth.user_id, kind).await {
-            Ok(Some(marker)) => {
+            Ok(Some(mut marker)) => {
+                if sent_with_save {
+                    marker["sent_with_save"] = json!(true);
+                }
                 markers.insert(BILLING_MARKER.to_string(), marker);
             }
             Ok(None) => {}
@@ -4335,6 +4495,12 @@ async fn update_my_enhanced_details(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    // After the send only while GMED requests a follow-up block (owner 2026-10-26).
+    if let Some(refusal) =
+        after_send_refusal(&mut tx, lead_id, auth.user_id, AfterSend::FollowUp).await
+    {
+        return refusal;
+    }
     let current = match load_identification(&mut *tx, lead_id).await {
         Ok((current, _)) => current,
         Err(error) => return internal(error, "load identification"),
@@ -4491,6 +4657,23 @@ async fn update_my_identification(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    // After the send only the follow-up blocks answer here (owner 2026-10-26);
+    // the reason of the request is part of the sent base form.
+    let reason_sent = statements_body.contains_key("request_reason");
+    if let Some(refusal) = after_send_refusal(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+        if reason_sent {
+            AfterSend::Closed
+        } else {
+            AfterSend::FollowUp
+        },
+    )
+    .await
+    {
+        return refusal;
+    }
     let current = match load_identification(&mut *tx, lead_id).await {
         Ok((current, _)) => current,
         Err(error) => return internal(error, "load identification"),
@@ -4779,6 +4962,19 @@ async fn save_consent_choices(
         Ok(current) => current,
         Err(error) => return internal(error, "load disclosure decision"),
     };
+    // After the send an option can only be withdrawn (owner 2026-10-26, a
+    // DSGVO right); ticking more goes through the contact at GMED.
+    match request_sent(&mut tx, lead_id).await {
+        Ok(true)
+            if !current
+                .as_ref()
+                .is_some_and(|current| body.choices.only_withdraws(&current.choices)) =>
+        {
+            return request_already_sent();
+        }
+        Ok(_) => {}
+        Err(error) => return internal(error, "check the sent request"),
+    }
     let disclosure = current.as_ref().and_then(|c| c.disclosure.clone());
     if let Some(d) = &disclosure
         && body.choices.named_recipients != (d.allow_disclosure && d.consent_given)
@@ -5059,20 +5255,6 @@ async fn save_trusted_persons(
             json!({}),
         );
     }
-    // The optional contact is a phone number or an e-mail address (QA 2026-10-22).
-    if persons.iter().any(|person| {
-        person
-            .contact
-            .as_deref()
-            .is_some_and(|contact| !consent_choices::recipient_contact_valid(contact))
-    }) {
-        return coded(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            consent_choices::RECIPIENTS_INVALID,
-            "The contact of a person is a phone number or an e-mail address",
-            json!({ "field": "contact" }),
-        );
-    }
     // The scope is chosen from fixed options (owner 2026-10-19); a person
     // with only a legacy free text is asked again.
     if persons.iter().any(|p| p.scope_codes.is_empty()) {
@@ -5098,6 +5280,59 @@ async fn save_trusted_persons(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    let stored_persons = match load_trusted_persons(&mut *tx, lead_id).await {
+        Ok(persons) => persons,
+        Err(error) => return internal(error, "load trusted persons"),
+    };
+    // After the send the decision can only be withdrawn — all of it, or
+    // persons removed from the list (owner 2026-10-26, a DSGVO right).
+    match request_sent(&mut tx, lead_id).await {
+        Ok(true)
+            if body.allow_disclosure
+                && !persons.iter().all(|person| stored_persons.contains(person)) =>
+        {
+            return request_already_sent();
+        }
+        Ok(_) => {}
+        Err(error) => return internal(error, "check the sent request"),
+    }
+    // A person named or edited since 2026-10-26 needs the phone number they
+    // call from and, unless an institution, the date of birth (owner); an
+    // unchanged person saved before keeps its legacy contact.
+    // A contact sent with a new or changed person is a phone number or an
+    // e-mail address (QA 2026-10-22); a stored one is kept as it is.
+    if persons.iter().any(|person| {
+        !stored_persons.contains(person)
+            && person
+                .contact
+                .as_deref()
+                .is_some_and(|contact| !consent_choices::recipient_contact_valid(contact))
+    }) {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            consent_choices::RECIPIENTS_INVALID,
+            "The contact of a person is a phone number or an e-mail address",
+            json!({ "field": "contact" }),
+        );
+    }
+    let today = crate::app_time::today();
+    if let Some((index, field)) = persons.iter().enumerate().find_map(|(index, person)| {
+        (!stored_persons.contains(person))
+            .then(|| consent_choices::missing_person_field(person, today))
+            .flatten()
+            .map(|field| (index, field))
+    }) {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            consent_choices::RECIPIENTS_INVALID,
+            match field {
+                "phone" => "Enter the phone number this person will call from",
+                "birth_date" => "Enter the date of birth of this person",
+                _ => "Choose the scope of information for each person",
+            },
+            json!({ "field": field, "index": index }),
+        );
+    }
     // A parent consents for the child's data, a representative for the
     // represented person's: the stored text says so, in the wording the
     // child's Anlage 1 prints for the stated custody (both parents under
@@ -5722,6 +5957,19 @@ pub(crate) async fn store_my_upload(
     let Some(consent_purpose) = upload_kind.consent() else {
         return not_found();
     };
+    // After the send only what stays open (owner 2026-10-26; checked again
+    // with the lead locked below).
+    let refused = match state.db.acquire().await {
+        Ok(mut conn) => {
+            refused_after_send(&mut conn, lead_id, auth.user_id, upload_kind.after_send()).await
+        }
+        Err(error) => Err(error),
+    };
+    match refused {
+        Ok(false) => {}
+        Ok(true) => return request_already_sent(),
+        Err(error) => return internal(error, "check the sent request"),
+    }
     // A proof of the own funds exists only while the patient pays himself.
     if upload_kind == UploadKind::SelfFundsProof {
         let self_payer = match state.db.acquire().await {
@@ -5853,6 +6101,8 @@ pub(crate) async fn store_my_upload(
     // link or the consent went away meanwhile, the stored file goes again.
     let mut upload_limit_reached = false;
     let mut duplicate_found = false;
+    let mut sent_refused = false;
+    let mut added_after_send = false;
     let mut replaced = ReplacedRefusedCopies::default();
     let mut staging_failed: Option<axum::response::Response> = None;
     let registered = async {
@@ -5860,6 +6110,13 @@ pub(crate) async fn store_my_upload(
         let Some((kind, _)) = lock_my_lead(&mut tx, lead_id, auth.user_id).await? else {
             return Ok::<_, sqlx::Error>(None);
         };
+        if refused_after_send(&mut tx, lead_id, auth.user_id, upload_kind.after_send()).await? {
+            sent_refused = true;
+            return Ok(None);
+        }
+        // A medical document added to the sent request: staff are told
+        // (owner 2026-10-26, «Dokumente nachreichen»).
+        added_after_send = medical && request_sent(&mut tx, lead_id).await?;
         // A parallel upload of the same file may have won meanwhile.
         if is_duplicate_upload(&mut tx, lead_id, upload_kind, representative_key, &sha256).await? {
             duplicate_found = true;
@@ -5980,6 +6237,9 @@ pub(crate) async fn store_my_upload(
             if duplicate_found {
                 return duplicate_document();
             }
+            if sent_refused {
+                return request_already_sent();
+            }
             if let Some(response) = staging_failed {
                 return response;
             }
@@ -6010,9 +6270,13 @@ pub(crate) async fn store_my_upload(
             "access_kind": kind.as_str(),
             "kind": upload_kind.as_str(),
             "replaced_document_ids": replaced.document_ids,
+            "added_after_submit": added_after_send,
         }),
     )
     .await;
+    if added_after_send {
+        notify_documents_added(&state, lead_id).await;
+    }
     // What staff see of the lead's representation changed with the file.
     if upload_kind.of_representative() {
         lead_representatives::publish_cabinet_change(&state, lead_id, auth.user_id, kind).await;
@@ -6214,6 +6478,18 @@ async fn withdraw_my_lead_document(
             }
             Err(error) => return internal(error, "load payer statement"),
         }
+    } else {
+        // After the send a medical document stays with the request — sent
+        // or added since; another file goes only while its block is open
+        // (owner 2026-10-26).
+        let open = match upload_kind.as_str() {
+            "medical" => AfterSend::Closed,
+            "identity" | lead_representatives::UPLOAD_IDENTITY => AfterSend::IdentityCopy,
+            _ => AfterSend::FollowUp,
+        };
+        if let Some(refusal) = after_send_refusal(&mut tx, lead_id, auth.user_id, open).await {
+            return refusal;
+        }
     }
     let reviewed = upload
         .try_get::<Option<DateTime<Utc>>, _>("reviewed_at")
@@ -6393,16 +6669,14 @@ async fn submit_my_lead_request(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
-    // Retrying an unchanged submission must not change the declaration time,
-    // enqueue notifications or recompute risk.
+    // The request is sent once (owner 2026-10-26: no «Erneut senden»; what
+    // the lead answers later goes with the follow-up's own send). A retry
+    // changes neither the declaration time nor the risk, and notifies nobody.
     if row
         .try_get::<Option<DateTime<Utc>>, _>("portal_submitted_at")
         .ok()
         .flatten()
         .is_some()
-        && !row
-            .try_get::<bool, _>("changed_since_submit")
-            .unwrap_or(true)
     {
         drop(tx);
         return match request_payload(&state, lead_id, auth.user_id, kind).await {
@@ -6811,6 +7085,50 @@ pub(crate) async fn notify_lead_staff(
     body: &str,
 ) {
     notify_lead_staff_with(state, lead_id, kind, title, body, None).await;
+}
+
+/// Kind of the notice «Lead hat Dokumente nachgereicht» (owner 2026-10-26).
+pub(crate) const DOCUMENTS_ADDED_NOTICE: &str = "lead_portal_documents_added";
+
+/// Tells the lead's staff that the lead added documents to the sent request
+/// («Dokumente nachreichen», owner 2026-10-26). A recipient who has not read
+/// the last such notice of the lead gets no second one: a batch of files is
+/// one notice. Best effort.
+async fn notify_documents_added(state: &AppState, lead_id: Uuid) {
+    let stored: Result<Vec<(Uuid, Uuid)>, sqlx::Error> = sqlx::query_as(&format!(
+        r#"WITH recipients AS ({LEAD_NOTIFICATION_RECIPIENTS_SQL})
+           INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           SELECT r.id, $2, 'Lead added documents',
+                  'The lead added documents to the sent request.', 'lead', $1
+           FROM recipients r
+           WHERE NOT EXISTS (
+               SELECT 1 FROM user_notifications n
+               WHERE n.user_id = r.id AND n.kind = $2 AND n.entity_type = 'lead'
+                 AND n.entity_id = $1 AND NOT n.is_read
+           )
+           RETURNING user_id, id"#
+    ))
+    .bind(lead_id)
+    .bind(DOCUMENTS_ADDED_NOTICE)
+    .fetch_all(&state.db)
+    .await;
+    match stored {
+        Ok(stored) => {
+            for (recipient, notification_id) in stored {
+                crate::realtime::publish_notification_event(
+                    state,
+                    recipient,
+                    "notification.created",
+                    Some(notification_id),
+                    json!({ "entity_type": "lead", "entity_id": lead_id }),
+                )
+                .await;
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, %lead_id, "store the documents-added notice");
+        }
+    }
 }
 
 /// [`notify_lead_staff`] with the facts the UI words the notice from
@@ -7228,6 +7546,7 @@ async fn get_lead_portal_intake(
             .ok()
             .flatten()
     };
+    let submitted_at = time(&row, "portal_submitted_at");
     let upload_items: Vec<Value> = if medical {
         uploads
             .iter()
@@ -7235,6 +7554,10 @@ async fn get_lead_portal_intake(
                 json!({
                     "document_id": upload.try_get::<Uuid, _>("document_id").ok(),
                     "uploaded_at": time(upload, "created_at"),
+                    // Added to the sent request («Dokumente nachreichen», owner 2026-10-26).
+                    "added_after_submit": submitted_at
+                        .zip(time(upload, "created_at"))
+                        .is_some_and(|(sent, uploaded)| uploaded > sent),
                     "access_kind": upload.try_get::<String, _>("access_kind").ok(),
                     "reviewed_at": time(upload, "reviewed_at"),
                     "consent_given_at": time(upload, "consent_given_at"),

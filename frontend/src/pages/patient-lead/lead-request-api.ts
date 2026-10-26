@@ -309,7 +309,13 @@ export type ConsentRecipientRelation = (typeof CONSENT_RECIPIENT_RELATIONS)[numb
  * list is the lead's trusted persons (own menu item of the cabinet, `TrustedPerson`).
  */
 export type ConsentRecipient = {
-  name: string; relation: ConsentRecipientRelation; contact?: string | null;
+  name: string; relation: ConsentRecipientRelation;
+  /** Phone or e-mail of a person named before 2026-10-26: read-only, kept until the person is edited. */
+  contact?: string | null;
+  /** The phone number this person calls GMED from (owner 2026-10-26); required for a new or edited person. */
+  phone?: string | null;
+  /** The person's date of birth ("YYYY-MM-DD", owner 2026-10-26); never of an institution (family doctor, clinic). */
+  birth_date?: string | null;
   /** Free-text scope of persons named before 2026-10-19; shown as typed until codes are chosen. */
   scope?: string | null;
   /** The chosen scope (owner 2026-10-19); `["all"]` covers everything. */
@@ -372,6 +378,8 @@ export type LeadRequestDocument = {
   uploaded_by_me: boolean;
   reviewed: boolean;
   can_delete: boolean;
+  /** Added to the sent request («Dokumente nachreichen», owner 2026-10-26). */
+  added_after_submit?: boolean;
 };
 
 /**

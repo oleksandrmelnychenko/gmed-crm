@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { ArrowDownToLine, Download, Eye, FileText, UserRound } from "lucide-react";
+import { ArrowDownToLine, CalendarDays, Download, Eye, FileText, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import type { DocumentItem } from "@/pages/documents/model/types";
 
@@ -63,10 +64,10 @@ export function LeadPatientConcern({
   };
 
   return (
-    <div className="mb-3 space-y-2 rounded-xl border border-border/70 bg-card p-4" data-testid="lead-patient-concern">
+    <div className="mb-2 space-y-1.5 rounded-lg border border-border/70 bg-card p-2.5" data-testid="lead-patient-concern">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-2">
-          <span className="inline-flex items-center gap-1.5 text-sm font-semibold">
+          <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold">
             <UserRound aria-hidden className="size-3.5" />
             {tx("Со слов пациента", "Angaben der Patientin / des Patienten")}
           </span>
@@ -80,7 +81,7 @@ export function LeadPatientConcern({
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant="default"
             className="h-7 rounded-lg text-xs"
             disabled={disabled || mode === "same"}
             onClick={transfer}
@@ -116,20 +117,23 @@ export function LeadPatientConcern({
       ) : null}
       {documents.length > 0 ? (
         <div className="space-y-1" data-testid="lead-patient-concern-files">
-          <div className="text-xs font-medium text-muted-foreground">
+          <div className="sr-only">
             {tx("Файлы пациента", "Dateien der Patientin / des Patienten")}
           </div>
           <ul className="divide-y divide-border/60 rounded-md border border-border/60 bg-background/60">
             {documents.map((document) => {
               const name = document.original_filename || document.auto_name || tx("Документ", "Dokument");
               return (
-                <li key={document.id} className="flex items-center gap-2 px-2.5 py-1.5 text-sm">
+                <li key={document.id} className="flex items-center gap-1.5 px-2 py-1 text-[13px]">
                   <FileText aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate" title={name}>{name}</span>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatAppDate(document.created_at)}</span>
+                  <StatusChip tone="info" className="shrink-0 whitespace-nowrap tabular-nums">
+                    <CalendarDays aria-hidden="true" />
+                    {formatAppDate(document.created_at)}
+                  </StatusChip>
                   <Button
                     type="button"
-                    size="icon-sm"
+                    size="icon-xs"
                     variant="ghost"
                     disabled={disabled}
                     aria-label={`${tx("Открыть", "Öffnen")}: ${name}`}
@@ -140,7 +144,7 @@ export function LeadPatientConcern({
                   </Button>
                   <Button
                     type="button"
-                    size="icon-sm"
+                    size="icon-xs"
                     variant="ghost"
                     disabled={disabled}
                     aria-label={`${tx("Скачать", "Herunterladen")}: ${name}`}

@@ -40,7 +40,7 @@
 //!
 //! See `docs/architecture/document-signatures-germany_ua.md`.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -111,6 +111,28 @@ impl ConsentChoices {
     /// options (named recipients, the channels) stay free.
     pub fn has_core(&self) -> bool {
         self.agency_processing && self.doctors_to_agency && self.data_system
+    }
+
+    /// Whether this choice only withdraws options of `before` (or repeats
+    /// it): nothing is ticked that was not ticked. After the request is sent
+    /// the cabinet saves only such a choice (owner 2026-10-26).
+    pub fn only_withdraws(&self, before: &Self) -> bool {
+        let ticked = |choice: &Self| {
+            [
+                choice.agency_processing,
+                choice.doctors_to_agency,
+                choice.data_system,
+                choice.named_recipients,
+                choice.channel_email,
+                choice.channel_threema,
+                choice.channel_whatsapp,
+                choice.channel_telegram,
+            ]
+        };
+        ticked(self)
+            .into_iter()
+            .zip(ticked(before))
+            .all(|(now, then)| !now || then)
     }
 }
 
@@ -379,16 +401,28 @@ fn own_disclosure_consent_text(language: &str, company: &str) -> String {
 /// are, how to reach them and the explicitly permitted scope. Part of the choice, so the form
 /// prints exactly the list the person chose; not sanctions-screened (owner
 /// decision 2026-10-12).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConsentRecipient {
     /// The person's name or the institution's name.
     pub name: String,
     /// One of [`RECIPIENT_RELATIONS`].
     pub relation: String,
-    /// A phone number or an e-mail address; optional.
+    /// The phone number or e-mail address of a person named before
+    /// 2026-10-26; kept (read-only in the cabinet) until the person is edited,
+    /// then replaced by [`Self::phone`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contact: Option<String>,
+    /// The phone number this person calls GMED from (owner 2026-10-26):
+    /// GMED tells on the phone only a caller from this number who also
+    /// names the date of birth. Required for every person or institution
+    /// named or edited since ([`missing_person_field`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone: Option<String>,
+    /// The person's date of birth (owner 2026-10-26); never of an
+    /// institution ([`is_institution`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub birth_date: Option<NaiveDate>,
     /// The free-text scope of persons named before 2026-10-19; printed as
     /// typed while no [`Self::scope_codes`] are chosen, dropped once they are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -414,17 +448,29 @@ impl ConsentRecipient {
         }
     }
 
-    /// The line the form prints: name, relationship, contact and disclosure scope.
+    /// The line the form prints: name, relationship, date of birth, the
+    /// phone the person calls from (a legacy contact as typed) and the
+    /// disclosure scope — «Name (Beziehung), geb. DD.MM.YYYY, Tel. …; Umfang
+    /// der Auskunft: …» (owner 2026-10-26).
     pub fn printed_line(&self) -> String {
         let mut line = format!("{} ({})", self.name.trim(), self.relation_label());
-        if let Some(contact) = self
-            .contact
-            .as_deref()
-            .map(str::trim)
-            .filter(|contact| !contact.is_empty())
-        {
+        if let Some(birth_date) = self.birth_date {
+            line.push_str(", geb. ");
+            line.push_str(&birth_date.format("%d.%m.%Y").to_string());
+        }
+        let text = |value: &Option<String>| {
+            value
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        };
+        if let Some(phone) = text(&self.phone) {
+            line.push_str(", Tel. ");
+            line.push_str(&phone);
+        } else if let Some(contact) = text(&self.contact) {
             line.push_str(", ");
-            line.push_str(contact);
+            line.push_str(&contact);
         }
         if let Some(scope) = self.printed_scope() {
             line.push_str("; Umfang der Auskunft: ");
@@ -515,6 +561,13 @@ pub fn clean_persons(
             .contact
             .map(|contact| contact.trim().to_string())
             .filter(|contact| !contact.is_empty());
+        let phone = person
+            .phone
+            .as_deref()
+            .map(crate::services::person_fields::one_line)
+            .filter(|phone| !phone.is_empty());
+        // An institution has no date of birth.
+        let birth_date = person.birth_date.filter(|_| !is_institution(&relation));
         let scope_codes = clean_scope_codes(&person.scope_codes)?;
         let scope = person
             .scope
@@ -526,6 +579,9 @@ pub fn clean_persons(
             || contact
                 .as_ref()
                 .is_some_and(|contact| contact.chars().count() > RECIPIENT_TEXT_MAX)
+            || phone
+                .as_ref()
+                .is_some_and(|phone| phone.chars().count() > RECIPIENT_TEXT_MAX)
             || scope.as_ref().is_some_and(|s| s.chars().count() > 240)
         {
             return Err(RECIPIENTS_INVALID);
@@ -534,11 +590,49 @@ pub fn clean_persons(
             name,
             relation,
             contact,
+            phone,
+            birth_date,
             scope,
             scope_codes,
         });
     }
     Ok(cleaned)
+}
+
+/// Whether a trusted person of this relation is an institution (the family
+/// doctor's practice, a clinic): it gets no date of birth.
+pub fn is_institution(relation: &str) -> bool {
+    matches!(relation.trim(), "family_doctor" | "clinic")
+}
+
+/// The field a trusted person named or edited since 2026-10-26 still
+/// misses (owner decision): `phone` — the number the person calls GMED
+/// from, required and a valid phone number ([`crate::services::person_fields::is_valid_phone`]);
+/// `birth_date` — required for a person (not an institution), not in the
+/// future and not before 1900; `scope_codes` — at least one scope. `None`
+/// when complete. A person saved before and unchanged is not checked (its
+/// legacy `contact` stays until it is edited).
+pub fn missing_person_field(person: &ConsentRecipient, today: NaiveDate) -> Option<&'static str> {
+    if !person
+        .phone
+        .as_deref()
+        .is_some_and(crate::services::person_fields::is_valid_phone)
+    {
+        return Some("phone");
+    }
+    if !is_institution(&person.relation) {
+        let earliest = NaiveDate::from_ymd_opt(1900, 1, 1).expect("valid date");
+        if !person
+            .birth_date
+            .is_some_and(|born| born >= earliest && born <= today)
+        {
+            return Some("birth_date");
+        }
+    }
+    if person.scope_codes.is_empty() {
+        return Some("scope_codes");
+    }
+    None
 }
 
 /// The recipients of a choice as they are stored ([`clean_persons`]); with
@@ -1083,6 +1177,8 @@ mod tests {
             name: "Max Muster".into(),
             relation: "friend".into(),
             contact: Some("max@example.test".into()),
+            phone: None,
+            birth_date: None,
             scope: Some("Nur Rechnungen".into()),
             scope_codes: Vec::new(),
         }];
@@ -1206,6 +1302,8 @@ mod tests {
             name: name.into(),
             relation: relation.into(),
             contact: contact.map(Into::into),
+            phone: None,
+            birth_date: None,
             scope: None,
             scope_codes: Vec::new(),
         };
@@ -1276,6 +1374,8 @@ mod tests {
             name: name.into(),
             relation: relation.into(),
             contact: contact.map(Into::into),
+            phone: None,
+            birth_date: None,
             scope: None,
             scope_codes: Vec::new(),
         };
@@ -1336,6 +1436,8 @@ mod tests {
             name: "Max Muster".into(),
             relation: "friend".into(),
             contact: Some("max@example.test".into()),
+            phone: None,
+            birth_date: None,
             scope: scope.map(Into::into),
             scope_codes: codes.iter().map(|code| code.to_string()).collect(),
         };
@@ -1402,6 +1504,130 @@ mod tests {
         .unwrap();
         assert!(legacy.scope_codes.is_empty());
         assert_eq!(legacy.printed_scope().as_deref(), Some("medizin"));
+    }
+
+    /// Owner 2026-10-26: a trusted person gives the phone number they call
+    /// from and (unless an institution) the date of birth; both are printed.
+    #[test]
+    fn trusted_persons_name_the_phone_they_call_from_and_their_birth_date() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 26).unwrap();
+        let person = ConsentRecipient {
+            name: "Olga Muster".into(),
+            relation: "spouse".into(),
+            phone: Some("+49 151 000000".into()),
+            birth_date: NaiveDate::from_ymd_opt(1975, 4, 3),
+            scope_codes: vec!["all".into()],
+            ..ConsentRecipient::default()
+        };
+        assert_eq!(missing_person_field(&person, today), None);
+        assert_eq!(
+            person.printed_line(),
+            "Olga Muster (Ehe-/Lebenspartner/in), geb. 03.04.1975, Tel. +49 151 000000; \
+             Umfang der Auskunft: alle Informationen"
+        );
+        for (changed, field) in [
+            (
+                ConsentRecipient {
+                    phone: None,
+                    ..person.clone()
+                },
+                "phone",
+            ),
+            (
+                ConsentRecipient {
+                    phone: Some("123".into()),
+                    ..person.clone()
+                },
+                "phone",
+            ),
+            (
+                ConsentRecipient {
+                    birth_date: None,
+                    ..person.clone()
+                },
+                "birth_date",
+            ),
+            (
+                ConsentRecipient {
+                    birth_date: NaiveDate::from_ymd_opt(2026, 10, 27),
+                    ..person.clone()
+                },
+                "birth_date",
+            ),
+            (
+                ConsentRecipient {
+                    scope_codes: Vec::new(),
+                    ..person.clone()
+                },
+                "scope_codes",
+            ),
+        ] {
+            assert_eq!(missing_person_field(&changed, today), Some(field));
+        }
+        // An institution has no date of birth: not asked, dropped when sent.
+        let clinic = ConsentRecipient {
+            name: "Klinik Nord".into(),
+            relation: "clinic".into(),
+            birth_date: NaiveDate::from_ymd_opt(1990, 1, 1),
+            ..person.clone()
+        };
+        let cleaned = clean_persons(vec![clinic]).unwrap().remove(0);
+        assert_eq!(cleaned.birth_date, None);
+        assert_eq!(missing_person_field(&cleaned, today), None);
+        assert_eq!(
+            cleaned.printed_line(),
+            "Klinik Nord (Klinik/Einrichtung), Tel. +49 151 000000; Umfang der Auskunft: alle Informationen"
+        );
+        // The phone is cleaned like every person's phone.
+        let spaced = ConsentRecipient {
+            phone: Some("  +49   151 000000 ".into()),
+            ..person.clone()
+        };
+        assert_eq!(clean_persons(vec![spaced]).unwrap()[0], person);
+        // A legacy person: the contact prints as typed, without a phone.
+        let legacy: ConsentRecipient = serde_json::from_value(json!({
+            "name": "Max Muster", "relation": "friend", "contact": "max@example.test",
+            "scope_codes": ["medical"]
+        }))
+        .unwrap();
+        assert_eq!(legacy.phone, None);
+        assert_eq!(legacy.birth_date, None);
+        assert_eq!(
+            legacy.printed_line(),
+            "Max Muster (Freund/in / Bekannte/r), max@example.test; Umfang der Auskunft: medizinische Informationen"
+        );
+        assert_eq!(missing_person_field(&legacy, today), Some("phone"));
+    }
+
+    /// After the send the cabinet saves only a withdrawal (owner 2026-10-26).
+    #[test]
+    fn only_a_withdrawal_unticks_without_ticking_anything_new() {
+        let before = ConsentChoices {
+            channel_email: true,
+            ..core()
+        };
+        assert!(before.only_withdraws(&before));
+        assert!(
+            ConsentChoices {
+                channel_email: false,
+                ..before
+            }
+            .only_withdraws(&before)
+        );
+        assert!(
+            !ConsentChoices {
+                channel_whatsapp: true,
+                ..before
+            }
+            .only_withdraws(&before)
+        );
+        assert!(
+            !ConsentChoices {
+                named_recipients: true,
+                ..before
+            }
+            .only_withdraws(&before)
+        );
     }
 
     #[test]

@@ -51,10 +51,7 @@ export function LeadSigningPackagePanel({
   const contractApplies = currentContractSigned || (!contractDocument && inheritedContract);
   const description = source
     ? tx("Проверьте состав пакета в окне подписи.", "Prüfen Sie den Paketinhalt im Unterschriftsfenster.")
-    : tx(
-        "Создайте договор и заказ ниже. Документы для общего приглашения выбираются в окне подписи.",
-        "Vertrag und Auftrag unten erstellen. Die Dokumente für die gemeinsame Einladung wählen Sie im Unterschriftsfenster.",
-      );
+    : null;
 
   return (
     <section
@@ -94,7 +91,7 @@ export function LeadSigningPackagePanel({
           {summary.status === "pending" && summary.progress && summary.progress.total > 0
             ? <SignatureProgressChips progress={summary.progress} testMode={summary.test_mode} lang={lang} /> : null}
         </div> : null}
-        <p className="text-xs leading-5 text-muted-foreground">{description}</p>
+        {description ? <p className="text-xs leading-5 text-muted-foreground">{description}</p> : null}
       </div>
       <div className="shrink-0">
         {source ? (

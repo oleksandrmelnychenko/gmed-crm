@@ -1386,3 +1386,73 @@ async fn me_reports_the_role_capabilities() {
     );
     assert!(!capabilities.contains(&"patients.view"), "{capabilities:?}");
 }
+
+/// Owner 2026-10-26: the idle sign-out is a CEO setting (15–720 minutes,
+/// 0 = off) that every signed-in client, patient logins included, reads from
+/// `GET /me`.
+#[tokio::test]
+async fn me_carries_the_idle_logout_minutes_the_ceo_set() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let ceo = auth_header_for(admin_id, "ceo");
+    let path = "/api/v1/admin/settings/idle_logout_minutes";
+
+    for invalid in ["14", "721", "-1"] {
+        let (status, body) =
+            json_request(&app, "POST", path, &ceo, Some(json!({ "value": invalid }))).await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{invalid}: {body}"
+        );
+    }
+
+    let it_admin_id = seed_user(&pool, &format!("me-idle-{tag}"), "it_admin").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        path,
+        &auth_header_for(it_admin_id, "it_admin"),
+        Some(json!({ "value": "45" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"], "business_setting_ceo_only");
+
+    let (status, body) =
+        json_request(&app, "POST", path, &ceo, Some(json!({ "value": "45" }))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let patient_id = seed_user(&pool, &format!("me-idle-{tag}"), "patient").await;
+    for (user_id, role) in [(patient_id, "patient"), (it_admin_id, "it_admin")] {
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            "/api/v1/me",
+            &auth_header_for(user_id, role),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{role}: {body}");
+        assert_eq!(body["idle_logout_minutes"], json!(45), "{role}: {body}");
+    }
+
+    let (status, body) =
+        json_request(&app, "POST", path, &ceo, Some(json!({ "value": "0" }))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me",
+        &auth_header_for(patient_id, "patient"),
+        None,
+    )
+    .await;
+    assert_eq!(body["idle_logout_minutes"], json!(0), "{body}");
+
+    let (status, body) =
+        json_request(&app, "POST", path, &ceo, Some(json!({ "value": "120" }))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}

@@ -373,7 +373,16 @@ async fn pending_cabinet(
     let after = |at: Option<DateTime<Utc>>, sent_at: Option<DateTime<Utc>>| {
         at.is_some_and(|at| sent_at.is_none_or(|sent_at| at > sent_at))
     };
-    let unsent = |key: &str| after(marker_time(markers.get(key)), follow_up_sent_at);
+    // A paying parent's payment route saved after the send goes to GMED with
+    // its save (owner 2026-10-26): never pending.
+    let unsent = |key: &str| {
+        markers
+            .get(key)
+            .and_then(|marker| marker.get("sent_with_save"))
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+            && after(marker_time(markers.get(key)), follow_up_sent_at)
+    };
     let digest_matches = |key: &str, value: String| {
         markers
             .get(key)
