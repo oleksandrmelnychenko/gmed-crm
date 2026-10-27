@@ -16,6 +16,7 @@ import {
   riskEventLabel,
   riskGateErrorText,
   representativeDocumentFieldsMissing,
+  representativeDocumentFocus,
   representativeCardPlace,
   representativeDocumentSlot,
   gwgSheetSignatureNotice,
@@ -476,5 +477,27 @@ describe("the contract gate names the missing parent details (staff report 2026-
     });
     expect(representativeDocumentSlot(phoneOnly)).toBe("rep2");
     expect(representativeDocumentSlot(new Error("x"))).toBeNull();
+  });
+
+  it("points at the proof of authority when only that is missing (DEV 2026-10-27)", () => {
+    const authority = new ApiRequestError("x", {
+      status: 422,
+      code: "representative_details_incomplete",
+      body: { code: "representative_details_incomplete", scope: "person", missing: ["rep1_authority_upload"] },
+    });
+    const text = riskGateErrorText(authority, ru) ?? "";
+    expect(text).toContain("не хватает документов этого лица");
+    expect(text).not.toContain("не годится");
+    expect(text).toContain("Загрузите подтверждение полномочий");
+    expect(text).toContain("«Документы представителей»");
+    expect(representativeDocumentFocus(authority)).toBe("authority");
+    expect(representativeDocumentSlot(authority)).toBe("rep1");
+    const both = new ApiRequestError("x", {
+      status: 422,
+      code: "representative_details_incomplete",
+      body: { code: "representative_details_incomplete", missing: ["rep1_authority_upload", "rep1_id_document_number"] },
+    });
+    expect(representativeDocumentFocus(both)).toBe("identity");
+    expect(representativeDocumentFocus(new Error("x"))).toBeNull();
   });
 });

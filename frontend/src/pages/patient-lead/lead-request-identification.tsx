@@ -1,4 +1,4 @@
-import { useCallback, useContext, useRef, useState, type ReactNode } from "react";
+import { useCallback, useContext, useRef, useState, type ReactNode, createContext } from "react";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { LoaderCircle, Upload } from "lucide-react";
 
@@ -187,6 +187,12 @@ function controlProps(form: IdentificationForm, field: IdentificationField) {
   };
 }
 
+/**
+ * Whom a parent or guardian answers for (owner 2026-10-27: «ти вже починаєш
+ * путатись»): the questions name the person instead of "the patient".
+ */
+export const IdentificationSubjectContext = createContext<string | null>(null);
+
 /** A statement with its label and the server's objection, if any. */
 export function IdentificationFormField({
   form,
@@ -207,10 +213,12 @@ export function IdentificationFormField({
   className?: string;
   children: ReactNode;
 }) {
+  const subject = useContext(IdentificationSubjectContext);
+  const named = guardian && subject ? (text.identificationFieldsOther(subject) as Partial<Record<IdentificationField, string>>)[field] : undefined;
   return (
     <LabeledField
       id={`lead-request-${field}`}
-      label={identificationFieldLabel(text, field, guardian)}
+      label={named ?? identificationFieldLabel(text, field, guardian)}
       error={form.errorFor(field)}
       required={required}
       question={question}

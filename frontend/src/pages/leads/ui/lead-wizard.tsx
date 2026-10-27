@@ -374,7 +374,7 @@ import { LeadRepresentativeDetailsForm, PendingRepresentativeDetailsForm } from 
 import { LeadRepresentativeUploads, representativeFileOrigin } from "./lead-representative-uploads";
 import { LeadPatientConcern } from "./lead-patient-concern";
 import { useLeadRiskAssessment } from "../model/use-lead-risk-assessment";
-import { gwgSheetSignatureNotice, representativeDocumentFieldsMissing, representativeDocumentSlot, representativeMissingText, riskGateErrorText } from "../model/lead-risk-assessment";
+import { gwgSheetSignatureNotice, representativeDocumentFieldsMissing, representativeDocumentFocus, representativeDocumentSlot, representativeMissingText, riskGateErrorText } from "../model/lead-risk-assessment";
 import { LeadIdentificationStatus } from "./lead-identification-status";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
@@ -868,6 +868,8 @@ const ENHANCED_CHECK_SECTION_ID = "lead-wizard-enhanced-check";
 const PREVIEW_JUMP_RISK = "risk-assessment";
 /** The preview's refusal of an organisation's GwG sheet leads to "who pays". */
 const PREVIEW_JUMP_PAYER = "payer-declaration";
+/** Suffix of a preview jump to a person's proof of authority (DEV 2026-10-27). */
+const AUTHORITY_JUMP = "#authority";
 const SERVICE_SPECIALTIES_ID = "lead-wizard-specialties";
 const MEDICAL_ANAMNESE_ID = "lead-wizard-anamnese";
 const ORDER_DATE_FROM_ID = "lead-wizard-program-date-from";
@@ -6797,6 +6799,7 @@ export function LeadWizard({
       // A lead gate names its reason (risk assessment, sanctions, blocked country).
       const gate = signatureGateErrorText(nextError, tx);
       const slot = representativeDocumentSlot(nextError);
+      const focus = representativeDocumentFocus(nextError);
       const representativeId = slot
         ? step1Portal.intake?.representation?.representatives.find((person) => person.slot === slot)?.id ?? null
         : null;
@@ -6806,7 +6809,8 @@ export function LeadWizard({
         setDocumentPreviewError(gate ?? errorText(nextError, tx));
         setDocumentPreviewJump(riskGateRefusal(nextError)
           ? PREVIEW_JUMP_RISK
-          : payerSheet ? PREVIEW_JUMP_PAYER : slot === "patient" ? "patient" : representativeId);
+          : payerSheet ? PREVIEW_JUMP_PAYER : slot === "patient" ? "patient"
+            : representativeId ? (focus === "authority" ? `${representativeId}${AUTHORITY_JUMP}` : representativeId) : null);
       } else if (gate || leadErrorBlockingReasons(nextError).length === 0) {
         // Next to the pressed button, not at the bottom of the step (DEV 2026-10-19),
         // with the way to what blocks it (QA 2026-10-22: the text named the
@@ -6833,10 +6837,12 @@ export function LeadWizard({
                 }
             : representativeId || slot === "patient"
               ? {
-                  label: tx("Перейти к данным документа", "Zu den Ausweisdaten"),
+                  label: focus === "authority" && representativeId
+                    ? tx("Загрузить подтверждение полномочий", "Vertretungsnachweis hochladen")
+                    : tx("Перейти к данным документа", "Zu den Ausweisdaten"),
                   onClick: () => {
                     setDocumentRowError(null);
-                    openRepresentativeIdData(representativeId ?? "patient");
+                    openRepresentativeIdData(representativeId ?? "patient", representativeId ? focus : null);
                   },
                 }
               : null,
@@ -7891,12 +7897,15 @@ ${serviceCommentLines.join("\n")}`
   }
 
   /** The identity document data of a person who acts for the lead, in the documents step. */
-  function openRepresentativeIdData(representativeId: string) {
+  function openRepresentativeIdData(representativeId: string, focus: "identity" | "authority" | null = null) {
     setStep("documents");
-    // The person's card is a <details>: open it, then go to its first field.
+    // The person's card is a <details>: open it, then go to its first field —
+    // or to the proof of authority when that is what is missing (DEV 2026-10-27).
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
       const form = document.querySelector<HTMLElement>(
-        representativeId === "patient" ? '[data-testid="lead-id-data"]' : `[data-testid="lead-representative-id-data-${representativeId}"]`,
+        representativeId === "patient" ? '[data-testid="lead-id-data"]'
+          : focus === "authority" ? `[data-testid="lead-representative-upload-authority-${representativeId}"]`
+          : `[data-testid="lead-representative-id-data-${representativeId}"]`,
       );
       const card = form?.closest("details");
       if (card) card.open = true;
@@ -7904,7 +7913,9 @@ ${serviceCommentLines.join("\n")}`
       if (!form || !panel?.contains(form)) return;
       // Scroll only the step body. Scrolling/focusing through the modal's
       // ancestors can push its header and footer out of their fixed positions.
-      const field = form.querySelector<HTMLElement>("select, input");
+      const field = focus === "authority"
+        ? form.querySelector<HTMLElement>("button, label[for]")
+        : form.querySelector<HTMLElement>("select, input");
       const target = field ?? form;
       const panelRect = panel.getBoundingClientRect();
       const targetRect = target.getBoundingClientRect();
@@ -12790,7 +12801,8 @@ ${serviceCommentLines.join("\n")}`
                     } else if (target === PREVIEW_JUMP_PAYER) {
                       openValidationIssue({ key: "payer-declaration", step: "documents", message: "", fieldId: PAYER_SECTION_ID });
                     } else if (target) {
-                      openRepresentativeIdData(target);
+                      const authority = target.endsWith(AUTHORITY_JUMP);
+                      openRepresentativeIdData(authority ? target.slice(0, -AUTHORITY_JUMP.length) : target, authority ? "authority" : null);
                     }
                   }}
                 >
@@ -12798,7 +12810,9 @@ ${serviceCommentLines.join("\n")}`
                     ? tx("Перейти к оценке риска", "Zur Risikobewertung")
                     : documentPreviewJump === PREVIEW_JUMP_PAYER
                       ? goToPayerLabel
-                      : tx("Перейти к данным документа", "Zu den Ausweisdaten")}
+                      : documentPreviewJump.endsWith(AUTHORITY_JUMP)
+                        ? tx("Загрузить подтверждение полномочий", "Vertretungsnachweis hochladen")
+                        : tx("Перейти к данным документа", "Zu den Ausweisdaten")}
                 </Button>
               ) : null}
             </div>

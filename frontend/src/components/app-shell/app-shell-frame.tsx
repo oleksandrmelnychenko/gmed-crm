@@ -74,6 +74,8 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
             className={cn(
               "min-w-0 flex-1 overflow-auto overscroll-contain bg-card px-2.5 py-3 sm:ml-1 sm:mt-1 sm:rounded-tl-lg sm:border-t sm:border-border/40 sm:px-4 sm:py-3.5 lg:px-5 lg:py-4 [&::-webkit-scrollbar-track]:my-1.5",
               workspaceRailKind === "appointment" && "bg-white",
+              // Patients and leads on a phone: a 16 px gutter, not the dense staff spacing (owner 2026-10-27).
+              patientPortal && "px-4 py-4",
             )}
           >
             {children}

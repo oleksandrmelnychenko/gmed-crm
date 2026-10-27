@@ -2063,8 +2063,10 @@ test.describe("lead cabinet", () => {
     });
     await page.goto("/");
     const block = page.getByTestId("lead-request-follow-up-L");
-    await expect(block.getByTestId("lead-request-legal-pep_self")).toContainText("Übt die Patientin / der Patient ein hochrangiges öffentliches Amt aus");
-    await expect(block.getByTestId("lead-request-legal-sanctions_links")).toContainText("Bestehen Verbindungen zu Personen oder Unternehmen");
+    // The questions name the child, not "you" and not "the patient" (owner 2026-10-27).
+    await expect(block.getByTestId("lead-request-legal-pep_self")).toContainText("Übt Anna Muster ein hochrangiges öffentliches Amt aus");
+    await expect(block.getByTestId("lead-request-legal-sanctions_links")).toContainText("Bestehen bei Anna Muster Verbindungen zu Personen oder Unternehmen");
+    await expect(page.getByTestId("lead-request-follow-up-subject")).toContainText("Alle Angaben auf dieser Seite betreffen Anna Muster, nicht Sie.");
     await expect(
       block.getByRole("combobox", { name: "Handelt die Patientin / der Patient im eigenen wirtschaftlichen Interesse?" }),
     ).toBeVisible();

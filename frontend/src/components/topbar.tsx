@@ -4,6 +4,7 @@ import {
   Bell,
   ChevronRight,
   Globe,
+  Menu,
   PanelLeft,
   X,
   Send,
@@ -360,9 +361,26 @@ export function Topbar() {
         )}
       >
         <div className="flex min-w-0 items-center gap-1">
-          <TopbarIconButton onClick={toggleNav} title={leadShell?.toggleSidebar ?? t.ui_toggle_sidebar}>
-            <PanelLeft className="size-[17px]" />
-          </TopbarIconButton>
+          {isPatientPortal ? (
+            // Patients and leads on a phone: a labelled menu button; the bare
+            // panel icon was not obvious (owner 2026-10-27). Wide screens keep the icon.
+            <button
+              type="button"
+              onClick={toggleNav}
+              title={leadShell?.toggleSidebar ?? t.ui_toggle_sidebar}
+              aria-label={leadShell?.toggleSidebar ?? t.ui_toggle_sidebar}
+              data-testid="portal-menu-button"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-border/70 px-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none lg:border-transparent lg:px-0 lg:size-8 lg:justify-center lg:text-muted-foreground"
+            >
+              <Menu aria-hidden="true" className="size-[17px] lg:hidden" />
+              <PanelLeft aria-hidden="true" className="hidden size-[17px] lg:block" />
+              <span className="lg:sr-only">{leadShell?.menu ?? (lang === "de" ? "Menü" : "Меню")}</span>
+            </button>
+          ) : (
+            <TopbarIconButton onClick={toggleNav} title={leadShell?.toggleSidebar ?? t.ui_toggle_sidebar}>
+              <PanelLeft className="size-[17px]" />
+            </TopbarIconButton>
+          )}
           <div aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
           <div className="flex min-w-0 items-center gap-2 px-1.5 sm:px-2">
             {/* "CONSOLE" is the staff workspace; patients see their portal. */}

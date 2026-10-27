@@ -12,6 +12,8 @@ export interface LeadShellText {
   /** Caption next to the wordmark ("GMED Patientenportal" for screen readers). */
   portalName: string;
   toggleSidebar: string;
+  /** The visible menu button on a phone (owner 2026-10-27: the bare icon was not obvious). */
+  menu: string;
   skipToContent: string;
   /** Suffix of a locked patient-portal entry ("Dashboard — Gesperrt"). */
   locked: string;
@@ -80,6 +82,7 @@ const PORTAL_FEATURES = [
 const de: LeadShellText = {
   portalName: "Patientenportal",
   toggleSidebar: "Seitenleiste umschalten",
+  menu: "Menü",
   skipToContent: "Zum Inhalt springen",
   locked: "Gesperrt",
   signOut: "Abmelden",
@@ -127,6 +130,7 @@ const de: LeadShellText = {
 const ru: LeadShellText = {
   portalName: "Портал пациента",
   toggleSidebar: "Переключить боковую панель",
+  menu: "Меню",
   skipToContent: "Перейти к содержанию",
   locked: "Закрыто",
   signOut: "Выход",
@@ -174,6 +178,7 @@ const ru: LeadShellText = {
 const uk: LeadShellText = {
   portalName: "Портал пацієнта",
   toggleSidebar: "Перемкнути бічну панель",
+  menu: "Меню",
   skipToContent: "Перейти до вмісту",
   locked: "Заблоковано",
   signOut: "Вийти",
@@ -221,6 +226,7 @@ const uk: LeadShellText = {
 const en: LeadShellText = {
   portalName: "Patient portal",
   toggleSidebar: "Toggle sidebar",
+  menu: "Menu",
   skipToContent: "Skip to content",
   locked: "Locked",
   signOut: "Sign out",

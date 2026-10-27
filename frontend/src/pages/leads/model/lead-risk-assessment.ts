@@ -935,6 +935,23 @@ export function representativeDocumentFieldsMissing(missing: unknown): boolean {
 }
 
 /**
+ * What in the person's card a refusal points at (DEV 2026-10-27, owner:
+ * «навігації передивись»): the identity document (scan or data) first, the
+ * proof of authority when only that is missing; `null` for other refusals.
+ */
+export function representativeDocumentFocus(error: unknown): "identity" | "authority" | null {
+  if (!(error instanceof ApiRequestError)) return null;
+  const code = error.body?.code ?? error.body?.error ?? error.code;
+  if (code !== "representative_details_incomplete") return null;
+  const missing: unknown = error.body?.missing;
+  if (!Array.isArray(missing)) return null;
+  const keys = missing.filter((key): key is string => typeof key === "string");
+  if (keys.some((key) => /_id_[a-z_]+$/.test(key))) return "identity";
+  if (keys.some((key) => key.endsWith("_authority_upload"))) return "authority";
+  return null;
+}
+
+/**
  * The place (`rep1`, `rep2`, `agent`, `guardian`) of the first person whose
  * document data a refusal (`representative_details_incomplete`) names, so the
  * wizard can open that person's document form; `null` otherwise.
@@ -1014,8 +1031,8 @@ export function riskGateErrorText(error: unknown, tx: Tx): string | null {
       && (error.body.missing as unknown[]).length > 0
       && (error.body.missing as unknown[]).every((key) => representativeDocumentFieldsMissing([key]));
     const base = error.body?.scope === "person" && onlyDocument ? tx(
-      "Подтвердить идентификацию нельзя: документ, удостоверяющий личность, не годится.",
-      "Die Identifizierung kann nicht bestätigt werden: Das Ausweisdokument genügt nicht.",
+      "Подтвердить идентификацию нельзя: не хватает документов этого лица.",
+      "Die Identifizierung kann nicht bestätigt werden: Unterlagen dieser Person fehlen.",
     ) : error.body?.scope === "person" ? tx(
       `Перед подтверждением подписи дополните данные этого лица в его карточке: ${representativeCardPlace(error.body?.missing, tx)}.`,
       `Bitte vervollständigen Sie vor der Bestätigung der Unterschrift die Daten dieser Person in ihrer Karte: ${representativeCardPlace(error.body?.missing, tx)}.`,
@@ -1024,10 +1041,22 @@ export function riskGateErrorText(error: unknown, tx: Tx): string | null {
       `Bitte vervollständigen Sie vor Vertrag und Unterschrift die Daten der Eltern bzw. gesetzlichen Vertreter in ihren Karten: ${representativeCardPlace(error.body?.missing, tx)}. Im Portal können Sie den Block „Vertretung“ anfordern.`,
     );
     const missing = representativeMissingText(error.body?.missing, tx);
-    const hint = representativeDocumentFieldsMissing(error.body?.missing) ? tx(
-      "Данные документа и сканы вносятся в шаге «Документы», блок «Документ, удостоверяющий личность», в карточке этого лица (сохраняются при выходе из формы).",
-      "Ausweisdaten und Scans werden im Schritt „Unterlagen“, Block „Ausweisdokument“, in der Karte dieser Person erfasst (gespeichert beim Verlassen des Formulars).",
-    ) : "";
+    // Where to act, by what is missing and whose it is (the button next to the text jumps there).
+    const focus = representativeDocumentFocus(error);
+    const slot = representativeDocumentSlot(error);
+    const hint = !representativeDocumentFieldsMissing(error.body?.missing) ? ""
+      : focus === "authority" ? tx(
+        "Загрузите подтверждение полномочий (для опекуна — решение суда о назначении) в карточке этого лица: шаг «Документы», блок «Документы представителей».",
+        "Laden Sie den Vertretungsnachweis (beim Vormund die Bestallungsurkunde) in der Karte dieser Person hoch: Schritt „Unterlagen“, Block „Ausweise der Vertreter“.",
+      )
+      : slot === "patient" ? tx(
+        "Данные документа и сканы вносятся в шаге «Документы», блок «Документ, удостоверяющий личность» (сохраняются при выходе из формы).",
+        "Ausweisdaten und Scans werden im Schritt „Unterlagen“, Block „Ausweisdokument“, erfasst (gespeichert beim Verlassen des Formulars).",
+      )
+      : tx(
+        "Данные документа и сканы вносятся в шаге «Документы», блок «Документ, удостоверяющий личность», в карточке этого лица (сохраняются при выходе из формы).",
+        "Ausweisdaten und Scans werden im Schritt „Unterlagen“, Block „Ausweisdokument“, in der Karte dieser Person erfasst (gespeichert beim Verlassen des Formulars).",
+      );
     return [base, missing, hint].filter(Boolean).join(" ");
   }
   if (code !== "risk_review_required") return null;

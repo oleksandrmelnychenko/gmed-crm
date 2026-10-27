@@ -318,6 +318,10 @@ export type LeadRequestText = {
    * asked (no points, level or reason).
    */
   followUpIntro: string;
+  /** A parent or guardian fills in another person's details: whom the step is about (owner 2026-10-27). */
+  followUpAboutPerson: (name: string) => string;
+  /** Under «since when … in the country of residence»: what to write when unsure (owner 2026-10-27). */
+  residenceSinceHint: string;
   followUpBeforeSubmitIntro: string;
   representativeQuestionsIntro: string;
   /** Block R of an adult patient: the persons are the patient's representatives, not parents (no child). */
@@ -1304,6 +1308,8 @@ const de: LeadRequestText = {
   },
   followUpBeforeSubmitIntro: "Für Ihre Anfrage benötigen wir noch einige ergänzende Angaben. Ihre Antworten werden automatisch gespeichert.",
   followUpIntro: "Bitte ergänzen Sie die folgenden Angaben und senden Sie sie ab.",
+  followUpAboutPerson: (name) => `Alle Angaben auf dieser Seite betreffen ${name}, nicht Sie.`,
+  residenceSinceHint: "Das Jahr, seit dem dort ständig gewohnt wird, z. B. 2015 oder „seit Geburt“. Ungefähr genügt.",
   followUpBlocks: {
     R: "Ergänzende Angaben der Eltern oder gesetzlichen Vertreter",
     A: "Herkunft der Mittel",
@@ -1902,6 +1908,8 @@ const ru: LeadRequestText = {
   },
   followUpBeforeSubmitIntro: "Для вашего запроса нам нужны ещё некоторые дополнительные сведения. Ответы сохраняются автоматически.",
   followUpIntro: "Пожалуйста, дополните сведения и отправьте их.",
+  followUpAboutPerson: (name) => `Все сведения на этом шаге — о ${name}, не о вас.`,
+  residenceSinceHint: "Год, с которого живёт там постоянно, например 2015 или «с рождения». Достаточно примерно.",
   followUpBlocks: {
     R: "Дополнительные сведения родителей или законных представителей",
     A: "Происхождение средств",
@@ -2498,6 +2506,8 @@ const uk: LeadRequestText = {
   },
   followUpBeforeSubmitIntro: "Для вашого запиту нам потрібні ще деякі додаткові відомості. Відповіді зберігаються автоматично.",
   followUpIntro: "Будь ласка, доповніть відомості та надішліть їх.",
+  followUpAboutPerson: (name) => `Усі відомості на цьому кроці — про ${name}, не про вас.`,
+  residenceSinceHint: "Рік, з якого живе там постійно, наприклад 2015 або «з народження». Достатньо приблизно.",
   followUpBlocks: {
     R: "Додаткові відомості батьків або законних представників",
     A: "Походження коштів",
@@ -3094,6 +3104,8 @@ const en: LeadRequestText = {
   },
   followUpBeforeSubmitIntro: "For your request we need a few more details. Your answers are saved automatically.",
   followUpIntro: "Please complete the details below and send them.",
+  followUpAboutPerson: (name) => `Everything on this step is about ${name}, not about you.`,
+  residenceSinceHint: "The year since living there permanently, e.g. 2015 or “since birth”. Approximate is fine.",
   followUpBlocks: {
     R: "Additional details of parents or legal representatives",
     A: "Source of funds",

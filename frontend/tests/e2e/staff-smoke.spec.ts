@@ -2581,7 +2581,8 @@ test.describe("lead wizard UX", () => {
       vat_rate: 0,
       is_cost_passthrough: true,
     });
-    expect((quote?.line_items as Record<string, unknown>[]).at(-1)).toMatchObject({
+    // The estimate is created after the service writes: wait for it (the check ran too early).
+    await expect.poll(() => (quote?.line_items as Record<string, unknown>[] | undefined)?.at(-1)).toMatchObject({
       description: "Voraussichtliche Auslagen",
       line_gross: "50.00",
     });
@@ -3308,7 +3309,8 @@ test.describe("lead onboarding wizard", () => {
       emailCall.method() === "POST" &&
       new URL(emailCall.url()).pathname === `/api/v1/leads/${createdId}/portal-login-email`,
     );
-    await credentials.getByRole("button", { name: "An neue.person@example.com senden" }).click();
+    // The button says «Per E-Mail senden» since the owner's polish (323f8bac); the address stands above it.
+    await credentials.getByRole("button", { name: "Per E-Mail senden" }).click();
     expect((await emailRequest).postDataJSON()).toEqual({
       user_id: "00000000-0000-0000-0000-000000000991",
       password: "Kq7-mP2x-Rw9t",

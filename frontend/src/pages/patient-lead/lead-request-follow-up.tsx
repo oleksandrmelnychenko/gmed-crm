@@ -58,6 +58,7 @@ import {
   LegalQuestionsSection,
   useIdentificationForm,
   type IdentificationForm,
+  IdentificationSubjectContext,
 } from "./lead-request-identification";
 import { SANCTIONS_LINK_KINDS, STAY_REASONS, combinedSaveState, consentGiven, type SaveState } from "./lead-request-model";
 import {
@@ -118,6 +119,8 @@ function followUpBlockTitle(
 }
 
 const FULL_ROW = "sm:col-span-2 lg:col-span-3";
+/** The blocks about the patient's own person (not the payer, not the representatives). */
+const SUBJECT_BLOCKS = new Set<FollowUpBlock>(["K", "L", "F", "H", "I", "J"]);
 
 export function FollowUpStep({
   request,
@@ -142,6 +145,11 @@ export function FollowUpStep({
   onShowMissing: () => void;
 }) {
   const guardian = request.access_kind === "guardian";
+  // A parent or guardian answers for the patient: say whom (owner 2026-10-27).
+  const subjectFirstName = guardian ? request.personal_data?.first_name?.trim() || null : null;
+  const subjectName = guardian
+    ? [request.personal_data?.first_name, request.personal_data?.last_name].map((part) => part?.trim()).filter(Boolean).join(" ") || null
+    : null;
   const blocks = openFollowUpBlocks(request);
   // Block B without a third-party payer asks nothing: no heading with "nothing needed here".
   const shownBlocks = blocks.filter(
@@ -290,6 +298,7 @@ export function FollowUpStep({
   };
 
   return (
+    <IdentificationSubjectContext.Provider value={subjectName}>
     <section className="flex flex-col gap-4" data-testid="lead-request-follow-up">
       {/* GMED asked once more after an answer: check and send again (no reason named). */}
       {requestedAgainAt ? (
@@ -299,7 +308,10 @@ export function FollowUpStep({
       ) : null}
       {/* Answered and unchanged: "please complete and send" would contradict the confirmation below. */}
       {answered && answeredAt && !beforeSubmit ? null : (
-        <CabinetHint testId="lead-request-follow-up-explanation">{beforeSubmit ? text.followUpBeforeSubmitIntro : text.followUpIntro}</CabinetHint>
+        <CabinetHint testId="lead-request-follow-up-explanation">
+          {beforeSubmit ? text.followUpBeforeSubmitIntro : text.followUpIntro}
+          {subjectName ? <span className="mt-1 block font-medium" data-testid="lead-request-follow-up-subject">{text.followUpAboutPerson(subjectName)}</span> : null}
+        </CabinetHint>
       )}
       {answered && answeredAt ? (
         <p
@@ -314,7 +326,7 @@ export function FollowUpStep({
 
       {shownBlocks.map((block) => (
         <div key={block} data-testid={`lead-request-follow-up-${block}`}>
-          <Section title={followUpBlockTitle(request, block, text)}>
+          <Section title={subjectFirstName && SUBJECT_BLOCKS.has(block) ? `${followUpBlockTitle(request, block, text)} — ${subjectFirstName}` : followUpBlockTitle(request, block, text)}>
             {showMissing ? (
               <MissingList
                 title={text.stepMissingTitle}
@@ -364,6 +376,7 @@ export function FollowUpStep({
         </div>
       </StepFooter>
     </section>
+    </IdentificationSubjectContext.Provider>
   );
 }
 
@@ -675,6 +688,7 @@ function ResidenceBlock({
     <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
       <IdentificationFormField form={form} field="residence_since" text={text} guardian={guardian} required>
         <IdentificationTextInput form={form} field="residence_since" maxLength={60} />
+        <p className="mt-1 text-xs leading-5 text-muted-foreground" data-testid="lead-request-residence-since-hint">{text.residenceSinceHint}</p>
       </IdentificationFormField>
       <IdentificationFormField form={form} field="stay_reason" text={text} required>
         <IdentificationChoiceSelect form={form} field="stay_reason" options={pick(text.stayReasonOptions, STAY_REASONS)} text={text} />
