@@ -9514,6 +9514,40 @@ async fn auto_linked_parent_patient_fills_the_representative_identity() {
         father.extras
     );
     assert_eq!(father.extras["city"], "Berlin");
+
+    // The passport of the patient record counts as the father's identity copy
+    // for the child's request: referenced, not copied (DEV 2026-10-27).
+    let passport = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO documents(id,version_root_document_id,patient_id,auto_name,original_filename,art,category,status,visibility,is_medical,uploaded_by)
+         VALUES($1,$1,$2,'Ausweisdokument','ioann-passport.png','identity','identity','active','internal',false,$3)",
+    )
+    .bind(passport)
+    .bind(parent_patient)
+    .bind(app.patient_manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, intake) = json_request(
+        &app.suite.app,
+        "GET",
+        &format!("/api/v1/leads/{child}/portal-intake"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    let person = intake["representation"]["representatives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|person| person["id"] == json!(contact))
+        .expect("father");
+    let copy = &person["identity_documents"][0];
+    assert_eq!(copy["id"], json!(passport), "{person}");
+    assert_eq!(copy["from_patient_record"], json!(true), "{person}");
+    assert_eq!(copy["reviewed"], json!(true));
+    assert_eq!(copy["file_name"], "ioann-passport.png");
 }
 
 /// Security sweep 2026-10-23: the parents' access reads a request only while

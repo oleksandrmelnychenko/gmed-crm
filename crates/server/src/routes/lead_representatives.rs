@@ -558,6 +558,10 @@ pub(crate) struct Upload {
     /// Staff use the document (reviewed, signed, shared, in a review, moved
     /// to a patient): the cabinet can no longer remove it.
     pub locked: bool,
+    /// The identity document of a parent who is already a patient, as it
+    /// stands in the patient record (DEV 2026-10-27): referenced, not copied;
+    /// it counts as the parent's checked copy and nobody removes it here.
+    pub from_patient_record: bool,
 }
 
 /// Everything of a lead's representation, as [`load`] reads it.
@@ -751,9 +755,11 @@ pub(crate) async fn load_on(
                 || moved
                 || row.try_get::<bool, _>("shared").unwrap_or(true)
                 || row.try_get::<bool, _>("in_review").unwrap_or(true),
+            from_patient_record: false,
         })
     })
     .collect();
+    let mut uploads: Vec<Upload> = uploads;
     let contacts = lead
         .try_get::<Option<Value>, _>("trusted_contacts")
         .ok()
@@ -804,6 +810,62 @@ pub(crate) async fn load_on(
     let mut representatives = resolve(minor, &effective_contacts, &rows, &logins, &answers);
     for person in &mut representatives {
         person.has_data = stored_ids.contains(&person.id);
+    }
+    // A parent who is already a patient brings the identity document GMED
+    // checked for the patient record (DEV 2026-10-27: «паспорт у папи є»):
+    // it counts as this representative's copy unless one was uploaded here.
+    for person in &representatives {
+        if uploads
+            .iter()
+            .any(|upload| upload.representative_id == person.id && upload.kind == UPLOAD_IDENTITY)
+        {
+            continue;
+        }
+        let Some(patient_id) = effective_contacts
+            .iter()
+            .find(|contact| entry_id(contact) == Some(person.id))
+            .and_then(|contact| contact.get("related_patient_id"))
+            .and_then(Value::as_str)
+            .and_then(|id| Uuid::parse_str(id.trim()).ok())
+        else {
+            continue;
+        };
+        let documents = sqlx::query(
+            r#"SELECT d.id, d.original_filename, d.auto_name, d.file_size, d.mime_type, d.created_at
+               FROM documents d
+               WHERE d.patient_id = $1
+                 AND d.art = 'identity'
+                 AND d.status = 'active'
+                 AND d.file_deleted_at IS NULL
+               ORDER BY d.created_at DESC, d.id
+               LIMIT 1"#,
+        )
+        .bind(patient_id)
+        .fetch_all(&mut *conn)
+        .await?;
+        for row in &documents {
+            let Ok(document_id) = row.try_get::<Uuid, _>("id") else {
+                continue;
+            };
+            uploads.push(Upload {
+                document_id,
+                representative_id: person.id,
+                kind: UPLOAD_IDENTITY.to_string(),
+                file_name: row
+                    .try_get::<Option<String>, _>("original_filename")
+                    .ok()
+                    .flatten()
+                    .or_else(|| row.try_get::<Option<String>, _>("auto_name").ok().flatten()),
+                size_bytes: row.try_get::<Option<i64>, _>("file_size").ok().flatten(),
+                mime_type: row.try_get::<Option<String>, _>("mime_type").ok().flatten(),
+                uploaded_at: row.try_get::<DateTime<Utc>, _>("created_at").ok(),
+                uploaded_by: None,
+                by_staff: true,
+                reviewed: true,
+                locked: true,
+                from_patient_record: true,
+            });
+        }
     }
     Ok(Some(Loaded {
         document_stage: lead.try_get("document_stage").unwrap_or(false),
@@ -1388,7 +1450,7 @@ pub(crate) fn portal_payload(loaded: &Loaded, user_id: Uuid) -> Value {
             .filter(|upload| upload.representative_id == person.id && upload.kind == kind)
             .map(|upload| {
                 let mine = upload.uploaded_by == Some(user_id);
-                json!({
+                let mut value = json!({
                     "id": upload.document_id,
                     "file_name": upload.file_name,
                     "size_bytes": upload.size_bytes,
@@ -1398,7 +1460,12 @@ pub(crate) fn portal_payload(loaded: &Loaded, user_id: Uuid) -> Value {
                     "uploaded_by_staff": upload.by_staff,
                     "reviewed": upload.reviewed,
                     "can_delete": mine && !upload.locked,
-                })
+                });
+                // Only a parent's patient-record passport says where it comes from.
+                if upload.from_patient_record {
+                    value["from_patient_record"] = json!(true);
+                }
+                value
             })
             .collect()
     };
@@ -1472,14 +1539,19 @@ pub(crate) fn staff_payload(loaded: &Loaded) -> Value {
             .iter()
             .filter(|upload| upload.representative_id == person.id && upload.kind == kind)
             .map(|upload| {
-                json!({
+                let mut value = json!({
                     "id": upload.document_id,
                     "file_name": upload.file_name,
                     "mime_type": upload.mime_type,
                     "uploaded_at": upload.uploaded_at,
                     "uploaded_by_staff": upload.by_staff,
                     "reviewed": upload.reviewed,
-                })
+                });
+                // Only a parent's patient-record passport says where it comes from.
+                if upload.from_patient_record {
+                    value["from_patient_record"] = json!(true);
+                }
+                value
             })
             .collect()
     };
@@ -4950,6 +5022,7 @@ mod tests {
             by_staff: false,
             reviewed: false,
             locked: false,
+            from_patient_record: false,
         }
     }
 

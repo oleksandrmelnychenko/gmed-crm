@@ -13,7 +13,7 @@ import { AutosaveFlushContext, CabinetSection, InfoNote, StepFooter, errorBody }
 import type { StepProps } from "./lead-request-step-forms";
 import { asLeadCabinetLang } from "./lead-request-text";
 import { TrustedPersonsEditor, TrustedPersonsList } from "./lead-trusted-persons-editor";
-import { disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, draftIndexOfSent, mergeDisclosureDraft, onlyWithdraws, recipientFieldOfServer, recipientsToSend, type DisclosureDraft, type RecipientField } from "./lead-trusted-persons-model";
+import { acceptedDefaultNo, disclosureChanged, disclosureDraft, disclosureProblem, disclosureToSend, draftIndexOfSent, mergeDisclosureDraft, onlyWithdraws, recipientFieldOfServer, recipientsToSend, type DisclosureDraft, type RecipientField } from "./lead-trusted-persons-model";
 import { disclosureConsentText, disclosureSubject, disclosureWording, trustedPersonsText } from "./lead-trusted-persons-text";
 
 export function DisclosureStep({ request, text: common, lang, enqueue, onChange, nav }: StepProps) {
@@ -61,8 +61,11 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       const ok = await saving.current;
       return ok ? latest.current.save() : false;
     }
-    const current = draftRef.current;
     const base = requestRef.current;
+    // The «No» shown by default and left as it is counts as the person's own
+    // answer once they leave the step (DEV 2026-10-27: a conscious «No» was
+    // saved nowhere, staff saw «not answered»). Saves run on leaving only.
+    const current = acceptedDefaultNo(draftRef.current, base);
     if (!disclosureChanged(current, base, user?.id) || ownMinor) return true;
     const problemNow = disclosureProblem(current);
     if (problemNow) {

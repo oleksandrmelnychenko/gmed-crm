@@ -219,6 +219,18 @@ export function disclosureProblem(draft: DisclosureDraft): "decision" | "require
   return draft.consentGiven ? null : "consent";
 }
 
+/**
+ * The decision to save when the person leaves the step: the «No» the page
+ * shows by default, with nothing stored yet, is their answer then (DEV
+ * 2026-10-27). Anything else stays as drafted.
+ */
+export function acceptedDefaultNo(draft: DisclosureDraft, request: Pick<LeadRequest, "disclosure" | "consent_form" | "submitted_at">): DisclosureDraft {
+  // A sent request is read-only: nothing is saved for it from here.
+  return !request.submitted_at && !request.disclosure && draft.allowDisclosure === false && !draft.answered && disclosureDefaultsToNo(request)
+    ? { ...draft, answered: true }
+    : draft;
+}
+
 export function disclosureChanged(draft: DisclosureDraft, request: Pick<LeadRequest, "disclosure" | "disclosure_company_name" | "trusted_persons" | "consent_form">, viewerId?: string): boolean {
   const saved = disclosureDraft(request, viewerId);
   // An answer given on the page while nothing is stored is a decision to save, also the "no"
