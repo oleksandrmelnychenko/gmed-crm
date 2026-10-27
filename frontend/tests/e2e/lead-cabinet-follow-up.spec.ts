@@ -1008,7 +1008,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     const order = await followUp
       .locator(':scope > div[data-testid^="lead-request-follow-up-"]')
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
-    expect(order).toEqual(["lead-request-follow-up-K", "lead-request-follow-up-L", "lead-request-follow-up-A"]);
+    // The explanation stands above the blocks (owner UI polish 323f8bac).
+    expect(order).toEqual(["lead-request-follow-up-explanation", "lead-request-follow-up-K", "lead-request-follow-up-L", "lead-request-follow-up-A"]);
 
     // Block K: birth name, place and country of birth (no longer in the first step).
     const blockK = page.getByTestId("lead-request-follow-up-K");

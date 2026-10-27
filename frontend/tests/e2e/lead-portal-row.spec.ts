@@ -280,7 +280,7 @@ test("expanded portal panels stay in view while the columns scroll horizontally"
   }
 });
 
-test("portal actions stay in place while permissions load and facts align across rows", async ({ page }) => {
+test("portal actions stay in place while permissions load and every fact stays inside its row", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await setup(page, "ru");
   await page.route("**/api/v1/leads", (route) => route.fulfill({ json: leads.map((lead, index) => ({
@@ -319,11 +319,16 @@ test("portal actions stay in place while permissions load and facts align across
         return { x: bounds.x - origin.x, y: bounds.y - origin.y, width: bounds.width };
       });
     }));
-    expect(facts[0]).toHaveLength(7);
-    for (let index = 0; index < 7; index += 1) {
-      expect(Math.abs(facts[0][index].x - facts[1][index].x)).toBeLessThan(1);
-      expect(Math.abs(facts[0][index].width - facts[1][index].width)).toBeLessThan(1);
-    }
+    // The facts are chips sized by their content since 323f8bac (owner UI
+    // polish), not a grid: every row shows all seven, none leaves its panel.
+    const panelWidths = await panels.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().width));
+    facts.forEach((row, rowIndex) => {
+      expect(row).toHaveLength(7);
+      for (const fact of row) {
+        expect(fact.x).toBeGreaterThanOrEqual(-0.5);
+        expect(fact.x + fact.width).toBeLessThanOrEqual(panelWidths[rowIndex] + 0.5);
+      }
+    });
   }
 });
 
