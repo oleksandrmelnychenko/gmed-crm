@@ -62,6 +62,7 @@ import {
 import { SANCTIONS_LINK_KINDS, STAY_REASONS, combinedSaveState, consentGiven, type SaveState } from "./lead-request-model";
 import {
   CabinetSection as Section,
+  CabinetHint,
   SECTION_ANCHORS,
   AutosaveFlushContext,
   FileUploadField,
@@ -298,7 +299,7 @@ export function FollowUpStep({
       ) : null}
       {/* Answered and unchanged: "please complete and send" would contradict the confirmation below. */}
       {answered && answeredAt && !beforeSubmit ? null : (
-        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-request-follow-up-explanation">{beforeSubmit ? text.followUpBeforeSubmitIntro : text.followUpIntro}</p>
+        <CabinetHint testId="lead-request-follow-up-explanation">{beforeSubmit ? text.followUpBeforeSubmitIntro : text.followUpIntro}</CabinetHint>
       )}
       {answered && answeredAt ? (
         <p
@@ -341,7 +342,7 @@ export function FollowUpStep({
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
-            variant="outline"
+            variant="default"
             className="h-9"
             // The page saves the entry still in its autosave delay first and judges the fresh
             // response (like the base steps): the first press with something missing shows it.
@@ -545,17 +546,16 @@ function FundsBlock({
         {asks.occupation ? textField("occupation") : null}
         {asks.sector ? textField("sector") : null}
         {asks.sector && !asks.occupation && request.payer_questionnaire?.available ? (
-          <p className={cn("text-xs leading-5 text-muted-foreground", FULL_ROW)}>{text.extraOccupationElsewhere}</p>
+          <CabinetHint className={FULL_ROW}>{text.extraOccupationElsewhere}</CabinetHint>
         ) : null}
         {/* A third party states the funds on the own link: said only when block A asks nothing else (B11). */}
         {payerNoteAlone(request, asks) ? (
-          <p
-            role="note"
-            className={cn("rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm leading-5 text-muted-foreground", FULL_ROW)}
-            data-testid="lead-request-follow-up-payer-note"
+          <CabinetHint
+            className={FULL_ROW}
+            testId="lead-request-follow-up-payer-note"
           >
             {text.extraPayerStatesFunds}
-          </p>
+          </CabinetHint>
         ) : null}
       </div>
       {asks.funds_proof ? (

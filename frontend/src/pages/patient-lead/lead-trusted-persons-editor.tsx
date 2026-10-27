@@ -123,11 +123,11 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
         <Button type="button" variant="ghost" size="sm" className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" disabled={disabled} aria-label={text.removeRecipient} title={text.removeRecipient} onClick={() => removeAt(index)}><Trash2 aria-hidden="true" className="size-3.5" /></Button>
       </div>
       <div className="grid gap-x-4 gap-y-3 p-3 sm:grid-cols-2">
-      <label className="min-w-0 space-y-1.5 text-xs"><span className="text-muted-foreground">{fields.name}</span>
+      <label className="min-w-0 space-y-1.5 text-xs"><span className="font-mono font-medium leading-5 text-foreground/75">{fields.name}</span>
         <Input className={inputClass} value={person.name} maxLength={120} disabled={disabled} autoComplete="off" aria-invalid={problems.has("name") || undefined} aria-describedby={describedBy("name")} onChange={(event) => update(index, { name: event.target.value })} />
         {message("name", problems, index)}
       </label>
-      <label className="min-w-0 space-y-1.5 text-xs"><span className="text-muted-foreground">{fields.relation}</span>
+      <label className="min-w-0 space-y-1.5 text-xs"><span className="font-mono font-medium leading-5 text-foreground/75">{fields.relation}</span>
         <NativeComboboxSelect className={selectClass} value={person.relation} disabled={disabled} aria-invalid={problems.has("relation") || undefined} aria-describedby={describedBy("relation")} onChange={(event) => update(index, { relation: event.target.value as ConsentRecipientRelation | "" })}>
           <option value="">—</option>{CONSENT_RECIPIENT_RELATIONS.map((relation) => <option key={relation} value={relation}>{text.recipientRelations[relation]}</option>)}
         </NativeComboboxSelect>
@@ -135,7 +135,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
       </label>
       <div className="min-w-0 space-y-1.5 text-xs">
         <div className="flex flex-wrap items-start gap-x-1.5 gap-y-1.5">
-          <label htmlFor={`trusted-person-phone-${index}`} className="min-w-0 flex-1 text-muted-foreground">{fields.phone}</label>
+          <label htmlFor={`trusted-person-phone-${index}`} className="min-w-0 flex-1 font-mono font-medium leading-5 text-foreground/75">{fields.phone}</label>
           <PhoneInfo index={index} label={fields.phoneInfoLabel} info={fields.phoneInfo} />
         </div>
         <Input id={`trusted-person-phone-${index}`} className={inputClass} type="tel" inputMode="tel" value={person.phone} maxLength={40} disabled={disabled} autoComplete="off" required
@@ -147,7 +147,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
         {message("phone", problems, index)}
       </div>
       {institution ? null : <div className="min-w-0 space-y-1.5 text-xs">
-        <label htmlFor={`trusted-person-birth-date-${index}`} className="text-muted-foreground">{fields.birthDate}</label>
+        <label htmlFor={`trusted-person-birth-date-${index}`} className="font-mono font-medium leading-5 text-foreground/75">{fields.birthDate}</label>
         <Input id={`trusted-person-birth-date-${index}`} key={`trusted-person-birth-date-${index}-${lang}`} className={inputClass} type="date" pickerLang={asLeadCabinetLang(lang) ?? undefined}
           min="1900-01-01" max={today} value={person.birthDate} disabled={disabled} autoComplete="off" required
           aria-invalid={problems.has("birth_date") || undefined} aria-describedby={describedBy("birth_date")} data-testid="trusted-person-birth-date"
@@ -155,12 +155,12 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
         {message("birth_date", problems, index)}
       </div>}
       <fieldset className="min-w-0 space-y-1.5 text-xs sm:col-span-2" aria-invalid={problems.has("scope") || undefined} aria-describedby={describedBy("scope")} data-testid="trusted-person-scope">
-        <legend className="mb-1.5 text-muted-foreground">{fields.scope}</legend>
+        <legend className="mb-1.5 font-mono font-medium leading-5 text-foreground/75">{fields.scope}</legend>
         <div className="grid gap-1.5 sm:grid-cols-2">
           {CONSENT_RECIPIENT_SCOPES.map((code) => <label key={code} className={cn(
             "flex min-w-0 cursor-pointer items-start gap-2.5 rounded-lg border px-2.5 py-2 text-sm leading-5",
             checked.includes(code) ? "border-[var(--brand)] bg-[var(--brand-soft)]" : "border-border/70 bg-card",
-            disabled && "cursor-not-allowed opacity-70",
+            disabled && "cursor-not-allowed",
           )}>
             <input type="checkbox" className={cn(checkboxClass, "mt-0.5 shrink-0")} checked={checked.includes(code)} disabled={disabled}
               data-testid={`trusted-person-scope-${code}`} onChange={() => update(index, { scopeCodes: toggleScopeCode(person.scopeCodes, code) })} />
@@ -174,7 +174,7 @@ export function TrustedPersonsEditor({ persons, onChange, lang, disabled = false
       </div>
     </div>;
     })}
-    {persons.length < MAX_CONSENT_RECIPIENTS ? <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5 rounded-lg" disabled={disabled} data-testid="trusted-person-add" onClick={() => onChange([...persons, blankRecipient()])}>
+    {persons.length < MAX_CONSENT_RECIPIENTS ? <Button type="button" size="sm" className="h-8 gap-1.5 rounded-lg" disabled={disabled} data-testid="trusted-person-add" onClick={() => onChange([...persons, blankRecipient()])}>
       <Plus aria-hidden="true" className="size-3.5" />{text.addRecipient}
     </Button> : <p className="text-xs text-muted-foreground" data-testid="trusted-person-max">{fields.maxReached}</p>}
   </div>;

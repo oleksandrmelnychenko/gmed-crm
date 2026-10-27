@@ -333,6 +333,15 @@
   opacity: 1;
 }
 
+/* Upload actions keep their brand colour while consent is still pending. */
+.patient-request-wizard button.cabinet-upload-action[data-slot="button"]:disabled {
+  background-color: var(--brand);
+  color: var(--primary-foreground);
+  -webkit-text-fill-color: var(--primary-foreground);
+  border-color: transparent;
+  cursor: not-allowed;
+}
+
 .patient-request-wizard :is(.MuiPickersTextField-root, .MuiPickersInputBase-root).Mui-disabled,
 .patient-request-wizard fieldset:disabled .MuiPickersInputBase-root {
   opacity: 1;

@@ -40,6 +40,7 @@ import {
 } from "./lead-request-model";
 import {
   CabinetSection as Section,
+  CabinetHint,
   LabeledField,
   RequiredMark,
   useStepMissingError,
@@ -493,7 +494,7 @@ export function InvoiceRecipientSection({
             >
               {textInput("email", 254, "email")}
               {errorFor("email") ? null : <EmailDomainWarning email={draft.email} lang={lang} />}
-              <p className="text-xs leading-5 text-muted-foreground">{text.invoiceEmailHint}</p>
+              <CabinetHint>{text.invoiceEmailHint}</CabinetHint>
             </LabeledField>
           ) : null}
 

@@ -43,6 +43,7 @@ import {
 } from "./lead-request-model";
 import {
   CabinetSection as Section,
+  CabinetHint,
   ConsentNeededNote,
   ConsentNoteAboveContext,
   LabeledField,
@@ -721,9 +722,9 @@ function RepresentativeBlock({
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="sm:col-span-2 lg:col-span-3">
           {identityLocked && !hintsAbove ? (
-            <p className="mb-2 text-xs text-muted-foreground" data-testid={`lead-request-${slot}-identity-locked`}>
+            <CabinetHint className="mb-2" testId={`lead-request-${slot}-identity-locked`}>
               {text.representativeIdentityLocked}
-            </p>
+            </CabinetHint>
           ) : null}
           {hintsAbove ? null : (
             <StatusChip tone="warning" className="items-start whitespace-normal rounded-lg px-2.5 py-1.5">
@@ -800,14 +801,14 @@ function RepresentativeBlock({
             />
             {form.errorFor("email") ? null : <EmailDomainWarning email={form.draft.email} lang={lang} enabled={!locked} />}
             {staffEmail && !hintsAbove && !form.errorFor("email") ? (
-              <p className="text-xs text-muted-foreground" data-testid={`lead-request-${slot}-email-staff`}>
+              <CabinetHint testId={`lead-request-${slot}-email-staff`}>
                 {text.representativeEmailStaff}
-              </p>
+              </CabinetHint>
             ) : null}
             {inviteHint ? (
-              <p className="text-xs text-muted-foreground" data-testid={`lead-request-${slot}-invite-hint`}>
+              <CabinetHint testId={`lead-request-${slot}-invite-hint`}>
                 {text.representativeOtherParentInvite}
-              </p>
+              </CabinetHint>
             ) : null}
           </LabeledField>
         ) : null}
@@ -1086,8 +1087,8 @@ export function RepresentationSection({
         </Button>
       ) : undefined}>
         <div className="space-y-4" data-testid="lead-request-representation">
-          {representation.document_stage === false && !showDocumentDetails ? <p className="text-sm leading-relaxed text-muted-foreground">{draft.custody === "guardian" ? text.parentShortFormIntroVormund : text.parentShortFormIntro}</p> : null}
-          {lockedByGmed ? <p className="text-xs text-muted-foreground" data-testid="lead-request-representation-locked">{text.representativeLockedByGmed}</p> : null}
+          {representation.document_stage === false && !showDocumentDetails ? <CabinetHint>{draft.custody === "guardian" ? text.parentShortFormIntroVormund : text.parentShortFormIntro}</CabinetHint> : null}
+          {lockedByGmed ? <CabinetHint testId="lead-request-representation-locked">{text.representativeLockedByGmed}</CabinetHint> : null}
           <StatusChip tone="warning" className="items-start whitespace-normal rounded-lg px-2.5 py-1.5" data-testid="lead-request-representation-name-hint">
             <CircleAlert aria-hidden="true" className="mt-[3px]" />
             <span>{text.namePassportHint}</span>
@@ -1096,7 +1097,7 @@ export function RepresentationSection({
               here (owner decision 2026-10-22): the parent writes to GMED instead. */}
           {custodyByStaff ? (
             <div className="space-y-1" data-testid="lead-request-custody-by-staff">
-              <p className="text-sm font-medium text-foreground">{text.custodyQuestion}</p>
+              <p className="font-mono text-xs font-medium leading-5 text-foreground/75">{text.custodyQuestion}</p>
               <p className="text-sm text-foreground" data-testid="lead-request-custody-value">
                 {text.custodyOptions[representation.custody ?? "joint"]}
               </p>

@@ -5,12 +5,12 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
 import {
   checkboxClass,
   inputClass,
   selectClass,
   textareaClass,
-  tokens,
 } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { ApiRequestError } from "@/lib/api";
@@ -57,7 +57,9 @@ import {
 } from "./lead-request-payer-questionnaire-model";
 import {
   CabinetGoToContext,
+  CabinetHint,
   CabinetSection as Section,
+  ConsentGivenChip,
   GoToSectionButton,
   LabeledField,
   MissingItemLink,
@@ -166,7 +168,7 @@ export function PayerQuestionnaireSection({
             <p role="alert" className="text-sm text-destructive">
               {text.payerQuestionnaireLoadFailed}
             </p>
-            <Button type="button" variant="outline" className="h-8" onClick={() => void load()}>
+            <Button type="button" className="h-8" onClick={() => void load()}>
               {text.retry}
             </Button>
           </div>
@@ -433,10 +435,10 @@ function PayerQuestionnaireForm({
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-3 rounded-lg border border-border bg-muted/10 px-3 py-3" data-testid="lead-request-payer-notice">
-        <p className="text-sm font-medium">{text.payerNoticeTitle}</p>
-        <p className="whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{text.payerNotice}</p>
+    <div className="space-y-4">
+      <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3" data-testid="lead-request-payer-notice">
+        <h4 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />{text.payerNoticeTitle}</h4>
+        <CabinetHint><p className="whitespace-pre-line">{text.payerNotice}</p></CabinetHint>
         <a href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
           {text.privacyLink}
         </a>
@@ -453,17 +455,17 @@ function PayerQuestionnaireForm({
               if (event.target.checked) void acknowledge(channels);
             }}
           />
-          <span className="space-y-1">
-            <span className="block leading-snug">{text.payerNoticeAck}</span>
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+            <span className="leading-snug">{text.payerNoticeAck}</span>
             {questionnaire.privacy.acknowledged_at ? (
-              <span className="block text-xs text-muted-foreground">
+              <ConsentGivenChip>
                 {text.payerNoticeAckAt(formatAppDateTime(questionnaire.privacy.acknowledged_at))}
-              </span>
+              </ConsentGivenChip>
             ) : null}
           </span>
         </label>
         <div role="group" aria-labelledby="lead-request-payer-channels-label">
-          <p id="lead-request-payer-channels-label" className={tokens.text.label}>
+          <p id="lead-request-payer-channels-label" className="font-mono text-xs font-medium leading-5 text-foreground/75">
             {text.payerContactChannels}
           </p>
           <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
@@ -574,7 +576,7 @@ function PayerQuestionnaireForm({
               aria-labelledby="lead-request-payer-funds_sources-label"
               aria-invalid={Boolean(errorFor("funds_sources")) || undefined}
             >
-              <p id="lead-request-payer-funds_sources-label" className={tokens.text.label}>
+              <p id="lead-request-payer-funds_sources-label" className="font-mono text-xs font-medium leading-5 text-foreground/75">
                 {labelOf("funds_sources")}
                 <RequiredMark />
               </p>
@@ -616,7 +618,7 @@ function PayerQuestionnaireForm({
               />
             </LabeledField>
             <div className="space-y-2" data-testid="lead-request-payer-funds-proof" data-required={proofRequired ? "true" : undefined}>
-              <p className={tokens.text.label}>
+              <p className="font-mono text-xs font-medium leading-5 text-foreground/75">
                 {text.payerFundsProofTitle}
                 {" · "}
                 <span className={proofRequired ? "text-destructive" : undefined}>
@@ -638,17 +640,18 @@ function PayerQuestionnaireForm({
                   void uploadFiles(files);
                 }}
               />
-              <Button
-                type="button"
-                variant="outline"
-                className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
-                disabled={readOnly || uploading}
-                onClick={() => fileInput.current?.click()}
-              >
-                {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
-                {uploading ? text.uploading : text.payerFundsProofUpload}
-              </Button>
-              <p className="text-xs leading-5 text-muted-foreground">{text.payerFundsProofHint}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusChip tone="warning" className="whitespace-normal text-xs">{text.payerFundsProofHint}</StatusChip>
+                <Button
+                  type="button"
+                  className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
+                  disabled={readOnly || uploading}
+                  onClick={() => fileInput.current?.click()}
+                >
+                  {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
+                  {uploading ? text.uploading : text.payerFundsProofUpload}
+                </Button>
+              </div>
               <UploadedFileList
                 documents={proofDocuments}
                 text={text}

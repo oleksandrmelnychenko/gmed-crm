@@ -454,7 +454,7 @@ export function IdentityDocumentSection({
             <Button
               type="button"
               // The label is a sentence: on a phone it may wrap instead of widening the page.
-              className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
+              className="cabinet-upload-action h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
               disabled={!consentReady || uploading || full}
               onClick={() => fileInput.current?.click()}
             >

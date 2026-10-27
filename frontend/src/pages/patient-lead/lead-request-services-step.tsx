@@ -2,12 +2,13 @@ import { useCallback, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusChip } from "@/components/ui/status-chip";
+import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
 import { cn } from "@/lib/utils";
 import { LEAD_WIZARD_SERVICE_OPTIONS, updateLeadServiceSelection } from "@/pages/leads/model/leads-model";
 import { saveLeadServices, type LeadServicePreferences } from "./lead-request-api";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import type { SaveState } from "./lead-request-model";
-import { CabinetSection, LabeledField, errorMessage, runDraftSave, useAutosave } from "./lead-request-parts";
+import { CabinetHint, CabinetSection, LabeledField, errorMessage, runDraftSave, useAutosave } from "./lead-request-parts";
 import { useServerDraftSync } from "./lead-request-server-sync";
 import { StepFrame, type StepProps } from "./lead-request-step-forms";
 import { servicesText } from "./lead-request-services-text";
@@ -103,20 +104,20 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
         <span>{error}</span>
         <Button type="button" size="sm" onClick={() => void save(draft)}>{text.retry}</Button>
       </div> : null}
-      <CabinetSection title={wording.period} accessory={<StatusChip>{wording.optional}</StatusChip>}>
+      <CabinetSection title={wording.period} accessory={<CabinetHint className="py-1">{wording.optional}</CabinetHint>}>
         <LabeledField id="lead-request-service-program_date_from" label={wording.from} className={cn(fieldStyle, "max-w-sm")}>
           <Input id="lead-request-service-program_date_from" type="date" className="h-10 bg-background"
             value={draft.program_date_from} onChange={(event) => setDraft((current) => ({ ...current, program_date_from: event.target.value }))} />
         </LabeledField>
       </CabinetSection>
       <CabinetSection title={wording.services} accessory={<StatusChip tone={draft.services.length ? "info" : "neutral"}>{draft.services.length}</StatusChip>}>
-        <div id="lead-request-service-services" className="grid gap-2.5 sm:grid-cols-2">
+        <div id="lead-request-service-services" className="grid items-start gap-2 sm:grid-cols-2">
           {LEAD_WIZARD_SERVICE_OPTIONS.map((value) => {
             const checked = draft.services.includes(value);
             return <div key={value} className={cn("min-w-0 rounded-xl border bg-background transition-colors", checked ? "border-[var(--brand)]" : "border-border")}>
-              <label className={cn("flex min-h-12 cursor-pointer items-center gap-3 rounded-xl px-3 py-3 text-sm leading-5", !locked && "hover:bg-muted/40", checked && "font-medium")}>
+              <label className={cn("flex min-h-10 items-center gap-2.5 rounded-xl px-3 py-2 text-sm leading-5", locked ? "cursor-default" : "cursor-pointer hover:bg-muted/40", checked && "font-medium")}>
                 <input type="checkbox" checked={checked} onChange={(event) => toggle(value, event.target.checked)}
-                  className="size-4 shrink-0 accent-[var(--brand)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]" />
+                  className={cn(checkboxClass, "shrink-0")} />
                 <span>{wording.options[value]}</span>
               </label>
               {checked && value !== "none" && value !== "not-sure" ? <div className="px-3 pb-3">

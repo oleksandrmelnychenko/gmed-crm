@@ -61,6 +61,7 @@ import {
 } from "./lead-request-model";
 import {
   CabinetSection as Section,
+  CabinetHint,
   ConsentGivenChip,
   LabeledField,
   RequiredMark,
@@ -313,13 +314,9 @@ export function PayerSection({
     return (
       <Section title={text.sectionPayer}>
         <div className="space-y-3" data-testid="lead-request-payer">
-          <p
-            role="note"
-            className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm leading-5 text-muted-foreground"
-            data-testid="lead-request-payer-answered"
-          >
+          <CabinetHint testId="lead-request-payer-answered">
             {text.payerAnsweredByPayer}
-          </p>
+          </CabinetHint>
           <div data-testid="lead-request-payer-readonly">
             <SummaryRows rows={answeredPayerRows(request, text)} />
           </div>
@@ -807,7 +804,7 @@ export function PayerContactConsent({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="space-y-1.5 rounded-lg border border-border bg-muted/10 px-3 py-3" data-testid="lead-request-payer-consent">
+    <div className="space-y-2 rounded-lg bg-card py-2" data-testid="lead-request-payer-consent">
       <label className="flex items-start gap-3 text-sm">
         <input
           type="checkbox"
@@ -897,7 +894,7 @@ export function CostEstimateConsent({
 
   return (
     <div
-      className={cn("space-y-1.5 rounded-lg border border-border bg-muted/10 px-3 py-3", className)}
+      className={cn("space-y-2 rounded-lg bg-card py-2", className)}
       data-testid="lead-request-payer-cost-estimate-consent"
     >
       <label className="flex items-start gap-3 text-sm">

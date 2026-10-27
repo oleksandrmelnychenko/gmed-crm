@@ -1226,7 +1226,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
           <StatusChip tone="warning">{text.documentsIntro}</StatusChip>
           <Button
             type="button"
-            className="w-full gap-2 sm:w-auto"
+            className="cabinet-upload-action w-full gap-2 sm:w-auto"
             disabled={!consentReady || uploading || full}
             onClick={() => fileInput.current?.click()}
             data-testid={sent ? "lead-request-add-documents" : undefined}

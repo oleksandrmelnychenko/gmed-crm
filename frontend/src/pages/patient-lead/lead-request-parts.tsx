@@ -320,6 +320,16 @@ export function CabinetSection({
   );
 }
 
+/** Shared explanatory note for the cabinet, including its conditional steps. */
+export function CabinetHint({ children, testId, className }: { children: ReactNode; testId?: string; className?: string }) {
+  return (
+    <div role="note" data-testid={testId} className={cn("flex min-w-0 items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200", className)}>
+      <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
 /** Consent metadata uses the same amber chip as the staff wizard. */
 export function ConsentGivenChip({ children }: { children: ReactNode }) {
   return (
@@ -448,7 +458,7 @@ export function LabeledField({
   const dismissServerChanged = useServerConflictDismiss(id);
   const shownError = error ?? (required ? stepMissing : undefined);
   const labelElement = (
-    <label htmlFor={id} data-cabinet-field-label={!question || undefined} className={cn(question ? "text-sm leading-snug text-foreground" : "font-mono text-xs font-medium leading-5 text-foreground/75", "block")}>
+    <label htmlFor={id} data-cabinet-field-label className={cn("block font-mono text-xs font-medium leading-5 text-foreground/75", question && "leading-relaxed")}>
       {label}
       {required ? <RequiredMark /> : null}
     </label>
@@ -788,7 +798,7 @@ export function FileUploadField({
         {consentReady ? <StatusChip tone="warning">{hint}</StatusChip> : null}
         <Button
           type="button"
-          className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
+          className="cabinet-upload-action h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
           disabled={!consentReady || uploading}
           onClick={() => fileInput.current?.click()}
         >

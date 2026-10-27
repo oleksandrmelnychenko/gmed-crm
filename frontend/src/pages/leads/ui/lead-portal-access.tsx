@@ -1,6 +1,6 @@
 import { TrustedContactRole } from "./trusted-contact-role";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, Copy, FileText, KeyRound, LoaderCircle, Mail, ShieldCheck, UserRound, UsersRound } from "lucide-react";
+import { CalendarDays, Check, Copy, FileText, KeyRound, LoaderCircle, Mail, ShieldCheck, UserRound, UsersRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { EmailDomainWarning } from "@/components/email-domain-warning";
@@ -288,7 +288,7 @@ export function LeadPortalAccessDetail({
   }
 
   return (
-    <div className="@container space-y-4 border-y border-l-2 border-zinc-200 border-l-primary bg-zinc-100 px-4 py-4 text-[13px] text-foreground dark:border-zinc-700 dark:border-l-primary dark:bg-zinc-900/60" data-testid="lead-portal-access">
+    <div className="@container space-y-3 border-y border-border/60 bg-muted/40 px-4 py-3 text-[13px] text-foreground" data-testid="lead-portal-access">
       {/* Portal state and grouped actions stay visually separate. */}
       <div className="grid items-center gap-3 @[64rem]:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -297,7 +297,7 @@ export function LeadPortalAccessDetail({
             {minor === true ? <><UsersRound aria-hidden="true" />{de ? "Zugang über Eltern" : "Вход через родителей"}</> : leadPortalStatusLabel(status, lang)}
           </StatusChip>
         </div>
-        <div className="grid w-full grid-cols-1 items-stretch gap-2 @[32rem]:grid-cols-[9rem_minmax(0,14rem)_10rem] @[64rem]:w-auto" role="group" aria-label={de ? "Portalaktionen" : "Действия с порталом"}>
+        <div className="flex flex-wrap items-center gap-2 [&>button]:w-auto [&>button]:shadow-none" role="group" aria-label={de ? "Portalaktionen" : "Действия с порталом"}>
           {canOffer ? (
             <Button
               type="button"
@@ -364,25 +364,25 @@ export function LeadPortalAccessDetail({
           ) : null}
       </div> : null}
       {status !== "none" ? (
-        <dl className="grid grid-cols-2 gap-2 @[40rem]:grid-cols-4 @[80rem]:grid-cols-[minmax(220px,2fr)_repeat(6,minmax(0,1fr))] [&>div]:rounded-lg [&>div]:border [&>div]:border-border [&>div]:bg-card [&>div]:p-3">
-          <PortalFact label={de ? "Login" : "Логин"} className="col-span-2 @[80rem]:col-span-1">
-            <span className="break-all">{lead.email ?? "—"}</span>
+        <dl className="flex flex-wrap items-stretch gap-1.5 [&>div]:flex [&>div]:max-w-full [&>div]:flex-none [&>div]:flex-col [&>div]:gap-1 [&>div]:rounded-lg [&>div]:border [&>div]:border-border/60 [&>div]:bg-card [&>div]:px-3 [&>div]:py-2 [&_dt]:text-[10px] [&_dt]:normal-case [&_dt]:leading-4 [&_dt]:tracking-normal [&_dd]:mt-0 [&_dd]:min-w-0 [&_dd]:text-xs [&_dd>.inline-flex]:gap-1 [&_dd>.inline-flex]:px-1.5 [&_dd>.inline-flex]:py-0 [&_dd>.inline-flex]:text-[11px] [&_dd>.inline-flex]:leading-4 [&_dd>.inline-flex>svg]:size-3">
+          <PortalFact label={de ? "Login" : "Логин"}>
+            <StatusChip tone="warning" className="max-w-full whitespace-normal [overflow-wrap:anywhere]"><Mail aria-hidden="true" />{lead.email ?? "—"}</StatusChip>
             <EmailDomainWarning email={lead.email} lang={lang} className="mt-1" />
           </PortalFact>
           <PortalFact label={de ? "Letzte Anmeldung" : "Последний вход"}>
-            {lastLogin ? formatAppDateTime(lastLogin) : de ? "noch nie" : "ещё не было"}
+            {lastLogin ? <StatusChip tone="info" className="whitespace-normal"><CalendarDays aria-hidden="true" />{formatAppDateTime(lastLogin)}</StatusChip> : de ? "noch nie" : "ещё не было"}
           </PortalFact>
             <LoginEmailFact
               emailedAt={lead.portal_account?.login_emailed_at}
               delivery={lead.portal_account?.login_email_delivery}
               lang={lang}
             />
-          <PortalFact label={de ? "Zugang bis" : "Доступ до"}>{lead.retention_deadline_at && status !== "disabled" ? formatAppDate(lead.retention_deadline_at) : "—"}</PortalFact>
+          <PortalFact label={de ? "Zugang bis" : "Доступ до"}>{lead.retention_deadline_at && status !== "disabled" ? <StatusChip tone="info"><CalendarDays aria-hidden="true" />{formatAppDate(lead.retention_deadline_at)}</StatusChip> : "—"}</PortalFact>
           {intake ? (
             <>
               <PortalFact label={de ? "Fragebogen" : "Анкета"} testId="lead-portal-progress">
                 {de ? `${intake.filled} von ${intake.total} Feldern` : `${intake.filled} из ${intake.total} полей`}
-                <span aria-hidden="true" className="mt-1 block h-1 w-24 overflow-hidden rounded-full bg-muted">
+                <span aria-hidden="true" className="mt-1 block h-0.5 w-24 max-w-full overflow-hidden rounded-full bg-muted">
                   <span
                     className="block h-full rounded-full bg-[var(--brand)]"
                     style={{ width: `${intake.total > 0 ? Math.round((intake.filled / intake.total) * 100) : 0}%` }}
@@ -397,7 +397,7 @@ export function LeadPortalAccessDetail({
                 {intake.documents}
               </PortalFact>
               <PortalFact label={de ? "Gesendet" : "Отправлено"}>
-                {intake.submitted_at ? formatAppDateTime(intake.submitted_at) : de ? "noch nicht" : "ещё нет"}
+                {intake.submitted_at ? <StatusChip tone="info" className="whitespace-normal"><CalendarDays aria-hidden="true" />{formatAppDateTime(intake.submitted_at)}</StatusChip> : de ? "noch nicht" : "ещё нет"}
               </PortalFact>
             </>
           ) : null}
@@ -583,7 +583,7 @@ export function PortalCredentialsDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>
             {created
@@ -592,17 +592,6 @@ export function PortalCredentialsDialog({
                 : tx("Доступ для пациента создан", "Zugang für den Patienten angelegt")
               : tx("Новый пароль", "Neues Passwort")}
           </DialogTitle>
-          <DialogDescription>
-            {parent
-              ? tx(
-                  "Пароль показывается только сейчас. Родитель или законный представитель входит с ним и заполняет заявку ребёнка; если пароль потерян, выдайте здесь новый.",
-                  "Das Passwort wird nur jetzt angezeigt. Der Elternteil bzw. die gesetzliche Vertretung meldet sich damit an und füllt die Anfrage des Kindes aus; geht es verloren, geben Sie hier ein neues aus.",
-                )
-              : tx(
-                  "Пароль показывается только сейчас. Пациент входит с ним; если пароль потерян, выдайте здесь новый.",
-                  "Das Passwort wird nur jetzt angezeigt. Der Patient meldet sich damit an; geht es verloren, geben Sie hier ein neues aus.",
-                )}
-          </DialogDescription>
         </DialogHeader>
         {credentials ? (
           // A new password starts with a fresh state (language, copy and e-mail status).
@@ -675,7 +664,10 @@ function PortalCredentialsContent({
     }
     setCopied(null);
     setCopyFailed(key);
-    selectElementText(dialog?.querySelector(`[data-copy-source='${key}']`));
+    const source = dialog?.querySelector(`[data-copy-source='${key}']`);
+    const preview = source?.closest("details");
+    if (preview) preview.open = true;
+    selectElementText(source);
   }
 
   async function sendByEmail() {
@@ -707,18 +699,19 @@ function PortalCredentialsContent({
 
   return (
     // A long login (plus addressing) wraps instead of pushing the dialog wider (DEV 2026-10-11).
-    <div className="min-w-0 space-y-4 text-sm">
-      <dl className="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2">
-        <dt className="text-muted-foreground">{de ? "Login" : "Логин"}</dt>
+    <div className="min-w-0 space-y-3 text-sm">
+      <dl className="grid grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 rounded-xl border border-border/60 bg-card p-3">
+        <dt className="font-mono text-xs text-foreground/75">{de ? "Login" : "Логин"}</dt>
         <dd className="min-w-0 select-all [overflow-wrap:anywhere]" data-copy-source="email" data-testid="portal-credentials-email">{credentials.email}</dd>
         <CopyButton copied={copied === "email"} label={de ? "Kopieren" : "Копировать"} onClick={(event) => void copy("email", credentials.email, event)} />
-        <dt className="text-muted-foreground">{de ? "Passwort" : "Пароль"}</dt>
+        <dt className="font-mono text-xs text-foreground/75">{de ? "Passwort" : "Пароль"}</dt>
         <dd className="min-w-0 select-all break-all font-mono" data-copy-source="password" data-testid="portal-credentials-password">{credentials.password}</dd>
         <CopyButton copied={copied === "password"} label={de ? "Kopieren" : "Копировать"} onClick={(event) => void copy("password", credentials.password, event)} />
       </dl>
-      <div className="min-w-0 space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
+      <div className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             {parent
               ? de
                 ? "Nachricht an den Elternteil / die gesetzliche Vertretung"
@@ -727,7 +720,7 @@ function PortalCredentialsContent({
                 ? "Nachricht an den Patienten"
                 : "Сообщение для пациента"}
           </span>
-          <div className="flex gap-1" role="group" aria-label={de ? "Sprache" : "Язык"}>
+          <div className="flex gap-0.5 rounded-lg border border-border/60 bg-muted/30 p-0.5" role="group" aria-label={de ? "Sprache" : "Язык"}>
             {MESSAGE_LANGUAGES.map((option) => (
               <button
                 key={option.value}
@@ -735,8 +728,8 @@ function PortalCredentialsContent({
                 aria-pressed={language === option.value}
                 className={
                   language === option.value
-                    ? "rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                    : "rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground"
+                    ? "rounded-md bg-[var(--brand)] px-2 py-1 text-xs font-semibold text-white"
+                    : "rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
                 }
                 onClick={() => {
                   setMessageLanguage(option.value);
@@ -748,13 +741,15 @@ function PortalCredentialsContent({
             ))}
           </div>
         </div>
-        <pre className="select-all whitespace-pre-wrap font-sans text-xs text-foreground [overflow-wrap:anywhere]" data-copy-source="message">{message}</pre>
+        <details className="rounded-lg bg-muted/30 px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium">{de ? "Nachricht anzeigen" : "Показать сообщение"}</summary>
+          <pre className="mt-2 select-all whitespace-pre-wrap font-sans text-xs leading-5 text-foreground [overflow-wrap:anywhere]" data-copy-source="message">{message}</pre>
+        </details>
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
-            variant="outline"
             size="sm"
-            className="h-7 gap-1.5 rounded-md text-xs"
+            className="h-8 gap-1.5 rounded-lg text-xs"
             onClick={(event) => void copy("message", message, event)}
           >
             {copied === "message" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -764,13 +759,14 @@ function PortalCredentialsContent({
             <Button
               type="button"
               size="sm"
-              className="h-auto min-h-7 max-w-full gap-1.5 whitespace-normal rounded-md py-1 text-left text-xs [overflow-wrap:anywhere]"
+              className="h-8 gap-1.5 rounded-lg text-xs"
               disabled={emailBusy}
               onClick={() => void sendByEmail()}
               data-testid="portal-credentials-send-email"
+              title={credentials.email}
             >
               {emailBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Mail className="size-3.5" />}
-              {de ? `An ${credentials.email} senden` : `Отправить на ${credentials.email}`}
+              {de ? "Per E-Mail senden" : "Отправить по e-mail"}
             </Button>
           ) : null}
         </div>
@@ -797,7 +793,7 @@ function PortalCredentialsContent({
           ) : null}
         </p>
       </div>
-      <p className="min-h-4 text-xs" role="status" aria-live="polite">
+      <p className="text-xs empty:hidden" role="status" aria-live="polite">
         {copied ? (
           <span className="text-emerald-700">{de ? "Kopiert" : "Скопировано"}</span>
         ) : copyFailed ? (
