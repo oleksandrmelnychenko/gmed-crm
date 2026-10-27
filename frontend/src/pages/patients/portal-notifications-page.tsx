@@ -10,7 +10,8 @@ import {
   useTopbarLabels,
 } from "@/components/topbar-data";
 import { Button } from "@/components/ui/button";
-import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { StatusChip } from "@/components/ui/status-chip";
+import { PortalDateChip } from "./ui/portal-page-layout";
 import {
   Banner,
   CountBadge,
@@ -206,7 +207,7 @@ export function PatientNotificationsPage() {
   if (loading) return <TabLoader />;
 
   return (
-    <TabShell className="mt-0 min-h-0">
+    <TabShell className="mt-0 min-h-0 space-y-3">
       <PageHeader
         title={copy.title}
         description={copy.description}
@@ -225,7 +226,7 @@ export function PatientNotificationsPage() {
             </Button>
             <Button
               type="button"
-              variant="outline"
+              variant="default"
               className={tokens.control.primaryButton}
               disabled={unreadCount === 0 || busyId === "all"}
               onClick={() => void markAllRead()}
@@ -240,17 +241,13 @@ export function PatientNotificationsPage() {
       {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
 
       <section className="space-y-4">
-        <div className="flex justify-end">
-          <NativeComboboxSelect
-            value={filter}
-            aria-label={copy.filterLabel}
-            className="w-full sm:w-56"
-            onChange={(event) => setFilter(event.target.value as ReadFilter)}
-          >
-            <option value="all">{copy.all}</option>
-            <option value="unread">{copy.onlyUnread}</option>
-            <option value="read">{copy.onlyRead}</option>
-          </NativeComboboxSelect>
+        <div className="flex flex-wrap justify-center gap-1 rounded-xl border border-border/60 bg-card p-1.5" aria-label={copy.filterLabel}>
+          {([['all', copy.all], ['unread', copy.onlyUnread], ['read', copy.onlyRead]] as const).map(([value, label]) => (
+            <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}
+              className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]", filter === value ? "bg-[var(--brand)] font-semibold text-white" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+              {value === 'read' ? <CheckCheck className="size-4" aria-hidden="true" /> : <Bell className="size-4" aria-hidden="true" />}{label}
+            </button>
+          ))}
         </div>
 
         {visibleNotifications.length === 0 ? (
@@ -265,41 +262,34 @@ export function PatientNotificationsPage() {
                 <article
                   key={item.id}
                   className={cn(
-                    "rounded-2xl border p-4 shadow-sm",
-                    item.is_read ? "border-border/70 bg-card" : "border-primary/25 bg-primary/[0.035]",
+                    "rounded-xl border p-3",
+                    item.is_read ? "border-border/60 bg-card" : "border-amber-200 bg-card",
                   )}
                 >
                   <div className="flex items-start gap-3">
                     <span className={cn(
-                      "flex size-9 shrink-0 items-center justify-center rounded-xl",
-                      item.is_read ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary",
+                      "flex size-8 shrink-0 items-center justify-center rounded-lg",
+                      item.is_read ? "bg-muted text-muted-foreground" : "bg-transparent text-[var(--brand)]",
                     )}>
                       <Bell className="size-4" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-semibold text-foreground">{text.title}</p>
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                          {notificationCategory(item, portalLang)}
-                        </span>
-                        <span className={cn(
-                          "rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                          item.is_read ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary",
-                        )}>
-                          {item.is_read ? copy.read : copy.new}
-                        </span>
+                        <StatusChip>{notificationCategory(item, portalLang)}</StatusChip>
+                        <StatusChip tone={item.is_read ? "neutral" : "warning"}>{item.is_read ? copy.read : copy.new}</StatusChip>
                       </div>
                       {text.body ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{text.body}</p> : null}
-                      <p className="mt-2 text-xs text-muted-foreground">{formatPortalDateTime(item.created_at)}</p>
+                      <div className="mt-2"><PortalDateChip>{formatPortalDateTime(item.created_at)}</PortalDateChip></div>
                     </div>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
                     {!item.is_read ? (
                       <Button
                         type="button"
                         size="sm"
-                        variant="ghost"
+                        variant="default"
                         disabled={busyId === item.id}
                         onClick={() => void markOneRead(item)}
                       >

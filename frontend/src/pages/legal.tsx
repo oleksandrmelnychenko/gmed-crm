@@ -133,7 +133,7 @@ export function LegalNoticePage() {
   // Inside the portal the shell already provides <main> and the way back.
   if (inPortal) {
     return (
-      <div className="mx-auto w-full max-w-3xl space-y-4 pb-16 text-[13px] text-foreground" data-testid="legal-notice">
+      <div className="mx-auto w-full min-w-0 max-w-5xl space-y-3 pb-4 text-sm text-foreground" data-testid="legal-notice">
         <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
         {content}
       </div>

@@ -1,3 +1,4 @@
+import { PortalDateChip } from "@/pages/patients/ui/portal-page-layout";
 import {
   startTransition,
   useEffect,
@@ -892,7 +893,7 @@ function PatientFeedbackContent({
   const { formatPortalAverage, formatPortalDateTime, portalNotSetLabel } = usePortalLabels();
   const { appointmentOptionLabel } = useLanguageHelpers();
   return (
-    <div className="space-y-4">
+    <div className="w-full min-w-0 space-y-3 [&_label]:font-mono [&_label]:text-xs">
       <PageHeader
         title={t.feedback_patient_page_title}
         description={t.feedback_patient_page_description}
@@ -918,12 +919,12 @@ function PatientFeedbackContent({
         <AdminInlineMetric icon={Users} label={t.feedback_available_visits_metric} value={availableAppointments.length} tone="slate" />
       </div>
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.8fr)]">
+      <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
         <AdminTableCard
           title={titleWithDot(t.feedback_new_survey_title)}
           description={t.feedback_new_survey_description}
         >
-          <form className="space-y-4 p-4 sm:p-5" onSubmit={(event) => void onSubmit(event)}>
+          <form className="space-y-3 p-3 sm:p-4" onSubmit={(event) => void onSubmit(event)}>
             <Field label={t.feedback_visit}>
               <NativeComboboxSelect
                 value={form.appointmentId || "__general__"}
@@ -953,7 +954,7 @@ function PatientFeedbackContent({
               <FeedbackFormNotes t={t} form={form} setForm={setForm} />
             </section>
 
-            <Button type="submit" className="h-11 w-full rounded-lg" disabled={submitting}>
+            <Button type="submit" className="h-9 w-full rounded-lg" disabled={submitting}>
               {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               {t.feedback_submit_button}
             </Button>
@@ -986,9 +987,7 @@ function PatientFeedbackContent({
                           <StatusBadge tone={feedbackStatusTone(item.status)}>
                             {feedbackReviewStatusLabel(item.status, t)}
                           </StatusBadge>
-                          <span className="text-xs text-muted-foreground">
-                            {formatPortalDateTime(item.submitted_at)}
-                          </span>
+                          <PortalDateChip>{formatPortalDateTime(item.submitted_at)}</PortalDateChip>
                         </div>
                         <p className="mt-2 truncate text-sm font-medium text-foreground">
                           {item.appointment_title || t.feedback_general_feedback}

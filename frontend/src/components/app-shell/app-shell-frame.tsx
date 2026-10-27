@@ -29,6 +29,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
   const skipToContentLabel = leadShell?.skipToContent ?? (lang === "de" ? "Zum Inhalt springen" : "Перейти к содержанию");
   const toggleSidebarLabel = leadShell?.toggleSidebar ?? t.ui_toggle_sidebar;
   const leadPortal = leadShell !== null;
+  const patientPortal = user?.role === "patient";
   // `<html lang>` follows the cabinet language, UA and EN included (QA 2026-10-25, G F-G6): screen
   // readers and hyphenation. Every `useLang` sets the portal language there; the cabinet's wins.
   useEffect(() => {
@@ -56,7 +57,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
       </a>
       <div className="flex h-full min-h-0 min-w-0 flex-col">
         <Topbar />
-        <div className={cn("relative flex min-h-0 min-w-0 flex-1 overflow-hidden", leadPortal ? "bg-card" : "bg-muted/60")}>
+        <div className={cn("relative flex min-h-0 min-w-0 flex-1 overflow-hidden", patientPortal ? "bg-card" : "bg-muted/60")}>
           <NavPanel />
           {!collapsed ? (
             <button

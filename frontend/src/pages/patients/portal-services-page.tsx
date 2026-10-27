@@ -1,3 +1,4 @@
+import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalDateChip, PortalSection as Section, PortalSummary } from "./ui/portal-page-layout";
 import {
   startTransition,
   useEffect,
@@ -12,7 +13,6 @@ import { Building2, LoaderCircle, Plus, RefreshCw, Send } from "lucide-react";
 
 import { Dialog } from "@/components/ui/dialog";
 import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
-import { PortalSection as Section, PortalSummary } from "./ui/portal-page-layout";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
@@ -21,9 +21,7 @@ import {
   CountBadge,
   EmptyCell,
   Field,
-  InfoRow,
   inputClass,
-  ListItem,
   PageHeader,
   selectClass,
   StatusBadge,
@@ -467,7 +465,7 @@ export function PatientServicesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4">
+    <div className="w-full min-w-0 max-w-none space-y-3">
       <PageHeader
         title={t.services_title}
         description={t.services_description}
@@ -529,7 +527,7 @@ export function PatientServicesPage() {
                           {conciergeServiceSourceLabel(item.request_source)}
                         </CountBadge>
                       </div>
-                      <h2 className="mt-3 text-base font-semibold text-foreground">{item.title}</h2>
+                      <h2 className="mt-2 text-base font-semibold text-foreground">{item.title}</h2>
                       <p className="mt-2 text-sm text-muted-foreground">
                         {[item.provider_name, item.assigned_concierge_name, item.appointment_title].filter(Boolean).join(" / ") || t.services_care_team_pending}
                       </p>
@@ -538,15 +536,15 @@ export function PatientServicesPage() {
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <InfoRow label={t.services_preferred_start} value={formatPortalDateTime(item.starts_at)} />
-                    <InfoRow label={t.services_preferred_end} value={formatPortalDateTime(item.ends_at)} />
+                    <InfoRow label={t.services_preferred_start} value={<PortalDateChip>{formatPortalDateTime(item.starts_at)}</PortalDateChip>} />
+                    <InfoRow label={t.services_preferred_end} value={<PortalDateChip>{formatPortalDateTime(item.ends_at)}</PortalDateChip>} />
                     <InfoRow label={t.services_vendor} value={item.vendor_name || t.common_not_set} />
                     <InfoRow
                       label={t.services_estimate}
                       value={item.cost_estimate ? formatPortalCurrency(item.cost_estimate) : t.common_not_set}
                     />
                     <InfoRow label={t.services_booking_reference} value={item.booking_reference || t.common_not_set} />
-                    <InfoRow label={t.services_created_at} value={formatPortalDateTime(item.created_at)} />
+                    <InfoRow label={t.services_created_at} value={<PortalDateChip>{formatPortalDateTime(item.created_at)}</PortalDateChip>} />
                   </div>
 
                   {item.service_notes ? (

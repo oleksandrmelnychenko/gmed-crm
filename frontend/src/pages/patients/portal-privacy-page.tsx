@@ -1,3 +1,4 @@
+import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalSection as Section, PortalDateChip } from "./ui/portal-page-layout";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { startTransition, useEffect, useMemo, useReducer, type FormEvent } from "react";
 import { LoaderCircle, RefreshCw, Shield } from "lucide-react";
@@ -8,10 +9,7 @@ import {
   CountBadge,
   EmptyCell,
   Field,
-  InfoRow,
-  ListItem,
   PageHeader,
-  Section,
   selectClass,
   StatusBadge,
   SuccessBanner,
@@ -215,7 +213,7 @@ export function PatientPrivacyPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="w-full min-w-0 space-y-3">
       <PageHeader
         title={t.portal_privacy_title}
         description={t.portal_privacy_description}
@@ -239,7 +237,7 @@ export function PatientPrivacyPage() {
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <section className="grid gap-6 xl:grid-cols-[0.95fr_1.25fr]">
+      <section className="grid items-start gap-3 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
         <Section
           title={t.portal_privacy_new_request}
           accessory={<Shield className="size-4 text-muted-foreground" />}
@@ -305,9 +303,7 @@ export function PatientPrivacyPage() {
                       <p className="text-sm font-semibold text-foreground">
                         {privacyRequestLabel(item.request_type)}
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t.portal_privacy_submitted} {formatPortalDateTime(item.requested_at)}
-                      </p>
+                      <div className="mt-2"><PortalDateChip>{t.portal_privacy_submitted} {formatPortalDateTime(item.requested_at)}</PortalDateChip></div>
                     </div>
                     <StatusBadge status={item.status} tone={privacyStatusBadgeTone(item.status)}>
                       {waitsForOpenBusiness(item)
@@ -322,9 +318,9 @@ export function PatientPrivacyPage() {
                   ) : null}
 
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_due} value={formatPortalDate(item.due_at)} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_reviewed} value={formatPortalDateTime(item.reviewed_at)} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_executed} value={formatPortalDateTime(item.executed_at)} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_due} value={<PortalDateChip>{formatPortalDate(item.due_at)}</PortalDateChip>} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_reviewed} value={<PortalDateChip>{formatPortalDateTime(item.reviewed_at)}</PortalDateChip>} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_executed} value={<PortalDateChip>{formatPortalDateTime(item.executed_at)}</PortalDateChip>} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_source} value={privacyRequestSourceLabel(item.source)} />
                   </div>
 

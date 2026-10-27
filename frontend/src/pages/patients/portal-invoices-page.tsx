@@ -1,3 +1,4 @@
+import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalStatCard as StatCard, PortalSection as Section, PortalDateChip } from "./ui/portal-page-layout";
 import { startTransition, useEffect, useMemo, useReducer, useState, type FormEvent } from "react";
 import { Download, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 
@@ -11,12 +12,8 @@ import {
   CountBadge,
   EmptyCell,
   Field,
-  InfoRow,
   inputClass,
-  ListItem,
   PageHeader,
-  Section,
-  StatCard,
   StatusBadge,
   SuccessBanner,
   TabLoader,
@@ -416,7 +413,7 @@ function usePatientInvoicesPageContent() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="w-full min-w-0 space-y-3">
       <PageHeader
         title={t.portal_invoices_my_invoices}
         description={t.portal_invoices_review_released_invoice_snapshots_track_payment_state_and_upload}
@@ -443,7 +440,7 @@ function usePatientInvoicesPageContent() {
       {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-3 md:grid-cols-3">
         <StatCard label={t.portal_invoices_visible_invoices} value={String(invoices.length)} />
         <StatCard label={t.portal_invoices_outstanding_balance} value={hiddenAmountCount > 0 ? t.portal_invoices_partly_hidden : totalBalance} />
         <StatCard label={t.portal_invoices_missing_payment_proof} value={String(proofPendingCount)} description={formatPortalCountLabel(t.portal_invoices_overdue_count, overdueCount)} />
@@ -795,7 +792,7 @@ function usePatientInvoicesPageContent() {
               </div>
             ) : (
               <>
-                <section className={cn("rounded-xl p-5", tokens.surface.card)}>
+                <section className={cn("rounded-xl p-3 sm:p-4", tokens.surface.card)}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
@@ -807,7 +804,7 @@ function usePatientInvoicesPageContent() {
                     <div className="flex flex-wrap gap-2">
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="default"
                         className={cn(tokens.control.primaryButton, !invoicePdfVisible(detail) && "hidden")}
                         onClick={() =>
                           void openPortalInvoicePdf(detail.id).catch((err) => {
@@ -821,7 +818,7 @@ function usePatientInvoicesPageContent() {
                       </Button>
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="default"
                         className={cn(tokens.control.primaryButton, !invoicePdfVisible(detail) && "hidden")}
                         onClick={() =>
                           void downloadPortalInvoicePdf(detail.id, `${detail.invoice_number}.pdf`).catch((err) => {
@@ -860,9 +857,9 @@ function usePatientInvoicesPageContent() {
                       </StatusBadge>
                     </div>
                   </div>
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_issued_at} value={formatPortalDateTime(detail.issued_at)} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_due_date} value={formatPortalDate(detail.due_date)} />
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_issued_at} value={<PortalDateChip>{formatPortalDateTime(detail.issued_at)}</PortalDateChip>} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_due_date} value={<PortalDateChip>{formatPortalDate(detail.due_date)}</PortalDateChip>} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_order} value={detail.order_number} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_quote} value={detail.quote_number || t.portal_invoices_not_set} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_total_gross} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.total_gross, detail.currency) : t.portal_invoices_hidden} />
@@ -1189,7 +1186,7 @@ function usePatientInvoicesPageContent() {
           });
         }}
       >
-        <DialogContent className="flex min-h-[min(560px,calc(100dvh-1rem))] flex-col bg-card sm:min-h-0 sm:max-w-xl">
+        <DialogContent className="flex min-h-[min(560px,calc(100dvh-1rem))] flex-col bg-card sm:min-h-0 sm:max-w-xl [&_label]:font-mono [&_label]:text-xs">
           <DialogHeader>
             <DialogTitle>{t.portal_invoices_upload_payment_proof}</DialogTitle>
             <DialogDescription>

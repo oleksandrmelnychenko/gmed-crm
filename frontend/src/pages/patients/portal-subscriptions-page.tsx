@@ -1,15 +1,13 @@
+import { PortalInfoRow as InfoRow, PortalStatCard as StatCard, PortalSection as Section, PortalDateChip } from "./ui/portal-page-layout";
 import { useEffect, useMemo, useState } from "react";
-import { CalendarRange, LoaderCircle, PackageCheck, ReceiptText, RefreshCw } from "lucide-react";
+import { LoaderCircle, PackageCheck, ReceiptText, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
   Banner,
   CountBadge,
   EmptyCell,
-  InfoRow,
   PageHeader,
-  Section,
-  StatCard,
   StatusBadge,
   TabLoader,
   tokens,
@@ -136,7 +134,7 @@ export function PatientSubscriptionsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="w-full min-w-0 space-y-3">
       <PageHeader
         title={t.portal_subscriptions_title}
         description={t.portal_subscriptions_subtitle}
@@ -175,7 +173,7 @@ export function PatientSubscriptionsPage() {
 
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-3 md:grid-cols-3">
         <StatCard
           label={t.portal_subscriptions_total}
           value={String(subscriptions.length)}
@@ -234,7 +232,7 @@ function SubscriptionSection({
           <p className="mt-2 text-sm text-muted-foreground">{emptyDescription}</p>
         </EmptyCell>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid gap-3 xl:grid-cols-2">
           {subscriptions.map((subscription) => (
             <SubscriptionCard key={subscription.id} subscription={subscription} />
           ))}
@@ -276,11 +274,11 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
         : t.portal_subscriptions_amount_hidden;
 
   return (
-    <article className={cn("space-y-5 rounded-xl p-4", tokens.surface.card)}>
+    <article className={cn("space-y-3 rounded-xl p-3", tokens.surface.card)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className={tokens.text.eyebrow}>{lifecycleLabel}</div>
-          <h2 className="mt-2 text-lg font-semibold text-foreground">
+          <h2 className="mt-2 text-base font-semibold text-foreground">
             {subscription.package_name}
           </h2>
           {subscription.description ? (
@@ -305,7 +303,7 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
         <InfoRow
           className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
           label={t.portal_subscriptions_period}
-          value={period}
+          value={<PortalDateChip>{period}</PortalDateChip>}
         />
         <InfoRow
           className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
@@ -342,10 +340,7 @@ function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionIt
             <PackageCheck className="size-4 text-primary" />
             {t.portal_subscriptions_usage}
           </h3>
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <CalendarRange className="size-3.5" />
-            {period}
-          </span>
+          <PortalDateChip>{period}</PortalDateChip>
         </div>
         {subscription.services.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">

@@ -1,3 +1,4 @@
+import { PortalInfoRow, PortalListItem, PortalDateChip } from "./ui/portal-page-layout";
 import { startTransition, useEffect, useMemo, useReducer, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { CalendarPlus, CheckCircle2, LoaderCircle, MessageCircle, RefreshCw, XCircle } from "lucide-react";
 
@@ -215,7 +216,7 @@ export function PatientRecommendationsPage() {
   }
 
   return (
-    <TabShell className="mt-0 min-h-0">
+    <TabShell className="mt-0 min-h-0 space-y-3">
       <PageHeader
         title={t.portal_recommendations_title}
         description={t.portal_recommendations_description}
@@ -244,14 +245,14 @@ export function PatientRecommendationsPage() {
           </p>
         </EmptyCell>
       ) : (
-        <section className="grid gap-4 xl:grid-cols-2">
+        <section className="grid gap-3 xl:grid-cols-2">
           {recommendations.map((item) => {
             const recommendationId = item.recommendation_id || item.id;
             const disabled = busyId?.startsWith(`${recommendationId}:`) ?? false;
             const isClosed = ["completed", "declined", "cancelled", "superseded"].includes(item.status);
 
             return (
-              <ListItem key={recommendationId} className="space-y-4">
+              <PortalListItem key={recommendationId} className="space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap gap-2">
@@ -262,7 +263,7 @@ export function PatientRecommendationsPage() {
                         {recommendationTypeLabel(item.recommendation_type)}
                       </CountBadge>
                     </div>
-                    <h2 className="mt-3 text-xl font-semibold text-foreground">{item.title}</h2>
+                    <h2 className="mt-2 text-base font-semibold text-foreground">{item.title}</h2>
                     <p className="mt-2 text-sm text-muted-foreground">
                       {[item.source_doctor_name, item.source_appointment_title, item.source_document_name, item.source_order_number]
                         .filter(Boolean)
@@ -270,7 +271,7 @@ export function PatientRecommendationsPage() {
                     </p>
                   </div>
                   {item.due_at ? (
-                    <CountBadge>{t.portal_recommendations_due} {formatPortalDateTime(item.due_at)}</CountBadge>
+                    <PortalDateChip>{t.portal_recommendations_due} {formatPortalDateTime(item.due_at)}</PortalDateChip>
                   ) : null}
                 </div>
 
@@ -281,7 +282,7 @@ export function PatientRecommendationsPage() {
                 ) : null}
 
                 {item.patient_decision ? (
-                  <InfoRow
+                  <PortalInfoRow
                     label={t.portal_recommendations_your_decision}
                     value={`${recommendationDecisionLabel(item.patient_decision)}${item.appointment_request_status ? ` / ${portalStatusLabel(item.appointment_request_status)}` : ""}`}
                   />
@@ -319,7 +320,7 @@ export function PatientRecommendationsPage() {
                     />
                   </div>
                 ) : null}
-              </ListItem>
+              </PortalListItem>
             );
           })}
         </section>
@@ -1132,7 +1133,7 @@ function ActionButton({
   return (
     <Button
       type="button"
-      variant="outline"
+      variant="default"
       className={tokens.control.primaryButton}
       disabled={disabled}
       onClick={onClick}

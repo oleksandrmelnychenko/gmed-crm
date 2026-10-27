@@ -583,7 +583,7 @@ export function PortalCredentialsDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="max-w-xl" aria-describedby={undefined}>
+      <DialogContent className="sm:w-[calc(100vw-3rem)] sm:max-w-2xl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>
             {created
@@ -710,7 +710,7 @@ function PortalCredentialsContent({
       </dl>
       <div className="min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="flex items-center gap-2 text-sm font-semibold">
+          <span className="flex min-w-0 items-center gap-2 text-sm font-semibold sm:flex-1">
             <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             {parent
               ? de
@@ -720,7 +720,7 @@ function PortalCredentialsContent({
                 ? "Nachricht an den Patienten"
                 : "Сообщение для пациента"}
           </span>
-          <div className="flex gap-0.5 rounded-lg border border-border/60 bg-muted/30 p-0.5" role="group" aria-label={de ? "Sprache" : "Язык"}>
+          <div className="flex shrink-0 gap-0.5 rounded-lg border border-border/60 bg-muted/30 p-0.5" role="group" aria-label={de ? "Sprache" : "Язык"}>
             {MESSAGE_LANGUAGES.map((option) => (
               <button
                 key={option.value}

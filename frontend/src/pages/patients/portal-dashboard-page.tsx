@@ -1,3 +1,4 @@
+import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalDateChip, PortalSection as Section, PortalSummary, PortalComplete } from "./ui/portal-page-layout";
 import { startTransition, useCallback, useEffect, useMemo, useReducer } from "react";
 import {
   ArrowUpRight,
@@ -13,15 +14,12 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import { PortalSection as Section, PortalSummary, PortalComplete } from "./ui/portal-page-layout";
 import { Button } from "@/components/ui/button";
 import { OverflowMenu } from "@/components/ui/overflow-menu";
 import {
   Banner,
   CountBadge,
   EmptyCell,
-  InfoRow,
-  ListItem,
   PageHeader,
   StatusBadge,
   TabLoader,
@@ -383,7 +381,7 @@ function usePatientDashboardPageContent() {
   }
 
   return (
-    <TabShell className="mx-auto mt-0 min-h-0 max-w-7xl">
+    <TabShell className="mt-0 w-full min-h-0 max-w-none space-y-3">
       <PageHeader
         title={`${greeting}, ${user?.name ?? patientLabel}`}
         description={t.portal_dashboard_only_explicitly_released_documents_and_privacy_workflows_are_sho}
@@ -564,7 +562,7 @@ function usePatientDashboardPageContent() {
                   {(item.due_at || item.amount) ? (
                     <div className="grid gap-3 sm:grid-cols-2">
                       {item.due_at ? (
-                        <InfoRow label={t.portal_dashboard_due} value={formatPortalDateTime(item.due_at)} />
+                        <InfoRow label={t.portal_dashboard_due} value={<PortalDateChip>{formatPortalDateTime(item.due_at)}</PortalDateChip>} />
                       ) : null}
                       {item.amount ? (
                         <InfoRow label={t.portal_dashboard_amount} value={formatPortalCurrency(item.amount)} />

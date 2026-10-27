@@ -1259,7 +1259,7 @@ function useChatPageContent() {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b">
-          <h2 className="text-lg font-semibold">{t.chat_title}</h2>
+          <h2 className="flex items-center gap-2 text-base font-semibold">{user?.role === "patient" ? <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" aria-hidden="true" /> : null}{t.chat_title}</h2>
           <button
             onClick={() => {
               setShowNewChat(!showNewChat);
@@ -1268,7 +1268,7 @@ function useChatPageContent() {
             aria-expanded={showNewChat}
             aria-controls="chat-new-peer-picker"
             title={t.chat_new}
-            className="flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className={cn("flex size-9 items-center justify-center rounded-lg transition-colors", user?.role === "patient" ? "bg-[var(--brand)] text-white hover:brightness-95" : "text-muted-foreground hover:bg-muted hover:text-foreground")}
           >
             <MessageSquarePlus className="size-[18px]" />
           </button>
@@ -1792,7 +1792,7 @@ function useChatPageContent() {
                 disabled={sending || (!input.trim() && !pendingFiles.length)}
                 aria-label={t.chat_send}
                 title={t.chat_send}
-                className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-40"
+                className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50", user?.role === "patient" ? "bg-[var(--brand)] text-white" : "bg-foreground text-background")}
               >
                 {sending ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               </button>

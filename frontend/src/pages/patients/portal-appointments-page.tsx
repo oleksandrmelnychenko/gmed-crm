@@ -1,3 +1,4 @@
+import { PortalInfoRow as InfoRow, PortalListItem as ListItem, PortalDateChip, PortalSection as Section, PortalSummary } from "./ui/portal-page-layout";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   startTransition,
@@ -11,7 +12,6 @@ import {
 } from "react";
 import { CalendarClock, LoaderCircle, Plus, RefreshCw, Send } from "lucide-react";
 
-import { PortalSection as Section, PortalSummary } from "./ui/portal-page-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,8 +19,6 @@ import {
   CountBadge,
   EmptyCell,
   Field,
-  InfoRow,
-  ListItem,
   PageHeader,
   StatusBadge,
   SuccessBanner,
@@ -376,7 +374,7 @@ function usePatientAppointmentsPageContent() {
   }
 
   return (
-    <TabShell className="mx-auto mt-0 max-w-6xl space-y-4">
+    <TabShell className="mt-0 w-full min-w-0 max-w-none space-y-3">
       <PageHeader
         title={t.portal_appointments_my_appointments}
         description={t.portal_appointments_review_scheduled_visits_and_send_new_appointment_requests_for_th}
@@ -439,7 +437,7 @@ function usePatientAppointmentsPageContent() {
                             {appointmentCarePathKindLabel(item.care_path_kind)}
                           </StatusBadge>
                         </div>
-                        <h2 className="mt-3 text-base font-semibold text-foreground">{item.title}</h2>
+                        <h2 className="mt-2 text-base font-semibold text-foreground">{item.title}</h2>
                         <p className="mt-2 text-sm text-muted-foreground">
                           {[item.provider_name, item.doctor_name, item.location].filter(Boolean).join(" / ")}
                         </p>
@@ -450,7 +448,7 @@ function usePatientAppointmentsPageContent() {
                       <InfoRow
                         className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
                         label={t.portal_appointments_date}
-                        value={formatPortalDate(item.date)}
+                        value={<PortalDateChip>{formatPortalDate(item.date)}</PortalDateChip>}
                       />
                       <InfoRow
                         className={cn("rounded-lg p-3", tokens.surface.mutedCard)}

@@ -56,9 +56,9 @@ export function AccountPage() {
   // (owner decision 2026-10-05); a lost one is replaced by staff.
   const leadCabinet = isLeadPortalUser(user);
   return (
-    <div className="space-y-4" data-testid="account-page">
+    <div className={user?.role === "patient" ? "w-full min-w-0 space-y-3 [&_label]:font-mono [&_label]:text-xs" : "space-y-4"} data-testid="account-page">
       <PageHeader title={l("account_title")} description={l("account_subtitle")} />
-      <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/40 p-3 sm:p-4">
+      <div className={user?.role === "patient" ? "space-y-3" : "space-y-4 rounded-2xl border border-border/60 bg-muted/40 p-3 sm:p-4"}>
         <div className={leadCabinet ? "min-w-0" : "grid items-start gap-4 xl:grid-cols-2"}>
           <ProfileSection />
           {leadCabinet ? null : (

@@ -1,10 +1,11 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { startTransition, useCallback, useEffect, useMemo, useReducer, useRef, type FormEvent } from "react";
-import { Download, IdCard, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-react";
+import { CalendarDays, ClipboardList, Download, Files, FileText, FlaskConical, IdCard, Languages, LoaderCircle, Mail, Receipt, RefreshCw, Upload } from "lucide-react";
 
 import { AdminDialogScaffold } from "@/components/admin-dialog-scaffold";
 import { PortalSection as Section, PortalComplete } from "./ui/portal-page-layout";
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { FilePicker } from "@/components/ui/file-picker";
 import {
   Dialog,
@@ -19,7 +20,6 @@ import {
   CountBadge,
   EmptyCell,
   Field,
-  InfoRow,
   ListItem,
   PageHeader,
   StatusBadge,
@@ -467,7 +467,7 @@ function usePatientDocumentsPageContent() {
   }
 
   return (
-    <TabShell className="mx-auto mt-0 max-w-6xl space-y-4">
+    <TabShell className="mt-0 w-full min-w-0 max-w-none space-y-3">
       <PageHeader
         title={t.portal_documents_my_documents}
         description={t.portal_documents_only_files_explicitly_released_to_your_portal_are_visible_here}
@@ -501,13 +501,14 @@ function usePatientDocumentsPageContent() {
       {error ? <Banner tone="error">{error}</Banner> : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="hidden text-lg font-semibold md:block">{t.portal_documents_my_documents}</h2>
+        <h2 className="flex items-center gap-2 text-base font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />{t.portal_documents_my_documents}</h2>
         <Button onClick={() => dispatchDocumentsState({ uploadOpen: true })}><Upload className="size-4" />{t.portal_documents_upload_documents}</Button>
       </div>
 
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
         <Section
           title={t.portal_documents_required_documents}
+          className="p-3 sm:p-3"
           accessory={
             <CountBadge>
               {t.portal_documents_fulfilled}: {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
@@ -550,7 +551,6 @@ function usePatientDocumentsPageContent() {
                     {documentAlerts.missing_documents.some((item) => isIdentityRuleKey(item.key)) ? (
                       <Button
                         type="button"
-                        variant="outline"
                         className="h-8 rounded-lg"
                         onClick={startIdentityUpload}
                       >
@@ -566,11 +566,20 @@ function usePatientDocumentsPageContent() {
         </Section>
       ) : null}
 
-      {documents.length > 0 ? <div className="rounded-xl border border-border/70 bg-card p-2">
-        <div className="flex flex-wrap gap-2">
+      {documents.length > 0 ? <div className="rounded-xl border border-border/60 bg-card p-1.5">
+        <div className="flex flex-wrap justify-center gap-1">
           {PORTAL_DOCUMENT_CATEGORY_TABS.map((tab) => {
             const count = categoryCounts.get(tab.key) ?? 0;
             const label = l(tab.labelKey);
+            const CategoryIcon = {
+              all: Files,
+              correspondence: Mail,
+              consents: FileText,
+              analyses: FlaskConical,
+              conclusions: ClipboardList,
+              invoices: Receipt,
+              translations: Languages,
+            }[tab.key];
             return (
               <button
                 key={tab.key}
@@ -578,14 +587,15 @@ function usePatientDocumentsPageContent() {
                 aria-pressed={activeCategory === tab.key}
                 onClick={() => dispatchDocumentsState({ activeCategory: tab.key })}
                 className={cn(
-                  "inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm transition",
+                  "inline-flex min-h-8 items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--brand)]",
                   activeCategory === tab.key
-                    ? "border-primary/40 bg-primary/10 font-medium text-foreground"
-                    : "border-border/60 bg-card text-muted-foreground hover:bg-muted/35",
+                    ? "bg-[var(--brand)] font-semibold text-white"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
               >
+                <CategoryIcon aria-hidden="true" className="size-4 shrink-0" />
                 <span>{label}</span>
-                {count > 0 ? <CountBadge>{count}</CountBadge> : null}
+                {count > 0 ? <span className={cn("rounded-full px-1.5 font-mono text-[11px] leading-5", activeCategory === tab.key ? "bg-white/20 text-white" : "bg-muted text-muted-foreground")}>{count}</span> : null}
               </button>
             );
           })}
@@ -596,6 +606,7 @@ function usePatientDocumentsPageContent() {
         <section className="space-y-4">
           <Section
             title={t.portal_documents_released_to_me}
+            className="p-3 sm:p-3"
             accessory={visibleDocuments.length > 0 ? <CountBadge>{visibleDocuments.length}</CountBadge> : undefined}
           >
 
@@ -609,7 +620,7 @@ function usePatientDocumentsPageContent() {
                 </p>
               </EmptyCell>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {visibleDocuments.map((item) => {
                   const busy = busyId === item.id;
                   const documentTranslationRequests = translationRequests.filter(
@@ -617,49 +628,31 @@ function usePatientDocumentsPageContent() {
                   );
 
                   return (
-                    <ListItem key={item.id} className="space-y-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
+                    <ListItem key={item.id} className="min-w-0 space-y-2 rounded-xl p-3">
+                      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start">
+                        <FileText aria-hidden="true" className="hidden size-5 shrink-0 text-muted-foreground lg:mt-0.5 lg:block" />
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <h3 className="text-sm font-semibold leading-5 text-foreground [overflow-wrap:anywhere]">{item.auto_name}</h3>
+                          <div className="flex flex-wrap items-center gap-1.5">
                             <StatusBadge className={documentTone(item)}>
                               {item.confirmed ? t.portal_documents_confirmed : item.requires_confirmation ? t.portal_documents_needs_confirmation : t.portal_documents_released}
                             </StatusBadge>
                             <StatusBadge status={item.status}>{portalStatusLabel(item.status)}</StatusBadge>
+                            <StatusChip tone="info" title={t.portal_documents_released_at}><CalendarDays aria-hidden="true" />{formatPortalDateTime(item.shared_at)}</StatusChip>
+                            <span className="text-xs text-muted-foreground">{formatPortalFileSize(item.file_size)}</span>
                           </div>
-                          <h2 className="mt-3 text-base font-semibold text-foreground">{item.auto_name}</h2>
-                          <p className="mt-2 text-sm text-muted-foreground">
-                            {[
-                              ...portalDocumentTypeLabels(item.art, item.category),
-                              formatPortalFileSize(item.file_size),
-                            ].join(" / ")}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                            <span>{portalDocumentTypeLabels(item.art, item.category).join(" · ")}</span>
+                            <span><span className="font-mono">{t.portal_documents_source}: </span>{portalDocumentSourceLabel(item.ursprung, item.klinik)}</span>
+                          </div>
+                          <StatusChip title={t.portal_documents_filename} className="items-start border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">
+                            <FileText aria-hidden="true" className="mt-0.5" />
+                            <span className="min-w-0 [overflow-wrap:anywhere]">{item.original_filename || item.auto_name}</span>
+                          </StatusChip>
                         </div>
-                        {item.requires_confirmation && !item.confirmed ? (
-                          <ShieldCheck className="size-5 text-amber-500" />
-                        ) : null}
-                      </div>
-
-                      <dl className="grid gap-3 sm:grid-cols-2">
-                        <InfoRow
-                          className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                          label={t.portal_documents_released_at}
-                          value={formatPortalDateTime(item.shared_at)}
-                        />
-                        <InfoRow
-                          className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                          label={t.portal_documents_filename}
-                          value={item.original_filename || item.auto_name}
-                        />
-                        <InfoRow
-                          className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                          label={t.portal_documents_source}
-                          value={portalDocumentSourceLabel(item.ursprung, item.klinik)}
-                        />
-                      </dl>
-
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex shrink-0 flex-wrap gap-1.5 lg:max-w-64 lg:justify-end">
                         <Button
-                          className="h-9 rounded-lg"
+                          className="h-8 rounded-lg text-xs"
                           disabled={busy}
                           onClick={() => void handleDownload(item)}
                         >
@@ -668,8 +661,7 @@ function usePatientDocumentsPageContent() {
                         </Button>
                         {item.requires_confirmation && !item.confirmed ? (
                           <Button
-                            variant="outline"
-                            className="h-9 rounded-lg"
+                            className="h-8 rounded-lg text-xs"
                             disabled={busy}
                             onClick={() => void handleConfirm(item.id)}
                           >
@@ -678,13 +670,14 @@ function usePatientDocumentsPageContent() {
                           </Button>
                         ) : null}
                         <Button
-                          variant="outline"
-                          className="h-9 rounded-lg"
+                          className="h-8 rounded-lg text-xs"
                           disabled={busy}
                           onClick={() => openTranslationDialog(item)}
                         >
+                          <Languages aria-hidden="true" className="size-3.5" />
                           {t.portal_documents_request_translation}
                         </Button>
+                      </div>
                       </div>
 
                       {documentTranslationRequests.length > 0 ? (
@@ -697,8 +690,10 @@ function usePatientDocumentsPageContent() {
                                 tokens.surface.mutedCard,
                               )}
                             >
-                              <span>
-                                {t.portal_documents_translation} {request.requested_language.toUpperCase()} / {formatPortalDateTime(request.requested_at)}
+                              <span className="flex flex-wrap items-center gap-2">
+                                <Languages aria-hidden="true" className="size-3.5" />
+                                <span className="font-mono">{t.portal_documents_translation} {request.requested_language.toUpperCase()}</span>
+                                <StatusChip tone="info"><CalendarDays aria-hidden="true" />{formatPortalDateTime(request.requested_at)}</StatusChip>
                               </span>
                               <StatusBadge status={request.status} className={translationRequestTone(request.status)}>
                                 {portalStatusLabel(request.status)}
@@ -723,7 +718,7 @@ function usePatientDocumentsPageContent() {
             });
           }}>
             <AdminDialogScaffold title={t.portal_documents_upload_documents} description={t.portal_documents_send_files_to_the_care_team_payment_proofs_stay_internal_and_can}>
-            <form className="space-y-4" onSubmit={(event) => void handleUpload(event)}>
+            <form className="space-y-3 rounded-xl border border-border/60 bg-card p-3 [&_label]:font-mono [&_label]:text-xs" onSubmit={(event) => void handleUpload(event)}>
               <Field label={t.portal_documents_category} htmlFor="portal-document-upload-kind">
                 <NativeComboboxSelect
                   id="portal-document-upload-kind"
@@ -783,6 +778,7 @@ function usePatientDocumentsPageContent() {
           {uploads.length > 0 ? (
           <Section
             title={t.portal_documents_my_uploads}
+            className="p-3 sm:p-3"
             accessory={<CountBadge>{uploads.length}</CountBadge>}
           >
             {uploads.length === 0 ? (
@@ -790,33 +786,38 @@ function usePatientDocumentsPageContent() {
                 {t.portal_documents_no_portal_uploads_yet}
               </EmptyCell>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {uploads.map((item) => {
                   const busy = busyId === item.id;
 
                   return (
-                    <ListItem key={item.id} className="space-y-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap gap-2">
+                    <ListItem key={item.id} className="min-w-0 space-y-2 rounded-xl p-3">
+                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start">
+                        <FileText aria-hidden="true" className="hidden size-5 shrink-0 text-muted-foreground sm:mt-0.5 sm:block" />
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <h3 className="text-sm font-semibold leading-5 text-foreground [overflow-wrap:anywhere]">{item.auto_name}</h3>
+                          <div className="flex flex-wrap items-center gap-1.5">
                             <StatusBadge className={uploadedDocumentTone(item)}>
                               {portalDocumentValueLabel(item.art)}
                             </StatusBadge>
+                            <StatusChip tone="info" title={t.portal_documents_uploaded}><CalendarDays aria-hidden="true" />{formatPortalDateTime(item.created_at)}</StatusChip>
+                            <span className="text-xs text-muted-foreground">{formatPortalFileSize(item.file_size)}</span>
                           </div>
-                          <p className="mt-3 text-sm font-semibold text-foreground">{item.auto_name}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
+                          <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
                             {[
                               // The badge above names the type; the category only when it says more.
                               portalDocumentTypeLabels(item.art, item.category)[1] ?? null,
                               item.order_number,
                               item.appointment_title,
-                              formatPortalFileSize(item.file_size),
                             ].filter(Boolean).join(" / ")}
                           </p>
+                          <StatusChip title={t.portal_documents_filename} className="items-start border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">
+                            <FileText aria-hidden="true" className="mt-0.5" />
+                            <span className="min-w-0 [overflow-wrap:anywhere]">{item.original_filename || item.auto_name}</span>
+                          </StatusChip>
                         </div>
                         <Button
-                          variant="outline"
-                          className="h-9 rounded-lg"
+                          className="h-8 w-fit shrink-0 rounded-lg text-xs"
                           disabled={busy}
                           onClick={() => void handleUploadDownload(item)}
                         >
@@ -824,11 +825,8 @@ function usePatientDocumentsPageContent() {
                           {t.portal_documents_download}
                         </Button>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {t.portal_documents_uploaded} {formatPortalDateTime(item.created_at)}
-                      </p>
                       {item.notes ? (
-                        <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                        <div className={cn("rounded-lg px-3 py-2 text-xs leading-5 text-foreground", tokens.surface.mutedCard)}>
                           {item.notes}
                         </div>
                       ) : null}
@@ -850,7 +848,7 @@ function usePatientDocumentsPageContent() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg [&_label]:font-mono [&_label]:text-xs">
           <DialogHeader>
             <DialogTitle>
               {t.portal_documents_request_translation}
@@ -860,7 +858,7 @@ function usePatientDocumentsPageContent() {
                 t.portal_documents_select_document}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-3">
             <Field label={t.portal_documents_target_language} htmlFor="portal-translation-language">
               <NativeComboboxSelect
                 id="portal-translation-language"
