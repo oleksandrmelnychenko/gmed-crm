@@ -76,7 +76,20 @@ test("cabinet edits, upload, submission and staff data survive a real API round 
   await expect(identity).toContainText("synthetic-identity.pdf");
   await page.locator('[data-step="documents"]').click();
   await page.getByTestId("lead-request-reason").getByRole("textbox").fill("Synthetic consultation updated in browser");
+  // The consent options are chosen before sending: a sent request is read-only
+  // (owner 2026-10-26, «якщо вже відправили то вже відправили»).
+  const consent = page.getByTestId("lead-request-consent-form");
+  const core = consent.locator("label").filter({ has: page.locator("[data-consent-required]") });
+  expect(await core.count()).toBe(3);
+  await settleDisposableClock(lead.id);
+  const consentSaved = page.waitForResponse((response) =>
+    response.url().endsWith(`/me/lead-requests/${lead.id}/consent-choices`) &&
+    response.request().method() === "POST",
+  );
+  for (const label of await core.all()) await label.getByRole("checkbox").check();
+  // Leaving the step flushes the choices, including a click before the autosave debounce.
   await page.locator('[data-step="send"]').click();
+  expect((await consentSaved).ok()).toBe(true);
   await expect(page.getByTestId("lead-request-missing")).toHaveCount(0);
   await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
   await settleDisposableClock(lead.id);
@@ -94,27 +107,15 @@ test("cabinet edits, upload, submission and staff data survive a real API round 
   const staffData = await getJson(request, `${api}/api/v1/leads/${lead.id}/portal-intake`, staffHeaders);
   expect(staffData.patient_request_reason.text).toBe(saved.identification.request_reason);
   expect(staffData.identity_documents.some((document: { file_name: string }) => document.file_name === "synthetic-identity.pdf")).toBe(true);
-  // A choice saved after submission must offer resubmission immediately,
-  // without a reload; the staff snapshot must include the new choice too.
+  // After the send the options are read-only: no change and no resubmission
+  // from the cabinet; the staff snapshot carries the choice made before sending.
   await page.locator('[data-step="documents"]').click();
-  const consent = page.getByTestId("lead-request-consent-form");
-  const core = consent.locator("label").filter({ has: page.locator("[data-consent-required]") });
-  expect(await core.count()).toBe(3);
-  await settleDisposableClock(lead.id);
-  const consentSaved = page.waitForResponse((response) =>
-    response.url().endsWith(`/me/lead-requests/${lead.id}/consent-choices`) &&
-    response.request().method() === "POST",
-  );
-  for (const label of await core.all()) await label.getByRole("checkbox").check();
-  await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
-  // Next flushes the choices, including a click before the autosave debounce.
-  await page.getByRole("button", { name: "Weiter", exact: true }).click();
-  expect((await consentSaved).ok()).toBe(true);
-  await expect(page.getByTestId("lead-request-changed")).toBeVisible();
-  await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
-  await settleDisposableClock(lead.id);
-  await page.getByTestId("lead-request-submit").click();
-  await expect(page.getByTestId("lead-request-changed")).toHaveCount(0);
+  const lockedCore = page.getByTestId("lead-request-consent-form").locator("label").filter({ has: page.locator("[data-consent-required]") });
+  for (const label of await lockedCore.all()) {
+    await expect(label.getByRole("checkbox")).toBeChecked();
+    await expect(label.getByRole("checkbox")).toBeDisabled();
+  }
+  await expect(page.getByTestId("lead-request-consent-form-sent")).toBeVisible();
   const final = await getJson(request, base, patientHeaders);
   expect(final.changed_since_submit).toBe(false);
   expect(final.consent_form.chosen_at).toBeTruthy();
