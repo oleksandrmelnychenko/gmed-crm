@@ -410,7 +410,13 @@ async fn login(
     // An enrolled authenticator app is asked for before any session exists;
     // an `mfa_required` account then still waits for admin approval
     // (`complete_totp_login`).
-    match super::totp::has_confirmed_totp(&state, user.id).await {
+    // DEV only (`GMED_DEV_SKIP_TOTP`, never behind the PROD console): no code asked.
+    let enrolled = if crate::auth::mfa_policy::dev_skip_totp() {
+        Ok(false)
+    } else {
+        super::totp::has_confirmed_totp(&state, user.id).await
+    };
+    match enrolled {
         Ok(true) => {
             match super::totp::open_challenge(
                 &state,

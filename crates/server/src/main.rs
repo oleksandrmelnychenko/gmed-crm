@@ -11,6 +11,10 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     let cfg = config::Config::from_env();
+    gmed_server::auth::mfa_policy::set_dev_skip_totp(cfg.dev_skip_totp);
+    if cfg.dev_skip_totp {
+        tracing::warn!("DEV: sign-in asks for no second factor (GMED_DEV_SKIP_TOTP)");
+    }
     let signature_provider = gmed_server::document_signatures::provider::Provider::from_env()
         .unwrap_or_else(|error| {
             tracing::error!(error, "Invalid document signing configuration");

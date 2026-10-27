@@ -13,8 +13,43 @@
 //! `*.e2e-<tag>@example.com`) are exempt only while `ENABLE_E2E_SUPPORT` is set,
 //! which no production deployment sets; production never skips the factor.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
+
+/// The PROD console: the DEV switch below is never honoured behind it.
+const PROD_CONSOLE: &str = "https://console.gmed-health.com";
+/// The only hosted console where the DEV switch may act.
+const DEV_CONSOLE: &str = "https://console-dev.gmed-health.com";
+
+static DEV_SKIP_TOTP: AtomicBool = AtomicBool::new(false);
+
+/// Whether `GMED_DEV_SKIP_TOTP` may act for a server with this console origin
+/// (owner 2026-10-27: no second factor on DEV): only behind the DEV console
+/// or a local one (no https console at all), never when the PROD console is
+/// the console or among the CORS origins.
+pub fn dev_skip_totp_allowed(console_url: Option<&str>, cors_origin: &str) -> bool {
+    let same = |url: &str, expected: &str| url.trim().trim_end_matches('/') == expected;
+    if console_url.is_some_and(|url| same(url, PROD_CONSOLE))
+        || cors_origin
+            .split(',')
+            .any(|origin| same(origin, PROD_CONSOLE))
+    {
+        return false;
+    }
+    console_url.is_none_or(|url| same(url, DEV_CONSOLE))
+}
+
+/// Set once at start-up from the configuration (`Config::dev_skip_totp`).
+pub fn set_dev_skip_totp(enabled: bool) {
+    DEV_SKIP_TOTP.store(enabled, Ordering::Relaxed);
+}
+
+/// DEV only: sign-in asks for no second factor and no enrolment is forced.
+pub fn dev_skip_totp() -> bool {
+    DEV_SKIP_TOTP.load(Ordering::Relaxed)
+}
 
 /// Roles that always need a second factor, whatever the settings say.
 pub const MANDATORY_TOTP_ROLES: &[&str] = &["ceo", "it_admin", "patient_manager"];
@@ -65,6 +100,9 @@ pub async fn totp_enrolment_pending<'e, E>(
 where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
+    if dev_skip_totp() {
+        return Ok(false);
+    }
     let row = sqlx::query(
         r#"SELECT u.email,
                   EXISTS (
@@ -102,6 +140,31 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::dev_skip_totp_allowed;
+
+    #[test]
+    fn the_dev_switch_never_acts_behind_the_prod_console() {
+        let dev_cors =
+            "https://console-dev.gmed-health.com,https://localhost,capacitor://localhost";
+        assert!(dev_skip_totp_allowed(
+            Some("https://console-dev.gmed-health.com"),
+            dev_cors
+        ));
+        assert!(dev_skip_totp_allowed(None, "http://localhost:5173"));
+        assert!(!dev_skip_totp_allowed(
+            Some("https://console.gmed-health.com/"),
+            "https://console.gmed-health.com"
+        ));
+        assert!(!dev_skip_totp_allowed(
+            Some("https://console-dev.gmed-health.com"),
+            "https://console.gmed-health.com"
+        ));
+        assert!(!dev_skip_totp_allowed(
+            Some("https://example.org"),
+            "https://example.org"
+        ));
+    }
+
     use super::*;
 
     #[test]

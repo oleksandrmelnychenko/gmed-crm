@@ -37,6 +37,9 @@ pub struct Config {
     pub mail: MailConfig,
     /// Explicit DEV-only test onboarding; never grants legal signature effects.
     pub dev_demo_onboarding: bool,
+    /// DEV only (`GMED_DEV_SKIP_TOTP`): sign-in without a second factor;
+    /// refused behind the PROD console (`auth::mfa_policy::dev_skip_totp_allowed`).
+    pub dev_skip_totp: bool,
 }
 
 /// Default send endpoint of the Mittaro API.
@@ -199,6 +202,12 @@ impl Config {
             std::env::var("CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:8080".into());
         let mittaro_api_url = env_text("GMED_MITTARO_API_URL");
         let console_url = console_url_from(env_text("GMED_CONSOLE_URL"), &cors_origin);
+        let dev_skip_totp = env_flag("GMED_DEV_SKIP_TOTP").0;
+        if dev_skip_totp
+            && !crate::auth::mfa_policy::dev_skip_totp_allowed(console_url.as_deref(), &cors_origin)
+        {
+            panic!("GMED_DEV_SKIP_TOTP is only allowed on DEV or a local console");
+        }
         for (name, url) in [
             ("GMED_MITTARO_API_URL", &mittaro_api_url),
             ("GMED_CONSOLE_URL", &console_url),
@@ -239,6 +248,7 @@ impl Config {
             },
             mail,
             dev_demo_onboarding: env_flag("GMED_DEV_DEMO_ONBOARDING").0,
+            dev_skip_totp,
         }
     }
 }
