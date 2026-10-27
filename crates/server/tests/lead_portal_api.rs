@@ -9969,3 +9969,128 @@ async fn a_parents_own_login_is_reset_on_the_own_request_and_the_refusal_names_i
         "a refused reset leaves no audit row"
     );
 }
+
+/// Tester's question 2026-10-27: Adolf is the father of one child and the
+/// court-appointed guardian (Vormund) of another. Each request names him in
+/// his own role; under the guardianship only the guardian represents the
+/// child, the child's own father stays a contact (§ 1773 BGB, owner
+/// decision 2026-10-27).
+#[tokio::test]
+async fn one_person_is_the_father_of_one_child_and_the_guardian_of_another() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+    let email = format!("adolf.{}@example.com", Uuid::new_v4().simple());
+
+    // Child A: Adolf is the father.
+    let (child_a, as_father) = minor_with_father(&app, "Linda", "Adolf Testov", &email).await;
+
+    // Child B: under guardianship; Adolf is the Vormund.
+    let as_guardian = Uuid::new_v4();
+    let (status, created) = json_request(
+        router,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Mila",
+            "last_name": "Portal",
+            "date_of_birth": "2015-03-04",
+            "custody": "guardian",
+            "trusted_contacts": [
+                { "id": as_guardian, "name": "Adolf Testov", "relation": "guardian", "email": email }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let child_b: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+
+    let representatives = |intake: &Value| -> Vec<(String, Value)> {
+        intake["representation"]["representatives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|person| {
+                (
+                    person["id"].as_str().unwrap().to_string(),
+                    person["slot"].clone(),
+                )
+            })
+            .collect()
+    };
+    for (child, expected) in [(child_a, as_father), (child_b, as_guardian)] {
+        let (status, intake) = json_request(
+            router,
+            "GET",
+            &format!("/api/v1/leads/{child}/portal-intake"),
+            &pm,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{intake}");
+        assert_eq!(
+            representatives(&intake),
+            vec![(expected.to_string(), json!("rep1"))],
+            "{intake}"
+        );
+    }
+
+    // A father and a guardian are never mixed on one child: under the
+    // guardianship a new parent contact is refused, at the new lead and later.
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Nora",
+            "last_name": "Portal",
+            "date_of_birth": "2015-03-04",
+            "custody": "guardian",
+            "trusted_contacts": [
+                { "id": Uuid::new_v4(), "name": "Ivan Portal", "relation": "father", "phone": "+49 30 1111111" },
+                { "id": Uuid::new_v4(), "name": "Adolf Testov", "relation": "guardian", "email": email }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(
+        refused["code"], "relation_parent_under_guardianship",
+        "{refused}"
+    );
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{child_b}/update"),
+        &pm,
+        Some(json!({
+            "trusted_contacts": [
+                { "id": as_guardian, "name": "Adolf Testov", "relation": "guardian", "email": email },
+                { "id": Uuid::new_v4(), "name": "Ivan Portal", "relation": "father", "phone": "+49 30 1111111" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(
+        refused["code"], "relation_parent_under_guardianship",
+        "{refused}"
+    );
+    // The same person as a relative is fine: a contact, not a representative.
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{child_b}/update"),
+        &pm,
+        Some(json!({
+            "trusted_contacts": [
+                { "id": as_guardian, "name": "Adolf Testov", "relation": "guardian", "email": email },
+                { "id": Uuid::new_v4(), "name": "Ivan Portal", "relation": "relative", "phone": "+49 30 1111111" }
+            ]
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "{saved}");
+}

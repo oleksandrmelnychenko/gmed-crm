@@ -747,6 +747,15 @@ enum TrustedContactIssue {
         id: String,
         name: String,
     },
+    /// A contact newly marked as mother, father or parent while the child is
+    /// under guardianship: only the guardian represents the child then
+    /// (§ 1773 BGB, owner 2026-10-27), so parents and a guardian are never
+    /// mixed on one child.
+    ParentUnderGuardianship {
+        index: usize,
+        id: String,
+        name: String,
+    },
     /// A parent, guardian or representative newly born less than 18 years
     /// ago: a representative is of full age, as in the cabinet.
     MinorRepresentative {
@@ -906,6 +915,14 @@ fn trusted_contact_issue_response(issue: &TrustedContactIssue) -> axum::response
             name,
             "phone",
         ),
+        TrustedContactIssue::ParentUnderGuardianship { index, id, name } => (
+            RELATION_PARENT_UNDER_GUARDIANSHIP,
+            "Under a court-ordered guardianship only the guardian (Vormund) represents the child; record a parent as another relation",
+            index,
+            id,
+            name,
+            "relation",
+        ),
         TrustedContactIssue::GuardianRelation { index, id, name } => (
             RELATION_GUARDIAN_NEEDS_CUSTODY,
             "A guardian (Vormund) is possible only under a court-ordered guardianship; choose mother or father for a parent",
@@ -958,6 +975,43 @@ fn trusted_contact_issue_response(issue: &TrustedContactIssue) -> axum::response
 /// A minor's parent or representative contact marked as guardian (Vormund)
 /// while the custody is not "guardian" (owner 2026-10-22).
 pub(crate) const RELATION_GUARDIAN_NEEDS_CUSTODY: &str = "relation_guardian_needs_custody";
+pub(crate) const RELATION_PARENT_UNDER_GUARDIANSHIP: &str = "relation_parent_under_guardianship";
+
+/// The first contact newly marked as a parent (mother, father, parent — not a
+/// guardian) or changed into one from another relation: refused while the child is under
+/// guardianship ([`TrustedContactIssue::ParentUnderGuardianship`]). Stored
+/// parents stay as they are; they are contacts, not representatives.
+fn parent_under_guardianship_issue(
+    contacts: &Value,
+    stored: &Value,
+) -> Option<TrustedContactIssue> {
+    let parent = |relation: Option<&str>| {
+        is_parent_or_guardian_relation(relation) && !is_legal_guardian_relation(relation)
+    };
+    for (index, contact) in contacts.as_array()?.iter().enumerate() {
+        let relation = contact_text(contact, "relation");
+        if !parent(relation) {
+            continue;
+        }
+        // A stored parent stays; a stored guardian may be corrected back to
+        // the parent staff meant (otherwise the custody, refused while a
+        // guardian is on file, could never change again).
+        let previous = stored_trusted_contact(stored, contact);
+        if previous
+            .is_some_and(|entry| is_parent_or_guardian_relation(contact_text(entry, "relation")))
+        {
+            continue;
+        }
+        return Some(TrustedContactIssue::ParentUnderGuardianship {
+            index,
+            id: contact_text(contact, "id").unwrap_or_default().to_string(),
+            name: contact_text(contact, "name")
+                .unwrap_or_default()
+                .to_string(),
+        });
+    }
+    None
+}
 
 /// The custody stated with a new lead: `None` when none is stated, an error
 /// for an unknown value or for an adult (a custody belongs to a minor).
@@ -988,6 +1042,26 @@ async fn check_changed_trusted_contacts(
     stored: &Value,
     minor: bool,
 ) -> Result<(), axum::response::Response> {
+    // Under a stated guardianship a new parent is refused (owner 2026-10-27).
+    if minor
+        && let Some(lead_id) = lead_id
+        && let Some(issue) = parent_under_guardianship_issue(contacts, stored)
+    {
+        let custody = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT custody FROM lead_gwg_declarations WHERE lead_id = $1",
+        )
+        .bind(lead_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %lead_id, "load lead custody");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        })?
+        .flatten();
+        if custody.as_deref() == Some(crate::routes::lead_representatives::CUSTODY_GUARDIAN) {
+            return Err(trusted_contact_issue_response(&issue));
+        }
+    }
     let Some(issue) = changed_trusted_contact_issue(contacts, stored, minor) else {
         return Ok(());
     };
@@ -4497,10 +4571,12 @@ async fn create_lead(
         }
     };
     // Every contact of a new lead is new. A guardian relation passes only
-    // under the custody "guardian" stated with it.
+    // under the custody "guardian" stated with it; a parent does not then.
     let contacts_checked =
         if custody.as_deref() == Some(crate::routes::lead_representatives::CUSTODY_GUARDIAN) {
-            match changed_trusted_contact_issue(&trusted_contacts, &json!([]), false) {
+            match changed_trusted_contact_issue(&trusted_contacts, &json!([]), false)
+                .or_else(|| parent_under_guardianship_issue(&trusted_contacts, &json!([])))
+            {
                 Some(issue) => Err(trusted_contact_issue_response(&issue)),
                 None => Ok(()),
             }

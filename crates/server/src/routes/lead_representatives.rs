@@ -441,6 +441,10 @@ fn person(
 /// with the role `legal_guardian` (while the lead is under guardianship).
 ///
 /// A row whose role does not fit the lead's age is ignored.
+fn relation_of(entry: &Value) -> Option<&str> {
+    entry.get("relation").and_then(Value::as_str)
+}
+
 pub(crate) fn resolve(
     minor: bool,
     contacts: &[Value],
@@ -458,12 +462,25 @@ pub(crate) fn resolve(
     }
     if minor {
         let custody = answers.custody();
+        // Under a guardianship the Vormund alone represents the child (a
+        // guardian is appointed only when no parent has custody, § 1773 BGB);
+        // the parents stay contacts (owner 2026-10-27). Before, a father listed
+        // first became the child's representative under custody «guardian».
+        // A guardian on file under the custody «guardian»: only the guardians.
+        // Without one yet (the person who stated the guardianship is still
+        // recorded as a parent until staff mark the relation), the rule stays.
+        let guardians_only = custody == CUSTODY_GUARDIAN
+            && entries.iter().any(|(_, entry)| {
+                crate::routes::leads::is_legal_guardian_relation(relation_of(entry))
+            });
         let mut parents = entries
             .into_iter()
             .filter(|(_, entry)| {
-                crate::routes::leads::is_parent_or_guardian_relation(
-                    entry.get("relation").and_then(Value::as_str),
-                )
+                if guardians_only {
+                    crate::routes::leads::is_legal_guardian_relation(relation_of(entry))
+                } else {
+                    crate::routes::leads::is_parent_or_guardian_relation(relation_of(entry))
+                }
             })
             .collect::<Vec<_>>();
         // A stable sort: contacts without a login keep the order of the array.
@@ -4808,6 +4825,43 @@ mod tests {
     }
 
     #[test]
+    fn under_a_guardianship_only_the_guardian_represents_the_child() {
+        // The father is listed first and even has a login: under custody
+        // «guardian» he stays a contact; the Vormund is the representative.
+        let contacts = vec![
+            contact(1, "Adolf Testov", "father"),
+            contact(2, "Vera Vormund", "guardian"),
+            contact(3, "Mila Testova", "mother"),
+        ];
+        let logins = vec![(id(1), id(9))];
+        let answers = Answers {
+            custody: Some(CUSTODY_GUARDIAN.into()),
+            ..Answers::default()
+        };
+        let people = resolve(true, &contacts, &HashMap::new(), &logins, &answers);
+        assert_eq!(
+            people
+                .iter()
+                .map(|person| (person.id, person.slot))
+                .collect::<Vec<_>>(),
+            vec![(id(2), Some(SLOT_REP1))]
+        );
+        // Without a guardian on file the person who stated the guardianship
+        // (still recorded as a parent) keeps the place until staff mark them.
+        let without = resolve(true, &contacts[..1], &HashMap::new(), &logins, &answers);
+        assert_eq!(without.len(), 1);
+        assert_eq!(without[0].slot, Some(SLOT_REP1));
+        // Under the parents' custody the parents act, as before.
+        let joint = Answers {
+            custody: Some(CUSTODY_JOINT.into()),
+            ..Answers::default()
+        };
+        let parents = resolve(true, &contacts, &HashMap::new(), &logins, &joint);
+        assert_eq!(parents[0].id, id(1));
+        assert_eq!(parents[0].slot, Some(SLOT_REP1));
+    }
+
+    #[test]
     fn the_parents_of_a_minor_are_its_representatives_and_the_login_comes_first() {
         let contacts = vec![
             contact(1, "Tante Muster", "aunt"),
@@ -4842,19 +4896,29 @@ mod tests {
         assert_eq!(people[1].last_name, "Muster");
         assert_eq!(people[1].date_of_birth, NaiveDate::from_ymd_opt(1985, 3, 2));
 
-        // One parent alone or a guardian: only the first has a place.
-        for custody in [CUSTODY_SOLE_PARENT, CUSTODY_GUARDIAN] {
-            let answers = Answers {
-                custody: Some(custody.into()),
-                ..Default::default()
-            };
-            let people = resolve(true, &contacts, &rows, &logins, &answers);
-            assert_eq!(
-                people.iter().map(|person| person.slot).collect::<Vec<_>>(),
-                vec![Some(SLOT_REP1), None, None],
-                "{custody}"
-            );
-        }
+        // One parent alone: only the first has a place.
+        let sole = Answers {
+            custody: Some(CUSTODY_SOLE_PARENT.into()),
+            ..Default::default()
+        };
+        let people = resolve(true, &contacts, &rows, &logins, &sole);
+        assert_eq!(
+            people.iter().map(|person| person.slot).collect::<Vec<_>>(),
+            vec![Some(SLOT_REP1), None, None]
+        );
+        // A guardian on file under the custody «guardian»: only the guardian.
+        let guardianship = Answers {
+            custody: Some(CUSTODY_GUARDIAN.into()),
+            ..Default::default()
+        };
+        let people = resolve(true, &contacts, &rows, &logins, &guardianship);
+        assert_eq!(
+            people
+                .iter()
+                .map(|person| (person.id, person.slot))
+                .collect::<Vec<_>>(),
+            vec![(id(4), Some(SLOT_REP1))]
+        );
         // An unknown custody value counts as both parents.
         assert_eq!(
             Answers {

@@ -549,6 +549,7 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   // Trusted contacts of a lead (leads.rs, lead_representatives.rs): a guardian of a minor needs
   // the custody "guardian"; a new or changed phone number needs six digits.
   relation_guardian_needs_custody: "api_relation_guardian_needs_custody",
+  relation_parent_under_guardianship: "api_relation_parent_under_guardianship",
   trusted_contact_phone_invalid: "api_trusted_contact_phone_invalid",
   // A parent or representative entered by staff is of full age, as in the cabinet.
   trusted_contact_representative_minor: "api_trusted_contact_representative_minor",
