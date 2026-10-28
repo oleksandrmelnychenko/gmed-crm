@@ -623,6 +623,8 @@ export function LeadPayerDeclarationSection({
               <input
                 type="radio"
                 name={`lead-payer-own-account-${leadId}`}
+                // Named by the visible answer, never by the raw value «on» (DEV 2026-10-28).
+                aria-label={label}
                 className="size-3.5 shrink-0 accent-[var(--brand)]"
                 checked={form.actsOnOwnAccount === value}
                 disabled={readOnly}
