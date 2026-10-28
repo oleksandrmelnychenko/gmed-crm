@@ -134,7 +134,8 @@ export function PatientRelationsTab({
         accessor: (relation) => relation.related_patient_pid ?? "",
         sortable: true,
         searchable: true,
-        width: 150,
+        // Room for the link suggestion «P-… · Привязать».
+        width: 210,
         render: (relation) => {
           if (relation.related_patient_pid) {
             return (
