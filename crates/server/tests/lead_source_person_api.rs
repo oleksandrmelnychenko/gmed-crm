@@ -754,6 +754,126 @@ async fn the_parents_phone_on_the_childs_record_passes_the_identity_check() {
     assert_eq!(row.10, Some(relation_id));
 }
 
+/// The same person on a sibling's card (owner decision 2026-10-28): an
+/// unlinked relation with a patient's full name and date of birth is
+/// suggested, never linked by itself; staff link it and the other record
+/// names the child back.
+#[tokio::test]
+async fn a_relation_naming_a_patient_is_suggested_and_linked_by_staff() {
+    let Some(suite) = support::suite_context(SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let today = gmed_server::app_time::today();
+    let ceo = user(pool, "Chef", "ceo", &unique("ceo"), true).await;
+    let auth = bearer(ceo, "ceo");
+    let born = NaiveDate::from_ymd_opt(1985, 3, 4).unwrap();
+    let anna = patient(pool, ceo, "Anna", born, None, None).await;
+    let mia = patient(pool, ceo, "Mia", years_before(today, 10), None, None).await;
+    let ben = patient(pool, ceo, "Ben", years_before(today, 8), None, None).await;
+    let mias_mother = relation(
+        pool,
+        mia,
+        " anna   MUSTER ",
+        None,
+        None,
+        Some(born),
+        None,
+        None,
+    )
+    .await;
+    // Another date of birth is another person: no suggestion.
+    let bens_mother = relation(
+        pool,
+        ben,
+        "Anna Muster",
+        None,
+        None,
+        born.succ_opt(),
+        None,
+        None,
+    )
+    .await;
+
+    let (status, list) = get(
+        &suite.app,
+        &format!("/api/v1/patients/{mia}/relations"),
+        &auth,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let row = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == json!(mias_mother))
+        .cloned()
+        .unwrap_or_else(|| panic!("{list}"));
+    assert_eq!(row["link_suggestion"]["patient_id"], json!(anna), "{row}");
+    assert_eq!(row["link_suggestion"]["name"], "Anna Muster", "{row}");
+    assert!(
+        row["related_patient_id"].is_null(),
+        "nothing links by itself: {row}"
+    );
+    let (_, list) = get(
+        &suite.app,
+        &format!("/api/v1/patients/{ben}/relations"),
+        &auth,
+    )
+    .await;
+    let row = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == json!(bens_mother))
+        .cloned()
+        .unwrap_or_else(|| panic!("{list}"));
+    assert!(row.get("link_suggestion").is_none(), "{row}");
+
+    // Only the suggested record is linked.
+    let link = format!("/api/v1/patients/{mia}/relations/{mias_mother}/link");
+    let (status, _) = post(
+        &suite.app,
+        &link,
+        &auth,
+        json!({ "related_patient_id": ben }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, linked) = post(
+        &suite.app,
+        &link,
+        &auth,
+        json!({ "related_patient_id": anna }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{linked}");
+    assert_eq!(linked["related_patient_id"], json!(anna), "{linked}");
+    let reverse: Vec<String> = sqlx::query_scalar(
+        "SELECT relation_type FROM patient_relations WHERE patient_id = $1 AND related_patient_id = $2",
+    )
+    .bind(anna)
+    .bind(mia)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(reverse, vec!["child".to_string()]);
+    assert!(
+        audit_context(pool, "link_patient_relation", mia)
+            .await
+            .is_some()
+    );
+    // Linked once: no suggestion, a second link is refused.
+    let (status, _) = post(
+        &suite.app,
+        &link,
+        &auth,
+        json!({ "related_patient_id": anna }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
 #[tokio::test]
 async fn the_conversion_links_the_relation_to_the_new_patient() {
     let Some(suite) = support::suite_context(SECRET).await else {

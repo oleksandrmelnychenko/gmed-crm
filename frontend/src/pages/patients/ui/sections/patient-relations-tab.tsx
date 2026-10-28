@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ExternalLink, Pencil, Plus, Trash2, UserRoundPlus } from "lucide-react";
+import { ExternalLink, Link2, Pencil, Plus, Trash2, UserRoundPlus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,11 @@ type PatientRelationsTabProps = {
   onCreateRelation: () => void;
   onDeleteRelation: (relationId: string) => void;
   onEditRelation: (relation: RelationItem) => void;
+  /**
+   * The same person is a patient already (full name and date of birth, owner decision
+   * 2026-10-28): staff link the relation to that record. Given only to staff who manage relations.
+   */
+  onLinkRelation?: (relation: RelationItem) => void;
   /**
    * «Новая заявка для этого человека» (owner 2026-10-25): a relation without an
    * own patient record becomes a lead prefilled from what GMED holds. Given
@@ -63,6 +68,7 @@ export function PatientRelationsTab({
   onCreateRelation,
   onDeleteRelation,
   onEditRelation,
+  onLinkRelation,
   onNewRequestForPerson,
   onOpenPatient,
   relationTypeLabel,
@@ -71,6 +77,7 @@ export function PatientRelationsTab({
 }: PatientRelationsTabProps) {
   const { lang, t } = useLang();
   const newRequestLabel = lang === "de" ? "Neue Anfrage für diese Person" : "Новая заявка для этого человека";
+  const linkLabel = lang === "de" ? "Verknüpfen" : "Привязать";
   const pagination = useDataTablePagination(
     relations,
     relations.map((item) => item.id).join(":"),
@@ -128,14 +135,41 @@ export function PatientRelationsTab({
         sortable: true,
         searchable: true,
         width: 150,
-        render: (relation) =>
-          relation.related_patient_pid ? (
-            <span className="truncate font-mono text-xs text-foreground">
-              {relation.related_patient_pid}
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
-          ),
+        render: (relation) => {
+          if (relation.related_patient_pid) {
+            return (
+              <span className="truncate font-mono text-xs text-foreground">
+                {relation.related_patient_pid}
+              </span>
+            );
+          }
+          const suggestion = relation.link_suggestion;
+          if (suggestion && onLinkRelation) {
+            const pid = suggestion.patient_pid ?? "";
+            const hint = lang === "de"
+              ? `Gleicher Name und Geburtsdatum wie Patient ${pid} (${suggestion.name}). Mit dieser Patientenakte verknüpfen?`
+              : `То же имя и дата рождения, что у пациента ${pid} (${suggestion.name}). Привязать к этой карточке?`;
+            return (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="h-6 gap-1 rounded-full px-2 font-mono text-[10px]"
+                title={hint}
+                aria-label={hint}
+                data-testid="relation-link-suggestion"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onLinkRelation(relation);
+                }}
+              >
+                <Link2 className="size-3" />
+                {pid ? `${pid} · ${linkLabel}` : linkLabel}
+              </Button>
+            );
+          }
+          return <span className="text-xs text-muted-foreground">{t.common_not_set}</span>;
+        },
       },
       {
         id: "phone",
@@ -181,7 +215,7 @@ export function PatientRelationsTab({
         ),
       },
     ],
-    [formatDateTime, l, lang, relationTypeLabel, t],
+    [formatDateTime, l, lang, linkLabel, onLinkRelation, relationTypeLabel, t],
   );
 
   // Also offered in the empty state: the table toolbar only exists once there is a row.

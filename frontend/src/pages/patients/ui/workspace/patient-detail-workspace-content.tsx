@@ -331,6 +331,7 @@ type PatientDetailWorkspaceContentProps = {
   onDocumentGenerated: () => void;
   onEditContractStatus: (contract: ContractItem) => void;
   onEditRelation: (relation: RelationItem) => void;
+  onLinkRelation?: (relation: RelationItem) => void;
   onLegalStatusSheetOpenChange: (open: boolean) => void;
   onManageInvoice: (invoice: InvoiceItem) => void;
   onNotesSheetOpenChange: (open: boolean) => void;
@@ -499,6 +500,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     onDocumentStatusFilterChange,
     onEditContractStatus,
     onEditRelation,
+    onLinkRelation,
     onLegalStatusSheetOpenChange,
     onManageInvoice,
     onNotesSheetOpenChange,
@@ -904,6 +906,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               onCreateRelation={onCreateRelation}
               onDeleteRelation={onDeleteRelation}
               onEditRelation={onEditRelation}
+              onLinkRelation={canManageRelations ? onLinkRelation : undefined}
               onNewRequestForPerson={onNewRequestForPerson}
               onOpenPatient={onOpenPatient}
               relationTypeLabel={relationTypeLabel}

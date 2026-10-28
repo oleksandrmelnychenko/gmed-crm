@@ -68,6 +68,14 @@ export function relationMutationError(error: unknown): unknown {
   );
 }
 
+/** Staff confirm the suggested patient record of an unlinked relation (owner decision 2026-10-28). */
+export function linkPatientRelation(patientId: string, relationId: string, relatedPatientId: string) {
+  return apiFetch<RelationItem>(`/patients/${patientId}/relations/${relationId}/link`, {
+    method: "POST",
+    body: JSON.stringify({ related_patient_id: relatedPatientId }),
+  });
+}
+
 export async function deletePatientRelation(patientId: string, relationId: string) {
   try {
     return await apiFetch(`/patients/${patientId}/relations/${relationId}/delete`, {

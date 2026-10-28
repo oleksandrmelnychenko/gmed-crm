@@ -838,7 +838,7 @@ pub async fn link_source_person_in_tx(
                 ),
             )
             .await?;
-            add_reverse_relation_in_tx(tx, relation_id, lead_id, actor).await?;
+            add_reverse_relation_in_tx(tx, relation_id, Some(lead_id), actor).await?;
             linked = true;
         }
     }
@@ -881,7 +881,7 @@ pub async fn link_source_person_in_tx(
             )
             .await?;
             for relation_id in &relations {
-                add_reverse_relation_in_tx(tx, *relation_id, lead_id, actor).await?;
+                add_reverse_relation_in_tx(tx, *relation_id, Some(lead_id), actor).await?;
             }
             linked = true;
         }
@@ -895,11 +895,12 @@ pub async fn link_source_person_in_tx(
 /// the parent's record already has a relation to that child. Audited on the
 /// parent's record; a relation of another kind gets no reverse row. Also run
 /// by the child's conversion when the parent is a patient already
-/// ([`crate::routes::leads`], DEV 2026-10-28).
+/// ([`crate::routes::leads`], DEV 2026-10-28) and by a link staff confirm on
+/// the patient's relations (no lead).
 pub(crate) async fn add_reverse_relation_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     relation_id: Uuid,
-    lead_id: Uuid,
+    lead_id: Option<Uuid>,
     actor: Uuid,
 ) -> Result<(), sqlx::Error> {
     let reverse: Option<(Uuid, Uuid, Uuid, String)> = sqlx::query_as(

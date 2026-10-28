@@ -9739,7 +9739,7 @@ async fn convert_lead(
             && let Err(error) = super::lead_portal_account::add_reverse_relation_in_tx(
                 &mut tx,
                 relation_id,
-                lead_id,
+                Some(lead_id),
                 auth.user_id,
             )
             .await

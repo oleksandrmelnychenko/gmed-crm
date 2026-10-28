@@ -36,7 +36,11 @@ const relation = (overrides: Partial<Parameters<typeof PatientRelationsTab>[0]["
   ...overrides,
 });
 
-function renderRows(relations: ReturnType<typeof relation>[], onNewRequestForPerson?: () => void) {
+function renderRows(
+  relations: ReturnType<typeof relation>[],
+  onNewRequestForPerson?: () => void,
+  onLinkRelation?: () => void,
+) {
   return renderToStaticMarkup(
     <Tabs value="relations">
       <PatientRelationsTab
@@ -46,6 +50,7 @@ function renderRows(relations: ReturnType<typeof relation>[], onNewRequestForPer
         onCreateRelation={noop}
         onDeleteRelation={noop}
         onEditRelation={noop}
+        onLinkRelation={onLinkRelation}
         onNewRequestForPerson={onNewRequestForPerson}
         onOpenPatient={noop}
         relationTypeLabel={(value) => value}
@@ -67,6 +72,20 @@ describe("new request for a relation", () => {
   it("stays silent without the right to create leads", () => {
     const html = renderRows([relation()]);
     expect(html).not.toContain("Новая заявка для этого человека");
+  });
+});
+
+describe("link suggestion (owner decision 2026-10-28)", () => {
+  const suggested = relation({ link_suggestion: { patient_id: "patient-9", patient_pid: "P-20261028-0033", name: "Anna Muster" } });
+
+  it("offers staff the patient with the same name and date of birth", () => {
+    const html = renderRows([suggested], undefined, noop);
+    expect(html).toContain("relation-link-suggestion");
+    expect(html).toContain("P-20261028-0033 · Привязать");
+  });
+
+  it("offers nothing without the right to manage relations", () => {
+    expect(renderRows([suggested])).not.toContain("relation-link-suggestion");
   });
 });
 

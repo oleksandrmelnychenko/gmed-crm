@@ -100,6 +100,7 @@ import {
   createInvoiceDunningEvent,
   createPatientWorkflowChecklistItem,
   deletePatientRelation,
+  linkPatientRelation,
   exportPatientComplianceArchive,
   fetchPatientLabelPayload,
   revokePatientAssignment,
@@ -1743,6 +1744,24 @@ function usePatientDetailPageContent() {
     }
   }
 
+  async function handleLinkRelation(relation: RelationItem) {
+    const suggestion = relation.link_suggestion;
+    if (!id || !suggestion) return;
+    const name = relation.related_display_name || relation.related_name;
+    const question = lang === "de"
+      ? `«${name}» mit der Patientenakte ${suggestion.patient_pid ?? ""} (${suggestion.name}) verknüpfen?`
+      : `Привязать «${name}» к карточке пациента ${suggestion.patient_pid ?? ""} (${suggestion.name})?`;
+    if (!window.confirm(question)) return;
+    setTabActionError("");
+    try {
+      await linkPatientRelation(id, relation.id, suggestion.patient_id);
+      toast.success(t.common_active);
+      reload();
+    } catch (error) {
+      setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
+    }
+  }
+
   async function handleCreateContract(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!id) return;
@@ -2123,6 +2142,7 @@ function usePatientDetailPageContent() {
         onDocumentStatusFilterChange={setDocumentStatusFilter}
         onEditContractStatus={openContractStatusEditor}
         onEditRelation={openEditRelation}
+        onLinkRelation={(relation) => { void handleLinkRelation(relation); }}
         onLegalStatusSheetOpenChange={setLegalStatusSheetOpen}
         onManageInvoice={openInvoiceManager}
         onNotesSheetOpenChange={setNotesSheetOpen}

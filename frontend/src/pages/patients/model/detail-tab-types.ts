@@ -70,6 +70,11 @@ export type RelationItem = {
    */
   is_organisation?: boolean;
   created_at: string;
+  /**
+   * The one patient record this unlinked relation names by full name and date of birth
+   * (owner decision 2026-10-28): offered to staff to link, never linked by itself.
+   */
+  link_suggestion?: { patient_id: string; patient_pid?: string | null; name: string } | null;
 };
 
 export type PatientLookupItem = {

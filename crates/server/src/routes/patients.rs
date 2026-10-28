@@ -174,6 +174,10 @@ pub fn router() -> Router<AppState> {
             post(update_relation),
         )
         .route(
+            "/patients/{patient_id}/relations/{relation_id}/link",
+            post(link_relation),
+        )
+        .route(
             "/patients/{patient_id}/relations/{relation_id}/delete",
             post(delete_relation),
         )
@@ -9987,21 +9991,45 @@ async fn list_relations(
         )
     })?;
 
+    let candidates = relation_link_candidates(&state.db, patient_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to find relation link candidates");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to list patient relations",
+            )
+        })?;
+    let patient_visible = |patient_id: Uuid| {
+        let baseline_allows = !linked_patient_requires_assignment
+            || linked_patient_baseline_ids.contains(&patient_id);
+        linked_patient_view_rules
+            .decision(patient_id)
+            .unwrap_or(baseline_allows)
+    };
+
     let items = rows
         .into_iter()
         .map(|row| {
+            let relation_id = row.try_get::<Uuid, _>("id").ok();
             let linked_patient_visible = row
                 .try_get::<Option<Uuid>, _>("related_patient_id")
                 .unwrap_or_default()
-                .map(|related_patient_id| {
-                    let baseline_allows = !linked_patient_requires_assignment
-                        || linked_patient_baseline_ids.contains(&related_patient_id);
-                    linked_patient_view_rules
-                        .decision(related_patient_id)
-                        .unwrap_or(baseline_allows)
-                })
+                .map(patient_visible)
                 .unwrap_or(true);
-            build_relation_json(row, linked_patient_visible)
+            let mut item = build_relation_json(row, linked_patient_visible);
+            // Only a patient the user may see is named.
+            if let Some(candidate) = relation_id
+                .and_then(|id| candidates.get(&id))
+                .filter(|candidate| patient_visible(candidate.patient_id))
+            {
+                item["link_suggestion"] = json!({
+                    "patient_id": candidate.patient_id,
+                    "patient_pid": candidate.pid,
+                    "name": candidate.name,
+                });
+            }
+            item
         })
         .collect::<Vec<_>>();
 
@@ -10347,6 +10375,145 @@ async fn update_relation(
     ));
 
     Ok(Json(build_relation_json(row, linked_patient_visible)))
+}
+
+/// A patient record an unlinked relation names (owner decision 2026-10-28).
+struct RelationLinkCandidate {
+    patient_id: Uuid,
+    pid: Option<String>,
+    name: String,
+}
+
+/// The unlinked relations of `patient_id` that name exactly one patient
+/// record by full name and date of birth (owner decision 2026-10-28): the same
+/// person recorded again, e.g. the mother on a sibling's card. Staff are
+/// offered the link; nothing links by itself. A record the patient is linked
+/// to already, the patient itself, prospects and deleted records are left out.
+async fn relation_link_candidates(
+    db: &sqlx::PgPool,
+    patient_id: Uuid,
+) -> Result<HashMap<Uuid, RelationLinkCandidate>, sqlx::Error> {
+    let rows: Vec<(Uuid, Uuid, Option<String>, String)> = sqlx::query_as(
+        r#"SELECT pr.id, p.id, p.patient_id, btrim(concat_ws(' ', p.first_name, p.last_name))
+           FROM patient_relations pr
+           JOIN patients p
+             ON p.birth_date = pr.birth_date
+            AND p.id <> pr.patient_id
+            AND p.lifecycle_status NOT IN ('deleted', 'prospective')
+            AND lower(regexp_replace(btrim(concat_ws(' ', p.first_name, p.last_name)), '\s+', ' ', 'g'))
+              = lower(regexp_replace(btrim(pr.related_name), '\s+', ' ', 'g'))
+           WHERE pr.patient_id = $1
+             AND pr.related_patient_id IS NULL
+             AND pr.birth_date IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM patient_relations other
+                 WHERE other.patient_id = pr.patient_id AND other.related_patient_id = p.id
+             )"#,
+    )
+    .bind(patient_id)
+    .fetch_all(db)
+    .await?;
+    let mut found: HashMap<Uuid, Vec<RelationLinkCandidate>> = HashMap::new();
+    for (relation_id, patient_id, pid, name) in rows {
+        found
+            .entry(relation_id)
+            .or_default()
+            .push(RelationLinkCandidate {
+                patient_id,
+                pid,
+                name,
+            });
+    }
+    Ok(found
+        .into_iter()
+        .filter_map(|(relation_id, mut candidates)| {
+            (candidates.len() == 1).then(|| (relation_id, candidates.remove(0)))
+        })
+        .collect())
+}
+
+#[derive(Deserialize)]
+struct LinkRelationRequest {
+    related_patient_id: Uuid,
+}
+
+/// `POST /patients/{id}/relations/{relation_id}/link`: staff confirm that an
+/// unlinked relation is the patient record the relations list suggested
+/// ([`relation_link_candidates`], owner decision 2026-10-28). The other
+/// record names this patient back, as after a conversion. Audited.
+async fn link_relation(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_uuid, relation_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<LinkRelationRequest>,
+) -> Result<Json<Value>, axum::response::Response> {
+    const FAILED: &str = "Failed to link patient relation";
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
+    ensure_patient_editable(&state, &auth, patient_uuid).await?;
+    ensure_related_patient_usable(&state, &auth, body.related_patient_id).await?;
+    let candidates = relation_link_candidates(&state.db, patient_uuid)
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
+    if candidates
+        .get(&relation_id)
+        .map(|candidate| candidate.patient_id)
+        != Some(body.related_patient_id)
+    {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "This relation does not name that patient (full name and date of birth)",
+        ));
+    }
+
+    let mut transaction = state
+        .db
+        .begin()
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
+    let row = sqlx::query(&format!(
+        r#"WITH upserted AS (
+                UPDATE patient_relations
+                SET related_patient_id = $3, is_organisation = NULL
+                WHERE patient_id = $1 AND id = $2 AND related_patient_id IS NULL
+                RETURNING {RELATION_RETURNING}
+           )
+           {RELATION_SELECT_FROM_UPSERTED}"#
+    ))
+    .bind(patient_uuid)
+    .bind(relation_id)
+    .bind(body.related_patient_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| relation_write_failed(error, FAILED))?
+    .ok_or_else(|| err(StatusCode::CONFLICT, "The relation is linked already"))?;
+    audit::write_in_transaction(
+        &mut transaction,
+        &audit::domain_event(
+            "link_patient_relation",
+            Some(auth.user_id),
+            "patient",
+            Some(patient_uuid),
+            json!({
+                "relation_id": relation_id,
+                "related_patient_id": body.related_patient_id,
+            }),
+        ),
+    )
+    .await
+    .map_err(|error| relation_write_failed(error, FAILED))?;
+    super::lead_portal_account::add_reverse_relation_in_tx(
+        &mut transaction,
+        relation_id,
+        None,
+        auth.user_id,
+    )
+    .await
+    .map_err(|error| relation_write_failed(error, FAILED))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
+    Ok(Json(build_relation_json(row, true)))
 }
 
 async fn delete_relation(
