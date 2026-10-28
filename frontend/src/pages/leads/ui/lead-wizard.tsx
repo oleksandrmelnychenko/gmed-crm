@@ -30,8 +30,10 @@ export { SelectedWorkTypesSummary } from "@/pages/orders/ui/order-work-types-sum
 import { serviceDescriptionItems, serviceDescriptionText, type ServiceDescriptionItem } from "@/lib/service-description";
 import {
   Suspense,
+  createContext,
   lazy,
   useCallback,
+  useContext,
   useDeferredValue,
   useEffect,
   useId,
@@ -3213,6 +3215,10 @@ function ToggleRow({
   );
 }
 
+/** Where a refused paper signature leads (DEV 2026-10-27, owner: «навігації передивись»). */
+type WizardSignatureJump = (error: unknown) => { label: string; onClick: () => void } | null;
+const WizardSignatureJumpContext = createContext<WizardSignatureJump | null>(null);
+
 function WizardDocumentRows({
   documents,
   complianceKind,
@@ -3245,6 +3251,7 @@ function WizardDocumentRows({
   /** A short note in the metadata line, e.g. who uploaded a representative's file. */
   documentNote?: (document: DocumentItem) => ReactNode;
 }) {
+  const signatureJump = useContext(WizardSignatureJumpContext);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [protectedDocumentIds, setProtectedDocumentIds] = useState<Set<string>>(() => new Set());
   if (documents.length === 0) {
@@ -3310,6 +3317,7 @@ function WizardDocumentRows({
                 lang={lang}
                 disabled={disabled}
                 errorText={(error) => wizardSignatureErrorText(error, tx)}
+                errorAction={signatureJump ?? undefined}
                 onDone={() => {
                   setProtectedDocumentIds((current) => new Set(current).add(document.id));
                   onChanged?.();
@@ -8364,7 +8372,41 @@ ${serviceCommentLines.join("\n")}`
       </Dialog>
     );
   }
+  // Where a refused paper signature leads: the payer's section, the risk
+  // assessment or the person's card (DEV 2026-10-27).
+  const signatureErrorJump: WizardSignatureJump = (error) => {
+    if (error instanceof ApiRequestError && error.body?.error === "payer_gate_blocked") {
+      const reasons = Array.isArray(error.body.reasons) ? error.body.reasons : [];
+      if (reasons.length === 1 && reasons[0] === "client_order_signature_missing") return null;
+      return {
+        label: goToPayerLabel,
+        onClick: () => openValidationIssue({ key: "payer-declaration", step: "documents", message: "", fieldId: PAYER_SECTION_ID }),
+      };
+    }
+    if (riskGateRefusal(error)) {
+      return {
+        label: tx("Перейти к оценке риска", "Zur Risikobewertung"),
+        onClick: () => openValidationIssue({ key: "risk-assessment", step: "documents", message: "", fieldId: RISK_ASSESSMENT_SECTION_ID }),
+      };
+    }
+    const slot = representativeDocumentSlot(error);
+    const focus = representativeDocumentFocus(error);
+    const representativeId = slot && slot !== "patient"
+      ? step1Portal.intake?.representation?.representatives.find((person) => person.slot === slot)?.id ?? null
+      : null;
+    if (slot === "patient" || representativeId) {
+      return {
+        label: focus === "authority" && representativeId
+          ? tx("Загрузить подтверждение полномочий", "Vertretungsnachweis hochladen")
+          : tx("Перейти к данным документа", "Zu den Ausweisdaten"),
+        onClick: () => openRepresentativeIdData(representativeId ?? "patient", representativeId ? focus : null),
+      };
+    }
+    return null;
+  };
+
   return (
+    <WizardSignatureJumpContext.Provider value={signatureErrorJump}>
     <WizardDocumentRowErrorProvider value={documentRowError}>
     <PortalUploadsProvider
       intake={step1Portal.intake}
@@ -11102,6 +11144,7 @@ ${serviceCommentLines.join("\n")}`
                             // Off while the server would refuse it (the document is older than the order).
                             disabled={isBusy || Boolean(paperSignatureBlocker(documentToSign))}
                             errorText={(error) => wizardSignatureErrorText(error, tx)}
+                            errorAction={signatureErrorJump}
                             onDone={() => {
                               // The scan signs the order for the client on the server: the
                               // agency checkbox opens at once, not after the refresh lands
@@ -12842,6 +12885,10 @@ ${serviceCommentLines.join("\n")}`
                   size="sm"
                   disabled={isBusy || Boolean(paperSignatureBlocker(previewedDocument))}
                   errorText={(error) => wizardSignatureErrorText(error, tx)}
+                  errorAction={(error) => {
+                    const jump = signatureErrorJump(error);
+                    return jump ? { ...jump, onClick: () => { replaceDocumentPreview(null); jump.onClick(); } } : null;
+                  }}
                   onDone={() => {
                     // The scan is a new version of the document: back to the list.
                     replaceDocumentPreview(null);
@@ -13202,5 +13249,6 @@ ${serviceCommentLines.join("\n")}`
       </Dialog>
     </PortalUploadsProvider>
     </WizardDocumentRowErrorProvider>
+    </WizardSignatureJumpContext.Provider>
   );
 }

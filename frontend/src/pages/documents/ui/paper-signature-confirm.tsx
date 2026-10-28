@@ -26,6 +26,11 @@ type Props = {
   errorText?: (error: unknown) => string | null;
   /** Runs after the scan was stored as the signed version (a new document version). */
   onDone?: (result: { documentId: string; replacedDocumentId: string; signedAt: string }) => void;
+  /**
+   * A way to what blocks the refusal (DEV 2026-10-27: «Укажите источник
+   * средств» named the gap but not where to fill it); closes the dialog.
+   */
+  errorAction?: (error: unknown) => { label: string; onClick: () => void } | null;
 };
 
 /**
@@ -45,10 +50,12 @@ export function PaperSignatureConfirmButton({
   size = "xs",
   errorText,
   onDone,
+  errorAction,
 }: Props) {
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorJump, setErrorJump] = useState<{ label: string; onClick: () => void } | null>(null);
 
   const describe = (reason: unknown) => {
     const specific = errorText?.(reason);
@@ -70,6 +77,7 @@ export function PaperSignatureConfirmButton({
         data-paper-signature-confirm={documentId}
         onClick={() => {
           setError(null);
+          setErrorJump(null);
           setOpen(true);
         }}
       >
@@ -90,9 +98,24 @@ export function PaperSignatureConfirmButton({
             </DialogDescription>
           </DialogHeader>
           {error ? (
-            <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-5 text-destructive">
-              {error}
-            </p>
+            <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-5 text-destructive">
+              <span className="min-w-0 flex-1">{error}</span>
+              {errorJump ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  data-testid="paper-signature-error-jump"
+                  onClick={() => {
+                    const jump = errorJump;
+                    setOpen(false);
+                    jump.onClick();
+                  }}
+                >
+                  {errorJump.label}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
           <PaperSignatureSection
             lang={lang}
@@ -109,6 +132,7 @@ export function PaperSignatureConfirmButton({
                 return true;
               } catch (reason) {
                 setError(describe(reason));
+                setErrorJump(errorAction?.(reason) ?? null);
                 return false;
               }
             }}
