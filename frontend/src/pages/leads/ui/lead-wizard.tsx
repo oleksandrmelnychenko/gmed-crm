@@ -7910,9 +7910,12 @@ ${serviceCommentLines.join("\n")}`
     // The person's card is a <details>: open it, then go to its first field —
     // or to the proof of authority when that is what is missing (DEV 2026-10-27).
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      const form = document.querySelector<HTMLElement>(
+      const authority = focus === "authority" && representativeId !== "patient"
+        ? document.querySelector<HTMLElement>(`[data-testid="lead-representative-upload-authority-${representativeId}"]`)
+        : null;
+      // Without an upload place for the proof (the card does not ask it), the person's card.
+      const form = authority ?? document.querySelector<HTMLElement>(
         representativeId === "patient" ? '[data-testid="lead-id-data"]'
-          : focus === "authority" ? `[data-testid="lead-representative-upload-authority-${representativeId}"]`
           : `[data-testid="lead-representative-id-data-${representativeId}"]`,
       );
       const card = form?.closest("details");
@@ -7921,7 +7924,7 @@ ${serviceCommentLines.join("\n")}`
       if (!form || !panel?.contains(form)) return;
       // Scroll only the step body. Scrolling/focusing through the modal's
       // ancestors can push its header and footer out of their fixed positions.
-      const field = focus === "authority"
+      const field = authority
         ? form.querySelector<HTMLElement>("button, label[for]")
         : form.querySelector<HTMLElement>("select, input");
       const target = field ?? form;

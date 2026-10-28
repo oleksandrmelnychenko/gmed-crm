@@ -2863,6 +2863,57 @@ test.describe("lead wizard UX", () => {
     expect(oneClickAttempts).toBe(0);
   });
 
+  test("a refused paper signature offers the way to what blocks it (DEV 2026-10-28)", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const eddId = "00000000-0000-0000-0000-000000000983";
+    const formId = "00000000-0000-0000-0000-000000000984";
+    const generated = (id: string, template: string, filename: string) => ({
+      id, lead_id: leadId, auto_name: filename, original_filename: filename,
+      generated_template_id: template, mime_type: "application/pdf", file_size: 2048,
+      created_at: "2026-09-05T10:00:00Z", has_stored_file: true, is_latest_version: true,
+      signed_at: null, compliance_kind: null,
+    });
+    await page.route(`**/api/v1/documents?lead_id=${leadId}&include_archived_versions=true`, (route) => json(route, [
+      generated(eddId, "enhanced_due_diligence", "verstaerkte-pruefung.pdf"),
+      generated(formId, "lead_self_disclosure", "patientenformular.pdf"),
+    ]));
+    // The payer gate (Timur Testov: the paying guardian's source of funds) and a risk refusal.
+    await page.route(`**/api/v1/documents/${eddId}/paper-signature`, (route) => json(route, {
+      error: "payer_gate_blocked",
+      message: "GMED signs only after the client and the payer: Source of funds is missing",
+      reasons: ["payer_source_of_funds_missing"],
+    }, 409));
+    await page.route(`**/api/v1/documents/${formId}/paper-signature`, (route) => json(route, {
+      error: "risk_review_required", code: "risk_review_required", message: "A risk review decision is required",
+    }, 409));
+    await page.goto(`/leads?lead=${leadId}&view=wizard`);
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.locator('[data-step="documents"]').click();
+    const tryToSign = async (testId: string) => {
+      await wizard.getByTestId(testId).getByRole("button", { name: "Unterschrift bestätigen", exact: true }).click();
+      const paper = page.getByRole("dialog", { name: "Unterschrift bestätigen", exact: true });
+      await paper.locator('input[type="file"]').setInputFiles({ name: "signed.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 signed") });
+      await paper.getByRole("checkbox").check();
+      await paper.getByRole("button", { name: "Als unterschrieben speichern", exact: true }).click();
+      return paper;
+    };
+
+    let paper = await tryToSign("lead-wizard-enhanced-check-section");
+    await expect(paper.getByRole("alert")).toContainText("GMED unterschreibt zuletzt");
+    const toPayer = paper.getByTestId("paper-signature-error-jump");
+    await expect(toPayer).toHaveText(/zahlenden Person|Kostenübernehmer/);
+    await toPayer.click();
+    await expect(paper).toBeHidden();
+    await expect(page.locator("#lead-wizard-payer-declaration")).toBeInViewport();
+
+    paper = await tryToSign("lead-wizard-self-disclosure-section");
+    const toRisk = paper.getByTestId("paper-signature-error-jump");
+    await expect(toRisk).toHaveText("Zur Risikobewertung");
+    await toRisk.click();
+    await expect(paper).toBeHidden();
+    await expect(page.locator("#lead-wizard-risk-assessment")).toBeInViewport();
+  });
+
   test("document preview keeps mobile actions visible and omits signing for information sheets", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const leadId = "00000000-0000-0000-0000-000000000902";

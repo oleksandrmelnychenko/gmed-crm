@@ -224,6 +224,8 @@ type Mock = {
   patientId?: Json;
   /** Replaces keys of the mother as the server has her. */
   annaOverrides?: Json;
+  /** The custody as the server states it; both parents by default. */
+  custody?: "joint" | "sole_parent" | "guardian";
   /**
    * A parent the wizard save adds is on file afterwards, as the server keeps
    * it: with no address or birth data of its own (a patient link's values
@@ -254,8 +256,8 @@ async function mount(page: Page, mock: Mock) {
     representation: {
       has_representative: null,
       under_guardianship: null,
-      custody: "joint",
-      custody_stated: false,
+      custody: mock.custody ?? "joint",
+      custody_stated: mock.custody !== undefined,
       representatives: mock.motherOnly
         ? [{ ...annaPerson, ...mock.annaOverrides }]
         : [
@@ -732,6 +734,25 @@ test("a refused sheet says why, in German too", async ({ page }) => {
     "Für diese Person kann kein Bogen erstellt werden: Sie ist nicht als gesetzliche Vertretung eines Minderjährigen erfasst.",
   );
   expect(calls.generated).toHaveLength(1);
+});
+
+test("a sheet refused for a missing proof of authority leads to that upload (DEV 2026-10-28)", async ({ page }) => {
+  // One parent alone (Anna, rep1): her proof of custody is asked for (as the guardian of Timur Testov).
+  const { wizard } = await mount(page, { lang: "de", custody: "sole_parent" });
+  await page.route("**/api/v1/documents/doc-ben-sheet/mark-signed", (route) => route.fulfill({
+    status: 422,
+    contentType: "application/json",
+    body: JSON.stringify({ error: "representative_details_incomplete", code: "representative_details_incomplete", scope: "person", missing: ["rep1_authority_upload"] }),
+  }));
+  const sheetRow = wizard.locator("li, div").filter({ has: page.getByRole("button", { name: "Dokumentationsbogen natuerliche Personen - Ben Muster.pdf", exact: true }) }).filter({ has: page.getByRole("button", { name: "Unterschrift bestätigen", exact: true }) }).last();
+  await sheetRow.getByRole("button", { name: "Unterschrift bestätigen", exact: true }).click();
+  // No more «das Ausweisdokument genügt nicht» when only the proof is missing.
+  await expect(wizard).toContainText("Unterlagen dieser Person fehlen");
+  await expect(wizard).not.toContainText("genügt nicht");
+  const jump = wizard.getByRole("button", { name: "Vertretungsnachweis hochladen", exact: true });
+  await expect(jump).toBeVisible();
+  await jump.click();
+  await expect(wizard.getByTestId(`lead-representative-upload-authority-${ANNA_ID}`)).toBeInViewport();
 });
 
 test("the patient form waits until the request was sent", async ({ page }) => {
