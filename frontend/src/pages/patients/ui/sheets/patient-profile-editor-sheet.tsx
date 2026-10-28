@@ -310,6 +310,7 @@ function PatientProfileEditorFormSections({
     ["sibling", dictionary.patient_relation_type_sibling],
     ["relative", dictionary.patient_relation_type_relative],
     ["guardian", guardianLabel],
+    ["ward", dictionary.patient_relation_type_ward],
     ["caregiver", dictionary.patient_relation_type_caregiver],
     ["friend", dictionary.patient_relation_type_friend],
     ["other", dictionary.patient_relation_type_other],

@@ -140,6 +140,7 @@ export function PatientFormFields({
     ["sibling", t.patient_relation_type_sibling],
     ["relative", t.patient_relation_type_relative],
     ["guardian", t.patient_relation_type_guardian],
+    ["ward", t.patient_relation_type_ward],
     ["caregiver", t.patient_relation_type_caregiver],
     ["friend", t.patient_relation_type_friend],
     ["other", t.patient_relation_type_other],

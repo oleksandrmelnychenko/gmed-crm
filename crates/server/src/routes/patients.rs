@@ -2156,7 +2156,7 @@ fn validate_relation_payload_fields(body: &UpsertRelationRequest) -> Result<(), 
 
     match body.relation_type.trim() {
         "spouse" | "parent" | "mother" | "father" | "child" | "sibling" | "relative"
-        | "guardian" | "caregiver" | "friend" | "other" => {}
+        | "guardian" | "ward" | "caregiver" | "friend" | "other" => {}
         _ => return Err("Invalid relation type"),
     }
 

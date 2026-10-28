@@ -300,6 +300,7 @@ const SOURCE_MAP: Record<string, string> = {
   sibling: "timeline_source_relation_sibling",
   relative: "timeline_source_relation_relative",
   guardian: "timeline_source_relation_guardian",
+  ward: "timeline_source_relation_ward",
   caregiver: "timeline_source_relation_caregiver",
   friend: "timeline_source_relation_friend",
   other: "timeline_source_relation_other",

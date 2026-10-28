@@ -51,6 +51,7 @@ const RELATION_TYPE_OPTIONS = [
   "sibling",
   "relative",
   "guardian",
+  "ward",
   "caregiver",
   "friend",
   "other",

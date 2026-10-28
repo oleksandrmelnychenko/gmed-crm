@@ -13908,7 +13908,8 @@ async fn ensure_order_service_patient_allowed(
                SELECT 1
                FROM patient_relations relation
                WHERE relation.relation_type IN (
-                   'parent', 'child', 'spouse', 'sibling', 'relative', 'guardian', 'caregiver'
+                   'parent', 'child', 'spouse', 'sibling', 'relative', 'guardian', 'ward',
+                   'caregiver'
                )
                  AND (
                      (relation.patient_id = $3 AND relation.related_patient_id = $2)

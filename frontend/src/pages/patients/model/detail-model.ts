@@ -70,6 +70,7 @@ const PATIENT_RELATION_TYPE_LABEL_KEYS = {
   child: "patient_relation_type_child",
   friend: "patient_relation_type_friend",
   guardian: "patient_relation_type_guardian",
+  ward: "patient_relation_type_ward",
   other: "patient_relation_type_other",
   parent: "patient_relation_type_parent",
   mother: "patient_relation_type_mother",

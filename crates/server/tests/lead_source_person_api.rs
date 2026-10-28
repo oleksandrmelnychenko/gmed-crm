@@ -874,6 +874,54 @@ async fn a_relation_naming_a_patient_is_suggested_and_linked_by_staff() {
     assert_eq!(status, StatusCode::CONFLICT);
 }
 
+/// A guardian's own record names the child as ward, not as child (owner
+/// decision 2026-10-28).
+#[tokio::test]
+async fn a_guardians_record_names_the_child_as_ward() {
+    let Some(suite) = support::suite_context(SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let today = gmed_server::app_time::today();
+    let ceo = user(pool, "Chef", "ceo", &unique("ceo"), true).await;
+    let born = NaiveDate::from_ymd_opt(1968, 3, 3).unwrap();
+    let vera = patient(pool, ceo, "Vera", born, None, None).await;
+    let emil = patient(pool, ceo, "Emil", years_before(today, 12), None, None).await;
+    let guardian = relation(
+        pool,
+        emil,
+        "Vera Muster",
+        None,
+        None,
+        Some(born),
+        None,
+        None,
+    )
+    .await;
+    sqlx::query("UPDATE patient_relations SET relation_type = 'guardian' WHERE id = $1")
+        .bind(guardian)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, body) = post(
+        &suite.app,
+        &format!("/api/v1/patients/{emil}/relations/{guardian}/link"),
+        &bearer(ceo, "ceo"),
+        json!({ "related_patient_id": vera }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let reverse: Vec<String> = sqlx::query_scalar(
+        "SELECT relation_type FROM patient_relations WHERE patient_id = $1 AND related_patient_id = $2",
+    )
+    .bind(vera)
+    .bind(emil)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(reverse, vec!["ward".to_string()]);
+}
+
 #[tokio::test]
 async fn the_conversion_links_the_relation_to_the_new_patient() {
     let Some(suite) = support::suite_context(SECRET).await else {

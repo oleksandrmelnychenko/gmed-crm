@@ -891,7 +891,8 @@ pub async fn link_source_person_in_tx(
 
 /// The relation seen from the other side (QA 2026-10-25): once a child's
 /// relation `relation_id` points to the parent's own record, the parent's
-/// record names the child (`child`; a spouse or sibling the same kind), unless
+/// record names the child (`child`; `ward` on a guardian's record, owner
+/// decision 2026-10-28; a spouse or sibling the same kind), unless
 /// the parent's record already has a relation to that child. Audited on the
 /// parent's record; a relation of another kind gets no reverse row. Also run
 /// by the child's conversion when the parent is a patient already
@@ -914,7 +915,8 @@ pub(crate) async fn add_reverse_relation_in_tx(
            JOIN patients other ON other.id = r.patient_id
            CROSS JOIN LATERAL (
                SELECT CASE
-                   WHEN r.relation_type IN ('parent', 'mother', 'father', 'guardian') THEN 'child'
+                   WHEN r.relation_type IN ('parent', 'mother', 'father') THEN 'child'
+                   WHEN r.relation_type = 'guardian' THEN 'ward'
                    WHEN r.relation_type IN ('spouse', 'sibling') THEN r.relation_type
                END AS relation_type
            ) reverse

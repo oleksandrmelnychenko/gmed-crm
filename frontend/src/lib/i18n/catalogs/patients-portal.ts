@@ -191,6 +191,7 @@ export interface PatientsPortalTranslations {
   patient_relation_type_child: string;
   patient_relation_type_friend: string;
   patient_relation_type_guardian: string;
+  patient_relation_type_ward: string;
   patient_relation_type_other: string;
   patient_relation_type_parent: string;
   patient_relation_type_mother: string;
@@ -1178,6 +1179,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_relation_type_child: "Ребенок",
   patient_relation_type_friend: "Друг",
   patient_relation_type_guardian: "Опекун",
+  patient_relation_type_ward: "Подопечный",
   patient_relation_type_other: "Другое",
   patient_relation_type_parent: "Родитель",
   patient_relation_type_mother: "Мать",
@@ -2152,6 +2154,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_relation_type_child: "Kind",
   patient_relation_type_friend: "Freund",
   patient_relation_type_guardian: "Vormund",
+  patient_relation_type_ward: "Mündel",
   patient_relation_type_other: "Sonstiges",
   patient_relation_type_parent: "Elternteil",
   patient_relation_type_mother: "Mutter",
