@@ -875,6 +875,90 @@ async fn scenario_joint_custody_minor_from_cabinet_to_conversion() {
     assert_eq!(me["patient"]["id"], json!(patient), "{me}");
 }
 
+/// A parent who is a patient already (DEV 2026-10-28): the child's
+/// conversion names the child on the parent's own record too, once.
+#[tokio::test]
+async fn the_conversion_names_the_child_on_the_parents_own_record() {
+    let Some(app) = Scn::new().await else { return };
+    let pool = app.pool();
+    let ben: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, email,
+                                 lifecycle_status, created_by, languages)
+           VALUES ($1, 'Ben', 'Muster', DATE '1983-04-06', 'male', $2, 'active', $3, ARRAY['de'])
+           RETURNING id"#,
+    )
+    .bind(format!("P-SCN-{}", Uuid::new_v4()))
+    .bind(unique("ben.patient"))
+    .bind(app.ceo_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(ben)
+    .bind(app.pm_id)
+    .bind(app.ceo_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let request = fill_joint_custody_request(&app, "DE").await;
+    let (lead, mother, father) = (request.lead, request.mother, request.father);
+    submit(&app, &request, &request.anna).await;
+    staff_set_contact(
+        &app,
+        lead,
+        father,
+        json!({ "birth_date": "1983-04-06", "related_patient_id": ben }),
+    )
+    .await;
+    enter_identity_data(&app, lead, mother, "C01X00T47").await;
+    enter_identity_data(&app, lead, father, "C02X00T48").await;
+    for id in [mother, father] {
+        let (code, sheet) = gwg_sheet(&app, lead, &format!("representative:{id}")).await;
+        assert_eq!(code, StatusCode::OK, "{sheet}");
+        app.ok(
+            StatusCode::OK,
+            "POST",
+            &format!("/documents/{}/mark-signed", sheet["id"].as_str().unwrap()),
+            &app.pm(),
+            Some(json!({ "compliance_kind": "other" })),
+        )
+        .await;
+    }
+    app.ok(
+        StatusCode::OK,
+        "POST",
+        &format!("/leads/{lead}/identification-status/payer/own-account-payment"),
+        &app.pm(),
+        Some(json!({ "confirmed": true })),
+    )
+    .await;
+
+    let child = qualify_and_convert(&app, lead).await;
+    let reverse: Vec<(String, String)> = sqlx::query_as(
+        "SELECT related_name, relation_type FROM patient_relations WHERE patient_id = $1 AND related_patient_id = $2",
+    )
+    .bind(ben)
+    .bind(child)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        reverse,
+        vec![("Mia Muster".to_string(), "child".to_string())]
+    );
+    // The mother is no patient: her relation stays one-sided.
+    let linked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patient_relations WHERE patient_id = $1 AND related_patient_id IS NOT NULL",
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(linked, 1);
+}
+
 /// Scenario 2: the father gets his own login and edits the same request:
 /// own data, last write, custody stated by staff, sending again, and staff
 /// uploads after sending.

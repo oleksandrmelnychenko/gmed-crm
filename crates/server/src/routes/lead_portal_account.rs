@@ -893,8 +893,10 @@ pub async fn link_source_person_in_tx(
 /// relation `relation_id` points to the parent's own record, the parent's
 /// record names the child (`child`; a spouse or sibling the same kind), unless
 /// the parent's record already has a relation to that child. Audited on the
-/// parent's record; a relation of another kind gets no reverse row.
-async fn add_reverse_relation_in_tx(
+/// parent's record; a relation of another kind gets no reverse row. Also run
+/// by the child's conversion when the parent is a patient already
+/// ([`crate::routes::leads`], DEV 2026-10-28).
+pub(crate) async fn add_reverse_relation_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     relation_id: Uuid,
     lead_id: Uuid,

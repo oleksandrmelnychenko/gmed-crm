@@ -9732,6 +9732,21 @@ async fn convert_lead(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         };
+        // A parent or guardian who is a patient already names the child on
+        // the own record too (DEV 2026-10-28: the father's card did not list
+        // his second child).
+        if let (Some(relation_id), Some(_)) = (relation_id, related_patient_id)
+            && let Err(error) = super::lead_portal_account::add_reverse_relation_in_tx(
+                &mut tx,
+                relation_id,
+                lead_id,
+                auth.user_id,
+            )
+            .await
+        {
+            tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "add the reverse relation on conversion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
         let (Some(contact_id), Some(relation_id)) = (contact_id, relation_id) else {
             continue;
         };
