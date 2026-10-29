@@ -8406,6 +8406,37 @@ async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() 
         ("staff_recorded", "staff", Some("paper"))
     );
 
+    // Staff upload the client's identity scan once the client agreed again;
+    // the file is marked as theirs (owner 2026-10-29: not only a
+    // representative's files).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/consent"),
+        &pm,
+        Some(consent(Some("in_person"))),
+    )
+    .await;
+    assert!(status.is_success(), "{body}");
+    let (status, body) = upload_file(
+        router,
+        &format!("{base}/identity-document"),
+        &pm,
+        "pass.pdf",
+        "application/pdf",
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let uploaded: (String, String) = sqlx::query_as(
+        "SELECT kind, access_kind FROM lead_portal_uploads WHERE lead_id = $1 AND kind = 'identity'",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(uploaded, ("identity".to_owned(), "staff".to_owned()));
+
     // Staff send for the client only saying how the client confirmed it.
     let (status, refused) = json_request(
         router,

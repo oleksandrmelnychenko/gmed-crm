@@ -11,7 +11,7 @@ test("cabinet edits, upload, submission and staff data survive a real API round 
     : JSON.parse(await readFile(STATE_FILE, "utf8")) as ProcessState;
   const api = process.env.FORM_LIVE_API_URL ?? managed!.backendUrl;
   const bootstrap = await request.post(`${api}/api/v1/e2e/bootstrap/full-smoke`, {
-    headers: { "x-e2e-secret": managed?.secret ?? "gmed-form-recheck-test-only" },
+    headers: { "x-e2e-secret": managed?.secret ?? process.env.FORM_LIVE_E2E_SECRET ?? "gmed-form-recheck-test-only" },
   });
   expect(bootstrap.ok(), await bootstrap.text()).toBe(true);
   const scenario = await bootstrap.json();

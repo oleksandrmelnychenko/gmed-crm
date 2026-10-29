@@ -209,6 +209,7 @@ jobs:
           tests/e2e-live/chat-secure.live.spec.ts
           tests/e2e-live/realtime.live.spec.ts
           tests/e2e-live/cabinet-roundtrip.spec.ts
+          tests/e2e-live/staff-client-form.live.spec.ts
 
       - name: Upload failed live browser diagnostics
         if: failure()
