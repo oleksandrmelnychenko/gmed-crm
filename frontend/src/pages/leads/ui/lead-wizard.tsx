@@ -12038,8 +12038,12 @@ ${serviceCommentLines.join("\n")}`
                     <Field required={amlCountryFieldsRequired} label={tx("Планируемое использование активов", "Geplante Verwendung der eingesetzten Vermögenswerte")}>
                       <textarea className={textareaClass} required={amlCountryFieldsRequired} rows={3} value={draft.amlEnhancedDueDiligence.plannedAssetUse} onChange={(event) => patchAml("plannedAssetUse", event.target.value)} />
                     </Field>
+                    {/* Chosen like «Проверил» from the same people (owner 2026-10-29); never filled in by itself. */}
                     <Field required label={tx("Согласовавший руководитель", "Zustimmende Führungskraft")}>
-                      <Input className={inputClass} required value={draft.amlEnhancedDueDiligence.managerApprovalName} onChange={(event) => patchAml("managerApprovalName", event.target.value)} />
+                      <Input className={inputClass} required list="lead-aml-managers" autoComplete="off" data-testid="lead-aml-manager" value={draft.amlEnhancedDueDiligence.managerApprovalName} onChange={(event) => patchAml("managerApprovalName", event.target.value)} />
+                      <datalist id="lead-aml-managers">
+                        {amlReviewers.map((reviewer) => <option key={reviewer.id} value={reviewer.name} />)}
+                      </datalist>
                     </Field>
                   </div>
                 </section>
