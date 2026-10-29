@@ -33,9 +33,6 @@ export function OnboardingSignatureManifest({ manifest, documentId, selectedIds 
       <AdminSectionTitle>{tx("Полный комплект первичного оформления", "Vollständige Erstaufnahme")}</AdminSectionTitle>
       <StatusBadge tone="neutral">{manifest.expected_count} {tx("документов", "Dokumente")}</StatusBadge>
     </div>
-    <p className="text-xs leading-5 text-muted-foreground">{tx(
-      "Уже подписанные документы учитываются в комплекте. Бумажные копии по умолчанию повторно не отправляются. Информационные приложения считаются отдельно.",
-      "Bereits unterschriebene Dokumente gehören zum vollständigen Paket. Papierkopien werden standardmäßig nicht erneut versendet. Informationsanlagen werden separat aufgeführt.")}</p>
     {onSelect && selectable.length ? <Button type="button" size="sm" variant="outline" className="h-auto max-w-full whitespace-normal text-left" disabled={disabled} onClick={() => {
       const ids = selectable.flatMap(item => item.document_id ? [item.document_id] : []);
       const paper = selectable.flatMap(item => item.paper_signed && item.document_id ? [item.document_id] : []);

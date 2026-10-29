@@ -131,10 +131,6 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
         <AdminSectionTitle>{tx("Документы на подпись", "Dokumente zur Unterschrift")}</AdminSectionTitle>
         <StatusBadge tone="neutral">{selection.documentIds.length} / {candidates.limits.max_documents}</StatusBadge>
       </div>
-      <p className="text-xs leading-5 text-muted-foreground">{tx(
-        "Один PDF-пакет и одно приглашение для каждого подписанта.",
-        "Ein PDF-Paket und eine Einladung pro unterzeichnender Person.",
-      )}</p>
       {presetIds.length > 0 && !presetApplied ? <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => update({ documentIds: [...selection.documentIds, ...presetIds.filter(id => !selection.documentIds.includes(id))] })}>
         <Plus className="size-4" />{tx("Добавить предложенный комплект", "Vorgeschlagenes Paket übernehmen")}
       </Button> : null}
@@ -189,7 +185,6 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
 
     {resolved.required.length > 0 ? <section aria-label={tx("Приложения для ознакомления", "Anlagen zur Kenntnisnahme")} className="space-y-3 rounded-xl border border-border/70 bg-card p-3">
       <AdminSectionTitle>{tx("Приложения для ознакомления", "Anlagen zur Kenntnisnahme")}</AdminSectionTitle>
-      <p className="text-xs leading-5 text-muted-foreground">{tx("Обязательные приложения к приглашению — без отдельной подписи.", "Pflichtanlagen zur Einladung – ohne eigene Unterschrift.")}</p>
       {resolved.required.map(template => {
         const options = resolved.attachmentOptions[template] ?? [];
         const chosen = selection.attachments[template] || (options.length === 1 ? options[0].id : "");
