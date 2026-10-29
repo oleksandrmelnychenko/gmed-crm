@@ -11067,7 +11067,7 @@ ${serviceCommentLines.join("\n")}`
               {renderPayerSignatureFlow(true)}
               <div id={ORDER_SIGNATURES_ID} tabIndex={-1} className="focus:outline-none">
               <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Подписи", "Unterschriften")}>
-                <div>
+                <div className="space-y-3">
                 {/* Owner decision 2026-10-12 (QA C2-14): the client's signature of the
                     order counts only with proof — the scan of the signed copy or a QES
                     (inside the contract package during intake) — never one click. */}
@@ -11090,17 +11090,20 @@ ${serviceCommentLines.join("\n")}`
                   return (
                     <div
                       data-testid="lead-order-client-signature"
-                      className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 py-3"
+                      className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/60 bg-card p-3"
                     >
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <StateMark
-                          done={signedPatient || demoSignatureChecks.includes("order_signed_patient")}
-                          label={demoSignatureChecks.includes("order_signed_patient")
-                            ? tx("DEV · Клиент подписал тестовый заказ", "DEV · Kunde hat den Testauftrag unterzeichnet")
-                            : signedPatient
-                            ? tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")
-                            : tx("Юридическая подпись заказа ещё не подтверждена", "Rechtswirksame Auftragsunterschrift noch nicht bestätigt")}
-                        />
+                      <div className="min-w-0 flex-1 basis-96 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs font-medium text-muted-foreground">{tx("Клиент", "Kunde")}</span>
+                          <StatusChip tone={demoSignatureChecks.includes("order_signed_patient") ? "info" : signedPatient ? "success" : "warning"}>
+                            {signedPatient ? <Check aria-hidden="true" /> : <Info aria-hidden="true" />}
+                            {demoSignatureChecks.includes("order_signed_patient")
+                              ? tx("DEV · Клиент подписал тестовый заказ", "DEV · Kunde hat den Testauftrag unterzeichnet")
+                              : signedPatient
+                                ? tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")
+                                : tx("Юридическая подпись заказа ещё не подтверждена", "Rechtswirksame Auftragsunterschrift noch nicht bestätigt")}
+                          </StatusChip>
+                        </div>
                         {needsDocument && !manualOnly && !signedPatient && !demoSignatureChecks.includes("order_signed_patient") ? (
                           <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-order-signature-needs-document">
                             <CircleAlert aria-hidden="true" className="mt-0.5" />
@@ -11119,7 +11122,7 @@ ${serviceCommentLines.join("\n")}`
                             </span>
                           </StatusChip>
                         ) : (
-                        <p className={cn("flex items-start gap-2 text-xs leading-5", manualOnly ? "text-amber-800 dark:text-amber-300" : "text-muted-foreground")}>
+                        <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
                           <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                           {demoSignatureChecks.includes("order_signed_patient")
                             ? tx("Тестовая подпись зачтена для оформления на DEV.", "Testunterschrift für die Aufnahme auf DEV angerechnet.")
@@ -11180,21 +11183,22 @@ ${serviceCommentLines.join("\n")}`
                     </div>
                   );
                 })()}
+                <div className="space-y-2 rounded-xl border border-border/60 bg-card p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-xs font-medium text-muted-foreground">GMED</span>
+                    <StatusChip tone={demoSignatureChecks.includes("order_signed_agency") ? "info" : signedAgency ? "success" : "warning"}>
+                      {signedAgency ? <Check aria-hidden="true" /> : <Info aria-hidden="true" />}
+                      {demoSignatureChecks.includes("order_signed_agency") ? tx("DEV · GMED подписал тестовый заказ", "DEV · GMED hat den Testauftrag unterzeichnet") : signedAgency ? tx("Подтверждено", "Bestätigt") : tx("Ожидает подтверждения", "Bestätigung ausstehend")}
+                    </StatusChip>
+                  </div>
                 {demoSignatureChecks.includes("order_signed_agency")
-                  ? <StatusChip tone="info">{tx("DEV · GMED подписал тестовый заказ", "DEV · GMED hat den Testauftrag unterzeichnet")}</StatusChip>
+                  ? null
                   : <ToggleRow
                   checked={signedAgency}
                   // The server confirms the agency's side only after the client
                   // signed (409 before; walk-through 2026-10-24); a mark made
                   // stays removable.
                   disabled={isBusy || agencyOrderConfirmationBlocked(signedPatient, signedAgency)}
-                  hint={agencyOrderConfirmationBlocked(signedPatient, signedAgency)
-                    ? tx(
-                        "Доступно после подписи клиента: сначала подтвердите подпись заказа клиентом (выше).",
-                        "Verfügbar nach der Unterschrift des Kunden: zuerst die Auftragsunterschrift des Kunden bestätigen (oben).",
-                      )
-                    : undefined}
-                  hintTestId="lead-order-agency-confirmation-hint"
                   onChange={(checked) => {
                     setSignedAgency(checked);
                     void saveFlags(
@@ -11204,6 +11208,13 @@ ${serviceCommentLines.join("\n")}`
                   }}
                   label={tx("Агентство подтвердило заказ", "Auftrag von der Agentur bestätigt")}
                 />}
+                  {agencyOrderConfirmationBlocked(signedPatient, signedAgency) && !demoSignatureChecks.includes("order_signed_agency") ? (
+                    <div data-testid="lead-order-agency-confirmation-hint" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+                      <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                      <span>{tx("Доступно после подписи клиента: сначала подтвердите подпись заказа клиентом (выше).", "Verfügbar nach der Unterschrift des Kunden: zuerst die Auftragsunterschrift des Kunden bestätigen (oben).")}</span>
+                    </div>
+                  ) : null}
+                </div>
                 </div>
               </Section>
               </div>
