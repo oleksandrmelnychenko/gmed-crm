@@ -1,3 +1,4 @@
+import { Info } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -45,7 +46,8 @@ export function OnboardingSignatureManifest({ manifest, documentId, selectedIds 
         const id = item.document_id;
         const checked = Boolean(id && (item.paper_signed ? paperIds.includes(id) : selectedIds.includes(id)));
         const canSelect = Boolean(onSelect && id && selectable.includes(item));
-        return <li key={item.template} className="flex min-w-0 items-start gap-3 px-3 py-2.5">
+        return <li key={item.template} className="min-w-0 space-y-1.5 px-3 py-2">
+          <div className="flex min-w-0 items-start gap-2">
           {onSelect ? <input type="checkbox" className="mt-1 size-4 shrink-0 accent-[var(--brand)]"
             aria-label={`${tx("Включить в электронный пакет", "In das elektronische Paket aufnehmen")}: ${tx(...(names[item.template] ?? [item.template, item.template]))}`}
             checked={checked} disabled={disabled || !canSelect || (id === documentId && !item.paper_signed)}
@@ -56,16 +58,17 @@ export function OnboardingSignatureManifest({ manifest, documentId, selectedIds 
               const paper = event.target.checked && item.paper_signed ? [...new Set([...paperIds, id])] : paperIds.filter(other => other !== id);
               onSelect?.(ids, paper);
             }} /> : null}
-          <div className="min-w-0 flex-1 space-y-1">
-            <p className="break-words text-sm font-medium">{tx(...(names[item.template] ?? [item.template, item.template]))}</p>
-            {item.title ? <p className="break-words text-xs text-muted-foreground">{item.title}{item.version ? ` · v${item.version}` : ""}</p> : null}
-            {item.state === "missing" ? <p className="text-xs text-amber-700 dark:text-amber-300">{tx("Сначала создайте этот документ.", "Erstellen Sie zuerst dieses Dokument.")}</p> : null}
-            {item.reason && CONSENT_CHOICE_REASONS.has(item.reason) ? <p className="text-xs text-amber-700 dark:text-amber-300">{signatureErrorText(item.reason, tx)}</p> : null}
-            {item.state === "blocked" && !CONSENT_CHOICE_REASONS.has(item.reason ?? "") ? <p className="text-xs text-destructive">{tx("Проверьте доступ и текущую PDF-версию документа.", "Prüfen Sie den Zugriff und die aktuelle PDF-Version.")}</p> : null}
-          </div>
+            <p className="min-w-0 flex-1 break-words text-sm font-semibold">{tx(...(names[item.template] ?? [item.template, item.template]))}</p>
           <StatusBadge tone={item.pending_elsewhere ? "warning" : item.state === "signed" ? "success" : item.state === "ready" ? "neutral" : "warning"}>
             {item.pending_elsewhere ? tx("На подписи", "In Unterzeichnung") : item.state === "signed" ? item.paper_signed ? tx("Подписан на бумаге", "Auf Papier unterschrieben") : tx("Подписан", "Unterschrieben") : item.state === "missing" ? tx("Не создан", "Fehlt") : item.state === "blocked" ? tx("Нужна проверка", "Prüfung nötig") : checked ? tx("В пакете", "Im Paket") : tx("Не выбран", "Nicht ausgewählt")}
           </StatusBadge>
+          </div>
+          <div className="min-w-0 space-y-1.5">
+            {item.title ? <p className="break-words text-xs leading-5 text-foreground">{item.title}{item.version ? ` · v${item.version}` : ""}</p> : null}
+            {item.state === "missing" ? <p className="text-xs text-amber-700 dark:text-amber-300">{tx("Сначала создайте этот документ.", "Erstellen Sie zuerst dieses Dokument.")}</p> : null}
+            {item.reason && CONSENT_CHOICE_REASONS.has(item.reason) ? <div className="flex w-full items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"><Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>{signatureErrorText(item.reason, tx)}</span></div> : null}
+            {item.state === "blocked" && !CONSENT_CHOICE_REASONS.has(item.reason ?? "") ? <p className="text-xs text-destructive">{tx("Проверьте доступ и текущую PDF-версию документа.", "Prüfen Sie den Zugriff und die aktuelle PDF-Version.")}</p> : null}
+          </div>
         </li>;
       })}
     </ul>

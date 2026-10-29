@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Eye, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Eye, Info, Plus, Trash2 } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -126,14 +126,14 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
       documentId={documentId} selectedIds={selection.documentIds} paperIds={selection.paperSignedDocumentIds}
       availableIds={candidates.documents.filter(document => !document.ineligible_reason).map(document => document.id)}
       disabled={disabled} onSelect={(documentIds, paperSignedDocumentIds) => update({ documentIds, paperSignedDocumentIds })} /> : null}
-    <section aria-label={tx("Документы на подпись", "Dokumente zur Unterschrift")} className="space-y-3 rounded-lg border border-[var(--brand)]/30 bg-[var(--brand)]/[0.025] p-3">
+    <section aria-label={tx("Документы на подпись", "Dokumente zur Unterschrift")} className="space-y-3 rounded-xl border border-border/70 bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <AdminSectionTitle>{tx("Документы на подпись", "Dokumente zur Unterschrift")}</AdminSectionTitle>
         <StatusBadge tone="neutral">{selection.documentIds.length} / {candidates.limits.max_documents}</StatusBadge>
       </div>
       <p className="text-xs leading-5 text-muted-foreground">{tx(
-        "Все выбранные PDF объединяются в один файл и подписываются один раз. Подписанты получат одно приглашение со списком документов и страниц.",
-        "Alle ausgewählten PDFs werden zu einer Datei zusammengeführt und einmal unterschrieben. Die Unterzeichnenden erhalten eine Einladung mit der Liste der Dokumente und Seiten.",
+        "Один PDF-пакет и одно приглашение для каждого подписанта.",
+        "Ein PDF-Paket und eine Einladung pro unterzeichnender Person.",
       )}</p>
       {presetIds.length > 0 && !presetApplied ? <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => update({ documentIds: [...selection.documentIds, ...presetIds.filter(id => !selection.documentIds.includes(id))] })}>
         <Plus className="size-4" />{tx("Добавить предложенный комплект", "Vorgeschlagenes Paket übernehmen")}
@@ -148,7 +148,7 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
               <div className="min-w-0 flex-1 space-y-1">
                 <p className="break-words text-sm font-medium text-foreground">{document?.title ?? tx("Документ недоступен", "Dokument nicht verfügbar")}{document ? ` · v${document.version}` : ""}</p>
                 <p className="text-[11px] text-muted-foreground">{[index === 0 ? tx("основной документ", "Hauptdokument") : null, sizeLabel(document?.size ?? null), document?.minimum_level === "AES" ? tx("допустима AES", "AES zulässig") : "QES"].filter(Boolean).join(" · ")}</p>
-                {documentWarnings(id).map(warning => <p key={warning.kind} className={blockingWarning(warning) ? "text-xs text-destructive" : "text-xs text-amber-700 dark:text-amber-300"}>{warningText(warning, tx)}</p>)}
+                {documentWarnings(id).map(warning => <div key={warning.kind} className={warning.reason && CONSENT_CHOICE_REASONS.has(warning.reason) ? "flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" : `flex items-start gap-2 text-xs leading-5 ${blockingWarning(warning) ? "text-destructive" : "text-amber-700 dark:text-amber-300"}`}><Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>{warningText(warning, tx)}</span></div>)}
                 {!previewed ? <p className="text-[11px] text-muted-foreground">{tx("Ещё не просмотрен", "Noch nicht angesehen")}</p> : null}
                 {document?.paper_signed ? <label className="flex items-start gap-2 text-xs leading-5 text-foreground">
                   <input type="checkbox" className="mt-1 size-4 accent-[var(--brand)]" checked={selection.paperSignedDocumentIds?.includes(id) ?? false} disabled={disabled}
@@ -179,53 +179,54 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
         "Для заказа этой сметы нет предварительного расчёта медицинских расходов — пакет уйдёт без него.",
         "Zum Auftrag dieses Kostenvoranschlags gibt es keine vorläufige medizinische Kostenkalkulation – das Paket wird ohne sie versendet.",
       )}</p> : null}
-      {available.length > 0 && selection.documentIds.length < candidates.limits.max_documents ? <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Добавить документ этого пациента/лида", "Dokument dieser Person hinzufügen")}
-        <NativeComboboxSelect className="h-9 bg-field text-sm font-normal text-foreground" value="" disabled={disabled} onChange={event => { const id = event.target.value; if (id) include(id); }}>
+      {available.length > 0 && selection.documentIds.length < candidates.limits.max_documents ? <label className="grid content-start gap-1.5 font-mono text-xs font-medium text-foreground/75">{tx("Добавить документ этого пациента/лида", "Dokument dieser Person hinzufügen")}
+        <NativeComboboxSelect className="h-9 bg-field text-sm font-sans font-normal text-foreground" value="" disabled={disabled} onChange={event => { const id = event.target.value; if (id) include(id); }}>
           <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
           {available.map(document => <option key={document.id} value={document.id} disabled={Boolean(document.ineligible_reason)}>{document.title} · v{document.version}{document.pending_elsewhere ? tx(" · уже на подписи", " · bereits versendet") : document.electronic_form_excluded ? tx(" · только на бумаге", " · nur Papierform") : document.ineligible_reason && CONSENT_CHOICE_REASONS.has(document.ineligible_reason) ? tx(" · нет выбора пациента — на бумаге", " · ohne Auswahl des Patienten – Papierform") : document.paper_signed ? tx(" · повторно подписать бумажную копию", " · Papierkopie erneut unterschreiben") : ""}</option>)}
         </NativeComboboxSelect>
       </label> : null}
     </section>
 
-    {resolved.required.length > 0 ? <section aria-label={tx("Приложения для ознакомления", "Anlagen zur Kenntnisnahme")} className="space-y-3 rounded-lg border border-border p-3">
+    {resolved.required.length > 0 ? <section aria-label={tx("Приложения для ознакомления", "Anlagen zur Kenntnisnahme")} className="space-y-3 rounded-xl border border-border/70 bg-card p-3">
       <AdminSectionTitle>{tx("Приложения для ознакомления", "Anlagen zur Kenntnisnahme")}</AdminSectionTitle>
-      <p className="text-xs leading-5 text-muted-foreground">{tx("Обязательны для этого пакета: подписанты получают их вместе с приглашением, без отдельной подписи.", "Für dieses Paket verpflichtend: Die Unterzeichnenden erhalten sie mit der Einladung, ohne eigene Unterschrift.")}</p>
+      <p className="text-xs leading-5 text-muted-foreground">{tx("Обязательные приложения к приглашению — без отдельной подписи.", "Pflichtanlagen zur Einladung – ohne eigene Unterschrift.")}</p>
       {resolved.required.map(template => {
         const options = resolved.attachmentOptions[template] ?? [];
         const chosen = selection.attachments[template] || (options.length === 1 ? options[0].id : "");
         const label = attachmentLabel(template, tx);
         return <div key={template} className="space-y-1.5">
-          <p className="text-xs font-medium text-foreground">{label}</p>
+          <p className="font-mono text-xs font-medium text-foreground/75">{label}</p>
           {options.length ? <div className="flex flex-wrap items-center gap-2">
-            <NativeComboboxSelect className="min-w-0 flex-1" aria-label={label} value={chosen} disabled={disabled} onChange={event => update({ attachments: { ...selection.attachments, [template]: event.target.value } })}>
+            <NativeComboboxSelect className="h-9 min-w-0 flex-1 bg-field text-sm" aria-label={label} value={chosen} disabled={disabled} onChange={event => update({ attachments: { ...selection.attachments, [template]: event.target.value } })}>
               <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
               {options.map(option => <option key={option.id} value={option.id}>{option.title} · v{option.version}</option>)}
             </NativeComboboxSelect>
-            <Button type="button" variant="outline" size="sm" disabled={!chosen || disabled || !onPreview} onClick={() => onPreview?.(chosen, "review")}><Eye className="size-4" />{tx("Проверить", "Prüfen")}</Button>
+            <Button type="button" variant="default" size="sm" className="bg-[var(--brand)] text-white hover:brightness-95" disabled={!chosen || disabled || !onPreview} onClick={() => onPreview?.(chosen, "review")}><Eye className="size-4" />{tx("Проверить", "Prüfen")}</Button>
           </div> : <Banner tone="error">{tx(`Сначала создайте документ «${label}». Без него пакет не отправляется.`, `Erstellen Sie zuerst das Dokument „${label}“. Ohne dieses wird das Paket nicht versendet.`)}</Banner>}
         </div>;
       })}
     </section> : null}
 
-    <section aria-label={tx("Параметры приглашения", "Einstellungen der Einladung")} className="grid gap-3 rounded-lg border border-border p-3 sm:grid-cols-2">
-      <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Уровень подписи", "Signaturstufe")}
-        <NativeComboboxSelect className="h-9 bg-field text-sm font-normal text-foreground" value={selection.level} disabled={disabled} onChange={event => update({ level: event.target.value as SignatureLevel })}>
+    <section aria-label={tx("Параметры приглашения", "Einstellungen der Einladung")} className="grid items-start gap-3 rounded-xl border border-border/70 bg-card p-3 sm:grid-cols-2">
+      <div className="sm:col-span-2"><AdminSectionTitle>{tx("Параметры приглашения", "Einstellungen der Einladung")}</AdminSectionTitle></div>
+      <label className="grid content-start gap-1.5 font-mono text-xs font-medium text-foreground/75">{tx("Уровень подписи", "Signaturstufe")}
+        <NativeComboboxSelect className="h-9 bg-field text-sm font-sans font-normal text-foreground" value={selection.level} disabled={disabled} onChange={event => update({ level: event.target.value as SignatureLevel })}>
           <option value="QES">{tx("QES — квалифицированная (заменяет письменную форму)", "QES – qualifiziert (ersetzt die Schriftform)")}</option>
           <option value="AES" disabled={resolved.minimumLevel === "QES"}>{tx("AES — усиленная (только согласия и сметы)", "AES – fortgeschritten (nur Einwilligungen und Kostenvoranschläge)")}</option>
         </NativeComboboxSelect>
-        {resolved.minimumLevel === "QES" ? <span className="font-normal">{tx("Для договоров и заказов нужна QES (§ 126a BGB).", "Verträge und Aufträge erfordern eine QES (§ 126a BGB).")}</span> : null}
+        {resolved.minimumLevel === "QES" ? <span className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 font-sans font-normal leading-5 text-amber-900"><Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /><span>{tx("Для договоров и заказов нужна QES (§ 126a BGB).", "Verträge und Aufträge erfordern eine QES (§ 126a BGB).")}</span></span> : null}
       </label>
-      <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Язык приглашения", "Sprache der Einladung")}
-        <NativeComboboxSelect className="h-9 bg-field text-sm font-normal text-foreground" value={selection.language} disabled={disabled} onChange={event => update({ language: event.target.value })}>
+      <label className="grid content-start gap-1.5 font-mono text-xs font-medium text-foreground/75">{tx("Язык приглашения", "Sprache der Einladung")}
+        <NativeComboboxSelect className="h-9 bg-field text-sm font-sans font-normal text-foreground" value={selection.language} disabled={disabled} onChange={event => update({ language: event.target.value })}>
           {candidates.languages.map(language => <option key={language} value={language}>{languageNames[language] ? tx(...languageNames[language]) : language}</option>)}
         </NativeComboboxSelect>
       </label>
-      <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Подписать до (необязательно)", "Unterschreiben bis (optional)")}
-        <input type="date" className="h-9 rounded-md border border-input bg-field px-2 text-sm font-normal text-foreground" min={minDate} max={maxDate} value={selection.expiresOn} disabled={disabled} onChange={event => update({ expiresOn: event.target.value })} />
+      <label className="grid content-start gap-1.5 font-mono text-xs font-medium text-foreground/75">{tx("Подписать до (необязательно)", "Unterschreiben bis (optional)")}
+        <input type="date" className="h-9 rounded-md border border-input bg-field px-2 text-sm font-sans font-normal text-foreground" min={minDate} max={maxDate} value={selection.expiresOn} disabled={disabled} onChange={event => update({ expiresOn: event.target.value })} />
       </label>
-      <label className="grid gap-1.5 text-xs font-medium text-muted-foreground sm:col-span-2">{tx("Сообщение подписантам (необязательно)", "Nachricht an die Unterzeichnenden (optional)")}
-        <textarea className="min-h-16 rounded-md border border-input bg-field px-2 py-1.5 text-sm font-normal text-foreground" maxLength={candidates.limits.max_message_chars} value={selection.message} disabled={disabled} onChange={event => update({ message: event.target.value })} />
-        <span className="font-normal">{tx("Без медицинских данных и диагнозов: письмо уходит по обычной почте. Список документов добавляется автоматически.", "Ohne Gesundheitsdaten oder Diagnosen: Die Nachricht geht per normaler E-Mail. Die Liste der Dokumente wird automatisch ergänzt.")}</span>
+      <label className="grid content-start gap-1.5 font-mono text-xs font-medium text-foreground/75 sm:col-span-2">{tx("Сообщение подписантам (необязательно)", "Nachricht an die Unterzeichnenden (optional)")}
+        <textarea className="min-h-16 rounded-md border border-input bg-field px-2 py-1.5 text-sm font-sans font-normal text-foreground" maxLength={candidates.limits.max_message_chars} value={selection.message} disabled={disabled} onChange={event => update({ message: event.target.value })} />
+        <span className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 font-sans font-normal leading-5 text-amber-900"><Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /><span>{tx("Без медицинских данных и диагнозов: письмо уходит по обычной почте. Список документов добавляется автоматически.", "Ohne Gesundheitsdaten oder Diagnosen: Die Nachricht geht per normaler E-Mail. Die Liste der Dokumente wird automatisch ergänzt.")}</span></span>
       </label>
     </section>
   </div>;

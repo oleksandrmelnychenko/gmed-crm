@@ -138,7 +138,7 @@ describe("signature package composer rules", () => {
     expect(signatureErrorText("consent_choice_missing", txRu)).toBe(
       "Пациент ещё не выбрал согласия — используйте бумажную подпись или попросите выбрать в кабинете.",
     );
-    expect(signatureErrorText("consent_choice_changed", txRu)).toContain("изменил выбор");
+    expect(signatureErrorText("consent_choice_changed", txRu)).toContain("изменился после создания документа");
     const markup = renderToStaticMarkup(<SignaturePackageComposer documentId="consent" candidates={candidates([missing])} previewedDocumentIds={[]}
       selection={emptyPackageSelection("consent")} onChange={() => undefined} />);
     expect(markup).toContain("Unterschrift auf Papier oder bitten Sie um die Auswahl im Kundenkabinett");

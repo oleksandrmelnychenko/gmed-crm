@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Download, Eye, FileSignature, LoaderCircle, Pencil, Plus, Send, ShieldCheck, Trash2 } from "lucide-react";
+import { Download, Eye, FileSignature, LoaderCircle, Info, Mail, Pencil, Plus, Send, ShieldCheck, Trash2 } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
+import { StatusChip } from "@/components/ui/status-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -18,7 +19,7 @@ import { OnboardingSignatureManifest } from "./onboarding-signature-manifest";
 import { signatureSignerProgress } from "./signature-signer-status";
 import { SignaturePackageComposer, emptyPackageSelection, expiryInstant, resolvePackage, type PackageSelection } from "./signature-package-composer";
 import {
-  abandonSignatureRequest, combinedSignerPolicy, createSignaturePackage, packageMinimumLevel, downloadSignatureReport, fetchLeadRepresentativeSigners, fetchPackageCandidates, fetchSignatureState, knownClientSigners,
+  CONSENT_CHOICE_REASONS, abandonSignatureRequest, combinedSignerPolicy, createSignaturePackage, packageMinimumLevel, downloadSignatureReport, fetchLeadRepresentativeSigners, fetchPackageCandidates, fetchSignatureState, knownClientSigners,
   isSignaturePending, recordPaperSignature, recordSignatureDelivery, resolveSignatureReview, signatureAction, signatureErrorText, signatureFrameCoverage, signatureReasonValid, signerPolicyError,
   validSigners, type DeliveryChannel, type PackageCandidates, type SignatureRequest, type SignatureState, type SignatureStatus, type Signer, type SignerPolicy, type SignerRole,
 } from "../data/document-signature-api";
@@ -497,7 +498,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
           </section>;
           })}
 
-          {state.can_send && !pending && state.ineligible_reason && !state.requests.some(r => r.result_document_id) ? <p className="rounded-xl border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground shadow-xs">{tx(...(ineligibleMessages[state.ineligible_reason] ?? ["Документ сейчас недоступен для подписания.", "Das Dokument kann derzeit nicht unterzeichnet werden."]))}{state.electronic_form_excluded ? ` (${state.electronic_form_excluded})` : ""}</p> : null}
+          {state.can_send && !pending && state.ineligible_reason && !state.requests.some(r => r.result_document_id) ? <div className={CONSENT_CHOICE_REASONS.has(state.ineligible_reason) ? "flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" : "flex items-start gap-2 rounded-xl border border-border/70 bg-card px-4 py-3 text-sm text-foreground"}><Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>{tx(...(ineligibleMessages[state.ineligible_reason] ?? ["Документ сейчас недоступен для подписания.", "Das Dokument kann derzeit nicht unterzeichnet werden."]))}{state.electronic_form_excluded ? ` (${state.electronic_form_excluded})` : ""}</span></div> : null}
 
           {state.enabled && state.can_send && !pending && !state.ineligible_reason && completed && !composeNew ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => { setComposeNew(true); onComposeNew?.(); }}><Plus className="size-4" />{tx("Новый запрос подписи", "Neue Signaturanfrage")}</Button> : null}
           {!composing && state.onboarding_manifest ? <OnboardingSignatureManifest manifest={state.onboarding_manifest} /> : null}
@@ -515,28 +516,28 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               {!candidates && !candidatesError ? <p role="status" className="text-xs text-muted-foreground"><LoaderCircle className="mr-2 inline size-4 animate-spin" />{tx("Загрузка документов…", "Dokumente werden geladen…")}</p> : null}
               {candidates ? <SignaturePackageComposer documentId={documentId} candidates={candidates} selection={selection} disabled={busy || awaitingState} previewedDocumentIds={previewedDocumentIds} onPreview={onPreviewRelated} onChange={next => { setSelection(next); setConfirmed(false); setActionError(null); }} /> : null}
 
-              <section aria-label={tx("Подписанты", "Unterzeichnende Personen")} className="space-y-3">
+              <section aria-label={tx("Подписанты", "Unterzeichnende Personen")} className="space-y-3 rounded-xl border border-border/70 bg-card p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <AdminSectionTitle>{policy === "client_only" ? tx("Подпись пациента", "Unterschrift der Patientenseite") : policy === "agency_only" ? tx("Подпись GMED", "GMED-Unterschrift") : tx("Подписанты", "Unterzeichnende Personen")}</AdminSectionTitle>
                   <Badge variant="outline" className="rounded-full text-[10px]" aria-label={`${tx("Выбрано подписантов", "Ausgewählte Personen")}: ${selectedSigners.length} / ${signers.length}`}>{selectedSigners.length} / {signers.length}</Badge>
                 </div>
-                {policy === "payer_and_agency" || policy === "client_payer_and_agency" ? <p className="text-xs leading-5 text-muted-foreground">{tx("Заявление о принятии расходов подписывает плательщик в своём поле подписи, затем GMED.", "Die Kostenübernahmeerklärung unterschreibt der Kostenübernehmer in seinem eigenen Unterschriftsfeld, danach GMED.")}</p> : null}
-                {policy === "both_parties" && isPackage ? <p className="text-xs leading-5 text-muted-foreground">{tx("Сторона пациента получит одно приглашение со всеми документами и подпишет первой; GMED получит пакет после неё.", "Die Patientenseite erhält eine Einladung mit allen Dokumenten und unterschreibt zuerst; GMED erhält das Paket danach.")}</p> : null}
+                {policy === "payer_and_agency" || policy === "client_payer_and_agency" ? <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"><Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>{tx("Заявление о принятии расходов подписывает плательщик в своём поле подписи, затем GMED.", "Die Kostenübernahmeerklärung unterschreibt der Kostenübernehmer in seinem eigenen Unterschriftsfeld, danach GMED.")}</span></div> : null}
+                {policy === "both_parties" && isPackage ? <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"><Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>{tx("Сторона пациента получит одно приглашение со всеми документами и подпишет первой; GMED получит пакет после неё.", "Die Patientenseite erhält eine Einladung mit allen Dokumenten und unterschreibt zuerst; GMED erhält das Paket danach.")}</span></div> : null}
                 {signers.map((signer, index) => {
                   const selected = !excludedSigners.includes(index);
                   const editing = selected && (!validSigners([signer]) || editingSigners.includes(index));
                   const name = `${signer.first_name} ${signer.last_name}`.trim() || `${tx("Подписант", "Unterzeichnende Person")} ${index + 1}`;
-                  return <div key={index} className={`min-w-0 rounded-lg border p-3 ${selected ? "border-[var(--brand)]/35 bg-[var(--brand)]/[0.025]" : "border-border/70 bg-muted/20"}`}>
+                  return <div key={index} className={`min-w-0 rounded-lg border p-3 ${selected ? "border-[var(--brand)]/40 bg-card" : "border-border/70 bg-muted/20"}`}>
                     <div className="flex min-w-0 items-start gap-2">
                       <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
                         <input type="checkbox" aria-label={`${tx("Выбрать подписанта", "Person auswählen")} ${index + 1}: ${name}`} checked={selected} disabled={busy || awaitingState} onChange={event => selectSigner(index, event.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" />
-                        <span className="min-w-0 space-y-1">
-                          <span className="block text-[11px] text-muted-foreground">{tx(...roleLabels[signer.role])}</span>
-                          <span className="block break-words text-sm font-medium">{name}</span>
-                          {signer.email ? <span className="block break-all text-xs text-muted-foreground">{signer.email}</span> : null}
+                        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                          <span className="break-words text-sm font-semibold">{name}</span>
+                          <StatusChip className="border-violet-200 bg-violet-50 text-violet-700">{tx(...roleLabels[signer.role])}</StatusChip>
+                          {signer.email ? <StatusChip tone="warning" className="break-all"><Mail aria-hidden="true" />{signer.email}</StatusChip> : null}
                         </span>
                       </label>
-                      <div className="flex shrink-0 flex-col gap-1">
+                      <div className="flex shrink-0 items-center gap-1">
                         {!editing ? <Button type="button" variant="ghost" size="icon-sm" disabled={busy || awaitingState || !selected} aria-label={`${tx("Изменить подписанта", "Person bearbeiten")} ${index + 1}`} onClick={() => setEditingSigners(current => [...current, index])}><Pencil className="size-3.5" /></Button> : null}
                         {signers.length > 1 ? <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" disabled={busy || awaitingState} aria-label={`${tx("Удалить подписанта", "Person entfernen")} ${index + 1}`} onClick={() => removeSigner(index)}><Trash2 className="size-3.5" /></Button> : null}
                       </div>

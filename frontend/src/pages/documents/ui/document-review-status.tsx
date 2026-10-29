@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, LoaderCircle, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { StatusChip } from "@/components/ui/status-chip";
 import { apiFetch } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
@@ -63,10 +64,10 @@ export function DocumentReviewStatus({
   return <div className="mt-2 space-y-2 text-xs">
     {actionError ? <p role="alert" className="text-destructive">{tx("Отметка не сохранена. Проверьте актуальный статус и повторите.", "Vermerk nicht gespeichert. Prüfen Sie den aktuellen Status und versuchen Sie es erneut.")}</p> : null}
     <div className="flex flex-wrap items-center gap-2">
-      <Badge variant="outline">{state.acknowledged ? tx("Ознакомлен", "Kenntnisnahme bestätigt") : state.sent ? tx("Отправлен для ознакомления", "Zur Kenntnisnahme versendet") : tx("Не отправлен", "Nicht versendet")}</Badge>
+      <StatusChip tone={state.acknowledged ? "success" : state.sent ? "info" : "warning"}>{state.acknowledged ? tx("Ознакомлен", "Kenntnisnahme bestätigt") : state.sent ? tx("Отправлен для ознакомления", "Zur Kenntnisnahme versendet") : tx("Не отправлен", "Nicht versendet")}</StatusChip>
       {event?.test_mode ? <Badge variant="outline">DEMO</Badge> : null}
       {event ? <span className="text-muted-foreground">{at} · {event.automatic ? "Skribble" : event.by}</span> : null}
-      {!state.acknowledged && state.can_record ? <Button type="button" size="xs" variant="outline" disabled={disabled || busy} onClick={() => setConfirming(value => value ? null : { kind: state.sent ? "acknowledged" : "sent", sent_event_id: state.sent?.id ?? null })}>{state.sent ? <Check className="size-3.5" /> : <Send className="size-3.5" />}{state.sent ? tx("Подтвердить ознакомление", "Kenntnisnahme bestätigen") : tx("Отметить как отправленный", "Als versendet markieren")}</Button> : null}
+      {!state.acknowledged && state.can_record ? <Button type="button" size="xs" variant="default" className="bg-[var(--brand)] text-white hover:brightness-95" disabled={disabled || busy} onClick={() => setConfirming(value => value ? null : { kind: state.sent ? "acknowledged" : "sent", sent_event_id: state.sent?.id ?? null })}>{state.sent ? <Check className="size-3.5" /> : <Send className="size-3.5" />}{state.sent ? tx("Подтвердить ознакомление", "Kenntnisnahme bestätigen") : tx("Отметить как отправленный", "Als versendet markieren")}</Button> : null}
     </div>
     {confirming ? <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2">
       <span>{confirmationStale ? tx("Статус отправки изменился. Проверьте его и откройте подтверждение заново.", "Der Versandstatus hat sich geändert. Prüfen und öffnen Sie die Bestätigung erneut.") : confirming.kind === "acknowledged" ? tx("Получено подтверждение клиента об ознакомлении с этой версией?", "Hat der Kunde die Kenntnisnahme dieser Version bestätigt?") : tx("Эта версия уже отправлена клиенту? Это только отметка, письмо не отправляется.", "Wurde diese Version bereits an den Kunden versendet? Dies vermerkt nur den Versand und versendet keine E-Mail.")}</span>

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, FileText, LoaderCircle, Minus, Plus } from "lucide-react";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
+import { StatusChip } from "@/components/ui/status-chip";
 import { Button } from "@/components/ui/button";
 import { apiFetchFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
@@ -200,9 +201,9 @@ function PdfPreview({ documentId, packageDocuments, onReady, onRetry }: Props & 
   };
 
   return <div aria-label={tx("PDF для подписи", "PDF zur Unterschrift")} className="m-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/70 bg-muted/30 shadow-sm">
-    {sources ? <nav aria-label={tx("Документы пакета", "Dokumente des Pakets")} className="flex shrink-0 flex-wrap gap-1.5 border-b border-border/70 bg-card px-2 py-1.5">
-      {sources.map((source, index) => <Button key={source.id} type="button" variant="outline" size="sm" className="h-auto min-h-7 max-w-full whitespace-normal py-1 text-left text-xs" disabled={rendering || Boolean(error)} onClick={() => goToDocument(source.id)}>
-        {index + 1}. {source.title} · <span className={source.kind === "signing" ? "text-[var(--brand)]" : "text-muted-foreground"}>{sourceKindLabel(source.kind, lang)}</span>
+    {sources ? <nav aria-label={tx("Документы пакета", "Dokumente des Pakets")} className="grid max-h-48 shrink-0 gap-1.5 overflow-y-auto border-b border-border/70 bg-card p-2">
+      {sources.map((source, index) => <Button key={source.id} type="button" variant="outline" size="sm" className="h-auto min-h-8 w-full justify-start gap-2 bg-card px-2.5 py-1.5 text-left text-xs hover:bg-muted/60" title={source.title} disabled={rendering || Boolean(error)} onClick={() => goToDocument(source.id)}>
+        <span className="shrink-0 font-mono text-muted-foreground">{index + 1}.</span><FileText aria-hidden="true" className="size-3.5 shrink-0" /><span className="min-w-0 flex-1 truncate">{source.title}</span><StatusChip tone={source.kind === "signing" ? "warning" : "info"} className="shrink-0 text-[11px]">{sourceKindLabel(source.kind, lang)}</StatusChip>
       </Button>)}
     </nav> : null}
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b border-border/70 bg-card px-2 py-1.5">
