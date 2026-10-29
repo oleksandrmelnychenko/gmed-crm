@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
+import { preferredLanguageOptions } from "@/pages/leads/model/lead-wizard.model";
 import { ArrowLeft, ArrowRight, CircleAlert, LoaderCircle, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -1287,13 +1288,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
  * N-02: Akan and Twi are both «Акан» in Russian; the first code stays, the
  * chosen one always), sorted by that name.
  */
-function cabinetLanguageOptions(lang: string, current = "") {
-  const seen = new Set<string>();
-  return LANGUAGE_OPTIONS.filter((option) => {
-    const name = languageName(option.value, lang).toLowerCase();
-    if (name === option.value.toLowerCase()) return false;
-    if (seen.has(name) && option.value !== current) return false;
-    seen.add(name);
-    return true;
-  }).sort((left, right) => languageName(left.value, lang).localeCompare(languageName(right.value, lang), lang));
+/** The languages GMED serves (owner 2026-10-29); a stored other language stays as the last option. */
+function cabinetLanguageOptions(_lang: string, current = "") {
+  return preferredLanguageOptions(LANGUAGE_OPTIONS, current);
 }

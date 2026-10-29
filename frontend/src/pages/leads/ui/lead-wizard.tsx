@@ -431,7 +431,7 @@ import {
   intakeAsksDiscoverySource,
   isMinor,
   isRepeatIntakeLead,
-  namedLanguageOptions,
+  preferredLanguageOptions,
   patientInsuranceCoversGermany,
   prepaymentDueAtPatch,
   repeatIntakePatientId,
@@ -9094,8 +9094,9 @@ ${serviceCommentLines.join("\n")}`
                   <NativeComboboxSelect id={STEP1_CONTROL_IDS.language} name="primary_language" value={draft.language} className={selectClass} onChange={(event) => patch("language", event.target.value)}>
                     <option value="">{tx("Выберите", "Auswählen")}</option>
                     {/* Only languages with a name in the UI language; a stored code without one stays visible. */}
-                    {draft.language && !namedLanguageOptions(LANGUAGE_OPTIONS, lang).some((item) => item.value === draft.language) ? <option value={draft.language}>{draft.language}</option> : null}
-                    {namedLanguageOptions(LANGUAGE_OPTIONS, lang).map((item) => <option key={item.value} value={item.value} data-search-text={`${item.value} ${languageLabel(item.value, "ru")} ${languageLabel(item.value, "de")} ${englishLanguageName(item.value)}`}>{languageLabel(item.value, lang)}</option>)}
+                    {/* The languages GMED serves (owner 2026-10-29); a stored other language stays visible. */}
+                    {draft.language && !preferredLanguageOptions(LANGUAGE_OPTIONS, draft.language).some((item) => item.value === draft.language) ? <option value={draft.language}>{draft.language}</option> : null}
+                    {preferredLanguageOptions(LANGUAGE_OPTIONS, draft.language).map((item) => <option key={item.value} value={item.value} data-search-text={`${item.value} ${languageLabel(item.value, "ru")} ${languageLabel(item.value, "de")} ${englishLanguageName(item.value)}`}>{languageLabel(item.value, lang)}</option>)}
                   </NativeComboboxSelect>
                 </Field>
                 <Field

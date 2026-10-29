@@ -146,7 +146,7 @@ import {
   type LeadGateErrors,
   type LeadGateField,
 } from "./model/lead-gate-form";
-import { isMinor, namedLanguageOptions } from "./model/lead-wizard.model";
+import { isMinor, preferredLanguageOptions } from "./model/lead-wizard.model";
 import { trustedContactRelationLabel } from "./model/lead-trusted-contacts";
 import { LANGUAGE_OPTIONS, englishLanguageName, languageLabel } from "@/components/ui/language-multi-select";
 import { CountrySelect } from "@/components/ui/country-select";
@@ -1718,7 +1718,8 @@ function useLeadsPageContent() {
   // The form «Данные для квалификации» edits an open lead only: a patient's
   // data live in the patient card.
   const gateEditable = permissions.canEdit && !detailOutOfWork && !detailIsConverted;
-  const gateLanguageOptions = namedLanguageOptions(LANGUAGE_OPTIONS, lang === "de" ? "de" : "ru");
+  // The languages GMED serves (owner 2026-10-29).
+  const gateLanguageOptions = preferredLanguageOptions(LANGUAGE_OPTIONS);
   const detailIsMinor = Boolean(detail?.date_of_birth) && isMinor(detail?.date_of_birth ?? "", new Date());
 
   const detailPaneNode: ReactNode = (

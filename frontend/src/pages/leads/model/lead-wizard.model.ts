@@ -770,6 +770,23 @@ export function clinicalWarningPayload(
   };
 }
 
+/** The languages GMED serves (owner 2026-10-29): «Предпочитаемый язык» offers these, in this order. */
+export const PREFERRED_LANGUAGE_CODES = ["de", "ru", "uk", "es", "en"] as const;
+
+/**
+ * The options of «Предпочитаемый язык» in the wizard, the new-lead form and
+ * the cabinet: [`PREFERRED_LANGUAGE_CODES`] in their order; a stored language
+ * outside them (an older lead) is kept as the last option.
+ */
+export function preferredLanguageOptions<Option extends { value: string }>(
+  options: readonly Option[],
+  current = "",
+): Option[] {
+  const codes: string[] = [...PREFERRED_LANGUAGE_CODES];
+  if (current && !codes.includes(current)) codes.push(current);
+  return codes.flatMap((code) => options.find((option) => option.value === code) ?? []);
+}
+
 /**
  * The languages of "Предпочитаемый язык": the ISO 639-1 list of the language
  * picker (`LANGUAGE_OPTIONS`, named by the browser's `Intl.DisplayNames`),
