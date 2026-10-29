@@ -3281,6 +3281,7 @@ async fn load_lead_conversion_readiness(
                         AND cr.granted AND cr.revoked_at IS NULL
                         AND (cr.expires_at IS NULL OR cr.expires_at > now())
                         AND (cr.context->>'access_kind' = 'guardian'
+                             OR cr.context ? 'recorded_by_staff'
                              OR leads.date_of_birth IS NULL
                              OR leads.date_of_birth
                                 <= ((now() AT TIME ZONE 'Europe/Berlin')::date - INTERVAL '18 years'))
@@ -3292,6 +3293,7 @@ async fn load_lead_conversion_readiness(
                         AND cr.granted AND cr.revoked_at IS NULL
                         AND (cr.expires_at IS NULL OR cr.expires_at > now())
                         AND (cr.context->>'access_kind' = 'guardian'
+                             OR cr.context ? 'recorded_by_staff'
                              OR leads.date_of_birth IS NULL
                              OR leads.date_of_birth
                                 <= ((now() AT TIME ZONE 'Europe/Berlin')::date - INTERVAL '18 years'))

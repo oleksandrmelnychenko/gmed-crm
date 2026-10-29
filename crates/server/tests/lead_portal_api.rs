@@ -8282,10 +8282,11 @@ async fn representative_follow_up_tracks_files_and_requires_current_inquiry_cons
 }
 
 /// Staff fill in the client's cabinet form from the wizard (owner decision
-/// 2026-10-29): every form step, also after the send, marked as staff's;
-/// the consents stay the client's, and only staff who edit leads come in.
+/// 2026-10-29): every form step, also after the send, marked as staff's,
+/// a consent the client gave them with how it was given; only staff who edit
+/// leads come in.
 #[tokio::test]
-async fn staff_fill_in_the_cabinet_form_but_never_give_the_consents() {
+async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() {
     let Some(app) = test_app().await else { return };
     let router = &app.suite.app;
     let pool = &app.suite.pool;
@@ -8316,16 +8317,63 @@ async fn staff_fill_in_the_cabinet_form_but_never_give_the_consents() {
     .unwrap();
     assert_eq!(kind.as_deref(), Some("staff"));
 
-    // The consents are the client's own.
-    let (status, _) = json_request(
+    // Staff record a consent the client gave them, saying how (owner
+    // decision 2026-10-29); it counts for the client's own login too.
+    let consent = |how: Option<&str>| {
+        let mut body = json!({"purpose": "lead_inquiry_processing", "version": "2026-10-03", "language": "de"});
+        if let Some(how) = how {
+            body["recorded_how"] = json!(how);
+            body["recorded_note"] = json!("Anruf der Patientin");
+        }
+        body
+    };
+    let (status, refused) = json_request(
         router,
         "POST",
         &format!("{base}/consent"),
         &pm,
-        Some(json!({"purpose": "lead_inquiry_processing", "version": "2026-10-03", "language": "de"})),
+        Some(consent(None)),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "consent_recorded_how_required");
+    let (status, given) = json_request(
+        router,
+        "POST",
+        &format!("{base}/consent"),
+        &pm,
+        Some(consent(Some("phone"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{given}");
+    let how: Option<String> = sqlx::query_scalar(
+        "SELECT context -> 'recorded_by_staff' ->> 'how' FROM consent_records WHERE lead_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(how.as_deref(), Some("phone"));
+    let (_, view) = json_request(router, "GET", &base, &patient, None).await;
+    assert!(
+        view["consents"]["lead_inquiry_processing"]["given_at"].is_string(),
+        "{view}"
+    );
+    // The client's withdrawal ends it.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &format!("{base}/consent/revoke"),
+        &patient,
+        Some(json!({"purpose": "lead_inquiry_processing"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, view) = json_request(router, "GET", &base, &patient, None).await;
+    assert!(
+        view["consents"]["lead_inquiry_processing"]["given_at"].is_null(),
+        "{view}"
+    );
 
     // After the send the form is closed for the client, open for staff.
     sqlx::query("UPDATE leads SET portal_submitted_at = now() WHERE id = $1")

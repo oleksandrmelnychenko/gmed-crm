@@ -1015,12 +1015,23 @@ export function giveLeadConsent(
   purpose: string,
   version: string,
   language: string,
+  /** Staff record a consent the client gave them (owner decision 2026-10-29): how, and a note. */
+  recorded?: { how: StaffConsentChannel; note: string } | null,
 ): Promise<{ purpose: string; given_at: string; version: string }> {
   return apiFetch(`${base(leadId)}/consent`, {
     method: "POST",
-    body: JSON.stringify({ purpose, version, language }),
+    body: JSON.stringify({
+      purpose,
+      version,
+      language,
+      ...(recorded ? { recorded_how: recorded.how, recorded_note: recorded.note.trim() || null } : {}),
+    }),
   });
 }
+
+/** How the client gave a consent staff record (server: `STAFF_CONSENT_CHANNELS`). */
+export const STAFF_CONSENT_CHANNELS = ["phone", "in_person", "email", "paper"] as const;
+export type StaffConsentChannel = (typeof STAFF_CONSENT_CHANNELS)[number];
 
 /**
  * Saves the person's own choice of the consent form options (every save is a new record; the

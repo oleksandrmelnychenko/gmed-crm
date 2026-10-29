@@ -2858,7 +2858,9 @@ where
         r#"SELECT id, COALESCE(granted_at, created_at)
            FROM consent_records
            WHERE lead_id = $1
-             AND user_id = $2
+             -- A consent staff recorded for the client counts for every login
+             -- of the request (owner decision 2026-10-29).
+             AND (user_id = $2 OR context ? 'recorded_by_staff')
              AND consent_type = $3
              AND granted = true
              AND revoked_at IS NULL
@@ -4894,6 +4896,45 @@ struct ConsentRequest {
     purpose: String,
     version: String,
     language: String,
+    /// Staff record a consent the client gave them (owner decision
+    /// 2026-10-29): how — one of [`STAFF_CONSENT_CHANNELS`]; required for staff.
+    #[serde(default)]
+    recorded_how: Option<String>,
+    /// What staff note with it (who called, which paper), at most 500 characters.
+    #[serde(default)]
+    recorded_note: Option<String>,
+}
+
+/// How the client gave a consent staff record ([`ConsentRequest::recorded_how`]).
+pub(crate) const STAFF_CONSENT_CHANNELS: &[&str] = &["phone", "in_person", "email", "paper"];
+
+/// The `recorded_by_staff` part of a consent's context, or the 422 when the
+/// way the client gave it is missing or unknown, or the note is too long.
+#[allow(clippy::result_large_err)]
+pub(crate) fn staff_consent_record(
+    how: Option<&str>,
+    note: Option<&str>,
+    staff: Uuid,
+) -> Result<Value, axum::response::Response> {
+    let how = how.map(str::trim).unwrap_or_default();
+    if !STAFF_CONSENT_CHANNELS.contains(&how) {
+        return Err(coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "consent_recorded_how_required",
+            "Say how the client gave the consent",
+            json!({ "field": "recorded_how", "allowed": STAFF_CONSENT_CHANNELS }),
+        ));
+    }
+    let note = note.map(str::trim).filter(|note| !note.is_empty());
+    if note.is_some_and(|note| note.chars().count() > 500) {
+        return Err(coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_field",
+            "At most 500 characters",
+            json!({ "field": "recorded_note" }),
+        ));
+    }
+    Ok(json!({ "how": how, "note": note, "staff_user_id": staff }))
 }
 
 #[derive(Deserialize)]
@@ -5841,7 +5882,8 @@ async fn give_consent(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<ConsentRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    // Staff record a consent the client gave them (owner decision 2026-10-29).
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     let purpose = match consent_purpose(&body.purpose) {
@@ -5861,12 +5903,41 @@ async fn give_consent(
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
     };
-    let kind = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
-        Ok(Some((kind, _))) => kind,
+    let (kind, row) = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+        Ok(Some(found)) => found,
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
-    let Some(text) = purpose.text(kind, &language) else {
+    // Staff record what the client (or, for a minor, the parent) agreed to:
+    // the wording the client reads, with how it was given.
+    let recorded_by_staff = if kind == AccessKind::Staff {
+        match staff_consent_record(
+            body.recorded_how.as_deref(),
+            body.recorded_note.as_deref(),
+            auth.user_id,
+        ) {
+            Ok(record) => Some(record),
+            Err(response) => return response,
+        }
+    } else {
+        None
+    };
+    let text_kind = if kind == AccessKind::Staff {
+        let minor = crate::routes::leads::is_minor_on(
+            row.try_get::<Option<NaiveDate>, _>("date_of_birth")
+                .ok()
+                .flatten(),
+            crate::app_time::today(),
+        );
+        if minor {
+            AccessKind::Guardian
+        } else {
+            AccessKind::Own
+        }
+    } else {
+        kind
+    };
+    let Some(text) = purpose.text(text_kind, &language) else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Unsupported language");
     };
     match active_consent(&mut *tx, lead_id, auth.user_id, purpose).await {
@@ -5882,7 +5953,7 @@ async fn give_consent(
         Ok(None) => {}
         Err(error) => return internal(error, "load consent"),
     }
-    let context = json!({
+    let mut context = json!({
         "source": "lead_portal",
         "purpose": purpose.purpose(),
         "text_version": purpose.version(),
@@ -5892,6 +5963,9 @@ async fn give_consent(
         "access_kind": kind.as_str(),
         "source_lead_id": lead_id,
     });
+    if let Some(record) = &recorded_by_staff {
+        context["recorded_by_staff"] = record.clone();
+    }
     let (consent_id, given_at): (Uuid, DateTime<Utc>) = match sqlx::query_as(
         r#"INSERT INTO consent_records (user_id, consent_type, granted, granted_at, context, lead_id)
            VALUES ($1, $2, true, now(), $3, $4)
@@ -5920,6 +5994,7 @@ async fn give_consent(
                 "text_version": purpose.version(),
                 "language": language,
                 "access_kind": kind.as_str(),
+                "recorded_how": recorded_by_staff.as_ref().map(|record| record["how"].clone()),
             }),
         ),
     )
@@ -5963,7 +6038,8 @@ async fn revoke_consent(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<ConsentRevokeRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    // Staff record the client's withdrawal too (owner decision 2026-10-29).
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     let purpose = match consent_purpose(&body.purpose) {
@@ -5980,15 +6056,20 @@ async fn revoke_consent(
         Err(error) => return internal(error, "lock request"),
     };
     let revoked: Vec<Uuid> = match sqlx::query_scalar(
+        // The caller's own consent and one staff recorded for the client;
+        // staff withdraw every consent of the request for the client.
         r#"UPDATE consent_records
            SET revoked_at = now()
-           WHERE lead_id = $1 AND user_id = $2 AND consent_type = $3
+           WHERE lead_id = $1
+             AND (user_id = $2 OR context ? 'recorded_by_staff' OR $4)
+             AND consent_type = $3
              AND granted = true AND revoked_at IS NULL
            RETURNING id"#,
     )
     .bind(lead_id)
     .bind(auth.user_id)
     .bind(purpose.consent_type())
+    .bind(kind == AccessKind::Staff)
     .fetch_all(&mut *tx)
     .await
     {

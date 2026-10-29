@@ -2605,7 +2605,7 @@ test.describe("patient portal after conversion", () => {
 // Staff fill in the client's form from the wizard (owner decision 2026-10-29): the same form,
 // every entry saved as staff's; the consents and the send stay the client's own.
 test.describe("the client's form filled in by staff", () => {
-  test("opens for staff with a banner; consents and the send stay the client's", async ({ page }) => {
+  test("opens for staff with a banner; staff record a consent with how it was given; no send", async ({ page }) => {
     const { calls } = await setup(page, "lead");
     await page.route("**/api/v1/me", (route) => route.fulfill({
       json: {
@@ -2623,10 +2623,19 @@ test.describe("the client's form filled in by staff", () => {
     }));
     await page.goto("/leads/lead-1/client-form");
     await expect(page.getByTestId("lead-request-staff-mode")).toBeVisible();
+    // Staff record the client's consent with how it was given (owner 2026-10-29).
     const consent = page.getByTestId("lead-request-inquiry-consent");
-    await expect(consent.getByRole("checkbox")).toBeDisabled();
-    await expect(page.getByTestId("lead-request-inquiry-consent-client-only")).toBeVisible();
-    // Staff are not held on the first step by the consent they cannot give.
+    await page.route("**/api/v1/me/lead-requests/lead-1/consent", async (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      expect(body).toMatchObject({ purpose: "lead_inquiry_processing", recorded_how: "phone" });
+      await route.fallback();
+    });
+    await consent.getByRole("checkbox").click();
+    await expect(page.getByTestId("lead-request-inquiry-consent-record-save")).toBeDisabled();
+    await page.getByTestId("lead-request-inquiry-consent-record-how").selectOption("phone");
+    await page.getByTestId("lead-request-inquiry-consent-record-save").click();
+    await expect.poll(() => calls.consents).toEqual(["lead_inquiry_processing"]);
+    await expect(consent.getByRole("checkbox")).toBeChecked();
     await page.locator("#lead-request-middle_name").fill("Maria");
     await page.getByTestId("lead-request-step-person").getByRole("button", { name: "Weiter" }).click();
     await expect.poll(() => calls.personalData).toEqual([{ middle_name: "Maria" }]);
