@@ -188,8 +188,8 @@ test("staff read the lead's GwG statements beside the identification sheet", asy
   await expect(block.getByTestId("lead-gwg-answer-high_risk_country")).toHaveCount(0);
   await expect(block.getByTestId("lead-gwg-declared-correct")).toHaveText("Подтвердил правильность: 05.10.2026 11:30");
 
-  // Read-only beneath the sheet actions; the redundant explanatory label was removed.
-  await expect(block.getByTestId("lead-gwg-statements-content").locator("input, textarea, select:not([data-testid^='lead-upload-move-']), button")).toHaveCount(0);
+  // Read-only beneath the sheet actions; the redundant explanatory label was removed; «Изменить» opens the client's form (2026-10-29).
+  await expect(block.getByTestId("lead-gwg-statements-content").locator("input, textarea, select:not([data-testid^='lead-upload-move-']), button:not([data-testid^='lead-client-form-edit-'])")).toHaveCount(0);
   await expect(wizard.getByText(/^Заполняется из заявки:/)).toHaveCount(0);
   const actions = wizard.getByTestId("gwg-identification-actions");
   await expect(actions).toBeVisible();
@@ -402,8 +402,8 @@ test("the invoice recipient and the payment route follow the economic interest; 
   await expect(flag).toHaveClass(/bg-amber-50/);
   await expect(flag).toHaveClass(/border-amber-200/);
   await expect(group.getByTestId("lead-gwg-billing-by-payer")).toHaveCount(0);
-  // Read-only: nothing forces the EDD sheet or blocks anything; staff decide.
-  await expect(group.locator("input, textarea, select, button")).toHaveCount(0);
+  // Read-only: nothing forces the EDD sheet or blocks anything; staff decide; «Изменить» opens the client's form.
+  await expect(group.locator("input, textarea, select, button:not([data-testid^='lead-client-form-edit-'])")).toHaveCount(0);
   await expect(wizard.getByTestId("gwg-identification-actions")).toBeVisible();
 
   await group.scrollIntoViewIfNeeded();
