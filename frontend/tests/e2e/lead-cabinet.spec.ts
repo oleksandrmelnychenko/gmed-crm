@@ -2601,3 +2601,36 @@ test.describe("patient portal after conversion", () => {
     await expect(page.getByTestId("lead-request")).toBeVisible();
   });
 });
+
+// Staff fill in the client's form from the wizard (owner decision 2026-10-29): the same form,
+// every entry saved as staff's; the consents and the send stay the client's own.
+test.describe("the client's form filled in by staff", () => {
+  test("opens for staff with a banner; consents and the send stay the client's", async ({ page }) => {
+    const { calls } = await setup(page, "lead");
+    await page.route("**/api/v1/me", (route) => route.fulfill({
+      json: {
+        id: "staff-user",
+        email: "petra.manager@example.com",
+        name: "Petra Manager",
+        role: "patient_manager",
+        capabilities: ["leads.view", "leads.edit"],
+        created_at: "2026-10-01T08:00:00Z",
+        preferred_language: "de",
+        password_change_required: false,
+        portal_mode: null,
+        lead_portal: null,
+      },
+    }));
+    await page.goto("/leads/lead-1/client-form");
+    await expect(page.getByTestId("lead-request-staff-mode")).toBeVisible();
+    const consent = page.getByTestId("lead-request-inquiry-consent");
+    await expect(consent.getByRole("checkbox")).toBeDisabled();
+    await expect(page.getByTestId("lead-request-inquiry-consent-client-only")).toBeVisible();
+    // Staff are not held on the first step by the consent they cannot give.
+    await page.locator("#lead-request-middle_name").fill("Maria");
+    await page.getByTestId("lead-request-step-person").getByRole("button", { name: "Weiter" }).click();
+    await expect.poll(() => calls.personalData).toEqual([{ middle_name: "Maria" }]);
+    await step(page, "send");
+    await expect(page.getByTestId("lead-request-submit")).toHaveCount(0);
+  });
+});

@@ -534,7 +534,8 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     // The client's form filled in by staff from the wizard (owner 2026-10-29).
     id: "leads/client-form",
     match: "prefix",
-    path: "/leads/",
+    // After the exact "/leads": matches "/leads/{id}/client-form".
+    path: "/leads",
     roles: ROLES_LEADS,
     capability: "leads.edit",
   },
