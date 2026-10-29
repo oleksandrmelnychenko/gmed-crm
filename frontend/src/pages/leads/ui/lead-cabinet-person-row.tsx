@@ -171,49 +171,48 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
         </Button>
       </div>
       <Dialog open={mode !== null} allowImplicitDismissal onOpenChange={(next) => { if (!next) close(); }}>
-        <DialogContent className="max-w-md" data-testid="person-cabinet-correction">
+        <DialogContent className="gap-4 sm:max-w-2xl" data-testid="person-cabinet-correction">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="flex items-center gap-2.5">
+              <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
               {mode === "delete"
                 ? tx(`Удалить «${stored.name}»?`, `«${stored.name}» entfernen?`)
                 : tx("Исправить данные", "Daten korrigieren")}
             </DialogTitle>
-            <DialogDescription>
-              {mode === "delete"
-                ? tx("Клиент отзывает согласие на передачу информации этому человеку. Форма согласия получит новую версию.",
-                  "Der Kunde widerruft die Einwilligung zur Auskunft an diese Person. Die Einverständniserklärung erhält eine neue Version.")
-                : tx("Кого указать и что сообщать, решает клиент; здесь только исправление данных. Форма согласия получит новую версию.",
-                  "Wen der Kunde benennt und was mitgeteilt wird, entscheidet er selbst; hier werden nur Daten korrigiert. Die Einverständniserklärung erhält eine neue Version.")}
-            </DialogDescription>
+            {mode === "delete" ? <DialogDescription className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
+              <Info aria-hidden="true" className="mt-1 size-4 shrink-0" />
+              <span>{tx("Клиент отзывает согласие на передачу информации этому человеку. Форма согласия получит новую версию.",
+                "Der Kunde widerruft die Einwilligung zur Auskunft an diese Person. Die Einverständniserklärung erhält eine neue Version.")}</span>
+            </DialogDescription> : null}
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="grid gap-4 rounded-xl border border-border/60 bg-card p-4 sm:grid-cols-2">
             {mode === "edit" ? <>
-              <div className={fieldClass}>
+              <div className={`${fieldClass} sm:col-span-2`}>
                 <label htmlFor="person-cabinet-name" className={labelClass}>{tx("Имя", "Name")}</label>
-                <Input id="person-cabinet-name" value={name} maxLength={120} onChange={(event) => setName(event.target.value)} />
+                <Input className="bg-card text-foreground" id="person-cabinet-name" value={name} maxLength={120} onChange={(event) => setName(event.target.value)} />
               </div>
               <div className={fieldClass}>
                 <label htmlFor="person-cabinet-phone" className={labelClass}>{tx("Телефон, с которого звонит", "Telefonnummer für Anrufe")}</label>
-                <Input id="person-cabinet-phone" type="tel" value={phone} maxLength={40} onChange={(event) => setPhone(event.target.value)} />
+                <Input className="bg-card text-foreground" id="person-cabinet-phone" type="tel" value={phone} maxLength={40} onChange={(event) => setPhone(event.target.value)} />
               </div>
               {institution ? null : <div className={fieldClass}>
                 <label htmlFor="person-cabinet-birth-date" className={labelClass}>{tx("Дата рождения", "Geburtsdatum")}</label>
-                <Input id="person-cabinet-birth-date" type="date" value={birthDate} onChange={(event) => setBirthDate(event.target.value)} />
+                <Input className="bg-card text-foreground" id="person-cabinet-birth-date" type="date" value={birthDate} onChange={(event) => setBirthDate(event.target.value)} />
               </div>}
               {stored.contact ? <div className={fieldClass}>
                 <label htmlFor="person-cabinet-contact" className={labelClass}>{tx("Контакт (прежний)", "Kontakt (bisher)")}</label>
-                <Input id="person-cabinet-contact" value={contact} maxLength={120} onChange={(event) => setContact(event.target.value)} />
+                <Input className="bg-card text-foreground" id="person-cabinet-contact" value={contact} maxLength={120} onChange={(event) => setContact(event.target.value)} />
               </div> : null}
             </> : null}
-            <div className={fieldClass}>
+            <div className={`${fieldClass} sm:col-span-2`}>
               <label htmlFor="person-cabinet-reason" className={labelClass}>{tx("Причина", "Grund")}</label>
               <textarea id="person-cabinet-reason" rows={2} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)}
                 placeholder={mode === "delete" ? tx("Например: клиент отозвал по телефону 29.10.", "Z. B.: Kunde hat am 29.10. telefonisch widerrufen.") : tx("Например: клиент сообщил новый номер.", "Z. B.: Kunde hat eine neue Nummer mitgeteilt.")}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring" />
             </div>
-            {error ? <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p> : null}
+            {error ? <p role="alert" className="sm:col-span-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p> : null}
           </div>
-          <DialogFooter>
+          <DialogFooter className="bg-card">
             <Button type="button" variant="outline" disabled={busy} onClick={close}>{tx("Отмена", "Abbrechen")}</Button>
             <Button type="button" variant={mode === "delete" ? "destructive" : "default"} disabled={busy} onClick={() => void submit()}
               data-testid="person-cabinet-correction-submit">

@@ -505,11 +505,6 @@ function usePatientInvoicesPageContent() {
               </Banner>
             </div>
           ) : null}
-          <p className="mt-4 text-sm text-muted-foreground">
-            {lang === "de"
-              ? "„Bezahlt“ sind eingegangene Zahlungen. „Vorauszahlung verrechnet“ wurde bereits einer Rechnung zugeordnet. „Noch zu zahlen“ ist der verbleibende Betrag der sichtbaren Rechnungen, abzüglich bereits bezahlter Anzahlungen und Guthaben – bitte nichts doppelt überweisen."
-              : "«Оплачено» — поступившие платежи. «Зачтено предоплат» — сумма, уже применённая к счетам. «Требуется доплатить» — остаток по доступным вам счетам за вычетом уже оплаченных авансов и переплат, чтобы ничего не оплачивать дважды."}
-          </p>
           {accountStatement.movements.some((movement) =>
             movement.kind === "balance_adjustment" ||
             movement.kind === "balance_adjustment_reversal"

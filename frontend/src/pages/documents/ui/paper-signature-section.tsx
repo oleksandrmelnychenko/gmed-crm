@@ -1,9 +1,10 @@
 import { useId, useState } from "react";
-import { FileUp, LoaderCircle, Stamp } from "lucide-react";
+import { FileText, FileUp, Info, LoaderCircle, Stamp } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
 import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
@@ -49,13 +50,15 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
   }
 
   return (
-    <section data-paper-signature className="rounded-xl border border-border/70 bg-card shadow-xs">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+    <section data-paper-signature className="overflow-hidden rounded-xl border border-border/70 bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5">
         <AdminSectionTitle>{tx("Подписано на бумаге", "Auf Papier unterschrieben")}</AdminSectionTitle>
         <Stamp aria-hidden="true" className="size-4 text-muted-foreground" />
       </div>
-      <div className="space-y-3 p-4">
-        <p className="text-xs leading-5 text-muted-foreground">
+      <div className="space-y-3 p-3">
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <p>
           {electronicFormExcluded
             ? tx(
                 `Для этого документа закон исключает электронную форму (${electronicFormExcluded}). Загрузите скан экземпляра, подписанного от руки.`,
@@ -65,8 +68,10 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
                 "Если документ подписан от руки, загрузите его скан. Скан станет подписанной версией документа, а договор, заказ или согласие будут отмечены как подписанные.",
                 "Wurde das Dokument handschriftlich unterschrieben, laden Sie den Scan hoch. Der Scan wird zur unterschriebenen Fassung des Dokuments; Vertrag, Auftrag oder Einwilligung gelten damit als unterschrieben.",
               )}
-        </p>
+          </p>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
+          <StatusChip tone="warning">{tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}</StatusChip>
           <span className="inline-flex">
             <input
               id={inputId}
@@ -83,8 +88,8 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
             <label
               htmlFor={inputId}
               className={cn(
-                buttonVariants({ variant: "outline", size: "sm" }),
-                "h-9 cursor-pointer rounded-lg peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
+                buttonVariants({ variant: "default", size: "sm" }),
+                "h-8 cursor-pointer rounded-lg bg-[var(--brand)] text-white hover:brightness-95 peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
                 blocked && "pointer-events-none opacity-50",
               )}
             >
@@ -92,9 +97,12 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
               {scan ? tx("Выбрать другой файл", "Andere Datei wählen") : tx("Выбрать скан", "Scan auswählen")}
             </label>
           </span>
-          <span className="min-w-0 flex-1 truncate text-xs text-foreground">
-            {scan ? scan.name : tx("PDF, JPG или PNG, до 25 МБ", "PDF, JPG oder PNG, bis 25 MB")}
-          </span>
+          {scan ? (
+            <StatusChip className="border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">
+              <FileText aria-hidden="true" />
+              <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{scan.name}</span>
+            </StatusChip>
+          ) : null}
         </div>
         {tooLarge ? (
           <p role="alert" className="text-xs text-destructive">
@@ -102,12 +110,12 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
           </p>
         ) : null}
         {/* The app's DD.MM.YYYY date field, not the browser's own (QA C3-02). */}
-        <label className="grid max-w-56 gap-1.5 text-xs font-medium text-muted-foreground">
-          {tx("Дата подписи", "Unterschrieben am")}
+        <label className="grid max-w-56 gap-1.5 text-xs font-medium text-foreground">
+          <span className="font-mono">{tx("Дата подписи", "Unterschrieben am")}</span>
           <Input
             type="date"
             data-testid="paper-signature-date"
-            className="h-9 text-sm font-normal"
+            className="h-9 bg-card text-sm font-normal text-foreground"
             max={today}
             value={signedOn}
             disabled={blocked}
@@ -122,7 +130,7 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
             {tx("Дата подписи не может быть в будущем.", "Das Unterschriftsdatum darf nicht in der Zukunft liegen.")}
           </p>
         ) : null}
-        <label className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-3 text-xs leading-5 dark:border-amber-800 dark:bg-amber-950/30">
+        <label className="flex items-start gap-2 rounded-lg bg-muted/25 px-3 py-2.5 text-sm leading-6 text-foreground">
           <input
             type="checkbox"
             checked={confirmed}
@@ -140,7 +148,7 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
         <div className="flex justify-end">
           <Button
             type="button"
-            className="h-9 rounded-lg"
+            className="h-9 rounded-lg bg-[var(--brand)] text-white hover:brightness-95"
             disabled={!scan || tooLarge || !dateValid || !confirmed || blocked}
             onClick={() => void submit()}
           >

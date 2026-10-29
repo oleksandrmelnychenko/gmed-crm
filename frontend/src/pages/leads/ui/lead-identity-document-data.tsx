@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
-import { Check, LoaderCircle, UserRound } from "lucide-react";
+import { Check, ChevronDown, Files, LoaderCircle, UserRound } from "lucide-react";
 
 import { checkboxClass, inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,9 @@ import type { Tx } from "../model/lead-payer";
 import type { LeadStaffIdDataMarks } from "../model/lead-risk-intake";
 import { LeadRepresentativeUploads } from "./lead-representative-uploads";
 import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
+
+const identityInputClass = cn(inputClass, "bg-card text-foreground disabled:opacity-100 disabled:bg-muted/20");
+const identitySelectClass = cn(selectClass, "bg-card text-foreground disabled:opacity-100 disabled:bg-muted/20");
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
 
@@ -109,7 +112,7 @@ function FormField({
 }) {
   return (
     <label className={cn("min-w-0 space-y-1.5", className)} onBlur={onBlur}>
-      <span className={cn(tokens.text.label, "block font-mono")}>{label}</span>
+      <span className={cn(tokens.text.label, "block font-mono text-foreground")}>{label}</span>
       {children}
       {error ? (
         <span id={errorId} role="alert" className="block text-xs font-medium text-destructive">
@@ -372,7 +375,7 @@ export function LeadIdentityDocumentDataForm({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <FormField label={tx("Вид документа", "Art des Dokuments")} error={fieldError("type")} errorId={errorId("type")} onBlur={touch("type")}>
           <NativeComboboxSelect
-            className={cn(selectClass, fieldError("type") && "border-destructive")}
+            className={cn(identitySelectClass, fieldError("type") && "border-destructive")}
             name="id_document_type"
             value={draft.type}
             disabled={disabled}
@@ -390,7 +393,7 @@ export function LeadIdentityDocumentDataForm({
         </FormField>
         <FormField label={tx("Номер документа", "Dokumentnummer")} error={fieldError("number")} errorId={errorId("number")} onBlur={touch("number")}>
           <Input
-            className={cn(inputClass, "uppercase")}
+            className={cn(identityInputClass, "uppercase")}
             name="id_document_number"
             autoComplete="off"
             maxLength={60}
@@ -403,7 +406,7 @@ export function LeadIdentityDocumentDataForm({
         </FormField>
         <FormField label={tx("Кем выдан", "Ausstellende Behörde")} error={fieldError("authority")} errorId={errorId("authority")} onBlur={touch("authority")}>
           <Input
-            className={inputClass}
+            className={identityInputClass}
             name="id_issuing_authority"
             maxLength={200}
             value={draft.authority}
@@ -417,7 +420,7 @@ export function LeadIdentityDocumentDataForm({
           <CountrySelect
             value={draft.country}
             lang={lang}
-            className={cn(selectClass, fieldError("country") && "border-destructive")}
+            className={cn(identitySelectClass, fieldError("country") && "border-destructive")}
             aria-label={tx("Страна выдачи", "Ausstellungsland")}
             disabled={disabled}
             onChange={(code) => patch({ country: code ?? "" })}
@@ -425,7 +428,7 @@ export function LeadIdentityDocumentDataForm({
         </FormField>
         <FormField label={tx("Дата выдачи", "Ausgestellt am")} error={fieldError("issuedOn")} errorId={errorId("issuedOn")} onBlur={touch("issuedOn")}>
           <Input
-            className={inputClass}
+            className={identityInputClass}
             type="date"
             name="id_issued_on"
             // No `max`: the picker would keep a future date to itself and the
@@ -443,7 +446,7 @@ export function LeadIdentityDocumentDataForm({
         </FormField>
         <FormField label={tx("Действителен до", "Gültig bis")} error={fieldError("validUntil")} errorId={errorId("validUntil")} onBlur={touch("validUntil")}>
           <Input
-            className={inputClass}
+            className={identityInputClass}
             type="date"
             name="id_valid_until"
             value={draft.validUntil}
@@ -568,18 +571,20 @@ function RepresentativeForm({
   const fileCount = person.identity_documents.length + person.authority_documents.length;
   return (
     <details
-      className="rounded-md border border-border/60 bg-background/50 p-2.5"
+      className="group/representative overflow-hidden rounded-xl border border-border bg-card text-foreground"
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
       data-testid={`lead-representative-id-card-${person.id}`}
     >
-      <summary className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-3 py-2.5 text-sm transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <UserRound aria-hidden="true" className="size-4 shrink-0" />
         <span className="font-semibold text-foreground">{representativeName(person) || "—"}</span>
         <StatusChip className={cn(PARENT_ROLE_CHIP_CLASS, "whitespace-normal")}>{representativeRoleLabel(person, tx)}</StatusChip>
         {fileCount > 0 ? (
-          <span className="text-xs text-muted-foreground">
-            · {tx("файлов", "Dateien")}: {fileCount}
-          </span>
+          <StatusChip tone="info">
+            <Files aria-hidden="true" />
+            {tx("Файлов", "Dateien")}: {fileCount}
+          </StatusChip>
         ) : null}
         {!open ? (
           <IdentityDocumentStatusChip
@@ -588,8 +593,9 @@ function RepresentativeForm({
             testId={status.kind === "expired" ? `lead-representative-id-expired-${person.id}` : `lead-representative-id-summary-${person.id}`}
           />
         ) : null}
+        <ChevronDown aria-hidden="true" className={cn("ml-auto size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
       </summary>
-      <div className="space-y-3 pt-2.5">
+      <div className="space-y-3 border-t border-border/50 p-3 [&>[data-testid^=lead-representative-id-data]]:rounded-lg [&>[data-testid^=lead-representative-id-data]]:bg-card [&>[data-testid^=lead-representative-id-data]]:p-3">
         {/* First the scan, then the data read from it. */}
         <LeadRepresentativeUploads
           leadId={leadId}
@@ -712,7 +718,8 @@ export function LeadIdentityDocumentData({
       />
       {representatives.length > 0 ? (
         <div className="space-y-2" data-testid="lead-representatives-id-data">
-          <h4 className="text-xs font-semibold text-foreground">
+          <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             {tx("Документы представителей", "Ausweise der Vertreter")}
           </h4>
           {representatives.map((person) => (

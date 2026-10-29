@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { FileCheck2 } from "lucide-react";
+import { FileCheck2, FileText } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import {
   Dialog,
   DialogContent,
@@ -85,16 +86,14 @@ export function PaperSignatureConfirmButton({
         {label ?? tx("Подтвердить подпись", "Unterschrift bestätigen")}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-[560px]">
+        <DialogContent className="gap-3 sm:w-[calc(100vw-3rem)] sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{tx("Подтверждение подписи", "Unterschrift bestätigen")}</DialogTitle>
-            <DialogDescription className="break-words">
-              {tx(
-                "Подписанным документ становится только с подтверждением: загрузите скан подписанного экземпляра или подпишите документ электронно.",
-                "Als unterschrieben gilt das Dokument nur mit Nachweis: Laden Sie den Scan des unterschriebenen Exemplars hoch oder lassen Sie das Dokument elektronisch unterschreiben.",
-              )}
-              {" "}
-              <span className="font-medium text-foreground">{title}</span>
+            <DialogTitle className="flex items-center gap-2"><FileCheck2 aria-hidden="true" className="size-5 shrink-0 text-[var(--brand)]" />{tx("Подтверждение подписи", "Unterschrift bestätigen")}</DialogTitle>
+            <DialogDescription className="pt-1">
+              <StatusChip className="border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">
+                <FileText aria-hidden="true" />
+                <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{title}</span>
+              </StatusChip>
             </DialogDescription>
           </DialogHeader>
           {error ? (

@@ -5130,9 +5130,6 @@ export function LeadWizard({
     && toCents(requiredPrepayment) <= toCents(quoteTotal)
   );
   const prepaymentRemaining = Math.max(requiredPrepayment - enteredPrepayment, 0);
-  const prepaymentInvoiceHref = quote?.patient_id && order?.id
-    ? `/invoices?patient=${encodeURIComponent(quote.patient_id)}&order=${encodeURIComponent(order.id)}&quote=${encodeURIComponent(quote.id)}&invoice_type=advance&create=1`
-    : null;
   const serverQuoteAccepted = readinessChecks.get("quote_accepted");
   // A repeat order covered by a package needs no quote: the server's check
   // passes then, and the step counter follows it.
@@ -8239,7 +8236,7 @@ ${serviceCommentLines.join("\n")}`
       return tx("Документ заказа устарел — создайте новую версию и подпишите её", "Einzelauftrag veraltet – neue Version erstellen und unterschreiben lassen");
     }
     if (template === "order_cost_estimate" && failing("estimate_document_outdated")) {
-      return tx("Смета устарела — пересчитайте и создайте новую версию", "Kostenvoranschlag veraltet – neu berechnen und neue Version erstellen");
+      return tx("Документ сметы создан до последнего изменения сумм или предоплаты — создайте новую версию", "Kostenvoranschlag vor der letzten Änderung von Beträgen oder Vorauszahlung erstellt – neue Version erstellen");
     }
     return null;
   };
@@ -8324,7 +8321,7 @@ ${serviceCommentLines.join("\n")}`
         onChanged={() => { void refreshDocumentsState(); }}
         documentNote={(document) => {
           const upload = byId.get(document.id);
-          return upload ? <span>{representativeFileOrigin(upload, tx)}</span> : null;
+          return upload ? <StatusChip tone="warning">{representativeFileOrigin(upload, tx)}</StatusChip> : null;
         }}
       /> : null}
       </>
@@ -11367,7 +11364,6 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </div>
 
-                {/* Top-aligned: the received column has a hint and a button below (owner 2026-10-19: the row jumped). */}
                 <div className="flex flex-wrap items-start gap-3">
                   {prepayment ? (
                     <Field className="w-full sm:w-64" label={tx("Необходимая предоплата", "Erforderliche Vorauszahlung")}>
@@ -11419,38 +11415,7 @@ ${serviceCommentLines.join("\n")}`
                       />
                     </Field>
                   ) : null}
-                  {/* Hint and link stay outside the <label> so the field is named only by its label. */}
-                  <div className="w-full space-y-2 sm:w-64">
-                    <Field className="block" label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
-                      <Input
-                        className={cn(inputClass, "font-mono tabular-nums")}
-                        inputMode="decimal"
-                        min="0"
-                        max={quote ? quoteTotal : undefined}
-                        step="0.01"
-                        value={paidAmount}
-                        readOnly
-                        disabled={!prepayment || isBusy}
-                        placeholder="0.00"
-                        aria-describedby={prepayment ? "lead-wizard-received-prepayment-hint" : undefined}
-                      />
-                    </Field>
-                      {prepayment ? <p id="lead-wizard-received-prepayment-hint" className="text-xs leading-5 text-muted-foreground">{tx(
-                        "Сумма обновляется из оплат авансового счёта.",
-                        "Der Betrag wird aus den Zahlungen der Vorauszahlungsrechnung übernommen.",
-                      )}</p> : null}
-                      {prepaymentInvoiceHref ? (
-                        <StaffLink
-                          to={prepaymentInvoiceHref}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full justify-center")}
-                        >
-                          <ReceiptText aria-hidden="true" className="size-3.5" />
-                          {tx("Внести предоплату", "Vorauszahlung erfassen")}
-                        </StaffLink>
-                      ) : null}
-                  </div>
+                  {/* Received prepayment is recorded through patient invoices, outside the lead wizard. */}
                   {!acceptedQuote ? (
                     <div className="flex w-full flex-col gap-1.5 sm:w-auto">
                       <Button
@@ -11464,9 +11429,16 @@ ${serviceCommentLines.join("\n")}`
                         {tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
                       </Button>
                       {estimateDocumentOutdated ? (
-                        <p id="lead-wizard-estimate-outdated" className="max-w-xs text-xs leading-5 text-amber-800 dark:text-amber-200">
-                          {tx("Смета устарела — пересчитайте и создайте новую версию", "Kostenvoranschlag veraltet – neu berechnen und neue Version erstellen")}
-                        </p>
+                        // The amounts may be right: the PDF of the estimate prints the
+                        // prepayment and was made before its last change (DEV 2026-10-29).
+                        <div id="lead-wizard-estimate-outdated" className="flex max-w-sm flex-col items-start gap-1.5 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                          <span>{tx("Документ сметы создан до последнего изменения сумм или предоплаты — создайте новую версию документа.", "Das Dokument des Kostenvoranschlags stammt von vor der letzten Änderung der Beträge oder der Vorauszahlung – erstellen Sie eine neue Version.")}</span>
+                          <Button type="button" variant="outline" size="xs" disabled={isBusy || !lines.some(validLine)} data-testid="lead-wizard-estimate-new-version"
+                            onClick={() => void generateCommercialDocument("order_cost_estimate")}>
+                            {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3 animate-spin" /> : <FileText className="size-3" />}
+                            {tx("Создать новую версию", "Neue Version erstellen")}
+                          </Button>
+                        </div>
                       ) : null}
                     </div>
                   ) : null}

@@ -1,7 +1,8 @@
 import { useId, useState, type ReactNode } from "react";
-import { LoaderCircle, Upload } from "lucide-react";
+import { CalendarDays, FileText, LoaderCircle, Upload } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
@@ -79,51 +80,54 @@ function UploadBlock({
   };
   const rendered = files.length > 0 ? renderFiles?.(person, kind) : null;
   return (
-    <div className="space-y-1.5" data-testid={`lead-representative-upload-${kind}-${person.id}`}>
+    <div className="space-y-2 rounded-lg border border-border/60 bg-card p-3" data-testid={`lead-representative-upload-${kind}-${person.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-foreground">{title}</span>
-        <span className="inline-flex">
-          <input
-            id={inputId}
-            type="file"
-            className="peer sr-only"
-            accept={LEAD_UPLOAD_ACCEPT}
-            disabled={disabled || busy}
-            data-testid={`lead-representative-upload-${kind}-${person.id}-input`}
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              event.currentTarget.value = "";
-              if (file) void upload(file);
-            }}
-          />
-          <label
-            htmlFor={inputId}
-            className={cn(
-              buttonVariants({ variant: "outline", size: "sm" }),
-              "h-8 rounded-lg peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
-              (disabled || busy) && "pointer-events-none opacity-50",
-            )}
-          >
-            {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Upload aria-hidden="true" className="size-3.5" />}
-            {busy
-              ? tx("Загрузка…", "Wird hochgeladen…")
-              : files.length > 0
-                ? tx("Добавить файл", "Datei hinzufügen")
-                : tx("Загрузить файл", "Datei hochladen")}
-          </label>
-        </span>
+        <span className="flex items-center gap-2 text-sm font-semibold text-foreground"><span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />{title}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusChip tone="warning">{tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}</StatusChip>
+          <span className="inline-flex">
+            <input
+              id={inputId}
+              type="file"
+              className="peer sr-only"
+              accept={LEAD_UPLOAD_ACCEPT}
+              disabled={disabled || busy}
+              data-testid={`lead-representative-upload-${kind}-${person.id}-input`}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void upload(file);
+              }}
+            />
+            <label
+              htmlFor={inputId}
+              className={cn(
+                buttonVariants({ variant: "default", size: "sm" }),
+                "h-8 rounded-lg bg-[var(--brand)] text-white hover:brightness-95 peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
+                (disabled || busy) && "pointer-events-none opacity-50",
+              )}
+            >
+              {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Upload aria-hidden="true" className="size-3.5" />}
+              {busy
+                ? tx("Загрузка…", "Wird hochgeladen…")
+                : files.length > 0
+                  ? tx("Добавить файл", "Datei hinzufügen")
+                  : tx("Загрузить файл", "Datei hochladen")}
+            </label>
+          </span>
+        </div>
       </div>
       {files.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {tx("Файл не загружен · PDF, JPG или PNG до 25 МБ", "Keine Datei hochgeladen · PDF, JPG oder PNG bis 25 MB")}
+        <p className="text-xs text-foreground/80">
+          {tx("Файл не загружен", "Keine Datei hochgeladen")}
         </p>
       ) : rendered ?? (
         <ul className="space-y-1 text-xs">
           {files.map((file) => (
-            <li key={file.id} className="flex flex-wrap gap-x-2 text-muted-foreground">
-              <span className="font-medium text-foreground">{file.file_name || "—"}</span>
-              {file.uploaded_at ? <span>{formatAppDate(file.uploaded_at)}</span> : null}
-              <span>{representativeFileOrigin(file, tx)}</span>
+            <li key={file.id} className="flex min-w-0 flex-wrap items-center gap-2">
+              <StatusChip className="border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200"><FileText aria-hidden="true" /><span className="min-w-0 [overflow-wrap:anywhere]">{file.file_name || "—"}</span></StatusChip>
+              {file.uploaded_at ? <StatusChip tone="info"><CalendarDays aria-hidden="true" />{formatAppDate(file.uploaded_at)}</StatusChip> : null}
+              <StatusChip tone="warning">{representativeFileOrigin(file, tx)}</StatusChip>
             </li>
           ))}
         </ul>
