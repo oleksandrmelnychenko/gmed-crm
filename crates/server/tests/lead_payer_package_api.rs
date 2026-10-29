@@ -1713,10 +1713,10 @@ async fn roles_conversion_and_purge() {
     assert_eq!(refused["code"], "payer_package_not_prepared");
     prepare(&app, lead_id).await;
 
-    // The consent endpoint: only the lead's own login, only with a third
-    // party.
+    // The consent endpoint: the lead's own login, or staff recording how the
+    // client gave it (owner 2026-10-29); only with a third party.
     let consent = format!("/api/v1/me/lead-requests/{lead_id}/payer/cost-estimate-consent");
-    let (status, _) = with_login(
+    let (status, refused) = with_login(
         &app,
         "POST",
         &consent,
@@ -1724,7 +1724,8 @@ async fn roles_conversion_and_purge() {
         Some(json!({ "consent": true })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "consent_recorded_how_required");
     let (other_lead, other_patient) = lead(&app, "other").await;
     let (status, _) = with_login(
         &app,
