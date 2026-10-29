@@ -5181,46 +5181,51 @@ export function LeadWizard({
         ? formatMoneyLabel(money(prepaymentAmount))
         : tx("требуется, сумма не указана", "erforderlich, Betrag fehlt");
 
+    const prepaymentExceedsTotal = templateId !== "cost_estimate"
+      && prepayment && validMoneyInput(prepaymentAmount.trim())
+      && toCents(money(prepaymentAmount)) > toCents(estimate.gross);
+
     return (
       <div
         id={commercialDocumentErrorId(templateId)}
         role="alert"
         aria-live="polite"
-        className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs text-destructive"
+        className="mt-3 space-y-3 rounded-xl border border-destructive/25 bg-card p-3"
       >
-        <div className="flex items-start gap-2">
-          <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-          <div className="min-w-0">
-            <p className="font-semibold">
-              {tx("Не удалось выполнить действие", "Aktion fehlgeschlagen")}: {commercialDocumentTitle(templateId)}
-            </p>
-            <p className="mt-0.5">{message}</p>
-          </div>
-        </div>
-        <dl className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-foreground/80">
-          {clientName ? (
-            <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
-              <dt className="sr-only">{tx("Клиент", "Kunde")}</dt>
-              <dd>{tx("Клиент", "Kunde")}: {clientName}</dd>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 basis-80 items-start gap-2">
+            <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-destructive" />
+            <div className="min-w-0 space-y-1 text-sm leading-6">
+              <p className="font-semibold text-destructive">
+                {tx("Не удалось выполнить действие", "Aktion fehlgeschlagen")}: {commercialDocumentTitle(templateId)}
+              </p>
+              <p className="text-foreground">{message}</p>
             </div>
+          </div>
+          {prepaymentExceedsTotal ? (
+            <Button type="button" size="sm" className="h-8 shrink-0 bg-[var(--brand)] text-white hover:brightness-95"
+              onClick={() => openValidationIssue({ key: "prepayment-amount", step: "commercial", message: "", fieldId: PREPAYMENT_AMOUNT_ID })}>
+              {tx("К предоплате", "Zur Vorauszahlung")}<ArrowRight aria-hidden="true" className="size-3.5" />
+            </Button>
           ) : null}
-          <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
-            <dt className="sr-only">{tx("Заказ", "Auftrag")}</dt>
-            <dd>{tx("Заказ", "Auftrag")}: {order?.order_number || tx("ещё не создан", "noch nicht erstellt")}</dd>
-          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {clientName ? (
+            <StatusChip tone="warning"><UserRound aria-hidden="true" />{tx("Клиент", "Kunde")}: {clientName}</StatusChip>
+          ) : null}
+          <StatusChip className="border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">
+            <FileText aria-hidden="true" />{tx("Заказ", "Auftrag")}: {order?.order_number || tx("ещё не создан", "noch nicht erstellt")}
+          </StatusChip>
           {totalLabel ? (
-            <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5 font-mono tabular-nums">
-              <dt className="sr-only">{tx("Итого", "Gesamt")}</dt>
-              <dd>{tx("Итого", "Gesamt")}: {totalLabel}</dd>
-            </div>
+            <StatusChip tone="info"><ReceiptText aria-hidden="true" />{tx("Итого", "Gesamt")}: <span className="font-mono font-semibold tabular-nums">{totalLabel}</span></StatusChip>
           ) : null}
           {templateId !== "cost_estimate" ? (
-            <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
-              <dt className="sr-only">{tx("Предоплата", "Vorauszahlung")}</dt>
-              <dd>{tx("Предоплата", "Vorauszahlung")}: {prepaymentLabel}</dd>
-            </div>
+            <StatusChip tone={prepaymentExceedsTotal ? "error" : "warning"}>
+              {prepaymentExceedsTotal ? <CircleAlert aria-hidden="true" /> : <ReceiptText aria-hidden="true" />}
+              {tx("Предоплата", "Vorauszahlung")}: <span className="font-mono font-semibold tabular-nums">{prepaymentLabel}</span>
+            </StatusChip>
           ) : null}
-        </dl>
+        </div>
       </div>
     );
   };
