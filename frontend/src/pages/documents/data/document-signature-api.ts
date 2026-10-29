@@ -363,8 +363,8 @@ export function signatureErrorText(
       );
     case "consent_choice_changed":
       return tx(
-        "Пациент изменил выбор согласий после создания документа — создайте документ заново или используйте бумажную подпись.",
-        "Der Patient hat seine Auswahl der Einwilligungen nach dem Erstellen des Dokuments geändert – erstellen Sie das Dokument neu oder nutzen Sie die Unterschrift auf Papier.",
+        "Выбор согласий изменился после создания документа (пациентом или исправлением сотрудника) — создайте документ заново или используйте бумажную подпись.",
+        "Die Auswahl der Einwilligungen hat sich nach dem Erstellen des Dokuments geändert (durch den Patienten oder eine Korrektur der Mitarbeitenden) – erstellen Sie das Dokument neu oder nutzen Sie die Unterschrift auf Papier.",
       );
     case "consent_choice_incomplete":
       return tx(
