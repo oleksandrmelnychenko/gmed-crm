@@ -147,7 +147,9 @@ describe("lead cabinet and payer link: language", () => {
 
   it("never tells a lead, a parent or a payer about an internal check (no tipping-off)", () => {
     // `channelsRisk` names the risk of e-mail and messengers for sensitive data, not a check.
-    expect(offenders(LANGS, (text, path) => path !== "channelsRisk" && TIPPING_OFF.test(text))).toEqual([]);
+    // `followUpBeforeSubmitIntro`: owner wording 2026-10-29: a general statement for every order, no personal assessment.
+    const exempt = new Set(["channelsRisk", "followUpBeforeSubmitIntro"]);
+    expect(offenders(LANGS, (text, path) => !exempt.has(path) && TIPPING_OFF.test(text))).toEqual([]);
   });
 
   it("gives the refusals the cabinet can receive a message of their own in every language", () => {

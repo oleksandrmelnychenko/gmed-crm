@@ -46,10 +46,11 @@ describe("LeadPayerPaperPath (re-check V-A7)", () => {
       "Заполните анкету плательщика по ссылке или загрузите подписанную на бумаге Selbstauskunft и документ плательщика",
     );
     expect(html).toContain('data-testid="lead-payer-paper-upload-open"');
-    expect(html).toContain("Загрузить документ плательщика (бумажный путь)");
+    // Short button labels under the «Бумажный путь» title (owner polish 2026-10-29).
+    expect(html).toContain("Загрузить документ</button>");
     expect(html).toContain('data-testid="lead-payer-paper-generate"');
-    expect(html).toContain("Создать Selbstauskunft для подписи на бумаге");
-    expect(render(missing, { tx: de })).toContain("Ausweis des Zahlers hochladen (Papierweg)");
+    expect(html).toContain("Создать анкету</button>");
+    expect(render(missing, { tx: de })).toContain("Ausweis hochladen</button>");
   });
 
   it("shows the identified payer and offers no new paper form once the payer answered on the link", () => {

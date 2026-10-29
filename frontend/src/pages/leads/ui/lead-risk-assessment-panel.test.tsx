@@ -71,7 +71,8 @@ describe("LeadRiskAssessmentPanel", () => {
     expect(html).toContain("зафиксирован (данные изменились)");
     expect(html).toContain("07.10.2026");
     expect(html).toContain("Способ и путь оплаты");
-    expect(html).toContain("не хватает: способ оплаты");
+    // The missing answers stand in a note of their own, starting with a capital (owner polish 2026-10-29).
+    expect(html).toContain("Не хватает: способ оплаты");
     expect(html).toContain("запрошено");
     for (const testId of ["lead-risk-decide-release", "lead-risk-decide-request_more", "lead-risk-decide-reject"]) {
       expect(html).toContain(testId);

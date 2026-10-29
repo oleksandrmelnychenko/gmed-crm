@@ -40,10 +40,12 @@ describe("consent form choices in the lead cabinet", () => {
     // No document number in the title, no save-state sentence of its own (labels audit 2026-10-26, B8).
     expect(markup).toContain("Einwilligung zur Datenübermittlung");
     expect(markup).not.toContain("Anlage 1");
-    expect(markup.match(/type="checkbox"/g)).toHaveLength(7);
+    // Three core consents and three channels: the cabinet no longer offers Threema (owner polish 2026-10-29).
+    expect(markup.match(/type="checkbox"/g)).toHaveLength(6);
+    expect(markup).not.toContain('data-consent-option="channel_threema"');
     expect(markup).not.toContain('checked=""');
     expect(markup).not.toContain("Noch keine Auswahl gespeichert.");
-    expect(markup).toContain("GMED kreuzt nichts für Sie an");
+    expect(markup).toContain("ist nur angekreuzt, was Sie hier wählen.");
     // An empty choice is no consent: the three are marked with the `*` of every required field,
     // the word only for screen readers.
     expect(markup.match(/data-consent-required=""/g)).toHaveLength(3);

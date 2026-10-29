@@ -1099,8 +1099,10 @@ test.describe("lead cabinet", () => {
     await expect(block).not.toContainText("Anlage 1");
     // The step-4 answer as one line with a jump back (owner 2026-10-26, C3).
     await expect(block.getByTestId("disclosure-saved-status")).toHaveText("Auskunft an Dritte: Nein");
-    // Three core consents and four channels; third-party disclosure is chosen on its own page.
-    await expect(block.getByRole("checkbox")).toHaveCount(7);
+    // Three core consents and three channels (no Threema since the owner polish 2026-10-29);
+    // third-party disclosure is chosen on its own page.
+    await expect(block.getByRole("checkbox")).toHaveCount(6);
+    await expect(block.locator('[data-consent-option="channel_threema"]')).toHaveCount(0);
     await expect(block.getByTestId("lead-request-consent-recipients").getByRole("link")).toHaveAttribute("href", /step=disclosure/);
     for (const box of await block.getByRole("checkbox").all()) await expect(box).not.toBeChecked();
     await expect(block).not.toContainText("Noch keine Auswahl gespeichert.");

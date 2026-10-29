@@ -57,6 +57,9 @@ function state(patch: Record<string, unknown> = {}, pkg: Record<string, unknown>
   })!;
 }
 
+/** The visible text of the markup, every tag replaced by one space. */
+const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
 /** The markup of the send button alone. */
 const sendButton = (html: string) =>
   html.match(/<button(?:(?!<button).)*?An den Zahler zur Unterschrift senden<\/button>/)?.[0] ?? "";
@@ -89,7 +92,8 @@ describe("LeadPayerPackagePanel", () => {
       expect(html).toContain(label);
     }
     expect(html.match(/ещё не создан/g)).toHaveLength(4);
-    expect(html).toContain("Подписывает: </span>Viktor Zahler · viktor.zahler@example.com");
+    // The signer stands in a chip of its own beside the label (owner polish 2026-10-29).
+    expect(textOf(html)).toContain("Подписывает: Viktor Zahler · viktor.zahler@example.com");
     expect(html).toContain("Подготовить документы");
     expect(html).not.toContain("Отправить плательщику на подпись");
     expect(html).toContain("Идентификация плательщика (QES): ещё нет");
@@ -143,7 +147,9 @@ describe("LeadPayerPackagePanel", () => {
         { status: "signed", request_id: "request-1", sent_at: "2026-10-06T11:00:00Z", signed_at: "2026-10-07T08:15:00Z", documents: signedDocuments },
       ),
     );
-    expect(html.match(/подписан 07\.10\.2026/g)).toHaveLength(4);
+    // Each signed document shows a «Подписан» chip beside a date chip (owner polish 2026-10-29).
+    expect(html.match(/data-testid="lead-payer-package-signed-/g)).toHaveLength(4);
+    expect(textOf(html).match(/Подписан 07\.10\.2026(?!\s\d)/g)).toHaveLength(4);
     expect(html).toContain("Подписано 07.10.2026 10:15");
     expect(html).toContain("Идентификация плательщика (QES): подписано 07.10.2026");
   });

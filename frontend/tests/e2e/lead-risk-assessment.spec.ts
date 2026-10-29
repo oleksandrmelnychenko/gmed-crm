@@ -284,9 +284,10 @@ test("level 2: staff see points and level, request more and release with a reaso
   // Points as chips; the full sentence stays the accessible name (owner style 593be890).
   await expect(panel.getByTestId("lead-risk-points")).toHaveAttribute("aria-label", "4 (большее из: пациент 4 · плательщик 3)");
   await expect(panel.getByTestId("lead-risk-points")).toContainText("Баллы · максимум:4Пациент:4Плательщик:3");
-  await expect(panel.getByTestId("lead-risk-trigger-T1").filter({ visible: true })).toContainText("Гражданство пациента в списке стран · список 1");
+  // Key, label and list variant stand in chips of their own (owner polish 2026-10-29).
+  await expect(panel.getByTestId("lead-risk-trigger-T1").filter({ visible: true })).toHaveText(/^T1\s*Гражданство пациента в списке стран\s*список 1$/);
   await expect(panel.getByTestId("lead-risk-trigger-T5").filter({ visible: true })).toContainText("Плательщик не супруг(а), родитель или ребёнок");
-  await expect(panel.getByTestId("lead-risk-block-A")).toContainText("не хватает: источник средств");
+  await expect(panel.getByTestId("lead-risk-block-A-missing")).toContainText("Не хватает: источник средств");
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-risk-level-2.png"), animations: "disabled" });
 

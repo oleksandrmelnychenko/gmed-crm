@@ -358,7 +358,7 @@ test("staff prepare the four documents and send them; the payer section waits fo
   await expect(panel).not.toContainText(
     "Der Zahler erhält ein Paket mit vier Dokumenten zur qualifizierten elektronischen Signatur (QES) über Skribble. Die QES identifiziert den Zahler zugleich nach dem GwG.",
   );
-  await expect(panel.getByTestId("lead-payer-package-signer")).toHaveText("Unterschreibt: Viktor Zahler · viktor.zahler@example.com");
+  await expect(panel.getByTestId("lead-payer-package-signer")).toHaveText(/^Unterschreibt:\s*Viktor Zahler · viktor\.zahler@example\.com$/);
   const rows = panel.getByTestId("lead-payer-package-documents").getByRole("listitem");
   await expect(rows).toHaveCount(4);
   await expect(rows).toContainText([
@@ -488,7 +488,7 @@ test("a demo package is marked as without legal effect, also on a phone", async 
     "Unterschrieben am 07.10.2026 10:15 · gesendet am 06.10.2026 13:30 (Intake QA) · Sprache DE",
   );
   for (const [slot] of SLOTS) {
-    await expect(panel.getByTestId(`lead-payer-package-signed-${slot}`)).toHaveText("unterschrieben am 07.10.2026");
+    await expect(panel.getByTestId(`lead-payer-package-signed-${slot}`)).toHaveText(/^Unterschrieben\s*07\.10\.2026$/);
   }
   await expect(panel.getByTestId("lead-payer-package-qes")).toHaveText(
     "Identifizierung des Zahlers (QES): signiert am 07.10.2026 · Test, ohne Rechtswirkung",
@@ -517,8 +517,9 @@ test("a prepared package with its send controls fits a phone", async ({ page }, 
     }),
   );
   await openCommercial();
+  // The signer stands in a chip of its own beside the label (owner polish 2026-10-29).
   await expect(panel.getByTestId("lead-payer-package-signer")).toHaveText(
-    "Подписывает: Ben Muster · buchhaltung@beispiel-gmbh.example.com · от имени Beispiel GmbH",
+    /^Подписывает:\s*Ben Muster · buchhaltung@beispiel-gmbh\.example\.com · от имени Beispiel GmbH$/,
   );
   await expect.poll(() => noOverflow(wizard)).toBe(true);
   await expect.poll(() => noOverflow(panel)).toBe(true);

@@ -35,7 +35,8 @@ test("saving channels keeps disclosure read-only and asks the server for canonic
     disclosure: { allow_disclosure: true, consent_given: true, version: "2026-10-14", language: "en", chosen_at: "2026-10-14T08:00:00Z", chosen_by: "guardian-a", access_kind: "guardian", company_name: "Example Clinic" },
     consent_form: { version: "v1", chosen_at: "2026-10-14T09:00:00Z", choices: body?.choices },
   } }));
-  await page.locator('[data-consent-option="channel_threema"]').check();
+  // The cabinet no longer offers Threema (owner polish 2026-10-29); Telegram stands in.
+  await page.locator('[data-consent-option="channel_telegram"]').check();
   await expect.poll(() => bodies.length).toBe(1);
   await page.locator('[data-consent-option="channel_email"]').check();
   release();
@@ -43,16 +44,16 @@ test("saving channels keeps disclosure read-only and asks the server for canonic
   // The own saved choice has no receipt sentence of its own (labels audit 2026-10-26, B8).
   await expect(page.getByTestId("lead-request-consent-form-state")).not.toContainText("Your choice of");
   await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
-  expect(body).toMatchObject({ choices: { named_recipients: true, channel_threema: true, channel_email: true }, recipients: [] });
+  expect(body).toMatchObject({ choices: { named_recipients: true, channel_telegram: true, channel_email: true }, recipients: [] });
   await expect(page.locator('[data-consent-option="channel_email"]')).toBeChecked();
   await expect(page.getByTestId("disclosure-saved-status")).toHaveText("Information for third parties: Yes, 1 person");
 });
 test("locally edited consent draft survives a newer server choice", async ({ page }) => {
   await open(page);
-  await page.locator('[data-consent-option="channel_threema"]').check();
+  await page.locator('[data-consent-option="channel_telegram"]').check();
   await page.getByRole("button", { name: "Refresh other parent" }).click();
   await expect(page.getByTestId("lead-request-consent-form-state")).toContainText(/not saved yet|was saved by the other parent/);
-  await expect(page.locator('[data-consent-option="channel_threema"]')).toBeChecked();
+  await expect(page.locator('[data-consent-option="channel_telegram"]')).toBeChecked();
   await expect(page.locator('[data-consent-option="channel_email"]')).not.toBeChecked();
   await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
 });
