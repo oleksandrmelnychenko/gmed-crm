@@ -10,6 +10,8 @@ import { downloadDocumentFile } from "@/pages/documents/data/document-api";
 
 import {
   PAYER_LINK_LANGUAGES,
+  prepareLeadPayerLink,
+  type PayerLinkShare,
   type LeadPayerLinkState,
   type PayerLinkLanguage,
 } from "../data/lead-payer-link-api";
@@ -20,17 +22,15 @@ import {
   payerLinkCabinetNote,
   payerLinkEmailLines,
   payerLinkErrorText,
-  payerLinkResendAsksFirst,
-  payerLinkResendQuestion,
   payerLinkStatusLine,
   previousQuestionnaireSummary,
   type Tx,
 } from "../model/lead-payer-link";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
+import { LeadPayerLinkDialog } from "./lead-payer-link-dialog";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import { LeadPayerQuestionnairePreview } from "./lead-payer-questionnaire-preview";
 
-const LANGUAGE_LABELS: Record<PayerLinkLanguage, string> = { de: "DE", en: "EN", uk: "UA", ru: "RU" };
 const PACKAGE_TONES: Record<PayerPackageStatus, StatusChipTone> = {
   prepared: "success", sending: "info", pending: "info", signed: "success",
   needs_review: "warning", declined: "error", withdrawn: "neutral", expired: "warning", error: "error",
@@ -89,26 +89,53 @@ export function LeadPayerLinkPanel({
 }) {
   const [language, setLanguage] = useState<PayerLinkLanguage | null>(null);
   const [reopen, setReopen] = useState(false);
-  const [busy, setBusy] = useState<"send" | "revoke" | null>(null);
+  const [busy, setBusy] = useState<"prepare" | "send" | "revoke" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   // The question asked before revoking, or before a new link replaces one the payer is filling in.
   const [confirm, setConfirm] = useState<"revoke" | "resend" | null>(null);
 
+  const [share, setShare] = useState<{ leadId: string; data: PayerLinkShare } | null>(null);
   const link = state.link;
-  const actions = payerLinkActions(state, reopen, tx, leadSubmitted);
+  const currentShare = link && share?.leadId === leadId && share.data.id === link.id
+    && !["revoked", "expired", "locked", "submitted"].includes(link.status)
+    && Date.parse(share.data.expires_at) > Date.now() ? share.data : null;
+  const actions = payerLinkActions({ ...state, can_send: state.can_prepare === true, mail_available: true }, reopen, tx, leadSubmitted);
   const chosenLanguage = language ?? link?.language ?? payerLinkLanguageOf(leadLanguage);
   const status = link ? payerLinkStatusLine(link, state.questionnaire?.submitted_at, tx) : null;
   const locked = disabled || busy !== null;
   const message = (cause: unknown) => payerLinkErrorText(cause, tx) ?? errorText(cause);
 
+  async function prepare() {
+    setConfirm(null);
+    setBusy("prepare");
+    setError("");
+    setNotice("");
+    setShare(null);
+    try {
+      const data = await prepareLeadPayerLink(leadId, { language: chosenLanguage, reopen: actions.reopenOffered && reopen });
+      const refreshed = await controller.reload();
+      if (refreshed?.link?.id !== data.id) {
+        throw new Error(tx("Не удалось обновить статус ссылки. Подготовьте приглашение ещё раз.", "Der Linkstatus konnte nicht aktualisiert werden. Bereiten Sie die Einladung erneut vor."));
+      }
+      setShare({ leadId, data });
+      setReopen(false);
+    } catch (cause) {
+      setError(message(cause));
+      void controller.reload();
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function send() {
+    if (!currentShare) return;
     setConfirm(null);
     setBusy("send");
     setError("");
     setNotice("");
     try {
-      const next = await controller.send({ language: chosenLanguage, reopen: actions.reopenOffered && reopen });
+      const next = await controller.send({ language: chosenLanguage, reopen: false, token: currentShare.token });
       setReopen(false);
       // The invitation informed the payer (Art. 14 DSGVO): the declaration says so now.
       onSent?.();
@@ -116,7 +143,7 @@ export function LeadPayerLinkPanel({
       setNotice(email ? tx(`Ссылка отправлена на ${email}`, `Link gesendet an ${email}`) : tx("Ссылка отправлена", "Link gesendet"));
     } catch (cause) {
       setError(message(cause));
-      // A failed e-mail revokes the new link on the server: show that state.
+      // Refresh delivery metadata; a prepared link survives mail failures.
       void controller.reload();
     } finally {
       setBusy(null);
@@ -130,6 +157,7 @@ export function LeadPayerLinkPanel({
     setNotice("");
     try {
       await controller.revoke();
+      setShare(null);
       setNotice(tx("Ссылка отозвана", "Link widerrufen"));
     } catch (cause) {
       setError(message(cause));
@@ -191,30 +219,6 @@ export function LeadPayerLinkPanel({
           ) : null}
           {canEdit ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                <span className="whitespace-nowrap font-mono text-xs leading-tight text-foreground/80" id={`lead-payer-link-language-${leadId}`}>
-                  {tx("Язык письма", "Sprache der E-Mail")}
-                </span>
-                <div className="inline-flex gap-1 rounded-lg border border-border/60 bg-muted/30 p-1" role="group" aria-labelledby={`lead-payer-link-language-${leadId}`}>
-                  {PAYER_LINK_LANGUAGES.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      aria-pressed={chosenLanguage === option}
-                      disabled={locked}
-                      className={cn(
-                        "h-7 min-w-9 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
-                        chosenLanguage === option
-                          ? "bg-[var(--brand)] text-white shadow-sm"
-                          : "text-foreground hover:bg-muted",
-                      )}
-                      onClick={() => setLanguage(option)}
-                    >
-                      {LANGUAGE_LABELS[option]}
-                    </button>
-                  ))}
-                </div>
-              </div>
               {actions.reopenOffered ? (
                 <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-foreground">
                   <input
@@ -236,15 +240,13 @@ export function LeadPayerLinkPanel({
                   disabled={locked || !actions.sendEnabled}
                   data-highlight={actions.highlight ? "true" : undefined}
                   onClick={() => {
-                    // A new link while the payer is filling in ends the payer's session: ask first.
-                    if (actions.sendKind === "resend" && payerLinkResendAsksFirst(link)) setConfirm("resend");
-                    else void send();
+                    // Creating another link replaces the current invitation.
+                    if (actions.sendKind === "resend") setConfirm("resend");
+                    else void prepare();
                   }}
                 >
-                  {busy === "send" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Mail className="size-3.5" />}
-                  {actions.sendKind === "resend"
-                    ? tx("Отправить повторно", "Erneut senden")
-                    : tx("Отправить ссылку плательщику", "Link an den Zahler senden")}
+                  {busy === "prepare" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Mail className="size-3.5" />}
+                  {tx("Подготовить приглашение", "Einladung vorbereiten")}
                 </Button>
                 {actions.revokeEnabled ? (
                   <Button
@@ -336,13 +338,18 @@ export function LeadPayerLinkPanel({
         </div>
       ) : null}
 
-      {error ? <Banner tone="error">{error}</Banner> : null}
-      {notice ? (
+      {error && !currentShare ? <Banner tone="error">{error}</Banner> : null}
+      {notice && !currentShare ? (
         <StatusChip tone="success" role="status" data-testid="lead-payer-link-notice">
           {notice}
         </StatusChip>
       ) : null}
 
+      {currentShare && <LeadPayerLinkDialog
+        key={currentShare.id} share={currentShare} language={chosenLanguage} onLanguage={setLanguage}
+        busy={busy === "send"} canSend={canEdit && !disabled && state.can_send && !state.risk_hold && !state.blocked_reason}
+        error={error} notice={notice} tx={tx} onSend={() => void send()} onClose={() => { setShare(null); setError(""); }}
+      />}
       <LeadConfirmDialog
         open={confirm === "revoke"}
         testId="lead-payer-link-revoke-dialog"
@@ -360,11 +367,11 @@ export function LeadPayerLinkPanel({
       <LeadConfirmDialog
         open={confirm === "resend"}
         testId="lead-payer-link-resend-dialog"
-        title={tx("Отправить новую ссылку?", "Neuen Link senden?")}
-        description={payerLinkResendQuestion(tx)}
-        confirmLabel={tx("Отправить новую", "Neuen Link senden")}
+        title={tx("Подготовить новую ссылку?", "Neuen Link vorbereiten?")}
+        description={tx("Предыдущая ссылка перестанет работать. Сохранённые ответы останутся.", "Der vorherige Link wird ungültig. Gespeicherte Antworten bleiben erhalten.")}
+        confirmLabel={tx("Подготовить", "Vorbereiten")}
         cancelLabel={tx("Отмена", "Abbrechen")}
-        onConfirm={() => void send()}
+        onConfirm={() => void prepare()}
         onCancel={() => setConfirm(null)}
       />
     </div>

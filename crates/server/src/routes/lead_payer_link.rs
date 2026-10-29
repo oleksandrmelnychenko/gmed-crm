@@ -4596,11 +4596,20 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
         });
     let now = Utc::now();
     let link_json = link.map(|(link, sent_by_name, last_email_status)| {
+        let status = link.status(context.statement.as_ref(), now);
+        let prepared = status == "sent" && last_email_status.as_deref() != Some("sent");
+        let sent_at = emails
+            .iter()
+            .find(|email| email["kind"] == "invitation" && email["status"] == "sent")
+            .and_then(|email| email.get("sent_at"))
+            .cloned();
         json!({
-            "status": link.status(context.statement.as_ref(), now),
+            "id": link.id,
+            "status": if prepared { "prepared" } else { status },
             "email": link.email,
             "language": link.language,
-            "sent_at": link.created_at,
+            "sent_at": sent_at,
+            "created_at": link.created_at,
             "sent_by_name": sent_by_name,
             "expires_at": link.expires_at,
             "opened_at": link.opened_at,
@@ -4618,6 +4627,7 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
     Json(json!({
         "mode": context.mode().map(Mode::as_str),
         "can_send": blocked_reason.is_none() && mail_available && auth.can(Capability::LeadsEdit),
+        "can_prepare": blocked_reason.is_none() && state.mail_config.console_url.is_some() && auth.can(Capability::LeadsEdit),
         "blocked_reason": blocked_reason,
         "risk_hold": risk_hold,
         "mail_available": mail_available,
@@ -4651,9 +4661,10 @@ async fn lock_lead(conn: &mut PgConnection, lead_id: Uuid) -> Result<bool, sqlx:
     )
 }
 
-/// `POST /leads/{id}/payer-link` (4.2): sends or resends the link. The
-/// previous link is revoked, a new one is stored and mailed; a failed
-/// e-mail revokes it again (`email_failed`). A sent invitation records that
+/// `POST /leads/{id}/payer-link`: prepare a manual link or send an invitation.
+/// A prepared token can be mailed without rotation; failed delivery leaves it
+/// available for manual sharing. Legacy direct sends still revoke on failure.
+/// A sent invitation records that
 /// the payer was informed (Art. 14 notice) unless that is recorded already.
 async fn staff_send(
     State(state): State<AppState>,
@@ -4679,7 +4690,21 @@ async fn staff_send(
         }
         Some(_) => return invalid_field("language", "Not one of the languages"),
     };
+    let manual = match body.get("delivery").and_then(Value::as_str) {
+        None | Some("email") => false,
+        Some("manual") => true,
+        Some(_) => return invalid_field("delivery", "Unknown delivery method"),
+    };
+    let existing_token = match body.get("token") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(token)) if is_secret(token) && !manual => Some(token.clone()),
+        Some(_) => return invalid_field("token", "Invalid prepared link"),
+    };
+    let reuse = existing_token.is_some();
     let reopen = body.get("reopen").and_then(Value::as_bool).unwrap_or(false);
+    if reuse && reopen {
+        return invalid_field("reopen", "Prepare a new link to reopen the questionnaire");
+    }
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return intake::internal(error, "begin payer link"),
@@ -4718,13 +4743,22 @@ async fn staff_send(
             json!({}),
         );
     }
-    // Without a working mailer nothing is revoked or stored (the same answer
-    // as the sign-in e-mail gives).
-    let mailer = match current_mailer(&state).await {
-        Ok(mailer) => mailer,
-        Err(code) => return mail_unavailable(code),
+    // Preparing a shareable link does not send mail. Email remains a separate
+    // action; its failure must not invalidate a link already copied by staff.
+    let mailer = if manual {
+        None
+    } else {
+        match current_mailer(&state).await {
+            Ok(mailer) => Some(mailer),
+            Err(code) => return mail_unavailable(code),
+        }
     };
-    let Some(console_url) = mailer.console_url().map(str::to_string) else {
+    let Some(console_url) = state
+        .mail_config
+        .console_url
+        .as_deref()
+        .map(|url| url.trim_end_matches('/').to_string())
+    else {
         return error_response(&MailError::NotConfigured);
     };
     if context.submitted_at().is_some() {
@@ -4757,8 +4791,10 @@ async fn staff_send(
             return intake::internal(error, "audit payer statement reopen");
         }
     }
-    if let Err(error) = revoke_active(&mut tx, lead_id, "resent", Some(auth.user_id)).await {
-        return intake::internal(error, "revoke payer link");
+    if !reuse {
+        if let Err(error) = revoke_active(&mut tx, lead_id, "resent", Some(auth.user_id)).await {
+            return intake::internal(error, "revoke payer link");
+        }
     }
     let language = language
         .or_else(|| {
@@ -4772,32 +4808,90 @@ async fn staff_send(
                 .code()
                 .to_string()
         });
-    let token = new_secret();
+    let token = existing_token.unwrap_or_else(new_secret);
     let email = declaration
         .email
         .clone()
         .unwrap_or_default()
         .trim()
         .to_string();
-    let inserted = sqlx::query(&format!(
-        r#"INSERT INTO lead_payer_links AS k
+    let link = if reuse {
+        // Bind the token to this lead before reading its link; never accept an
+        // expired, revoked, locked or reassigned payer invitation.
+        let row = match sqlx::query(&format!(
+            "SELECT {LINK_COLUMNS} FROM lead_payer_links k WHERE k.lead_id = $1 AND k.token_hash = $2 FOR UPDATE"
+        )).bind(lead_id).bind(hash_token(&token)).fetch_optional(&mut *tx).await {
+            Ok(row) => row,
+            Err(error) => return intake::internal(error, "load prepared payer link"),
+        };
+        let mut link = match row.as_ref().map(Link::from_row).transpose() {
+            Ok(Some(link))
+                if link.revoked_at.is_none()
+                    && link.locked_at.is_none()
+                    && link.expires_at > Utc::now()
+                    && lead_payer::same_payer_key(&link.payer_key, &declaration.payer_key())
+                    && normalized_email(Some(&link.email)) == normalized_email(Some(&email)) =>
+            {
+                link
+            }
+            Ok(_) => {
+                return coded(
+                    StatusCode::CONFLICT,
+                    "payer_link_stale",
+                    "Prepare a new payer link",
+                    json!({}),
+                );
+            }
+            Err(error) => return intake::internal(error, "read prepared payer link"),
+        };
+        if let Err(error) = sqlx::query("UPDATE lead_payer_links SET language = $2 WHERE id = $1")
+            .bind(link.id)
+            .bind(&language)
+            .execute(&mut *tx)
+            .await
+        {
+            return intake::internal(error, "update payer invitation language");
+        }
+        link.language = language;
+        link
+    } else {
+        let inserted = sqlx::query(&format!(
+            r#"INSERT INTO lead_payer_links AS k
                (lead_id, token_hash, email, language, payer_key, sent_by, expires_at)
            VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(days => $7))
            RETURNING {LINK_COLUMNS}"#
-    ))
-    .bind(lead_id)
-    .bind(hash_token(&token))
-    .bind(email)
-    .bind(language)
-    .bind(declaration.payer_key())
-    .bind(auth.user_id)
-    .bind(LINK_VALID_DAYS as i32)
-    .fetch_one(&mut *tx)
-    .await
-    .and_then(|row| Link::from_row(&row));
-    let link = match inserted {
-        Ok(link) => link,
-        Err(error) => return intake::internal(error, "store payer link"),
+        ))
+        .bind(lead_id)
+        .bind(hash_token(&token))
+        .bind(email)
+        .bind(language)
+        .bind(declaration.payer_key())
+        .bind(auth.user_id)
+        .bind(LINK_VALID_DAYS as i32)
+        .fetch_one(&mut *tx)
+        .await
+        .and_then(|row| Link::from_row(&row));
+        let link = match inserted {
+            Ok(link) => link,
+            Err(error) => return intake::internal(error, "store payer link"),
+        };
+        if manual {
+            if let Err(error) = audit::write_in_transaction(
+                &mut tx,
+                &audit::domain_event(
+                    "payer_link_prepared",
+                    Some(auth.user_id),
+                    "lead",
+                    Some(lead_id),
+                    json!({ "link_id": link.id, "language": link.language, "delivery": "manual" }),
+                ),
+            )
+            .await
+            {
+                return intake::internal(error, "audit prepared payer link");
+            }
+        }
+        link
     };
     // An organisation is greeted by the contact person the lead named, not
     // by "Guten Tag," alone (QA 2026-10-12, round 3).
@@ -4821,6 +4915,34 @@ async fn staff_send(
     let logo_url = templates::logo_url(&console_url);
     let link_url = format!("{console_url}/payer#{token}");
     let privacy_url = format!("{console_url}/legal#privacy");
+    if manual {
+        let mut messages = Map::new();
+        for language in LANGUAGES {
+            let rendered = templates::payer_invitation(&PayerInvitationEmail {
+                language: MailLanguage::from_code(Some(language)),
+                payer_name: declaration.payer_name().as_deref().unwrap_or_default(),
+                organisation: declaration.is_organisation(),
+                contact_name: contact_name.as_deref(),
+                patient_name: &context.patient_name,
+                link_url: &link_url,
+                expires_on: crate::app_time::date_of(link.expires_at),
+                privacy_url: &privacy_url,
+                agency: &agency,
+                logo_url: Some(&logo_url),
+            });
+            messages.insert(language.to_string(), json!(rendered.text));
+        }
+        publish(&state, Some(auth.user_id), lead_id, None).await;
+        // The raw link is returned once, never persisted in audit or exposed by GET.
+        return (
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(json!({
+                "id": link.id, "token": token, "url": link_url, "email": link.email,
+                "expires_at": link.expires_at, "messages": messages,
+            })),
+        )
+            .into_response();
+    }
     let mail_language = MailLanguage::from_code(Some(&link.language));
     let rendered = templates::payer_invitation(&PayerInvitationEmail {
         language: mail_language,
@@ -4840,6 +4962,9 @@ async fn staff_send(
         text: rendered.text,
         html: rendered.html,
         idempotency_key: format!("payer-link:{}:{}", link.id, mail_language.code()),
+    };
+    let Some(mailer) = mailer else {
+        return error_response(&MailError::NotConfigured);
     };
     let result = mailer.send(&outgoing).await;
     let logged = async {
@@ -4876,15 +5001,17 @@ async fn staff_send(
                 .await?;
             }
             Err(error) => {
-                sqlx::query(
-                    r#"UPDATE lead_payer_links
+                if !reuse {
+                    sqlx::query(
+                        r#"UPDATE lead_payer_links
                        SET revoked_at = now(), revoked_by = $2, revoked_reason = 'email_failed'
                        WHERE id = $1 AND revoked_at IS NULL"#,
-                )
-                .bind(link.id)
-                .bind(auth.user_id)
-                .execute(&mut *tx)
-                .await?;
+                    )
+                    .bind(link.id)
+                    .bind(auth.user_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
                 audit::write_in_transaction(
                     &mut tx,
                     &audit::domain_event(
@@ -4903,7 +5030,7 @@ async fn staff_send(
     .await;
     if let Err(error) = logged {
         tracing::error!(%error, %lead_id, "log payer link e-mail");
-        if result.is_err() {
+        if result.is_err() && !reuse {
             // The link must not stay live without its e-mail.
             let _ = sqlx::query(
                 r#"UPDATE lead_payer_links

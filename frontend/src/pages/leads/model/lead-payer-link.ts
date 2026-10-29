@@ -53,7 +53,7 @@ export function payerLinkChanged(change: unknown): boolean {
 }
 
 /** Statuses of a link the payer can still open: it can be resent or revoked. */
-const ACTIVE_STATUSES: readonly string[] = ["sent", "opened", "verified", "locked", "submitted"];
+const ACTIVE_STATUSES: readonly string[] = ["prepared", "sent", "opened", "verified", "locked", "submitted"];
 
 export function payerLinkActive(link: PayerLinkInfo | null | undefined): boolean {
   return Boolean(link && ACTIVE_STATUSES.includes(link.status));
@@ -121,6 +121,11 @@ export function payerLinkStatusLine(
   let tone: PayerLinkStatusLine["tone"];
   let facts: string[];
   switch (link.status) {
+    case "prepared":
+      label = tx("Ссылка готова", "Link bereit");
+      tone = "info";
+      facts = [validUntil];
+      break;
     case "sent":
       label = tx("Отправлена", "Gesendet");
       tone = "info";
@@ -316,6 +321,8 @@ export function payerLinkErrorText(error: unknown, tx: Tx): string | null {
   if (!code) return null;
   if ((PAYER_LINK_BLOCKED_REASONS as readonly string[]).includes(code)) return payerLinkBlockedReasonText(code, tx);
   switch (code) {
+    case "payer_link_stale":
+      return tx("Ссылка больше не действует. Закройте окно и подготовьте новую ссылку.", "Der Link ist nicht mehr gültig. Schließen Sie das Fenster und bereiten Sie einen neuen Link vor.");
     case "payer_already_submitted":
       return tx(
         "Плательщик уже отправил анкету: для новой ссылки отметьте «Открыть анкету для исправлений»",

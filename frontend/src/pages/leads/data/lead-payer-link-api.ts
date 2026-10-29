@@ -29,7 +29,7 @@ export const PAYER_LINK_BLOCKED_REASONS = [
 
 export type PayerLinkBlockedReason = (typeof PAYER_LINK_BLOCKED_REASONS)[number];
 
-export const PAYER_LINK_STATUSES = ["sent", "opened", "verified", "submitted", "expired", "revoked", "locked"] as const;
+export const PAYER_LINK_STATUSES = ["prepared", "sent", "opened", "verified", "submitted", "expired", "revoked", "locked"] as const;
 
 export type PayerLinkStatus = (typeof PAYER_LINK_STATUSES)[number];
 
@@ -45,6 +45,8 @@ export const PAYER_LINK_REVOKE_REASONS = [
 
 /** The newest link of the lead, revoked or not. */
 export type PayerLinkInfo = {
+  id?: string | null;
+  created_at?: string | null;
   status: PayerLinkStatus;
   email: string | null;
   language: PayerLinkLanguage | null;
@@ -233,6 +235,7 @@ export type PayerPreviousQuestionnaire = {
 export type LeadPayerLinkState = {
   mode: PayerLinkMode | null;
   can_send: boolean;
+  can_prepare?: boolean;
   blocked_reason: string | null;
   /**
    * The risk assessment holds the link: `review` at level 3 until a decision
@@ -249,7 +252,7 @@ export type LeadPayerLinkState = {
 };
 
 /** The body of "send" and "resend": the language of the e-mail and the page, and whether a submitted questionnaire is reopened. */
-export type PayerLinkSendInput = { language: PayerLinkLanguage; reopen: boolean };
+export type PayerLinkSendInput = { language: PayerLinkLanguage; reopen: boolean; token?: string };
 
 const base = (leadId: string) => `/leads/${encodeURIComponent(leadId)}/payer-link`;
 
@@ -296,6 +299,8 @@ function normalizeLink(value: unknown): PayerLinkInfo | null {
   if (!status) return null;
   return {
     status,
+    id: textOrNull(raw.id),
+    created_at: textOrNull(raw.created_at),
     email: textOrNull(raw.email),
     language: oneOf(PAYER_LINK_LANGUAGES, raw.language),
     sent_at: textOrNull(raw.sent_at),
@@ -485,6 +490,7 @@ export function normalizeLeadPayerLinkState(value: unknown): LeadPayerLinkState 
   return {
     mode: raw.mode === "link" || raw.mode === "cabinet" ? raw.mode : null,
     can_send: raw.can_send,
+    can_prepare: raw.can_prepare === true,
     blocked_reason: textOrNull(raw.blocked_reason),
     risk_hold: raw.risk_hold === "review" || raw.risk_hold === "rejected" ? raw.risk_hold : null,
     mail_available: raw.mail_available !== false,
@@ -515,4 +521,26 @@ export function normalizePreviousQuestionnaires(value: unknown): PayerPreviousQu
       },
     ];
   });
+}
+
+/** Kept only in component memory; never stored in query caches or browser storage. */
+export type PayerLinkShare = {
+  id: string;
+  token: string;
+  url: string;
+  email: string;
+  expires_at: string;
+  messages: Record<PayerLinkLanguage, string>;
+};
+
+export async function prepareLeadPayerLink(leadId: string, input: PayerLinkSendInput): Promise<PayerLinkShare> {
+  const raw = asRecord(await apiFetch<unknown>(base(leadId), {
+    method: "POST", body: JSON.stringify({ language: input.language, reopen: input.reopen, delivery: "manual" }),
+  }));
+  const messages = asRecord(raw?.messages);
+  if (!raw || !messages || !["id", "token", "url", "email", "expires_at"].every((key) => typeof raw[key] === "string" && raw[key])
+    || !PAYER_LINK_LANGUAGES.every((language) => typeof messages[language] === "string" && messages[language])) {
+    throw new Error("Invalid payer invitation response");
+  }
+  return raw as PayerLinkShare;
 }
