@@ -348,6 +348,9 @@ import {
   wizardDocumentIsArchived,
 } from "./lead-wizard-document-metadata";
 import { LeadGwgStatements } from "./lead-gwg-statements";
+import { ClientFormEditButton, ClientFormEditContext, LeadClientFormDialog } from "./lead-client-form-dialog";
+import { CLIENT_FORM_SERVICE_DRAFT_KEYS } from "../model/lead-client-form-steps";
+import type { StepId as ClientFormStepId } from "@/pages/patient-lead/lead-request-steps";
 import { LeadAmlPepReviews } from "./lead-aml-pep-reviews";
 import {
   parsePepReviews,
@@ -4441,7 +4444,8 @@ export function LeadWizard({
   useEffect(() => {
     trustedContactsBaseRef.current = trustedContactsBase;
   }, [trustedContactsBase]);
-  const mergePatientStep1 = useCallback(async () => {
+  // `keys`: the draft fields taken over (the patient's step-1 fields by default).
+  const mergeCabinetChanges = useCallback(async (keys?: readonly string[]) => {
     if (!leadId) return;
     // A save under way reaches the server first, so the fresh lead knows it.
     await saveQueueRef.current;
@@ -4455,7 +4459,7 @@ export function LeadWizard({
     const next = draftFromLead(fresh);
     if (previous) {
       const base = draftFromLead(previous);
-      setDraft((current) => (current ? mergePatientUpdates(current, base, next) ?? current : current));
+      setDraft((current) => (current ? mergePatientUpdates(current, base, next, keys) ?? current : current));
     }
     // The cabinet changes trusted contacts too (a second parent, a corrected
     // name): they replace the contacts staff have not edited.
@@ -4472,6 +4476,7 @@ export function LeadWizard({
     });
     setLead(fresh);
   }, [leadId]);
+  const mergePatientStep1 = useCallback(() => mergeCabinetChanges(), [mergeCabinetChanges]);
   const step1Portal = useLeadStep1Portal({ leadId, open, onPatientDataChanged: mergePatientStep1 });
   /** The reason the lead wrote in the cabinet (trigger flow 13.1); "" without one or without medical access. */
   const patientRequestReason = step1Portal.intake?.request_reason?.text.trim() ?? "";
@@ -4530,6 +4535,34 @@ export function LeadWizard({
   const reloadStep1Portal = useCallback(() => {
     void reloadStep1PortalState();
   }, [reloadStep1PortalState]);
+  // The client's form in a dialog of the wizard (owner decision 2026-10-29):
+  // staff fill in everything the client fills in, without another browser tab.
+  const [clientForm, setClientForm] = useState<{ open: boolean; step: ClientFormStepId; version: number }>(
+    { open: false, step: "person", version: 0 },
+  );
+  const canEditClientForm = Boolean(leadId) && canEditPayerLink && !leadConverted;
+  const openClientForm = useCallback((formStep: ClientFormStepId) => {
+    // The wizard's own pending entry reaches the server first: the form shows it.
+    void flushLeadAutosaveRef.current()
+      .catch(() => undefined)
+      .then(() => setClientForm((current) => ({ open: true, step: formStep, version: current.version + 1 })));
+  }, []);
+  const clientFormEdit = useMemo(
+    () => (canEditClientForm ? { open: openClientForm, tx } : null),
+    [canEditClientForm, openClientForm, tx],
+  );
+  const reloadIdentification = identification.reload;
+  const closeClientForm = useCallback(() => {
+    setClientForm((current) => ({ ...current, open: false }));
+    // What staff entered shows in the wizard's read-only blocks and its untouched fields.
+    void reloadStep1PortalState();
+    void reloadPayer();
+    void reloadIdentification();
+    void mergeCabinetChanges([...Object.keys(PORTAL_FIELD_BY_DRAFT_KEY), ...CLIENT_FORM_SERVICE_DRAFT_KEYS])
+      // After the merge: it compares with the lead as it was, which this read replaces.
+      .then(() => refreshDocumentsState())
+      .catch(() => undefined);
+  }, [mergeCabinetChanges, reloadIdentification, refreshDocumentsState, reloadPayer, reloadStep1PortalState]);
   // A save that changed the contacts or the lead's age changes who represents the lead.
   useEffect(() => {
     if (representationVersion > 0) void reloadStep1PortalState();
@@ -8666,6 +8699,7 @@ ${serviceCommentLines.join("\n")}`
           <fieldset disabled={leadConverted} aria-readonly={leadConverted || undefined} data-readonly={leadConverted ? "true" : undefined} className="m-0 min-w-0 border-0 p-0">
           {/* The fieldset turns native controls off; the scope turns off the shared
               ones it cannot reach (date pickers, lists in portals) — QA 2026-10-25, F-W8. */}
+          <ClientFormEditContext.Provider value={clientFormEdit}>
           <ReadOnlyScope active={leadConverted} banner={false}>
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5">
@@ -8770,9 +8804,9 @@ ${serviceCommentLines.join("\n")}`
                 accessory={isRepeatIntake ? null : (
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     {/* Everything the client fills in, staff fill in too: the client's own form (owner 2026-10-29). */}
-                    {leadId && !leadConverted ? (
+                    {canEditClientForm ? (
                       <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" data-testid="lead-wizard-client-form"
-                        onClick={() => window.open(`/leads/${encodeURIComponent(leadId)}/client-form`, "_blank", "noopener")}>
+                        onClick={() => openClientForm("person")}>
                         <FileText className="size-3.5" />
                         {tx("Заполнить анкету за клиента", "Formular für den Kunden ausfüllen")}
                       </Button>
@@ -9659,7 +9693,13 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <Section
                 title={tx("Запрошенные услуги", "Gewünschte Leistungen")}
-                accessory={<CountBadge>{draft.serviceNeeds.length}</CountBadge>}
+                accessory={(
+                  <div className="flex items-center gap-2">
+                    {/* The client's own questionnaire of services (programme start, wishes): its step of the client's form. */}
+                    <ClientFormEditButton section="services" />
+                    <CountBadge>{draft.serviceNeeds.length}</CountBadge>
+                  </div>
+                )}
               >
                 <div className="grid items-start gap-2 sm:grid-cols-2">
                   {Array.from(new Set([
@@ -11665,6 +11705,7 @@ ${serviceCommentLines.join("\n")}`
             </section>
           ) : null}
           </ReadOnlyScope>
+          </ClientFormEditContext.Provider>
           </fieldset>
         </main>
         {draft ? (
@@ -12382,6 +12423,16 @@ ${serviceCommentLines.join("\n")}`
               </AdminDialogScaffold>
           ) : null}
       </Dialog>
+      {leadId ? (
+        <LeadClientFormDialog
+          leadId={leadId}
+          open={clientForm.open}
+          step={clientForm.step}
+          version={clientForm.version}
+          tx={tx}
+          onClose={closeClientForm}
+        />
+      ) : null}
       <Dialog
         open={serviceReportOpen}
         allowImplicitDismissal

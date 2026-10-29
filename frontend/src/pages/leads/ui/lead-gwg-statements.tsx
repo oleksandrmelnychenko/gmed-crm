@@ -60,6 +60,8 @@ import { identityDocumentEnteredLine } from "../model/lead-identity-document-dat
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
 import { uploadMoveTargets, type UploadMoveTarget } from "../model/upload-move";
+import type { ClientFormSection } from "../model/lead-client-form-steps";
+import { ClientFormEditButton } from "./lead-client-form-dialog";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
 const STATEMENT_COLUMNS = "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
@@ -67,12 +69,20 @@ const STATEMENT_CARD_COLUMNS = "grid-cols-1 @sm/statement:grid-cols-2 @3xl/state
 const STATEMENT_CARD = "@container/statement min-w-0 space-y-3 rounded-xl border border-border/60 bg-card p-3";
 const STATEMENT_SECTION = "space-y-2.5 border-t border-border/50 pt-3";
 
-function StatementHeading({ children }: { children: ReactNode }) {
-  return (
+function StatementHeading({ children, edit }: { children: ReactNode; edit?: ClientFormSection }) {
+  const heading = (
     <h4 className="flex min-w-0 items-center gap-2 text-[13px] font-semibold leading-5 text-foreground">
       <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
       <span className="min-w-0 break-words">{children}</span>
     </h4>
+  );
+  if (!edit) return heading;
+  // Staff change the client's answers in the client's form (owner 2026-10-29).
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-2">
+      {heading}
+      <ClientFormEditButton section={edit} />
+    </div>
   );
 }
 
@@ -116,12 +126,14 @@ function PatientStatementsPanel({ title, marker, tx, children }: {
 }
 
 /** One group of statements: a caption and its facts as a definition list. */
-function StatementGroup({ title, columns, children, card = false, wide = false, footer }: {
+function StatementGroup({ title, columns, children, card = false, wide = false, footer, edit }: {
   title: string; columns: string; children: ReactNode; card?: boolean; wide?: boolean; footer?: ReactNode;
+  /** The block of the client's form that answers this group: an «Изменить» button opens it. */
+  edit?: ClientFormSection;
 }) {
   return (
     <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && wide && "col-span-full")}>
-      <StatementHeading>{title}</StatementHeading>
+      <StatementHeading edit={edit}>{title}</StatementHeading>
       <dl className={cn("grid gap-x-4 gap-y-3", card ? STATEMENT_CARD_COLUMNS : columns)}>{children}</dl>
       {footer}
     </div>
@@ -363,6 +375,7 @@ function RepresentationGroup({
             {`${tx("изменено в кабинете", "im Portal geändert")} · ${formatAppDateTime(updatedAt)}`}
           </StatusChip>
         ) : null}
+        <ClientFormEditButton section="representation" className="ml-auto" />
       </div>
       <dl className={cn("grid grid-cols-1 gap-x-5 gap-y-2.5", !card && "sm:grid-cols-2")}>
         {statements.kind === "minor" ? (
@@ -457,6 +470,7 @@ function PayerOrganisationGroup({
           {tx("Плательщик — данные организации из кабинета", "Zahler – Organisationsangaben aus dem Portal")}
         </StatementHeading>
         {marker ? <PatientFieldBadge marker={marker} tx={tx} /> : null}
+        <ClientFormEditButton section="payer_organisation" className="ml-auto" />
       </div>
       <dl className={cn("grid gap-x-4 gap-y-3", card ? STATEMENT_CARD_COLUMNS : STATEMENT_COLUMNS)}>
         {payerOrganisationStatements(mask, tx).map((row) => (
@@ -509,6 +523,7 @@ function BillingGroup({
             <PatientFieldBadge marker={{ at: updatedAt, access_kind: null }} tx={tx} />
           </span>
         ) : null}
+        <ClientFormEditButton section="billing" className="ml-auto" />
       </div>
       <dl className={cn("grid gap-x-4 gap-y-3", card ? STATEMENT_CARD_COLUMNS : STATEMENT_COLUMNS)}>
         {statements.invoice.map((statement) => (
@@ -623,7 +638,7 @@ function LeadGwgFollowUpAnswers({
   return (
     <div className={cards ? "contents" : "space-y-3"} data-testid="lead-gwg-follow-up-answers">
       {stay ? (
-        <StatementGroup card={cards} title={tx("Проживание и гражданства (доп. сведения)", "Aufenthalt und Staatsangehörigkeiten (ergänzend)")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup card={cards} edit="follow_up" title={tx("Проживание и гражданства (доп. сведения)", "Aufenthalt und Staatsangehörigkeiten (ergänzend)")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Проживает там с", "Wohnhaft dort seit")} testId="lead-gwg-residence-since">{identification.residence_since}</Statement>
           <Statement label={tx("Другие места проживания", "Weitere Wohnsitze")}>{identification.other_residences}</Statement>
           <Statement label={tx("Прежние гражданства", "Frühere Staatsangehörigkeiten")}>
@@ -635,12 +650,12 @@ function LeadGwgFollowUpAnswers({
         </StatementGroup>
       ) : null}
       {identification.relationship_since ? (
-        <StatementGroup card={cards} title={tx("Отношение к плательщику (доп. сведения)", "Beziehung zum Zahler (ergänzend)")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup card={cards} edit="follow_up" title={tx("Отношение к плательщику (доп. сведения)", "Beziehung zum Zahler (ergänzend)")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Знакомы с", "Bekannt seit")} testId="lead-gwg-relationship-since">{identification.relationship_since}</Statement>
         </StatementGroup>
       ) : null}
       {pep ? (
-        <StatementGroup card={cards} title={tx("PEP: подробности", "PEP: Einzelheiten")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup card={cards} edit="follow_up" title={tx("PEP: подробности", "PEP: Einzelheiten")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Должность", "Amt / Funktion")} testId="lead-gwg-pep-office">{identification.pep_office}</Statement>
           <Statement label={tx("Страна", "Land")}>{country(identification.pep_country)}</Statement>
           <Statement label={tx("Период", "Zeitraum")}>{identification.pep_period}</Statement>
@@ -651,7 +666,7 @@ function LeadGwgFollowUpAnswers({
         </StatementGroup>
       ) : null}
       {sanctions ? (
-        <StatementGroup card={cards} title={tx("Связи с санкционными лицами: подробности", "Sanktionsbezug: Einzelheiten")} columns={STATEMENT_COLUMNS}>
+        <StatementGroup card={cards} edit="follow_up" title={tx("Связи с санкционными лицами: подробности", "Sanktionsbezug: Einzelheiten")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Лицо или организация", "Person oder Organisation")} testId="lead-gwg-sanctions-link-name">
             {identification.sanctions_link_name}
           </Statement>
@@ -700,6 +715,7 @@ function EnhancedDetailsGroup({ details, tx, card = false }: { details: LeadPort
             {tx("усиленная проверка требуется по правилу GMED", "verstärkte Prüfung nach GMED-Regel erforderlich")}
           </span>
         ) : null}
+        <ClientFormEditButton section="enhanced_details" className="ml-auto" />
       </div>
       <dl className={cn("grid gap-x-5 gap-y-2.5", card ? "grid-cols-1" : STATEMENT_COLUMNS)}>
         {ownFunds ? (
@@ -765,9 +781,12 @@ function RelationshipProofGroup({ details, tx, onDownload, fallbackRequested, ca
   if (!requested && documents.length === 0) return null;
   return (
     <div className={card ? STATEMENT_CARD : STATEMENT_SECTION} data-testid="lead-gwg-relationship-proof">
-      <h4 className="text-xs font-semibold text-foreground">
-        {tx("Подтверждение связи с плательщиком", "Nachweis der Beziehung zum Zahler")}
-      </h4>
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="text-xs font-semibold text-foreground">
+          {tx("Подтверждение связи с плательщиком", "Nachweis der Beziehung zum Zahler")}
+        </h4>
+        <ClientFormEditButton section="relationship_proof" className="ml-auto" />
+      </div>
       {documents.length > 0 ? <UploadedFiles documents={documents} tx={tx} onDownload={onDownload} slot="relationship_proof" /> : (
         <StatusChip tone="warning" data-testid="lead-gwg-relationship-proof-missing">
           <CircleAlert aria-hidden="true" />
@@ -998,12 +1017,16 @@ function LeadGwgStatementsBody({
     return (
       <PatientStatementsPanel key={intake.lead_id} title={title} tx={tx}>
         <ChangedSinceSubmitLine intake={intake} tx={tx} />
-        <p className="text-xs text-muted-foreground" data-testid="lead-gwg-statements-empty">
-          {tx(
-            "Пациент ещё не заполнил эти данные в кабинете",
-            "Der Patient hat diese Angaben im Portal noch nicht gemacht",
-          )}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground" data-testid="lead-gwg-statements-empty">
+            {tx(
+              "Пациент ещё не заполнил эти данные в кабинете",
+              "Der Patient hat diese Angaben im Portal noch nicht gemacht",
+            )}
+          </p>
+          {/* Staff may fill them in for the client (owner 2026-10-29): the identity document first. */}
+          <ClientFormEditButton section="identity" />
+        </div>
         {/* Who represents a minor is known from the request before anybody opens the cabinet. */}
         {representation?.kind === "minor" ? <div className="pt-1.5">{representationGroup}</div> : null}
         {payerGroup ? <div className="pt-1.5">{payerGroup}</div> : null}
@@ -1043,7 +1066,8 @@ function LeadGwgStatementsBody({
 
       <div className="grid grid-cols-1 items-start gap-3 @3xl/patient-statements:grid-cols-2" data-testid="lead-gwg-statements-grid">
         <div className="min-w-0 space-y-3">
-        <StatementGroup card title={tx("Личность", "Person")} columns={STATEMENT_COLUMNS}>
+        {/* With the birth data (block K) the follow-up step; the salutation and the channels are step 1's. */}
+        <StatementGroup card edit={birthRows.length > 0 ? "birth" : "person"} title={tx("Личность", "Person")} columns={STATEMENT_COLUMNS}>
           <Statement label={tx("Обращение", "Anrede")}>{salutationLabel(identification.salutation, tx)}</Statement>
           {birthRows.map((item) => (
             <Statement key={item.key} label={item.label} testId={`lead-gwg-${item.key}`}>{item.value}</Statement>
@@ -1063,7 +1087,7 @@ function LeadGwgStatementsBody({
         {representation && representation.persons.length === 0 ? representationGroup : null}
         </div>
 
-        <StatementGroup card title={tx("Документ, удостоверяющий личность", "Ausweisdokument")} columns={STATEMENT_COLUMNS}
+        <StatementGroup card edit="identity" title={tx("Документ, удостоверяющий личность", "Ausweisdokument")} columns={STATEMENT_COLUMNS}
           footer={identityDocumentEnteredLine(identification, tx) || identification.id_document_unreadable ? (
             <StatusChip tone="warning" className="whitespace-normal" data-testid="lead-gwg-id-entered-by">
               {identityDocumentEnteredLine(identification, tx)}
@@ -1100,6 +1124,7 @@ function LeadGwgStatementsBody({
         {ownAccountShown || paymentBackgroundShown ? (
           <StatementGroup
             card
+            edit="economic_interest"
             title={tx("Экономический интерес", "Wirtschaftliches Interesse")}
             columns="grid-cols-1 sm:grid-cols-3"
           >
@@ -1141,7 +1166,7 @@ function LeadGwgStatementsBody({
         {organisationGroup}
 
         {legalAnswers.length > 0 ? (
-        <StatementGroup card wide title={tx("Юридические вопросы", "Rechtliche Fragen")} columns="grid-cols-1 sm:grid-cols-2">
+        <StatementGroup card wide edit="legal" title={tx("Юридические вопросы", "Rechtliche Fragen")} columns="grid-cols-1 sm:grid-cols-2">
           {legalAnswers.map((item) => (
             <Statement
               key={item.key}

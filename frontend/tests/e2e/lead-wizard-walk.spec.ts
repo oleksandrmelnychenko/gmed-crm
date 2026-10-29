@@ -273,3 +273,53 @@ test("the service and order tabs and the release checklist follow what each step
   await checklist.getByRole("button", { name: /Оформление заказа\s*Не завершено/ }).click();
   await expect(wizard.getByRole("tab", { name: /Оформление заказа/ })).toHaveAttribute("aria-selected", "true");
 });
+
+// Staff fill in the client's form inside the wizard, without another browser
+// tab (owner decision 2026-10-29); closing the dialog is the way back and the
+// wizard reads the client's answers again.
+test("the client's form opens in a dialog of the wizard and the wizard reloads the answers on closing", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const request = {
+    lead_id: leadId,
+    access_kind: "self",
+    created_at: "2026-10-20T08:00:00Z",
+    personal_data: {
+      first_name: "Olga", middle_name: null, last_name: "Beispiel", date_of_birth: "1980-02-03", legal_sex: "female",
+      citizenships: ["DE"], street_address: "Musterweg 1", zip_code: "10115", city: "Berlin", country: "DE",
+      phone: "+49 30 123456", primary_language: "ru",
+    },
+    progress: { filled: 10, total: 12, missing_for_submit: [] },
+    identification: { salutation: null, contact_channels: [], declared_correct_at: null },
+    identity_documents: [],
+    follow_up: { required: false, blocks: [], missing: {}, answered_at: null },
+    review_notice: false,
+    minor: false,
+    documents: [],
+    max_documents: 30,
+    consents: Object.fromEntries(["health_data_processing", "lead_inquiry_processing"].map((type) => [type, {
+      type,
+      version: "2026-10-03",
+      texts: { de: "Ich willige ein.", ru: "Я согласен(на)." },
+      given_at: null,
+    }])),
+    submitted_at: null,
+    changed_since_submit: false,
+    retention_deadline_at: null,
+  };
+  const { wizard, calls } = await mount(page, adultLead(), { [`/me/lead-requests/${leadId}`]: () => request });
+
+  await wizard.getByTestId("lead-wizard-client-form").click();
+  const dialog = page.getByTestId("lead-client-form-dialog");
+  await expect(dialog.getByTestId("lead-request-staff-mode")).toBeVisible({ timeout: 30_000 });
+  await expect(dialog.locator('[data-step="person"]')).toHaveAttribute("aria-selected", "true");
+  // No link that leaves the wizard: closing the dialog is the way back.
+  await expect(dialog.getByRole("button", { name: "Вернуться к лиду" })).toHaveCount(0);
+
+  const before = calls.length;
+  await dialog.getByTestId("lead-client-form-close").click();
+  await expect(dialog).toHaveCount(0);
+  await expect(wizard.getByTestId("lead-wizard-client-form")).toBeVisible();
+  const readAgain = (path: string) => calls.slice(before).some((call) => call.method === "GET" && call.path === path);
+  await expect.poll(() => readAgain(`/leads/${leadId}/portal-intake`)).toBe(true);
+  await expect.poll(() => readAgain(`/leads/${leadId}`)).toBe(true);
+});

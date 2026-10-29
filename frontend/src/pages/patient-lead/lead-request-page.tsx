@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Check, Clock, LoaderCircle } from "lucide-react";
 import { CabinetStaffModeContext, cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 import { useSearchParams } from "react-router-dom";
@@ -80,9 +80,26 @@ import {
 /**
  * The cabinet of the logged-in client, or — with `staffLeadId` — the form of
  * one request that staff fill in for the client from the wizard (owner
- * decision 2026-10-29; `/leads/{id}/client-form`).
+ * decision 2026-10-29; `/leads/{id}/client-form`, or `embedded` in a dialog of
+ * the wizard).
  */
-export function LeadRequestPage({ staffLeadId = null }: { staffLeadId?: string | null } = {}) {
+export function LeadRequestPage({
+  staffLeadId = null,
+  initialStep: startStep = null,
+  embedded = false,
+  saveRef,
+}: {
+  staffLeadId?: string | null;
+  /** The step to open with instead of `?step=` / the request's own first step. */
+  initialStep?: StepId | null;
+  /**
+   * Inside a dialog of the wizard: the wizard's address keeps its own `?lead=` /
+   * `?step=` and the banner has no link back to the lead (closing the dialog is the way back).
+   */
+  embedded?: boolean;
+  /** Set to a function that saves every open entry; false when one could not be saved. */
+  saveRef?: RefObject<(() => Promise<boolean>) | null>;
+} = {}) {
   const staffMode = Boolean(staffLeadId);
   const [, setSearchParams] = useSearchParams();
   const { lang: portalLang, setLang: setPortalLang } = useLang();
@@ -107,7 +124,7 @@ export function LeadRequestPage({ staffLeadId = null }: { staffLeadId?: string |
   // reason the page does not name (a custody change, removed by staff …; QA 2026-10-24, B-2).
   const [guardianAccessEnded, setGuardianAccessEnded] = useState(false);
   const [guardianAccessEndedNeutral, setGuardianAccessEndedNeutral] = useState(false);
-  const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.search).get("lead"));
+  const [selected, setSelected] = useState<string | null>(() => (embedded ? staffLeadId : new URLSearchParams(window.location.search).get("lead")));
   const [error, setError] = useState("");
   // Switching requests must not replace a queue whose uploads are still running.
   const [sessions] = useState(() => new Map<string, { enqueue: RequestQueue; flushers: Set<AutosaveFlush>; saved: () => void }>());
@@ -148,6 +165,19 @@ export function LeadRequestPage({ staffLeadId = null }: { staffLeadId?: string |
       leaving.current = false;
     }
   }, [sessions]);
+  // The wizard's dialog saves every open entry before it closes (owner 2026-10-29).
+  useEffect(() => {
+    if (!saveRef) return;
+    saveRef.current = () => {
+      const leadId = selected;
+      if (!leadId || !sessions.has(leadId)) return Promise.resolve(true);
+      return new Promise<boolean>((resolve) => {
+        // Resolved by the first of: saved, blocked, or a step change already under way (not saved yet).
+        void switchAfterSave(leadId, () => resolve(true), () => resolve(false)).then(() => resolve(false));
+      });
+    };
+    return () => { saveRef.current = null; };
+  }, [saveRef, selected, sessions, switchAfterSave]);
 
   const chooseLang = useCallback(
     (next: LeadCabinetLang) => {
@@ -322,9 +352,12 @@ export function LeadRequestPage({ staffLeadId = null }: { staffLeadId?: string |
       {staffMode ? (
         <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100" data-testid="lead-request-staff-mode">
           <span className="min-w-0 flex-1">{cabinetStaffText(lang).banner}</span>
-          <Button type="button" variant="outline" size="sm" onClick={() => window.location.assign(`/leads?lead=${encodeURIComponent(request.lead_id)}&view=wizard`)}>
-            {cabinetStaffText(lang).back}
-          </Button>
+          {/* In the wizard's dialog, closing the dialog is the way back. */}
+          {embedded ? null : (
+            <Button type="button" variant="outline" size="sm" onClick={() => window.location.assign(`/leads?lead=${encodeURIComponent(request.lead_id)}&view=wizard`)}>
+              {cabinetStaffText(lang).back}
+            </Button>
+          )}
         </div>
       ) : null}
       {requests.length > 1 ? (
@@ -343,6 +376,7 @@ export function LeadRequestPage({ staffLeadId = null }: { staffLeadId?: string |
               )}
               onClick={() => { void switchAfterSave(request.lead_id, () => {
                 setSelected(item.lead_id);
+                if (embedded) return;
                 setSearchParams((current) => {
                   const params = new URLSearchParams(current);
                   params.set("lead", item.lead_id);
@@ -358,7 +392,7 @@ export function LeadRequestPage({ staffLeadId = null }: { staffLeadId?: string |
       {saveBlocked ? <div role="alert" data-testid="lead-request-save-blocked"><Banner tone="error">{text.saveBeforeLeaving}</Banner></div> : null}
       <AutosaveFlushContext.Provider value={session.flushers}>
         <AutosaveSavedContext.Provider value={session.saved}>
-          <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} enqueue={session.enqueue} switchAfterSave={switchAfterSave} onChange={replaceRequest} onAccessLost={load} />
+          <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} enqueue={session.enqueue} switchAfterSave={switchAfterSave} onChange={replaceRequest} onAccessLost={load} startStep={startStep} syncAddress={!embedded} />
         </AutosaveSavedContext.Provider>
       </AutosaveFlushContext.Provider>
     </LeadCabinetFrame>
@@ -446,6 +480,8 @@ function LeadRequestView({
   onAccessLost,
   enqueue,
   switchAfterSave,
+  startStep = null,
+  syncAddress = true,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -454,6 +490,10 @@ function LeadRequestView({
   onAccessLost: () => Promise<void>;
   enqueue: RequestQueue;
   switchAfterSave: (leadId: string, action: () => void, onBlocked?: () => void) => Promise<void>;
+  /** The step asked for by the caller; the address's `?step=` otherwise. */
+  startStep?: StepId | null;
+  /** Whether the step is kept in the address (`?lead=` / `?step=`); not inside the wizard's dialog. */
+  syncAddress?: boolean;
 }) {
   const guardian = request.access_kind === "guardian";
   const patientName = [request.personal_data.first_name, request.personal_data.last_name].filter(Boolean).join(" ");
@@ -517,7 +557,7 @@ function LeadRequestView({
     refreshFromServer("event");
   });
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedStep = searchParams.get("step");
+  const requestedStep = startStep ?? (syncAddress ? searchParams.get("step") : null);
   const [chosenStep, setChosenStep] = useState<StepId>(() => visibleSteps(request).find((step) => step === requestedStep) ?? initialStep(request));
   useEffect(() => {
     const reload = () => { void onAccessLost(); };
@@ -602,12 +642,14 @@ function LeadRequestView({
         return;
       }
       setChosenStep(next);
-      setSearchParams((current) => {
-        const params = new URLSearchParams(current);
-        params.set("lead", request.lead_id);
-        params.set("step", next);
-        return params;
-      }, { replace: true });
+      if (syncAddress) {
+        setSearchParams((current) => {
+          const params = new URLSearchParams(current);
+          params.set("lead", request.lead_id);
+          params.set("step", next);
+          return params;
+        }, { replace: true });
+      }
       if (next === "send") setSendOpened(true);
       if (target?.anchor || target?.field) {
         // A fresh object: the same section asked for again scrolls again.
@@ -630,7 +672,7 @@ function LeadRequestView({
       if (problem) revealCabinetTarget({ element: problem, field: true });
       else window.requestAnimationFrame(() => document.querySelector('[data-testid="lead-request-save-blocked"]')?.scrollIntoView?.({ block: "nearest" }));
     });
-  }, [switchAfterSave, request.lead_id, setSearchParams, missingShownSteps, step, showMissingOf, staffMode]);
+  }, [switchAfterSave, request.lead_id, setSearchParams, syncAddress, missingShownSteps, step, showMissingOf, staffMode]);
 
   const nav: StepNav = {
     index: position + 1,

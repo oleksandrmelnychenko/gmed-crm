@@ -99,7 +99,12 @@ export function withPatientDataPending<K extends string>(
 }
 
 function comparable(value: unknown): string {
-  return Array.isArray(value) ? value.join(",") : String(value ?? "").trim();
+  if (Array.isArray(value)) return value.join(",");
+  // A map of texts (the comments per service): compared by its entries, in key order.
+  if (value && typeof value === "object") {
+    return JSON.stringify(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)));
+  }
+  return String(value ?? "").trim();
 }
 
 /**

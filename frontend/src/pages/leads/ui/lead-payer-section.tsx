@@ -58,6 +58,7 @@ import { LeadPayerPaperPath } from "./lead-payer-paper-path";
 import { LeadPayerPaymentRoute } from "./lead-payer-payment-route";
 import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata";
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
+import { ClientFormEditButton } from "./lead-client-form-dialog";
 
 import {
   payerRelationshipKindsFor,
@@ -1174,6 +1175,7 @@ export function LeadPayerDeclarationSection({
                     {tx("Данные организации из кабинета", "Organisationsangaben aus dem Portal")}
                   </span>
                   {cabinet?.patient_payer ? <PatientFieldBadge marker={cabinet.patient_payer} tx={tx} /> : null}
+                  <ClientFormEditButton section="payer_organisation" className="ml-auto" />
                 </div>
                 <dl className="grid gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3">
                   {payerOrganisationStatements(organisationMask, tx).map((row) => (
@@ -1340,6 +1342,8 @@ export function LeadPayerDeclarationSection({
                   <PatientFieldBadge marker={{ at: cabinetBilling.recipient_updated_at, access_kind: null }} tx={tx} />
                 </span>
               ) : null}
+              {/* Staff change the recipient in the client's form (owner 2026-10-29). */}
+              <ClientFormEditButton section="billing" className="ml-auto" />
             </div>
             {recipientStatements.length > 0 ? (
               <dl className="grid gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-payer-recipient-snapshot">
