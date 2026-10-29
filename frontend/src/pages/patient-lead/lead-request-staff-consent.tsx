@@ -14,6 +14,8 @@ export function StaffConsentRecordFields({
   testId,
   busy = false,
   hint,
+  actionLabel,
+  actionDisabled = false,
   onRecord,
   onCancel,
 }: {
@@ -22,6 +24,10 @@ export function StaffConsentRecordFields({
   busy?: boolean;
   /** A line above the fields, e.g. that the changes wait for the record. */
   hint?: string;
+  /** The button text when it does more than record, e.g. «Send for the client». */
+  actionLabel?: string;
+  /** Keeps the button off while something else is still missing. */
+  actionDisabled?: boolean;
   onRecord: (recorded: StaffConsentRecord) => void;
   onCancel?: () => void;
 }) {
@@ -59,11 +65,11 @@ export function StaffConsentRecordFields({
         <button
           type="button"
           className="h-8 rounded-lg bg-[var(--brand)] px-3 text-xs font-medium text-white disabled:opacity-50"
-          disabled={busy || !how}
+          disabled={busy || actionDisabled || !how}
           onClick={() => { if (how) onRecord({ how, note }); }}
           data-testid={`${testId}-record-save`}
         >
-          {text.recordConsent}
+          {actionLabel ?? text.recordConsent}
         </button>
         {onCancel ? (
           <button type="button" className="h-8 rounded-lg border border-border px-3 text-xs" disabled={busy} onClick={onCancel}>

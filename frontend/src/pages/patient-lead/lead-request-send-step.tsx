@@ -11,7 +11,8 @@ import { useAuth } from "@/lib/auth";
 import { rememberSignOutNotice } from "@/lib/login-redirect";
 import { cn } from "@/lib/utils";
 
-import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, submitLeadRequest, type LeadRequest } from "./lead-request-api";
+import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, submitLeadRequest, type LeadRequest, type StaffConsentRecord } from "./lead-request-api";
+import { StaffConsentRecordFields } from "./lead-request-staff-consent";
 import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown, missingOfRefusal } from "./lead-request-follow-up-model";
 import { canSubmit, consentGiven, type SubmitField } from "./lead-request-model";
 import { CabinetSection as Section, MissingItemLink, RequiredMark, SentLockHint, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
@@ -40,7 +41,7 @@ export function SendStep({
   /** Opens a step and shows the field a missing item names (`CabinetGoTo`). */
   onEdit: (step: Step, target?: CabinetTarget) => void;
 }) {
-  // Staff filling in the form never send it for the client (owner 2026-10-29).
+  // Staff send for the client, saying how the client confirmed (owner 2026-10-29).
   const staffMode = useCabinetStaffMode();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -90,13 +91,13 @@ export function SendStep({
     }
   }
 
-  async function send() {
+  async function send(recorded?: StaffConsentRecord) {
     if (needsDeclaration && !confirmed) return;
     setBusy(true);
     setError("");
     try {
       // After the last entry of step "data", which is saved when that step is left.
-      onChange(await enqueue(() => submitLeadRequest(request.lead_id, needsDeclaration)));
+      onChange(await enqueue(() => submitLeadRequest(request.lead_id, needsDeclaration, recorded)));
       // The confirmation belongs to what was sent; a later change is confirmed anew.
       setConfirmed(false);
     } catch (cause) {
@@ -292,14 +293,23 @@ export function SendStep({
             {text.back}
           </Button>
         )}
-        {sent ? (
+        {/* Staff stay signed in: «finish and sign out» is the client's. */}
+        {sent && !staffMode ? (
           <Button type="button" className="h-9 gap-2" disabled={signingOut} onClick={() => void finish()} data-testid="lead-request-finish">
             {signingOut ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <LogOut aria-hidden="true" className="size-3.5" />}
             {text.finishAndSignOut}
           </Button>
         ) : null}
         {sendable && staffMode ? (
-          <p className="text-xs text-muted-foreground" data-testid="lead-request-submit-client-only">{cabinetStaffText(lang).clientOnly}</p>
+          <StaffConsentRecordFields
+            lang={lang}
+            testId="lead-request-submit"
+            busy={busy}
+            hint={cabinetStaffText(lang).sendHint}
+            actionLabel={cabinetStaffText(lang).sendForClient}
+            actionDisabled={!ready || (needsDeclaration && !confirmed)}
+            onRecord={(recorded) => void send(recorded)}
+          />
         ) : sendable ? (
           <Button
             type="button"

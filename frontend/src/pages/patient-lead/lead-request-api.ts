@@ -1293,9 +1293,15 @@ export function submitLeadPayerQuestionnaire(leadId: string): Promise<unknown> {
  * Sends the request. `declaredCorrect` is the confirmation that the statements
  * are complete and true; a server that knows the identification requires it.
  */
-export function submitLeadRequest(leadId: string, declaredCorrect: boolean): Promise<LeadRequest> {
+export function submitLeadRequest(
+  leadId: string,
+  declaredCorrect: boolean,
+  /** Staff send for the client (owner 2026-10-29): how the client confirmed, and a note. */
+  recorded?: StaffConsentRecord | null,
+): Promise<LeadRequest> {
+  const body = { ...(declaredCorrect ? { declared_correct: true } : {}), ...staffConsentRecordBody(recorded) };
   return apiFetch<LeadRequest>(`${base(leadId)}/submit`, {
     method: "POST",
-    ...(declaredCorrect ? { body: JSON.stringify({ declared_correct: true }) } : {}),
+    ...(Object.keys(body).length ? { body: JSON.stringify(body) } : {}),
   });
 }

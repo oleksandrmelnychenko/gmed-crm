@@ -15,7 +15,9 @@ export function useCabinetStaffMode(): boolean {
 
 const TEXT = {
   ru: {
-    banner: "Вы заполняете анкету за клиента. Всё, что вы вносите, помечено «внёс сотрудник». Согласия клиента, его выбор в форме согласия и доверенных лиц записывайте с тем, как он их дал; отправку клиент делает сам — в кабинете или подписью на бумаге.",
+    banner: "Вы заполняете анкету за клиента. Всё, что вы вносите, помечено «внёс сотрудник». Согласия клиента, его выбор в форме согласия и доверенных лиц записывайте с тем, как он их дал; отправить анкету за клиента можно на последнем шаге, указав, как он подтвердил данные.",
+    sendHint: "Как клиент подтвердил, что данные полны и верны",
+    sendForClient: "Отправить за клиента",
     clientOnly: "Это делает клиент сам — в кабинете или подписью на бумаге.",
     back: "Вернуться к лиду",
     consentHow: "Как клиент дал согласие",
@@ -29,7 +31,9 @@ const TEXT = {
     cancel: "Отмена",
   },
   uk: {
-    banner: "Ви заповнюєте анкету за клієнта. Усе, що ви вносите, позначено «вніс співробітник». Згоди клієнта, його вибір у формі згоди та довірених осіб записуйте з тим, як він їх дав; відправку клієнт робить сам — у кабінеті або підписом на папері.",
+    banner: "Ви заповнюєте анкету за клієнта. Усе, що ви вносите, позначено «вніс співробітник». Згоди клієнта, його вибір у формі згоди та довірених осіб записуйте з тим, як він їх дав; надіслати анкету за клієнта можна на останньому кроці, вказавши, як він підтвердив дані.",
+    sendHint: "Як клієнт підтвердив, що дані повні й правильні",
+    sendForClient: "Надіслати за клієнта",
     clientOnly: "Це робить клієнт сам — у кабінеті або підписом на папері.",
     back: "Повернутися до ліда",
     consentHow: "Як клієнт дав згоду",
@@ -43,7 +47,9 @@ const TEXT = {
     cancel: "Скасувати",
   },
   de: {
-    banner: "Sie füllen das Formular für den Kunden aus. Ihre Angaben sind als «von Mitarbeitenden eingetragen» markiert. Einwilligungen des Kunden, seine Auswahl in der Einwilligungserklärung und Vertrauenspersonen tragen Sie mit dem Weg ein, auf dem er sie gab; das Absenden erledigt der Kunde selbst – im Kundenkabinett oder per Unterschrift auf Papier.",
+    banner: "Sie füllen das Formular für den Kunden aus. Ihre Angaben sind als «von Mitarbeitenden eingetragen» markiert. Einwilligungen des Kunden, seine Auswahl in der Einwilligungserklärung und Vertrauenspersonen tragen Sie mit dem Weg ein, auf dem er sie gab; das Formular senden Sie für den Kunden im letzten Schritt ab, mit dem Weg, auf dem er die Angaben bestätigt hat.",
+    sendHint: "Wie der Kunde bestätigt hat, dass die Angaben vollständig und richtig sind",
+    sendForClient: "Für den Kunden absenden",
     clientOnly: "Das erledigt der Kunde selbst – im Kundenkabinett oder per Unterschrift auf Papier.",
     back: "Zurück zum Lead",
     consentHow: "Wie der Kunde eingewilligt hat",
@@ -57,7 +63,9 @@ const TEXT = {
     cancel: "Abbrechen",
   },
   en: {
-    banner: "You are filling in the form for the client. Your entries are marked “entered by staff”. Record the client's consents, their consent form options and trusted persons with how they were given; sending is done by the client — in the cabinet or by signing on paper.",
+    banner: "You are filling in the form for the client. Your entries are marked “entered by staff”. Record the client's consents, their consent form options and trusted persons with how they were given; send the form for the client on the last step, saying how they confirmed the details.",
+    sendHint: "How the client confirmed the details are complete and true",
+    sendForClient: "Send for the client",
     clientOnly: "The client does this — in the cabinet or by signing on paper.",
     back: "Back to the lead",
     consentHow: "How the client consented",
