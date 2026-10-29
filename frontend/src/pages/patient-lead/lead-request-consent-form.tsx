@@ -239,7 +239,7 @@ export function ConsentFormChoicesSection({
           {recipientsBlock}
           <fieldset className="space-y-2">
             <legend className="mb-2 font-mono text-xs font-medium text-foreground/75">{text.channelsTitle}</legend>
-            <div className="grid gap-2 sm:grid-cols-2">{CONSENT_FORM_CHANNELS.map(option)}</div>
+            <div className="grid gap-2 sm:grid-cols-2">{CONSENT_FORM_CHANNELS.filter((key) => key !== "channel_threema").map(option)}</div>
             <p className="text-xs leading-5 text-foreground/75">{text.channelsRisk}</p>
           </fieldset>
           {sent ? (

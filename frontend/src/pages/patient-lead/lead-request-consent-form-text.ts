@@ -66,7 +66,7 @@ function slavicPlural(count: number, one: string, few: string, many: string): st
 const de: ConsentFormText = {
   title: "Einwilligung zur Datenübermittlung",
   intro:
-    "Wählen Sie selbst, wozu Sie einwilligen. Im Formular, das Sie später elektronisch unterschreiben, ist nur angekreuzt, was Sie hier wählen – GMED kreuzt nichts für Sie an. Ohne Ihre Auswahl unterschreiben Sie das Formular auf Papier und kreuzen dort selbst an.",
+    "Wählen Sie selbst, wozu Sie einwilligen. Im Formular, das Sie später elektronisch unterschreiben, ist nur angekreuzt, was Sie hier wählen. Ohne Ihre Auswahl unterschreiben Sie das Formular auf Papier und kreuzen dort selbst an.",
   options: {
     agency_processing:
       "GMED und beauftragte Mitarbeitende dürfen meine personenbezogenen und medizinischen Daten und Unterlagen einholen, bearbeiten, speichern und bei Bedarf an behandelnde Ärzte, Kliniken, Labore, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln.",
@@ -111,7 +111,7 @@ const de: ConsentFormText = {
 
 const deChild: ChildTexts = {
   intro:
-    "Wählen Sie selbst, wozu Sie für Ihr Kind einwilligen. Im Formular, das Sie später als Sorgeberechtigte/r elektronisch unterschreiben, ist nur angekreuzt, was Sie hier wählen – GMED kreuzt nichts für Sie an. Ohne Ihre Auswahl unterschreiben Sie das Formular auf Papier und kreuzen dort selbst an.",
+    "Wählen Sie selbst, wozu Sie für Ihr Kind einwilligen. Im Formular, das Sie später als Sorgeberechtigte/r elektronisch unterschreiben, ist nur angekreuzt, was Sie hier wählen. Ohne Ihre Auswahl unterschreiben Sie das Formular auf Papier und kreuzen dort selbst an.",
   options: {
     agency_processing:
       "GMED und beauftragte Mitarbeitende dürfen die personenbezogenen und medizinischen Daten und Unterlagen meines Kindes einholen, bearbeiten, speichern und bei Bedarf an behandelnde Ärzte, Kliniken, Labore, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln.",
@@ -133,7 +133,7 @@ const deChild: ChildTexts = {
 const en: ConsentFormText = {
   title: "Consent to data transfer",
   intro:
-    "Choose yourself what you consent to. The form you later sign electronically shows ticked only what you choose here – GMED ticks nothing for you. Without your choice you sign the form on paper and tick the boxes there yourself.",
+    "Choose yourself what you consent to. The form you later sign electronically shows ticked only what you choose here. Without your choice you sign the form on paper and tick the boxes there yourself.",
   options: {
     agency_processing:
       "GMED and the staff it instructs may obtain, process and store my personal and medical data and documents and, where needed, pass them on to treating doctors, clinics, laboratories, interpreters, translators, assessors or payers.",
@@ -177,7 +177,7 @@ const en: ConsentFormText = {
 
 const enChild: ChildTexts = {
   intro:
-    "Choose yourself what you consent to for your child. The form you later sign electronically as the parent or guardian shows ticked only what you choose here – GMED ticks nothing for you. Without your choice you sign the form on paper and tick the boxes there yourself.",
+    "Choose yourself what you consent to for your child. The form you later sign electronically as the parent or guardian shows ticked only what you choose here. Without your choice you sign the form on paper and tick the boxes there yourself.",
   options: {
     agency_processing:
       "GMED and the staff it instructs may obtain, process and store my child's personal and medical data and documents and, where needed, pass them on to treating doctors, clinics, laboratories, interpreters, translators, assessors or payers.",
@@ -197,7 +197,7 @@ const enChild: ChildTexts = {
 const uk: ConsentFormText = {
   title: "Згода на передачу даних",
   intro:
-    "Оберіть самі, на що ви погоджуєтеся. У формі, яку ви згодом підпишете електронно, позначено лише те, що ви оберете тут, — GMED нічого не позначає за вас. Без вашого вибору ви підписуєте форму на папері й позначаєте там самі.",
+    "Оберіть самі, на що ви погоджуєтеся. У формі, яку ви згодом підпишете електронно, позначено лише те, що ви оберете тут. Без вашого вибору ви підписуєте форму на папері й позначаєте там самі.",
   options: {
     agency_processing:
       "GMED і уповноважені працівники можуть отримувати, обробляти, зберігати мої персональні й медичні дані та документи і за потреби передавати їх лікарям, клінікам, лабораторіям, перекладачам, експертам або платникам.",
@@ -241,7 +241,7 @@ const uk: ConsentFormText = {
 
 const ukChild: ChildTexts = {
   intro:
-    "Оберіть самі, на що ви погоджуєтеся за свою дитину. У формі, яку ви згодом підпишете електронно як батько, мати чи опікун, позначено лише те, що ви оберете тут, — GMED нічого не позначає за вас. Без вашого вибору ви підписуєте форму на папері й позначаєте там самі.",
+    "Оберіть самі, на що ви погоджуєтеся за свою дитину. У формі, яку ви згодом підпишете електронно як батько, мати чи опікун, позначено лише те, що ви оберете тут. Без вашого вибору ви підписуєте форму на папері й позначаєте там самі.",
   options: {
     agency_processing:
       "GMED і уповноважені працівники можуть отримувати, обробляти, зберігати персональні й медичні дані та документи моєї дитини і за потреби передавати їх лікарям, клінікам, лабораторіям, перекладачам, експертам або платникам.",
@@ -261,7 +261,7 @@ const ukChild: ChildTexts = {
 const ru: ConsentFormText = {
   title: "Согласие на передачу данных",
   intro:
-    "Выберите сами, на что вы соглашаетесь. В форме, которую вы позже подпишете электронно, отмечено только то, что вы выберете здесь, — GMED ничего не отмечает за вас. Без вашего выбора вы подписываете форму на бумаге и отмечаете там сами.",
+    "Выберите сами, на что вы соглашаетесь. В форме, которую вы позже подпишете электронно, отмечено только то, что вы выберете здесь. Без вашего выбора вы подписываете форму на бумаге и отмечаете там сами.",
   options: {
     agency_processing:
       "GMED и уполномоченные сотрудники могут получать, обрабатывать, хранить мои персональные и медицинские данные и документы и при необходимости передавать их лечащим врачам, клиникам, лабораториям, переводчикам, экспертам или плательщикам.",
@@ -305,7 +305,7 @@ const ru: ConsentFormText = {
 
 const ruChild: ChildTexts = {
   intro:
-    "Выберите сами, на что вы соглашаетесь за своего ребёнка. В форме, которую вы позже подпишете электронно как родитель или опекун, отмечено только то, что вы выберете здесь, — GMED ничего не отмечает за вас. Без вашего выбора вы подписываете форму на бумаге и отмечаете там сами.",
+    "Выберите сами, на что вы соглашаетесь за своего ребёнка. В форме, которую вы позже подпишете электронно как родитель или опекун, отмечено только то, что вы выберете здесь. Без вашего выбора вы подписываете форму на бумаге и отмечаете там сами.",
   options: {
     agency_processing:
       "GMED и уполномоченные сотрудники могут получать, обрабатывать, хранить персональные и медицинские данные и документы моего ребёнка и при необходимости передавать их лечащим врачам, клиникам, лабораториям, переводчикам, экспертам или плательщикам.",

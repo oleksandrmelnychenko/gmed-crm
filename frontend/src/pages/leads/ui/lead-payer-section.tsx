@@ -5,8 +5,11 @@ import {
   CalendarDays,
   Check,
   CircleAlert,
+  Clock3,
   FileText,
+  Info,
   LoaderCircle,
+  LockKeyhole,
   Upload,
 } from "lucide-react";
 
@@ -1420,8 +1423,8 @@ function SequenceStep({ state, actor, tx }: { state: SignatureStepState; actor: 
         : state === "done" ? tx("Плательщик подписал заявление о принятии расходов", "Kostenübernehmer hat unterschrieben") : tx("Ожидается заявление о принятии расходов", "Unterschrift des Kostenübernehmers ausstehend")
       : state === "done" ? tx("GMED подписал заказ", "GMED hat den Auftrag unterzeichnet")
         : state === "blocked" ? tx("GMED: подпись пока недоступна", "GMED: Unterschrift noch gesperrt") : tx("GMED: можно подписывать", "GMED: Unterschrift möglich");
-  return <StatusChip data-signature-step={actor} data-step-state={state} tone={state === "done" ? "success" : state === "not_required" ? "neutral" : "warning"}>
-    {state === "done" ? <Check aria-hidden="true" className="size-3.5" /> : null}{label}
+  return <StatusChip data-signature-step={actor} data-step-state={state} className="whitespace-normal" tone={state === "done" ? "success" : state === "not_required" ? "neutral" : "warning"}>
+    {state === "done" ? <Check aria-hidden="true" /> : state === "blocked" ? <LockKeyhole aria-hidden="true" /> : state !== "not_required" ? <Clock3 aria-hidden="true" /> : null}{label}
   </StatusChip>;
 }
 
@@ -1585,7 +1588,7 @@ export function LeadPayerSignatureFlow({
             // Plain words instead of "DEMO не подтверждает юридическую подпись" (QA 2026-10-25).
             ? tx("Тестовая подпись (DEMO) подписью заказа не считается", "Eine Testunterschrift (DEMO) gilt nicht als Auftragsunterschrift")
             : tx("Заказ: подписание пакета ещё не завершено", "Auftrag: Paketunterzeichnung noch nicht abgeschlossen")}</StatusChip>
-      </div> : <div className="flex flex-wrap items-center gap-x-2 gap-y-1" aria-label={tx("Порядок подписания", "Reihenfolge der Unterschriften")}>
+      </div> : <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/20 p-2.5" aria-label={tx("Порядок подписания", "Reihenfolge der Unterschriften")}>
         <SequenceStep state={sequence.client} actor="client" tx={tx} />
         <ArrowRight aria-hidden="true" className="size-3.5 text-muted-foreground" />
         <SequenceStep state={sequence.payer} actor="payer" tx={tx} />
@@ -1597,16 +1600,15 @@ export function LeadPayerSignatureFlow({
         />
       </div>}
       {required ? (
-        <p className="text-xs text-muted-foreground" data-testid="lead-payer-cost-assumption-purpose">
-          {tx("Заявление о принятии расходов (Kostenübernahmeerklärung): ", "Kostenübernahmeerklärung: ")}
-          {costCoveragePurpose(tx)}
-        </p>
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200" data-testid="lead-payer-cost-assumption-purpose">
+          <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <div className="min-w-0 space-y-1">
+            <p><span className="font-semibold">{tx("Заявление о принятии расходов (Kostenübernahmeerklärung): ", "Kostenübernahmeerklärung: ")}</span>{costCoveragePurpose(tx)}</p>
+            {documents.length === 0 ? <StatusChip tone="warning"><FileText aria-hidden="true" />{tx("Документ ещё не создан", "Dokument noch nicht erstellt")}</StatusChip> : null}
+          </div>
+        </div>
       ) : null}
-      {required ? (
-        documents.length > 0
-          ? renderDocuments(documents)
-          : <p className="text-xs text-muted-foreground">{tx("Заявление о принятии расходов ещё не создано", "Kostenübernahmeerklärung wurde noch nicht erstellt")}</p>
-      ) : null}
+      {required && documents.length > 0 ? renderDocuments(documents) : null}
       {packagePanelShown && packageState ? (
         <LeadPayerPackagePanel
           leadId={leadId}
