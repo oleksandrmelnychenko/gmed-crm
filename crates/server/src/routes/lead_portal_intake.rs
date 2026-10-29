@@ -410,11 +410,14 @@ pub fn router() -> Router<AppState> {
 // Access
 // ----------------------------------------------------------------------------
 
-/// How a login reaches a lead: its own login or a parent's / guardian's.
+/// How a login reaches a lead: its own login, a parent's / guardian's, or a
+/// member of staff filling in the form for the client (owner decision
+/// 2026-10-29, [`require_cabinet_editor`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AccessKind {
     Own,
     Guardian,
+    Staff,
 }
 
 impl AccessKind {
@@ -422,6 +425,7 @@ impl AccessKind {
         match self {
             AccessKind::Own => "self",
             AccessKind::Guardian => "guardian",
+            AccessKind::Staff => "staff",
         }
     }
 
@@ -429,6 +433,7 @@ impl AccessKind {
         match value {
             "self" => Some(AccessKind::Own),
             "guardian" => Some(AccessKind::Guardian),
+            "staff" => Some(AccessKind::Staff),
             _ => None,
         }
     }
@@ -681,6 +686,32 @@ pub(crate) fn require_patient(auth: &AuthUser) -> Result<(), axum::response::Res
     }
 }
 
+/// The cabinet forms staff may fill in for the client (owner decision
+/// 2026-10-29: «все, що робить пацієнт, ми з візарда також»): the patient,
+/// or staff who edit leads. Consents, the consent options, the trusted
+/// persons, the cost-estimate consent and the send stay the patient's own
+/// ([`require_patient`]); staff record those on paper.
+pub(crate) fn require_cabinet_editor(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if auth.role == Role::Patient {
+        return Ok(());
+    }
+    auth.require_capability(Capability::LeadsEdit)
+}
+
+/// Whether `user_id` is a member of staff (any role but the patient's).
+pub(crate) async fn is_staff_user<'e, E>(executor: E, user_id: Uuid) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    Ok(
+        sqlx::query_scalar::<_, bool>("SELECT role <> 'patient' FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(executor)
+            .await?
+            .unwrap_or(false),
+    )
+}
+
 /// Locks the lead and checks the caller's link in the same statement. `None`
 /// when the lead is gone, converted or not the caller's — or closed to the
 /// caller as a minor's own login ([`OWN_LOGIN_CLOSED_SQL`]).
@@ -699,6 +730,10 @@ pub(crate) async fn lock_my_lead(
         .await?;
     let row = sqlx::query(&format!(
         r#"SELECT CASE
+                    -- Staff fill in the form for the client; the handlers let
+                    -- only staff who edit leads come this far.
+                    WHEN EXISTS (SELECT 1 FROM users u WHERE u.id = $2 AND u.role <> 'patient')
+                        THEN 'staff'
                     WHEN l.portal_user_id = $2 AND NOT {OWN_LOGIN_CLOSED_SQL} THEN 'self'
                     WHEN {OWN_LOGIN_CLOSED_SQL} AND EXISTS (
                         SELECT 1 FROM lead_portal_access a
@@ -733,6 +768,15 @@ pub(crate) async fn my_lead_access(
     lead_id: Uuid,
     user_id: Uuid,
 ) -> Result<Option<AccessKind>, sqlx::Error> {
+    if is_staff_user(&state.db, user_id).await? {
+        let open: Option<Uuid> = sqlx::query_scalar(&format!(
+            "SELECT l.id FROM leads l WHERE l.id = $1 AND {PORTAL_LEAD_SQL}"
+        ))
+        .bind(lead_id)
+        .fetch_optional(&state.db)
+        .await?;
+        return Ok(open.map(|_| AccessKind::Staff));
+    }
     Ok(accessible_leads(&state.db, user_id)
         .await?
         .into_iter()
@@ -810,7 +854,11 @@ pub(crate) async fn refused_after_send(
     caller: Uuid,
     open: AfterSend,
 ) -> Result<bool, sqlx::Error> {
-    if open == AfterSend::Added || !request_sent(conn, lead_id).await? {
+    // Staff change the sent request in the client's form as in the wizard.
+    if open == AfterSend::Added
+        || is_staff_user(&mut *conn, caller).await?
+        || !request_sent(conn, lead_id).await?
+    {
         return Ok(false);
     }
     Ok(match open {
@@ -3013,7 +3061,7 @@ pub(crate) async fn request_payload(
         AccessKind::Guardian => {
             guardian_payer_template(&state.db, lead_id, user_id, &representation).await?
         }
-        AccessKind::Own => None,
+        AccessKind::Own | AccessKind::Staff => None,
     };
     let uploads = sqlx::query(
         r#"SELECT u.document_id, u.kind, u.created_at, u.reviewed_at, u.uploaded_by, u.access_kind,
@@ -3510,7 +3558,7 @@ async fn get_my_lead_request(
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     let kind = match my_lead_access(&state, lead_id, auth.user_id).await {
@@ -3531,7 +3579,7 @@ async fn update_my_personal_data(
     Path(lead_id): Path<Uuid>,
     Json(patch): Json<PersonalDataPatch>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     let mut tx = match state.db.begin().await {
@@ -3738,7 +3786,7 @@ async fn update_my_payer(
     Path(lead_id): Path<Uuid>,
     Json(mut body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     // The organisation mask (trigger flow 2026-10-07) is stored apart.
@@ -4098,7 +4146,7 @@ async fn update_my_billing(
     Path(lead_id): Path<Uuid>,
     Json(mut body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     let invalid = |field: &str, message: &str| {
@@ -4468,7 +4516,7 @@ async fn update_my_enhanced_details(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     let invalid = |field: &str, message: &str| {
@@ -4642,7 +4690,7 @@ async fn update_my_identification(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     let (body, statements_body) = match crate::risk::cabinet::split_identification_body(body) {
@@ -6200,7 +6248,7 @@ pub(crate) async fn store_my_upload(
     upload_kind: UploadKind,
     representative_id: Option<Uuid>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     let kind = match my_lead_access(&state, lead_id, auth.user_id).await {
@@ -6678,7 +6726,7 @@ async fn withdraw_my_lead_document(
     Extension(auth): Extension<AuthUser>,
     Path((lead_id, document_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     let mut tx = match state.db.begin().await {

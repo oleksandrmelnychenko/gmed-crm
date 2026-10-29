@@ -2780,7 +2780,7 @@ pub(crate) async fn update_my_representation(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(response) = intake::require_patient(&auth) {
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
     let mut tx = match state.db.begin().await {
@@ -3035,7 +3035,7 @@ pub(crate) async fn upsert_my_representative(
     Path((lead_id, representative_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(response) = intake::require_patient(&auth) {
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
     // The identity document data of a representative are staff's (trigger
@@ -3326,7 +3326,7 @@ pub(crate) async fn remove_my_representative(
     Extension(auth): Extension<AuthUser>,
     Path((lead_id, representative_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(response) = intake::require_patient(&auth) {
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
     let mut tx = match state.db.begin().await {
@@ -3819,7 +3819,7 @@ pub(crate) async fn save_my_country_questions(
     Path((lead_id, representative_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(response) = intake::require_patient(&auth) {
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
     let mut tx = match state.db.begin().await {

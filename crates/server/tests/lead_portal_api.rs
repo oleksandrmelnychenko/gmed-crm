@@ -1548,7 +1548,8 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         Some(json!({ "payer_kind": "self" })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    // Staff fill in the client's form (owner decision 2026-10-29).
+    assert_ne!(status, StatusCode::FORBIDDEN);
 
     // Wrong values name the field; unknown keys (the staff part) are refused.
     let (status, body) = json_request(
@@ -2088,10 +2089,12 @@ async fn the_lead_states_the_identification_and_staff_read_it() {
         "POST",
         &identification,
         &manager,
-        Some(json!({ "birth_place": "Kyiv" })),
+        Some(json!({ "salutation": "dr" })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    // Staff fill in the client's form (owner decision 2026-10-29): the
+    // manager reaches the checks of the form (nothing is stored here).
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
     // The confirmation is the server's to set; unknown keys are refused.
     for body in [
@@ -3750,7 +3753,8 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         Some(json!({ "payment_method": "cash" })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    // Staff fill in the client's form (owner decision 2026-10-29).
+    assert_ne!(status, StatusCode::FORBIDDEN);
     let (other_lead, _, _) = lead_with_login(&app, "Olga", "olga.billing@example.com").await;
     let (status, _) = json_request(
         router,
@@ -5018,8 +5022,9 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
     assert!(body["payer_questionnaire"].is_null(), "{body}");
     let (status, _) = json_request(router, "GET", &section, ben, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    // Staff fill in the client's form (owner decision 2026-10-29).
     let (status, _) = json_request(router, "GET", &section, &pm, None).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_ne!(status, StatusCode::FORBIDDEN);
 
     let (status, body) = json_request(router, "GET", &section, anna, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -8274,6 +8279,78 @@ async fn representative_follow_up_tracks_files_and_requires_current_inquiry_cons
         again["follow_up"]["answered_at"],
         body["follow_up"]["answered_at"]
     );
+}
+
+/// Staff fill in the client's cabinet form from the wizard (owner decision
+/// 2026-10-29): every form step, also after the send, marked as staff's;
+/// the consents stay the client's, and only staff who edit leads come in.
+#[tokio::test]
+async fn staff_fill_in_the_cabinet_form_but_never_give_the_consents() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    let concierge = app.staff("concierge");
+    let (lead, _user, patient) = lead_with_login(&app, "Staff", "staff.fills@example.com").await;
+    let base = format!("/api/v1/me/lead-requests/{lead}");
+
+    let (status, view) = json_request(router, "GET", &base, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    let (status, _) = json_request(router, "GET", &base, &concierge, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/personal-data"),
+        &pm,
+        Some(json!({"first_name": "Annette"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let kind: Option<String> = sqlx::query_scalar(
+        "SELECT portal_field_updates -> 'first_name' ->> 'kind' FROM leads WHERE id = $1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(kind.as_deref(), Some("staff"));
+
+    // The consents are the client's own.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &format!("{base}/consent"),
+        &pm,
+        Some(json!({"purpose": "lead_inquiry_processing", "version": "2026-10-03", "language": "de"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // After the send the form is closed for the client, open for staff.
+    sqlx::query("UPDATE leads SET portal_submitted_at = now() WHERE id = $1")
+        .bind(lead)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &format!("{base}/personal-data"),
+        &patient,
+        Some(json!({"first_name": "Anna"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/personal-data"),
+        &pm,
+        Some(json!({"first_name": "Anna"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 /// An explicit decision fixture; the production UI never presets these answers.

@@ -4140,7 +4140,7 @@ async fn cabinet_get(
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = intake::require_patient(&auth) {
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
     // Only a request the login still reaches: a parent's access ends with
@@ -4201,7 +4201,7 @@ async fn cabinet_patch(
     Path(lead_id): Path<Uuid>,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = intake::require_patient(&auth) {
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
     let mut tx = match state.db.begin().await {
@@ -4356,7 +4356,7 @@ async fn cabinet_funds_proof(
     Path(lead_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> Response {
-    if let Err(response) = intake::require_patient(&auth) {
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
     let checked = async {

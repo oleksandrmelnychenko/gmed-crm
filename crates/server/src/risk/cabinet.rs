@@ -458,7 +458,7 @@ async fn submit_follow_up(
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
 ) -> Response {
-    if let Err(response) = intake::require_patient(&auth) {
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
     let mut tx = match state.db.begin().await {
@@ -546,14 +546,17 @@ async fn submit_follow_up(
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit follow-up");
     }
-    intake::notify_lead_staff(
-        &state,
-        lead_id,
-        "lead_portal_follow_up_submitted",
-        "Patient sent the additional information",
-        "The additional information of the request was sent.",
-    )
-    .await;
+    // Staff who fill the form in for the client need no notice of their own answers.
+    if kind != intake::AccessKind::Staff {
+        intake::notify_lead_staff(
+            &state,
+            lead_id,
+            "lead_portal_follow_up_submitted",
+            "Patient sent the additional information",
+            "The additional information of the request was sent.",
+        )
+        .await;
+    }
     crate::realtime::publish_lead_event(
         &state,
         Some(auth.user_id),

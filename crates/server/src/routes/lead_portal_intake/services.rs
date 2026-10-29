@@ -130,7 +130,7 @@ pub(super) async fn update(
     Path(lead_id): Path<Uuid>,
     Json(patch): Json<ServicePatch>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    if let Err(response) = super::require_cabinet_editor(&auth) {
         return response;
     }
     let mut tx = match state.db.begin().await {

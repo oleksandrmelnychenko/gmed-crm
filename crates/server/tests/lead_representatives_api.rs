@@ -2273,31 +2273,15 @@ async fn the_representation_is_reached_only_through_the_own_request() {
     for (method, path, body) in &calls {
         let (status, answer) = json_request(router, method, path, &stranger, body.clone()).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}: {answer}");
-        for role in ["patient_manager", "sales"] {
-            let (status, answer) =
-                json_request(router, method, path, &app.staff(role), body.clone()).await;
-            assert_eq!(
-                status,
-                StatusCode::FORBIDDEN,
-                "{role} {method} {path}: {answer}"
-            );
-        }
+        // Staff who edit leads fill in the client's form since 2026-10-29
+        // (lead_portal_api: staff_fill_in_the_cabinet_form_…); a stranger
+        // still reaches nothing.
     }
     for part in ["identity-document", "authority-document"] {
         let path = format!("{request}/representatives/{agent}/{part}");
         let (status, answer) =
             upload_file(router, &path, &stranger, "a.pdf", "application/pdf", PDF).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{part}: {answer}");
-        let (status, answer) = upload_file(
-            router,
-            &path,
-            &app.staff("patient_manager"),
-            "a.pdf",
-            "application/pdf",
-            PDF,
-        )
-        .await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{part}: {answer}");
     }
     // Nothing changed.
     let (_, body) = json_request(router, "GET", &request, &patient, None).await;
