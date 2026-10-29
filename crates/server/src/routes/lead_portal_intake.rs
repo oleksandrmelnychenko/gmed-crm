@@ -7117,6 +7117,12 @@ async fn withdraw_my_lead_document(
 struct SubmitRequest {
     #[serde(default)]
     declared_correct: bool,
+    /// Staff send for the client (owner decision 2026-10-29): how the client
+    /// confirmed that the information is complete and true; required for staff.
+    #[serde(default)]
+    recorded_how: Option<String>,
+    #[serde(default)]
+    recorded_note: Option<String>,
 }
 
 /// `POST /me/lead-requests/{lead_id}/submit`: "send to the manager". Needs the
@@ -7129,13 +7135,13 @@ async fn submit_my_lead_request(
     Path(lead_id): Path<Uuid>,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    // Staff send for the client, saying how the client confirmed it (owner 2026-10-29).
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     // The checkbox of the last step (owner spec 2026-10-05).
-    let declared_correct = serde_json::from_slice::<SubmitRequest>(&body)
-        .unwrap_or_default()
-        .declared_correct;
+    let submit = serde_json::from_slice::<SubmitRequest>(&body).unwrap_or_default();
+    let declared_correct = submit.declared_correct;
     if !declared_correct {
         return coded(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -7152,6 +7158,18 @@ async fn submit_my_lead_request(
         Ok(Some(found)) => found,
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
+    };
+    let recorded = if kind == AccessKind::Staff {
+        match staff_consent_record(
+            submit.recorded_how.as_deref(),
+            submit.recorded_note.as_deref(),
+            auth.user_id,
+        ) {
+            Ok(record) => Some(record),
+            Err(response) => return response,
+        }
+    } else {
+        None
     };
     // The request is sent once (owner 2026-10-26: no «Erneut senden»; what
     // the lead answers later goes with the follow-up's own send). A retry
@@ -7369,6 +7387,7 @@ async fn submit_my_lead_request(
                 "self_funds_documents": self_funds_documents,
                 "declared_correct": true,
                 "inquiry_consent_record_id": inquiry_consent_id,
+                "recorded_by_staff": recorded,
             }),
         ),
     )
@@ -7409,30 +7428,33 @@ async fn submit_my_lead_request(
                 false
             }
         };
-    notify_lead_staff_with(
-        &state,
-        lead_id,
-        "lead_portal_submitted",
-        "Patient sent the request data",
-        &format!(
-            "Personal data: {} of {} fields, {} documents.{}",
-            data.filled_count(),
-            PROGRESS_FIELDS.len(),
-            documents,
-            if payer_link_ready {
-                " The payer link can be sent now."
-            } else {
-                ""
-            }
-        ),
-        Some(json!({
-            "filled": data.filled_count(),
-            "total": PROGRESS_FIELDS.len(),
-            "documents": documents,
-            "payer_link_ready": payer_link_ready,
-        })),
-    )
-    .await;
+    // Staff who sent it for the client need no notice of their own send.
+    if kind != AccessKind::Staff {
+        notify_lead_staff_with(
+            &state,
+            lead_id,
+            "lead_portal_submitted",
+            "Patient sent the request data",
+            &format!(
+                "Personal data: {} of {} fields, {} documents.{}",
+                data.filled_count(),
+                PROGRESS_FIELDS.len(),
+                documents,
+                if payer_link_ready {
+                    " The payer link can be sent now."
+                } else {
+                    ""
+                }
+            ),
+            Some(json!({
+                "filled": data.filled_count(),
+                "total": PROGRESS_FIELDS.len(),
+                "documents": documents,
+                "payer_link_ready": payer_link_ready,
+            })),
+        )
+        .await;
+    }
     crate::realtime::publish_lead_event(
         &state,
         Some(auth.user_id),

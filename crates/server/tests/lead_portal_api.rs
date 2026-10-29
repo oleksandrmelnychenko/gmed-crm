@@ -8406,6 +8406,18 @@ async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() 
         ("staff_recorded", "staff", Some("paper"))
     );
 
+    // Staff send for the client only saying how the client confirmed it.
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &format!("{base}/submit"),
+        &pm,
+        Some(json!({ "declared_correct": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "consent_recorded_how_required");
+
     // After the send the form is closed for the client, open for staff.
     sqlx::query("UPDATE leads SET portal_submitted_at = now() WHERE id = $1")
         .bind(lead)
