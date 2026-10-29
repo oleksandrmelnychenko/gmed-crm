@@ -6452,7 +6452,7 @@ async fn the_lead_chooses_the_consent_form_options_and_the_form_records_the_choi
     assert_eq!(form["version"], "2026-10-12", "{form}");
     assert_eq!(form["choices"], Value::Null, "{form}");
 
-    // Staff never choose for the person.
+    // Staff record the person's choice only with how it was given (owner 2026-10-29).
     let (status, body) = json_request(
         router,
         "POST",
@@ -6461,7 +6461,8 @@ async fn the_lead_chooses_the_consent_form_options_and_the_form_records_the_choi
         Some(json!({ "choices": choices, "version": "2026-10-12", "language": "de" })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "consent_recorded_how_required", "{body}");
     // Outdated texts and unknown options are refused.
     let (status, body) = json_request(
         router,
@@ -8375,6 +8376,36 @@ async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() 
         "{view}"
     );
 
+    // The consent form options the client named, recorded by staff with how.
+    let choices =
+        json!({"agency_processing": true, "doctors_to_agency": true, "data_system": true});
+    let (status, refused) = choose(router, lead, &pm, &choices).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "consent_recorded_how_required");
+    let (status, chosen) = json_request(
+        router,
+        "POST",
+        &format!("{base}/consent-choices"),
+        &pm,
+        Some(
+            json!({ "choices": choices, "version": "2026-10-12", "language": "de",
+            "recorded_how": "paper", "recorded_note": "Formular vom 29.10." }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{chosen}");
+    let (source, kind, how): (String, String, Option<String>) = sqlx::query_as(
+        "SELECT source, access_kind, recorded_how FROM consent_form_choices WHERE lead_id = $1 ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (source.as_str(), kind.as_str(), how.as_deref()),
+        ("staff_recorded", "staff", Some("paper"))
+    );
+
     // After the send the form is closed for the client, open for staff.
     sqlx::query("UPDATE leads SET portal_submitted_at = now() WHERE id = $1")
         .bind(lead)
@@ -9034,7 +9065,9 @@ async fn trusted_persons_require_an_explicit_decision_consent_and_a_scope_for_ea
         confirmed_disclosure(json!([]), false),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    // Staff record the client's decision only with how it was given (owner 2026-10-29).
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "consent_recorded_how_required", "{body}");
     let (minor, _, child) = lead_with_login(&app, "Mia", "mia.disclosure@example.com").await;
     sqlx::query("UPDATE leads SET date_of_birth='2015-05-10' WHERE id=$1")
         .bind(minor)

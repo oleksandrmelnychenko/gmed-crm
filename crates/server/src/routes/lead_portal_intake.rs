@@ -4954,6 +4954,12 @@ struct ConsentChoicesRequest {
     /// [`consent_choices::TEXT_VERSION`] of the texts the person saw.
     version: String,
     language: String,
+    /// Staff record what the client chose (owner decision 2026-10-29): how
+    /// the client gave it ([`STAFF_CONSENT_CHANNELS`]); required for staff.
+    #[serde(default)]
+    recorded_how: Option<String>,
+    #[serde(default)]
+    recorded_note: Option<String>,
 }
 
 /// The cabinet's view of the person's own choice of the consent form options.
@@ -4985,7 +4991,8 @@ async fn save_consent_choices(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<ConsentChoicesRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    // Staff record the options the client chose (owner decision 2026-10-29).
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     if body.version != consent_choices::TEXT_VERSION {
@@ -5041,6 +5048,18 @@ async fn save_consent_choices(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    let recorded = if kind == AccessKind::Staff {
+        match staff_consent_record(
+            body.recorded_how.as_deref(),
+            body.recorded_note.as_deref(),
+            auth.user_id,
+        ) {
+            Ok(record) => Some(record),
+            Err(response) => return response,
+        }
+    } else {
+        None
+    };
     // For a minor only a parent or the guardian chooses — the child's form
     // names and is signed by the one who chose (QA 2026-10-12, A3-01). The
     // lead's own login of a minor (before any parent has access) saves
@@ -5065,7 +5084,12 @@ async fn save_consent_choices(
     };
     // After the send an option can only be withdrawn (owner 2026-10-26, a
     // DSGVO right); ticking more goes through the contact at GMED.
-    match request_sent(&mut tx, lead_id).await {
+    // Staff record what the client says also after the send.
+    match if kind == AccessKind::Staff {
+        Ok(false)
+    } else {
+        request_sent(&mut tx, lead_id).await
+    } {
         Ok(true)
             if !current
                 .as_ref()
@@ -5142,8 +5166,11 @@ async fn save_consent_choices(
     let (choice_id, chosen_at): (Uuid, DateTime<Utc>) = match sqlx::query_as(
         r#"INSERT INTO consent_form_choices (
                template_id, lead_id, patient_id, choices, chosen_by, access_kind,
-               source, language, text_version, recipients, chosen_at, disclosure)
-           SELECT $1, l.id, l.prospect_patient_id, $2, $3, $4, 'lead_portal', $5, $6, $8, clock_timestamp(), $9
+               source, language, text_version, recipients, chosen_at, disclosure,
+               recorded_how, recorded_note)
+           SELECT $1, l.id, l.prospect_patient_id, $2, $3, $4,
+                  CASE WHEN $10::text IS NULL THEN 'lead_portal' ELSE 'staff_recorded' END,
+                  $5, $6, $8, clock_timestamp(), $9, $10, $11
            FROM leads l WHERE l.id = $7
            RETURNING id, chosen_at"#,
     )
@@ -5156,6 +5183,16 @@ async fn save_consent_choices(
     .bind(lead_id)
     .bind(&recipients_json)
     .bind(disclosure.as_ref().map(|d| json!(d)))
+    .bind(
+        recorded
+            .as_ref()
+            .and_then(|record| record["how"].as_str().map(str::to_string)),
+    )
+    .bind(
+        recorded
+            .as_ref()
+            .and_then(|record| record["note"].as_str().map(str::to_string)),
+    )
     .fetch_one(&mut *tx)
     .await
     {
@@ -5273,6 +5310,12 @@ struct TrustedPersonsRequest {
     consent_given: bool,
     version: String,
     language: String,
+    /// Staff record what the client chose (owner decision 2026-10-29): how
+    /// the client gave it ([`STAFF_CONSENT_CHANNELS`]); required for staff.
+    #[serde(default)]
+    recorded_how: Option<String>,
+    #[serde(default)]
+    recorded_note: Option<String>,
 }
 
 async fn disclosure_company_name<'e, E>(executor: E) -> Result<String, sqlx::Error>
@@ -5306,7 +5349,8 @@ async fn save_trusted_persons(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<TrustedPersonsRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient(&auth) {
+    // Staff record the trusted persons the client named (owner decision 2026-10-29).
+    if let Err(response) = require_cabinet_editor(&auth) {
         return response;
     }
     if body.version != consent_choices::DISCLOSURE_VERSION {
@@ -5381,13 +5425,30 @@ async fn save_trusted_persons(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    let recorded = if kind == AccessKind::Staff {
+        match staff_consent_record(
+            body.recorded_how.as_deref(),
+            body.recorded_note.as_deref(),
+            auth.user_id,
+        ) {
+            Ok(record) => Some(record),
+            Err(response) => return response,
+        }
+    } else {
+        None
+    };
     let stored_persons = match load_trusted_persons(&mut *tx, lead_id).await {
         Ok(persons) => persons,
         Err(error) => return internal(error, "load trusted persons"),
     };
     // After the send the decision can only be withdrawn — all of it, or
     // persons removed from the list (owner 2026-10-26, a DSGVO right).
-    match request_sent(&mut tx, lead_id).await {
+    // Staff record what the client says also after the send.
+    match if kind == AccessKind::Staff {
+        Ok(false)
+    } else {
+        request_sent(&mut tx, lead_id).await
+    } {
         Ok(true)
             if body.allow_disclosure
                 && !persons.iter().all(|person| stored_persons.contains(person)) =>
@@ -5443,7 +5504,21 @@ async fn save_trusted_persons(
         Err(error) => return internal(error, "load custody"),
     };
     let subject = consent_choices::DisclosureSubject::for_custody(
-        kind.as_str(),
+        if kind == AccessKind::Staff {
+            if crate::routes::leads::is_minor_on(
+                lead_row
+                    .try_get::<Option<NaiveDate>, _>("date_of_birth")
+                    .ok()
+                    .flatten(),
+                crate::app_time::today(),
+            ) {
+                AccessKind::Guardian.as_str()
+            } else {
+                AccessKind::Own.as_str()
+            }
+        } else {
+            kind.as_str()
+        },
         crate::routes::leads::is_minor_on(
             lead_row
                 .try_get::<Option<NaiveDate>, _>("date_of_birth")
@@ -5541,9 +5616,11 @@ async fn save_trusted_persons(
     if let Err(error) = sqlx::query(
         r#"INSERT INTO consent_form_choices (
                    template_id, lead_id, patient_id, choices, chosen_by, access_kind,
-                   source, language, text_version, recipients, chosen_at, disclosure)
+                   source, language, text_version, recipients, chosen_at, disclosure,
+                   recorded_how, recorded_note)
                SELECT $1, l.id, l.prospect_patient_id, $6, $3, $4,
-                      'lead_portal', $7, $8, $5, $9, $10
+                      CASE WHEN $11::text IS NULL THEN 'lead_portal' ELSE 'staff_recorded' END,
+                      $7, $8, $5, $9, $10, $11, $12
                FROM leads l WHERE l.id = $2"#,
     )
     .bind(consent_choices::TEMPLATE)
@@ -5556,6 +5633,16 @@ async fn save_trusted_persons(
     .bind(consent_choices::TEXT_VERSION)
     .bind(now)
     .bind(json!(disclosure))
+    .bind(
+        recorded
+            .as_ref()
+            .and_then(|record| record["how"].as_str().map(str::to_string)),
+    )
+    .bind(
+        recorded
+            .as_ref()
+            .and_then(|record| record["note"].as_str().map(str::to_string)),
+    )
     .execute(&mut *tx)
     .await
     {

@@ -1408,6 +1408,12 @@ async fn publish(state: &AppState, actor: Uuid, lead_id: Uuid) {
 #[serde(deny_unknown_fields)]
 struct CostEstimateConsentBody {
     consent: bool,
+    /// Staff record the client's consent (owner decision 2026-10-29): how
+    /// the client gave it; required for staff.
+    #[serde(default)]
+    recorded_how: Option<String>,
+    #[serde(default)]
+    recorded_note: Option<String>,
 }
 
 /// `POST /me/lead-requests/{lead_id}/payer/cost-estimate-consent`: the
@@ -1422,7 +1428,8 @@ async fn cost_estimate_consent(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<CostEstimateConsentBody>,
 ) -> Response {
-    if let Err(response) = intake::require_patient(&auth) {
+    // Staff record the client's consent too (owner decision 2026-10-29).
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
     let mut tx = match state.db.begin().await {
@@ -1433,6 +1440,18 @@ async fn cost_estimate_consent(
         Ok(Some(found)) => found,
         Ok(None) => return intake::not_found(),
         Err(error) => return intake::internal(error, "lock request"),
+    };
+    let recorded = if kind == intake::AccessKind::Staff && body.consent {
+        match intake::staff_consent_record(
+            body.recorded_how.as_deref(),
+            body.recorded_note.as_deref(),
+            auth.user_id,
+        ) {
+            Ok(record) => Some(record),
+            Err(response) => return response,
+        }
+    } else {
+        None
     };
     let declaration = match lead_payer::load_declaration(&mut tx, lead_id).await {
         Ok(declaration) => declaration,
@@ -1460,12 +1479,24 @@ async fn cost_estimate_consent(
     if next != declaration.cost_estimate_consent_at {
         if let Err(error) = sqlx::query(
             r#"UPDATE lead_payer_declarations
-               SET cost_estimate_consent_at = $2, updated_by = $3, updated_at = now()
+               SET cost_estimate_consent_at = $2, updated_by = $3, updated_at = now(),
+                   cost_estimate_consent_recorded_how = $4,
+                   cost_estimate_consent_recorded_note = $5
                WHERE lead_id = $1"#,
         )
         .bind(lead_id)
         .bind(next)
         .bind(auth.user_id)
+        .bind(
+            recorded
+                .as_ref()
+                .and_then(|record| record["how"].as_str().map(str::to_string)),
+        )
+        .bind(
+            recorded
+                .as_ref()
+                .and_then(|record| record["note"].as_str().map(str::to_string)),
+        )
         .execute(&mut *tx)
         .await
         {
