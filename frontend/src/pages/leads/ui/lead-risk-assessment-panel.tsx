@@ -77,15 +77,20 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
       render: (trigger) => {
         const variant = riskVariantLabel(trigger.variant, tx);
         return (
-          <span data-testid={`lead-risk-trigger-${trigger.key}`} data-active={trigger.active ? "true" : "false"}>
-            <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">{trigger.key}</span>
+          <span className="flex flex-wrap items-center gap-2" data-testid={`lead-risk-trigger-${trigger.key}`} data-active={trigger.active ? "true" : "false"}>
+            <StatusChip className="border-violet-200 bg-violet-50 font-mono text-violet-700 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200">{trigger.key}</StatusChip>
             <span className="font-medium">{riskTriggerLabel(trigger.key, tx, trigger.subject)}</span>
-            {variant ? <span className="text-muted-foreground"> · {variant}</span> : null}
+            {variant ? <StatusChip>{variant}</StatusChip> : null}
           </span>
         );
       },
     },
-    { id: "subject", label: tx("Кого касается", "Betrifft"), accessor: (trigger) => riskSubjectLabel(trigger.subject, tx, trigger.variant, representatives, trigger), width: 150, cellClassName: "whitespace-normal break-words leading-4" },
+    {
+      id: "subject", label: tx("Кого касается", "Betrifft"),
+      accessor: (trigger) => riskSubjectLabel(trigger.subject, tx, trigger.variant, representatives, trigger),
+      width: 150, cellClassName: "whitespace-normal break-words leading-4",
+      render: (trigger) => <StatusChip tone="info"><UserRound />{riskSubjectLabel(trigger.subject, tx, trigger.variant, representatives, trigger)}</StatusChip>,
+    },
     {
       id: "points",
       label: tx("Баллы", "Punkte"),
@@ -93,8 +98,8 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
       width: 72,
       align: "right",
       render: (trigger) => trigger.knockout
-        ? <span className="font-semibold text-rose-700 dark:text-rose-300">K.o.</span>
-        : <span className="font-semibold tabular-nums">{trigger.points}</span>,
+        ? <StatusChip tone="error">K.o.</StatusChip>
+        : <StatusChip tone="warning" className="font-mono font-semibold tabular-nums">{trigger.points}</StatusChip>,
     },
     {
       id: "state",
@@ -103,18 +108,21 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
       width: 240,
       cellClassName: "whitespace-normal break-words leading-4",
       render: (trigger) => (
-        <span data-testid={`lead-risk-trigger-${trigger.key}-state`} className={trigger.active ? "text-foreground" : "text-muted-foreground"}>
-          {riskTriggerStateLabel(trigger, tx, (value) => formatAppDate(value))}
-        </span>
+        <div data-testid={`lead-risk-trigger-${trigger.key}-state`} className="flex flex-wrap items-center gap-1.5">
+          <StatusChip tone={trigger.active ? "warning" : "neutral"} className="whitespace-normal text-left">
+            {riskTriggerStateLabel({ ...trigger, inactive_since: null }, tx, (value) => formatAppDate(value))}
+          </StatusChip>
+          {!trigger.active && trigger.inactive_since ? <StatusChip tone="info"><CalendarDays />{formatAppDate(trigger.inactive_since)}</StatusChip> : null}
+        </div>
       ),
     },
     {
       id: "first_fired_at",
       label: tx("Впервые", "Erstmals"),
       accessor: (trigger) => trigger.first_fired_at,
-      width: 120,
+      width: 145,
       cellClassName: "whitespace-nowrap font-mono tabular-nums",
-      render: (trigger) => formatAppDate(trigger.first_fired_at) || "—",
+      render: (trigger) => trigger.first_fired_at ? <StatusChip tone="info"><CalendarDays />{formatAppDate(trigger.first_fired_at)}</StatusChip> : "—",
     },
   ];
   return (
@@ -135,21 +143,24 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
 
 function BlockRow({ block, requested, beforeSubmit = false, tx, representatives }: { block: RiskBlockState; requested: boolean; beforeSubmit?: boolean; tx: Tx; representatives: LeadRiskAssessment["representatives"] }) {
   return (
-    <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5" data-testid={`lead-risk-block-${block.key}`}>
-      <span className="font-mono text-[11px] font-semibold text-foreground">{block.key}</span>
-      <span className="font-medium text-foreground">{riskBlockLabel(block.key, tx)}</span>
-      <span className="text-muted-foreground">· {riskPartyLabel(block.party, tx)}</span>
-      {/* "запрошено · ждём ответ" or "ответ получен", never both. */}
-      {requested && !block.answered ? <span className="text-muted-foreground">· {tx("запрошено", "angefordert")}</span> : null}
-      <span className={block.answered ? "text-emerald-700 dark:text-emerald-300" : WARNING_TEXT}>
-        · {beforeSubmit
-          ? block.answered ? tx("заполнено", "ausgefüllt") : tx("нужен ответ", "Antwort erforderlich")
-          : block.answered ? tx("ответ получен", "beantwortet") : tx("ждём ответ", "offen")}
-      </span>
+    <li className="min-w-0 space-y-2 rounded-lg border border-border/60 bg-card px-3 py-2.5" data-testid={`lead-risk-block-${block.key}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusChip className="border-violet-200 bg-violet-50 font-mono text-violet-700 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200">{block.key}</StatusChip>
+        <span className="text-sm font-semibold text-foreground">{riskBlockLabel(block.key, tx)}</span>
+        <StatusChip>{riskPartyLabel(block.party, tx)}</StatusChip>
+        {/* "запрошено · ждём ответ" or "ответ получен", never both. */}
+        {requested && !block.answered ? <StatusChip tone="info">{tx("запрошено", "angefordert")}</StatusChip> : null}
+        <StatusChip tone={block.answered ? "success" : "warning"}>
+          {block.answered ? <Check /> : <Info />}{beforeSubmit
+            ? block.answered ? tx("заполнено", "ausgefüllt") : tx("нужен ответ", "Antwort erforderlich")
+            : block.answered ? tx("ответ получен", "beantwortet") : tx("ждём ответ", "offen")}
+        </StatusChip>
+        </div>
       {block.missing.length > 0 ? (
-        <span className="w-full text-xs text-muted-foreground" data-testid={`lead-risk-block-${block.key}-missing`}>
-          {tx("не хватает", "fehlt")}: {block.missing.map((key) => riskMissingLabel(key, tx, representatives)).join(", ")}
-        </span>
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/60 px-2.5 py-2 text-xs leading-5 text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200" data-testid={`lead-risk-block-${block.key}-missing`}>
+          <Info className="mt-0.5 size-4 shrink-0" />
+          <span>{tx("Не хватает", "Fehlt")}: {block.missing.map((key) => riskMissingLabel(key, tx, representatives)).join(", ")}</span>
+        </div>
       ) : null}
     </li>
   );
@@ -403,7 +414,7 @@ export function LeadRiskAssessmentPanel({
         ) : null}
 
         {(started || questionsBeforeSubmit) && blocksShown.length > 0 ? (
-          <div className="space-y-1.5" data-testid="lead-risk-blocks">
+          <div className="space-y-3" data-testid="lead-risk-blocks">
             <Caption>{questionsBeforeSubmit
               ? tx("Вопросы до отправки анкеты", "Fragen vor dem Absenden der Anfrage")
               : tx("Дополнительные сведения", "Ergänzende Angaben")}</Caption>
@@ -413,15 +424,16 @@ export function LeadRiskAssessmentPanel({
                 "Diese Fragen stehen im Portal aufgrund der aktuellen Länderangaben bereits zur Verfügung. Unten ist der Ausfüllstand zu sehen; die Risikobewertung wurde noch nicht gestartet.",
               )}
             </p> : null}
-            <ul className="space-y-1 text-xs">
+            <ul className="grid items-start gap-2 @3xl/risk:grid-cols-2">
               {blocksShown.map((block) => (
                 <BlockRow key={block.key} block={block} requested={requested.has(block.key)} beforeSubmit={questionsBeforeSubmit} tx={tx} representatives={assessment.representatives} />
               ))}
             </ul>
             {started && assessment.follow_up_answered_at ? (
-              <p className="text-xs text-muted-foreground" data-testid="lead-risk-follow-up-answered">
+              <StatusChip tone="info" data-testid="lead-risk-follow-up-answered">
+                <CalendarDays />
                 {tx("Пациент отправил сведения", "Angaben gesendet am")} {formatAppDateTime(assessment.follow_up_answered_at)}
-              </p>
+              </StatusChip>
             ) : null}
           </div>
         ) : null}

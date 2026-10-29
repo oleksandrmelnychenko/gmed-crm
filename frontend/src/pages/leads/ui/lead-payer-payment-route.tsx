@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
+import { Info, LoaderCircle } from "lucide-react";
 
 import { inputClass, selectClass, textareaClass, tokens } from "@/components/ui-shell";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
@@ -146,7 +146,7 @@ export function LeadPayerPaymentRoute({
     const rows = billing ? billingStatements(billing, tx, lang, true).payment.filter((row) => row.key !== "expected_total") : [];
     const answered = Boolean(declaration.payment_method) || declaration.via_third_party != null;
     return (
-      <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-payer-payment-route">
+      <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-payer-payment-route">
         {header}
         {answered ? (
           <dl className="grid gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -173,15 +173,16 @@ export function LeadPayerPaymentRoute({
   const invalid = Object.keys(errors).length > 0;
 
   return (
-    <div className="space-y-3 border-t border-border/50 pt-3" data-testid="lead-payer-payment-route">
+    <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-payer-payment-route">
       {header}
-      <p className="text-xs leading-5 text-muted-foreground">
+      <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+        <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
         {tx(
           "Учитывается в оценке риска сразу. Если плательщик позже ответит по своей ссылке, его ответ заменит этот.",
           "Zählt sofort für die Risikobewertung. Antwortet der Zahler später über seinen Link, ersetzt seine Angabe diese.",
         )}
       </p>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <RouteField label={tx("Способ оплаты", "Zahlungsart")} error={errorOf("payment_method")}>
           <NativeComboboxSelect
             value={draft.payment_method}

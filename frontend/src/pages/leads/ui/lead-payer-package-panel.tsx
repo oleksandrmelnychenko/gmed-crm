@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
-import { Check, FileSignature, FileText, LoaderCircle, Send, ShieldCheck } from "lucide-react";
+import { CalendarDays, Check, FileText, Info, LoaderCircle, Send, ShieldCheck, UserRound } from "lucide-react";
 
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -137,12 +138,11 @@ export function LeadPayerPackagePanel({
   }
 
   return (
-    <div className="min-w-0 space-y-2.5 rounded-lg border border-border/70 bg-background/60 p-3" data-testid="lead-payer-package">
+    <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-payer-package">
       <div className="flex flex-wrap items-center gap-2">
-        <FileSignature aria-hidden="true" className="size-3.5 text-muted-foreground" />
-        <span className="text-xs font-semibold text-foreground">
+        <AdminSectionTitle>
           {tx("Документы плательщику на подпись", "Unterlagen für den Zahler zur Unterschrift")}
-        </span>
+        </AdminSectionTitle>
         {status ? (
           <span className="inline-flex" data-testid="lead-payer-package-badge" data-status={pkg?.status}>
             <StatusChip tone={pkg?.status === "prepared" ? "success" : status.tone === "brand" ? "info" : status.tone}>{status.label}</StatusChip>
@@ -155,62 +155,64 @@ export function LeadPayerPackagePanel({
         ) : null}
       </div>
       {signer ? (
-        <p className="break-words text-xs leading-5 text-foreground" data-testid="lead-payer-package-signer">
-          <span className="text-muted-foreground">{tx("Подписывает: ", "Unterschreibt: ")}</span>
-          {signer}
+        <p className="flex flex-wrap items-center gap-2 text-xs leading-5 text-foreground" data-testid="lead-payer-package-signer">
+          <span className="font-mono text-muted-foreground">{tx("Подписывает:", "Unterschreibt:")}</span>
+          <StatusChip tone="warning"><UserRound aria-hidden="true" /><span className="min-w-0 break-words">{signer}</span></StatusChip>
         </p>
       ) : null}
 
-      <ol className="divide-y divide-border/70 rounded-lg border border-border/70 bg-card" data-testid="lead-payer-package-documents">
+      <ol className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/50" data-testid="lead-payer-package-documents">
         {rows.map(({ slot, document }, index) => {
           const label = payerPackageSlotLabel(slot, tx);
           return (
             <li
               key={slot}
-              className="flex min-w-0 items-start gap-2 px-3 py-2"
+              className="flex min-w-0 items-start gap-3 px-3 py-3"
               data-testid={`lead-payer-package-document-${slot}`}
               data-document-id={document?.document_id}
             >
-              <span aria-hidden="true" className="mt-0.5 w-4 shrink-0 font-mono text-[11px] text-muted-foreground">{index + 1}.</span>
-              <div className="min-w-0 flex-1">
-                {document && onOpenDocument ? (
-                  <button
-                    type="button"
-                    className="max-w-full break-words text-left text-sm font-medium text-foreground underline-offset-2 hover:underline disabled:opacity-60"
-                    disabled={disabled}
-                    title={document.title ?? undefined}
-                    onClick={() => onOpenDocument(document.document_id, document.title ?? label)}
-                  >
-                    {label}
-                  </button>
-                ) : (
-                  <span className={cn("break-words text-sm", document || (slot === "self_disclosure" && answeredOnPaper) ? "font-medium text-foreground" : "text-muted-foreground")}>{label}</span>
-                )}
-                <p className="break-words text-xs leading-5 text-muted-foreground" data-testid={`lead-payer-package-purpose-${slot}`}>
+              <span aria-hidden="true" className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] font-mono text-[11px] font-semibold text-white">{index + 1}</span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  {document && onOpenDocument ? (
+                    <button
+                      type="button"
+                      className="max-w-full break-words text-left text-sm font-semibold text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                      disabled={disabled}
+                      title={document.title ?? undefined}
+                      onClick={() => onOpenDocument(document.document_id, document.title ?? label)}
+                    >
+                      {label}
+                    </button>
+                  ) : (
+                    <span className="break-words text-sm font-semibold text-foreground">{label}</span>
+                  )}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {document ? (
+                      <>
+                        {document.version !== null ? (
+                          <StatusChip className="border-violet-200 bg-violet-50 font-mono text-violet-700 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200">{tx("Версия", "Version")} {document.version}</StatusChip>
+                        ) : null}
+                        {document.signed_at ? (
+                          <span className="inline-flex flex-wrap items-center gap-1.5" data-testid={`lead-payer-package-signed-${slot}`}>
+                            <StatusChip tone="success"><Check aria-hidden="true" />{tx("Подписан", "Unterschrieben")}</StatusChip>
+                            <StatusChip tone="info"><CalendarDays aria-hidden="true" />{formatAppDate(document.signed_at)}</StatusChip>
+                          </span>
+                        ) : null}
+                      </>
+                    ) : slot === "self_disclosure" && answeredOnPaper ? (
+                      <StatusChip tone="success" data-testid="lead-payer-package-paper-self_disclosure">
+                        <Check aria-hidden="true" className="size-3.5" />
+                        {payerPaperSelfDisclosureText(tx)}
+                      </StatusChip>
+                    ) : (
+                      <StatusChip tone="warning">{tx("ещё не создан", "noch nicht erstellt")}</StatusChip>
+                    )}
+                  </div>
+                </div>
+                <p className="break-words text-xs leading-5 text-foreground/75" data-testid={`lead-payer-package-purpose-${slot}`}>
                   {payerPackageSlotPurpose(slot, tx)}
                 </p>
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  {document ? (
-                    <>
-                      {document.version !== null ? (
-                        <span className="font-mono">{tx("Версия", "Version")} {document.version}</span>
-                      ) : null}
-                      {document.signed_at ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-700" data-testid={`lead-payer-package-signed-${slot}`}>
-                          <Check aria-hidden="true" className="size-3.5" />
-                          {tx(`подписан ${formatAppDate(document.signed_at)}`, `unterschrieben am ${formatAppDate(document.signed_at)}`)}
-                        </span>
-                      ) : null}
-                    </>
-                  ) : slot === "self_disclosure" && answeredOnPaper ? (
-                    <span className="inline-flex items-center gap-1 text-emerald-700" data-testid="lead-payer-package-paper-self_disclosure">
-                      <Check aria-hidden="true" className="size-3.5" />
-                      {payerPaperSelfDisclosureText(tx)}
-                    </span>
-                  ) : (
-                    <span>{tx("ещё не создан", "noch nicht erstellt")}</span>
-                  )}
-                </div>
               </div>
               {document ? <FileText aria-hidden="true" className="mt-1 size-3.5 shrink-0 text-muted-foreground" /> : null}
             </li>
@@ -229,11 +231,11 @@ export function LeadPayerPackagePanel({
       ) : null}
       {blockedText ? (
         <p
-          className={cn("text-xs leading-5", answeredOnPaper && state.blocked_reason === "payer_not_submitted" ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300")}
+          className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
           data-testid="lead-payer-package-blocked"
           data-reason={state.blocked_reason ?? undefined}
         >
-          {blockedText}
+          <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /><span>{blockedText}</span>
         </p>
       ) : null}
       {pkg && outdated.length > 0 ? (
@@ -254,8 +256,8 @@ export function LeadPayerPackagePanel({
       {identification ? (
         <p
           className={cn(
-            "inline-flex items-start gap-1.5 break-words text-xs leading-5",
-            identification.tone === "success" ? "text-emerald-700" : "text-muted-foreground",
+            "flex w-fit max-w-full items-start gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium leading-5",
+            identification.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200" : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
           )}
           data-testid="lead-payer-package-qes"
         >
@@ -282,8 +284,8 @@ export function LeadPayerPackagePanel({
                     className={cn(
                       "min-h-7 min-w-9 rounded-md px-2.5 py-1 text-[13px] font-medium transition-colors disabled:cursor-default disabled:opacity-60",
                       chosenLanguage === option
-                        ? "bg-card text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
+                        ? "bg-[var(--brand)] text-white shadow-sm"
+                        : "text-foreground hover:bg-muted",
                     )}
                     onClick={() => setLanguage(option)}
                   >

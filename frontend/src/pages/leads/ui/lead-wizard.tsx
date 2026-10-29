@@ -9213,7 +9213,8 @@ ${serviceCommentLines.join("\n")}`
                               : enhancedCheckTitle(tx)}
                         </StatusChip>
                         {amlRequired && amlRequiredText ? (
-                          <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-aml-enhanced-check-reasons">
+                          <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" data-testid="lead-aml-enhanced-check-reasons">
+                            <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
                             {amlRequiredText}
                           </p>
                         ) : null}
@@ -10578,11 +10579,7 @@ ${serviceCommentLines.join("\n")}`
                               {selectedCostEstimateWorkTypes.length}
                             </span>
                           </p>
-                        ) : (
-                          <p className="mt-0.5 text-[11px] text-muted-foreground">
-                            {tx("Выберите необходимые позиции", "Benötigte Positionen auswählen")}
-                          </p>
-                        )}
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-2">
                         {workTypesLoading ? (
@@ -11580,7 +11577,7 @@ ${serviceCommentLines.join("\n")}`
                 >
                 <WizardDocumentRows
                   documents={commercialDocuments.cost_estimate}
-                  emptyLabel={tx("Предварительный расчёт медицинских расходов ещё не создан", "Vorläufige medizinische Kostenkalkulation wurde noch nicht erstellt")}
+                  emptyLabel=""
                   lang={lang}
                   busy={busy}
                   disabled={isBusy}
@@ -12592,7 +12589,7 @@ ${serviceCommentLines.join("\n")}`
                     return (
                       <article
                         key={line.id}
-                        className="overflow-hidden rounded-lg border border-border border-l-[3px] border-l-orange-500 bg-card shadow-sm"
+                        className="overflow-hidden rounded-lg border border-border bg-card shadow-sm"
                       >
                         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted/35 px-4 py-3">
                           <div className="flex min-w-0 items-start gap-2.5">

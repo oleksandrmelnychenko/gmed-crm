@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, CircleAlert, FileText, LoaderCircle, Upload } from "lucide-react";
+import { Check, CircleAlert, FileText, Info, LoaderCircle, Upload } from "lucide-react";
 
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { CountrySelect } from "@/components/ui/country-select";
@@ -42,6 +43,8 @@ const FILING_ROLES = new Set(["ceo", "patient_manager"]);
  * scan. Both count for the readiness check `payer_identified`.
  */
 export function LeadPayerPaperPath({
+  embedded = false,
+  onDocumentCountChange,
   leadId,
   identification,
   payerName,
@@ -53,6 +56,8 @@ export function LeadPayerPaperPath({
   onChanged,
   onOpenDocument,
 }: {
+  embedded?: boolean;
+  onDocumentCountChange?: (count: number) => void;
   leadId: string;
   identification: PayerIdentificationStatus;
   payerName: string;
@@ -93,6 +98,10 @@ export function LeadPayerPaperPath({
   }, [reload]);
 
   const { selfDisclosure, identity } = payerPaperDocuments(documents);
+  const documentCount = identity.length + (selfDisclosure ? 1 : 0);
+  const countCallback = useRef(onDocumentCountChange);
+  countCallback.current = onDocumentCountChange;
+  useEffect(() => { countCallback.current?.(documentCount); }, [leadId, documentCount]);
   const line = payerIdentificationLine(identification, tx);
   const disclosureDone = identification.statement_sent || identification.self_disclosure_signed;
   const locked = disabled || busy !== null;
@@ -149,19 +158,15 @@ export function LeadPayerPaperPath({
 
   return (
     <div
-      id={PAYER_PAPER_PATH_ID}
+      id={embedded ? undefined : PAYER_PAPER_PATH_ID}
       tabIndex={-1}
-      className="min-w-0 space-y-2.5 rounded-lg border border-border/70 bg-background/60 p-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="min-w-0 space-y-3 bg-card focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       data-testid="lead-payer-paper-path"
       data-identified={identification.identified ? "true" : "false"}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <FileText aria-hidden="true" className="size-3.5 text-muted-foreground" />
-        <span className="text-xs font-semibold text-foreground">
-          {tx("Бумажный путь (без ссылки)", "Papierweg (ohne Link)")}
-        </span>
-      </div>
-      <p className="break-words text-xs leading-5 text-muted-foreground">
+      <AdminSectionTitle>{tx("Бумажный путь (без ссылки)", "Papierweg (ohne Link)")}</AdminSectionTitle>
+      <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+        <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
         {tx(
           "Если у плательщика нет e-mail или он предпочитает бумагу: загрузите его документ и подписанную на бумаге Selbstauskunft.",
           "Hat der Zahler keine E-Mail oder bevorzugt er Papier: seinen Ausweis und die auf Papier unterschriebene Selbstauskunft hochladen.",
@@ -170,8 +175,8 @@ export function LeadPayerPaperPath({
       {line ? (
         <p
           className={cn(
-            "inline-flex items-start gap-1.5 break-words text-xs leading-5",
-            line.tone === "success" ? "text-emerald-700" : line.tone === "warning" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground",
+            "flex items-start gap-2 rounded-lg border px-3 py-2 text-xs leading-5",
+            line.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200" : line.tone === "warning" ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200" : "border-border text-foreground",
           )}
           data-testid="lead-payer-paper-status"
           data-tone={line.tone}
@@ -200,12 +205,12 @@ export function LeadPayerPaperPath({
             {selfDisclosure ? (
               <button
                 type="button"
-                className="max-w-full break-words text-left text-xs text-foreground underline underline-offset-2 disabled:opacity-60"
+                className="mt-1 inline-flex max-w-full items-start gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-2 py-1 text-left text-xs text-violet-700 hover:bg-violet-100 disabled:opacity-60 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200"
                 disabled={disabled}
                 data-testid="lead-payer-paper-self-disclosure-open"
                 onClick={() => onOpenDocument?.(selfDisclosure.id, title(selfDisclosure))}
               >
-                {title(selfDisclosure)}
+                <FileText aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /><span className="min-w-0 break-all">{title(selfDisclosure)}</span>
               </button>
             ) : null}
           </div>
@@ -222,7 +227,7 @@ export function LeadPayerPaperPath({
                 {busy === "generate" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <FileText aria-hidden="true" className="size-3.5" />}
                 {selfDisclosure
                   ? tx("Новая версия для бумаги", "Neue Papierfassung")
-                  : tx("Создать Selbstauskunft для подписи на бумаге", "Selbstauskunft für die Papierunterschrift erstellen")}
+                  : tx("Создать анкету", "Fragebogen erstellen")}
               </Button>
               {selfDisclosure ? (
                 <PaperSignatureConfirmButton
@@ -252,11 +257,11 @@ export function LeadPayerPaperPath({
                     <li key={document.id} className="break-words text-xs leading-5 text-muted-foreground">
                       <button
                         type="button"
-                        className="max-w-full break-words text-left text-foreground underline underline-offset-2 disabled:opacity-60"
+                        className="mt-1 inline-flex max-w-full items-start gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-2 py-1 text-left text-xs text-violet-700 hover:bg-violet-100 disabled:opacity-60 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200"
                         disabled={disabled}
                         onClick={() => onOpenDocument?.(document.id, title(document))}
                       >
-                        {title(document)}
+                        <FileText aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" /><span className="min-w-0 break-all">{title(document)}</span>
                       </button>
                       {document.notes ? <span> · {document.notes}</span> : null}
                     </li>
@@ -284,7 +289,7 @@ export function LeadPayerPaperPath({
                 }}
               >
                 <Upload aria-hidden="true" className="size-3.5" />
-                {tx("Загрузить документ плательщика (бумажный путь)", "Ausweis des Zahlers hochladen (Papierweg)")}
+                {tx("Загрузить документ", "Ausweis hochladen")}
               </Button>
             ) : null}
           </div>

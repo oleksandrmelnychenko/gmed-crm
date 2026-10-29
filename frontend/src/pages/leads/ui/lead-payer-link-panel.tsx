@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, CircleAlert, FileSignature, FileText, History, LoaderCircle, Mail, Undo2 } from "lucide-react";
+import { ChevronRight, FileSignature, FileText, History, Info, LoaderCircle, Mail, Undo2 } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, checkboxClass } from "@/components/ui-shell";
@@ -139,13 +139,15 @@ export function LeadPayerLinkPanel({
   }
 
   return (
-    <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5 text-[13px]" data-testid="lead-payer-link">
+    <div className="space-y-3 bg-card text-[13px]" data-testid="lead-payer-link">
       <div className="flex flex-wrap items-center gap-2">
         <AdminSectionTitle>{tx("Ссылка для плательщика", "Zahler-Link")}</AdminSectionTitle>
         {status && !actions.cabinet ? (
           <StatusChip tone={status.tone} data-testid="lead-payer-link-badge" data-status={link?.status}>
             {status.label}
           </StatusChip>
+        ) : !actions.cabinet && !status ? (
+          <StatusChip tone="warning" data-testid="lead-payer-link-status">{tx("Ссылка ещё не отправлялась", "Noch kein Link gesendet")}</StatusChip>
         ) : null}
       </div>
 
@@ -161,11 +163,7 @@ export function LeadPayerLinkPanel({
             <p className="break-words text-xs leading-5 text-muted-foreground" data-testid="lead-payer-link-status">
               {status.text}
             </p>
-          ) : (
-            <StatusChip tone="neutral" data-testid="lead-payer-link-status">
-              {tx("Ссылка ещё не отправлялась", "Noch kein Link gesendet")}
-            </StatusChip>
-          )}
+          ) : null}
           {link && link.emails.length > 0 ? (
             <ul className="space-y-0.5 text-xs leading-5" data-testid="lead-payer-link-emails">
               {payerLinkEmailLines(link.emails, tx).map((line) => (
@@ -194,10 +192,10 @@ export function LeadPayerLinkPanel({
           {canEdit ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                <span className="whitespace-nowrap text-[11.5px] leading-tight text-muted-foreground" id={`lead-payer-link-language-${leadId}`}>
+                <span className="whitespace-nowrap font-mono text-xs leading-tight text-foreground/80" id={`lead-payer-link-language-${leadId}`}>
                   {tx("Язык письма", "Sprache der E-Mail")}
                 </span>
-                <div className="flex gap-1" role="group" aria-labelledby={`lead-payer-link-language-${leadId}`}>
+                <div className="inline-flex gap-1 rounded-lg border border-border/60 bg-muted/30 p-1" role="group" aria-labelledby={`lead-payer-link-language-${leadId}`}>
                   {PAYER_LINK_LANGUAGES.map((option) => (
                     <button
                       key={option}
@@ -205,10 +203,10 @@ export function LeadPayerLinkPanel({
                       aria-pressed={chosenLanguage === option}
                       disabled={locked}
                       className={cn(
-                        "h-7 min-w-9 rounded-lg border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+                        "h-7 min-w-9 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
                         chosenLanguage === option
-                          ? "border-[var(--brand)] bg-[var(--brand)] text-white"
-                          : "border-border/50 bg-field text-muted-foreground hover:text-foreground",
+                          ? "bg-[var(--brand)] text-white shadow-sm"
+                          : "text-foreground hover:bg-muted",
                       )}
                       onClick={() => setLanguage(option)}
                     >
@@ -266,7 +264,7 @@ export function LeadPayerLinkPanel({
           ) : null}
           {canEdit && actions.sendBlockedText ? (
             <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-payer-link-blocked">
-              <CircleAlert aria-hidden="true" className="mt-0.5" />
+              <Info aria-hidden="true" className="mt-0.5" />
               <span>{actions.sendBlockedText}</span>
             </StatusChip>
           ) : null}

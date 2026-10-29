@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowRight,
+  CalendarDays,
   Check,
   CircleAlert,
   FileText,
@@ -49,6 +50,7 @@ import type { LeadPayerPackageState, PayerPackageDocument } from "../data/lead-p
 import { useLeadPayerPackage } from "../model/use-lead-payer-package";
 import { LeadPayerLinkPanel } from "./lead-payer-link-panel";
 import { LeadPayerPackagePanel } from "./lead-payer-package-panel";
+import { PAYER_PAPER_PATH_ID } from "../model/lead-payer-paper";
 import { LeadPayerPaperPath } from "./lead-payer-paper-path";
 import { LeadPayerPaymentRoute } from "./lead-payer-payment-route";
 import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata";
@@ -320,6 +322,8 @@ export function LeadPayerDeclarationSection({
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [autosave, setAutosave] = useState<PayerAutosaveState>({ status: "idle", dirty: false, error: null });
   const [evidenceName, setEvidenceName] = useState("");
+  const [questionnaireView, setQuestionnaireView] = useState<{ leadId: string; path: "link" | "paper" } | null>(null);
+  const [paperDocumentCount, setPaperDocumentCount] = useState<{ leadId: string; count: number } | null>(null);
   const loadedFor = useRef<string | null>(null);
   const formRef = useRef(form);
   const autosaveRef = useRef<PayerAutosave | null>(null);
@@ -518,6 +522,11 @@ export function LeadPayerDeclarationSection({
   // statement adopted without funds data): staff transcribe it, the field no
   // longer waits for the payer (QA 2026-10-25, F-F4).
   const payerIdentification = data?.status.identification ?? null;
+  const paperAvailable = Boolean(payerIdentification && !payingParent && data?.declaration?.payer_kind === "third_party");
+  const showQuestionnairePaths = paperAvailable || Boolean(payerLink?.data || payerLink?.error);
+  const questionnairePath = questionnaireView?.leadId === leadId ? questionnaireView.path : "link";
+  const showPaperPath = paperAvailable && (questionnairePath === "paper" || !payerLink);
+  const paperCount = paperDocumentCount?.leadId === leadId ? paperDocumentCount.count : 0;
   const payerStatementOnFile = Boolean(payerIdentification
     && (payerIdentification.identified || payerIdentification.statement_sent || payerIdentification.self_disclosure_signed));
   const patientAboutPayer = form.kind === "third_party" ? data?.funds?.payer_stated_by_patient ?? null : null;
@@ -1171,7 +1180,9 @@ export function LeadPayerDeclarationSection({
               </div>
             ) : null}
             {/* The paying parent is the contracting party: no third party's information (2026-10-19). */}
-            {payingParent ? null : <div className="border-t border-border/70">
+            {!payingParent ? <div className="space-y-2 rounded-xl border border-border/50 bg-card p-3.5">
+              <AdminSectionTitle>{tx("Согласия", "Einwilligungen")}</AdminSectionTitle>
+            {payingParent ? null : <div>
               <PayerCheckbox
                 checked={form.payerInformed}
                 disabled={readOnly}
@@ -1180,7 +1191,7 @@ export function LeadPayerDeclarationSection({
                   <>
                     {tx("Плательщик проинформирован об обработке его данных", "Der Kostenübernehmer wurde über die Verarbeitung seiner Daten informiert")}
                     {informedAt && form.payerInformed ? (
-                      <span className="ml-2 font-mono text-xs text-muted-foreground">{formatAppDateTime(informedAt)}</span>
+                      <StatusChip tone="info" className="ml-2 align-middle"><CalendarDays aria-hidden="true" />{formatAppDateTime(informedAt)}</StatusChip>
                     ) : null}
                   </>
                 )}
@@ -1195,7 +1206,7 @@ export function LeadPayerDeclarationSection({
                 )}
               </StatusChip>
             ) : typed ? (
-              <p className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11.5px] leading-5 text-muted-foreground" data-testid="lead-payer-contact-consent">
+              <p className="flex flex-wrap items-center gap-2 text-xs leading-5 text-foreground" data-testid="lead-payer-contact-consent">
                 {tx(
                   "Согласие пациента на передачу контактов плательщику:",
                   "Einverständnis zur Weitergabe der Kontaktdaten an den Zahler:",
@@ -1215,7 +1226,7 @@ export function LeadPayerDeclarationSection({
             ) : null}
             {typed && costEstimateConsent && !payingParent ? (
               <p
-                className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11.5px] leading-5 text-muted-foreground"
+                className="flex flex-wrap items-center gap-2 text-xs leading-5 text-foreground"
                 data-testid="lead-payer-cost-estimate-consent"
                 data-state={costEstimateConsent.state}
               >
@@ -1228,6 +1239,30 @@ export function LeadPayerDeclarationSection({
                 </StatusChip>
               </p>
             ) : null}
+            </div> : null}
+            {showQuestionnairePaths ? (
+            <div id={PAYER_PAPER_PATH_ID} tabIndex={-1}
+              onFocus={(event) => { if (event.target === event.currentTarget && paperAvailable) setQuestionnaireView({ leadId, path: "paper" }); }}
+              className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <AdminSectionTitle>{tx("Анкета плательщика", "Fragebogen des Zahlers")}</AdminSectionTitle>
+                {paperAvailable && payerLink ? (
+                  <div role="group" aria-label={tx("Способ заполнения", "Art der Erfassung")} className="inline-flex gap-1 rounded-lg border border-border/60 bg-muted/30 p-1">
+                    {(["link", "paper"] as const).map((path) => (
+                      <button key={path} type="button" aria-pressed={showPaperPath === (path === "paper")}
+                        onClick={() => setQuestionnaireView({ leadId, path })}
+                        className={cn("inline-flex min-h-8 items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          showPaperPath === (path === "paper") ? "bg-[var(--brand)] text-white shadow-sm" : "text-foreground hover:bg-muted")}>
+                        {path === "link" ? tx("По ссылке", "Per Link") : tx("На бумаге", "Auf Papier")}
+                        {(path === "paper" ? paperCount > 0 : Boolean(payerLink.data?.questionnaire?.submitted_at)) ? (
+                          <span className={cn("rounded-full px-1.5 font-mono", showPaperPath === (path === "paper") ? "bg-white/20" : "bg-muted")}>{path === "paper" ? paperCount : 1}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            <div hidden={showPaperPath}>
             {payerLink?.data ? (
               <LeadPayerLinkPanel
                 leadId={leadId}
@@ -1249,9 +1284,13 @@ export function LeadPayerDeclarationSection({
                 {errorText(payerLink.error)}
               </p>
             ) : null}
+            </div>
+            <div hidden={!showPaperPath}>
             {/* The payer link goes by e-mail only: beside it staff identify a payer on paper (re-check V-A7). */}
             {data?.status.identification && !payingParent && data.declaration?.payer_kind === "third_party" ? (
               <LeadPayerPaperPath
+                embedded
+                onDocumentCountChange={(count) => setPaperDocumentCount({ leadId, count })}
                 leadId={leadId}
                 identification={data.status.identification}
                 payerName={payerDisplayName(data.declaration)}
@@ -1263,6 +1302,9 @@ export function LeadPayerDeclarationSection({
                 onChanged={onPayerLinkSent}
                 onOpenDocument={onOpenPayerDocument}
               />
+            ) : null}
+            </div>
+            </div>
             ) : null}
             {/* Staff enter or correct the payer's payment route (owner 2026-10-26); the payer's link answer replaces it. */}
             {data?.declaration && !payingParent && data.declaration.payer_kind === "third_party" ? (
