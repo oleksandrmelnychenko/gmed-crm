@@ -34,7 +34,7 @@ describe("portal consent facts in the staff wizard", () => {
     const row = renderToStaticMarkup(<ul><CabinetPersonRow person={intake.trusted_persons![0]} tx={tx} lang="ru" /></ul>);
     expect(row).toContain("друг / знакомый");
     expect(row).toContain("Eva Muster");
-    expect(row).toContain("изменить может только он");
+    expect(row).toContain("Указал клиент в кабинете");
     expect(renderToStaticMarkup(<ul><CabinetPersonRow person={intake.trusted_persons![0]} tx={de} lang="de" /></ul>)).toContain("Freund/in / Bekannte/r");
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={{ ...intake, identification_hidden: true }} tx={tx} />)).toBe("");
   });

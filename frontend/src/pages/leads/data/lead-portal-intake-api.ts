@@ -709,6 +709,41 @@ export function normalizeLeadPortalBilling(value: unknown): LeadPortalBilling | 
   };
 }
 
+/** The stored fields of a cabinet person, exactly as the server compares them. */
+function storedTrustedPerson(person: LeadPortalConsentRecipient) {
+  return {
+    name: person.name,
+    relation: person.relation,
+    ...(person.contact ? { contact: person.contact } : {}),
+    ...(person.phone ? { phone: person.phone } : {}),
+    ...(person.birth_date ? { birth_date: person.birth_date } : {}),
+    ...(person.scope ? { scope: person.scope } : {}),
+    ...(person.scope_codes?.length ? { scope_codes: person.scope_codes } : {}),
+  };
+}
+
+/**
+ * Staff correct a person the client named in the cabinet (`person`) or remove
+ * them on the client's withdrawal (`null`), with a reason (owner decision
+ * 2026-10-29). `index` is the person's place in the cabinet list.
+ */
+export function correctLeadTrustedPerson(
+  leadId: string,
+  index: number,
+  current: LeadPortalConsentRecipient,
+  person: LeadPortalConsentRecipient | null,
+  reason: string,
+): Promise<{ trusted_persons: unknown; action: "corrected" | "withdrawn" }> {
+  return apiFetch(`${base(leadId)}/trusted-persons/${index}`, {
+    method: "POST",
+    body: JSON.stringify({
+      base: storedTrustedPerson(current),
+      person: person ? storedTrustedPerson(person) : null,
+      reason,
+    }),
+  });
+}
+
 export function setLeadStep1FillMode(leadId: string, mode: Step1FillMode): Promise<{ fill_mode: Step1FillMode }> {
   return apiFetch(`${base(leadId)}/portal-intake/fill-mode`, {
     method: "POST",

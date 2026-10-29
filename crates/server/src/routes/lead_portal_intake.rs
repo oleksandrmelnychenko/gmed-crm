@@ -400,6 +400,10 @@ pub fn router() -> Router<AppState> {
             "/leads/{lead_id}/trusted-contacts/{representative_id}",
             delete(lead_representatives::remove_lead_trusted_contact),
         )
+        .route(
+            "/leads/{lead_id}/trusted-persons/{index}",
+            post(correct_trusted_person),
+        )
 }
 
 // ----------------------------------------------------------------------------
@@ -5513,6 +5517,262 @@ async fn save_trusted_persons(
         Ok(payload) => Json(payload).into_response(),
         Err(error) => internal(error, "load request"),
     }
+}
+
+/// The longest reason staff give for a correction of a trusted person.
+const CORRECTION_REASON_MAX_CHARS: usize = 500;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TrustedPersonCorrection {
+    /// The person as staff loaded it: the list may have changed meanwhile.
+    base: consent_choices::ConsentRecipient,
+    /// The corrected person; `null` records the patient's withdrawal for it.
+    person: Option<consent_choices::ConsentRecipient>,
+    reason: String,
+}
+
+/// `POST /leads/{lead_id}/trusted-persons/{index}`: staff correct the data
+/// of a person the patient named in the cabinet (name, phone, contact, date
+/// of birth) or remove the person when the patient withdraws the consent for
+/// them (owner decision 2026-10-29). Who is named and what may be told stays
+/// the patient's: staff neither add a person nor change its relation or
+/// scope. The correction is a new consent choice row (`staff_correction`)
+/// that keeps the patient's choice, chooser and time and records who
+/// corrected it, when and why; earlier consent invitations are invalidated,
+/// so the consent form gets a new version. Audited without names.
+async fn correct_trusted_person(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((lead_id, index)): Path<(Uuid, usize)>,
+    Json(body): Json<TrustedPersonCorrection>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
+        return response;
+    }
+    let reason = body.reason.trim().to_string();
+    if reason.is_empty() || reason.chars().count() > CORRECTION_REASON_MAX_CHARS {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "correction_reason_required",
+            "Say why the person is corrected or removed",
+            json!({ "field": "reason", "max": CORRECTION_REASON_MAX_CHARS }),
+        );
+    }
+    if let Some(person) = &body.person
+        && (person.relation != body.base.relation
+            || person.scope_codes != body.base.scope_codes
+            || person.scope != body.base.scope)
+    {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "trusted_person_scope_patient_only",
+            "Who the person is and what may be told is the patient's choice",
+            json!({ "field": "scope_codes" }),
+        );
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return internal(error, "begin"),
+    };
+    let open: Option<Uuid> = match sqlx::query_scalar(
+        r#"SELECT id FROM leads
+           WHERE id = $1 AND qualification_status <> 'deleted' AND converted_patient_id IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(open) => open,
+        Err(error) => return internal(error, "lock lead"),
+    };
+    if open.is_none() {
+        return not_found();
+    }
+    let stored = match load_trusted_persons(&mut *tx, lead_id).await {
+        Ok(persons) => persons,
+        Err(error) => return internal(error, "load trusted persons"),
+    };
+    if stored.get(index) != Some(&body.base) {
+        return coded(
+            StatusCode::CONFLICT,
+            "trusted_person_changed",
+            "The person was changed meanwhile; reload the request",
+            json!({}),
+        );
+    }
+    let mut persons = stored.clone();
+    match &body.person {
+        Some(person) => persons[index] = person.clone(),
+        None => {
+            persons.remove(index);
+        }
+    }
+    let persons = match consent_choices::clean_persons(persons) {
+        Ok(persons) => persons,
+        Err(code) => {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                code,
+                "Name, who they are, optionally how to reach them",
+                json!({ "field": consent_choices::persons_error_field(code, "name") }),
+            );
+        }
+    };
+    if body.person.is_some() {
+        let edited = &persons[index];
+        if *edited == stored[index] {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "nothing_changed",
+                "Nothing was changed",
+                json!({}),
+            );
+        }
+        if edited
+            .contact
+            .as_deref()
+            .is_some_and(|contact| !consent_choices::recipient_contact_valid(contact))
+        {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                consent_choices::RECIPIENTS_INVALID,
+                "The contact of a person is a phone number or an e-mail address",
+                json!({ "field": "contact" }),
+            );
+        }
+        if let Some(field) = consent_choices::missing_person_field(edited, crate::app_time::today())
+        {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                consent_choices::RECIPIENTS_INVALID,
+                match field {
+                    "phone" => "Enter the phone number this person will call from",
+                    "birth_date" => "Enter the date of birth of this person",
+                    _ => "Choose the scope of information for each person",
+                },
+                json!({ "field": field }),
+            );
+        }
+    }
+    let persons_json = match serde_json::to_value(&persons) {
+        Ok(value) => value,
+        Err(error) => return internal(error, "encode trusted persons"),
+    };
+    if let Err(error) = sqlx::query(
+        "UPDATE leads SET portal_trusted_persons = $2, updated_at = now() WHERE id = $1",
+    )
+    .bind(lead_id)
+    .bind(&persons_json)
+    .execute(&mut *tx)
+    .await
+    {
+        return internal(error, "store trusted persons");
+    }
+    // The consent choice names the persons the form prints: a new row with
+    // the corrected list, the patient's choice and decision unchanged — or,
+    // with nobody left, no disclosure at all.
+    let current = match consent_choices::current_for(&mut *tx, Some(lead_id), None).await {
+        Ok(current) => current,
+        Err(error) => return internal(error, "load consent choice"),
+    };
+    if let Some(current) = current.filter(|current| current.recipients.contains(&body.base)) {
+        let mut recipients = current.recipients.clone();
+        if let Some(position) = recipients.iter().position(|person| *person == body.base) {
+            match &body.person {
+                Some(_) => recipients[position] = persons[index].clone(),
+                None => {
+                    recipients.remove(position);
+                }
+            }
+        }
+        let mut choices = current.choices;
+        let mut disclosure = current.disclosure.clone();
+        if recipients.is_empty() {
+            choices.named_recipients = false;
+            if let Some(disclosure) = disclosure.as_mut() {
+                disclosure.allow_disclosure = false;
+                disclosure.consent_given = false;
+            }
+        }
+        if let Err(error) = sqlx::query(
+            r#"INSERT INTO consent_form_choices (
+                   template_id, lead_id, patient_id, choices, chosen_by, access_kind, source,
+                   language, text_version, recipients, chosen_at, disclosure,
+                   corrected_by, corrected_at, correction_reason)
+               SELECT template_id, lead_id, patient_id, $2, chosen_by, access_kind,
+                      'staff_correction', language, text_version, $3, chosen_at, $4,
+                      $5, now(), $6
+               FROM consent_form_choices WHERE id = $1"#,
+        )
+        .bind(current.id)
+        .bind(json!(choices))
+        .bind(json!(recipients))
+        .bind(disclosure.map(|disclosure| json!(disclosure)))
+        .bind(auth.user_id)
+        .bind(&reason)
+        .execute(&mut *tx)
+        .await
+        {
+            return internal(error, "insert corrected consent choice");
+        }
+    }
+    let action = if body.person.is_some() {
+        "corrected"
+    } else {
+        "withdrawn"
+    };
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "lead_trusted_person_corrected",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            // Names and the reason stay out of the audit trail (erasure);
+            // the reason is kept with the consent choice.
+            json!({ "action": action, "index": index, "count": persons.len() }),
+        ),
+    )
+    .await
+    {
+        return internal(error, "audit trusted person correction");
+    }
+    let invalidated = match crate::document_signatures::invalidate_consent_choices(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+        true,
+    )
+    .await
+    {
+        Ok(requests) => requests,
+        Err(error) => return internal(error, "invalidate earlier consent invitations"),
+    };
+    if let Err(error) = tx.commit().await {
+        return internal(error, "commit trusted person correction");
+    }
+    let (invalidated_count, invalidated) = invalidated;
+    if invalidated_count > 0 {
+        let signature_state = state.clone();
+        tokio::spawn(async move {
+            crate::document_signatures::withdraw_invalidated_consents(
+                &signature_state,
+                &invalidated,
+            )
+            .await;
+        });
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.portal_updated",
+        lead_id,
+        json!({ "change": "trusted_persons", "access_kind": "staff" }),
+    )
+    .await;
+    Json(json!({ "trusted_persons": persons, "action": action })).into_response()
 }
 
 #[allow(clippy::result_large_err)]

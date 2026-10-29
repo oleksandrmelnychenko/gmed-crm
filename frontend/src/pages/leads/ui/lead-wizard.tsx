@@ -368,8 +368,8 @@ import {
   toggleScopeCode,
   type ConsentRecipientScope,
 } from "@/lib/consent-recipient-scope";
-import { CabinetPersonDetails, CabinetPersonRow, CabinetRecipientBadge } from "./lead-cabinet-person-row";
-import { cabinetPeople, consentFormRecipients, mergeLeadPeople } from "../model/lead-people";
+import { CabinetPersonActions, CabinetPersonDetails, CabinetPersonRow, CabinetRecipientBadge, type CabinetPersonEditTarget } from "./lead-cabinet-person-row";
+import { cabinetPeople, consentFormRecipients, mergeLeadPeople, personNameKey, type CabinetPerson } from "../model/lead-people";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { LeadIdentityDocumentData } from "./lead-identity-document-data";
 import { LeadRepresentativeDetailsForm, PendingRepresentativeDetailsForm } from "./lead-representative-details";
@@ -10133,6 +10133,15 @@ ${serviceCommentLines.join("\n")}`
                     draft.trustedContacts,
                     cabinetPeople(step1Portal.intake?.trusted_persons, step1Portal.intake?.consent_form),
                   );
+                  // Staff correct or remove a cabinet person by its place in the
+                  // cabinet's own list (owner 2026-10-29).
+                  const storedCabinetPersons = step1Portal.intake?.trusted_persons ?? [];
+                  const cabinetEdit = (person: CabinetPerson): CabinetPersonEditTarget | null => {
+                    const index = storedCabinetPersons.findIndex((stored) => personNameKey(stored.name) === personNameKey(person.name));
+                    return index >= 0 && leadId
+                      ? { leadId, index, stored: storedCabinetPersons[index], onChanged: reloadStep1Portal }
+                      : null;
+                  };
                   const formRecipients = consentFormRecipients(
                     step1Portal.intake?.consent_form,
                     draft.trustedContacts,
@@ -10175,7 +10184,7 @@ ${serviceCommentLines.join("\n")}`
                       {peopleRows.map((row) => {
                         const contact = row.contact;
                         if (!contact) {
-                          return row.cabinet ? <CabinetPersonRow key={row.key} person={row.cabinet} tx={tx} lang={lang} /> : null;
+                          return row.cabinet ? <CabinetPersonRow key={row.key} person={row.cabinet} tx={tx} lang={lang} edit={cabinetEdit(row.cabinet)} /> : null;
                         }
                         return (
                         <li key={row.key} className="flex flex-wrap items-start gap-3 rounded-xl border border-border/60 bg-card p-3">
@@ -10205,7 +10214,15 @@ ${serviceCommentLines.join("\n")}`
                                 </div>
                               ) : null}
                             </div>
-                            {row.cabinet ? <CabinetPersonDetails person={row.cabinet} tx={tx} lang={lang} /> : null}
+                            {row.cabinet ? (() => {
+                              const edit = cabinetEdit(row.cabinet);
+                              return (
+                                <div className="flex items-start gap-2">
+                                  <div className="min-w-0 flex-1"><CabinetPersonDetails person={row.cabinet} tx={tx} lang={lang} /></div>
+                                  {edit ? <div className="mt-2"><CabinetPersonActions target={edit} tx={tx} /></div> : null}
+                                </div>
+                              );
+                            })() : null}
                             {serverContactError?.contactId === contact.id ? (
                               <p role="alert" className="mt-1 text-xs font-medium text-destructive" data-testid="trusted-contact-server-error">
                                 {serverContactError.message}

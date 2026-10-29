@@ -8323,6 +8323,136 @@ fn assert_disclosure_receipt(receipt: &Value, allow: bool, chooser: Uuid, kind: 
     );
 }
 
+/// Staff correct a person the patient named or remove them on the patient's
+/// withdrawal (owner decision 2026-10-29); who is named and the scope stay the
+/// patient's, and each correction is a new consent choice with its reason.
+#[tokio::test]
+async fn staff_correct_or_remove_a_trusted_person_but_never_widen_the_choice() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    let (lead, _user, patient) = lead_with_login(&app, "Fix", "fix.disclosure@example.com").await;
+    let max = disclosure_person("Max Named", "financial");
+    let olga = disclosure_person("Olga Named", "medical");
+    let (status, body) = save_disclosure(
+        router,
+        lead,
+        &patient,
+        confirmed_disclosure(json!([max, olga]), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let first = format!("/api/v1/leads/{lead}/trusted-persons/0");
+    let correct = |base: &Value, person: Value, reason: &str| json!({ "base": base, "person": person, "reason": reason });
+
+    // The scope stays the patient's.
+    let mut wider = max.clone();
+    wider["scope_codes"] = json!(["all"]);
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &first,
+        &pm,
+        Some(correct(&max, wider, "Anruf")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "trusted_person_scope_patient_only");
+    // A reason is required.
+    let mut fixed = max.clone();
+    fixed["phone"] = json!("+49 30 5550199");
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &first,
+        &pm,
+        Some(correct(&max, fixed.clone(), "  ")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "correction_reason_required");
+    // The patient may not use it.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &first,
+        &patient,
+        Some(correct(&max, fixed.clone(), "Anruf")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, corrected) = json_request(
+        router,
+        "POST",
+        &first,
+        &pm,
+        Some(correct(&max, fixed.clone(), "Patient rief an: neue Nummer")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{corrected}");
+    assert_eq!(corrected["trusted_persons"][0]["phone"], "+49 30 5550199");
+    // A stale base is refused.
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &first,
+        &pm,
+        Some(correct(&max, fixed.clone(), "Anruf")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "trusted_person_changed");
+    // The newest choice prints the corrected person; the patient's choice stays.
+    type Newest = (String, Value, Value, Option<String>, Option<Uuid>);
+    let newest = || async {
+        sqlx::query_as::<_, Newest>(
+            "SELECT source, recipients, choices, correction_reason, chosen_by FROM consent_form_choices
+             WHERE lead_id = $1 ORDER BY seq DESC LIMIT 1",
+        )
+        .bind(lead)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+    let (source, recipients, choices, reason, chooser) = newest().await;
+    assert_eq!(source, "staff_correction");
+    assert_eq!(recipients[0]["phone"], "+49 30 5550199", "{recipients}");
+    assert_eq!(choices["named_recipients"], true, "{choices}");
+    assert_eq!(reason.as_deref(), Some("Patient rief an: neue Nummer"));
+    assert_ne!(chooser, None);
+
+    // Olga is removed on the patient's withdrawal; Max is still named.
+    let (status, removed) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead}/trusted-persons/1"),
+        &pm,
+        Some(correct(&olga, Value::Null, "Widerruf am Telefon")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    assert_eq!(removed["trusted_persons"].as_array().map(Vec::len), Some(1));
+    let (_, recipients, choices, _, _) = newest().await;
+    assert_eq!(recipients.as_array().map(Vec::len), Some(1), "{recipients}");
+    assert_eq!(choices["named_recipients"], true);
+    // Nobody left: no disclosure at all.
+    let max_now = removed["trusted_persons"][0].clone();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &first,
+        &pm,
+        Some(correct(&max_now, Value::Null, "Widerruf")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, recipients, choices, _, _) = newest().await;
+    assert_eq!(recipients, json!([]));
+    assert_eq!(choices["named_recipients"], false, "{choices}");
+}
+
 #[tokio::test]
 async fn patient_form_disclosure_matches_the_cabinet_and_consent_and_rejects_stale_people() {
     let Some(app) = test_app().await else { return };

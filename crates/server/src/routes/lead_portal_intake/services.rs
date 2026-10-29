@@ -212,7 +212,10 @@ pub(super) async fn update(
         };
         // The wished start lies ahead (owner 2026-10-29); a stored past date
         // stays until it is changed.
-        if next != from && !next.is_empty() && next < crate::app_time::today().format("%Y-%m-%d").to_string() {
+        if next != from
+            && !next.is_empty()
+            && next < crate::app_time::today().format("%Y-%m-%d").to_string()
+        {
             return field_error("program_date_from", "The date lies in the past").into_response();
         }
         from = next;

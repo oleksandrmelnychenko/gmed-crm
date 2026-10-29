@@ -264,9 +264,9 @@ export function OrderWorkspaceNavView({
   return (
     <aside
       data-workspace-rail="order"
-      className="hidden lg:flex lg:w-56 xl:w-64 2xl:w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+      className="hidden lg:my-4 lg:ml-4 lg:mr-2 lg:flex lg:w-56 xl:w-64 2xl:w-72 min-h-0 shrink-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
     >
-      <div className="px-4 pt-4">
+      <div className="px-5 pt-5">
         <StaffLink
           to={backHref}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -276,7 +276,7 @@ export function OrderWorkspaceNavView({
         </StaffLink>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
         {groupedSections.map(({ group, items }, groupIndex) => (
           <div key={group} className={cn(groupIndex > 0 && "mt-4")}>
             {groupIndex > 0 ? (

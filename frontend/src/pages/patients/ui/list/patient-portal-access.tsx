@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { KeyRound, LoaderCircle, Mail } from "lucide-react";
+import { CalendarDays, KeyRound, LoaderCircle, Mail } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
-import { cn } from "@/lib/utils";
 import {
   fetchPortalLoginEmails,
   sendPortalLoginEmail,
@@ -185,7 +184,7 @@ export function PatientPortalAccessDetail({
   const subscription = patient.subscription ?? null;
 
   return (
-    <div className="@container space-y-4 border-y border-l-2 border-border border-l-primary bg-muted px-4 py-4 text-xs" data-testid="patient-portal-access">
+    <div className="@container space-y-3 border-y border-border/60 bg-muted/40 px-4 py-3 text-[13px] text-foreground" data-testid="patient-portal-access">
       <div className="grid items-center gap-3 @[52rem]:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <AdminSectionTitle>{de ? "Patientenportal" : "Портал пациента"}</AdminSectionTitle>
@@ -193,13 +192,13 @@ export function PatientPortalAccessDetail({
             ? de ? "Über Eltern / gesetzliche Vertretung" : "Через родителя / представителя"
             : leadPortalStatusLabel(status, lang)}</StatusChip>
         </div>
-        <div className="grid w-full grid-cols-1 items-stretch gap-2 @[26rem]:grid-cols-[9rem_minmax(0,14rem)] @[52rem]:w-auto" role="group" aria-label={de ? "Portalaktionen" : "Действия с порталом"}>
+        <div className="flex flex-wrap items-center gap-2 [&>button]:w-auto [&>button]:shadow-none" role="group" aria-label={de ? "Portalaktionen" : "Действия с порталом"}>
         {canOffer ? (
           <Button
             type="button"
-            variant={canReset ? "outline" : "default"}
+            variant="default"
             size="sm"
-            className={cn("h-auto min-h-8 max-w-full gap-1.5 whitespace-normal rounded-lg px-2.5 py-1.5 text-xs shadow-xs", canReset && "border-foreground/20 bg-card hover:bg-accent")}
+            className="h-auto min-h-8 max-w-full gap-1.5 whitespace-normal rounded-lg bg-[var(--brand)] px-2.5 py-1.5 text-xs text-white hover:brightness-95"
             disabled={busy}
             onClick={() => (canReset ? setConfirmOpen(true) : void issue())}
             data-testid="patient-portal-issue"
@@ -211,9 +210,9 @@ export function PatientPortalAccessDetail({
         {canOffer ? (
           <Button
             type="button"
-            variant={canReset ? "default" : "outline"}
+            variant="default"
             size="sm"
-            className={cn("h-auto min-h-8 max-w-full gap-1.5 whitespace-normal rounded-lg px-2.5 py-1.5 text-xs shadow-xs", !canReset && "border-foreground/20 bg-card hover:bg-accent")}
+            className="h-auto min-h-8 max-w-full gap-1.5 whitespace-normal rounded-lg bg-[var(--brand)] px-2.5 py-1.5 text-xs text-white hover:brightness-95"
             disabled={busy || emailInfo === undefined}
             onClick={() => {
               setEmailNotice("");
@@ -232,27 +231,27 @@ export function PatientPortalAccessDetail({
             {emailNotice}
           </span>
         ) : null}
-      <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-[repeat(auto-fit,minmax(200px,1fr))] [&>div]:rounded-lg [&>div]:border [&>div]:border-border [&>div]:bg-card [&>div]:p-3">
+      <dl className="flex flex-wrap items-stretch gap-1.5 [&>div]:flex [&>div]:max-w-full [&>div]:flex-none [&>div]:flex-col [&>div]:gap-1 [&>div]:rounded-lg [&>div]:border [&>div]:border-border/60 [&>div]:bg-card [&>div]:px-3 [&>div]:py-2 [&_dt]:text-[10px] [&_dt]:normal-case [&_dt]:leading-4 [&_dt]:tracking-normal [&_dd]:mt-0 [&_dd]:min-w-0 [&_dd]:text-xs [&_dd>.inline-flex]:gap-1 [&_dd>.inline-flex]:px-1.5 [&_dd>.inline-flex]:py-0 [&_dd>.inline-flex]:text-[11px] [&_dd>.inline-flex]:leading-4 [&_dd>.inline-flex>svg]:size-3">
         <PortalFact label={de ? "Kontotyp" : "Тип аккаунта"} testId="patient-account-type">
           {subscription ? (
             <>
-              <span className="block">{subscriptionKindLabel(subscription, lang)}</span>
+              <StatusChip tone={subscription.status === "active" ? "success" : "warning"}>{subscriptionKindLabel(subscription, lang)}</StatusChip>
               <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
                 {[subscription.name, subscriptionPeriod(subscription, de)].filter(Boolean).join(" · ")}
               </span>
             </>
           ) : (
-            <span className="text-muted-foreground">{de ? "Ohne Abonnement" : "Без подписки"}</span>
+            <StatusChip tone="neutral">{de ? "Ohne Abonnement" : "Без подписки"}</StatusChip>
           )}
         </PortalFact>
         {status !== "none" ? (
           <>
             <PortalFact label={de ? "Login" : "Логин"}>
-              <span className="break-all">{loginEmail ?? "—"}</span>
+              <StatusChip tone="warning" className="max-w-full whitespace-normal [overflow-wrap:anywhere]"><Mail aria-hidden="true" />{loginEmail ?? "—"}</StatusChip>
               <EmailDomainWarning email={loginEmail} lang={lang} className="mt-1" />
             </PortalFact>
             <PortalFact label={de ? "Letzte Anmeldung" : "Последний вход"}>
-              {account?.last_login_at ? formatAppDateTime(account.last_login_at) : de ? "noch nie" : "ещё не было"}
+              {account?.last_login_at ? <StatusChip tone="info" className="whitespace-normal"><CalendarDays aria-hidden="true" />{formatAppDateTime(account.last_login_at)}</StatusChip> : de ? "noch nie" : "ещё не было"}
             </PortalFact>
             <LoginEmailFact emailedAt={account?.login_emailed_at} delivery={account?.login_email_delivery} lang={lang} />
           </>
