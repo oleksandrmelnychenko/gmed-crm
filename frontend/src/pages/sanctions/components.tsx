@@ -3,7 +3,7 @@
  * admin settings and the CEO review page.
  */
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
-import { CircleCheck, LoaderCircle, ShieldAlert } from "lucide-react";
+import { CircleCheck, Info, LoaderCircle, ShieldAlert } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
 import { Field, StatusBadge, textareaClass } from "@/components/ui-shell";
@@ -49,6 +49,7 @@ export function SanctionsReasonDialog({
   description,
   confirmLabel,
   destructive = false,
+  maxWidthClassName = "sm:max-w-[560px]",
   children,
   onConfirm,
   onClose,
@@ -58,6 +59,7 @@ export function SanctionsReasonDialog({
   description?: ReactNode;
   confirmLabel: string;
   destructive?: boolean;
+  maxWidthClassName?: string;
   children?: ReactNode;
   onConfirm: (reason: string) => Promise<void>;
   onClose: () => void;
@@ -99,7 +101,7 @@ export function SanctionsReasonDialog({
       <AdminDialogScaffold
           title={title}
           description={description}
-          maxWidthClassName="sm:max-w-[560px]"
+          maxWidthClassName={maxWidthClassName}
           onSubmit={(event) => {
             event.preventDefault();
             void submit();
@@ -118,7 +120,7 @@ export function SanctionsReasonDialog({
       >
         {children}
         <section className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
-          <Field label={t.sanctions_reason} htmlFor={reasonId} required>
+          <Field label={<span className="font-mono">{t.sanctions_reason}</span>} htmlFor={reasonId} required>
             <textarea
               id={reasonId}
               className={cn(textareaClass, "min-h-24")}
@@ -129,8 +131,9 @@ export function SanctionsReasonDialog({
               aria-invalid={Boolean(error) && !valid}
               onChange={(event) => setReason(event.target.value)}
             />
-            <p id={`${reasonId}-hint`} className="text-xs text-muted-foreground">
-              {t.sanctions_reason_hint}
+            <p id={`${reasonId}-hint`} className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              <span>{t.sanctions_reason_hint}</span>
             </p>
           </Field>
           {error ? (

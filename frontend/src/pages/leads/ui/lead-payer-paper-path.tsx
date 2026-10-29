@@ -309,9 +309,6 @@ export function LeadPayerPaperPath({
                   onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                 />
               </label>
-              <p className="text-xs text-muted-foreground">
-                {tx("Данные документа — по желанию:", "Angaben zum Ausweis – optional:")}
-              </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="min-w-0 space-y-1.5">
                   <span className={cn(tokens.text.label, "block font-mono")}>{tx("Вид документа", "Art des Ausweises")}</span>

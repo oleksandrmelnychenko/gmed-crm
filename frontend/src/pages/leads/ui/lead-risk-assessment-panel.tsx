@@ -4,7 +4,7 @@ import { CalendarDays, Check, ChevronDown, History, Info, LoaderCircle, RotateCc
 import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
 
-import { Section, checkboxClass, tokens } from "@/components/ui-shell";
+import { Section, checkboxClass } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { countryLabel } from "@/components/ui/country-select";
@@ -582,7 +582,13 @@ export function LeadRiskAssessmentPanel({
       <SanctionsReasonDialog
         open={dialog !== null}
         title={dialogTitle}
-        description={dialogDescription}
+        maxWidthClassName={dialog?.kind === "decide" && dialog.decision === "request_more" ? "sm:max-w-[760px]" : undefined}
+        description={dialog?.kind === "decide" && dialog.decision === "request_more" ? (
+          <span className="mt-1 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+            <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            <span>{dialogDescription}</span>
+          </span>
+        ) : dialogDescription}
         confirmLabel={
           dialog?.kind === "confirm"
             ? tx("Подтвердить", "Bestätigen")
@@ -610,14 +616,18 @@ export function LeadRiskAssessmentPanel({
         onClose={() => setDialog(null)}
       >
         {dialog?.kind === "decide" && dialog.decision === "request_more" ? (
-          <fieldset className="space-y-1.5" data-testid="lead-risk-block-chooser">
-            <legend className={cn(tokens.text.label, "mb-1 font-mono")}>{tx("Какие сведения запросить", "Welche Angaben anfordern")}</legend>
-            <div className="grid gap-1 sm:grid-cols-2">
+          <fieldset className="min-w-0 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-risk-block-chooser">
+            <legend className="sr-only">{tx("Какие сведения запросить", "Welche Angaben anfordern")}</legend>
+            <div className="mb-3 flex items-center justify-between gap-3" aria-hidden="true">
+              <span className="flex items-center gap-2 text-sm font-semibold"><span className="size-1.5 shrink-0 rounded-full bg-primary" />{tx("Какие сведения запросить", "Welche Angaben anfordern")}</span>
+              <StatusChip tone="info" className="font-mono">{blocks.length} / {RISK_BLOCK_KEYS.length}</StatusChip>
+            </div>
+            <div className="grid gap-1.5 sm:grid-cols-2">
               {RISK_BLOCK_KEYS.map((key) => (
-                <label key={key} className="flex cursor-pointer items-center gap-2 text-sm">
+                <label key={key} className={cn("flex min-w-0 cursor-pointer items-start gap-2.5 rounded-lg px-2.5 py-2 text-sm leading-5 transition-colors hover:bg-muted/60", blocks.includes(key) && "bg-muted/40")}>
                   <input
                     type="checkbox"
-                    className={checkboxClass}
+                    className={cn(checkboxClass, "mt-0.5 shrink-0")}
                     checked={blocks.includes(key)}
                     onChange={(event) =>
                       setBlocks((current) =>
@@ -627,8 +637,9 @@ export function LeadRiskAssessmentPanel({
                       )
                     }
                   />
-                  <span>
-                    <span className="font-mono text-xs font-semibold">{key}</span> {riskBlockLabel(key, tx)}
+                  <span className="flex min-w-0 items-start gap-2">
+                    <StatusChip className="shrink-0 border-violet-200 bg-violet-50 px-1.5 py-0 font-mono text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">{key}</StatusChip>
+                    <span>{riskBlockLabel(key, tx)}</span>
                   </span>
                 </label>
               ))}
