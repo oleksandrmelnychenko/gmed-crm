@@ -58,6 +58,20 @@ describe("consent form choices in the lead cabinet", () => {
     expect(markup).toContain('aria-label="Meine Unterlagen dürfen im EDV-System von GMED gespeichert und verarbeitet werden."');
   });
 
+  it("shows an old Threema tick so it can be removed (owner 2026-10-29)", () => {
+    const markup = renderToStaticMarkup(
+      <ConsentFormChoicesSection
+        request={request({ version: "2026-10-12", choices: { ...CORE, channel_threema: true }, chosen_at: "2026-10-20T10:00:00Z" })}
+        lang="uk"
+        enqueue={queue}
+        onChange={() => undefined}
+      />,
+    );
+    expect(markup).toContain('data-consent-option="channel_threema"');
+    expect(markup.match(/type="checkbox"/g)).toHaveLength(7);
+    expect(markup).toContain("GMED більше не використовує Threema. Зніміть позначку, щоб відкликати цю згоду.");
+  });
+
   it("knows the three consents the service runs on", () => {
     expect(hasCoreConsents(NO_CONSENT_FORM_CHOICES)).toBe(false);
     expect(hasCoreConsents({ ...CORE, data_system: false })).toBe(false);
