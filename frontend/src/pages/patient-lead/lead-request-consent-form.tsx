@@ -1,5 +1,6 @@
 import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
+import { useCabinetStaffMode } from "./lead-request-staff-mode";
 
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDateTime } from "@/lib/app-time-zone";
@@ -110,7 +111,9 @@ export function ConsentFormChoicesSection({
   const [error, setError] = useState("");
   // A sent request is read-only (owner 2026-10-26: «якщо вже відправили то вже
   // відправили»): changes and withdrawals go through the contact at GMED.
-  const sent = Boolean(request.submitted_at);
+  // Staff filling in the form read the client's options only (owner 2026-10-29).
+  const staffMode = useCabinetStaffMode();
+  const sent = Boolean(request.submitted_at) || staffMode;
   const ownMinor = choiceOnlyByGuardian(request);
   const namedRecipients = savedDisclosureAllowed(request);
   const version = form?.version;

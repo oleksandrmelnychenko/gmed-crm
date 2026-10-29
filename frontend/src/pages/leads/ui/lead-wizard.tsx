@@ -8768,7 +8768,17 @@ ${serviceCommentLines.join("\n")}`
               <Section
                 title={isMinor(draft.birthDate, new Date()) ? tx("Личные данные ребёнка", "Persönliche Daten des Kindes") : tx("Личные данные", "Persönliche Daten")}
                 accessory={isRepeatIntake ? null : (
-                  <Step1FillModeSwitch mode={step1Portal.mode} onChange={step1Portal.setMode} disabled={isBusy} tx={tx} />
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {/* Everything the client fills in, staff fill in too: the client's own form (owner 2026-10-29). */}
+                    {leadId && !leadConverted ? (
+                      <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" data-testid="lead-wizard-client-form"
+                        onClick={() => window.open(`/leads/${encodeURIComponent(leadId)}/client-form`, "_blank", "noopener")}>
+                        <FileText className="size-3.5" />
+                        {tx("Заполнить анкету за клиента", "Formular für den Kunden ausfüllen")}
+                      </Button>
+                    ) : null}
+                    <Step1FillModeSwitch mode={step1Portal.mode} onChange={step1Portal.setMode} disabled={isBusy} tx={tx} />
+                  </div>
                 )}
               >
               {step1Portal.modeFailed && !isRepeatIntake ? (

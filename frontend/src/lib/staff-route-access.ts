@@ -531,6 +531,14 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "crm", labelKey: "leads_title" },
   },
   {
+    // The client's form filled in by staff from the wizard (owner 2026-10-29).
+    id: "leads/client-form",
+    match: "prefix",
+    path: "/leads/",
+    roles: ROLES_LEADS,
+    capability: "leads.edit",
+  },
+  {
     id: "patients",
     match: "prefix",
     path: "/patients",

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, CalendarDays, Check, CircleAlert, FileText, Info, LoaderCircle, Lock, Trash2, Upload } from "lucide-react";
+import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -565,6 +566,8 @@ export function ConsentCheckbox({
 }) {
   const consent = request.consents[purpose];
   const given = consentGiven(request, purpose);
+  // Staff filling in the form never give a consent for the client (owner 2026-10-29).
+  const staffMode = useCabinetStaffMode();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // The answer carries only the consent: only that field changes, in the newest request.
@@ -604,7 +607,7 @@ export function ConsentCheckbox({
           className={cn(checkboxClass, "mt-0.5")}
           checked={given}
           // Sent is sent (owner 2026-10-26): a given consent is withdrawn through GMED.
-          disabled={busy || !consent || (Boolean(request.submitted_at) && given)}
+          disabled={busy || !consent || staffMode || (Boolean(request.submitted_at) && given)}
           onChange={(event) => void toggle(event.target.checked)}
         />
         <span className={cn("min-w-0", privacyLink ? "space-y-1.5" : "flex flex-wrap items-center gap-x-3 gap-y-1")}>
@@ -623,6 +626,7 @@ export function ConsentCheckbox({
           ) : null}
         </span>
       </label>
+      {staffMode ? <p className="mt-1.5 text-xs text-muted-foreground" data-testid={`${testId}-client-only`}>{cabinetStaffText(lang).clientOnly}</p> : null}
       {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
     </div>
   );

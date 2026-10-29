@@ -1,5 +1,6 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, CircleAlert, Info, ShieldCheck } from "lucide-react";
+import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
@@ -38,7 +39,9 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   const [serverProblem, setServerProblem] = useState<{ index: number; field: RecipientField } | null>(null);
   // Sent requests are read-only (owner 2026-10-26); only a withdrawal stays open: "no" for
   // everybody, or a saved person removed.
-  const locked = Boolean(request.submitted_at);
+  // Staff filling in the form read the client's decision only (owner 2026-10-29).
+  const staffMode = useCabinetStaffMode();
+  const locked = Boolean(request.submitted_at) || staffMode;
   // A blank row is there already: "add a person" would be wrong, what is missing in it is meant.
   const problemMessage = (current: NonNullable<typeof problem>) =>
     current === "consent" ? text.consentRequired
@@ -167,7 +170,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   if (locked) return <section className="flex flex-col gap-4" data-testid="lead-request-disclosure-step">
     <StatusChip tone="success" role="note" className="items-start gap-2 px-3 py-1.5" data-testid="disclosure-locked-hint">
       <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-      <span>{common.sentLockedHint}</span>
+      <span>{staffMode ? cabinetStaffText(lang).clientOnly : common.sentLockedHint}</span>
     </StatusChip>
     <CabinetSection compact title={text.title} accessory={state}>
       <div className="space-y-3" data-testid="disclosure-locked">

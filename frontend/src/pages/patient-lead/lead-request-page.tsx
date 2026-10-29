@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Clock, LoaderCircle } from "lucide-react";
+import { CabinetStaffModeContext, cabinetStaffText } from "./lead-request-staff-mode";
 import { useSearchParams } from "react-router-dom";
 
 import { Banner } from "@/components/ui-shell";
@@ -75,7 +76,13 @@ import {
  * Since the trigger flow (2026-10-07) the form is a stepper of short steps in
  * a wider layout, with the follow-up blocks as a step of their own.
  */
-export function LeadRequestPage() {
+/**
+ * The cabinet of the logged-in client, or — with `staffLeadId` — the form of
+ * one request that staff fill in for the client from the wizard (owner
+ * decision 2026-10-29; `/leads/{id}/client-form`).
+ */
+export function LeadRequestPage({ staffLeadId = null }: { staffLeadId?: string | null } = {}) {
+  const staffMode = Boolean(staffLeadId);
   const [, setSearchParams] = useSearchParams();
   const { lang: portalLang, setLang: setPortalLang } = useLang();
   const { user, refreshUser, logout } = useAuth();
@@ -144,6 +151,8 @@ export function LeadRequestPage() {
   const chooseLang = useCallback(
     (next: LeadCabinetLang) => {
       setChosen({ userId, lang: next });
+      // Staff only switch the form's language; their own account keeps its own.
+      if (staffMode) return;
       storeLeadCabinetLang(userId, next);
       // The app's own catalogs (account page, legal notice) speak DE and RU; the shell around
       // the cabinet follows the cabinet language itself (`publishLeadCabinetLang`).
@@ -152,11 +161,22 @@ export function LeadRequestPage() {
       // 2026-10-24); best effort, the cabinet works without it.
       void saveCabinetLanguage(next).catch(() => undefined);
     },
-    [setPortalLang, userId],
+    [setPortalLang, staffMode, userId],
   );
 
   const load = useCallback(async () => {
     setError("");
+    if (staffLeadId) {
+      try {
+        const one = await fetchMyLeadRequest(staffLeadId);
+        setRequestLang(asLeadCabinetLang(one.personal_data.primary_language));
+        setRequests([one]);
+        setSelected(staffLeadId);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+      return;
+    }
     try {
       const {
         requests: loaded,
@@ -180,7 +200,7 @@ export function LeadRequestPage() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [refreshUser]);
+  }, [refreshUser, staffLeadId]);
 
   // Loaded again when the account changes between the cabinet and the patient portal.
   useEffect(() => {
@@ -296,7 +316,16 @@ export function LeadRequestPage() {
     sessions.set(request.lead_id, session);
   }
   return (
+    <CabinetStaffModeContext.Provider value={staffMode}>
     <LeadCabinetFrame lang={lang} onLang={chooseLang}>
+      {staffMode ? (
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100" data-testid="lead-request-staff-mode">
+          <span className="min-w-0 flex-1">{cabinetStaffText(lang).banner}</span>
+          <Button type="button" variant="outline" size="sm" onClick={() => window.location.assign(`/leads?lead=${encodeURIComponent(request.lead_id)}&view=wizard`)}>
+            {cabinetStaffText(lang).back}
+          </Button>
+        </div>
+      ) : null}
       {requests.length > 1 ? (
         <div className="flex flex-wrap gap-2" role="tablist" aria-label={text.requestFor}>
           {requests.map((item) => (
@@ -332,6 +361,7 @@ export function LeadRequestPage() {
         </AutosaveSavedContext.Provider>
       </AutosaveFlushContext.Provider>
     </LeadCabinetFrame>
+    </CabinetStaffModeContext.Provider>
   );
 }
 

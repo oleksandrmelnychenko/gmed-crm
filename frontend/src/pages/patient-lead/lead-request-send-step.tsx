@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, Info, LoaderCircle, LogOut, Pencil, Send, Upload } from "lucide-react";
+import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 
 import { Banner, SuccessBanner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,8 @@ export function SendStep({
   /** Opens a step and shows the field a missing item names (`CabinetGoTo`). */
   onEdit: (step: Step, target?: CabinetTarget) => void;
 }) {
+  // Staff filling in the form never send it for the client (owner 2026-10-29).
+  const staffMode = useCabinetStaffMode();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
@@ -295,7 +298,9 @@ export function SendStep({
             {text.finishAndSignOut}
           </Button>
         ) : null}
-        {sendable ? (
+        {sendable && staffMode ? (
+          <p className="text-xs text-muted-foreground" data-testid="lead-request-submit-client-only">{cabinetStaffText(lang).clientOnly}</p>
+        ) : sendable ? (
           <Button
             type="button"
             className="h-9 gap-2"

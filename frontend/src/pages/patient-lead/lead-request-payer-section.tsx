@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type MutableRefObject } from "react";
 
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
+import { useCabinetStaffMode } from "./lead-request-staff-mode";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
@@ -867,6 +868,8 @@ export function CostEstimateConsent({
   const givenAt = request.payer?.cost_estimate_consent_at ?? null;
   const checked = pending ?? Boolean(givenAt);
   const id = "lead-request-payer_cost_estimate_consent";
+  // The client's own consent: staff filling in the form read it only (owner 2026-10-29).
+  const staffMode = useCabinetStaffMode();
 
   async function change(consent: boolean) {
     setPending(consent);
@@ -904,7 +907,7 @@ export function CostEstimateConsent({
           aria-label={text.payerCostEstimateConsentLabel}
           className={cn(checkboxClass, "mt-0.5")}
           checked={checked}
-          disabled={pending !== null}
+          disabled={pending !== null || staffMode}
           aria-invalid={failed || undefined}
           aria-describedby={failed ? `${id}-error` : undefined}
           onChange={(event) => void change(event.target.checked)}
