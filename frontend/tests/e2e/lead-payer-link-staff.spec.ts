@@ -109,11 +109,12 @@ const portalStatements = {
 
 type LinkState = Record<string, unknown>;
 
-/** Nothing sent yet; the lead's request is in, so the link may go out. */
+/** Nothing sent yet; the lead's request is in, so the link may be prepared and mailed. */
 function freshState(patch: LinkState = {}): LinkState {
   return {
     mode: "link",
     can_send: true,
+    can_prepare: true,
     blocked_reason: null,
     mail_available: true,
     link: null,
@@ -138,6 +139,21 @@ function sentLink(patch: LinkState = {}): LinkState {
     revoked_reason: null,
     last_email_status: "sent",
     ...patch,
+  };
+}
+
+/** A link prepared for manual sharing: no e-mail went out, so no `sent_at` (server 2026-10-29). */
+function preparedLink(patch: LinkState = {}): LinkState {
+  return sentLink({ status: "prepared", sent_at: null, created_at: "2026-10-06T11:00:00Z", last_email_status: null, ...patch });
+}
+
+/** The ready-made invitation texts the server renders once per prepared link. */
+function invitationMessages(url: string): Record<string, string> {
+  return {
+    de: `Guten Tag Herr Zahler,\nbitte füllen Sie den Fragebogen für Mia Muster aus: ${url}`,
+    en: `Dear Mr Zahler,\nplease fill in the questionnaire for Mia Muster: ${url}`,
+    uk: `Добрий день, пане Zahler,\nбудь ласка, заповніть анкету для Mia Muster: ${url}`,
+    ru: `Здравствуйте, господин Zahler,\nпожалуйста, заполните анкету для Mia Muster: ${url}`,
   };
 }
 
@@ -205,6 +221,9 @@ function answeredQuestionnaire(patch: LinkState = {}): LinkState {
 }
 
 type Calls = {
+  /** Bodies of `POST /leads/{id}/payer-link` with `delivery: "manual"`: a new link for the dialog. */
+  prepares: Record<string, unknown>[];
+  /** Bodies of the same POST with the prepared `token`: the e-mail of that link. */
   sends: Record<string, unknown>[];
   revokes: number;
   estimates: Record<string, unknown>[];
@@ -227,8 +246,9 @@ async function mount(
   options: MountOptions = {},
 ) {
   await startClockAt(page);
-  const state = { link: initial, declaration: { ...declaration } as Record<string, unknown> };
-  const calls: Calls = { sends: [], revokes: 0, estimates: [], routes: [] };
+  // `token`: the raw token of the newest prepared link; the server keeps only its hash.
+  const state = { link: initial, declaration: { ...declaration } as Record<string, unknown>, token: null as string | null };
+  const calls: Calls = { prepares: [], sends: [], revokes: 0, estimates: [], routes: [] };
   await page.addInitScript((value) => {
     localStorage.setItem("gmed_lang", value);
     localStorage.setItem("gmed_access_token", "lead-payer-link-staff-token");
@@ -300,22 +320,47 @@ async function mount(
           aml_countries: ["AT"],
         },
       };
-    } else if (path === `/leads/${leadId}/payer-link` && method === "POST") {
-      // Like the server: a submitted questionnaire needs "reopen"; the new link replaces the active one.
+    } else if (path === `/leads/${leadId}/payer-link` && method === "POST" && typeof request.postDataJSON()?.token === "string") {
+      // Like the server: the prepared token is mailed as it is, without a new link; a token
+      // that is no longer the lead's live link is refused as stale.
       const body = request.postDataJSON() as Record<string, unknown>;
       calls.sends.push(body);
-      const questionnaire = state.link.questionnaire as LinkState | null;
-      if (questionnaire?.submitted_at && body.reopen !== true) {
-        return route.fulfill({ status: 409, json: { code: "payer_already_submitted", message: "payer_already_submitted" } });
+      const current = state.link.link as LinkState | null;
+      if (!current || body.token !== state.token || !["prepared", "sent", "opened", "verified"].includes(String(current.status))) {
+        return route.fulfill({ status: 409, json: { code: "payer_link_stale", message: "Prepare a new payer link" } });
       }
       state.link = {
         ...state.link,
-        link: sentLink({ language: body.language, sent_at: "2026-10-06T11:00:00Z" }),
-        questionnaire: questionnaire && body.reopen ? { ...questionnaire, state: "draft", submitted_at: null, declared_correct_at: null } : questionnaire,
+        link: { ...current, status: "sent", language: body.language, sent_at: "2026-10-06T11:00:00Z", last_email_status: "sent" },
       };
       // The invitation carries the payer notice: the payer counts as informed (contract D7).
       state.declaration = { ...state.declaration, payer_informed_at: state.declaration.payer_informed_at ?? "2026-10-06T11:00:00Z" };
       response = state.link;
+    } else if (path === `/leads/${leadId}/payer-link` && method === "POST") {
+      // Like the server: a submitted questionnaire needs "reopen"; the new link replaces the
+      // active one and is answered once with its token and the texts, without an e-mail.
+      const body = request.postDataJSON() as Record<string, unknown>;
+      calls.prepares.push(body);
+      if (body.delivery !== "manual") {
+        return route.fulfill({ status: 422, json: { code: "invalid_field", message: "The panel prepares links only" } });
+      }
+      const questionnaire = state.link.questionnaire as LinkState | null;
+      if (questionnaire?.submitted_at && body.reopen !== true) {
+        return route.fulfill({ status: 409, json: { code: "payer_already_submitted", message: "payer_already_submitted" } });
+      }
+      const number = calls.prepares.length;
+      const id = `payer-link-${number}`;
+      state.token = `prepared-token-${number}`;
+      state.link = {
+        ...state.link,
+        link: preparedLink({ id, language: body.language }),
+        questionnaire: questionnaire && body.reopen ? { ...questionnaire, state: "draft", submitted_at: null, declared_correct_at: null } : questionnaire,
+      };
+      const url = `https://console.gmed.example/payer#${state.token}`;
+      return route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: { id, token: state.token, url, email: "viktor.zahler@example.com", expires_at: "2026-11-05T10:00:00Z", messages: invitationMessages(url) },
+      });
     } else if (path === `/leads/${leadId}/payer-link/revoke` && method === "POST") {
       calls.revokes += 1;
       state.link = {
@@ -361,9 +406,10 @@ async function mount(
 const noOverflow = (locator: ReturnType<Page["getByTestId"]>) =>
   locator.evaluate((node) => node.scrollWidth <= node.clientWidth + 1);
 
-test("staff send the payer link in the chosen language without a separate expected total", async ({ page }, testInfo) => {
+test("staff prepare the invitation, copy it and mail it in the chosen language, without a separate expected total", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
-  const { wizard, panel, calls } = await mount(page, "de", freshState());
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  const { wizard, panel, calls, state } = await mount(page, "de", freshState());
 
   // Inside "Wer zahlt", below the payer's data.
   await expect(wizard.locator("#lead-wizard-payer-declaration").getByTestId("lead-payer-link")).toBeVisible();
@@ -372,34 +418,68 @@ test("staff send the payer link in the chosen language without a separate expect
   await expect(panel.getByTestId("lead-payer-link-ready")).toHaveText(
     "Die Anfrage ist eingegangen: Der Zahler-Link kann jetzt gesendet werden",
   );
-  const send = panel.getByRole("button", { name: "Link an den Zahler senden" });
-  await expect(send).toBeEnabled();
-  await expect(send).toHaveAttribute("data-highlight", "true");
+  const prepare = panel.getByRole("button", { name: "Einladung vorbereiten" });
+  await expect(prepare).toBeEnabled();
+  await expect(prepare).toHaveAttribute("data-highlight", "true");
   await expect(panel.getByRole("button", { name: "Link widerrufen" })).toHaveCount(0);
-  // The lead speaks Ukrainian: the invitation starts in UA.
-  const languages = panel.getByRole("group", { name: "Sprache der E-Mail" });
-  await expect(languages.getByRole("button", { name: "UA", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await languages.getByRole("button", { name: "EN", exact: true }).click();
-  await expect(languages.getByRole("button", { name: "EN", exact: true })).toHaveAttribute("aria-pressed", "true");
+  // The language is chosen in the dialog, for the message.
+  await expect(panel.getByRole("group", { name: "Sprache der E-Mail" })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "UA", exact: true })).toHaveCount(0);
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-payer-link-new-de-desktop.png"), animations: "disabled" });
   const informed = wizard.getByRole("checkbox", { name: /Der Kostenübernehmer wurde über die Verarbeitung seiner Daten informiert/ });
   await expect(informed).not.toBeChecked();
 
-  await send.click();
-  await expect(panel.getByTestId("lead-payer-link-notice")).toHaveText("Link gesendet an viktor.zahler@example.com");
-  expect(calls.sends).toEqual([{ language: "en", reopen: false }]);
+  await prepare.click();
+  const dialog = page.getByRole("dialog", { name: "Zahler-Link", exact: true });
+  await expect(dialog).toBeVisible();
+  // The lead speaks Ukrainian: the link is prepared in UA, without an e-mail.
+  expect(calls.prepares).toEqual([{ language: "uk", reopen: false, delivery: "manual" }]);
+  expect(calls.sends).toEqual([]);
+  const url = "https://console.gmed.example/payer#prepared-token-1";
+  const messages = invitationMessages(url);
+  await expect(dialog).toContainText("viktor.zahler@example.com");
+  await expect(dialog.getByRole("textbox", { name: "Link", exact: true })).toHaveValue(url);
+  const languages = dialog.getByRole("group", { name: "Sprache der Nachricht" });
+  await expect(languages.getByRole("button", { name: "UA", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog).toContainText(messages.uk.split("\n")[1]);
+  // The panel behind says the link is ready, not sent; nobody informed the payer yet.
   const badge = panel.getByTestId("lead-payer-link-badge");
+  await expect(badge).toHaveAttribute("data-status", "prepared");
+  await expect(badge).toHaveText("Link bereit");
+  await expect(panel.getByTestId("lead-payer-link-status")).toHaveText("Gültig bis 05.11.2026");
+  expect(state.declaration.payer_informed_at).toBeNull();
+
+  await dialog.getByRole("button", { name: "Link kopieren" }).click();
+  await expect(dialog.getByRole("status").filter({ hasText: "Kopiert" })).toHaveCount(1);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
+  await languages.getByRole("button", { name: "EN", exact: true }).click();
+  await expect(languages.getByRole("button", { name: "EN", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog).toContainText(messages.en.split("\n")[1]);
+  await dialog.getByRole("button", { name: "Nachricht kopieren" }).click();
+  // The system clipboard of Windows hands line breaks back as CRLF.
+  await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).replace(/\r\n/g, "\n"))).toBe(messages.en);
+  await page.screenshot({ path: testInfo.outputPath("lead-payer-link-dialog-de-desktop.png"), animations: "disabled" });
+
+  // The e-mail goes out with the prepared token, in the language chosen in the dialog.
+  await dialog.getByRole("button", { name: "Per E-Mail senden" }).click();
+  await expect(dialog.getByRole("status").filter({ hasText: "Link gesendet an viktor.zahler@example.com" })).toBeVisible();
+  expect(calls.sends).toEqual([{ language: "en", reopen: false, token: "prepared-token-1" }]);
+  expect(calls.prepares).toHaveLength(1);
   await expect(badge).toHaveAttribute("data-status", "sent");
   await expect(badge).toHaveText("Gesendet");
   await expect(panel.getByTestId("lead-payer-link-status")).toHaveText(
     "Gesendet am 06.10.2026 13:00 an viktor.zahler@example.com (Intake QA) · gültig bis 05.11.2026",
   );
-  await expect(panel.getByRole("button", { name: "Erneut senden" })).toBeEnabled();
-  await expect(panel.getByRole("button", { name: "Link widerrufen" })).toBeVisible();
-  await expect(panel.getByTestId("lead-payer-link-ready")).toHaveCount(0);
+
+  await dialog.getByRole("button", { name: "Fertig", exact: true }).click();
+  await expect(dialog).toBeHidden();
   // The invitation informed the payer: the declaration is loaded afresh and says so.
   await expect(informed).toBeChecked();
+  await expect(panel.getByTestId("lead-payer-link-notice")).toHaveText("Link gesendet an viktor.zahler@example.com");
+  await expect(panel.getByRole("button", { name: "Einladung vorbereiten" })).toBeEnabled();
+  await expect(panel.getByRole("button", { name: "Link widerrufen" })).toBeVisible();
+  await expect(panel.getByTestId("lead-payer-link-ready")).toHaveCount(0);
 
   // Amounts belong in the cost estimate, not in the payer-link block.
   await expect(panel.getByTestId("lead-payer-estimated-total")).toHaveCount(0);
@@ -412,7 +492,7 @@ test("staff send the payer link in the chosen language without a separate expect
   await expect.poll(() => noOverflow(wizard)).toBe(true);
   await expect.poll(() => noOverflow(panel)).toBe(true);
   await panel.scrollIntoViewIfNeeded();
-  await expect(panel.getByRole("button", { name: "Erneut senden" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Einladung vorbereiten" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("lead-payer-link-sent-de-mobile.png"), animations: "disabled" });
 });
 
@@ -428,54 +508,84 @@ test("after the payer answered, a new link needs 'reopen for correction'", async
   await expect(panel.getByTestId("lead-payer-link-status")).toHaveCount(0);
   await expect(panel.getByTestId("lead-payer-questionnaire-preview")).toContainText("Vom Zahler am 06.10.2026 12:30");
   await expect(panel.getByTestId("lead-payer-estimated-total")).toHaveCount(0);
-  const resend = panel.getByRole("button", { name: "Erneut senden" });
-  await expect(resend).toBeDisabled();
+  const prepare = panel.getByRole("button", { name: "Einladung vorbereiten" });
+  await expect(prepare).toBeDisabled();
   await expect(panel.getByTestId("lead-payer-link-blocked")).toHaveText(
     "Die Angaben sind eingegangen: Für einen neuen Link „Zur Korrektur öffnen“ wählen",
   );
   const reopen = panel.getByRole("checkbox", { name: "Zur Korrektur öffnen" });
   await reopen.check();
-  await expect(resend).toBeEnabled();
+  await expect(prepare).toBeEnabled();
   await expect(panel.getByTestId("lead-payer-link-blocked")).toHaveCount(0);
-  // The link of the payer is in German.
-  await expect(panel.getByRole("button", { name: "DE", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await resend.click();
-  await expect(panel.getByTestId("lead-payer-link-notice")).toHaveText("Link gesendet an viktor.zahler@example.com");
-  expect(calls.sends).toEqual([{ language: "de", reopen: true }]);
-  await expect(panel.getByTestId("lead-payer-link-badge")).toHaveText("Gesendet");
+  // A new link replaces the current one: asked first.
+  await prepare.click();
+  const question = page.getByTestId("lead-payer-link-resend-dialog");
+  await question.getByRole("button", { name: "Vorbereiten", exact: true }).click();
+  await expect(question).toBeHidden();
+  expect(calls.prepares).toEqual([{ language: "de", reopen: true, delivery: "manual" }]);
+  // The link of the payer is in German: so is the message.
+  const dialog = page.getByRole("dialog", { name: "Zahler-Link", exact: true });
+  await expect(dialog.getByRole("button", { name: "DE", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await dialog.getByRole("button", { name: "Fertig", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(calls.sends).toEqual([]);
+  await expect(panel.getByTestId("lead-payer-link-badge")).toHaveText("Link bereit");
   await expect(panel.getByRole("checkbox", { name: "Zur Korrektur öffnen" })).toHaveCount(0);
 });
 
-test("a resend while the payer is filling in asks first; a sent-only link is resent at once", async ({ page }) => {
+test("a new invitation replaces the current link only after the question", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
-  const { wizard, panel, calls, state } = await mount(
+  const { wizard, panel, calls } = await mount(
     page,
     "de",
-    freshState({ link: sentLink({ status: "verified", opened_at: "2026-10-06T10:05:00Z", verified_at: "2026-10-06T10:06:00Z" }) }),
+    freshState({ link: sentLink({ id: "payer-link-0", status: "verified", opened_at: "2026-10-06T10:05:00Z", verified_at: "2026-10-06T10:06:00Z" }) }),
   );
-  const resend = panel.getByRole("button", { name: "Erneut senden" });
-  await expect(resend).toBeEnabled();
-  await resend.click();
+  const prepare = panel.getByRole("button", { name: "Einladung vorbereiten" });
+  await expect(prepare).toBeEnabled();
+  await prepare.click();
   const question = page.getByTestId("lead-payer-link-resend-dialog");
   await expect(question).toBeVisible();
-  await expect(question).toContainText(
-    "Der Zahler füllt den Fragebogen gerade aus – der alte Link wird ungültig. Neuen Link senden?",
-  );
+  await expect(question).toContainText("Neuen Link vorbereiten?");
+  await expect(question).toContainText("Der vorherige Link wird ungültig. Gespeicherte Antworten bleiben erhalten.");
   await question.getByRole("button", { name: "Abbrechen", exact: true }).click();
   await expect(question).toBeHidden();
-  expect(calls.sends).toEqual([]);
+  expect(calls.prepares).toEqual([]);
   await expect(wizard).toBeVisible();
 
-  await resend.click();
-  await question.getByRole("button", { name: "Neuen Link senden", exact: true }).click();
+  await prepare.click();
+  await question.getByRole("button", { name: "Vorbereiten", exact: true }).click();
   await expect(question).toBeHidden();
-  await expect(panel.getByTestId("lead-payer-link-notice")).toHaveText("Link gesendet an viktor.zahler@example.com");
-  expect(calls.sends).toEqual([{ language: "de", reopen: false }]);
-  // The new link is only sent, not opened: "send again" goes out without the question.
-  expect((state.link.link as LinkState).status).toBe("sent");
-  await resend.click();
-  await expect.poll(() => calls.sends.length).toBe(2);
-  await expect(question).toBeHidden();
+  const dialog = page.getByRole("dialog", { name: "Zahler-Link", exact: true });
+  await expect(dialog).toBeVisible();
+  expect(calls.prepares).toEqual([{ language: "de", reopen: false, delivery: "manual" }]);
+  await dialog.getByRole("button", { name: "Fertig", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  // A prepared link is a live link too: the next invitation asks again.
+  await expect(panel.getByTestId("lead-payer-link-badge")).toHaveText("Link bereit");
+  await prepare.click();
+  await expect(question).toBeVisible();
+  await question.getByRole("button", { name: "Abbrechen", exact: true }).click();
+  expect(calls.prepares).toHaveLength(1);
+});
+
+test("a prepared link replaced meanwhile is not mailed: the dialog closes and says to prepare a new one", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { panel, calls, state } = await mount(page, "de", freshState());
+  await panel.getByRole("button", { name: "Einladung vorbereiten" }).click();
+  const dialog = page.getByRole("dialog", { name: "Zahler-Link", exact: true });
+  await expect(dialog).toBeVisible();
+
+  // Someone else prepares another link for the lead while this dialog is open.
+  state.token = "prepared-token-elsewhere";
+  state.link = { ...state.link, link: preparedLink({ id: "payer-link-elsewhere" }) };
+  await dialog.getByRole("button", { name: "Per E-Mail senden" }).click();
+  await expect.poll(() => calls.sends.length).toBe(1);
+  expect(calls.sends[0]).toMatchObject({ token: "prepared-token-1", reopen: false });
+  // The reload shows the other link: the old token is gone with the dialog.
+  await expect(dialog).toBeHidden();
+  await expect(panel).toContainText("Der Link ist nicht mehr gültig. Schließen Sie das Fenster und bereiten Sie einen neuen Link vor.");
+  await expect(panel.getByTestId("lead-payer-link-badge")).toHaveText("Link bereit");
+  await expect(panel.getByTestId("lead-payer-link-notice")).toHaveCount(0);
 });
 
 test("staff revoke a link only after the confirmation", async ({ page }) => {
@@ -512,30 +622,51 @@ test("staff revoke a link only after the confirmation", async ({ page }) => {
   expect(calls.revokes).toBe(1);
   await expect(panel.getByTestId("lead-payer-link-badge")).toHaveText("Отозвана");
   await expect(panel.getByTestId("lead-payer-link-status")).toContainText("Отозвана 06.10.2026 13:30 — отозвана сотрудником");
-  // An ended link: send a new one, nothing to revoke.
-  await expect(panel.getByRole("button", { name: "Отправить ссылку плательщику" })).toBeEnabled();
+  // An ended link: prepare a new one, nothing to revoke.
+  await expect(panel.getByRole("button", { name: "Подготовить приглашение" })).toBeEnabled();
   await expect(revoke).toHaveCount(0);
 });
 
 test("a blocked link names the reason", async ({ page }) => {
-  const { panel, calls } = await mount(page, "de", freshState({ can_send: false, blocked_reason: "request_not_submitted" }));
-  const send = panel.getByRole("button", { name: "Link an den Zahler senden" });
-  await expect(send).toBeDisabled();
-  await expect(send).not.toHaveAttribute("data-highlight", "true");
+  // Like the server: a blocked reason allows neither sending nor preparing.
+  const { panel, calls } = await mount(
+    page,
+    "de",
+    freshState({ can_send: false, can_prepare: false, blocked_reason: "request_not_submitted" }),
+  );
+  const prepare = panel.getByRole("button", { name: "Einladung vorbereiten" });
+  await expect(prepare).toBeDisabled();
+  await expect(prepare).not.toHaveAttribute("data-highlight", "true");
   await expect(panel.getByTestId("lead-payer-link-blocked")).toHaveText(
     "Der Patient muss die aktuelle Anfrage im Portal absenden. Nach einer Änderung des Zahlers oder Einverständnisses ist ein erneutes Absenden erforderlich",
   );
   await expect(panel.getByTestId("lead-payer-link-ready")).toHaveCount(0);
+  expect(calls.prepares).toEqual([]);
   expect(calls.sends).toEqual([]);
 });
 
-test("without e-mail sending set up the link cannot go out", async ({ page }) => {
-  // Like the server: without e-mail sending `can_send` is false, without a blocked reason.
-  const { panel } = await mount(page, "de", freshState({ can_send: false, mail_available: false }));
-  await expect(panel.getByRole("button", { name: "Link an den Zahler senden" })).toBeDisabled();
-  await expect(panel.getByTestId("lead-payer-link-blocked")).toHaveText(
-    "Der E-Mail-Versand ist nicht eingerichtet. Mittaro wird unter „API-Verbindungen“ → „E-Mail“ verbunden.",
-  );
+test("without e-mail sending set up the invitation is prepared for copying, not mailed", async ({ page }) => {
+  // Like the server: without e-mail sending `can_send` is false; preparing needs only the console address.
+  const { panel, calls } = await mount(page, "de", freshState({ can_send: false, mail_available: false }));
+  const prepare = panel.getByRole("button", { name: "Einladung vorbereiten" });
+  await expect(prepare).toBeEnabled();
+  await expect(panel.getByTestId("lead-payer-link-blocked")).toHaveCount(0);
+  await prepare.click();
+  const dialog = page.getByRole("dialog", { name: "Zahler-Link", exact: true });
+  await expect(dialog.getByRole("button", { name: "Per E-Mail senden" })).toBeDisabled();
+  await expect(dialog).toContainText("E-Mail-Versand ist derzeit nicht verfügbar. Sie können die Nachricht kopieren.");
+  await expect(dialog.getByRole("button", { name: "Nachricht kopieren" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Link kopieren" })).toBeEnabled();
+  expect(calls.prepares).toHaveLength(1);
+  expect(calls.sends).toEqual([]);
+});
+
+test("without the right to prepare the button stays off", async ({ page }) => {
+  // No blocked reason, but the server allows no preparation (e.g. no console address configured).
+  const { panel } = await mount(page, "de", freshState({ can_prepare: false }));
+  await expect(panel.getByRole("button", { name: "Einladung vorbereiten" })).toBeDisabled();
+  await expect(panel.getByTestId("lead-payer-link-blocked")).toHaveText("Der Link kann derzeit nicht gesendet werden");
+  await expect(panel.getByTestId("lead-payer-link-ready")).toHaveCount(0);
 });
 
 test("a paying parent with a cabinet login gets a note, no link", async ({ page }) => {
@@ -543,7 +674,7 @@ test("a paying parent with a cabinet login gets a note, no link", async ({ page 
   await expect(panel.getByTestId("lead-payer-link-cabinet")).toHaveText(
     "Плательщик — родитель с доступом в кабинет: анкета в его кабинете",
   );
-  await expect(panel.getByRole("button", { name: "Отправить ссылку плательщику" })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "Подготовить приглашение" })).toHaveCount(0);
   await expect(panel.getByTestId("lead-payer-link-blocked")).toHaveCount(0);
   await expect(panel.getByTestId("lead-payer-estimated-total")).toHaveCount(0);
 });

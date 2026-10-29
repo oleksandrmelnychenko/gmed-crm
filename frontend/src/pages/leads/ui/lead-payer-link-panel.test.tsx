@@ -22,6 +22,7 @@ function state(patch: Record<string, unknown> = {}): LeadPayerLinkState {
   return normalizeLeadPayerLinkState({
     mode: "link",
     can_send: true,
+    can_prepare: true,
     blocked_reason: null,
     mail_available: true,
     link: null,
@@ -51,21 +52,60 @@ describe("LeadPayerLinkPanel", () => {
     const html = render(state(), { leadSubmitted: false });
     expect(html).toContain("Ссылка ещё не отправлялась");
     expect(html).not.toContain("Пациент отправил заявку");
-    expect(html).toContain("Отправить ссылку плательщику");
+    expect(html).toContain("Подготовить приглашение");
   });
 
-  it("offers the first link in the lead's language, without a separate amount", () => {
+  it("offers to prepare the first invitation, without a separate amount", () => {
     const html = render(state());
     expect(html).toContain("Ссылка для плательщика");
     expect(html).toContain("Ссылка ещё не отправлялась");
     expect(html).toContain("Пациент отправил заявку: теперь можно отправить ссылку плательщику");
     expect(html).toContain('data-highlight="true"');
-    expect(html).toContain("Отправить ссылку плательщику");
+    expect(html).toContain("Подготовить приглашение");
+    expect(html).not.toContain("Отправить ссылку плательщику");
     expect(html).not.toContain("Отозвать ссылку");
-    // The lead speaks Ukrainian: UA is the language of the invitation.
-    expect(html).toMatch(/aria-pressed="true"[^>]*>UA</);
+    // The language of the message is chosen in the invitation dialog, not in the panel.
+    expect(html).not.toContain("Язык письма");
+    expect(html).not.toContain("aria-pressed");
     expect(html).not.toContain("Ожидаемая общая сумма, EUR");
     expect(html).not.toContain("подтверждение источника средств");
+  });
+
+  it("shows a prepared link as ready, not as sent, with a new invitation and revoke", () => {
+    const html = render(
+      state({
+        link: {
+          id: "link-1",
+          status: "prepared",
+          email: "viktor.zahler@example.com",
+          language: "de",
+          sent_at: null,
+          created_at: "2026-10-06T10:00:00Z",
+          expires_at: "2026-11-05T10:00:00Z",
+        },
+      }),
+      { tx: de },
+    );
+    expect(html).toContain('data-status="prepared"');
+    expect(html).toContain(">Link bereit<");
+    expect(html).toMatch(/data-testid="lead-payer-link-status">Gültig bis 05\.11\.2026</);
+    expect(html).not.toContain("Gesendet am");
+    expect(html).toContain("Einladung vorbereiten");
+    expect(html).toContain("Link widerrufen");
+    // No highlight once a link exists.
+    expect(html).not.toContain('data-highlight="true"');
+  });
+
+  it("prepares even without the e-mail service, and names a missing right to prepare", () => {
+    // The e-mail is a separate step in the dialog: preparing needs only `can_prepare`.
+    const noMail = render(state({ can_send: false, mail_available: false }));
+    expect(noMail).toContain("Подготовить приглашение");
+    expect(noMail).not.toContain('data-testid="lead-payer-link-blocked"');
+    expect(noMail).not.toContain("Отправка e-mail не настроена");
+    const cannot = render(state({ can_send: false, can_prepare: false }));
+    expect(cannot).toContain('data-testid="lead-payer-link-blocked"');
+    expect(cannot).toContain("Ссылку сейчас отправить нельзя");
+    expect(cannot).not.toContain('data-highlight="true"');
   });
 
   it("shows the sent link, resend and revoke, in German", () => {
@@ -84,10 +124,11 @@ describe("LeadPayerLinkPanel", () => {
     );
     expect(html).toContain("Gesendet am 06.10.2026 12:00 an viktor.zahler@example.com · gültig bis 05.11.2026");
     expect(html).toContain('data-status="sent"');
-    expect(html).toContain("Erneut senden");
+    // Another invitation replaces the link (the panel asks first): the same button.
+    expect(html).toContain("Einladung vorbereiten");
+    expect(html).not.toContain("Erneut senden");
     expect(html).toContain("Link widerrufen");
     expect(html).not.toContain("Zur Korrektur öffnen");
-    expect(html).toMatch(/aria-pressed="true"[^>]*>DE</);
     expect(html).not.toContain('value="12000,00"');
   });
 
@@ -103,24 +144,23 @@ describe("LeadPayerLinkPanel", () => {
     expect(answered).toContain("Vom Zahler am 06.10.2026 12:30");
     expect(answered).not.toContain('data-testid="lead-payer-link-status"');
     expect(answered).toContain("Die Angaben sind eingegangen: Für einen neuen Link „Zur Korrektur öffnen“ wählen");
-    const blocked = render(state({ can_send: false, blocked_reason: "request_not_submitted" }));
+    // The server allows neither sending nor preparing while a reason blocks the link.
+    const blocked = render(state({ can_send: false, can_prepare: false, blocked_reason: "request_not_submitted" }));
     expect(blocked).toContain("Пациенту нужно отправить актуальную заявку из кабинета. После изменения плательщика или согласия заявку нужно отправить повторно");
     expect(blocked).not.toContain('data-highlight="true"');
-    const noMail = render(state({ can_send: false, mail_available: false }));
-    expect(noMail).toContain("Отправка e-mail не настроена. Mittaro подключается в разделе «API-подключения» → «E-Mail».");
   });
 
   it("only notes the cabinet for a paying parent with a login", () => {
     const html = render(state({ mode: "cabinet", can_send: false, blocked_reason: "payer_has_cabinet_login" }));
     expect(html).toContain("Плательщик — родитель с доступом в кабинет: анкета в его кабинете");
-    expect(html).not.toContain("Отправить ссылку плательщику");
+    expect(html).not.toContain("Подготовить приглашение");
     expect(html).not.toContain("lead-payer-link-blocked");
   });
 
   it("only notes the contracting parent for a payer stored as a third party before", () => {
     const html = render(state({ can_send: false, blocked_reason: "payer_is_representative" }));
     expect(html).toContain("ссылка плательщика и заявление о принятии расходов не нужны");
-    expect(html).not.toContain("Отправить ссылку плательщику");
+    expect(html).not.toContain("Подготовить приглашение");
     expect(html).not.toContain("Язык письма");
     expect(html).not.toContain("lead-payer-link-blocked");
     expect(html).not.toContain('data-testid="lead-payer-link-badge"');

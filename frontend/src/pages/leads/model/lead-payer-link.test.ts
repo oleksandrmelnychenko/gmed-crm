@@ -195,6 +195,12 @@ describe("payer link: reload and status", () => {
     expect(submitted.tone).toBe("success");
     expect(submitted.text).toMatch(/^Angaben eingegangen am 06\.10\.2026 12:30 · gesendet am/);
     expect(payerLinkStatusLine(link({ status: "expired" }), null, de).text).toMatch(/^Abgelaufen am 05\.11\.2026 11:00/);
+    // A prepared link was not mailed: its validity only, no "sent" fact.
+    expect(payerLinkStatusLine(link({ status: "prepared", sent_at: null }), null, de)).toEqual({
+      label: "Link bereit",
+      tone: "info",
+      text: "Gültig bis 05.11.2026",
+    });
     expect(payerLinkStatusLine(link({ status: "locked" }), null, ru)).toMatchObject({
       label: "Заблокирована",
       tone: "error",
@@ -227,7 +233,7 @@ describe("payer link: reload and status", () => {
   });
 
   it("tells active links from ended ones", () => {
-    for (const status of ["sent", "opened", "verified", "locked", "submitted"] as const) {
+    for (const status of ["prepared", "sent", "opened", "verified", "locked", "submitted"] as const) {
       expect(payerLinkActive(link({ status }))).toBe(true);
     }
     expect(payerLinkActive(link({ status: "expired" }))).toBe(false);
@@ -382,6 +388,9 @@ describe("payer link: errors of the writes", () => {
       "Der Patient muss die aktuelle Anfrage im Portal absenden. Nach einer Änderung des Zahlers oder Einverständnisses ist ein erneutes Absenden erforderlich",
     );
     expect(payerLinkErrorText(error(409, "payer_already_submitted"), de)).toContain("„Zur Korrektur öffnen“");
+    expect(payerLinkErrorText(error(409, "payer_link_stale"), ru)).toBe(
+      "Ссылка больше не действует. Закройте окно и подготовьте новую ссылку.",
+    );
     expect(payerLinkErrorText(error(503, "mail_not_configured"), ru)).toBe(
       "Отправка e-mail не настроена. Mittaro подключается в разделе «API-подключения» → «E-Mail».",
     );
@@ -539,6 +548,7 @@ describe("payer link: the server's answer", () => {
     expect(value).toEqual({
       mode: "link",
       can_send: false,
+      can_prepare: false,
       blocked_reason: "request_not_submitted",
       risk_hold: null,
       mail_available: true,
@@ -546,6 +556,16 @@ describe("payer link: the server's answer", () => {
       questionnaire: null,
       previous_questionnaires: [],
     });
+    // Preparing a manual link needs the server's explicit `can_prepare: true`.
+    expect(normalizeLeadPayerLinkState({ can_send: false, can_prepare: true })?.can_prepare).toBe(true);
+    expect(normalizeLeadPayerLinkState({ can_send: true, can_prepare: "yes" })?.can_prepare).toBe(false);
+    // A prepared link carries its id and creation time; sent_at stays empty until an e-mail went out.
+    expect(
+      normalizeLeadPayerLinkState({
+        can_send: true,
+        link: { id: "link-1", status: "prepared", created_at: "2026-10-06T10:00:00Z", sent_at: null },
+      })?.link,
+    ).toMatchObject({ id: "link-1", status: "prepared", created_at: "2026-10-06T10:00:00Z", sent_at: null });
     expect(normalizeLeadPayerLinkState({ can_send: true, risk_hold: "review" })?.risk_hold).toBe("review");
     expect(normalizeLeadPayerLinkState({ can_send: true, risk_hold: "level3" })?.risk_hold).toBeNull();
     const q = normalizeStaffPayerQuestionnaire({ answers: { pep_self: "yes", citizenships: ["AT", 3] }, check_level: 3 });
