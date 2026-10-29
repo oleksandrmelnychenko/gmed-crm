@@ -881,7 +881,7 @@ function RecipientPayer({
         />
         {/* Saved on its own, about the third party the server has stored. */}
         {sameIdentity && costEstimateConsentAsked(request, false) ? (
-          <CostEstimateConsent request={request} text={text} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />
+          <CostEstimateConsent request={request} text={text} lang={lang} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />
         ) : null}
         {fieldError === "payer" ? (
           <p role="alert" className="text-xs text-destructive">

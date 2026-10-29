@@ -1,6 +1,7 @@
 import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
-import { useCabinetStaffMode } from "./lead-request-staff-mode";
+import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
+import { StaffConsentRecordFields } from "./lead-request-staff-consent";
 
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDateTime } from "@/lib/app-time-zone";
@@ -17,6 +18,7 @@ import {
   saveLeadConsentFormChoicesAndRefresh,
   type ConsentFormChoices,
   type LeadRequest,
+  type StaffConsentRecord,
 } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { leadRequestText } from "./lead-request-text";
@@ -111,13 +113,14 @@ export function ConsentFormChoicesSection({
   const [error, setError] = useState("");
   // A sent request is read-only (owner 2026-10-26: «якщо вже відправили то вже
   // відправили»): changes and withdrawals go through the contact at GMED.
-  // Staff filling in the form read the client's options only (owner 2026-10-29).
+  // Staff record the client's options with how the client gave them, also after the send
+  // (owner 2026-10-29): nothing saves on its own, only «Record the consent».
   const staffMode = useCabinetStaffMode();
-  const sent = Boolean(request.submitted_at) || staffMode;
+  const sent = Boolean(request.submitted_at) && !staffMode;
   const ownMinor = choiceOnlyByGuardian(request);
   const namedRecipients = savedDisclosureAllowed(request);
   const version = form?.version;
-  const save = useCallback(async (snapshot: ConsentFormChoices): Promise<boolean> => {
+  const save = useCallback(async (snapshot: ConsentFormChoices, recorded: StaffConsentRecord | null = null): Promise<boolean> => {
     if (!version || ownMinor) return true;
     return enqueue(async () => {
       // Recheck inside the shared queue: a timer and Next can flush the same choice.
@@ -131,7 +134,7 @@ export function ConsentFormChoicesSection({
       onSaveState?.("saving");
       try {
         const saved = await saveLeadConsentFormChoicesAndRefresh(
-          request.lead_id, { ...snapshot, named_recipients: namedRecipients }, version, lang, [],
+          request.lead_id, { ...snapshot, named_recipients: namedRecipients }, version, lang, [], recorded,
         );
         savedRef.current = saved.consent_form;
         setBaseline(saved.consent_form);
@@ -155,7 +158,10 @@ export function ConsentFormChoicesSection({
       }
     });
   }, [version, ownMinor, enqueue, request.lead_id, namedRecipients, lang, onChange, onSaveState, personsText.outdated, text]);
-  useAutosave(draft, save);
+  // Staff: the timer and leaving the step save nothing; an unrecorded change keeps the step.
+  const staffAutosave = useCallback((snapshot: ConsentFormChoices): boolean =>
+    !version || ownMinor || !consentFormChanged(snapshot, savedRef.current?.choices), [version, ownMinor]);
+  useAutosave(draft, staffMode ? staffAutosave : save);
   if (!form) return null;
   if (choiceOnlyByGuardian(request)) {
     return (
@@ -251,6 +257,10 @@ export function ConsentFormChoicesSection({
             <p className="text-xs text-muted-foreground" data-testid="lead-request-consent-form-core-hint">
               {text.coreHint}
             </p>
+          ) : null}
+          {staffMode && changed && coreTicked ? (
+            <StaffConsentRecordFields lang={lang} testId="lead-request-consent-form" busy={busy}
+              hint={cabinetStaffText(lang).recordChanges} onRecord={(recorded) => void save(draft, recorded)} />
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
             {busy ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}

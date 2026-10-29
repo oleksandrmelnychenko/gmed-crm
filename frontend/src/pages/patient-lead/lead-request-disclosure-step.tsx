@@ -8,7 +8,8 @@ import { formatAppDateTime } from "@/lib/app-time-zone";
 import { ApiRequestError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import { CONSENT_RECIPIENTS_INVALID, LEAD_REQUEST_ACCESS_CHANGED, LEAD_REQUEST_GUARDIAN_ONLY, saveLeadTrustedPersons } from "./lead-request-api";
+import { CONSENT_RECIPIENTS_INVALID, LEAD_REQUEST_ACCESS_CHANGED, LEAD_REQUEST_GUARDIAN_ONLY, saveLeadTrustedPersons, type StaffConsentRecord } from "./lead-request-api";
+import { StaffConsentRecordFields } from "./lead-request-staff-consent";
 import { choiceOnlyByGuardian, choosesForChild } from "./lead-request-consent-form";
 import { AutosaveFlushContext, CabinetSection, InfoNote, StepFooter, errorBody } from "./lead-request-parts";
 import type { StepProps } from "./lead-request-step-forms";
@@ -19,15 +20,20 @@ import { disclosureConsentText, disclosureSubject, disclosureWording, trustedPer
 
 export function DisclosureStep({ request, text: common, lang, enqueue, onChange, nav }: StepProps) {
   const { user } = useAuth();
+  // Staff record the client's decision with how the client gave it, also after the send (owner
+  // 2026-10-29): nothing saves on its own, only «Record the consent». The client's saved consent
+  // shows as given, whoever of the client's side saved it.
+  const staffMode = useCabinetStaffMode();
+  const viewerId = staffMode ? undefined : user?.id;
   const text = trustedPersonsText(lang);
   const wording = disclosureWording(text, request);
-  const [draft, setDraft] = useState(() => disclosureDraft(request, user?.id));
+  const [draft, setDraft] = useState(() => disclosureDraft(request, viewerId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const saving = useRef<Promise<boolean> | null>(null);
   const flushers = useContext(AutosaveFlushContext);
   const ownMinor = choiceOnlyByGuardian(request);
-  const changed = disclosureChanged(draft, request, user?.id);
+  const changed = disclosureChanged(draft, request, viewerId);
   const problem = disclosureProblem(draft);
   const companyName = request.disclosure_company_name?.trim() || request.disclosure?.company_name?.trim() || "GMED";
   const personName = [request.personal_data.first_name, request.personal_data.last_name].filter(Boolean).join(" ");
@@ -39,9 +45,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   const [serverProblem, setServerProblem] = useState<{ index: number; field: RecipientField } | null>(null);
   // Sent requests are read-only (owner 2026-10-26); only a withdrawal stays open: "no" for
   // everybody, or a saved person removed.
-  // Staff filling in the form read the client's decision only (owner 2026-10-29).
-  const staffMode = useCabinetStaffMode();
-  const locked = Boolean(request.submitted_at) || staffMode;
+  const locked = Boolean(request.submitted_at) && !staffMode;
   // A blank row is there already: "add a person" would be wrong, what is missing in it is meant.
   const problemMessage = (current: NonNullable<typeof problem>) =>
     current === "consent" ? text.consentRequired
@@ -56,20 +60,21 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   const requestRef = useRef(request);
   requestRef.current = request;
   // The save of the newest render, for the flusher, the timer and a save that waited for another.
-  const latest = useRef<{ save: () => Promise<boolean>; draft: DisclosureDraft }>({ save: () => Promise.resolve(true), draft });
+  const latest = useRef<{ save: (recorded?: StaffConsentRecord | null) => Promise<boolean>; draft: DisclosureDraft }>({ save: () => Promise.resolve(true), draft });
 
-  const save = useCallback(async (): Promise<boolean> => {
+  const save = useCallback(async (recorded: StaffConsentRecord | null = null): Promise<boolean> => {
     if (saving.current) {
       // Typed during the save: saved right after it, never dropped.
       const ok = await saving.current;
-      return ok ? latest.current.save() : false;
+      return ok ? latest.current.save(recorded) : false;
     }
     const base = requestRef.current;
     // The «No» shown by default and left as it is counts as the person's own
     // answer once they leave the step (DEV 2026-10-27: a conscious «No» was
     // saved nowhere, staff saw «not answered»). Saves run on leaving only.
-    const current = acceptedDefaultNo(draftRef.current, base);
-    if (!disclosureChanged(current, base, user?.id) || ownMinor) return true;
+    // Staff passing by record no answer for the client.
+    const current = staffMode ? draftRef.current : acceptedDefaultNo(draftRef.current, base);
+    if (!disclosureChanged(current, base, viewerId) || ownMinor) return true;
     const problemNow = disclosureProblem(current);
     if (problemNow) {
       // The step stays: every missing entry is marked at its field.
@@ -77,8 +82,13 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       setError(problemMessage(problemNow));
       return false;
     }
-    // After the send only a withdrawal is saved; the server refuses anything else too.
-    if (base.submitted_at && !onlyWithdraws(current, base)) {
+    // Staff save only with how the client gave the decision (server: 422 `consent_recorded_how_required`).
+    if (staffMode && !recorded) {
+      setError(cabinetStaffText(lang).recordFirst);
+      return false;
+    }
+    // After the send only a withdrawal is saved; the server refuses anything else too (not from staff).
+    if (base.submitted_at && !staffMode && !onlyWithdraws(current, base)) {
       setError(common.sentLockedHint);
       return false;
     }
@@ -86,10 +96,10 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     setError("");
     const pending = (async () => {
       try {
-        const baseline = disclosureDraft(base, user?.id);
-        const saved = await enqueue(() => saveLeadTrustedPersons(base.lead_id, disclosureToSend(current, asLeadCabinetLang(lang) ?? "ru")));
+        const baseline = disclosureDraft(base, viewerId);
+        const saved = await enqueue(() => saveLeadTrustedPersons(base.lead_id, disclosureToSend(current, asLeadCabinetLang(lang) ?? "ru"), recorded));
         // The server's state for what stayed as sent; an edit made while the save ran stays and is saved next.
-        const merged = mergeDisclosureDraft(draftRef.current, current, disclosureDraft(saved, user?.id), baseline);
+        const merged = mergeDisclosureDraft(draftRef.current, current, disclosureDraft(saved, viewerId), baseline);
         draftRef.current = merged;
         requestRef.current = saved;
         setDraft(merged);
@@ -121,7 +131,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     })();
     saving.current = pending;
     return pending;
-  }, [ownMinor, problemMessage, text, enqueue, lang, user?.id, onChange, common.errors.request_failed, common.sentLockedHint]);
+  }, [ownMinor, problemMessage, text, enqueue, lang, staffMode, viewerId, onChange, common.errors.request_failed, common.sentLockedHint]);
 
   // Leaving via a tab, Next or another child's request saves a valid choice
   // in the shared queue. A failed/incomplete draft stays visible for correction.
@@ -133,11 +143,11 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   }, [flushers]);
   useEffect(() => {
     // Only an explicit, complete decision is saved; viewing another parent's
-    // choice does not turn it into this parent's consent.
-    if (!changed || problem || ownMinor) return;
+    // choice does not turn it into this parent's consent. Staff save by recording only.
+    if (!changed || problem || ownMinor || staffMode) return;
     const timer = window.setTimeout(() => { void latest.current.save(); }, 700);
     return () => window.clearTimeout(timer);
-  }, [draft, changed, problem, ownMinor]);
+  }, [draft, changed, problem, ownMinor, staffMode]);
   useEffect(() => {
     if (!changed && !busy) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
@@ -163,14 +173,15 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     {busy ? common.saving : changed ? text.unsaved : text.saved}
   </StatusChip> : null;
   // The other parent's saved choice is named once as a sentence; the own one needs no receipt (A2).
-  const savedByOther = request.disclosure && user?.id && request.disclosure.chosen_by !== user.id ? request.disclosure : null;
+  // Staff see no such sentence: they record the client's own choice.
+  const savedByOther = request.disclosure && viewerId && request.disclosure.chosen_by !== viewerId ? request.disclosure : null;
   // After the send: the decision read-only; changes and withdrawals via GMED (owner 2026-10-26).
   const lockedAllow = draft.allowDisclosure === true;
 
   if (locked) return <section className="flex flex-col gap-4" data-testid="lead-request-disclosure-step">
     <StatusChip tone="success" role="note" className="items-start gap-2 px-3 py-1.5" data-testid="disclosure-locked-hint">
       <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-      <span>{staffMode ? cabinetStaffText(lang).clientOnly : common.sentLockedHint}</span>
+      <span>{common.sentLockedHint}</span>
     </StatusChip>
     <CabinetSection compact title={text.title} accessory={state}>
       <div className="space-y-3" data-testid="disclosure-locked">
@@ -240,6 +251,10 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       </CabinetSection>
     </> : null}
 
+    {staffMode && changed && !problem ? (
+      <StaffConsentRecordFields lang={lang} testId="disclosure" busy={busy}
+        hint={cabinetStaffText(lang).recordChanges} onRecord={(recorded) => void latest.current.save(recorded)} />
+    ) : null}
     {error || (changed && problem) ? <StatusChip tone={error ? "error" : "warning"} role={error ? "alert" : "status"} className="rounded-lg px-3 py-2 text-sm">
       <CircleAlert aria-hidden="true" />{error || problemMessage(problem!)}
     </StatusChip> : null}

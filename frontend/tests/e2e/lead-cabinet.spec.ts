@@ -2603,24 +2603,27 @@ test.describe("patient portal after conversion", () => {
 });
 
 // Staff fill in the client's form from the wizard (owner decision 2026-10-29): the same form,
-// every entry saved as staff's; the consents and the send stay the client's own.
+// every entry saved as staff's; what the client consented to staff record with how it was given;
+// the send stays the client's own.
 test.describe("the client's form filled in by staff", () => {
+  const signInAsStaff = (page: Page) => page.route("**/api/v1/me", (route) => route.fulfill({
+    json: {
+      id: "staff-user",
+      email: "petra.manager@example.com",
+      name: "Petra Manager",
+      role: "patient_manager",
+      capabilities: ["leads.view", "leads.edit"],
+      created_at: "2026-10-01T08:00:00Z",
+      preferred_language: "de",
+      password_change_required: false,
+      portal_mode: null,
+      lead_portal: null,
+    },
+  }));
+
   test("opens for staff with a banner; staff record a consent with how it was given; no send", async ({ page }) => {
     const { calls } = await setup(page, "lead");
-    await page.route("**/api/v1/me", (route) => route.fulfill({
-      json: {
-        id: "staff-user",
-        email: "petra.manager@example.com",
-        name: "Petra Manager",
-        role: "patient_manager",
-        capabilities: ["leads.view", "leads.edit"],
-        created_at: "2026-10-01T08:00:00Z",
-        preferred_language: "de",
-        password_change_required: false,
-        portal_mode: null,
-        lead_portal: null,
-      },
-    }));
+    await signInAsStaff(page);
     await page.goto("/leads/lead-1/client-form");
     await expect(page.getByTestId("lead-request-staff-mode")).toBeVisible();
     // Staff record the client's consent with how it was given (owner 2026-10-29).
@@ -2641,5 +2644,43 @@ test.describe("the client's form filled in by staff", () => {
     await expect.poll(() => calls.personalData).toEqual([{ middle_name: "Maria" }]);
     await step(page, "send");
     await expect(page.getByTestId("lead-request-submit")).toHaveCount(0);
+  });
+
+  test("staff record the client's consent form options with how the client gave them", async ({ page }) => {
+    const { calls } = await setup(page, "lead", {
+      prepare: (request) => Object.assign(request, { consent_form: { version: "2026-10-12", choices: null, chosen_at: null } }),
+    });
+    await signInAsStaff(page);
+    const bodies: Record<string, unknown>[] = [];
+    await page.route("**/api/v1/me/lead-requests/lead-1/consent-choices", async (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      bodies.push(body);
+      expect(body).toMatchObject({ recorded_how: "in_person", recorded_note: "Beratung vor Ort" });
+      await route.fallback();
+    });
+    await page.goto("/leads/lead-1/client-form");
+    await expect(page.getByTestId("lead-request-staff-mode")).toBeVisible();
+    await step(page, "documents");
+    const block = page.getByTestId("lead-request-consent-form");
+    // Editable for staff; nothing saves on its own before staff say how the client chose.
+    for (const name of [/behandelnden Ärzte/, /beauftragte Mitarbeitende/, /EDV-System/]) {
+      await block.getByRole("checkbox", { name }).check();
+    }
+    await block.getByRole("checkbox", { name: "WhatsApp", exact: true }).check();
+    const save = page.getByTestId("lead-request-consent-form-record-save");
+    await expect(save).toBeDisabled();
+    await page.getByTestId("lead-request-consent-form-record-how").selectOption("in_person");
+    await page.getByTestId("lead-request-consent-form-record-note").fill("Beratung vor Ort");
+    expect(bodies).toHaveLength(0);
+    await save.click();
+    await expect.poll(() => calls.consentChoices.length).toBe(1);
+    expect(calls.consentChoices[0]).toMatchObject({
+      version: "2026-10-12",
+      recorded_how: "in_person",
+      recorded_note: "Beratung vor Ort",
+      choices: { agency_processing: true, doctors_to_agency: true, data_system: true, channel_whatsapp: true },
+    });
+    await expect(page.getByTestId("lead-request-consent-form-record")).toHaveCount(0);
+    expect(bodies).toHaveLength(1);
   });
 });

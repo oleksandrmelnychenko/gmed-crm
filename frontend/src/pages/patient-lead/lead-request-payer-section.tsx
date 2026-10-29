@@ -32,7 +32,9 @@ import {
   saveLeadPayer,
   saveLeadPayerCostEstimateConsent,
   type LeadRequest,
+  type StaffConsentRecord,
 } from "./lead-request-api";
+import { StaffConsentRecordFields } from "./lead-request-staff-consent";
 import {
   IdentificationTextArea,
   type IdentificationForm,
@@ -306,7 +308,7 @@ export function PayerSection({
   const consentAsked = typed
     && ((!draft.guardian_pays && !(draft.representative_id && payerTypeOf(draft) === "person")
       && request.payer?.payer_kind !== "representative") || serverAsksConsent);
-  const costConsent = { request, text, enqueue, onChange, onSaveState };
+  const costConsent = { request, text, lang, enqueue, onChange, onSaveState };
 
   if (answered && ownAccountOnly) return null;
   if (answered) {
@@ -849,6 +851,7 @@ export function PayerContactConsent({
 export function CostEstimateConsent({
   request,
   text,
+  lang,
   enqueue,
   onChange,
   onSaveState,
@@ -856,6 +859,7 @@ export function CostEstimateConsent({
 }: {
   request: LeadRequest;
   text: LeadRequestText;
+  lang: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
@@ -868,15 +872,22 @@ export function CostEstimateConsent({
   const givenAt = request.payer?.cost_estimate_consent_at ?? null;
   const checked = pending ?? Boolean(givenAt);
   const id = "lead-request-payer_cost_estimate_consent";
-  // The client's own consent: staff filling in the form read it only (owner 2026-10-29).
+  // Staff record the client's consent with how the client gave it (owner 2026-10-29); a
+  // withdrawal needs no record.
   const staffMode = useCabinetStaffMode();
+  const [recordOpen, setRecordOpen] = useState(false);
 
-  async function change(consent: boolean) {
+  async function change(consent: boolean, recorded: StaffConsentRecord | null = null) {
+    if (staffMode && consent && !recorded) {
+      setRecordOpen(true);
+      return;
+    }
     setPending(consent);
     setFailed(false);
     onSaveState("saving");
     try {
-      onChange(await enqueue(() => saveLeadPayerCostEstimateConsent(leadId, consent)));
+      onChange(await enqueue(() => saveLeadPayerCostEstimateConsent(leadId, consent, recorded)));
+      setRecordOpen(false);
       onSaveState("saved");
     } catch (cause) {
       setFailed(true);
@@ -907,7 +918,7 @@ export function CostEstimateConsent({
           aria-label={text.payerCostEstimateConsentLabel}
           className={cn(checkboxClass, "mt-0.5")}
           checked={checked}
-          disabled={pending !== null || staffMode}
+          disabled={pending !== null}
           aria-invalid={failed || undefined}
           aria-describedby={failed ? `${id}-error` : undefined}
           onChange={(event) => void change(event.target.checked)}
@@ -923,6 +934,10 @@ export function CostEstimateConsent({
         <div className="pl-7 text-xs text-muted-foreground">
           <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(givenAt))}</ConsentGivenChip>
         </div>
+      ) : null}
+      {staffMode && recordOpen && !checked ? (
+        <StaffConsentRecordFields lang={lang} testId="lead-request-payer-cost-estimate-consent" busy={pending !== null}
+          onRecord={(recorded) => void change(true, recorded)} onCancel={() => setRecordOpen(false)} />
       ) : null}
       {failed ? (
         <p id={`${id}-error`} role="alert" className="text-xs text-destructive">

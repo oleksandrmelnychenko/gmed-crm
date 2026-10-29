@@ -996,10 +996,15 @@ export const NO_THIRD_PARTY_PAYER = "no_third_party_payer";
  * removes it. Saved at once and on its own, also while "who pays" is
  * read-only; 409 `no_third_party_payer` without a third party.
  */
-export function saveLeadPayerCostEstimateConsent(leadId: string, consent: boolean): Promise<LeadRequest> {
+export function saveLeadPayerCostEstimateConsent(
+  leadId: string,
+  consent: boolean,
+  /** Staff record the consent the client gave them (owner 2026-10-29); a withdrawal carries none. */
+  recorded?: StaffConsentRecord | null,
+): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/payer/cost-estimate-consent`, {
     method: "POST",
-    body: JSON.stringify({ consent }),
+    body: JSON.stringify({ consent, ...staffConsentRecordBody(consent ? recorded : null) }),
   });
 }
 
@@ -1016,22 +1021,33 @@ export function giveLeadConsent(
   version: string,
   language: string,
   /** Staff record a consent the client gave them (owner decision 2026-10-29): how, and a note. */
-  recorded?: { how: StaffConsentChannel; note: string } | null,
+  recorded?: StaffConsentRecord | null,
 ): Promise<{ purpose: string; given_at: string; version: string }> {
   return apiFetch(`${base(leadId)}/consent`, {
     method: "POST",
-    body: JSON.stringify({
-      purpose,
-      version,
-      language,
-      ...(recorded ? { recorded_how: recorded.how, recorded_note: recorded.note.trim() || null } : {}),
-    }),
+    body: JSON.stringify({ purpose, version, language, ...staffConsentRecordBody(recorded) }),
   });
 }
 
 /** How the client gave a consent staff record (server: `STAFF_CONSENT_CHANNELS`). */
 export const STAFF_CONSENT_CHANNELS = ["phone", "in_person", "email", "paper"] as const;
 export type StaffConsentChannel = (typeof STAFF_CONSENT_CHANNELS)[number];
+/** A consent staff record for the client (owner decision 2026-10-29): how it was given, and a note. */
+export type StaffConsentRecord = { how: StaffConsentChannel; note: string };
+/** The server keeps a note of a staff record up to this many characters. */
+export const STAFF_CONSENT_NOTE_MAX = 500;
+
+/**
+ * The body fields of a consent staff record (`recorded_how`, `recorded_note`); nothing for the
+ * client's own consent, so the cabinet sends exactly what it sent before. The server requires
+ * `recorded_how` from staff (422 `consent_recorded_how_required`).
+ */
+export function staffConsentRecordBody(
+  recorded?: StaffConsentRecord | null,
+): { recorded_how?: StaffConsentChannel; recorded_note?: string | null } {
+  if (!recorded) return {};
+  return { recorded_how: recorded.how, recorded_note: recorded.note.trim().slice(0, STAFF_CONSENT_NOTE_MAX) || null };
+}
 
 /**
  * Saves the person's own choice of the consent form options (every save is a new record; the
@@ -1045,10 +1061,12 @@ export function saveLeadConsentFormChoices(
   version: string,
   language: string,
   recipients: ConsentRecipient[] = [],
+  /** Staff record the client's choice (owner 2026-10-29): how the client gave it, and a note. */
+  recorded?: StaffConsentRecord | null,
 ): Promise<LeadRequestConsentForm> {
   return apiFetch<LeadRequestConsentForm>(`${base(leadId)}/consent-choices`, {
     method: "POST",
-    body: JSON.stringify({ choices, recipients, version, language }),
+    body: JSON.stringify({ choices, recipients, version, language, ...staffConsentRecordBody(recorded) }),
   });
 }
 
@@ -1065,10 +1083,15 @@ export async function saveLeadConsentFormChoicesAndRefresh(
  * No sends an empty list; Yes requires at least one complete person and explicit consent.
  * Each successful save records the actor, language and current text version.
  */
-export function saveLeadTrustedPersons(leadId: string, disclosure: LeadDisclosureInput): Promise<LeadRequest> {
+export function saveLeadTrustedPersons(
+  leadId: string,
+  disclosure: LeadDisclosureInput,
+  /** Staff record the client's decision (owner 2026-10-29): how the client gave it, and a note. */
+  recorded?: StaffConsentRecord | null,
+): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/trusted-persons`, {
     method: "POST",
-    body: JSON.stringify(disclosure),
+    body: JSON.stringify({ ...disclosure, ...staffConsentRecordBody(recorded) }),
   });
 }
 

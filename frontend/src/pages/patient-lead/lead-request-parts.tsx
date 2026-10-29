@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, CalendarDays, Check, CircleAlert, FileText, Info, LoaderCircle, Lock, Trash2, Upload } from "lucide-react";
-import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
-import { STAFF_CONSENT_CHANNELS, type StaffConsentChannel } from "./lead-request-api";
+import { useCabinetStaffMode } from "./lead-request-staff-mode";
+import { StaffConsentRecordFields } from "./lead-request-staff-consent";
+import type { StaffConsentRecord } from "./lead-request-api";
 
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -573,16 +574,14 @@ export function ConsentCheckbox({
   // Staff record a consent the client gave them, saying how (owner 2026-10-29).
   const staffMode = useCabinetStaffMode();
   const [recordOpen, setRecordOpen] = useState(false);
-  const [recordHow, setRecordHow] = useState<StaffConsentChannel | "">("");
-  const [recordNote, setRecordNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // The answer carries only the consent: only that field changes, in the newest request.
   const patch = useRequestPatch(onChange, request);
 
-  async function toggle(checked: boolean) {
+  async function toggle(checked: boolean, recorded: StaffConsentRecord | null = null) {
     if (!consent) return;
-    if (staffMode && checked && !recordHow) {
+    if (staffMode && checked && !recorded) {
       setRecordOpen(true);
       return;
     }
@@ -596,7 +595,6 @@ export function ConsentCheckbox({
       }));
     try {
       if (checked) {
-        const recorded = staffMode && recordHow ? { how: recordHow, note: recordNote } : null;
         const result = await enqueue(() => giveLeadConsent(request.lead_id, purpose, consent.version, lang, recorded));
         withConsent(result.given_at);
         setRecordOpen(false);
@@ -642,30 +640,8 @@ export function ConsentCheckbox({
         </span>
       </label>
       {staffMode && recordOpen && !given ? (
-        <div className="mt-2 space-y-2 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid={`${testId}-record`}>
-          <label className="block space-y-1 text-xs">
-            <span className="font-mono font-medium text-foreground/80">{cabinetStaffText(lang).consentHow}</span>
-            <select className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm" value={recordHow}
-              onChange={(event) => setRecordHow(event.target.value as StaffConsentChannel | "")} data-testid={`${testId}-record-how`}>
-              <option value="">—</option>
-              {STAFF_CONSENT_CHANNELS.map((channel) => <option key={channel} value={channel}>{cabinetStaffText(lang).channels[channel]}</option>)}
-            </select>
-          </label>
-          <label className="block space-y-1 text-xs">
-            <span className="font-mono font-medium text-foreground/80">{cabinetStaffText(lang).consentNote}</span>
-            <input className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm" maxLength={500} value={recordNote}
-              onChange={(event) => setRecordNote(event.target.value)} />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="h-8 rounded-lg bg-[var(--brand)] px-3 text-xs font-medium text-white disabled:opacity-50"
-              disabled={busy || !recordHow} onClick={() => void toggle(true)} data-testid={`${testId}-record-save`}>
-              {cabinetStaffText(lang).recordConsent}
-            </button>
-            <button type="button" className="h-8 rounded-lg border border-border px-3 text-xs" disabled={busy} onClick={() => setRecordOpen(false)}>
-              {cabinetStaffText(lang).cancel}
-            </button>
-          </div>
-        </div>
+        <StaffConsentRecordFields lang={lang} testId={testId} busy={busy}
+          onRecord={(recorded) => void toggle(true, recorded)} onCancel={() => setRecordOpen(false)} />
       ) : null}
       {invalidText && !given && !staffMode ? <p id={`${testId}-error`} role="alert" className="mt-1.5 text-xs font-medium text-destructive">{invalidText}</p> : null}
       {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
