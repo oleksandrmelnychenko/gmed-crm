@@ -350,12 +350,12 @@ describe("lead cabinet languages", () => {
       "Дякуємо! Ваші дані надіслано 10.10.2026 13:09.",
       "Спасибо! Ваши данные отправлены 10.10.2026 13:09.",
     ]);
-    // The extra questions before sending: one neutral sentence (owner 2026-10-22).
+    // Introductory copy for the extra questions before sending.
     expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).followUpBeforeSubmitIntro)).toEqual([
-      "Für Ihre Anfrage benötigen wir noch einige ergänzende Angaben. Ihre Antworten werden automatisch gespeichert.",
+      "Bei internationalen Aufträgen dokumentieren wir die Herkunft der Zahlung. Wir stützen uns dabei auf die geltenden Vorschriften zur Verhinderung von Geldwäsche und die EU-Sanktionsregelungen, die für jedes Unternehmen gelten, sowie auf unsere interne Compliance-Richtlinie. Das Verfahren ist für alle Aufträge einheitlich und keine persönliche Bewertung. Ihre Angaben werden streng vertraulich behandelt und nur zu diesem Zweck verwendet.",
       "For your request we need a few more details. Your answers are saved automatically.",
       "Для вашого запиту нам потрібні ще деякі додаткові відомості. Відповіді зберігаються автоматично.",
-      "Для вашего запроса нам нужны ещё некоторые дополнительные сведения. Ответы сохраняются автоматически.",
+      "При международных заказах мы документируем происхождение платежа. Мы опираемся на действующие нормы о предотвращении отмывания денег и санкционные правила ЕС, обязательные для любой компании, а также на нашу внутреннюю политику комплаенса. Процедура единая для всех заказов и не является личной оценкой. Ваши данные строго конфиденциальны и используются только для этой цели.",
     ]);
     // No text of the follow-up speaks of points, levels, triggers, risk or a decision (P2).
     const risk = /risiko|risk|punkt|point|stufe|level|trigger|abgelehnt|reject|ризик|риск|бал/i;
