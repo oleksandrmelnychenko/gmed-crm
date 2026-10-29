@@ -4791,10 +4791,10 @@ async fn staff_send(
             return intake::internal(error, "audit payer statement reopen");
         }
     }
-    if !reuse {
-        if let Err(error) = revoke_active(&mut tx, lead_id, "resent", Some(auth.user_id)).await {
-            return intake::internal(error, "revoke payer link");
-        }
+    if !reuse
+        && let Err(error) = revoke_active(&mut tx, lead_id, "resent", Some(auth.user_id)).await
+    {
+        return intake::internal(error, "revoke payer link");
     }
     let language = language
         .or_else(|| {
@@ -4875,8 +4875,8 @@ async fn staff_send(
             Ok(link) => link,
             Err(error) => return intake::internal(error, "store payer link"),
         };
-        if manual {
-            if let Err(error) = audit::write_in_transaction(
+        if manual
+            && let Err(error) = audit::write_in_transaction(
                 &mut tx,
                 &audit::domain_event(
                     "payer_link_prepared",
@@ -4887,9 +4887,8 @@ async fn staff_send(
                 ),
             )
             .await
-            {
-                return intake::internal(error, "audit prepared payer link");
-            }
+        {
+            return intake::internal(error, "audit prepared payer link");
         }
         link
     };

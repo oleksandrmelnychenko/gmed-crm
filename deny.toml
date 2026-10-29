@@ -28,6 +28,15 @@ ignore = [
     # It remains transitive through printpdf's generation-only lopdf path.
     # Re-evaluate: when printpdf removes or replaces this dependency.
     "RUSTSEC-2026-0192",
+
+    # crypto-bigint 0.5 — timing variability in operations meant to be
+    # constant-time. Pulled in by jsonwebtoken's `rust_crypto` backend through
+    # p256/p384 (elliptic-curve 0.13) for ES256/ES384. GMED signs its own
+    # tokens with HS512 and verifies DATEV tokens with RS256 only; no EC key is
+    # used, so the affected arithmetic never runs on a secret.
+    # Re-evaluate: when jsonwebtoken moves to elliptic-curve 0.14 / crypto-bigint
+    # 0.7, or if an ES* algorithm is ever introduced.
+    "RUSTSEC-2026-0387",
 ]
 
 [bans]
