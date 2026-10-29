@@ -407,7 +407,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
   const sent = Boolean(request.submitted_at);
   const consentSection = (
     <>
-      {/* Privacy first (spec section 0): the consent the request and the upload of the identity document need. */}
+      {/* The consent the request and the upload of the identity document need, at the end of the step (owner 2026-10-29). */}
       <Section title={text.sectionConsent} className="[&>div:first-child]:px-3 [&>div:first-child]:pt-3 [&>div:last-child]:p-3">
         <ConsentCheckbox
           request={request}
@@ -419,6 +419,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
           label={consentText(request, INQUIRY_CONSENT, lang) || text.inquiryConsentLabel}
           testId="lead-request-inquiry-consent"
           privacyLink
+          invalidText={nav.missingShown && inquiryConsentMissing(request) ? text.inquiryConsentRequired : null}
         />
       </Section>
     </>
@@ -435,7 +436,6 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
       saveState={parts.state}
       open={sent ? consentSection : undefined}
     >
-      {sent ? null : consentSection}
 
       <Section title={childSectionTitle(text, "person", request.minor)}>
         {showNamePassportHint ? (
@@ -652,6 +652,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
           />
         </div>
       ) : null}
+      {sent ? null : consentSection}
     </StepFrame>
   );
 }

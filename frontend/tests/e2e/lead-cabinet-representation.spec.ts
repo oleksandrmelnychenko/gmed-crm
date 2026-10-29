@@ -549,7 +549,8 @@ test.describe("lead cabinet: who acts for an adult", () => {
       .getByTestId("lead-request-step-person")
       .locator("h3")
       .evaluateAll((titles) => titles.map((title) => title.textContent));
-    expect(order).toEqual(["Datenschutz und Einwilligung", "Persönliche Daten", "Adresse", "Kontakt", "Vertretung"]);
+    // The consent closes the first step (owner 2026-10-29).
+    expect(order).toEqual(["Persönliche Daten", "Adresse", "Kontakt", "Vertretung", "Datenschutz und Einwilligung"]);
 
     // Until the question is answered the request cannot be sent.
     await page.locator('[data-step="send"]').click();

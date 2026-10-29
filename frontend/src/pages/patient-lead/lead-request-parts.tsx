@@ -553,6 +553,7 @@ export function ConsentCheckbox({
   onChange,
   testId,
   privacyLink = false,
+  invalidText = null,
 }: {
   request: LeadRequest;
   purpose: string;
@@ -563,6 +564,8 @@ export function ConsentCheckbox({
   onChange: (request: LeadRequest) => void;
   testId: string;
   privacyLink?: boolean;
+  /** The required consent was not given when Next was pressed: said at the box itself. */
+  invalidText?: string | null;
 }) {
   const consent = request.consents[purpose];
   const given = consentGiven(request, purpose);
@@ -604,6 +607,8 @@ export function ConsentCheckbox({
         <input
           type="checkbox"
           aria-label={label}
+          aria-invalid={invalidText && !given ? true : undefined}
+          aria-describedby={invalidText && !given ? `${testId}-error` : undefined}
           className={cn(checkboxClass, "mt-0.5")}
           checked={given}
           // Sent is sent (owner 2026-10-26): a given consent is withdrawn through GMED.
@@ -627,6 +632,7 @@ export function ConsentCheckbox({
         </span>
       </label>
       {staffMode ? <p className="mt-1.5 text-xs text-muted-foreground" data-testid={`${testId}-client-only`}>{cabinetStaffText(lang).clientOnly}</p> : null}
+      {invalidText && !given && !staffMode ? <p id={`${testId}-error`} role="alert" className="mt-1.5 text-xs font-medium text-destructive">{invalidText}</p> : null}
       {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
     </div>
   );

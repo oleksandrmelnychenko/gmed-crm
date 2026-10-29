@@ -2279,10 +2279,16 @@ test.describe("lead cabinet", () => {
     // The form is longer than the screen; "Weiter" must not need scrolling.
     await expect(page.locator("#lead-request-first_name")).toBeInViewport();
     await expect(next).toBeInViewport();
-    // The first press shows what is missing and stays (owner 2026-10-09); the second goes on.
+    // The first press shows what is missing and stays (owner 2026-10-09); without the consent
+    // the second stays too and says so at the box (owner 2026-10-29); with it, it goes on.
     await next.click();
     await expect(page.getByTestId("lead-request-step-person").getByTestId("lead-request-step-missing")).toBeVisible();
     await expect(next).toBeInViewport();
+    await next.click();
+    await expect(page.getByTestId("lead-request-step-person")).toBeVisible();
+    await expect(page.locator("#lead-request-inquiry-consent-error")).toBeVisible();
+    await page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox").click();
+    await expect(page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox")).toBeChecked();
     await next.click();
     await expect(page.getByTestId("lead-request-step-identity")).toBeVisible();
   });
@@ -2340,9 +2346,11 @@ test.describe("lead cabinet", () => {
     await messenger.check();
     expect(calls.personalData).toEqual([]);
     const next = page.getByTestId("lead-request-step-person").getByRole("button", { name: "Weiter" });
-    // The first press shows what is missing and stays; the second leaves the step.
+    // The first press shows what is missing and stays; with the consent the second leaves the step.
     await next.click();
     await expect(page.getByTestId("lead-request-step-person").getByTestId("lead-request-step-missing")).toBeVisible();
+    await page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox").click();
+    await expect(page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox")).toBeChecked();
     await next.click();
     await expect(page.getByTestId("lead-request-step-identity")).toBeVisible();
     await expect.poll(() => calls.personalData).toEqual([{ middle_name: "Maria" }]);

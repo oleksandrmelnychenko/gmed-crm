@@ -119,6 +119,8 @@ export type LeadRequestText = {
   sendTitle: string;
   missingTitle: string;
   inquiryConsentMissing: string;
+  /** Under the consent checkbox when Next is pressed without it (owner 2026-10-29). */
+  inquiryConsentRequired: string;
   sendButton: string;
   sending: string;
   sentTitle: string;
@@ -1132,6 +1134,7 @@ const de: LeadRequestText = {
   sendTitle: "An Ihre Ansprechperson senden",
   missingTitle: "Bitte noch ergänzen:",
   inquiryConsentMissing: "Bitte stimmen Sie unter „Einwilligung & Person“ der Verarbeitung Ihrer Angaben zu.",
+  inquiryConsentRequired: "Ohne Ihre Einwilligung in die Verarbeitung Ihrer Angaben geht es nicht weiter.",
   sendButton: "Anfrage senden",
   sending: "Wird gesendet…",
   sentTitle: "Vielen Dank!",
@@ -1736,6 +1739,7 @@ const ru: LeadRequestText = {
   sendTitle: "Отправить вашему контакту в GMED",
   missingTitle: "Пожалуйста, дополните:",
   inquiryConsentMissing: "Пожалуйста, дайте согласие на обработку данных на шаге «Согласие и личные данные».",
+  inquiryConsentRequired: "Без согласия на обработку данных продолжить нельзя.",
   sendButton: "Отправить заявку",
   sending: "Отправляется…",
   sentTitle: "Спасибо!",
@@ -2334,6 +2338,7 @@ const uk: LeadRequestText = {
   sendTitle: "Надіслати вашому контакту у GMED",
   missingTitle: "Будь ласка, доповніть:",
   inquiryConsentMissing: "Будь ласка, надайте згоду на обробку даних на кроці «Згода й особисті дані».",
+  inquiryConsentRequired: "Без згоди на обробку даних продовжити не можна.",
   sendButton: "Надіслати заявку",
   sending: "Надсилається…",
   sentTitle: "Дякуємо!",
@@ -2932,6 +2937,7 @@ const en: LeadRequestText = {
   sendTitle: "Send to your contact person",
   missingTitle: "Please add:",
   inquiryConsentMissing: "Please agree to the processing of your details in the step “Consent & person”.",
+  inquiryConsentRequired: "Without your consent to the processing of your details you cannot continue.",
   sendButton: "Send request",
   sending: "Sending…",
   sentTitle: "Thank you!",

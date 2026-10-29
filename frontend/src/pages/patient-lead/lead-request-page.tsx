@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Clock, LoaderCircle } from "lucide-react";
-import { CabinetStaffModeContext, cabinetStaffText } from "./lead-request-staff-mode";
+import { CabinetStaffModeContext, cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 import { useSearchParams } from "react-router-dom";
 
 import { Banner } from "@/components/ui-shell";
@@ -53,6 +53,7 @@ import {
 } from "./lead-request-step-forms";
 import {
   initialStep,
+  inquiryConsentMissing,
   missingByStep,
   stepDone,
   stepMissingCount,
@@ -577,6 +578,7 @@ function LeadRequestView({
     return () => window.cancelAnimationFrame(frame);
   }, [pendingTarget]);
 
+  const staffMode = useCabinetStaffMode();
   const go = useCallback((next: StepId, validateCurrent = false, target?: CabinetTarget) => {
     if (validateCurrent) setNextPressed(true);
     // A link into the step on screen needs no saving and no step change: it only shows the field.
@@ -585,6 +587,14 @@ function LeadRequestView({
       return;
     }
     void switchAfterSave(request.lead_id, () => {
+      // Without the consent to process the request Next never leaves the first
+      // step — not only the first time (owner 2026-10-29). Staff filling in the
+      // form cannot give it and go on.
+      if (validateCurrent && step === "person" && !staffMode && inquiryConsentMissing(latestRequest.current)) {
+        showMissingOf(step);
+        setPendingTarget({ field: "inquiry_consent" });
+        return;
+      }
       // All sections have now saved. The pre-save render can still list fields
       // the user just completed, especially in Insurance & Invoice.
       if (validateCurrent && !missingShownSteps.has(step) && stepMissingCount(latestRequest.current, step) > 0) {
@@ -620,7 +630,7 @@ function LeadRequestView({
       if (problem) revealCabinetTarget({ element: problem, field: true });
       else window.requestAnimationFrame(() => document.querySelector('[data-testid="lead-request-save-blocked"]')?.scrollIntoView?.({ block: "nearest" }));
     });
-  }, [switchAfterSave, request.lead_id, setSearchParams, missingShownSteps, step, showMissingOf]);
+  }, [switchAfterSave, request.lead_id, setSearchParams, missingShownSteps, step, showMissingOf, staffMode]);
 
   const nav: StepNav = {
     index: position + 1,
