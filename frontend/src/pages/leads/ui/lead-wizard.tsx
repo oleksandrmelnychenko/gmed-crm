@@ -11228,18 +11228,18 @@ ${serviceCommentLines.join("\n")}`
                   </Button>
                 )}
               >
-                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <div className="rounded-xl border border-border/60 bg-card p-3">
                   {estimatedOutlaysLine ? (
-                    <div className="flex flex-wrap items-end gap-2">
+                    <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
                       <Field
-                        className="min-w-0 flex-1 sm:max-w-sm"
+                        className="w-full min-w-0 sm:w-56"
                         label={tx("Предполагаемые расходы", ESTIMATED_OUTLAYS_DESCRIPTION)}
                       >
                         <div className="relative">
                           <Input
                             id="lead-wizard-estimated-outlays"
                             aria-label={tx("Предполагаемые расходы", ESTIMATED_OUTLAYS_DESCRIPTION)}
-                            className={cn(inputClass, "pr-12 font-mono tabular-nums")}
+                            className={cn(inputClass, "h-9 bg-card pr-10 font-mono tabular-nums text-foreground")}
                             inputMode="decimal"
                             min="0"
                             step="0.01"
@@ -11268,12 +11268,15 @@ ${serviceCommentLines.join("\n")}`
                       >
                         <Trash2 aria-hidden="true" className="size-4" />
                       </Button>
-                      <p className="w-full text-xs text-muted-foreground">
+                      <StatusChip tone="warning" className="mb-0.5 rounded-lg px-2.5 py-1">
+                        <Info aria-hidden="true" />
+                        <span>
                         {tx(
                           "Будет добавлено последней строкой сметы без НДС.",
                           "Wird als letzte Position des Kostenvoranschlags ohne MwSt. ausgewiesen.",
                         )}
-                      </p>
+                        </span>
+                      </StatusChip>
                     </div>
                   ) : (
                     <Button
@@ -11289,13 +11292,13 @@ ${serviceCommentLines.join("\n")}`
                   )}
                 </div>
                 {quote ? (
-                  <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
-                      <dt className={cn(tokens.text.label, "font-mono")}>
+                  <dl className="flex flex-wrap gap-2">
+                    <div className="min-w-36 rounded-lg border border-border/60 bg-card px-3 py-2">
+                      <dt className="font-mono text-xs font-medium text-muted-foreground">
                         {tx("Статус", "Status")}
                       </dt>
                       <dd className="mt-1 text-xs font-medium text-foreground">
-                        <StatusBadge tone={quote.status === "accepted" ? "success" : "neutral"}>
+                        <StatusChip tone={quote.status === "accepted" ? "success" : quote.status === "sent" ? "info" : quote.status === "rejected" ? "error" : quote.status === "draft" || quote.status === "expired" ? "warning" : "neutral"}>
                           {/* Same quote status labels as the contracts page. */}
                           {(
                             {
@@ -11307,156 +11310,165 @@ ${serviceCommentLines.join("\n")}`
                               superseded: t.revenue_quote_status_superseded,
                             } as Record<string, string>
                           )[quote.status] ?? quote.status}
-                        </StatusBadge>
+                        </StatusChip>
                       </dd>
                     </div>
-                    <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
-                      <dt className={cn(tokens.text.label, "font-mono")}>
+                    <div className="min-w-36 rounded-lg border border-border/60 bg-card px-3 py-2">
+                      <dt className="font-mono text-xs font-medium text-muted-foreground">
                         {tx("Сумма", "Betrag")}
                       </dt>
-                      <dd className="mt-1 whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-foreground">
+                      <dd className="mt-1 whitespace-nowrap font-mono text-sm font-semibold tabular-nums text-orange-700 dark:text-orange-300">
                         {formatMoneyLabel(quoteTotal)}
                       </dd>
                     </div>
-                    <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
-                      <dt className={cn(tokens.text.label, "font-mono")}>
+                    <div className="min-w-36 rounded-lg border border-border/60 bg-card px-3 py-2">
+                      <dt className="font-mono text-xs font-medium text-muted-foreground">
                         {tx("Предоплата", "Vorauszahlung")}
                       </dt>
-                      <dd className="mt-1 whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
+                      <dd className="mt-1 whitespace-nowrap font-mono text-sm font-semibold tabular-nums text-sky-800 dark:text-sky-300">
                         {formatMoneyLabel(persistedPrepayment)}
                       </dd>
                     </div>
-                    <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
-                      <dt className={cn(tokens.text.label, "font-mono")}>
+                    <div className="min-w-36 rounded-lg border border-border/60 bg-card px-3 py-2">
+                      <dt className="font-mono text-xs font-medium text-muted-foreground">
                         {tx("Остаток", "Restbetrag")}
                       </dt>
-                      <dd className="mt-1 whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
+                      <dd className={cn("mt-1 whitespace-nowrap font-mono text-sm font-semibold tabular-nums", quoteTotal > persistedPrepayment ? "text-amber-900 dark:text-amber-200" : "text-emerald-800 dark:text-emerald-300")}>
                         {formatMoneyLabel(Math.max(quoteTotal - persistedPrepayment, 0))}
                       </dd>
                     </div>
                   </dl>
                 ) : null}
 
-                <div>
-                  <ToggleRow
-                    checked={prepayment}
-                    disabled={isBusy}
-                    onChange={(checked) => {
-                      setPrepayment(checked);
-                      const nextAmount = checked
-                        ? prepaymentAmount || (quote ? quoteTotal.toFixed(2) : "")
-                        : prepaymentAmount;
-                      if (checked && nextAmount !== prepaymentAmount) {
-                        setPrepaymentAmount(nextAmount);
-                      }
-                      void saveFlags(
-                        {
-                          prepayment_required: checked,
-                          ...(checked && nextAmount ? { prepayment_amount: nextAmount } : {}),
-                        },
-                        {
-                          prepayment_required: prepayment,
-                          prepayment_amount: prepaymentAmount,
-                        },
-                      );
-                    }}
-                    label={tx("Требуется предоплата", "Vorauszahlung erforderlich")}
-                  />
-                </div>
+                <div className="space-y-3 rounded-xl border border-border/60 bg-card p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <ToggleRow
+                      checked={prepayment}
+                      disabled={isBusy}
+                      onChange={(checked) => {
+                        setPrepayment(checked);
+                        const nextAmount = checked
+                          ? prepaymentAmount || (quote ? quoteTotal.toFixed(2) : "")
+                          : prepaymentAmount;
+                        if (checked && nextAmount !== prepaymentAmount) {
+                          setPrepaymentAmount(nextAmount);
+                        }
+                        void saveFlags(
+                          {
+                            prepayment_required: checked,
+                            ...(checked && nextAmount ? { prepayment_amount: nextAmount } : {}),
+                          },
+                          {
+                            prepayment_required: prepayment,
+                            prepayment_amount: prepaymentAmount,
+                          },
+                        );
+                      }}
+                      label={tx("Требуется предоплата", "Vorauszahlung erforderlich")}
+                    />
+                    {prepayment && quote ? (
+                      <StatusChip tone="warning">
+                        <ReceiptText aria-hidden="true" />
+                        <span>{tx("Осталось получить", "Noch zu erhalten")}:</span>
+                        <span className="font-mono font-semibold tabular-nums">{formatMoneyLabel(prepaymentRemaining, quote.currency)}</span>
+                      </StatusChip>
+                    ) : null}
+                  </div>
 
-                <div className="flex flex-wrap items-start gap-3">
-                  {prepayment ? (
-                    <Field className="w-full sm:w-64" label={tx("Необходимая предоплата", "Erforderliche Vorauszahlung")}>
-                      <Input
-                        id={PREPAYMENT_AMOUNT_ID}
-                        className={cn(inputClass, "font-mono tabular-nums")}
-                        inputMode="decimal"
-                        min="0.01"
-                        max={quote ? quoteTotal : undefined}
-                        step="0.01"
-                        value={prepaymentAmount}
-                        onChange={(event) => setPrepaymentAmount(event.target.value)}
-                        onBlur={() => {
-                          const normalizedAmount = prepaymentAmount.trim();
-                          if (order?.id && normalizedAmount && validMoneyInput(normalizedAmount)) {
+                  <div className="flex flex-wrap items-end gap-3">
+                    {prepayment ? (
+                      <Field className="w-full sm:w-56" label={tx("Необходимая предоплата", "Erforderliche Vorauszahlung")}>
+                        <Input
+                          id={PREPAYMENT_AMOUNT_ID}
+                          className={cn(inputClass, "h-9 bg-card font-mono tabular-nums text-foreground")}
+                          inputMode="decimal"
+                          min="0.01"
+                          max={quote ? quoteTotal : undefined}
+                          step="0.01"
+                          value={prepaymentAmount}
+                          onChange={(event) => setPrepaymentAmount(event.target.value)}
+                          onBlur={() => {
+                            const normalizedAmount = prepaymentAmount.trim();
+                            if (order?.id && normalizedAmount && validMoneyInput(normalizedAmount)) {
+                              void saveFlags(
+                                { prepayment_amount: normalizedAmount },
+                                { prepayment_amount: String(order.prepayment_amount ?? "") },
+                                { background: true },
+                              );
+                            }
+                          }}
+                          disabled={isBusy}
+                          placeholder="0.00"
+                        />
+                      </Field>
+                    ) : null}
+                    {prepayment ? (
+                      <Field className="w-full sm:w-56" label={tx("Внести предоплату до", "Vorauszahlung fällig bis")}>
+                        <Input
+                          type="datetime-local"
+                          id="lead-wizard-prepayment-deadline"
+                          aria-label={tx("Внести предоплату до", "Vorauszahlung fällig bis")}
+                          value={prepaymentDeadline}
+                          className={cn(inputClass, "h-9 bg-card text-foreground")}
+                          onChange={(event) => setPrepaymentDeadline(event.target.value)}
+                          onBlur={() => {
+                            const deadline = prepaymentDeadline ? parseBerlinLocalInput(prepaymentDeadline) : null;
+                            if (prepaymentDeadline && !deadline) return;
+                            const nextDueAt = deadline?.toISOString() ?? "";
+                            if (localDeadline(order?.prepayment_due_at) === prepaymentDeadline) return;
                             void saveFlags(
-                              { prepayment_amount: normalizedAmount },
-                              { prepayment_amount: String(order.prepayment_amount ?? "") },
+                              { prepayment_due_at: nextDueAt },
+                              { prepayment_due_at: order?.prepayment_due_at ?? "" },
                               { background: true },
                             );
-                          }
-                        }}
-                        disabled={isBusy}
-                        placeholder="0.00"
-                      />
-                    </Field>
-                  ) : null}
-                  {prepayment ? (
-                    <Field className="w-full sm:w-64" label={tx("Внести предоплату до", "Vorauszahlung fällig bis")}>
-                      <Input
-                        type="datetime-local"
-                        id="lead-wizard-prepayment-deadline"
-                        aria-label={tx("Внести предоплату до", "Vorauszahlung fällig bis")}
-                        value={prepaymentDeadline}
-                        className={inputClass}
-                        onChange={(event) => setPrepaymentDeadline(event.target.value)}
-                        onBlur={() => {
-                          const deadline = prepaymentDeadline ? parseBerlinLocalInput(prepaymentDeadline) : null;
-                          if (prepaymentDeadline && !deadline) return;
-                          const nextDueAt = deadline?.toISOString() ?? "";
-                          if (localDeadline(order?.prepayment_due_at) === prepaymentDeadline) return;
-                          void saveFlags(
-                            { prepayment_due_at: nextDueAt },
-                            { prepayment_due_at: order?.prepayment_due_at ?? "" },
-                            { background: true },
-                          );
-                        }}
-                        disabled={isBusy}
-                      />
-                    </Field>
-                  ) : null}
-                  {/* Received prepayment is recorded through patient invoices, outside the lead wizard. */}
-                  {!acceptedQuote ? (
-                    <div className="flex w-full flex-col gap-1.5 sm:w-auto">
-                      <Button
-                        type="button"
-                        className="w-fit"
-                        disabled={isBusy || !quote || !quoteIsCurrent || estimateDocumentOutdated}
-                        aria-describedby={estimateDocumentOutdated ? "lead-wizard-estimate-outdated" : undefined}
-                        onClick={() => void createOrAcceptQuote(true)}
-                      >
-                        {busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                        {tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
+                          }}
+                          disabled={isBusy}
+                        />
+                      </Field>
+                    ) : null}
+                    {/* Received prepayment is recorded through patient invoices, outside the lead wizard. */}
+                    {!acceptedQuote ? (
+                      <div className="flex w-full items-center sm:w-auto">
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-9 w-fit bg-[var(--brand)] text-white hover:brightness-95"
+                          disabled={isBusy || !quote || !quoteIsCurrent || estimateDocumentOutdated}
+                          aria-describedby={estimateDocumentOutdated ? "lead-wizard-estimate-outdated" : undefined}
+                          onClick={() => void createOrAcceptQuote(true)}
+                        >
+                          {busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                          {tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
+                        </Button>
+
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {!acceptedQuote && estimateDocumentOutdated ? (
+                    // The amounts may be right: the PDF of the estimate prints the
+                    // prepayment and was made before its last change (DEV 2026-10-29).
+                    <div id="lead-wizard-estimate-outdated" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm leading-6 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+                      <span className="flex min-w-0 flex-1 basis-80 items-start gap-2"><Info aria-hidden="true" className="mt-1 size-4 shrink-0" /><span>{tx("Документ сметы создан до последнего изменения сумм или предоплаты — создайте новую версию документа.", "Das Dokument des Kostenvoranschlags stammt von vor der letzten Änderung der Beträge oder der Vorauszahlung – erstellen Sie eine neue Version.")}</span></span>
+                      <Button type="button" variant="default" size="sm" className="h-8 shrink-0 bg-[var(--brand)] text-white hover:brightness-95" disabled={isBusy || !lines.some(validLine)} data-testid="lead-wizard-estimate-new-version"
+                        onClick={() => void generateCommercialDocument("order_cost_estimate")}>
+                        {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3 animate-spin" /> : <FileText className="size-3" />}
+                        {tx("Создать новую версию", "Neue Version erstellen")}
                       </Button>
-                      {estimateDocumentOutdated ? (
-                        // The amounts may be right: the PDF of the estimate prints the
-                        // prepayment and was made before its last change (DEV 2026-10-29).
-                        <div id="lead-wizard-estimate-outdated" className="flex max-w-sm flex-col items-start gap-1.5 text-xs leading-5 text-amber-800 dark:text-amber-200">
-                          <span>{tx("Документ сметы создан до последнего изменения сумм или предоплаты — создайте новую версию документа.", "Das Dokument des Kostenvoranschlags stammt von vor der letzten Änderung der Beträge oder der Vorauszahlung – erstellen Sie eine neue Version.")}</span>
-                          <Button type="button" variant="outline" size="xs" disabled={isBusy || !lines.some(validLine)} data-testid="lead-wizard-estimate-new-version"
-                            onClick={() => void generateCommercialDocument("order_cost_estimate")}>
-                            {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3 animate-spin" /> : <FileText className="size-3" />}
-                            {tx("Создать новую версию", "Neue Version erstellen")}
-                          </Button>
-                        </div>
-                      ) : null}
                     </div>
                   ) : null}
-                </div>
-                {prepayment && quote ? (
-                  <div className="flex justify-end text-xs text-muted-foreground">
-                    <span>{tx("Осталось получить", "Noch zu erhalten")}: </span>
-                    <span className="ml-1 font-mono tabular-nums text-foreground">
-                      {formatMoneyLabel(prepaymentRemaining, quote.currency)}
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2" role="status">
+                  {prepayment && order?.payment_tracking ? (
+                    <StatusChip tone="info"><CalendarDays aria-hidden="true" />
+                      {paymentStatusLabel(order.payment_tracking.status, lang)}
+                    </StatusChip>
+                  ) : null}
+                  <StatusChip tone={quoteAndPrepaymentReady ? "success" : "warning"}>
+                    {quoteAndPrepaymentReady ? <Check aria-hidden="true" /> : <Info aria-hidden="true" />}
+                    {quoteStateLabel}
+                  </StatusChip>
                   </div>
-                ) : null}
-                {prepayment && order?.payment_tracking ? (
-                  <p className="text-xs text-muted-foreground" role="status">
-                    {paymentStatusLabel(order.payment_tracking.status, lang)}
-                  </p>
-                ) : null}
-                <StateMark done={quoteAndPrepaymentReady} label={quoteStateLabel} />
+                </div>
                 {commercialQuoteError ? (
                   <div
                     role="alert"
