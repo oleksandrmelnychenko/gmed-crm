@@ -9198,78 +9198,7 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </Field>
               </div>
-              {amlRequired || amlHints.length > 0 || wizardDocuments.enhanced_due_diligence.length > 0 ? (
-                <div className="mt-4" data-testid="lead-aml-enhanced-check" data-required={amlRequired ? "true" : "false"}>
-                  <div className="rounded-xl border border-border/50 bg-card p-3.5">
-                    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0 space-y-2">
-                        <StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>
-                          <ShieldCheck aria-hidden="true" />
-                          {/* The same name as the documents step and the form (owner 2026-10-19). */}
-                          {amlRequired
-                            ? tx("Усиленная AML-проверка (ориентир § 15 GwG): требуется по правилу GMED", "Verstärkte AML-Prüfung (Orientierung § 15 GwG): nach GMED-Regel erforderlich")
-                            : amlCheckSettled(enhancedCheck)
-                              ? tx("Усиленная AML-проверка (ориентир § 15 GwG): добровольная", "Verstärkte AML-Prüfung (Orientierung § 15 GwG): freiwillig")
-                              : enhancedCheckTitle(tx)}
-                        </StatusChip>
-                        {amlRequired && amlRequiredText ? (
-                          <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200" data-testid="lead-aml-enhanced-check-reasons">
-                            <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                            {amlRequiredText}
-                          </p>
-                        ) : null}
-                        {amlHints.map((hint) => (
-                          <StatusChip key={hint} tone="warning" data-testid="lead-aml-enhanced-check-hint">
-                            <CircleAlert aria-hidden="true" />
-                            <span>{hint}</span>
-                          </StatusChip>
-                        ))}
-                        {!leadId ? (
-                          <div className="text-xs leading-5 text-muted-foreground" data-testid="lead-aml-enhanced-check-after-create">
-                            {tx(
-                              "Проверку можно заполнить после создания обращения.",
-                              "Die Prüfung kann nach dem Anlegen des Leads ausgefüllt werden.",
-                            )}
-                          </div>
-                        ) : null}
-                      </div>
-                      {leadId ? (
-                        <Button
-                          type="button"
-                          variant="default"
-                          size="sm"
-                          className="h-8 shrink-0 rounded-lg"
-                          disabled={isBusy}
-                          onClick={openAmlSheet}
-                        >
-                          <ShieldCheck aria-hidden="true" className="size-3.5" />
-                          {wizardDocuments.enhanced_due_diligence.length > 0
-                            ? tx("Создать новую версию", "Neue Version erstellen")
-                            : tx("Заполнить проверку", "Prüfung ausfüllen")}
-                        </Button>
-                      ) : null}
-                    </div>
-                    {wizardDocuments.enhanced_due_diligence.length > 0 ? (
-                      <div className="mt-3 border-t border-border/50 pt-3">
-                        <WizardDocumentRows
-                          documents={wizardDocuments.enhanced_due_diligence}
-                          complianceKind="enhanced_due_diligence"
-                          emptyLabel=""
-                          lang={lang}
-                          busy={busy}
-                          disabled={isBusy}
-                          tx={tx}
-                          onOpen={(document) => void openOrDownloadDocument(document)}
-                          onDownload={(document) => void downloadDocument(document)}
-                          onSign={(document, kind) => void signDocument(document.id, kind)}
-                          onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
-                          onChanged={() => { void refreshDocumentsState(); }}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
+              {/* The enhanced AML check lives in «Документы» only (owner 2026-10-29: it was shown twice). */}
               </Section>
               {isMinor(draft.birthDate, new Date()) ? (
                 <Section
