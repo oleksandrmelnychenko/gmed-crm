@@ -11486,40 +11486,31 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 </div>
                 {commercialQuoteError ? (
-                  <div
-                    role="alert"
-                    aria-live="polite"
-                    className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs text-destructive"
-                  >
+                  <div role="alert" aria-live="polite" className="space-y-3 rounded-xl border border-destructive/25 bg-card p-3">
                     <div className="flex items-start gap-2">
-                      <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                      <div className="min-w-0">
-                        <p className="font-semibold">
+                      <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-destructive" />
+                      <div className="min-w-0 space-y-1 text-sm leading-6">
+                        <p className="font-semibold text-destructive">
                           {tx("Не удалось обновить смету", "Kostenvoranschlag konnte nicht aktualisiert werden")}
                         </p>
-                        <p className="mt-0.5">{commercialQuoteError}</p>
+                        <p className="text-foreground">{commercialQuoteError}</p>
                       </div>
                     </div>
-                    <dl className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-foreground/80">
-                      <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
-                        <dt className="sr-only">{tx("Смета", "Kostenvoranschlag")}</dt>
-                        <dd>{tx("Смета", "Kostenvoranschlag")}: {quote?.quote_number || tx("ещё не создана", "noch nicht erstellt")}</dd>
-                      </div>
-                      <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5 font-mono tabular-nums">
-                        <dt className="sr-only">{tx("Итого", "Gesamt")}</dt>
-                        <dd>{tx("Итого", "Gesamt")}: {formatMoneyLabel(quote ? quoteTotal : estimate.gross)}</dd>
-                      </div>
-                      <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
-                        <dt className="sr-only">{tx("Предоплата", "Vorauszahlung")}</dt>
-                        <dd>
-                          {tx("Предоплата", "Vorauszahlung")}: {prepayment
-                            ? prepaymentAmount.trim()
-                              ? formatMoneyLabel(money(prepaymentAmount))
-                              : tx("сумма не указана", "Betrag fehlt")
-                            : tx("не требуется", "nicht erforderlich")}
-                        </dd>
-                      </div>
-                    </dl>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusChip className="border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-200">
+                        <FileText aria-hidden="true" />{tx("Смета", "Kostenvoranschlag")}: {quote?.quote_number || tx("ещё не создана", "noch nicht erstellt")}
+                      </StatusChip>
+                      <StatusChip tone="info">
+                        <ReceiptText aria-hidden="true" />{tx("Итого", "Gesamt")}: <span className="font-mono font-semibold tabular-nums">{formatMoneyLabel(quote ? quoteTotal : estimate.gross)}</span>
+                      </StatusChip>
+                      <StatusChip tone={prepayment && validMoneyInput(prepaymentAmount.trim()) && toCents(money(prepaymentAmount)) > toCents(estimate.gross) ? "error" : "warning"}>
+                        <ReceiptText aria-hidden="true" />{tx("Предоплата", "Vorauszahlung")}: <span className="font-mono font-semibold tabular-nums">{prepayment
+                          ? prepaymentAmount.trim()
+                            ? formatMoneyLabel(money(prepaymentAmount))
+                            : tx("сумма не указана", "Betrag fehlt")
+                          : tx("не требуется", "nicht erforderlich")}</span>
+                      </StatusChip>
+                    </div>
                   </div>
                 ) : null}
               </Section>
