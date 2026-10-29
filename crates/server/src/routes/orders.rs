@@ -3074,7 +3074,9 @@ async fn initialize_order_planning_from_lead(
                            'air-ambulance',
                            'air_ambulance',
                            'business-aviation',
-                           'business_aviation'
+                           'business_aviation',
+                           'document_translation',
+                           'visa_support'
                        ]::text[]
                        AS requires_non_medical
                FROM leads
@@ -3131,7 +3133,9 @@ pub(crate) async fn carry_lead_needs_into_order_planning(
                            'air-ambulance',
                            'air_ambulance',
                            'business-aviation',
-                           'business_aviation'
+                           'business_aviation',
+                           'document_translation',
+                           'visa_support'
                        ]::text[]
                        AS requires_non_medical
                FROM leads

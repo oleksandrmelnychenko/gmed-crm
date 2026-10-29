@@ -17,6 +17,9 @@ const NEED_LABEL_PAIRS: ReadonlyArray<readonly [ru: string, de: string]> = [
   ["Трансфер из аэропорта", "Flughafentransfer"],
   ["Консьерж", "Concierge"],
   ["Переводчик", "Dolmetscher"],
+  // Service labels before the 2026-10-29 renames, still in older orders.
+  ["Поддержка переводчика", "Dolmetscherbegleitung"],
+  ["Перевод документов", "Dokumentenübersetzung"],
 ];
 
 /**

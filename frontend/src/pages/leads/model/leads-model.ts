@@ -651,6 +651,8 @@ export const LEAD_WIZARD_SERVICE_OPTIONS = [
   "driver",
   "concierge",
   "interpreter_support",
+  "document_translation",
+  "visa_support",
   "medical-transport",
   "air-ambulance",
   "business-aviation",
@@ -681,6 +683,10 @@ const LEAD_SERVICE_VALUE_ALIASES = {
   dolmetscher: "interpreter_support",
   "interpreter-support": "interpreter_support",
   interpreter_support: "interpreter_support",
+  document_translation: "document_translation",
+  "document-translation": "document_translation",
+  visa_support: "visa_support",
+  "visa-support": "visa_support",
 } satisfies Record<string, string>;
 
 const LEAD_EXCLUSIVE_SERVICE_OPTIONS = new Set(["none", "not-sure"]);
@@ -715,6 +721,7 @@ const LEAD_PROGRAM_SERVICE_LABEL_KEYS = {
   rehabilitation: "lead_option_rehabilitation",
   spine_program: "lead_option_spine_program",
   urology_second_opinion: "lead_option_urology_second_opinion",
+  visa_support: "lead_option_visa_support",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const LEAD_LOCATION_DETAIL_LABEL_KEYS = {

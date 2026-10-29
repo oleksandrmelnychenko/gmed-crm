@@ -535,6 +535,7 @@ export interface OperationsTranslations {
   lead_option_executive_screening: string;
   lead_option_fertility_support: string;
   lead_option_interpreter_support: string;
+  lead_option_visa_support: string;
   lead_option_medical_second_opinion: string;
   lead_option_medical_treatment: string;
   lead_option_oncology_second_opinion: string;
@@ -1182,11 +1183,12 @@ export const operationsRu: OperationsTranslations = {
   lead_option_cardiology_fast_track: "Ускоренная кардиология",
   lead_option_concierge_support: "Консьерж-сопровождение",
   lead_option_dental_reconstruction: "Стоматологическая реконструкция",
-  lead_option_document_translation: "Перевод документов",
+  lead_option_document_translation: "Письменный перевод документов",
   lead_option_executive_checkup: "Комплексное обследование",
   lead_option_executive_screening: "Расширенный скрининг",
   lead_option_fertility_support: "Поддержка по фертильности",
-  lead_option_interpreter_support: "Поддержка переводчика",
+  lead_option_interpreter_support: "Сопровождение устного переводчика",
+  lead_option_visa_support: "Визовая поддержка",
   lead_option_medical_second_opinion: "Медицинское второе мнение",
   lead_option_medical_treatment: "Медицинское лечение",
   lead_option_oncology_second_opinion: "Онкологическое второе мнение",
@@ -1849,11 +1851,12 @@ export const operationsDe: OperationsTranslations = {
   lead_option_cardiology_fast_track: "Kardiologie Fast Track",
   lead_option_concierge_support: "Concierge-Begleitung",
   lead_option_dental_reconstruction: "Zahnrekonstruktion",
-  lead_option_document_translation: "Dokumentenübersetzung",
+  lead_option_document_translation: "Schriftliche Übersetzung von Dokumenten",
   lead_option_executive_checkup: "Umfassende Vorsorgeuntersuchung",
   lead_option_executive_screening: "Erweitertes Screening",
   lead_option_fertility_support: "Fertilitätsbegleitung",
   lead_option_interpreter_support: "Dolmetscherbegleitung",
+  lead_option_visa_support: "Visumunterstützung",
   lead_option_medical_second_opinion: "Medizinische Zweitmeinung",
   lead_option_medical_treatment: "Medizinische Behandlung",
   lead_option_oncology_second_opinion: "Onkologische Zweitmeinung",
