@@ -1025,11 +1025,12 @@ pub(crate) async fn share_released_documents_in_tx(
              AND d.visibility = 'patient_visible'
              AND d.status <> 'archived'
              AND d.file_deleted_at IS NULL
+             -- Only the current version; a share staff withdrew stays withdrawn.
+             AND NOT EXISTS (SELECT 1 FROM documents n WHERE n.replaces_document_id = d.id)
              AND NOT EXISTS (
                  SELECT 1 FROM document_shares existing
                  WHERE existing.document_id = d.id
                    AND existing.shared_with_user_id = u.id
-                   AND existing.revoked_at IS NULL
              )
            RETURNING id"#,
     )
@@ -1473,6 +1474,33 @@ async fn issue_lead_portal_access(
     }
 
     let portal_user: Option<Uuid> = lead.try_get("portal_user_id").ok().flatten();
+    // A login that reaches a patient record is that record's: replacing its
+    // password needs the same access as the patient's own route (leads have no
+    // pool, and the password goes to the member of staff; QA 2026-10-30).
+    let own_patients: Vec<Uuid> = match portal_user {
+        Some(user_id) => match sqlx::query_scalar(
+            r#"SELECT patient_id FROM patient_assignments
+               WHERE user_id = $1 AND revoked_at IS NULL AND source <> 'lead_guardian'"#,
+        )
+        .bind(user_id)
+        .fetch_all(&mut *tx)
+        .await
+        {
+            Ok(ids) => ids,
+            Err(error) => return internal(error, lead_id, "load own patient records"),
+        },
+        None => Vec::new(),
+    };
+    let converted_patient: Option<Uuid> = lead.try_get("converted_patient_id").ok().flatten();
+    for patient_id in own_patients.into_iter().chain(converted_patient) {
+        match crate::routes::patients::has_patient_edit_access(&state, &auth, patient_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+            }
+            Err(response) => return response,
+        }
+    }
     if let Some(user_id) = portal_user {
         // A minor's own login while the parents have access gets no password
         // (QA 2026-10-12, A3-01): the parents use theirs.

@@ -1618,6 +1618,63 @@ pub(crate) fn staff_payload(loaded: &Loaded) -> Value {
     Value::Object(payload)
 }
 
+/// The staff payload for a role without access to patient records (Sales): a
+/// person linked to a patient record keeps name and role, never that record's
+/// contact and identity data (owner 2026-10-23: name and number only;
+/// QA 2026-10-30).
+pub(crate) fn mask_patient_linked(loaded: &Loaded, payload: &mut Value) {
+    let linked: Vec<Uuid> = loaded
+        .contacts
+        .iter()
+        .filter(|contact| {
+            contact
+                .get("related_patient_id")
+                .is_some_and(|id| !id.is_null())
+        })
+        .filter_map(entry_id)
+        .collect();
+    let Some(people) = payload
+        .get_mut("representatives")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for person in people {
+        let is_linked = person
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok())
+            .is_some_and(|id| linked.contains(&id));
+        if !is_linked {
+            continue;
+        }
+        let Some(fields) = person.as_object_mut() else {
+            continue;
+        };
+        for key in [
+            "date_of_birth",
+            "birth_place",
+            "birth_country",
+            "citizenships",
+            "street",
+            "zip",
+            "city",
+            "country",
+            "email",
+            "phone",
+            "id_document_type",
+            "id_document_number",
+            "id_issuing_authority",
+            "id_issuing_country",
+            "id_issued_on",
+            "id_valid_until",
+        ] {
+            fields.remove(key);
+        }
+        fields.insert("identity_documents".into(), json!([]));
+    }
+}
+
 /// When the lead or a parent last changed the representation: the marker of
 /// the last cabinet write or a later upload of a representative's file.
 pub(crate) fn updated_at(loaded: &Loaded, field_updates: &Value) -> Option<DateTime<Utc>> {

@@ -82,6 +82,7 @@ pub fn classify(method: &Method, path: &str) -> Option<RiskRoute> {
             | Rule::PaperSignature
             | Rule::ContractStatus
             | Rule::OrderCommercialBasis
+            | Rule::OrderIntake
     );
     guarded.then_some(RiskRoute::Mapped(target, rule))
 }
@@ -103,9 +104,10 @@ impl RiskRoute {
             RiskRoute::Mapped(_, rule @ (Rule::LeadQualify | Rule::Always(_))) => {
                 rule.action(body) == Some(GateAction::QualifyOrConvert)
             }
-            RiskRoute::Mapped(_, rule @ (Rule::ContractStatus | Rule::OrderCommercialBasis)) => {
-                rule.action(body) == Some(GateAction::AgencyCountersign)
-            }
+            RiskRoute::Mapped(
+                _,
+                rule @ (Rule::ContractStatus | Rule::OrderCommercialBasis | Rule::OrderIntake),
+            ) => rule.action(body) == Some(GateAction::AgencyCountersign),
             _ => true,
         }
     }
@@ -211,8 +213,20 @@ pub async fn holds(
     route: RiskRoute,
     actor: Option<Uuid>,
 ) -> Result<bool, sqlx::Error> {
+    // A converted lead is frozen: new triggers from its old data (a passport that
+    // expired since) would void a release nobody can renew (QA 2026-10-30).
+    let converted: bool =
+        sqlx::query_scalar("SELECT converted_patient_id IS NOT NULL FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_optional(&state.db)
+            .await?
+            .unwrap_or(false);
     let mut tx = state.db.begin().await?;
-    let assessment = store::ensure_started(&mut tx, lead_id, Cause::Gate, actor).await?;
+    let assessment = if converted {
+        store::load(&mut tx, lead_id).await?
+    } else {
+        store::ensure_started(&mut tx, lead_id, Cause::Gate, actor).await?
+    };
     tx.commit().await?;
     let Some(assessment) = assessment else {
         return Ok(false);
@@ -245,6 +259,17 @@ fn blocked(rejected: bool) -> Response {
 
 /// Middleware on the protected router (after the sanctions gate).
 pub async fn middleware(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    // The gates hold staff actions and name the reason. A client's login reaches
+    // none of these routes (the handler refuses it) and must not learn of a hit
+    // or a hold from the gate, which runs before those checks (tipping-off,
+    // QA 2026-10-30).
+    if request
+        .extensions()
+        .get::<AuthUser>()
+        .is_some_and(|auth| auth.role == gmed_domain::role::Role::Patient)
+    {
+        return next.run(request).await;
+    }
     let Some(route) = classify(request.method(), request.uri().path()) else {
         return next.run(request).await;
     };

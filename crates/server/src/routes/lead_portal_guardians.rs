@@ -858,7 +858,8 @@ async fn active_guardian_link(
     sqlx::query(&format!(
         r#"SELECT a.user_id, u.email, u.is_active,
                   EXISTS(SELECT 1 FROM patient_assignments pa
-                         WHERE pa.user_id = a.user_id AND pa.revoked_at IS NULL)
+                         WHERE pa.user_id = a.user_id AND pa.revoked_at IS NULL
+                           AND pa.source <> 'lead_guardian')
                   OR EXISTS(SELECT 1 FROM leads l WHERE l.portal_user_id = a.user_id)
                       AS own_patient_login,
                   (SELECT l.id FROM leads l

@@ -2079,6 +2079,34 @@ async fn only_sent_cabinet_answers_fire_triggers() {
     assert!(trigger(&staff, "T14", "patient").is_some(), "{staff}");
 }
 
+/// No tipping-off (QA 2026-10-30): a held lead's own login gets the same
+/// refusal as any other client from the staff routes, never the gate's reason.
+#[tokio::test]
+async fn a_client_login_never_learns_of_a_hold_from_the_gate() {
+    let Some(app) = test_app().await else { return };
+    let (lead_id, patient) = cabinet_lead(&app, "Tari").await;
+    sqlx::query("UPDATE leads SET citizenships = '{IR}' WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let held_for_staff = qualify(&app, lead_id).await;
+    assert!(held(&held_for_staff), "{}", held_for_staff.1);
+    for path in ["qualify", "convert"] {
+        let (status, body) = request(
+            &app,
+            "POST",
+            &format!("/leads/{lead_id}/{path}"),
+            &patient,
+            Some(json!({ "status": "qualified" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(!body.to_string().contains("risk"), "{body}");
+        assert!(!body.to_string().contains("sanction"), "{body}");
+    }
+}
+
 /// The cabinet's own payment route (section 8, the billing marker) follows
 /// the same rule (owner decision 2026-10-26): an unsent «cash» fires no T9,
 /// the send does.

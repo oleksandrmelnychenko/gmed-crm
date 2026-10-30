@@ -502,6 +502,8 @@ pub enum Rule {
     OrderStatus,
     /// `signed_agency: true` is the countersignature.
     OrderCommercialBasis,
+    /// `action: "confirm"` signs the order for both sides: the countersignature.
+    OrderIntake,
     /// `status: "signed"` is the countersignature.
     ContractStatus,
     /// Rejecting or letting a quote expire passes.
@@ -532,6 +534,13 @@ impl Rule {
             Rule::OrderStatus => (status != "cancelled").then_some(GateAction::OrderContractWork),
             Rule::OrderCommercialBasis => Some(
                 if body.get("signed_agency").and_then(Value::as_bool) == Some(true) {
+                    GateAction::AgencyCountersign
+                } else {
+                    GateAction::OrderContractWork
+                },
+            ),
+            Rule::OrderIntake => Some(
+                if body.get("action").and_then(Value::as_str) == Some("confirm") {
                     GateAction::AgencyCountersign
                 } else {
                     GateAction::OrderContractWork
@@ -604,6 +613,7 @@ pub fn classify(method: &Method, path: &str) -> Option<(Target, Rule)> {
             match rest {
                 ["status"] => Some((order, Rule::OrderStatus)),
                 ["commercial-basis"] => Some((order, Rule::OrderCommercialBasis)),
+                ["intake"] => Some((order, Rule::OrderIntake)),
                 // Winding down and bookkeeping stay possible.
                 ["external-invoices", ..]
                 | ["debt-management"]
@@ -848,6 +858,17 @@ async fn paper_signature_exempt(
 
 /// Middleware on the protected router: blocks guarded requests.
 pub async fn middleware(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    // The gates hold staff actions and name the reason. A client's login reaches
+    // none of these routes (the handler refuses it) and must not learn of a hit
+    // or a hold from the gate, which runs before those checks (tipping-off,
+    // QA 2026-10-30).
+    if request
+        .extensions()
+        .get::<AuthUser>()
+        .is_some_and(|auth| auth.role == gmed_domain::role::Role::Patient)
+    {
+        return next.run(request).await;
+    }
     let Some((target, rule)) = classify(request.method(), request.uri().path()) else {
         return next.run(request).await;
     };
@@ -1378,7 +1399,6 @@ mod tests {
             "/orders/{id}/leistungen/{id}/deliver",
             "/orders/{id}/quotes",
             "/orders/{id}/amendments",
-            "/orders/{id}/intake",
             "/framework-contracts/{id}/contracting-party",
         ] {
             assert!(

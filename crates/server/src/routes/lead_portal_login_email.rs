@@ -297,6 +297,16 @@ async fn get_patient_login_emails(
     if let Err(response) = auth.require_capability(Capability::PatientsView) {
         return response;
     }
+    // Who manages the login reads its e-mails: not an interpreter, concierge or billing.
+    if !crate::routes::lead_portal_account::may_issue_portal_password(auth.role)
+        && auth.role != gmed_domain::role::Role::CeoAssistant
+    {
+        return coded(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Insufficient permissions",
+        );
+    }
     match crate::routes::patients::has_patient_access(&state, &auth, patient_id).await {
         Ok(true) => {}
         Ok(false) => {

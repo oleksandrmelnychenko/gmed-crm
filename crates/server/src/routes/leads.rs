@@ -110,7 +110,12 @@ pub(crate) async fn validate_lead_attachment(
 // ----------------------------------------------------------------------------
 
 pub fn public_router() -> Router<AppState> {
-    Router::new().route("/public/lead-intake", post(ingest_lead_intake))
+    // The attachments of a website submission, as nginx allows them; axum's
+    // default of 2 MB lost the whole lead with one scan (QA 2026-10-30).
+    Router::new().route(
+        "/public/lead-intake",
+        post(ingest_lead_intake).layer(axum::extract::DefaultBodyLimit::max(30 * 1024 * 1024)),
+    )
 }
 
 pub fn router() -> Router<AppState> {
@@ -3437,6 +3442,10 @@ async fn load_lead_conversion_readiness(
                          AND (d.generated_bindings -> 'gwg_identification' ->> 'subject' = 'payer'
                               OR d.generated_bindings -> 'gwg_identification' ->> 'form' = 'legal_entity')
                          AND d.signed_at IS NULL
+                         -- A paper or QES signature is a new version of it.
+                         AND NOT EXISTS (
+                             SELECT 1 FROM documents n WHERE n.replaces_document_id = d.id
+                         )
                          -- Only while a third party pays: a payer changed to
                          -- the patient or a parent leaves that sheet behind.
                          AND EXISTS (
@@ -8690,12 +8699,11 @@ async fn convert_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if preflight
+    if let Some(patient_id) = preflight
         .try_get::<Option<Uuid>, _>("converted_patient_id")
         .unwrap_or_default()
-        .is_some()
     {
-        return err(StatusCode::CONFLICT, "Lead already converted");
+        return lead_converted_response(patient_id);
     }
     if preflight
         .try_get::<String, _>("failed_outcome_status")
@@ -8754,8 +8762,8 @@ async fn convert_lead(
     };
 
     let converted_patient_id: Option<Uuid> = lead.try_get("converted_patient_id").ok().flatten();
-    if converted_patient_id.is_some() {
-        return err(StatusCode::CONFLICT, "Lead already converted");
+    if let Some(patient_id) = converted_patient_id {
+        return lead_converted_response(patient_id);
     }
     let failed_outcome_status: String = lead
         .try_get("failed_outcome_status")
@@ -8858,6 +8866,30 @@ async fn convert_lead(
         "patient_first" => prospect_patient_id,
         _ => None,
     };
+    // An existing patient's record: the same access and Art. 18 check as every
+    // other way into it (QA 2026-10-30). A new prospect is this lead's own.
+    if let Some(prospect_id) = activation_patient_id {
+        let existing = match sqlx::query_scalar::<_, String>(
+            "SELECT lifecycle_status FROM patients WHERE id = $1",
+        )
+        .bind(prospect_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(status) => {
+                status.is_some_and(|status| matches!(status.as_str(), "active" | "inactive"))
+            }
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, "load lifecycle for conversion");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if existing
+            && let Err(response) = require_repeat_patient_access(&state, &auth, prospect_id).await
+        {
+            return response;
+        }
+    }
 
     let first_name = [
         lead.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -9341,7 +9373,18 @@ async fn convert_lead(
                            ),
                            -- Only a real renewed signature ends a revocation;
                            -- DEV test onboarding preserves these markers.
-                           legal_status = (COALESCE(legal_status, '{}'::jsonb) || $5::jsonb)
+                           -- The record's notes and AML data stay: only this lead's own
+                           -- AML data are added, and a required check stays required.
+                           legal_status = (COALESCE(legal_status, '{}'::jsonb)
+                                   || ($5::jsonb - 'notes' - 'aml_enhanced_due_diligence'
+                                       - 'aml_enhanced_due_diligence_required')
+                                   || CASE WHEN $5::jsonb->'aml_enhanced_due_diligence' <> '{}'::jsonb
+                                           THEN jsonb_build_object('aml_enhanced_due_diligence',
+                                                $5::jsonb->'aml_enhanced_due_diligence')
+                                           ELSE '{}'::jsonb END
+                                   || jsonb_build_object('aml_enhanced_due_diligence_required',
+                                        COALESCE((legal_status->>'aml_enhanced_due_diligence_required')::boolean, false)
+                                        OR COALESCE(($5::jsonb->>'aml_enhanced_due_diligence_required')::boolean, false)))
                                - (CASE WHEN $5::jsonb->>'dsgvo_signed' = 'true'
                                        THEN ARRAY['dsgvo_revoked_at'] ELSE ARRAY[]::text[] END
                                   || CASE WHEN $5::jsonb->>'confidentiality_release_signed' = 'true'
@@ -10220,7 +10263,14 @@ async fn convert_lead(
            UNION
            SELECT $1, c.manager_id, $2
            FROM cases c
+           JOIN users u ON u.id = c.manager_id AND u.is_active
            WHERE c.patient_id = $1
+             -- Someone removed from this patient stays removed (QA 2026-10-30).
+             AND NOT EXISTS (
+                 SELECT 1 FROM patient_assignments r
+                 WHERE r.patient_id = $1 AND r.user_id = c.manager_id
+                   AND r.revoked_at IS NOT NULL
+             )
            ON CONFLICT (patient_id, user_id) DO UPDATE
            SET assigned_by = EXCLUDED.assigned_by,
                assigned_at = now(),
@@ -11978,6 +12028,22 @@ async fn purge_lead_side_records_in_tx(
     .bind(lead_id)
     .execute(&mut **tx)
     .await?;
+    // The payer's data copied onto the lead's orders (`set_order_payer`); an
+    // order with an invoice keeps its recipient for accounting (QA 2026-10-30).
+    sqlx::query(
+        r#"UPDATE orders o
+           SET payer_contact_name = NULL, payer_contact_email = NULL,
+               payer_contact_phone = NULL, payer_contact_relationship = NULL,
+               payer_notes = NULL, payer_address_street = NULL, payer_address_zip = NULL,
+               payer_address_city = NULL, payer_address_country = NULL,
+               payer_role = NULL, payer_contact_is_organisation = NULL
+           WHERE o.source_lead_id = $1
+             AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+             AND NOT EXISTS (SELECT 1 FROM external_invoices e WHERE e.order_id = o.id)"#,
+    )
+    .bind(lead_id)
+    .execute(&mut **tx)
+    .await?;
     // A framework contract that was never signed is a draft; a signed one, or
     // one an order refers to, stays.
     sqlx::query(
@@ -12559,6 +12625,25 @@ pub async fn purge_unqualified_leads(
     now: chrono::DateTime<chrono::Utc>,
     only: Option<&[Uuid]>,
 ) -> Result<UnqualifiedLeadPurgeReport, sqlx::Error> {
+    // A lead that left the rule (qualified, signed) starts over: a later
+    // re-entry is warned anew instead of being deleted on the old warning,
+    // as [`UNQUALIFIED_LEAD_DELETION_SQL`] promises (QA 2026-10-30).
+    if let Err(error) = sqlx::query(&format!(
+        r#"UPDATE leads AS l
+           SET retention_warning_sent_at = NULL, retention_reminder_sent_at = NULL
+           WHERE (l.retention_warning_sent_at IS NOT NULL
+                  OR l.retention_reminder_sent_at IS NOT NULL)
+             AND NOT ({})
+             AND ($2::uuid[] IS NULL OR l.id = ANY($2))"#,
+        UNQUALIFIED_LEAD_SUBJECT_SQL.replace("$4", "$1"),
+    ))
+    .bind(ANONYMIZED_FIRST_NAME)
+    .bind(only)
+    .execute(&state.db)
+    .await
+    {
+        tracing::warn!(%error, "clear retention markers of leads outside the rule");
+    }
     let mut report = UnqualifiedLeadPurgeReport {
         warned: warn_about_unqualified_lead_deadlines(state, policy, now, only).await?,
         ..Default::default()
@@ -12660,6 +12745,22 @@ async fn purge_unqualified_lead(
     .await?;
     if invoiced {
         return Ok(UnqualifiedLeadPurge::Blocked);
+    }
+    // A signature request still out: the person can sign it, and the signed PDF
+    // would land on a deleted lead. The lead waits for the request's end; a
+    // signed DSGVO then takes it out of the rule (QA 2026-10-30).
+    let signature_open: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM document_signature_requests r
+               JOIN documents d ON d.id = r.source_document_id
+               WHERE d.lead_id = $1 AND r.status IN ('sending', 'pending', 'needs_review')
+           )"#,
+    )
+    .bind(lead_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if signature_open {
+        return Ok(UnqualifiedLeadPurge::Skipped);
     }
 
     // The open preparation order is withdrawn like in the manual deletion. The
@@ -12910,7 +13011,8 @@ async fn warn_about_unqualified_lead_deadlines(
     now: chrono::DateTime<chrono::Utc>,
     only: Option<&[Uuid]>,
 ) -> Result<u64, sqlx::Error> {
-    let due_soon_sql = |lead_filter: &str| {
+    let due_soon_sql = {
+        let lead_filter = "l.id = $5";
         format!(
             r#"UPDATE leads AS l
                SET retention_warning_sent_at = $3
@@ -12943,54 +13045,73 @@ async fn warn_about_unqualified_lead_deadlines(
 
     let mut warned = 0;
     for candidate in candidates {
-        let mut tx = state.db.begin().await?;
-        let Some(row) = sqlx::query(&due_soon_sql("l.id = $5"))
-            .bind(policy.days as i32)
-            .bind(policy.effective_at)
-            .bind(now)
-            .bind(ANONYMIZED_FIRST_NAME)
-            .bind(candidate)
-            .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
-            .fetch_optional(&mut *tx)
-            .await?
-        else {
-            continue;
-        };
-        let lead_id: Uuid = row.try_get("id")?;
-        // The warning marker is set in the same statement, so the instant is
-        // the deadline or the lead time after this warning
-        // ([`UNQUALIFIED_LEAD_DELETION_SQL`]): the notice names that day.
-        let delete_at: chrono::DateTime<chrono::Utc> = row.try_get("delete_at")?;
-        let recipients = unqualified_lead_recipients(&mut tx, row.try_get("created_by")?).await?;
-        // The frontend shows these facts in RU/DE (topbar-data.ts).
-        let stored = store_lead_retention_notices(
-            &mut tx,
-            &recipients,
-            "lead_retention_warning",
-            "Lead will be deleted automatically",
-            &format!(
-                "Not qualified and no signed consent; deletion on {}.",
-                // The German calendar day of the deletion, not the UTC one.
-                crate::app_time::date_of(delete_at).format("%Y-%m-%d")
-            ),
-            lead_id,
-        )
-        .await?;
-        tx.commit().await?;
-        publish_lead_retention_notices(state, lead_id, &stored).await;
-        // An open leads list or wizard shows the countdown («Автоудаление»)
-        // of the instant the warning just fixed, without a reload.
-        crate::realtime::publish_lead_event(
-            state,
-            None,
-            LEAD_RETENTION_WARNING_EVENT,
-            lead_id,
-            json!({ "delete_at": delete_at.to_rfc3339() }),
-        )
-        .await;
-        warned += 1;
+        // One lead's failure leaves the others' warnings and the purge running.
+        match warn_about_unqualified_lead(state, policy, now, candidate, &due_soon_sql).await {
+            Ok(true) => warned += 1,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::error!(lead_id = %candidate, %error, "Unqualified lead warning failed");
+            }
+        }
     }
     Ok(warned)
+}
+
+/// Warns about one lead, re-checked under its update. False when it no longer
+/// falls under the rule.
+async fn warn_about_unqualified_lead(
+    state: &crate::state::AppState,
+    policy: UnqualifiedLeadRetention,
+    now: chrono::DateTime<chrono::Utc>,
+    candidate: Uuid,
+    due_soon_sql: &str,
+) -> Result<bool, sqlx::Error> {
+    let mut tx = state.db.begin().await?;
+    let Some(row) = sqlx::query(due_soon_sql)
+        .bind(policy.days as i32)
+        .bind(policy.effective_at)
+        .bind(now)
+        .bind(ANONYMIZED_FIRST_NAME)
+        .bind(candidate)
+        .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
+        .fetch_optional(&mut *tx)
+        .await?
+    else {
+        return Ok(false);
+    };
+    let lead_id: Uuid = row.try_get("id")?;
+    // The warning marker is set in the same statement, so the instant is
+    // the deadline or the lead time after this warning
+    // ([`UNQUALIFIED_LEAD_DELETION_SQL`]): the notice names that day.
+    let delete_at: chrono::DateTime<chrono::Utc> = row.try_get("delete_at")?;
+    let recipients = unqualified_lead_recipients(&mut tx, row.try_get("created_by")?).await?;
+    // The frontend shows these facts in RU/DE (topbar-data.ts).
+    let stored = store_lead_retention_notices(
+        &mut tx,
+        &recipients,
+        "lead_retention_warning",
+        "Lead will be deleted automatically",
+        &format!(
+            "Not qualified and no signed consent; deletion on {}.",
+            // The German calendar day of the deletion, not the UTC one.
+            crate::app_time::date_of(delete_at).format("%Y-%m-%d")
+        ),
+        lead_id,
+    )
+    .await?;
+    tx.commit().await?;
+    publish_lead_retention_notices(state, lead_id, &stored).await;
+    // An open leads list or wizard shows the countdown («Автоудаление»)
+    // of the instant the warning just fixed, without a reload.
+    crate::realtime::publish_lead_event(
+        state,
+        None,
+        LEAD_RETENTION_WARNING_EVENT,
+        lead_id,
+        json!({ "delete_at": delete_at.to_rfc3339() }),
+    )
+    .await;
+    Ok(true)
 }
 
 /// The leads (alias `l`) the sweep would really delete within the warning

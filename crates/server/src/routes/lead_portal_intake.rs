@@ -703,12 +703,15 @@ pub(crate) fn require_patient(auth: &AuthUser) -> Result<(), axum::response::Res
 /// 2026-10-29: «все, що робить пацієнт, ми з візарда також»): the patient,
 /// or staff who edit leads. Consents, the consent options, the trusted
 /// persons, the cost-estimate consent and the send stay the patient's own
-/// ([`require_patient`]); staff record those on paper.
+/// ([`require_patient`]); staff record those on paper. The form holds
+/// insurance data, notes and medical uploads, so it stays closed to a role
+/// without medical access (Sales, RBAC matrix; QA 2026-10-30).
 pub(crate) fn require_cabinet_editor(auth: &AuthUser) -> Result<(), axum::response::Response> {
     if auth.role == Role::Patient {
         return Ok(());
     }
-    auth.require_capability(Capability::LeadsEdit)
+    auth.require_capability(Capability::LeadsEdit)?;
+    auth.require_capability(Capability::PatientsMedicalView)
 }
 
 /// Whether `user_id` is a member of staff (any role but the patient's).
@@ -8013,8 +8016,12 @@ async fn get_lead_portal_intake(
                         })
                         .and_then(|update| update.get("at").cloned())
                 );
+                let mut representation = lead_representatives::staff_payload(&loaded);
+                if !auth.can(Capability::PatientsView) {
+                    lead_representatives::mask_patient_linked(&loaded, &mut representation);
+                }
                 (
-                    lead_representatives::staff_payload(&loaded),
+                    representation,
                     lead_representatives::updated_at(&loaded, &updates),
                     billing,
                     billing_updated_at,
@@ -8671,6 +8678,9 @@ async fn review_portal_upload(
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
     };
+    if let Err(response) = crate::routes::leads::refuse_if_converted(&mut *tx, lead_id).await {
+        return response;
+    }
     let kind: Option<String> = match sqlx::query_scalar(
         "SELECT kind FROM lead_portal_uploads WHERE document_id = $1 AND lead_id = $2 AND withdrawn_at IS NULL FOR UPDATE"
     ).bind(document_id).bind(lead_id).fetch_optional(&mut *tx).await {

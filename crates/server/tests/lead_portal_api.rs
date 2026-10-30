@@ -1791,6 +1791,11 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         "self_funds_source",
         "self_funds_description",
         "self_funds_entered_by",
+        // How staff recorded the two consents: read-only here.
+        "contact_consent_recorded_how",
+        "contact_consent_recorded_note",
+        "cost_estimate_consent_recorded_how",
+        "cost_estimate_consent_recorded_note",
         "payer_funds_source_stated",
         "payer_funds_description_stated",
     ] {

@@ -109,10 +109,10 @@ fn build_app_inner(app_state: state::AppState) -> Router {
     //      successful unannotated background polls, using the AuthUser left
     //      behind by require_auth
     //   3. rate_limit::apply_general — per-IP token bucket
-    // Innermost, after authentication: a lead-only patient login reaches only
-    // its request page and account (lead cabinet, owner decision 2026-10-03),
-    // then the sanctions and blocked-country gate
-    // (docs/architecture/sanctions-screening_ua.md).
+    // After authentication: the sanctions and blocked-country gate
+    // (docs/architecture/sanctions-screening_ua.md), then the risk gate, both
+    // for staff only; innermost, a lead-only patient login reaches only its
+    // request page and account (lead cabinet, owner decision 2026-10-03).
     let protected_routes = routes::protected_router()
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
