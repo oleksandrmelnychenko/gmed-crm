@@ -3251,6 +3251,13 @@ pub(crate) struct PortalPayerInput {
     /// one is recorded for this payer, `false` removes it. Left out: the
     /// stored consent stays.
     contact_consent: Option<bool>,
+    /// Staff record that consent for the client (owner 2026-10-30): how the
+    /// client gave it (`STAFF_CONSENT_CHANNELS`), required from staff when
+    /// the consent is newly recorded, and an optional note.
+    #[serde(default)]
+    contact_consent_recorded_how: Option<String>,
+    #[serde(default)]
+    contact_consent_recorded_note: Option<String>,
     /// "Do you act in your own economic interest?" Left out: the stored
     /// answer stays.
     acts_on_own_account: Option<bool>,
@@ -3793,6 +3800,37 @@ fn declaration_from_portal(
     Ok(declaration)
 }
 
+/// How the client gave the contact consent staff record and the note: 422
+/// `consent_recorded_how_required` without a known way, `invalid_field` for a
+/// note over 500 characters (the rule of `staff_consent_record`).
+fn staff_contact_consent_record(
+    input: &PortalPayerInput,
+) -> Result<(String, Option<String>), PortalPayerError> {
+    let how = input
+        .contact_consent_recorded_how
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    if !crate::routes::lead_portal_intake::STAFF_CONSENT_CHANNELS.contains(&how) {
+        return Err(PortalPayerError::Invalid {
+            code: "consent_recorded_how_required",
+            field: "payer_contact_consent",
+        });
+    }
+    let note = input
+        .contact_consent_recorded_note
+        .as_deref()
+        .map(str::trim)
+        .filter(|note| !note.is_empty());
+    if note.is_some_and(|note| note.chars().count() > 500) {
+        return Err(PortalPayerError::Invalid {
+            code: "invalid_field",
+            field: "payer_contact_consent",
+        });
+    }
+    Ok((how.to_string(), note.map(str::to_string)))
+}
+
 /// Saves the cabinet's answer in the caller's transaction, with its audit
 /// event and the payer of the lead's orders. Returns the declaration when
 /// something changed.
@@ -3831,10 +3869,35 @@ pub(crate) async fn save_from_portal(
     if previous.as_ref() == Some(&declaration) {
         return Ok(None);
     }
+    let consent_changed = declaration.contact_consent_at
+        != previous
+            .as_ref()
+            .and_then(|previous| previous.contact_consent_at);
+    // Staff record the client's consent that GMED contacts the payer with how
+    // the client gave it, like the client's other consents (owner 2026-10-30).
+    let consent_recorded =
+        if consent_changed && declaration.contact_consent_at.is_some() && access_kind == "staff" {
+            Some(staff_contact_consent_record(input)?)
+        } else {
+            None
+        };
     let identity_changed = previous
         .as_ref()
         .is_none_or(|previous| !previous.same_identity(&declaration));
     store_declaration(conn, lead_id, &declaration, Some(actor), identity_changed).await?;
+    if consent_changed {
+        let (how, note) = consent_recorded.unzip();
+        sqlx::query(
+            r#"UPDATE lead_payer_declarations
+               SET contact_consent_recorded_how = $2, contact_consent_recorded_note = $3
+               WHERE lead_id = $1"#,
+        )
+        .bind(lead_id)
+        .bind(how)
+        .bind(note.flatten())
+        .execute(&mut *conn)
+        .await?;
+    }
     // Another payer or another e-mail address: the payer's link stops
     // working, and another payer's answers go — with a link payer's
     // payment route when only the address changed.

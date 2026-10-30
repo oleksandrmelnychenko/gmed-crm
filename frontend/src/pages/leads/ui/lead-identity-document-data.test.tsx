@@ -26,6 +26,7 @@ import {
 } from "../model/lead-identity-document-data";
 import { LeadIdentityDocumentData, LeadIdentityDocumentDataForm } from "./lead-identity-document-data";
 import { LeadPatientConcern, patientConcernTransferMode } from "./lead-patient-concern";
+import { PortalMarkerKindsContext, PortalUploadsProvider } from "./lead-wizard-portal-intake";
 
 const ru = (text: string) => text;
 const de = (_ru: string, text: string) => text;
@@ -325,6 +326,33 @@ describe("«Со слов пациента» in the medical step", () => {
     expect(html).toContain("06.10.2026");
     expect(html).toContain("Открыть: mrt-befund.pdf");
     expect(html).toContain("Скачать: mrt-befund.pdf");
+  });
+
+  // Owner 2026-10-30: a reason staff typed in the client's form said «Со слов пациента».
+  it("says staff entered the reason and uploaded the file in the client's form", () => {
+    const intake = normalizeLeadPortalIntake({
+      lead_id: "lead-1",
+      uploads: [{ document_id: "doc-m1", uploaded_at: null, access_kind: "staff", reviewed_at: null,
+        consent_given_at: null, consent_revoked_at: null, consent_version: null }],
+    });
+    const html = renderToStaticMarkup(
+      <PortalMarkerKindsContext.Provider value={{ request_reason: "staff" }}>
+        <PortalUploadsProvider intake={intake} canReview={false} onReviewed={() => undefined}>
+          <LeadPatientConcern
+            reason={reason}
+            documents={[file]}
+            currentConcern=""
+            onTransfer={() => undefined}
+            onOpen={() => undefined}
+            onDownload={() => undefined}
+            tx={ru}
+          />
+        </PortalUploadsProvider>
+      </PortalMarkerKindsContext.Provider>,
+    );
+    expect(html).toContain("Внёс сотрудник в анкете клиента");
+    expect(html).not.toContain("Со слов пациента");
+    expect(html).toContain("Загружено сотрудником");
   });
 
   it("is nothing when the lead entered nothing", () => {

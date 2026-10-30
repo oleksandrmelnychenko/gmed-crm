@@ -7,6 +7,7 @@ import {
   PatientUploadMark,
   PortalInquiryConsentLine,
   PortalUploadsProvider,
+  portalUploadsTitle,
   Step1FillModeSwitch,
   Step1PortalFieldNote,
   Step1PortalProvider,
@@ -96,6 +97,27 @@ describe("wizard step 1 and the patient portal", () => {
     const consent = renderToStaticMarkup(<PortalInquiryConsentLine intake={intake} tx={tx} />);
     expect(consent).toContain("Согласие на обработку запроса (кабинет)");
     expect(consent).toContain("Дано:");
+  });
+
+  // Owner 2026-10-30: files staff uploaded in the client's form said «Загружено пациентом».
+  it("labels a file staff uploaded in the client's form as theirs", () => {
+    const staffIntake = normalizeLeadPortalIntake({
+      lead_id: "lead-1",
+      uploads: [
+        { ...intake.uploads[0], document_id: "doc-staff", access_kind: "staff" },
+        intake.uploads[0],
+      ],
+    }) as LeadPortalIntake;
+    const html = renderToStaticMarkup(
+      <PortalUploadsProvider intake={staffIntake} canReview={false} onReviewed={() => {}}>
+        <PatientUploadMark documentId="doc-staff" lang="ru" />
+      </PortalUploadsProvider>,
+    );
+    expect(html).toContain("Загружено сотрудником");
+    expect(html).not.toContain("Загружено пациентом");
+    expect(portalUploadsTitle(staffIntake.uploads, ["doc-staff"], tx)).toBe("Загружено сотрудником");
+    expect(portalUploadsTitle(staffIntake.uploads, ["doc-1"], tx)).toBe("Загружено пациентом");
+    expect(portalUploadsTitle(staffIntake.uploads, ["doc-staff", "doc-1"], tx)).toBe("Загружено в анкете клиента");
   });
 
   it("ignores an answer that is not a portal state", () => {

@@ -8,6 +8,7 @@ import type { DocumentItem } from "@/pages/documents/model/types";
 
 import type { LeadPortalRequestReason } from "../model/lead-risk-intake";
 import type { Tx } from "../model/lead-payer";
+import { useMarkerKind, usePortalStaffUploadIds } from "./lead-wizard-portal-intake";
 
 /** Whether the transfer replaces text staff already have in "Причина обращения". */
 export function patientConcernTransferMode(
@@ -28,7 +29,9 @@ export function patientConcernTransferMode(
  * after a confirmation when it would replace staff's text), and the medical
  * files the lead uploaded (the same as "Загружено пациентом" in the documents
  * step). Nothing when the lead entered nothing. The lead's text itself is
- * never changed.
+ * never changed. What staff entered in the client's form says «внёс
+ * сотрудник» instead, a file they uploaded «загружено сотрудником» (owner
+ * 2026-10-30).
  */
 export function LeadPatientConcern({
   reason,
@@ -51,7 +54,13 @@ export function LeadPatientConcern({
 }) {
   const [confirming, setConfirming] = useState(false);
   const mode = patientConcernTransferMode(reason, currentConcern);
+  const reasonKind = useMarkerKind("request_reason");
+  const staffUploads = usePortalStaffUploadIds();
   if (!reason && documents.length === 0) return null;
+  // Staff's own entry in the client's form is no word of the patient (owner 2026-10-30).
+  const byStaff = reason
+    ? reasonKind === "staff"
+    : documents.every((document) => staffUploads.has(document.id));
 
   const transfer = () => {
     if (!reason) return;
@@ -67,9 +76,11 @@ export function LeadPatientConcern({
     <div className="mb-2 space-y-1.5 rounded-lg border border-border/70 bg-card p-2.5" data-testid="lead-patient-concern">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-2">
-          <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold">
+          <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold" data-testid="lead-patient-concern-source">
             <UserRound aria-hidden className="size-3.5" />
-            {tx("Со слов пациента", "Angaben der Patientin / des Patienten")}
+            {byStaff
+              ? tx("Внёс сотрудник в анкете клиента", "Von Mitarbeitenden im Kundenformular eingetragen")
+              : tx("Со слов пациента", "Angaben der Patientin / des Patienten")}
           </span>
           {reason?.updated_at ? (
             <span className="text-xs tabular-nums text-muted-foreground" data-testid="lead-patient-concern-date">
@@ -102,10 +113,15 @@ export function LeadPatientConcern({
       {confirming ? (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200" role="alert" data-testid="lead-patient-concern-confirm">
           <span className="min-w-0 flex-1">
-            {tx(
-              "В причине обращения уже есть текст сотрудника. Заменить его текстом пациента?",
-              "Im Anliegen steht bereits ein Text. Durch die Angaben der Patientin / des Patienten ersetzen?",
-            )}
+            {byStaff
+              ? tx(
+                "В причине обращения уже есть текст. Заменить его текстом из анкеты клиента?",
+                "Im Anliegen steht bereits ein Text. Durch den Text aus dem Kundenformular ersetzen?",
+              )
+              : tx(
+                "В причине обращения уже есть текст сотрудника. Заменить его текстом пациента?",
+                "Im Anliegen steht bereits ein Text. Durch die Angaben der Patientin / des Patienten ersetzen?",
+              )}
           </span>
           <Button type="button" size="xs" variant="destructive" onClick={transfer} data-testid="lead-patient-concern-replace">
             {tx("Заменить", "Ersetzen")}
@@ -127,6 +143,11 @@ export function LeadPatientConcern({
                 <li key={document.id} className="flex items-center gap-1.5 px-2 py-1 text-[13px]">
                   <FileText aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate" title={name}>{name}</span>
+                  {staffUploads.has(document.id) ? (
+                    <StatusChip tone="info" className="shrink-0 whitespace-nowrap" data-testid="lead-patient-concern-file-by-staff">
+                      {tx("Загружено сотрудником", "Von GMED hochgeladen")}
+                    </StatusChip>
+                  ) : null}
                   <StatusChip tone="info" className="shrink-0 whitespace-nowrap tabular-nums">
                     <CalendarDays aria-hidden="true" />
                     {formatAppDate(document.created_at)}

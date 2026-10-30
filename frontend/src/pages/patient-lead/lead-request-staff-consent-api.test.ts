@@ -5,11 +5,15 @@ import {
   DISCLOSURE_VERSION,
   NO_CONSENT_FORM_CHOICES,
   giveLeadConsent,
+  rememberPayerContactConsentRecord,
   saveLeadConsentFormChoices,
+  saveLeadPayer,
   saveLeadPayerCostEstimateConsent,
   saveLeadTrustedPersons,
   staffConsentRecordBody,
+  submitLeadFollowUp,
   type LeadDisclosureInput,
+  type LeadRequestPayerInput,
 } from "./lead-request-api";
 
 vi.mock("@/lib/api", async (original) => ({
@@ -84,5 +88,29 @@ describe("consent saves recorded by staff", () => {
       purpose: "lead_inquiry_processing", version: "v1", language: "de",
       recorded_how: "phone", recorded_note: "rief am Vormittag an",
     });
+  });
+
+  // Owner 2026-10-30: the consent that GMED contacts the payer was saved at once in staff mode.
+  it("payer contact consent: the answer that gives it carries the record staff took", async () => {
+    const payer: LeadRequestPayerInput = { payer_kind: "third_party", first_name: "Viktor", contact_consent: true };
+    rememberPayerContactConsentRecord(null);
+    await saveLeadPayer("lead-1", payer);
+    expect(lastBody()).toEqual(payer);
+    rememberPayerContactConsentRecord(recorded);
+    await saveLeadPayer("lead-1", payer);
+    expect(lastBody()).toEqual({
+      ...payer, contact_consent_recorded_how: "phone", contact_consent_recorded_note: "rief am Vormittag an",
+    });
+    // Without the consent in the answer nothing is recorded.
+    await saveLeadPayer("lead-1", { ...payer, contact_consent: false });
+    expect(lastBody()).toEqual({ ...payer, contact_consent: false });
+    rememberPayerContactConsentRecord(null);
+  });
+
+  it("follow-up send: the client's send has no body, staff say how the client confirmed it", async () => {
+    await submitLeadFollowUp("lead-1");
+    expect(vi.mocked(apiFetch).mock.calls.at(-1)).toEqual(["/me/lead-requests/lead-1/follow-up/submit", { method: "POST" }]);
+    await submitLeadFollowUp("lead-1", { how: "in_person", note: "" });
+    expect(lastBody()).toEqual({ recorded_how: "in_person", recorded_note: null });
   });
 });

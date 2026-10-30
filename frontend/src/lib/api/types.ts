@@ -165,7 +165,13 @@ interface LeadReadiness {
   checks: LeadReadinessCheck[];
   steps: LeadReadinessStep[];
   /** Active cabinet consents (adult lead or parent / guardian); they count like the staff toggles. */
-  cabinet_consents?: { privacy_practices: boolean; healthcare: boolean };
+  cabinet_consents?: {
+    privacy_practices: boolean;
+    healthcare: boolean;
+    /** How the client gave a consent staff recorded in the client's form (owner 2026-10-30); null for the client's own. */
+    privacy_practices_recorded?: { how: string | null; note: string | null } | null;
+    healthcare_recorded?: { how: string | null; note: string | null } | null;
+  };
 }
 
 interface LeadPhoneEntry {

@@ -70,11 +70,15 @@ struct RecipientSummary {
     /// as `invoice_recipient_resolve` names them.
     payer_patient_relation_id: Option<Uuid>,
     payer_patient_id: Option<Uuid>,
+    /// Who entered the lead's answer the recipient comes from (`source`
+    /// `payer_declaration` or `invoice_address`): `self` / `guardian` in the
+    /// cabinet, `staff` in the client's form or the wizard (owner 2026-10-30).
+    entered_by: Option<&'static str>,
 }
 
 impl RecipientSummary {
     fn to_json(&self) -> Value {
-        json!({
+        let mut value = json!({
             "source": self.inherited.source,
             "role": self.inherited.record.payer_role,
             "kind": self.recipient.kind,
@@ -90,7 +94,12 @@ impl RecipientSummary {
             "payer_patient_id": self.payer_patient_id,
             "missing": missing_address_parts(&self.recipient),
             "minor_without_payer": self.inherited.minor_without_payer,
-        })
+        });
+        // Only for a recipient that comes from the lead's answers.
+        if let Some(entered_by) = self.entered_by {
+            value["entered_by"] = json!(entered_by);
+        }
+        value
     }
 }
 
@@ -178,7 +187,53 @@ async fn load_recipient(
         payer_patient_id: uuid("payer_patient_id"),
         recipient: InvoiceRecipient::from_json(&resolved, false),
         inherited,
+        entered_by: None,
     })
+}
+
+/// Who entered the part of the lead's form an inherited recipient comes from:
+/// the invoice recipient of step 3 for `invoice_address`, the payer for
+/// `payer_declaration`. The cabinet's marker names its writer; without one
+/// staff entered it in the wizard. `None` for the other sources.
+async fn recipient_entered_by(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    source: &str,
+) -> Result<Option<&'static str>, sqlx::Error> {
+    let marker = match source {
+        "invoice_address" => crate::routes::lead_portal_intake::INVOICE_RECIPIENT_MARKER,
+        "payer_declaration" => crate::routes::lead_portal_intake::PAYER_MARKER,
+        _ => return Ok(None),
+    };
+    let row = sqlx::query(
+        r#"SELECT COALESCE(portal_field_updates ? $2, false) AS has_marker,
+                  portal_field_updates -> $2 ->> 'kind' AS kind
+           FROM leads WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(marker)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(|row| {
+        entered_by_of_marker(
+            row.try_get::<bool, _>("has_marker").unwrap_or(false),
+            row.try_get::<Option<String>, _>("kind")
+                .ok()
+                .flatten()
+                .as_deref(),
+        )
+    }))
+}
+
+/// The writer of a cabinet marker: staff without one (the wizard); a marker
+/// without a kind is older than staff filling in the client's form, so the
+/// client's own.
+fn entered_by_of_marker(has_marker: bool, kind: Option<&str>) -> &'static str {
+    match (has_marker, kind) {
+        (false, _) | (true, Some("staff")) => "staff",
+        (true, Some("guardian")) => "guardian",
+        (true, _) => "self",
+    }
 }
 
 /// The newest open lead of the patient, if any.
@@ -236,7 +291,11 @@ async fn load_summary(
                 .with_representative(&loaded.representation);
         }
     }
-    let recipient = load_recipient(conn, patient_id).await?;
+    let mut recipient = load_recipient(conn, patient_id).await?;
+    if let Some(declared) = &declared {
+        recipient.entered_by =
+            recipient_entered_by(conn, declared.lead_id, recipient.inherited.source).await?;
+    }
     let identification = match (&declared, with_identification) {
         (Some(declared), true) => {
             Some(lead_identification::load_identification_status(conn, declared.lead_id).await?)

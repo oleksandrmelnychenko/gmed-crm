@@ -8441,6 +8441,85 @@ async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() 
     .await
     .unwrap();
     assert_eq!(uploaded, ("identity".to_owned(), "staff".to_owned()));
+    // Its document names GMED staff as the source, not the patient portal
+    // (owner 2026-10-30: the patient card said «Портал пациента»).
+    let source: (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT d.source_person, d.ursprung FROM documents d JOIN lead_portal_uploads u ON u.document_id = d.id WHERE u.lead_id = $1 AND u.kind = 'identity'",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        source,
+        (Some("gmed_staff".to_owned()), Some("gmed_staff".to_owned()))
+    );
+
+    // The consent that GMED contacts the payer: staff record it with how
+    // the client gave it, like the other consents (owner 2026-10-30).
+    let payer = |how: Option<&str>| {
+        let mut body = json!({
+            "payer_kind": "third_party",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "date_of_birth": "1970-05-06",
+            "street": "Zahlweg 5",
+            "zip": "80331",
+            "city": "München",
+            "country": "DE",
+            "relationship_kind": "relative",
+            "email": "viktor.zahler@example.com",
+            "phone": "+49 89 000000",
+            "contact_consent": true
+        });
+        if let Some(how) = how {
+            body["contact_consent_recorded_how"] = json!(how);
+            body["contact_consent_recorded_note"] = json!("Anruf 30.10.");
+        }
+        body
+    };
+    let (status, refused) = json_request(
+        router,
+        "POST",
+        &format!("{base}/payer"),
+        &pm,
+        Some(payer(None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "consent_recorded_how_required");
+    assert_eq!(refused["field"], "payer_contact_consent");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/payer"),
+        &pm,
+        Some(payer(Some("phone"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["payer"]["contact_consent_at"].is_string(), "{body}");
+    let recorded: (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT contact_consent_recorded_how, contact_consent_recorded_note FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        recorded,
+        (Some("phone".to_owned()), Some("Anruf 30.10.".to_owned()))
+    );
+    // A later save of the same payer keeps the consent without a new record.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/payer"),
+        &pm,
+        Some(payer(None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 
     // Staff see afterwards how the client gave each consent (owner 2026-10-29).
     let (status, intake) = json_request(
@@ -8505,6 +8584,25 @@ async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() 
     assert_eq!(status, StatusCode::OK, "{body}");
     // Staff's own correction is no change the client still has to send.
     assert_eq!(body["changed_since_submit"], false, "{body}");
+
+    // The follow-up's own send asks staff how the client confirmed the
+    // answers too (owner 2026-10-30), before anything else is judged.
+    let follow_up = format!("{base}/follow-up/submit");
+    let (status, refused) = json_request(router, "POST", &follow_up, &pm, None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "consent_recorded_how_required");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &follow_up,
+        &pm,
+        Some(json!({ "recorded_how": "phone" })),
+    )
+    .await;
+    assert_ne!(
+        body["code"], "consent_recorded_how_required",
+        "{status} {body}"
+    );
 }
 
 /// An explicit decision fixture; the production UI never presets these answers.

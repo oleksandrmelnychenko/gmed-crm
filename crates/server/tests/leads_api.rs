@@ -10060,14 +10060,27 @@ async fn cabinet_consents_reach_the_patient_card_at_conversion() {
         .execute(pool)
         .await
         .unwrap();
-    for consent_type in ["lead_inquiry_processing", "health_data_processing"] {
+    // The inquiry consent staff recorded in the client's form, given in
+    // person (owner 2026-10-30): the card names that way, not «на бумаге».
+    for (consent_type, context) in [
+        (
+            "lead_inquiry_processing",
+            json!({"access_kind": "staff", "source": "lead_portal",
+                   "recorded_by_staff": {"how": "in_person", "note": null}}),
+        ),
+        (
+            "health_data_processing",
+            json!({"access_kind": "self", "source": "lead_portal"}),
+        ),
+    ] {
         sqlx::query(
             r#"INSERT INTO consent_records (user_id, lead_id, consent_type, granted, granted_at, context)
-               VALUES ($1, $2, $3, true, now(), '{"access_kind":"self","source":"lead_portal"}'::jsonb)"#,
+               VALUES ($1, $2, $3, true, now(), $4)"#,
         )
         .bind(portal_user)
         .bind(lead_id)
         .bind(consent_type)
+        .bind(context)
         .execute(pool)
         .await
         .unwrap();
@@ -10097,6 +10110,15 @@ async fn cabinet_consents_reach_the_patient_card_at_conversion() {
         detail["readiness"]["cabinet_consents"]["healthcare"], true,
         "{detail}"
     );
+    assert_eq!(
+        detail["readiness"]["cabinet_consents"]["privacy_practices_recorded"],
+        json!({"how": "in_person", "note": null}),
+        "{detail}"
+    );
+    assert!(
+        detail["readiness"]["cabinet_consents"]["healthcare_recorded"].is_null(),
+        "{detail}"
+    );
     assert_eq!(detail["readiness"]["conversion_ready"], true, "{detail}");
 
     let (status, converted) = json_request(
@@ -10121,6 +10143,16 @@ async fn cabinet_consents_reach_the_patient_card_at_conversion() {
     );
     assert_eq!(
         intake_profile["consent_privacy_practices"], true,
+        "{intake_profile}"
+    );
+    assert_eq!(
+        intake_profile["consent_privacy_practices_way"],
+        json!({"via": "staff", "how": "in_person", "note": null}),
+        "{intake_profile}"
+    );
+    assert_eq!(
+        intake_profile["consent_healthcare_way"],
+        json!({"via": "cabinet"}),
         "{intake_profile}"
     );
     // The patient card reads the same profile.

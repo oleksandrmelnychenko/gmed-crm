@@ -943,7 +943,7 @@ pub(crate) const PAYER_MARKER: &str = "payer";
 pub(crate) const BILLING_MARKER: &str = "billing";
 /// Key of the invoice recipient's answers of step 3 (2026-10-11) in
 /// `leads.portal_field_updates`.
-const INVOICE_RECIPIENT_MARKER: &str = "invoice_recipient";
+pub(crate) const INVOICE_RECIPIENT_MARKER: &str = "invoice_recipient";
 /// Key of the answers of the extra step in `leads.portal_field_updates`.
 pub(crate) const ENHANCED_DETAILS_MARKER: &str = "enhanced_details";
 /// Key of the trusted persons (2026-10-14) in `leads.portal_field_updates`.
@@ -6601,7 +6601,9 @@ pub(crate) async fn store_my_upload(
         content_type.as_deref(),
         &data,
         auth.user_id,
-        false,
+        // Staff uploading in the client's form: the document never claims the
+        // patient portal as its source (owner 2026-10-30).
+        kind == AccessKind::Staff,
     )
     .await
     {
@@ -6800,6 +6802,10 @@ pub(crate) async fn store_my_upload(
     }
 }
 
+/// `documents.ursprung` and `source_person` of a file staff uploaded for the
+/// lead (in the client's form, or a representative's file in the wizard).
+pub(crate) const STAFF_UPLOAD_SOURCE: &str = "gmed_staff";
+
 /// A lead upload stored as a document, not registered yet.
 pub(crate) struct StoredUpload {
     pub document_id: Uuid,
@@ -6811,8 +6817,8 @@ pub(crate) struct StoredUpload {
 /// Checks the file of a lead upload and stores it as a document of the lead,
 /// named and typed by its kind (`person`: the representative a file of a
 /// representative is named after). Shared by the cabinet and by staff
-/// uploading a representative's file in the wizard (`by_staff`: the document
-/// does not claim the cabinet as its origin). The caller registers it in
+/// uploading a file in the wizard or in the client's form (`by_staff`: the
+/// document names GMED staff as its origin, not the cabinet). The caller registers it in
 /// `lead_portal_uploads` or discards it again.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn store_upload_document(
@@ -6861,14 +6867,24 @@ pub(crate) async fn store_upload_document(
         is_medical: medical,
         mime_type: &mime_type,
         klinik: None,
-        ursprung: (!by_staff).then_some("lead_portal"),
+        // A staff upload names GMED staff as its source (owner 2026-10-30): the
+        // patient card said «Портал пациента» for files staff uploaded.
+        ursprung: Some(if by_staff {
+            STAFF_UPLOAD_SOURCE
+        } else {
+            "lead_portal"
+        }),
         notes: None,
         document_direction: Some("incoming"),
         document_variant: Some("original"),
         document_language: None,
         access_category: Some(access_category),
         document_date: Some(crate::app_time::today()),
-        source_person: (!by_staff).then_some("patient_portal"),
+        source_person: Some(if by_staff {
+            STAFF_UPLOAD_SOURCE
+        } else {
+            "patient_portal"
+        }),
         source_institution: None,
         addressee_person: None,
         addressee_institution: Some("GMED"),

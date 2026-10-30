@@ -23,7 +23,10 @@ import {
   type ExtraAnswers,
   type FollowUpBlock,
   type LeadRequest,
+  type StaffConsentRecord,
 } from "./lead-request-api";
+import { StaffConsentRecordFields } from "./lead-request-staff-consent";
+import { cabinetStaffText, useCabinetStaffMode } from "./lead-request-staff-mode";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { BillingSections } from "./lead-request-billing";
 import {
@@ -187,7 +190,16 @@ export function FollowUpStep({
   const latestRequest = useRef(request);
   latestRequest.current = request;
 
-  async function send() {
+  // Staff send the answers for the client only saying how the client confirmed them, like the
+  // request's own send (owner 2026-10-30).
+  const staffMode = useCabinetStaffMode();
+  const [recordOpen, setRecordOpen] = useState(false);
+
+  async function send(recorded: StaffConsentRecord | null = null) {
+    if (staffMode && !recorded) {
+      setRecordOpen(true);
+      return;
+    }
     // A send also shows what is still missing.
     onShowMissing();
     setSending(true);
@@ -199,7 +211,8 @@ export function FollowUpStep({
         setError(text.notSaved);
         return;
       }
-      onChange(await enqueue(() => submitLeadFollowUp(request.lead_id)));
+      onChange(await enqueue(() => submitLeadFollowUp(request.lead_id, recorded)));
+      setRecordOpen(false);
     } catch (cause) {
       const body = errorBody(cause);
       const missing = body?.code === FOLLOW_UP_INCOMPLETE ? missingOfRefusal(body) : null;
@@ -375,6 +388,18 @@ export function FollowUpStep({
           </Button> : null}
         </div>
       </StepFooter>
+      {staffMode && recordOpen && !beforeSubmit && !answered ? (
+        <StaffConsentRecordFields
+          lang={lang}
+          testId="lead-request-follow-up-submit"
+          busy={sending}
+          howLabel={cabinetStaffText(lang).sendHint}
+          actionLabel={cabinetStaffText(lang).sendForClient}
+          actionDisabled={!inquiryConsent || Object.values(states).some((state) => state === "saving")}
+          onRecord={(recorded) => void send(recorded)}
+          onCancel={() => setRecordOpen(false)}
+        />
+      ) : null}
     </section>
     </IdentificationSubjectContext.Provider>
   );

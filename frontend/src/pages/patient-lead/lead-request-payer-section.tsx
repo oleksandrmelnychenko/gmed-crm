@@ -29,6 +29,7 @@ import {
   NO_THIRD_PARTY_PAYER,
   PAYER_ANSWERED_BY_PAYER,
   fetchMyLeadRequests,
+  rememberPayerContactConsentRecord,
   saveLeadPayer,
   saveLeadPayerCostEstimateConsent,
   type LeadRequest,
@@ -78,7 +79,7 @@ import { payerFitsFlow, type PayerChoice, type RecipientDraft, type RecipientFlo
 import { useServerDraftSync } from "./lead-request-server-sync";
 import { SummaryRows } from "./lead-request-send-step";
 import { answeredPayerRows, payerAnsweredByPayer } from "./lead-request-summary";
-import { asLeadCabinetLang, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { LEAD_CABINET_LANGS, asLeadCabinetLang, leadRequestText, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 /**
  * The autosave of "who pays" (owner request 2026-10-05): the whole answer is
@@ -806,6 +807,19 @@ export function PayerContactConsent({
   error?: string;
   onChange: (checked: boolean) => void;
 }) {
+  // Staff record the client's consent with how the client gave it, like the other consents
+  // (owner 2026-10-30): the box is ticked only once the way is recorded; a withdrawal needs none.
+  const staffMode = useCabinetStaffMode();
+  const [recordOpen, setRecordOpen] = useState(false);
+  const change = (next: boolean) => {
+    if (staffMode && next) {
+      setRecordOpen(true);
+      return;
+    }
+    if (staffMode) rememberPayerContactConsentRecord(null);
+    setRecordOpen(false);
+    onChange(next);
+  };
   return (
     <div className="space-y-2 rounded-lg bg-card py-2" data-testid="lead-request-payer-consent">
       <label className="flex items-start gap-3 text-sm">
@@ -817,7 +831,7 @@ export function PayerContactConsent({
           checked={checked}
           aria-invalid={Boolean(error) || undefined}
           aria-describedby={error ? "lead-request-payer_contact_consent-error" : undefined}
-          onChange={(event) => onChange(event.target.checked)}
+          onChange={(event) => change(event.target.checked)}
         />
         <span className="min-w-0 leading-snug">
           {payerFieldLabel(text, "payer_contact_consent", guardian)}
@@ -832,6 +846,18 @@ export function PayerContactConsent({
           </p>
         ) : null}
       </div>
+      {staffMode && recordOpen && !checked ? (
+        <StaffConsentRecordFields
+          lang={LEAD_CABINET_LANGS.find((option) => leadRequestText(option.value) === text)?.value ?? "ru"}
+          testId="lead-request-payer-consent"
+          onRecord={(recorded) => {
+            rememberPayerContactConsentRecord(recorded);
+            setRecordOpen(false);
+            onChange(true);
+          }}
+          onCancel={() => setRecordOpen(false)}
+        />
+      ) : null}
       {error ? (
         <p id="lead-request-payer_contact_consent-error" role="alert" className="text-xs text-destructive">
           {error}

@@ -27228,6 +27228,12 @@ struct LeadSelfDisclosure {
     /// When the follow-up answers were sent, if after the request: the form
     /// says so beside the request's time (QA 2026-10-12, round 3).
     follow_up_sent_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Staff sent the request for the client in the client's form (owner
+    /// 2026-10-30): `Some` with how the client confirmed it (`None` inside
+    /// when the audit no longer has it); `None` for the client's own send.
+    submitted_by_staff: Option<Option<String>>,
+    /// The same for the follow-up answers.
+    follow_up_by_staff: Option<Option<String>>,
     salutation: Option<String>,
     first_name: String,
     middle_name: Option<String>,
@@ -27329,6 +27335,20 @@ impl LeadSelfDisclosure {
 /// them (no cabinet submission, owner decision 2026-10-23).
 const GMED_RECORDED_LINE: &str =
     "Angaben aufgenommen durch GMED; sie werden mit der Unterschrift geprüft und bestätigt.";
+
+/// How the client confirmed what staff sent for them, in the words of the
+/// form (`STAFF_CONSENT_CHANNELS`), between `before` and `after`; nothing
+/// without a known way.
+fn staff_confirmation_suffix(how: Option<&str>, before: &str, after: &str) -> String {
+    let way = match how {
+        Some("phone") => "telefonisch",
+        Some("in_person") => "persönlich",
+        Some("email") => "per E-Mail",
+        Some("paper") => "auf Papier",
+        _ => return String::new(),
+    };
+    format!("{before}{way}{after}")
+}
 
 /// Whether the patient form can be made: from the request the lead sent
 /// through the cabinet, or — nothing sent and staff fill the data in
@@ -27446,12 +27466,25 @@ async fn load_lead_self_disclosure(
                   street_address, zip_code, city, country, email, phone, portal_submitted_at,
                   legal_sex,
                   ({}) AS changed_since_submit,
-                  wizard_state->>'step1_fill_mode' AS fill_mode
+                  wizard_state->>'step1_fill_mode' AS fill_mode,
+                  (SELECT u.role FROM users u WHERE u.id = l.portal_submitted_by)
+                      AS submitted_by_role,
+                  (SELECT a.context->'recorded_by_staff'->>'how' FROM audit_log a
+                    WHERE a.entity_type = 'lead' AND a.entity_id = l.id
+                      AND a.action = 'lead_portal_submit'
+                    ORDER BY a.created_at DESC LIMIT 1) AS submitted_how,
+                  (SELECT a.context->>'access_kind' FROM audit_log a
+                    WHERE a.entity_type = 'lead' AND a.entity_id = l.id AND a.action = $2
+                    ORDER BY a.created_at DESC LIMIT 1) AS follow_up_access_kind,
+                  (SELECT a.context->'recorded_by_staff'->>'how' FROM audit_log a
+                    WHERE a.entity_type = 'lead' AND a.entity_id = l.id AND a.action = $2
+                    ORDER BY a.created_at DESC LIMIT 1) AS follow_up_how
            FROM leads l
            WHERE id = $1"#,
         super::lead_portal_intake::CHANGED_SINCE_SUBMIT_SQL,
     ))
     .bind(lead_id)
+    .bind(crate::risk::cabinet::FOLLOW_UP_SUBMIT_ACTION)
     .fetch_optional(&mut *conn)
     .await
     .map_err(|error| failed(error, "lead"))?
@@ -27460,6 +27493,14 @@ async fn load_lead_self_disclosure(
         .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_submitted_at")
         .ok()
         .flatten();
+    let optional_text = |column: &str| row.try_get::<Option<String>, _>(column).ok().flatten();
+    // Staff sent it for the client in the client's form (owner 2026-10-30):
+    // the form names them and how the client confirmed it.
+    let submitted_by_staff = optional_text("submitted_by_role")
+        .is_some_and(|role| role != "patient")
+        .then(|| optional_text("submitted_how"));
+    let follow_up_by_staff = (optional_text("follow_up_access_kind").as_deref() == Some("staff"))
+        .then(|| optional_text("follow_up_how"));
     let fill_mode = row.try_get::<Option<String>, _>("fill_mode").ok().flatten();
     if !self_disclosure_source_ready(submitted_at.is_some(), fill_mode.as_deref()) {
         return Err(lead_request_not_sent());
@@ -27684,6 +27725,8 @@ async fn load_lead_self_disclosure(
         submitted_at,
         consent_choice,
         follow_up_sent_at,
+        submitted_by_staff,
+        follow_up_by_staff,
         invoice_recipient,
         payment_route,
         via_third_party_kind: billing_extras["via_third_party_kind"]
@@ -27914,15 +27957,35 @@ fn build_lead_self_disclosure_pdf(
     // The follow-up answers sent later are part of the form: the header names
     // their time too, not only the request's (QA 2026-10-12, round 3).
     let follow_up_sent = data.follow_up_sent_at.map(payer_date_time);
-    let sent_line = match (&sent, &follow_up_sent) {
-        (Some((sent_on, sent_at)), Some((follow_up_on, follow_up_at))) => format!(
-            "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal; ergänzende Angaben übermittelt am {follow_up_on} um {follow_up_at}."
-        ),
-        (Some((sent_on, sent_at)), None) => format!(
-            "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal."
-        ),
+    let sent_line = match &sent {
+        Some((sent_on, sent_at)) => {
+            // Staff sent it for the client from the client's form: not "über
+            // das Patientenportal" (owner 2026-10-30), with how the client
+            // confirmed the data.
+            let request = match &data.submitted_by_staff {
+                Some(how) => format!(
+                    "Angaben aus dem Patientenformular, erfasst von GMED-Mitarbeitenden und am {sent_on} um {sent_at} übermittelt{}",
+                    staff_confirmation_suffix(how.as_deref(), "; Bestätigung der Angaben: ", ""),
+                ),
+                None => format!(
+                    "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal"
+                ),
+            };
+            match &follow_up_sent {
+                Some((follow_up_on, follow_up_at)) => match &data.follow_up_by_staff {
+                    Some(how) => format!(
+                        "{request}; ergänzende Angaben von GMED-Mitarbeitenden erfasst und am {follow_up_on} um {follow_up_at} übermittelt{}.",
+                        staff_confirmation_suffix(how.as_deref(), " (Bestätigung: ", ")"),
+                    ),
+                    None => format!(
+                        "{request}; ergänzende Angaben übermittelt am {follow_up_on} um {follow_up_at}."
+                    ),
+                },
+                None => format!("{request}."),
+            }
+        }
         // Staff entered the data (owner decision 2026-10-23).
-        (None, _) => GMED_RECORDED_LINE.to_string(),
+        None => GMED_RECORDED_LINE.to_string(),
     };
     admin_block(
         &mut layout,
@@ -40788,6 +40851,50 @@ mod tests {
         let text = normalized_pdf_text(&without.bytes);
         assert!(!text.contains("Ergänzende Angaben gesendet"), "{text}");
         assert!(!text.contains("ergänzende Angaben übermittelt"), "{text}");
+    }
+
+    /// Owner 2026-10-30: staff sent the request (and the follow-up) for the
+    /// client from the client's form; the form says so, with how the client
+    /// confirmed it, never "über das Patientenportal".
+    #[test]
+    fn the_self_disclosure_names_staff_who_sent_it_for_the_client() {
+        let by_staff = super::LeadSelfDisclosure {
+            submitted_by_staff: Some(Some("in_person".into())),
+            ..anna_lead_disclosure()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &by_staff,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0011",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&generated.bytes);
+        assert!(
+            text.contains("erfasst von GMED-Mitarbeitenden und am 07.10.2026 um 10:30 übermittelt; Bestätigung der Angaben: persönlich."),
+            "{text}"
+        );
+        assert!(!text.contains("über das Patientenportal"), "{text}");
+
+        let follow_up = super::LeadSelfDisclosure {
+            submitted_by_staff: Some(None),
+            follow_up_sent_at: Some(Utc.with_ymd_and_hms(2026, 10, 7, 10, 55, 0).unwrap()),
+            follow_up_by_staff: Some(Some("phone".into())),
+            ..anna_lead_disclosure()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &follow_up,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0012",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&generated.bytes);
+        assert!(
+            text.contains("erfasst von GMED-Mitarbeitenden und am 07.10.2026 um 10:30 übermittelt; ergänzende Angaben von GMED-Mitarbeitenden erfasst und am 07.10.2026 um 12:55 übermittelt (Bestätigung: telefonisch)."),
+            "{text}"
+        );
+        assert!(!text.contains("über das Patientenportal"), "{text}");
     }
 
     #[test]

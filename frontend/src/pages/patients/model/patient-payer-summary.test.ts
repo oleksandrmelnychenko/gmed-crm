@@ -574,6 +574,12 @@ describe("label helpers", () => {
     expect(invoiceRecipientSourceNote("payer_declaration", de)).toBe("laut Zahlererklärung");
     expect(invoiceRecipientSourceNote("invoice_address", ru)).toBe("адрес для счетов по декларации");
     expect(invoiceRecipientSourceNote("invoice_address", de)).toBe("Rechnungsanschrift laut Erklärung");
+    // Staff entered it in the patient's form: no declaration of the payer (owner 2026-10-30).
+    expect(invoiceRecipientSourceNote("payer_declaration", ru, "staff")).toBe("по данным обращения · внёс сотрудник");
+    expect(invoiceRecipientSourceNote("invoice_address", de, "staff")).toBe("Rechnungsanschrift laut Anfrage · von Mitarbeitenden erfasst");
+    expect(invoiceRecipientSourceNote("payer_declaration", ru, "self")).toBe("по декларации плательщика");
+    expect(normalizePatientPayerSummary({ patient_id: "p", invoice_recipient: { source: "payer_declaration", entered_by: "staff" } })
+      ?.invoice_recipient?.entered_by).toBe("staff");
     expect(invoiceRecipientSourceNote("default_payer", ru)).toBe("плательщик по умолчанию");
     expect(invoiceRecipientSourceNote("default_payer", de)).toBe("Standardzahler");
     expect(invoiceRecipientSourceNote("contracting_party", ru)).toBe("сторона договора");

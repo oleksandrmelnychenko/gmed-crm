@@ -598,6 +598,8 @@ async fn a_self_payer_adult_and_a_third_party_person() {
         body["invoice_recipient"],
         json!({
             "source": "payer_declaration",
+            // The wizard stored it: no cabinet marker (owner 2026-10-30).
+            "entered_by": "staff",
             "role": "cost_bearer",
             "kind": "contact",
             "name": "Viktor Zahler",
@@ -673,6 +675,8 @@ async fn a_self_payer_adult_and_a_third_party_person() {
         body["invoice_recipient"],
         json!({
             "source": "invoice_address",
+            // The wizard stored it: no cabinet marker (owner 2026-10-30).
+            "entered_by": "staff",
             "role": "invoice_address",
             "kind": "contact",
             "name": "Elsa Muster",
@@ -765,8 +769,30 @@ async fn a_self_payer_adult_and_a_third_party_person() {
     assert!(body["declaration"]["first_name"].is_null());
     assert!(body["declaration"]["last_name"].is_null());
     assert_eq!(body["invoice_recipient"]["source"], "payer_declaration");
+    assert_eq!(body["invoice_recipient"]["entered_by"], "staff", "{body}");
     assert_eq!(body["invoice_recipient"]["name"], "Beispiel GmbH");
     assert_eq!(body["invoice_recipient"]["city"], "Köln");
+    // Who wrote the cabinet's "who pays" marker names who entered the
+    // recipient (owner 2026-10-30): the client, or staff in the client's form.
+    for (kind, entered_by) in [
+        ("self", "self"),
+        ("staff", "staff"),
+        ("guardian", "guardian"),
+    ] {
+        sqlx::query(
+            "UPDATE leads SET portal_field_updates = jsonb_build_object('payer', jsonb_build_object('at', now(), 'kind', $2::text)) WHERE converted_patient_id = $1",
+        )
+        .bind(company)
+        .bind(kind)
+        .execute(pool)
+        .await
+        .unwrap();
+        let body = summary(&app, company, "ceo").await;
+        assert_eq!(
+            body["invoice_recipient"]["entered_by"], entered_by,
+            "{body}"
+        );
+    }
     assert!(body["identification"]["payer"].is_object(), "{body}");
     let moved = seed_patient_document(&app, company).await;
     seed_qes(&app, moved, "payer", "kosten@example.com", minutes_ago(30)).await;

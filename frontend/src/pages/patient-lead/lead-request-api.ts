@@ -979,11 +979,30 @@ export function saveLeadPersonalData(leadId: string, patch: PersonalDataPatch): 
 /** The refusal of "who pays" once the payer answered on the own link: only GMED changes the payer then. */
 export const PAYER_ANSWERED_BY_PAYER = "payer_answered_by_payer";
 
+/**
+ * How the client gave the consent that GMED contacts the payer, as staff just recorded it in the
+ * client's form (owner 2026-10-30). The box is ticked in a step whose answer saves on its own
+ * later, so the record waits here for the next answer that carries the consent; the server needs
+ * it only when the consent is newly recorded (422 `consent_recorded_how_required` otherwise).
+ */
+let payerContactConsentRecord: StaffConsentRecord | null = null;
+
+export function rememberPayerContactConsentRecord(recorded: StaffConsentRecord | null): void {
+  payerContactConsentRecord = recorded;
+}
+
 /** Saves the answer "who pays"; 409 `payer_answered_by_payer` after the payer answered on the own link. */
 export function saveLeadPayer(leadId: string, payer: LeadRequestPayerInput): Promise<LeadRequest> {
+  const recorded = payer.contact_consent === true ? payerContactConsentRecord : null;
   return apiFetch<LeadRequest>(`${base(leadId)}/payer`, {
     method: "POST",
-    body: JSON.stringify(payer),
+    body: JSON.stringify(recorded
+      ? {
+        ...payer,
+        contact_consent_recorded_how: recorded.how,
+        contact_consent_recorded_note: recorded.note.trim().slice(0, STAFF_CONSENT_NOTE_MAX) || null,
+      }
+      : payer),
   });
 }
 
@@ -1240,8 +1259,14 @@ export const FOLLOW_UP_INCOMPLETE = "follow_up_incomplete";
  * `follow_up_incomplete` with `missing` (by block) while a block misses
  * something; otherwise the request with `follow_up.answered_at` set.
  */
-export function submitLeadFollowUp(leadId: string): Promise<LeadRequest> {
-  return apiFetch<LeadRequest>(`${base(leadId)}/follow-up/submit`, { method: "POST" });
+export function submitLeadFollowUp(
+  leadId: string,
+  /** Staff send for the client saying how the client confirmed the answers (owner 2026-10-30). */
+  recorded?: StaffConsentRecord | null,
+): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/follow-up/submit`, recorded
+    ? { method: "POST", body: JSON.stringify(staffConsentRecordBody(recorded)) }
+    : { method: "POST" });
 }
 
 /** Withdraws an own upload: a medical document, a copy of an identity document or a proof of authority. */

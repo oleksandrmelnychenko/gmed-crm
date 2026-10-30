@@ -449,18 +449,35 @@ pub async fn reassess_for_cabinet(
     tx.commit().await
 }
 
+/// The audit action of the follow-up's own send.
+pub const FOLLOW_UP_SUBMIT_ACTION: &str = "lead_portal_follow_up_submit";
+
+/// The body of the follow-up's send: none from the client; staff say how the
+/// client confirmed the answers (owner 2026-10-30, like the request's send).
+#[derive(Default, serde::Deserialize)]
+struct FollowUpSubmitRequest {
+    #[serde(default)]
+    recorded_how: Option<String>,
+    #[serde(default)]
+    recorded_note: Option<String>,
+}
+
 /// `POST /me/lead-requests/{lead_id}/follow-up/submit`: the lead sends the
 /// answers of the follow-up blocks. 422 `follow_up_incomplete` with
 /// `missing` while a block misses something; otherwise records the time,
-/// reassesses, tells the lead's staff and returns the request object.
+/// reassesses, tells the lead's staff and returns the request object. Staff
+/// send for the client only saying how the client confirmed the answers
+/// (422 `consent_recorded_how_required`); the audit keeps it.
 async fn submit_follow_up(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
+    body: axum::body::Bytes,
 ) -> Response {
     if let Err(response) = intake::require_cabinet_editor(&auth) {
         return response;
     }
+    let submit = serde_json::from_slice::<FollowUpSubmitRequest>(&body).unwrap_or_default();
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return intake::internal(error, "begin"),
@@ -469,6 +486,18 @@ async fn submit_follow_up(
         Ok(Some(found)) => found,
         Ok(None) => return intake::not_found(),
         Err(error) => return intake::internal(error, "lock request"),
+    };
+    let recorded = if kind == intake::AccessKind::Staff {
+        match intake::staff_consent_record(
+            submit.recorded_how.as_deref(),
+            submit.recorded_note.as_deref(),
+            auth.user_id,
+        ) {
+            Ok(record) => Some(record),
+            Err(response) => return response,
+        }
+    } else {
+        None
     };
     if lead
         .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_submitted_at")
@@ -542,6 +571,22 @@ async fn submit_follow_up(
     match store::follow_up_answered(&mut tx, lead_id, auth.user_id).await {
         Ok(_) => {}
         Err(error) => return intake::internal(error, "record follow-up"),
+    }
+    // Who sent the answers, and for staff how the client confirmed them (the
+    // patient form names it, owner 2026-10-30).
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            FOLLOW_UP_SUBMIT_ACTION,
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            json!({ "access_kind": kind.as_str(), "recorded_by_staff": recorded }),
+        ),
+    )
+    .await
+    {
+        return intake::internal(error, "audit follow-up");
     }
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit follow-up");

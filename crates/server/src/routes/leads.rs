@@ -2667,6 +2667,10 @@ struct LeadConversionReadinessInput {
     /// `health_data_processing`) of the adult lead or a parent / guardian.
     cabinet_consent_privacy: bool,
     cabinet_consent_healthcare: bool,
+    /// `{how, note, staff_user_id}` of the newest active consent when staff
+    /// recorded it in the client's form; `null` for the client's own.
+    cabinet_consent_privacy_recorded: Value,
+    cabinet_consent_healthcare_recorded: Value,
     identity_document_verified: bool,
     dsgvo_document_signed: bool,
     confidentiality_release_signed: bool,
@@ -3111,6 +3115,9 @@ fn evaluate_lead_conversion_readiness(
         "cabinet_consents": {
             "privacy_practices": input.cabinet_consent_privacy,
             "healthcare": input.cabinet_consent_healthcare,
+            // How the client gave a consent staff recorded (owner 2026-10-30).
+            "privacy_practices_recorded": input.cabinet_consent_privacy_recorded,
+            "healthcare_recorded": input.cabinet_consent_healthcare_recorded,
         },
         "steps": [
             { "key": "master_data", "label": "Stammdaten", "ready": master_data_ready },
@@ -3139,6 +3146,17 @@ fn evaluate_lead_conversion_readiness(
 /// The conversion reason of [`LeadConversionReadinessInput::contract_details_missing`];
 /// the frontend maps this exact text.
 const CONTRACT_DETAILS_MISSING: &str = "Contract details of the representatives are missing";
+
+/// `{how, note}` of a consent staff recorded for the client (the
+/// `recorded_by_staff` context of its record), `null` otherwise.
+fn recorded_by_staff(row: &sqlx::postgres::PgRow, column: &str) -> Value {
+    match row.try_get::<Option<Value>, _>(column).ok().flatten() {
+        Some(recorded) if recorded["how"].is_string() => {
+            json!({ "how": recorded["how"], "note": recorded["note"] })
+        }
+        _ => Value::Null,
+    }
+}
 
 fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversionReadinessInput {
     let wizard_state = row
@@ -3177,6 +3195,14 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
             || cabinet_consent_healthcare,
         cabinet_consent_privacy,
         cabinet_consent_healthcare,
+        cabinet_consent_privacy_recorded: recorded_by_staff(
+            row,
+            "cabinet_consent_privacy_recorded",
+        ),
+        cabinet_consent_healthcare_recorded: recorded_by_staff(
+            row,
+            "cabinet_consent_healthcare_recorded",
+        ),
         identity_document_verified: row.try_get("identity_document_verified").unwrap_or(false),
         dsgvo_document_signed: row.try_get("dsgvo_document_signed").unwrap_or(false),
         confidentiality_release_signed: row
@@ -3298,6 +3324,24 @@ async fn load_lead_conversion_readiness(
                              OR leads.date_of_birth
                                 <= ((now() AT TIME ZONE 'Europe/Berlin')::date - INTERVAL '18 years'))
                   ) AS cabinet_consent_healthcare,
+                  -- How the client gave the newest active consent staff
+                  -- recorded in the client's form (owner 2026-10-30): the
+                  -- wizard and the patient card say «Записал сотрудник ·
+                  -- лично» instead of «в кабинете» / «на бумаге».
+                  (SELECT cr.context->'recorded_by_staff'
+                     FROM consent_records cr
+                    WHERE cr.lead_id = leads.id
+                      AND cr.consent_type = 'lead_inquiry_processing'
+                      AND cr.granted AND cr.revoked_at IS NULL
+                      AND (cr.expires_at IS NULL OR cr.expires_at > now())
+                    ORDER BY cr.granted_at DESC LIMIT 1) AS cabinet_consent_privacy_recorded,
+                  (SELECT cr.context->'recorded_by_staff'
+                     FROM consent_records cr
+                    WHERE cr.lead_id = leads.id
+                      AND cr.consent_type = 'health_data_processing'
+                      AND cr.granted AND cr.revoked_at IS NULL
+                      AND (cr.expires_at IS NULL OR cr.expires_at > now())
+                    ORDER BY cr.granted_at DESC LIMIT 1) AS cabinet_consent_healthcare_recorded,
                   -- Repeat intakes (patient_first) reuse the compliance evidence
                   -- already stored on the patient instead of demanding new copies.
                   EXISTS (
@@ -8990,6 +9034,24 @@ async fn convert_lead(
             .unwrap_or(false);
         json!(staff || cabinet)
     };
+    // How that consent came (owner 2026-10-30): `cabinet`, `staff` with how
+    // the client gave it, or `paper` (the wizard's toggle); the card said
+    // «на бумаге» for every consent.
+    let consent_way = |column: &str, cabinet_key: &str| -> Value {
+        let cabinet = &readiness.payload["cabinet_consents"];
+        if cabinet[cabinet_key].as_bool().unwrap_or(false) {
+            let recorded = &cabinet[format!("{cabinet_key}_recorded").as_str()];
+            if recorded.is_object() {
+                json!({ "via": "staff", "how": recorded["how"], "note": recorded["note"] })
+            } else {
+                json!({ "via": "cabinet" })
+            }
+        } else if snapshot_value(column).as_bool().unwrap_or(false) {
+            json!({ "via": "paper" })
+        } else {
+            Value::Null
+        }
+    };
     let source: Option<String> = lead.try_get("source").ok().flatten();
     let intake_source: Option<String> = lead.try_get("intake_source").ok().flatten();
     let flow: Option<String> = lead.try_get("flow").ok().flatten();
@@ -9059,6 +9121,8 @@ async fn convert_lead(
         "consent_healthcare": consent_given("consent_healthcare", "healthcare"),
         "consent_opt_out": snapshot_value("consent_opt_out"),
         "consent_privacy_practices": consent_given("consent_privacy_practices", "privacy_practices"),
+        "consent_healthcare_way": consent_way("consent_healthcare", "healthcare"),
+        "consent_privacy_practices_way": consent_way("consent_privacy_practices", "privacy_practices"),
         "discovery_source": wizard_state.get("discovery_source").cloned().unwrap_or(Value::Null),
         "discovery_source_other": wizard_state.get("discovery_source_other").cloned().unwrap_or(Value::Null),
         "referrer": wizard_state.get("referrer").cloned().unwrap_or(Value::Null),
@@ -13599,6 +13663,8 @@ mod lead_conversion_readiness_tests {
             consent_healthcare: true,
             cabinet_consent_privacy: false,
             cabinet_consent_healthcare: false,
+            cabinet_consent_privacy_recorded: Value::Null,
+            cabinet_consent_healthcare_recorded: Value::Null,
             identity_document_verified: true,
             dsgvo_document_signed: true,
             confidentiality_release_signed: true,

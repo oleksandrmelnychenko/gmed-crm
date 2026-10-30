@@ -1,3 +1,5 @@
+import { staffRecordedLabel } from "@/pages/leads/model/lead-portal-consents";
+
 import type { PatientDetail } from "./list-model";
 
 export type LeadOriginServiceRequest = {
@@ -53,6 +55,29 @@ function numberFromUnknown(value: unknown) {
       ? Number(value)
       : Number.NaN;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/**
+ * How a consent of the lead came, as the conversion records it (owner 2026-10-30): in the cabinet,
+ * recorded by staff in the client's form with how the client gave it, or the wizard's paper toggle.
+ */
+export type LeadConsentWay = { via: "cabinet" | "staff" | "paper"; how: string | null; note: string | null };
+
+export function leadConsentWay(value: unknown): LeadConsentWay | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const via = record.via;
+  if (via !== "cabinet" && via !== "staff" && via !== "paper") return null;
+  return { via, how: stringFromUnknown(record.how), note: stringFromUnknown(record.note) };
+}
+
+/** «в кабинете», «Записал сотрудник · лично · примечание» or «на бумаге»; null without a way. */
+export function leadConsentWayLabel(way: LeadConsentWay | null, tx: (ru: string, de: string) => string): string | null {
+  if (!way) return null;
+  if (way.via === "cabinet") return tx("в кабинете", "im Kundenkabinett");
+  if (way.via === "paper") return tx("на бумаге", "auf Papier");
+  return staffRecordedLabel({ recorded_how: way.how, recorded_note: way.note }, tx)
+    ?? tx("Записал сотрудник", "Von Mitarbeitenden eingetragen");
 }
 
 // Consents given (true = granted); the opt-out is a refusal and keeps the plain precedence.

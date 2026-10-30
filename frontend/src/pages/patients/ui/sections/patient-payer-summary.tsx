@@ -302,7 +302,7 @@ function LoadedCard({
               <span>{recipient.name ?? "—"}</span>
               <span className="font-normal">{postalAddressLine(recipient, lang)}</span>
               {recipient.email ? <span className="font-normal">{recipient.email}</span> : null}
-              <Muted testId={`${TEST_ID}-recipient-source`}>{invoiceRecipientSourceNote(recipient.source, tx)}</Muted>
+              <Muted testId={`${TEST_ID}-recipient-source`}>{invoiceRecipientSourceNote(recipient.source, tx, recipient.entered_by)}</Muted>
               {addressWarning ? <Warning testId={`${TEST_ID}-recipient-address-warning`}>{addressWarning}</Warning> : null}
               {recipient.minor_without_payer ? (
                 <Warning testId={`${TEST_ID}-recipient-minor-warning`}>{minorWithoutPayerWarning(tx)}</Warning>

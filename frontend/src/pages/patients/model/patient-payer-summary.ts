@@ -129,6 +129,11 @@ export type InvoiceRecipientSource = (typeof INVOICE_RECIPIENT_SOURCES)[number];
 /** Who an invoice of the patient would be addressed to today. */
 export type PatientInvoiceRecipient = {
   source: InvoiceRecipientSource;
+  /**
+   * Who entered the lead's answer a `payer_declaration` / `invoice_address` recipient comes from:
+   * the client (`self`, `guardian`) or staff (`staff`, owner 2026-10-30); null otherwise.
+   */
+  entered_by?: "self" | "guardian" | "staff" | null;
   /** `contracting_party`, `cost_bearer`, `invoice_address` (the party at another address) or null. */
   role: string | null;
   /** `patient`, `relation`, `payer_patient` or `contact`. */
@@ -288,6 +293,9 @@ function normalizeInvoiceRecipient(value: unknown): PatientInvoiceRecipient | nu
   if (!record) return null;
   return {
     source: isRecipientSource(record.source) ? record.source : "none",
+    ...(record.entered_by === "self" || record.entered_by === "guardian" || record.entered_by === "staff"
+      ? { entered_by: record.entered_by }
+      : {}),
     role: text(record.role),
     kind: text(record.kind),
     name: text(record.name),
@@ -516,12 +524,22 @@ export function contractingPartyLabel(party: PatientContractingParty, tx: Tx): s
  * from. An `invoice_address` is the party at another address the lead gave
  * in section 7 — not a Kostenübernehmer, so the note never calls it one.
  */
-export function invoiceRecipientSourceNote(source: InvoiceRecipientSource, tx: Tx): string {
+export function invoiceRecipientSourceNote(
+  source: InvoiceRecipientSource,
+  tx: Tx,
+  /** Staff entered the lead's answer (owner 2026-10-30): no "declaration" of the payer then. */
+  enteredBy?: PatientInvoiceRecipient["entered_by"],
+): string {
+  const byStaff = enteredBy === "staff";
   switch (source) {
     case "payer_declaration":
-      return tx("по декларации плательщика", "laut Zahlererklärung");
+      return byStaff
+        ? tx("по данным обращения · внёс сотрудник", "laut Anfrage · von Mitarbeitenden erfasst")
+        : tx("по декларации плательщика", "laut Zahlererklärung");
     case "invoice_address":
-      return tx("адрес для счетов по декларации", "Rechnungsanschrift laut Erklärung");
+      return byStaff
+        ? tx("адрес для счетов по данным обращения · внёс сотрудник", "Rechnungsanschrift laut Anfrage · von Mitarbeitenden erfasst")
+        : tx("адрес для счетов по декларации", "Rechnungsanschrift laut Erklärung");
     case "default_payer":
       return tx("плательщик по умолчанию", "Standardzahler");
     case "contracting_party":

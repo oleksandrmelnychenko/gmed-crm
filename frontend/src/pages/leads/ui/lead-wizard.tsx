@@ -16,6 +16,15 @@ import { OrderPatientDocumentReview, OrderExistingContractsTable, type RequestRe
 import { isContractUsable } from "@/pages/orders/model/order-intake";
 import { useRepeatPatientReview } from "../model/use-repeat-patient-review";
 import { usePreviousRequests } from "../model/use-previous-requests";
+import {
+  cabinetConsentsNote,
+  cabinetConsentsOf,
+  cabinetConsentSummaryValue,
+  healthcareConsentToggleLabel,
+  NO_CABINET_CONSENTS,
+  privacyConsentToggleLabel,
+  type CabinetConsents,
+} from "../model/lead-cabinet-consents";
 import { PreviousRequestsPanel } from "./previous-requests-panel";
 import { orderPeriodWarnings } from "../model/order-period-warnings";
 import { createNewestLoadGuard, type NewestLoadGuard } from "../model/newest-load-guard";
@@ -388,6 +397,7 @@ import {
   PatientDataPendingNotice,
   PatientUpdatedBanner,
   PortalMarkerKindsContext,
+  portalUploadsTitle,
   PortalInquiryConsentLine,
   PortalHealthConsentLine,
   PortalUploadsProvider,
@@ -2857,16 +2867,6 @@ function orderValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue[] {
   return issues;
 }
 
-type CabinetConsents = { privacy: boolean; healthcare: boolean };
-const NO_CABINET_CONSENTS: CabinetConsents = { privacy: false, healthcare: false };
-
-/** The server's view of the active cabinet consents (adult lead or parent / guardian). */
-function cabinetConsentsOf(readiness: { cabinet_consents?: { privacy_practices: boolean; healthcare: boolean } } | null | undefined): CabinetConsents {
-  return {
-    privacy: readiness?.cabinet_consents?.privacy_practices === true,
-    healthcare: readiness?.cabinet_consents?.healthcare === true,
-  };
-}
 
 /**
  * The documents-step issues the server's qualification asks for
@@ -8067,8 +8067,8 @@ ${serviceCommentLines.join("\n")}`
       // when neither consent is (QA 2026-10-12 B3-01).
       status: requestConsentStatus(privacyConsentGiven, healthcareConsentGiven, tx),
       detail: [
-        `${tx("Согласие на обработку запроса", "Einwilligung zur Bearbeitung der Anfrage")}: ${cabinetConsents.privacy ? tx("да (кабинет)", "ja (Kundenkabinett)") : draft.privacyConsent ? tx("да (на бумаге)", "ja (Papier)") : tx("нет", "nein")}`,
-        `${tx("Медицинские данные", "Gesundheitsdaten")}: ${cabinetConsents.healthcare ? tx("да (кабинет)", "ja (Kundenkabinett)") : draft.healthcareConsent ? tx("да", "ja") : tx("нет", "nein")}`,
+        `${tx("Согласие на обработку запроса", "Einwilligung zur Bearbeitung der Anfrage")}: ${cabinetConsents.privacy ? cabinetConsentSummaryValue(cabinetConsents.privacyRecorded, tx) : draft.privacyConsent ? tx("да (на бумаге)", "ja (Papier)") : tx("нет", "nein")}`,
+        `${tx("Медицинские данные", "Gesundheitsdaten")}: ${cabinetConsents.healthcare ? cabinetConsentSummaryValue(cabinetConsents.healthcareRecorded, tx) : draft.healthcareConsent ? tx("да", "ja") : tx("нет", "nein")}`,
       ].join(" · "),
       action: missingConsentField ? {
         label: tx("Отметить согласия", "Einwilligungen bestätigen"),
@@ -9793,7 +9793,7 @@ ${serviceCommentLines.join("\n")}`
                 </Section>
               ) : null}
               {patientUploadDocuments.length > 0 ? (
-                <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Загружено пациентом", "Vom Patienten hochgeladen")}>
+                <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={portalUploadsTitle(step1Portal.intake?.uploads ?? [], patientUploadDocuments.map((item) => item.id), tx)}>
                   <WizardDocumentRows
                     documents={patientUploadDocuments}
                     emptyLabel=""
@@ -10103,16 +10103,14 @@ ${serviceCommentLines.join("\n")}`
                   {/* A consent given in the cabinet (adult lead, or a parent / guardian
                       for a minor) shows here as given and locks the toggle; the toggle
                       itself records only a consent obtained outside the cabinet (paper). */}
-                  <ToggleRow id={PRIVACY_CONSENT_ID} checked={privacyConsentGiven} disabled={isBusy || cabinetConsents.privacy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Согласие на обработку запроса получено на бумаге", "Einwilligung zur Bearbeitung der Anfrage auf Papier erhalten")} />
-                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={healthcareConsentGiven} disabled={isBusy || cabinetConsents.healthcare} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
-                  {cabinetConsents.privacy || cabinetConsents.healthcare ? (
+                  <ToggleRow id={PRIVACY_CONSENT_ID} checked={privacyConsentGiven} disabled={isBusy || cabinetConsents.privacy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={privacyConsentToggleLabel(cabinetConsents, tx)} />
+                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={healthcareConsentGiven} disabled={isBusy || cabinetConsents.healthcare} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={healthcareConsentToggleLabel(cabinetConsents, tx)} />
+                  {/* A consent staff recorded in the client's form names that way, never the
+                      cabinet nor paper (owner 2026-10-30). */}
+                  {cabinetConsentsNote(cabinetConsents, tx) ? (
                     <StatusChip tone="warning" className="w-full items-start whitespace-normal rounded-xl px-3 py-2" data-testid="cabinet-consents-note">
                       <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                      <span className="min-w-0 leading-5">{cabinetConsents.privacy && cabinetConsents.healthcare
-                        ? tx("Оба согласия даны в кабинете — отдельная отметка не нужна.", "Beide Einwilligungen wurden im Kundenkabinett erteilt – keine gesonderte Bestätigung nötig.")
-                        : cabinetConsents.privacy
-                          ? tx("Согласие на обработку запроса дано в кабинете. Согласие на медицинские данные отметьте, только если получили его иначе (например, на бумаге).", "Die Einwilligung zur Bearbeitung der Anfrage liegt aus dem Kundenkabinett vor. Die Einwilligung zu Gesundheitsdaten nur bestätigen, wenn sie anders (z. B. auf Papier) vorliegt.")
-                          : tx("Согласие на медицинские данные дано в кабинете. Согласие на обработку запроса отметьте, только если получили его на бумаге.", "Die Einwilligung zu Gesundheitsdaten liegt aus dem Kundenkabinett vor. Die Einwilligung zur Bearbeitung der Anfrage nur bestätigen, wenn sie auf Papier vorliegt.")}</span>
+                      <span className="min-w-0 leading-5">{cabinetConsentsNote(cabinetConsents, tx)}</span>
                     </StatusChip>
                   ) : null}
                 </div>

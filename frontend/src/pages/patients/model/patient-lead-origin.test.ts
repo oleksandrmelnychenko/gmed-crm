@@ -1,7 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import type { PatientDetail } from "./list-model";
-import { createPatientLeadOrigin } from "./patient-lead-origin";
+import { createPatientLeadOrigin, leadConsentWay, leadConsentWayLabel } from "./patient-lead-origin";
+
+// Owner 2026-10-30: the card said «Согласие на обработку запроса (на бумаге)» for a consent staff
+// recorded «лично» in the client's form.
+describe("leadConsentWay", () => {
+  const ru = (text: string) => text;
+
+  it("names how the consent came", () => {
+    const origin = createPatientLeadOrigin(patient({
+      intake_profile: { consent_privacy_practices_way: { via: "staff", how: "in_person", note: null } },
+    }));
+    const way = leadConsentWay(origin.value("consent_privacy_practices_way"));
+    expect(way).toEqual({ via: "staff", how: "in_person", note: null });
+    expect(leadConsentWayLabel(way, ru)).toBe("Записал сотрудник · лично");
+    expect(leadConsentWayLabel(leadConsentWay({ via: "cabinet" }), ru)).toBe("в кабинете");
+    expect(leadConsentWayLabel(leadConsentWay({ via: "paper" }), ru)).toBe("на бумаге");
+    expect(leadConsentWay(null)).toBeNull();
+    expect(leadConsentWay({ via: "fax" })).toBeNull();
+  });
+});
 
 function patient(overrides: Partial<PatientDetail> = {}): PatientDetail {
   return {

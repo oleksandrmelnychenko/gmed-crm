@@ -454,7 +454,38 @@ export function usePortalUploadIds(): ReadonlySet<string> {
   return useMemo(() => new Set(state?.uploads.keys() ?? []), [state]);
 }
 
-/** "Uploaded by the patient" with the consent mark, in a document row. */
+/** Ids of the client-form documents staff uploaded for the client (`access_kind = staff`). */
+export function usePortalStaffUploadIds(): ReadonlySet<string> {
+  const state = useContext(PortalUploadsContext);
+  return useMemo(
+    () => new Set(Array.from(state?.uploads.values() ?? []).filter(uploadedByStaff).map((upload) => upload.document_id)),
+    [state],
+  );
+}
+
+/**
+ * The title over the client-form uploads: «Загружено пациентом», «Загружено сотрудником» when
+ * staff uploaded every one of them in the client's form, «Загружено в анкете клиента» for both.
+ */
+export function portalUploadsTitle(
+  uploads: readonly Pick<LeadPortalUpload, "document_id" | "access_kind">[],
+  documentIds: readonly string[],
+  tx: Tx,
+): string {
+  const staff = new Set(uploads.filter(uploadedByStaff).map((upload) => upload.document_id));
+  const byStaff = documentIds.filter((id) => staff.has(id)).length;
+  if (byStaff === 0) return tx("Загружено пациентом", "Vom Patienten hochgeladen");
+  return byStaff === documentIds.length
+    ? tx("Загружено сотрудником", "Von GMED hochgeladen")
+    : tx("Загружено в анкете клиента", "Im Kundenformular hochgeladen");
+}
+
+/** Staff uploaded the file in the client's form, not the client (owner 2026-10-30). */
+export function uploadedByStaff(upload: Pick<LeadPortalUpload, "access_kind">): boolean {
+  return upload.access_kind === "staff";
+}
+
+/** "Uploaded by the patient" (or by staff in the client's form) with the consent mark, in a document row. */
 export function PatientUploadMark({ documentId, lang }: { documentId: string; lang: string }) {
   const state = useContext(PortalUploadsContext);
   const upload = state?.uploads.get(documentId);
@@ -470,7 +501,10 @@ export function PatientUploadMark({ documentId, lang }: { documentId: string; la
         className="h-5 gap-1 rounded-full border-sky-200 bg-sky-50 px-1.5 text-[10.5px] font-medium text-sky-800"
       >
         <UserRound aria-hidden="true" className="size-3" />
-        {de ? "Vom Patienten hochgeladen" : "Загружено пациентом"}
+        {/* A file staff uploaded in the client's form is theirs, not the patient's (owner 2026-10-30). */}
+        {uploadedByStaff(upload)
+          ? de ? "Von GMED hochgeladen" : "Загружено сотрудником"
+          : de ? "Vom Patienten hochgeladen" : "Загружено пациентом"}
         {upload.uploaded_at ? ` · ${formatAppDateTime(upload.uploaded_at)}` : ""}
       </Badge>
       {upload.added_after_submit ? (

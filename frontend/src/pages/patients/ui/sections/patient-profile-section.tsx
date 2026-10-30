@@ -53,6 +53,9 @@ import { LegalStatusDocumentItem } from "./legal-status-document-item";
 import { patientFieldHidden, type PatientDetail } from "../../model/list-model";
 import {
   createPatientLeadOrigin,
+  leadConsentWay,
+  leadConsentWayLabel,
+  type LeadConsentWay,
   type LeadOriginSelectedWorkType,
 } from "../../model/patient-lead-origin";
 import { LegalStatusPill } from "../shared/legal-status-pill";
@@ -695,6 +698,10 @@ function usePatientProfileTabContent({
   const automatedContactConsent = leadOrigin.boolean("consent_automated_contact");
   const healthcareConsent = leadOrigin.boolean("consent_healthcare");
   const privacyConsent = leadOrigin.boolean("consent_privacy_practices");
+  // How each consent came (owner 2026-10-30): «на бумаге» only for the paper toggle, a consent
+  // staff recorded in the client's form says so with the way the client gave it.
+  const healthcareConsentWay = leadConsentWay(leadOrigin.value("consent_healthcare_way"));
+  const privacyConsentWay = leadConsentWay(leadOrigin.value("consent_privacy_practices_way"));
   const consentOptOut = leadOrigin.boolean("consent_opt_out");
   const programDateFrom = leadOrigin.string("program_date_from")
     ?? (typeof leadOrigin.wizardState["program_date_from"] === "string" ? leadOrigin.wizardState["program_date_from"] : null);
@@ -731,6 +738,11 @@ function usePatientProfileTabContent({
   const booleanValue = (value: boolean | null) => (
     value == null ? t.common_not_set : value ? l("patients_yes") : l("patients_no")
   );
+  /** «Есть · Записал сотрудник · лично» for a given consent with its way. */
+  const consentValue = (value: boolean | null, way: LeadConsentWay | null) => {
+    const wayLabel = value ? leadConsentWayLabel(way, (ru, de) => (profileLang === "de" ? de : ru)) : null;
+    return wayLabel ? `${booleanValue(value)} · ${wayLabel}` : booleanValue(value);
+  };
   // Groups the server leaves out for this role read "hidden", never "not set"
   // or a legal status that looks unstarted (QA B-14, 2026-10-11).
   const isHidden = (group: string) => patientFieldHidden(detail, group);
@@ -1045,10 +1057,16 @@ function usePatientProfileTabContent({
               <ProfileSummaryLine label={t.lead_consent_automated_contact} value={booleanValue(automatedContactConsent)} />
             ) : null}
             {healthcareConsent != null ? (
-              <ProfileSummaryLine label={t.lead_consent_healthcare} value={booleanValue(healthcareConsent)} />
+              <ProfileSummaryLine label={t.lead_consent_healthcare} value={consentValue(healthcareConsent, healthcareConsentWay)} />
             ) : null}
             {privacyConsent != null ? (
-              <ProfileSummaryLine label={t.lead_consent_privacy_practices} value={booleanValue(privacyConsent)} />
+              <ProfileSummaryLine
+                // «(на бумаге)» only for the wizard's paper toggle (owner 2026-10-30).
+                label={privacyConsentWay?.via === "paper"
+                  ? t.lead_consent_privacy_practices
+                  : profileLang === "de" ? "Einwilligung zur Bearbeitung der Anfrage" : "Согласие на обработку запроса"}
+                value={consentValue(privacyConsent, privacyConsentWay?.via === "paper" ? null : privacyConsentWay)}
+              />
             ) : null}
             {consentOptOut != null ? (
               <ProfileSummaryLine label={t.lead_consent_opt_out} value={booleanValue(consentOptOut)} />

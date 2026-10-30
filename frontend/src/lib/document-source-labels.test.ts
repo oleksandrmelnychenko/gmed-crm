@@ -30,6 +30,9 @@ describe("formatDocumentSourceLabel", () => {
       expect(formatDocumentSourceLabel(origin, de), origin).not.toBe(origin);
     }
     expect(formatDocumentSourceLabel("paper_signature", ru)).toBe("Подписан на бумаге (скан)");
+    // A file staff uploaded for the lead names them, not the portal (owner 2026-10-30).
+    expect(formatDocumentSourceLabel("gmed_staff", ru)).toBe("Сотрудник GMED");
+    expect(formatDocumentSourceLabel("gmed_staff", de)).toBe("GMED-Mitarbeitende");
     // A known template is named (QA 2026-10-11).
     // An origin reads "generated from …", not the button "Generate from …"
     // (QA 2026-10-12 B2-13).
