@@ -618,10 +618,17 @@ export function ConsentCheckbox({
           aria-invalid={invalidText && !given ? true : undefined}
           aria-describedby={invalidText && !given ? `${testId}-error` : undefined}
           className={cn(checkboxClass, "mt-0.5")}
-          checked={given}
+          // While staff say how the client consented the tick shows, unsaved until recorded.
+          checked={given || (staffMode && recordOpen)}
           // Sent is sent (owner 2026-10-26): a given consent is withdrawn through GMED.
           disabled={busy || !consent || (Boolean(request.submitted_at) && given && !staffMode)}
-          onChange={(event) => void toggle(event.target.checked)}
+          onChange={(event) => {
+            if (staffMode && recordOpen && !given && !event.target.checked) {
+              setRecordOpen(false);
+              return;
+            }
+            void toggle(event.target.checked);
+          }}
         />
         <span className={cn("min-w-0", privacyLink ? "space-y-1.5" : "flex flex-wrap items-center gap-x-3 gap-y-1")}>
           <span className={cn("leading-snug", privacyLink && "block")}>{label}</span>

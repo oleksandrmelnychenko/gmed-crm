@@ -39,7 +39,10 @@ export function StaffConsentRecordFields({
   const [note, setNote] = useState("");
   return (
     <div className="mt-2 space-y-2 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid={`${testId}-record`}>
-      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      {/* Without a hint of its own the box says the tick waits for the record (owner 2026-10-30: «чекбокс не працює»). */}
+      {hint ?? (howLabel ? null : text.recordPending) ? (
+        <p className="text-xs text-muted-foreground" data-testid={`${testId}-record-hint`}>{hint ?? text.recordPending}</p>
+      ) : null}
       <label className="block space-y-1 text-xs">
         <span className="font-mono font-medium text-foreground/80">{howLabel ?? text.consentHow}</span>
         <select

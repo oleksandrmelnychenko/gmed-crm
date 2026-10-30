@@ -11,8 +11,7 @@ import { useAuth } from "@/lib/auth";
 import { rememberSignOutNotice } from "@/lib/login-redirect";
 import { cn } from "@/lib/utils";
 
-import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, submitLeadRequest, type LeadRequest, type StaffConsentRecord } from "./lead-request-api";
-import { StaffConsentRecordFields } from "./lead-request-staff-consent";
+import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, STAFF_CONSENT_CHANNELS, STAFF_CONSENT_NOTE_MAX, submitLeadRequest, type LeadRequest, type StaffConsentChannel, type StaffConsentRecord } from "./lead-request-api";
 import { actsAsGuardian } from "./lead-request-access";
 import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown, missingOfRefusal } from "./lead-request-follow-up-model";
 import { canSubmit, consentGiven, type SubmitField } from "./lead-request-model";
@@ -47,6 +46,9 @@ export function SendStep({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  // Staff say how the client confirmed the details before they send for the client.
+  const [sendHow, setSendHow] = useState<StaffConsentChannel | "">("");
+  const [sendNote, setSendNote] = useState("");
   const [signingOut, setSigningOut] = useState(false);
   const { logout } = useAuth();
   // The missing items in the parents' words also for staff on a minor's form, as on the steps (owner 2026-10-30).
@@ -281,6 +283,36 @@ export function SendStep({
           ) : null}
         </Section>
       ) : null}
+      {sendable && staffMode ? (
+        <Section title={cabinetStaffText(lang).sendTitle}>
+          <div className="grid gap-3 sm:grid-cols-2" data-testid="lead-request-submit-record">
+            <label className="block space-y-1.5 text-xs">
+              <span className="font-mono font-medium text-foreground/80">{cabinetStaffText(lang).sendHint}<RequiredMark /></span>
+              <select
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                value={sendHow}
+                disabled={busy}
+                onChange={(event) => setSendHow(event.target.value as StaffConsentChannel | "")}
+                data-testid="lead-request-submit-record-how"
+              >
+                <option value="">—</option>
+                {STAFF_CONSENT_CHANNELS.map((channel) => <option key={channel} value={channel}>{cabinetStaffText(lang).channels[channel]}</option>)}
+              </select>
+            </label>
+            <label className="block space-y-1.5 text-xs">
+              <span className="font-mono font-medium text-foreground/80">{cabinetStaffText(lang).consentNote}</span>
+              <input
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                maxLength={STAFF_CONSENT_NOTE_MAX}
+                value={sendNote}
+                disabled={busy}
+                onChange={(event) => setSendNote(event.target.value)}
+                data-testid="lead-request-submit-record-note"
+              />
+            </label>
+          </div>
+        </Section>
+      ) : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
       <StepFooter>
         {request.submitted_at ? (
@@ -303,15 +335,17 @@ export function SendStep({
           </Button>
         ) : null}
         {sendable && staffMode ? (
-          <StaffConsentRecordFields
-            lang={lang}
-            testId="lead-request-submit"
-            busy={busy}
-            howLabel={cabinetStaffText(lang).sendHint}
-            actionLabel={cabinetStaffText(lang).sendForClient}
-            actionDisabled={!ready || (needsDeclaration && !confirmed)}
-            onRecord={(recorded) => void send(recorded)}
-          />
+          // The same primary action as the client's own send, at the same place.
+          <Button
+            type="button"
+            className="h-9 gap-2"
+            disabled={!ready || busy || (needsDeclaration && !confirmed) || !sendHow}
+            onClick={() => { if (sendHow) void send({ how: sendHow, note: sendNote }); }}
+            data-testid="lead-request-submit-record-save"
+          >
+            {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Send aria-hidden="true" className="size-3.5" />}
+            {busy ? text.sending : cabinetStaffText(lang).sendForClient}
+          </Button>
         ) : sendable ? (
           <Button
             type="button"
