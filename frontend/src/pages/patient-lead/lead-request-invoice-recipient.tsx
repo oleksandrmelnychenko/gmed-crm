@@ -509,7 +509,7 @@ export function InvoiceRecipientSection({
               >
                 <input
                   {...control("is_payer")}
-                  aria-label={flow.recipient === "self" ? text.recipient.isPayerSelf : text.recipient.isPayerThirdParty}
+                  aria-label={flow.recipient === "self" ? text.recipient.isPayerSelf : organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty}
                   type="checkbox"
                   className={cn(checkboxClass, "mt-0.5")}
                   checked={draft.is_payer === "yes"}
@@ -517,7 +517,7 @@ export function InvoiceRecipientSection({
                   onChange={(event) => answerIsPayer(event.target.checked ? "yes" : "no")}
                 />
                 {/* In the person's words, not "the invoice recipient is the payer" (labels audit 2026-10-26, B3). */}
-                <span className="min-w-0">{flow.recipient === "self" ? text.recipient.isPayerSelf : text.recipient.isPayerThirdParty}</span>
+                <span className="min-w-0">{flow.recipient === "self" ? text.recipient.isPayerSelf : organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty}</span>
               </label>
               {errorFor("is_payer") ? (
                 <p id="lead-request-recipient_is_payer-error" role="alert" className="text-xs text-destructive">

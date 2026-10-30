@@ -553,7 +553,8 @@ describe("lead request summary", () => {
       Land: "Deutschland",
       "E-Mail": "rechnung@example.com",
       "Warum erfolgt die Zahlung über die Organisation?": "Der Arbeitgeber erhält die Rechnung.",
-      "Diese Person zahlt auch": "Nein",
+      // An organisation is named as such (DEV QA 2026-10-30).
+      "Diese Organisation zahlt auch": "Nein",
     });
     // Who pays: one answer, no type row; section 7 is not listed again.
     expect(rows(groups, "payer")).toMatchObject({ "Wer ist der Zahler?": "Ich selbst" });

@@ -535,8 +535,13 @@ describe("payer AML and signing order", () => {
     expect(payerStatusBadge(status({ complete: false, missing: ["cost_assumption_missing"] }), de).label).toBe(
       "wartet auf Kostenübernahmeerklärung",
     );
+    // What is missing is named beside the badge (DEV QA 2026-10-30).
     expect(payerStatusBadge(status({ complete: false, missing: ["payer_not_informed", "cost_assumption_missing"] }), tx))
-      .toEqual({ tone: "warning", label: "Не заполнено" });
+      .toEqual({
+        tone: "warning",
+        label: "Не заполнено",
+        hint: "Подтвердите, что плательщик проинформирован об обработке его данных; Создайте заявление о принятии расходов (Kostenübernahmeerklärung)",
+      });
     expect(payerStatusBadge(status({ complete: false, missing: [] }), de).label).toBe("Unvollständig");
     expect(payerStatusBadge(null, tx).label).toBe("Не заполнено");
   });

@@ -1596,7 +1596,7 @@ pub(crate) async fn load_payer_state(
                   latest_order.id AS order_id, latest_order.order_number,
                   latest_order.signed_patient, latest_order.signed_agency,
                   cost.id AS cost_document_id, cost.signed_at AS cost_signed_at,
-                  cost.payer_identity_version,
+                  cost.payer_identity_version, cost.terms_current AS cost_terms_current,
                   sent.lead_id AS statement_lead_id,
                   sent.funds_sources AS statement_funds_sources,
                   sent.funds_description AS statement_funds_description
@@ -1613,7 +1613,27 @@ pub(crate) async fn load_payer_state(
            ) latest_order ON true
            LEFT JOIN LATERAL (
                SELECT doc.id, doc.signed_at,
-                      doc.generated_bindings ->> '_payer_identity_version' AS payer_identity_version
+                      doc.generated_bindings ->> '_payer_identity_version' AS payer_identity_version,
+                      -- The declaration names the order's services and amounts
+                      -- (DEV QA 2026-10-30): one made before the order existed,
+                      -- for another order or before the last change of the
+                      -- order's terms or prepayment is outdated, like an order
+                      -- document or an estimate (`document_terms_current`).
+                      (
+                          latest_order.id IS NOT DISTINCT FROM doc.order_id
+                          AND NOT EXISTS (
+                              SELECT 1 FROM orders terms
+                              WHERE terms.id = doc.order_id
+                                AND GREATEST(terms.client_terms_changed_at,
+                                             terms.prepayment_terms_changed_at)
+                                    > COALESCE(
+                                        (SELECT original.created_at FROM documents original
+                                         WHERE original.id = doc.replaces_document_id
+                                           AND doc.ursprung IN ('paper_signature',
+                                                                'electronic_signature')),
+                                        doc.created_at)
+                          )
+                      ) AS terms_current
                FROM documents doc
                WHERE doc.generated_template_id = 'cost_coverage_declaration'
                  AND doc.status <> 'archived'
@@ -1712,10 +1732,17 @@ pub(crate) async fn load_payer_state(
         .flatten()
     {
         let names: Option<String> = row.try_get("payer_identity_version").unwrap_or_default();
+        let terms_current = row
+            .try_get::<Option<bool>, _>("cost_terms_current")
+            .ok()
+            .flatten()
+            .unwrap_or(true);
         state.cost_assumption = CostAssumptionDocument {
             document_id: Some(document_id),
             signed_at: row.try_get("cost_signed_at").unwrap_or_default(),
-            current: names.is_some() && names == state.identity_changed_at.map(identity_version),
+            current: names.is_some()
+                && names == state.identity_changed_at.map(identity_version)
+                && terms_current,
         };
     }
     Ok(state)
@@ -1792,6 +1819,9 @@ pub(crate) struct PayerIdentification {
     pub self_disclosure_signed: bool,
     /// A current identity document of the payer is on file.
     pub identity_document: bool,
+    /// Staff entered the sent answers from the paper Selbstauskunft (owner
+    /// 2026-10-30): the wizard shows the paper path, not the link.
+    pub statement_by_staff: bool,
 }
 
 impl PayerIdentification {
@@ -1804,8 +1834,12 @@ pub(crate) async fn load_payer_identification(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<PayerIdentification, sqlx::Error> {
-    let (statement_sent, self_disclosure_signed, identity_document): (bool, bool, bool) =
-        sqlx::query_as(
+    let (statement_sent, self_disclosure_signed, identity_document, statement_by_staff): (
+        bool,
+        bool,
+        bool,
+        bool,
+    ) = sqlx::query_as(
             r#"SELECT
                   EXISTS (
                       SELECT 1 FROM lead_payer_statements s
@@ -1828,6 +1862,11 @@ pub(crate) async fn load_payer_identification(
                         AND d.art = 'payer_identity'
                         AND d.status <> 'archived'
                         AND d.file_deleted_at IS NULL
+                  ),
+                  EXISTS (
+                      SELECT 1 FROM lead_payer_statements s
+                      WHERE s.lead_id = $1 AND s.source = 'staff'
+                        AND (s.submitted_at IS NOT NULL OR s.adopted_at IS NOT NULL)
                   )"#,
         )
         .bind(lead_id)
@@ -1837,6 +1876,7 @@ pub(crate) async fn load_payer_identification(
         statement_sent,
         self_disclosure_signed,
         identity_document,
+        statement_by_staff,
     })
 }
 
@@ -1860,6 +1900,7 @@ async fn identification_status(
         "statement_sent": parts.statement_sent,
         "self_disclosure_signed": parts.self_disclosure_signed,
         "identity_document": parts.identity_document,
+        "statement_by_staff": parts.statement_by_staff,
     }))
 }
 
@@ -4022,6 +4063,24 @@ pub(crate) async fn store_payment_route(
 ) -> Result<(), sqlx::Error> {
     store_declaration(conn, lead_id, declaration, None, false).await?;
     set_payment_route_entered_by(conn, lead_id, ROUTE_ENTERED_BY_PAYER).await
+}
+
+/// Stores section 8 staff entered from the payer's signed paper
+/// Selbstauskunft (owner 2026-10-30): staff's route, counted at once like the
+/// staff route endpoint's (the link's route marker is cleared).
+pub(crate) async fn store_payment_route_by_staff(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    declaration: &Declaration,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    store_declaration(conn, lead_id, declaration, Some(actor), false).await?;
+    set_payment_route_entered_by(conn, lead_id, ROUTE_ENTERED_BY_STAFF).await?;
+    sqlx::query("UPDATE lead_payer_statements SET payment_route_marker = NULL WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(&mut *conn)
+        .await
+        .map(|_| ())
 }
 
 /// `payment_route_entered_by` of the payer's link.

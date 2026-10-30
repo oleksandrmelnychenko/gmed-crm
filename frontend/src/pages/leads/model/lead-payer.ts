@@ -1109,7 +1109,7 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
 export function payerStatusBadge(
   status: Pick<PayerDeclarationStatus, "complete" | "missing" | "payer_package"> | null | undefined,
   tx: Tx,
-): { tone: "success" | "info" | "warning"; label: string } {
+): { tone: "success" | "info" | "warning"; label: string; hint?: string } {
   if (status?.complete) return { tone: "success", label: tx("Заполнено", "Vollständig") };
   const packageOut = status?.payer_package?.status === "sending" || status?.payer_package?.status === "pending";
   if (
@@ -1123,7 +1123,13 @@ export function payerStatusBadge(
   if (status && status.missing.length > 0 && status.missing.every((code) => code === "cost_assumption_missing")) {
     return { tone: "info", label: tx("ждёт заявления о принятии расходов", "wartet auf Kostenübernahmeerklärung") };
   }
-  return { tone: "warning", label: tx("Не заполнено", "Unvollständig") };
+  // "Не заполнено" with every field filled said nothing (DEV QA 2026-10-30: the
+  // payer was not marked informed): the badge names what is missing.
+  const missing = status?.missing ?? [];
+  const hint = [...new Set(missing.map((code) => payerReasonLabel(code, tx)))].join("; ");
+  return hint
+    ? { tone: "warning", label: tx("Не заполнено", "Unvollständig"), hint }
+    : { tone: "warning", label: tx("Не заполнено", "Unvollständig") };
 }
 
 /**

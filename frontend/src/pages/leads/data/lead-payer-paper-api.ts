@@ -20,8 +20,8 @@ export function fetchPayerPaperDocuments(leadId: string): Promise<DocumentItem[]
   return fetchDocuments(`/documents?lead_id=${encodeURIComponent(leadId)}`);
 }
 
-export function uploadPayerIdentity(leadId: string, file: File, payerName: string, fields: PayerIdentityFields) {
-  return uploadDocument(payerIdentityUploadForm(leadId, file, payerName, fields));
+export function uploadPayerIdentity(leadId: string, file: File, payerName: string, fields: PayerIdentityFields, organisation = false) {
+  return uploadDocument(payerIdentityUploadForm(leadId, file, payerName, fields, organisation));
 }
 
 export function generatePaperSelfDisclosure(leadId: string, replaceDocumentId?: string | null) {

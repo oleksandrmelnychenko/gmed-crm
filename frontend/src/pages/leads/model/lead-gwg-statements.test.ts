@@ -1065,14 +1065,33 @@ describe("section 8 of a third-party payer with the own link (phase 3a)", () => 
         lead_id: "lead-1",
         payer_link: { mode: "link", status: "submitted", sent_at: "2026-10-06T08:00:00Z", submitted_at: "2026-10-06T08:30:00Z", check_level: 2 },
       })?.payer_link,
-    ).toEqual({ mode: "link", status: "submitted", sent_at: "2026-10-06T08:00:00Z", submitted_at: "2026-10-06T08:30:00Z", check_level: 2 });
+    ).toEqual({
+      mode: "link",
+      status: "submitted",
+      sent_at: "2026-10-06T08:00:00Z",
+      submitted_at: "2026-10-06T08:30:00Z",
+      check_level: 2,
+      entered_by_staff: false,
+      payment_route_by_staff: false,
+    });
     expect(normalizeLeadPortalPayerLink({ mode: "other", check_level: "2" })).toEqual({
       mode: null,
       status: null,
       sent_at: null,
       submitted_at: null,
       check_level: null,
+      entered_by_staff: false,
+      payment_route_by_staff: false,
     });
+  });
+
+  it("says staff entered the route on the paper path instead of awaiting the link (DEV QA 2026-10-30)", () => {
+    expect(paymentRouteByPayerLine({ submitted_at: null, payment_route_by_staff: true }, ru)).toBe(
+      "Способ оплаты: внёс сотрудник (раздел «Кто платит»)",
+    );
+    expect(paymentRouteByPayerLine({ submitted_at: "2026-10-06T08:30:00Z", entered_by_staff: true }, de)).toBe(
+      "Zahlungsweg: von GMED erfasst (Abschnitt „Wer zahlt“)",
+    );
   });
 
   it("says the payer states the route through the link, or when the payer stated it", () => {

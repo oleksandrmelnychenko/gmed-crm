@@ -293,6 +293,8 @@ export type LeadRequestText = {
     /** The same box in words of the person (labels audit 2026-10-26, B3): "I pay myself" / "this person also pays". */
     isPayerSelf: string;
     isPayerThirdParty: string;
+    /** The same box for an organisation as recipient (DEV QA 2026-10-30: "this person" named a GmbH). */
+    isPayerOrganisation: string;
     /**
      * Unticked with a third-party recipient: the patient pays, or another
      * person or organisation (owner 2026-10-11). A parent's login reads the
@@ -1287,6 +1289,7 @@ const de: LeadRequestText = {
     isPayer: "Der Rechnungsempfänger ist auch der Zahler",
     isPayerSelf: "Ich zahle selbst",
     isPayerThirdParty: "Diese Person zahlt auch",
+    isPayerOrganisation: "Diese Organisation zahlt auch",
     payerParty: {
       patient: "Zahler bin ich",
       other: "Zahler ist eine andere Person oder Organisation",
@@ -1888,6 +1891,7 @@ const ru: LeadRequestText = {
     isPayer: "Получатель счёта является плательщиком",
     isPayerSelf: "Я оплачиваю сам(а)",
     isPayerThirdParty: "Этот человек также оплачивает",
+    isPayerOrganisation: "Эта организация также оплачивает",
     payerParty: {
       patient: "Плательщиком счёта являюсь я",
       other: "Плательщиком счёта является другое лицо или организация",
@@ -2487,6 +2491,7 @@ const uk: LeadRequestText = {
     isPayer: "Отримувач рахунку є платником",
     isPayerSelf: "Я сплачую сам(а)",
     isPayerThirdParty: "Ця особа також сплачує",
+    isPayerOrganisation: "Ця організація також сплачує",
     payerParty: {
       patient: "Платником рахунку є я",
       other: "Платником рахунку є інша особа або організація",
@@ -3086,6 +3091,7 @@ const en: LeadRequestText = {
     isPayer: "The invoice recipient is also the payer",
     isPayerSelf: "I pay myself",
     isPayerThirdParty: "This person also pays",
+    isPayerOrganisation: "This organisation also pays",
     payerParty: {
       patient: "I am the payer",
       other: "The payer is another person or organisation",

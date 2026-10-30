@@ -63,6 +63,37 @@ describe("LeadPayerPaperPath (re-check V-A7)", () => {
     expect(html).toMatch(/data-testid="lead-payer-paper-identity" data-done="true"/);
   });
 
+  it("lets staff enter the paper answers and still sign the paper form once they are sent (DEV QA 2026-10-30)", () => {
+    const draft = render(missing);
+    expect(draft).toContain('data-testid="lead-payer-paper-answers" data-done="false"');
+    expect(draft).toContain("Внести ответы</button>");
+    const entered = render({ ...missing, statement_sent: true, statement_by_staff: true, identity_document: true, identified: true });
+    expect(entered).toContain("внесены сотрудником с бумажной анкеты");
+    expect(entered).toContain("Открыть ответы</button>");
+    expect(entered).not.toContain("Анкета отправлена плательщиком по ссылке");
+    // The signed paper form is still to be filed.
+    expect(entered).toContain('data-testid="lead-payer-paper-generate"');
+    // Read-only staff see the state, not the button.
+    expect(render(missing, { canEdit: false })).not.toContain("lead-payer-paper-answers-open");
+  });
+
+  it("asks an organisation for its contact person's ID or its register extract", () => {
+    const html = renderToStaticMarkup(
+      <LeadPayerPaperPath
+        leadId="lead-1"
+        identification={missing}
+        payerName="Beispiel GmbH"
+        organisation
+        canEdit
+        lang="ru"
+        tx={ru}
+        errorText={() => "error"}
+      />,
+    );
+    expect(html).toContain("Документ представителя организации / выписка из реестра");
+    expect(html).toContain("представитель, его документ, бенефициары, PEP, санкции и способ оплаты");
+  });
+
   it("writes only for staff who may file the lead's documents", () => {
     const readOnly = render(missing, { canEdit: false });
     expect(readOnly).not.toContain("lead-payer-paper-upload-open");

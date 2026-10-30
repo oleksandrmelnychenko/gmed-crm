@@ -83,6 +83,40 @@ function render(
   );
 }
 
+describe("LeadPayerPackagePanel paper signature (DEV QA 2026-10-30)", () => {
+  const paperRender = (value: LeadPayerPackageState, canEdit = true) =>
+    renderToStaticMarkup(
+      <LeadPayerPackagePanel
+        leadId="lead-1"
+        state={value}
+        controller={controller}
+        canEdit={canEdit}
+        tx={ru}
+        lang="ru"
+        errorText={() => "error"}
+        onPaperSigned={() => undefined}
+      />,
+    );
+
+  it("offers «Подписано на бумаге» for every prepared, unsigned document", () => {
+    const html = paperRender(state({}, {}));
+    for (const slot of ["self_disclosure", "cost_coverage", "patient_statement", "cost_estimate"]) {
+      expect(html).toContain(`data-testid="lead-payer-package-paper-sign-${slot}"`);
+    }
+    const signed = paperRender(state({}, { documents: documents.map((item) => ({ ...item, signed_at: "2026-10-07T09:00:00Z" })) }));
+    expect(signed).not.toContain("lead-payer-package-paper-sign-");
+  });
+
+  it("leaves a package out for the QES and read-only staff without it", () => {
+    expect(paperRender(state({}, { status: "pending", request_id: "request-1", sent_at: "2026-10-06T11:00:00Z" }))).not.toContain(
+      "lead-payer-package-paper-sign-",
+    );
+    expect(paperRender(state({}, {}), false)).not.toContain("lead-payer-package-paper-sign-");
+    // Nothing prepared yet: nothing to sign.
+    expect(paperRender(state())).not.toContain("lead-payer-package-paper-sign-");
+  });
+});
+
 describe("LeadPayerPackagePanel", () => {
   it("lists the four documents before preparing and offers to prepare them", () => {
     const html = render(state());

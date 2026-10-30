@@ -250,6 +250,10 @@ pub struct BlockAnswers {
     /// The payer is a legal representative, independent of the current viewer.
     pub paying_parent: bool,
     pub statement_submitted: bool,
+    /// Staff entered the third-party payer's payment route
+    /// (`payment_route_entered_by = staff`): it counts at once (owner
+    /// 2026-10-26), so block C no longer waits for the payer's link.
+    pub route_entered_by_staff: bool,
     /// Block E of a paying organisation: the legal form and why the payment
     /// goes through the organisation — the organisation's own answer on its
     /// link, else what the lead gave in the cabinet
@@ -387,6 +391,7 @@ pub async fn load_block_answers(
                   g.sanctions_link_since_extent, g.id_data_entered_at, g.birth_place,
                   g.birth_country, g.pep_self, g.sanctions_links,
                   d.via_third_party_kind,
+                  (d.payment_route_entered_by = 'staff') AS route_entered_by_staff,
                   s.submitted_at AS statement_submitted_at,
                   COALESCE(NULLIF(btrim(s.legal_form), ''),
                            NULLIF(btrim(d.organisation_legal_form), '')) AS statement_legal_form,
@@ -477,6 +482,11 @@ pub async fn load_block_answers(
             .ok()
             .flatten()
             .is_some(),
+        route_entered_by_staff: row
+            .try_get::<Option<bool>, _>("route_entered_by_staff")
+            .ok()
+            .flatten()
+            .unwrap_or(false),
         statement_legal_form: text("statement_legal_form"),
         statement_payment_reason: text("statement_payment_reason"),
         minor: inputs.minor,
@@ -589,6 +599,16 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
                     missing.push("via_third_party_kind");
                 }
                 PARTY_CABINET
+            } else if answers.route_entered_by_staff {
+                // Staff saved the third party's route (owner 2026-10-26: it
+                // counts at once): block C asks the route itself, not the
+                // payer's send (DEV QA 2026-10-30, paper path).
+                for key in lead_payer::portal_missing_billing(payer, PaymentRouteBy::Patient) {
+                    if PAYMENT_ROUTE_KEYS.contains(&key) {
+                        missing.push(key);
+                    }
+                }
+                PARTY_PAYER_LINK
             } else {
                 link_submit(&mut missing);
                 PARTY_PAYER_LINK
@@ -2071,6 +2091,46 @@ mod tests {
             &["D".to_string(), "E".to_string()],
             &filled
         ));
+    }
+
+    /// DEV QA 2026-10-30 (paper path): block C of a third party waits for
+    /// the payer's send only while nobody else gave the route; a route staff
+    /// saved counts at once (owner 2026-10-26) and is checked itself. Block D
+    /// is answered by the sent statement, also one staff entered on paper.
+    #[test]
+    fn a_staff_route_answers_block_c_and_a_sent_statement_block_d() {
+        let route = |method: Option<&str>| Declaration {
+            payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.to_string(),
+            payment_method: method.map(str::to_string),
+            account_country: Some("DE".into()),
+            account_holder: Some("Beispiel Logistik GmbH".into()),
+            bank_name: Some("Hafenbank".into()),
+            via_third_party: Some(false),
+            ..Declaration::default()
+        };
+        let waiting = BlockAnswers {
+            payer: Some(route(Some("bank_transfer"))),
+            route_by: Some(PaymentRouteBy::Payer),
+            ..Default::default()
+        };
+        assert_eq!(block_missing("C", &waiting).1, ["payer_link_submit"]);
+        assert_eq!(block_missing("D", &waiting).1, ["payer_link_submit"]);
+        let staff_route = BlockAnswers {
+            route_entered_by_staff: true,
+            ..waiting.clone()
+        };
+        assert!(block_missing("C", &staff_route).1.is_empty());
+        let incomplete = BlockAnswers {
+            payer: Some(route(None)),
+            ..staff_route.clone()
+        };
+        assert_eq!(block_missing("C", &incomplete).1, ["payment_method"]);
+        let sent = BlockAnswers {
+            statement_submitted: true,
+            ..waiting
+        };
+        assert!(block_missing("C", &sent).1.is_empty());
+        assert!(block_missing("D", &sent).1.is_empty());
     }
 
     /// QA 2026-10-24, B-4: a child has no occupation or sector, is no PEP

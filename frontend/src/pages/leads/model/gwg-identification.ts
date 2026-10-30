@@ -326,13 +326,14 @@ export function gwgPayerSheetMissingLabels(missing: unknown, tx: Tx): string[] {
 /**
  * Who enters the paying organisation's data, and that the sheet is made again
  * afterwards. Beneficial owners, the representative, PEP answers and the
- * reason of the payment come from the payer only (owner decision 2026-10-24):
- * staff send the payer's link, they do not enter these.
+ * reason of the payment are the payer's own statement: through its link, or
+ * — owner rule 2026-10-29 replacing the link-only rule of 2026-10-24 — from
+ * its signed paper Selbstauskunft, entered by staff on the paper path.
  */
 export function gwgPayerSheetHint(tx: Tx): string {
   return tx(
-    "Эти данные организация-плательщик вносит сама по своей ссылке — отправьте или повторите ссылку в разделе «Кто платит»; затем сформируйте лист заново.",
-    "Diese Angaben macht die zahlende Organisation selbst über ihren Link – den Link unter „Wer zahlt“ senden oder erneut senden; danach den Bogen neu erstellen.",
+    "Эти данные организация-плательщик вносит по своей ссылке, либо их вносит сотрудник с подписанной бумажной анкеты («Анкета плательщика» → «На бумаге» в разделе «Кто платит»); затем сформируйте лист заново.",
+    "Diese Angaben macht die zahlende Organisation über ihren Link, oder GMED erfasst sie aus dem unterschriebenen Papierfragebogen („Fragebogen des Zahlers“ → „Auf Papier“ unter „Wer zahlt“); danach den Bogen neu erstellen.",
   );
 }
 

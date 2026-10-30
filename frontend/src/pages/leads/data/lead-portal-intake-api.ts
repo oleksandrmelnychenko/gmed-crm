@@ -286,6 +286,10 @@ export type LeadPortalPayerLink = {
   sent_at: string | null;
   submitted_at: string | null;
   check_level: number | null;
+  /** Staff entered the sent answers from the paper Selbstauskunft (owner 2026-10-30). */
+  entered_by_staff?: boolean;
+  /** Staff saved the payer's payment route (it counts at once). */
+  payment_route_by_staff?: boolean;
 };
 
 /** `GET /leads/{id}/portal-intake`: what the patient did in the portal. */
@@ -514,6 +518,8 @@ export function normalizeLeadPortalPayerLink(value: unknown): LeadPortalPayerLin
     sent_at: textOrNull(raw.sent_at),
     submitted_at: textOrNull(raw.submitted_at),
     check_level: typeof raw.check_level === "number" ? raw.check_level : null,
+    entered_by_staff: raw.entered_by_staff === true,
+    payment_route_by_staff: raw.payment_route_by_staff === true,
   };
 }
 

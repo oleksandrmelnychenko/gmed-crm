@@ -3571,3 +3571,326 @@ async fn a_staff_payment_route_counts_at_once_while_the_payer_drafts() {
         "the payer's draft cash is pending"
     );
 }
+
+const PAPER: &str = "/payer-questionnaire";
+
+/// A staff upload of the paper path's questionnaire (multipart with a bearer).
+async fn staff_paper_upload(
+    app: &PayerApp,
+    lead_id: Uuid,
+    kind: &str,
+    bearer: &str,
+) -> (StatusCode, Value) {
+    let boundary = format!("----gmed-boundary-{}", Uuid::new_v4().simple());
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        b"Content-Disposition: form-data; name=\"file\"; filename=\"ausweis.pdf\"\r\nContent-Type: application/pdf\r\n\r\n",
+    );
+    body.extend_from_slice(PDF);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/leads/{lead_id}{PAPER}/{kind}"))
+        .header("Authorization", bearer)
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let (status, _, body) = call(app, request).await;
+    (status, body)
+}
+
+/// The paper path of a paying organisation (owner rule 2026-10-29, DEV QA
+/// 2026-10-30): staff enter the signed paper Selbstauskunft into the payer's
+/// own questionnaire — representative, identity document, beneficial owners,
+/// PEP, sanctions links, payment route — with the link's validation; the
+/// sent answers are staff's, end a link still out, identify the payer and
+/// complete the organisation's GwG sheet, all before any risk decision.
+#[tokio::test]
+async fn staff_enter_an_organisations_paper_answers_like_the_link() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, patient) = lead(&app, "paper-org").await;
+    name_payer(
+        &app,
+        lead_id,
+        &patient,
+        json!({
+            "payer_kind": "third_party",
+            "payer_type": "company",
+            "organisation_name": "Beispiel Logistik GmbH",
+            "country": "DE",
+            "relationship_kind": "employer",
+            "email": "kasse@example.com",
+            "contact_consent": true
+        }),
+    )
+    .await;
+    submit_request(&app, lead_id).await;
+    // A link went out first; the organisation answers on paper instead.
+    send_link(&app, lead_id, json!({})).await;
+    assert_eq!(active_links(pool, lead_id).await, 1);
+    let path = format!("/api/v1/leads/{lead_id}{PAPER}");
+    let manager = app.manager();
+
+    let (status, read) = with_login(&app, "GET", &path, &manager, None).await;
+    assert_eq!(status, StatusCode::OK, "{read}");
+    assert_eq!(read["state"], "draft", "{read}");
+    assert_eq!(read["payer_type"], "company", "{read}");
+    assert_eq!(read["entered_by_staff"], false, "{read}");
+    assert_eq!(
+        read["answers"]["organisation_name"], "Beispiel Logistik GmbH",
+        "{read}"
+    );
+    // Read-only roles look, write nothing.
+    let (status, body) = with_login(
+        &app,
+        "POST",
+        &format!("{path}/consent"),
+        &app.staff("ceo_assistant"),
+        Some(json!({ "acknowledged": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    // Staff transcribe in any order: the privacy notice the payer signed on
+    // paper stays missing until recorded.
+    let (status, body) = with_login(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({ "representative_first_name": "Vera" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["answers"]["representative_first_name"], "Vera");
+    assert_eq!(body["missing_for_submit"][0], "privacy_ack", "{body}");
+    let (status, body) = with_login(
+        &app,
+        "POST",
+        &format!("{path}/consent"),
+        &manager,
+        Some(json!({ "acknowledged": true, "contact_channels": ["phone"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["privacy"]["acknowledged_at"].is_string(), "{body}");
+    // The notice read on paper informs the payer: «Кто платит» needs no
+    // separate tick (DEV QA 2026-10-30).
+    let informed: bool = sqlx::query_scalar(
+        "SELECT payer_informed_at IS NOT NULL FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(informed);
+
+    // The link's validation: a person's key is refused for a company.
+    let (status, body) = with_login(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({ "first_name": "Vera" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["field"], "first_name", "{body}");
+    let (status, body) = with_login(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({
+            "street": "Hafenstraße 1",
+            "zip": "20457",
+            "city": "Hamburg",
+            "country": "DE",
+            "legal_form": "GmbH",
+            "payment_reason": "Der Arbeitgeber übernimmt die Behandlung",
+            "register_court": "Amtsgericht Hamburg",
+            "register_number": "HRB 12345",
+            "representative_first_name": "Vera",
+            "representative_last_name": "Vertreter",
+            "representative_role": "Geschäftsführerin",
+            "id_document_type": "id_card",
+            "id_document_number": "L01X00T47",
+            "id_issuing_authority": "Stadt Hamburg",
+            "id_issuing_country": "DE",
+            "id_valid_until": "2099-12-31",
+            "beneficial_owners_none": true,
+            "pep_self": false,
+            "pep_related": false,
+            "sanctions_links": false,
+            "payment_method": "bank_transfer",
+            "account_country": "DE",
+            "account_holder": "Beispiel Logistik GmbH",
+            "bank_name": "Hafenbank",
+            "via_third_party": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["missing_for_submit"],
+        json!(["id_document_upload"]),
+        "{body}"
+    );
+    // The route staff transcribe is staff's and counts at once.
+    let (route_by, marker): (Option<String>, Option<String>) = sqlx::query_as(
+        r#"SELECT d.payment_route_entered_by, s.payment_route_marker
+           FROM lead_payer_declarations d JOIN lead_payer_statements s USING (lead_id)
+           WHERE d.lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(route_by.as_deref(), Some("staff"));
+    assert_eq!(marker, None);
+
+    // The representative's identity document the organisation handed over.
+    let (status, body) = staff_paper_upload(&app, lead_id, "identity-document", &manager).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["missing_for_submit"], json!([]), "{body}");
+    let (access_kind, uploaded_by): (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT access_kind, uploaded_by FROM lead_portal_uploads WHERE lead_id = $1 AND kind = 'payer_identity'",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(access_kind, "staff");
+    assert!(uploaded_by.is_some());
+
+    // Staff confirm the paper form; without it nothing is sent.
+    let (status, body) = with_login(&app, "POST", &format!("{path}/submit"), &manager, None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "declaration_required", "{body}");
+    let (status, body) = with_login(
+        &app,
+        "POST",
+        &format!("{path}/submit"),
+        &manager,
+        Some(json!({ "declared_correct": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["state"], "submitted", "{body}");
+    assert_eq!(body["entered_by_staff"], true, "{body}");
+    let (source, answered_by): (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT source, answered_by_user FROM lead_payer_statements WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(source, "staff");
+    assert!(answered_by.is_some());
+    // The link still out is over: the organisation answered on paper.
+    assert_eq!(active_links(pool, lead_id).await, 0);
+    let reason: Option<String> = sqlx::query_scalar(
+        "SELECT revoked_reason FROM lead_payer_links WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(reason.as_deref(), Some("paper_answers"));
+    let submitted = audit_contexts(pool, "payer_questionnaire_submitted", lead_id).await;
+    let (actor, context) = submitted.last().expect("a submit audit row");
+    assert!(actor.is_some());
+    assert_eq!(context["access_kind"], "staff", "{context}");
+    assert_eq!(context["recorded_how"], "paper", "{context}");
+
+    // The payer counts as answered: identified with the document, and the
+    // wizard knows staff entered it.
+    let (_, declaration) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &manager,
+        None,
+    )
+    .await;
+    let identification = &declaration["status"]["identification"];
+    assert_eq!(identification["statement_sent"], true, "{declaration}");
+    assert_eq!(identification["statement_by_staff"], true, "{declaration}");
+    assert_eq!(identification["identity_document"], true, "{declaration}");
+
+    // The organisation's GwG sheet made now has everything the organisation
+    // states: its signature can be confirmed.
+    let (status, sheet) = with_login(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &app.staff("ceo"),
+        Some(json!({
+            "template_id": "gwg_identification",
+            "lead_id": lead_id,
+            "language": "de",
+            "status": "active",
+            "bindings": { "gwg_identification": { "subject": "payer" } }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sheet}");
+    let sheet_id = sheet["id"].as_str().unwrap();
+    let (status, signed) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{sheet_id}/mark-signed"),
+        &app.staff("ceo"),
+        Some(json!({ "compliance_kind": "other" })),
+    )
+    .await;
+    assert_ne!(
+        signed["code"], "payer_details_incomplete",
+        "{status} {signed}"
+    );
+
+    // Sent answers change only after a reopen.
+    let (status, body) = with_login(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({ "representative_role": "Prokuristin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, body) = with_login(&app, "POST", &format!("{path}/reopen"), &manager, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["state"], "draft", "{body}");
+    let (status, body) = with_login(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({ "representative_role": "Prokuristin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["answers"]["representative_role"], "Prokuristin");
+}
+
+/// Without a third party there is no paper questionnaire.
+#[tokio::test]
+async fn the_paper_questionnaire_is_only_for_a_third_party() {
+    let Some(app) = payer_app().await else { return };
+    let (lead_id, _) = lead(&app, "paper-none").await;
+    let (status, body) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}{PAPER}"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "no_third_party", "{body}");
+}

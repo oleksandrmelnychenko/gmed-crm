@@ -310,6 +310,31 @@ pub fn router() -> Router<AppState> {
             get(staff_get).post(staff_send),
         )
         .route("/leads/{lead_id}/payer-link/revoke", post(staff_revoke))
+        // Staff enter the payer's signed paper Selbstauskunft (owner 2026-10-30).
+        .route(
+            "/leads/{lead_id}/payer-questionnaire",
+            get(paper_get).post(paper_patch),
+        )
+        .route(
+            "/leads/{lead_id}/payer-questionnaire/consent",
+            post(paper_consent),
+        )
+        .route(
+            "/leads/{lead_id}/payer-questionnaire/identity-document",
+            post(paper_identity_document).layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
+        )
+        .route(
+            "/leads/{lead_id}/payer-questionnaire/funds-proof",
+            post(paper_funds_proof).layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
+        )
+        .route(
+            "/leads/{lead_id}/payer-questionnaire/submit",
+            post(paper_submit),
+        )
+        .route(
+            "/leads/{lead_id}/payer-questionnaire/reopen",
+            post(paper_reopen),
+        )
         .route(
             "/me/lead-requests/{lead_id}/payer-questionnaire",
             get(cabinet_get).post(cabinet_patch),
@@ -683,6 +708,9 @@ fn applies(key: &str, organisation: bool) -> bool {
 /// The row of `lead_payer_statements`.
 #[derive(Clone, Debug, Default)]
 struct Statement {
+    /// `link`, `cabinet` or `staff` (staff entered the signed paper
+    /// Selbstauskunft, owner 2026-10-30).
+    source: Option<String>,
     link_id: Option<Uuid>,
     privacy_ack_at: Option<DateTime<Utc>>,
     privacy_text_version: Option<String>,
@@ -697,7 +725,7 @@ struct Statement {
     updated_at: Option<DateTime<Utc>>,
 }
 
-const STATEMENT_COLUMNS: &str = "link_id, privacy_ack_at, privacy_text_version, privacy_ip, \
+const STATEMENT_COLUMNS: &str = "source, link_id, privacy_ack_at, privacy_text_version, privacy_ip, \
      contact_channels, confirmed_email, email_confirmed_at, salutation, first_name, last_name, \
      former_names, date_of_birth, birth_place, birth_country, citizenships, street, city, zip, \
      country, habitual_residence_country, phone, language, id_document_type, id_document_number, \
@@ -710,7 +738,17 @@ const STATEMENT_COLUMNS: &str = "link_id, privacy_ack_at, privacy_text_version, 
      payment_reason, declared_correct_at, submitted_at, \
      adopted_at, updated_at";
 
+/// `lead_payer_statements.source` of the answers staff entered from the
+/// signed paper Selbstauskunft (owner 2026-10-30).
+pub(crate) const SOURCE_STAFF: &str = "staff";
+
 impl Statement {
+    /// Staff entered these answers from the payer's signed paper
+    /// Selbstauskunft («внёс сотрудник»).
+    fn by_staff(&self) -> bool {
+        self.source.as_deref() == Some(SOURCE_STAFF)
+    }
+
     fn from_row(row: &PgRow) -> Self {
         let text = |column: &str| {
             row.try_get::<Option<String>, _>(column)
@@ -735,6 +773,7 @@ impl Statement {
             .filter_map(Owner::from_stored)
             .collect();
         Statement {
+            source: text("source"),
             link_id: row.try_get("link_id").ok().flatten(),
             privacy_ack_at: time("privacy_ack_at"),
             privacy_text_version: text("privacy_text_version"),
@@ -1834,6 +1873,11 @@ struct LeadContext {
     loaded: lead_representatives::Loaded,
     statement: Option<Statement>,
     uploads: Vec<PayerUpload>,
+    /// A current "Ausweis (Zahler/in)" / proof of the payer's funds is among
+    /// the lead's documents: the paper path files them through the document
+    /// upload, not the link, and they count for the answers staff enter.
+    identity_on_file: bool,
+    funds_proof_on_file: bool,
 }
 
 async fn load_context(
@@ -1867,6 +1911,18 @@ async fn load_context(
         .unwrap_or_default();
     let statement = load_statement(conn, lead_id).await?;
     let uploads = load_payer_uploads(conn, lead_id).await?;
+    let (identity_on_file, funds_proof_on_file): (bool, bool) = sqlx::query_as(
+        r#"SELECT
+               EXISTS (SELECT 1 FROM documents d
+                       WHERE d.lead_id = $1 AND d.art = 'payer_identity'
+                         AND d.status <> 'archived' AND d.file_deleted_at IS NULL),
+               EXISTS (SELECT 1 FROM documents d
+                       WHERE d.lead_id = $1 AND d.art = 'payer_funds_proof'
+                         AND d.status <> 'archived' AND d.file_deleted_at IS NULL)"#,
+    )
+    .bind(lead_id)
+    .fetch_one(&mut *conn)
+    .await?;
     Ok(Some(LeadContext {
         patient_name,
         primary_language: lead
@@ -1894,6 +1950,8 @@ async fn load_context(
         loaded,
         statement,
         uploads,
+        identity_on_file,
+        funds_proof_on_file,
     }))
 }
 
@@ -2121,15 +2179,20 @@ fn questionnaire(
         .collect();
     let (level, reasons) = check_level(check);
     let asked = mode == Mode::Link;
+    // Staff count the payer's copies filed on the paper path too ("Ausweis
+    // (Zahler/in)" uploaded as a lead document, owner 2026-10-30): the payer
+    // handed them over on paper, not through the link.
+    let staff = viewer == Viewer::Staff;
     let mut missing = missing_for_submit(
         &answers,
         &Requirements {
             privacy_acknowledged: statement.privacy_ack_at.is_some(),
             payer_type: &payer_type,
-            id_uploaded: !identity_documents.is_empty(),
+            id_uploaded: !identity_documents.is_empty() || (staff && context.identity_on_file),
             funds_required: level == 2,
             funds_proof_required: level == 2,
-            funds_proof_uploaded: !funds_proof_documents.is_empty(),
+            funds_proof_uploaded: !funds_proof_documents.is_empty()
+                || (staff && context.funds_proof_on_file),
             payment_route: asked.then_some(&declaration),
             organisation_follow_up: check.organisation_follow_up,
             today,
@@ -2240,6 +2303,9 @@ impl Questionnaire {
         value["privacy"]["ip"] = json!(self.statement.privacy_ip);
         value["updated_at"] = json!(self.statement.updated_at);
         value["adopted_at"] = json!(self.statement.adopted_at);
+        // Staff entered the answers from the signed paper Selbstauskunft
+        // («внёс сотрудник», owner 2026-10-30).
+        value["entered_by_staff"] = json!(self.statement.by_staff());
         value
     }
 }
@@ -2596,7 +2662,9 @@ async fn revoke_active(
 }
 
 /// Who writes the payer's answers: the payer through its link (no login,
-/// the hashed client IP on the audit row) or a paying parent in the cabinet.
+/// the hashed client IP on the audit row), a paying parent in the cabinet,
+/// or staff entering the payer's signed paper Selbstauskunft (owner rule
+/// 2026-10-29: what the payer does online, staff can do from the wizard).
 enum Writer {
     Link {
         link_id: Uuid,
@@ -2605,20 +2673,23 @@ enum Writer {
     Parent {
         user_id: Uuid,
     },
+    Staff {
+        user_id: Uuid,
+    },
 }
 
 impl Writer {
     fn actor(&self) -> Option<Uuid> {
         match self {
             Writer::Link { .. } => None,
-            Writer::Parent { user_id } => Some(*user_id),
+            Writer::Parent { user_id } | Writer::Staff { user_id } => Some(*user_id),
         }
     }
 
     fn link_id(&self) -> Option<Uuid> {
         match self {
             Writer::Link { link_id, .. } => Some(*link_id),
-            Writer::Parent { .. } => None,
+            Writer::Parent { .. } | Writer::Staff { .. } => None,
         }
     }
 
@@ -2626,6 +2697,7 @@ impl Writer {
         match self {
             Writer::Link { .. } => "payer",
             Writer::Parent { .. } => "guardian",
+            Writer::Staff { .. } => "staff",
         }
     }
 
@@ -2641,6 +2713,11 @@ impl Writer {
         match self {
             Writer::Link { link_id, .. } => context["link_id"] = json!(link_id),
             Writer::Parent { .. } => context["access_kind"] = json!("guardian"),
+            // Staff transcribe the payer's signed paper form.
+            Writer::Staff { .. } => {
+                context["access_kind"] = json!("staff");
+                context["recorded_how"] = json!("paper");
+            }
         }
         let mut event =
             audit::domain_event(action, self.actor(), entity_type, Some(entity_id), context);
@@ -2791,10 +2868,14 @@ async fn save_patch(
     body: &[u8],
     today: NaiveDate,
 ) -> Result<bool, Response> {
+    // Staff transcribe the paper form in any order (the privacy notice the
+    // payer signed on paper stays "missing" until recorded); the payer and
+    // the paying parent acknowledge it first.
+    let staff = matches!(writer, Writer::Staff { .. });
     let Some(statement) = context
         .statement
         .as_ref()
-        .filter(|statement| statement.privacy_ack_at.is_some())
+        .filter(|statement| staff || statement.privacy_ack_at.is_some())
     else {
         return Err(consent_required());
     };
@@ -2804,7 +2885,7 @@ async fn save_patch(
     let declaration = context.declaration.clone().unwrap_or_default();
     let parent = match writer {
         Writer::Parent { .. } => context.paying_parent(),
-        Writer::Link { .. } => None,
+        Writer::Link { .. } | Writer::Staff { .. } => None,
     };
     let organisation = declaration.is_organisation();
     let (answers_patch, route_patch) = split_patch(
@@ -2853,10 +2934,18 @@ async fn save_patch(
     if let Some((declaration, route_changed)) = &route
         && !route_changed.is_empty()
     {
-        lead_payer::store_payment_route(conn, lead_id, declaration)
-            .await
-            .map_err(database)?;
-        mark_payment_route(conn, lead_id).await.map_err(database)?;
+        if let Writer::Staff { user_id } = writer {
+            // Staff's transcription of the paper form counts at once, like
+            // the staff route block (owner 2026-10-26 / 2026-10-30).
+            lead_payer::store_payment_route_by_staff(conn, lead_id, declaration, *user_id)
+                .await
+                .map_err(database)?;
+        } else {
+            lead_payer::store_payment_route(conn, lead_id, declaration)
+                .await
+                .map_err(database)?;
+            mark_payment_route(conn, lead_id).await.map_err(database)?;
+        }
     }
     audit::write_in_transaction(
         conn,
@@ -2908,6 +2997,23 @@ async fn mark_payment_route(conn: &mut PgConnection, lead_id: Uuid) -> Result<()
         .execute(&mut *conn)
         .await?;
     Ok(())
+}
+
+/// Why no upload of staff's paper transcription is taken now: staff need no
+/// recorded privacy notice first (like their answers, [`save_patch`]), and the
+/// statement row is created with the upload.
+fn staff_upload_refusal(context: &LeadContext) -> Option<Response> {
+    if context.submitted_at().is_some() {
+        return Some(already_submitted());
+    }
+    (context.uploads.len() >= MAX_PAYER_UPLOADS).then(|| {
+        coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "too_many_documents",
+            "Too many documents of the payer",
+            json!({ "max_documents": MAX_PAYER_UPLOADS }),
+        )
+    })
 }
 
 /// Why no upload is taken now.
@@ -3199,6 +3305,23 @@ async fn submit_in_tx(
     .execute(&mut *conn)
     .await
     .map_err(database)?;
+    if let Writer::Staff { user_id } = writer {
+        // The answers are the payer's signed paper form as staff entered it:
+        // marked as staff's, and a link still out would let somebody else
+        // answer again — it ends (owner 2026-10-30).
+        sqlx::query(
+            "UPDATE lead_payer_statements SET source = $2, answered_by_user = $3 WHERE lead_id = $1",
+        )
+        .bind(lead_id)
+        .bind(SOURCE_STAFF)
+        .bind(user_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(database)?;
+        revoke_active(conn, lead_id, "paper_answers", Some(*user_id))
+            .await
+            .map_err(database)?;
+    }
     let adopted = adopted_declaration(&built.route, &built.answers);
     lead_payer::adopt_payer_identity(conn, lead_id, &adopted, writer.actor(), writer.link_id())
         .await
@@ -4661,6 +4784,438 @@ async fn lock_lead(conn: &mut PgConnection, lead_id: Uuid) -> Result<bool, sqlx:
     )
 }
 
+// ----------------------------------------------------------------------------
+// Staff enter the payer's paper answers (owner 2026-10-30)
+// ----------------------------------------------------------------------------
+//
+// The paper path of a third-party payer (re-check V-A7) ends with the signed
+// paper Selbstauskunft. Owner rule 2026-10-29: everything the payer does on
+// the link, staff can do from the wizard — so staff transcribe that paper
+// form into the very questionnaire the link fills (`/leads/{id}/payer-
+// questionnaire…`): the same answers, validation and "missing" list, the
+// privacy notice recorded as given on paper, the copies, and "send". The
+// sent answers carry `source = 'staff'` («внёс сотрудник»), are audited with
+// `access_kind = staff`, `recorded_how = paper`, and count everywhere a sent
+// questionnaire counts: risk blocks C/D, the GwG sheets, the payer package.
+// No risk decision is needed to record them (it is what the decision reads);
+// only the signatures wait for it.
+
+/// Why staff may not enter the paper answers now; `None` when they may.
+fn paper_refusal(context: &LeadContext) -> Option<Response> {
+    let conflict =
+        |code: &str, message: &str| Some(coded(StatusCode::CONFLICT, code, message, json!({})));
+    if context.converted {
+        return conflict("lead_converted", "The lead is converted");
+    }
+    if !context.open {
+        return conflict("lead_deleted", "The lead is deleted");
+    }
+    // A paying parent answers in the own cabinet or on the representative's
+    // sheet; only a third party of its own has a payer questionnaire here.
+    if context.mode() != Some(Mode::Link) || context.paying_parent().is_some() {
+        return conflict("no_third_party", "No third party pays");
+    }
+    None
+}
+
+/// Locks the lead and loads its context for a staff write of the paper answers.
+async fn lock_paper_context(
+    tx: &mut Transaction<'static, Postgres>,
+    lead_id: Uuid,
+) -> Result<LeadContext, Response> {
+    match lock_lead(tx, lead_id).await {
+        Ok(true) => {}
+        Ok(false) => return Err(intake::err(StatusCode::NOT_FOUND, "Lead not found")),
+        Err(error) => return Err(intake::internal(error, "lock lead")),
+    }
+    let context = load_context(tx, lead_id)
+        .await
+        .map_err(|error| intake::internal(error, "load payer questionnaire"))?
+        .ok_or_else(|| intake::err(StatusCode::NOT_FOUND, "Lead not found"))?;
+    match paper_refusal(&context) {
+        Some(response) => Err(response),
+        None => Ok(context),
+    }
+}
+
+/// The statement row staff write into: created as staff's when the payer
+/// never opened a link; a draft the payer began stays one row (last writer
+/// wins, as for the payment route).
+async fn ensure_staff_statement(
+    conn: &mut PgConnection,
+    context: &LeadContext,
+    lead_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), Response> {
+    if context.statement.is_some() {
+        return Ok(());
+    }
+    let payer_key = context
+        .declaration
+        .as_ref()
+        .map(Declaration::payer_key)
+        .unwrap_or(Value::Null);
+    sqlx::query(
+        r#"INSERT INTO lead_payer_statements (lead_id, source, payer_key, answered_by_user)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (lead_id) DO NOTHING"#,
+    )
+    .bind(lead_id)
+    .bind(SOURCE_STAFF)
+    .bind(payer_key)
+    .bind(user_id)
+    .execute(&mut *conn)
+    .await
+    .map(|_| ())
+    .map_err(database)
+}
+
+/// `GET /leads/{id}/payer-questionnaire`: the payer's questionnaire as staff
+/// enter it from paper (the payer link's shape, plus staff's fields).
+async fn paper_get(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+) -> Response {
+    if !lead_payer::may_view(&auth) {
+        return intake::err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let refusal = async {
+        let mut conn = state.db.acquire().await?;
+        Ok::<_, sqlx::Error>(
+            load_context(&mut conn, lead_id)
+                .await?
+                .map(|context| paper_refusal(&context)),
+        )
+    }
+    .await;
+    match refusal {
+        Ok(None) => intake::err(StatusCode::NOT_FOUND, "Lead not found"),
+        Ok(Some(Some(response))) => response,
+        Ok(Some(None)) => {
+            questionnaire_response(&state, lead_id, Viewer::Staff, StatusCode::OK).await
+        }
+        Err(error) => intake::internal(error, "load payer questionnaire"),
+    }
+}
+
+/// `POST /leads/{id}/payer-questionnaire/consent`: the payer acknowledged the
+/// privacy notice on the paper form (staff record it; the first time is kept).
+async fn paper_consent(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin"),
+    };
+    let context = match lock_paper_context(&mut tx, lead_id).await {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+    if let Err(response) = ensure_staff_statement(&mut tx, &context, lead_id, auth.user_id).await {
+        return response;
+    }
+    // The payer read the notice on the paper form: the payer is informed
+    // (Art. 14 DSGVO), recorded once by the staff member, as the cabinet's
+    // acknowledgement does (DEV QA 2026-10-30: «Кто платит» stayed
+    // incomplete until the checkbox was ticked by hand).
+    let informed = match sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET payer_informed_at = now(), payer_informed_by = $2, updated_at = now()
+           WHERE lead_id = $1 AND payer_informed_at IS NULL"#,
+    )
+    .bind(lead_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(done) => done.rows_affected() > 0,
+        Err(error) => return intake::internal(error, "record payer informed"),
+    };
+    let writer = Writer::Staff {
+        user_id: auth.user_id,
+    };
+    if let Err(response) = record_consent(
+        &mut tx,
+        &context,
+        &writer,
+        lead_id,
+        &body,
+        None,
+        Some("de"),
+        Some(informed),
+    )
+    .await
+    {
+        return response;
+    }
+    if let Err(error) = tx.commit().await {
+        return intake::internal(error, "commit payer consent");
+    }
+    publish(&state, Some(auth.user_id), lead_id, Some("staff")).await;
+    questionnaire_response(&state, lead_id, Viewer::Staff, StatusCode::OK).await
+}
+
+/// `POST /leads/{id}/payer-questionnaire`: staff's autosave of the paper
+/// answers (the link's keys and validation, section 8 included).
+async fn paper_patch(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin"),
+    };
+    let mut context = match lock_paper_context(&mut tx, lead_id).await {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+    if context.statement.is_none() {
+        if let Err(response) =
+            ensure_staff_statement(&mut tx, &context, lead_id, auth.user_id).await
+        {
+            return response;
+        }
+        context.statement = match load_statement(&mut tx, lead_id).await {
+            Ok(statement) => statement,
+            Err(error) => return database(error),
+        };
+    }
+    let writer = Writer::Staff {
+        user_id: auth.user_id,
+    };
+    let changed = match save_patch(
+        &mut tx,
+        &context,
+        &writer,
+        lead_id,
+        &body,
+        crate::app_time::today(),
+    )
+    .await
+    {
+        Ok(changed) => changed,
+        Err(response) => return response,
+    };
+    if let Err(error) = tx.commit().await {
+        return intake::internal(error, "commit payer answers");
+    }
+    if changed {
+        publish(&state, Some(auth.user_id), lead_id, Some("staff")).await;
+    }
+    questionnaire_response(&state, lead_id, Viewer::Staff, StatusCode::OK).await
+}
+
+async fn paper_identity_document(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    multipart: Multipart,
+) -> Response {
+    paper_upload(state, auth, lead_id, multipart, UploadKind::PayerIdentity).await
+}
+
+async fn paper_funds_proof(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    multipart: Multipart,
+) -> Response {
+    paper_upload(state, auth, lead_id, multipart, UploadKind::PayerFundsProof).await
+}
+
+/// `POST /leads/{id}/payer-questionnaire/identity-document` and
+/// `…/funds-proof`: the copy the payer handed over, uploaded by staff
+/// (`access_kind = staff`).
+async fn paper_upload(
+    state: AppState,
+    auth: AuthUser,
+    lead_id: Uuid,
+    mut multipart: Multipart,
+    kind: UploadKind,
+) -> Response {
+    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
+        return response;
+    }
+    let context = match async {
+        let mut conn = state.db.acquire().await.map_err(database)?;
+        let context = load_context(&mut conn, lead_id)
+            .await
+            .map_err(database)?
+            .ok_or_else(|| intake::err(StatusCode::NOT_FOUND, "Lead not found"))?;
+        if let Some(response) = paper_refusal(&context).or_else(|| staff_upload_refusal(&context)) {
+            return Err(response);
+        }
+        Ok(context)
+    }
+    .await
+    {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+    let built = questionnaire(
+        &context,
+        Viewer::Staff,
+        &EnhancedCheck::default(),
+        crate::app_time::today(),
+    );
+    let payer_name = built
+        .answers
+        .display_name(built.organisation)
+        .unwrap_or_else(|| "payer".to_string());
+    let file = match store_payer_file(
+        &state,
+        lead_id,
+        kind,
+        &payer_name,
+        auth.user_id,
+        "staff_paper_path",
+        &mut multipart,
+    )
+    .await
+    {
+        Ok(file) => file,
+        Err(response) => return response,
+    };
+    let writer = Writer::Staff {
+        user_id: auth.user_id,
+    };
+    let registered = async {
+        let mut tx = state
+            .db
+            .begin()
+            .await
+            .map_err(|error| intake::internal(error, "begin payer upload"))?;
+        let context = lock_paper_context(&mut tx, lead_id).await?;
+        if let Some(response) = staff_upload_refusal(&context) {
+            return Err(response);
+        }
+        ensure_staff_statement(&mut tx, &context, lead_id, auth.user_id).await?;
+        register_payer_file(&mut tx, lead_id, kind, &writer, &file).await?;
+        tx.commit().await.map_err(database)
+    }
+    .await;
+    if let Err(response) = registered {
+        intake::discard_stored_document(&state, file.document_id, &file.storage_key).await;
+        return response;
+    }
+    publish(&state, Some(auth.user_id), lead_id, Some("staff")).await;
+    questionnaire_response(&state, lead_id, Viewer::Staff, StatusCode::CREATED).await
+}
+
+/// `POST /leads/{id}/payer-questionnaire/submit`: staff confirm that the
+/// entered answers are the payer's signed paper Selbstauskunft
+/// (`declared_correct`). The statement is sent as staff's, an active link is
+/// revoked (`paper_answers`) and the risk is reassessed.
+async fn paper_submit(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin"),
+    };
+    let context = match lock_paper_context(&mut tx, lead_id).await {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+    let writer = Writer::Staff {
+        user_id: auth.user_id,
+    };
+    if let Err(response) = submit_in_tx(
+        &mut tx,
+        &context,
+        &writer,
+        Viewer::Staff,
+        lead_id,
+        declared_correct(&body),
+    )
+    .await
+    {
+        return response;
+    }
+    if let Err(error) = tx.commit().await {
+        return intake::internal(error, "commit payer submit");
+    }
+    publish(&state, Some(auth.user_id), lead_id, Some("staff")).await;
+    questionnaire_response(&state, lead_id, Viewer::Staff, StatusCode::OK).await
+}
+
+/// `POST /leads/{id}/payer-questionnaire/reopen`: staff open the sent answers
+/// again to correct them (the answers stay, the confirmation goes), like the
+/// link's "reopen".
+async fn paper_reopen(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+) -> Response {
+    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin"),
+    };
+    let context = match lock_paper_context(&mut tx, lead_id).await {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+    if context.submitted_at().is_none() {
+        return questionnaire_response(&state, lead_id, Viewer::Staff, StatusCode::OK).await;
+    }
+    let result = async {
+        sqlx::query(
+            r#"UPDATE lead_payer_statements
+               SET submitted_at = NULL, declared_correct_at = NULL
+               WHERE lead_id = $1"#,
+        )
+        .bind(lead_id)
+        .execute(&mut *tx)
+        .await?;
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "payer_questionnaire_reopened",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({ "access_kind": "staff" }),
+            ),
+        )
+        .await?;
+        crate::risk::store::reassess(
+            &mut tx,
+            lead_id,
+            crate::risk::store::Cause::Staff,
+            Some(auth.user_id),
+        )
+        .await?;
+        tx.commit().await
+    }
+    .await;
+    if let Err(error) = result {
+        return intake::internal(error, "reopen payer statement");
+    }
+    publish(&state, Some(auth.user_id), lead_id, Some("staff")).await;
+    questionnaire_response(&state, lead_id, Viewer::Staff, StatusCode::OK).await
+}
+
 /// `POST /leads/{id}/payer-link`: prepare a manual link or send an invitation.
 /// A prepared token can be mailed without rotation; failed delivery leaves it
 /// available for manual sharing. Legacy direct sends still revoke on failure.
@@ -5118,7 +5673,7 @@ pub(crate) async fn link_sent_for(
            WHERE k.lead_id = $1
            UNION ALL
            SELECT s.payer_key FROM lead_payer_statements s
-           WHERE s.lead_id = $1 AND s.source = 'cabinet'
+           WHERE s.lead_id = $1 AND s.source IN ('cabinet', 'staff')
              AND s.privacy_ack_at IS NOT NULL"#,
     )
     .bind(lead_id)
@@ -5722,6 +6277,10 @@ pub(crate) struct PackageSubject {
     pub signer_role: Option<String>,
     /// The language the payer chose (`de`, `en`, `uk`, `ru`), if any.
     pub language: Option<String>,
+    /// Staff entered the answers from the payer's signed paper Selbstauskunft
+    /// (owner 2026-10-30): the payer's documents are signed on paper too, so
+    /// no confirmed e-mail is needed to make them.
+    pub paper: bool,
 }
 
 /// `None` while the declaration names no third party.
@@ -5774,6 +6333,7 @@ pub(crate) async fn package_subject(
         acting_for,
         signer_role: role,
         language: answers.language.clone(),
+        paper: statement.is_some_and(Statement::by_staff),
     }))
 }
 
@@ -5928,7 +6488,12 @@ fn disclosure_of(
         share_percent: cents_text(owner.share_cents),
     };
     PayerSelfDisclosure {
-        mode: mode.as_str(),
+        // Answers staff entered from the paper form say so (owner 2026-10-30).
+        mode: if statement.by_staff() && !paper {
+            SOURCE_STAFF
+        } else {
+            mode.as_str()
+        },
         organisation: built.organisation,
         payer_type: built.payer_type.clone(),
         submitted_at,
@@ -6013,6 +6578,15 @@ pub(crate) async fn intake_summary(state: &AppState, lead_id: Uuid) -> Result<Va
         }
         None => None,
     };
+    // Who gave the answers and the route (DEV QA 2026-10-30: the statements
+    // still said "the payer states it on the link" after the paper path).
+    let route_by_staff: bool = sqlx::query_scalar(
+        "SELECT COALESCE(payment_route_entered_by = 'staff', false) FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .unwrap_or(false);
     Ok(json!({
         "mode": mode.map(Mode::as_str),
         "status": link
@@ -6021,6 +6595,8 @@ pub(crate) async fn intake_summary(state: &AppState, lead_id: Uuid) -> Result<Va
         "sent_at": link.as_ref().map(|(link, _, _)| link.created_at),
         "submitted_at": submitted.map(|payer| payer.submitted_at),
         "check_level": level,
+        "entered_by_staff": context.statement.as_ref().is_some_and(Statement::by_staff),
+        "payment_route_by_staff": route_by_staff,
     }))
 }
 
@@ -6110,6 +6686,8 @@ mod tests {
             loaded: lead_representatives::Loaded::default(),
             statement: None,
             uploads: Vec::new(),
+            identity_on_file: false,
+            funds_proof_on_file: false,
         };
         assert_eq!(context.blocked_reason(), Some("request_not_submitted"));
         context.request_submitted_at = Some(at);

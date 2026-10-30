@@ -22,6 +22,8 @@ export type PayerIdentificationStatus = {
   /** A signed Selbstauskunft is on file (QES or the scan of the paper copy). */
   self_disclosure_signed: boolean;
   identity_document: boolean;
+  /** Staff entered the sent answers from the paper Selbstauskunft (owner 2026-10-30); absent on an older server. */
+  statement_by_staff?: boolean;
 };
 
 /** The anchor the readiness reason `payer_not_identified` focuses. */
@@ -38,6 +40,10 @@ export type PayerIdentityFields = {
   number: string;
   issuingCountry: string;
   validUntil: string;
+  /** An organisation: whose document it is (the contact person / representative). */
+  holder?: string;
+  /** An organisation: the copy is its commercial register extract, not a person's ID. */
+  registerExtract?: boolean;
 };
 
 export const EMPTY_PAYER_IDENTITY_FIELDS: PayerIdentityFields = {
@@ -45,6 +51,8 @@ export const EMPTY_PAYER_IDENTITY_FIELDS: PayerIdentityFields = {
   number: "",
   issuingCountry: "",
   validUntil: "",
+  holder: "",
+  registerExtract: false,
 };
 
 const ID_DOCUMENT_TYPE_DE: Record<PayerIdDocumentType, string> = {
@@ -71,6 +79,9 @@ export function payerIdDocumentTypeLabel(type: PayerIdDocumentType, tx: Tx): str
  */
 export function payerIdentityNotes(fields: PayerIdentityFields): string | null {
   const parts: string[] = [];
+  const holder = fields.holder?.trim() ?? "";
+  if (fields.registerExtract) return holder ? `Handelsregisterauszug, vorgelegt von ${holder}` : null;
+  if (holder) parts.push(`Inhaber/in ${holder}`);
   const number = fields.number.trim();
   const kind = fields.type ? ID_DOCUMENT_TYPE_DE[fields.type] : "";
   if (kind || number) parts.push([kind || "Ausweisdokument", number ? `Nr. ${number}` : ""].filter(Boolean).join(" "));
@@ -80,20 +91,36 @@ export function payerIdentityNotes(fields: PayerIdentityFields): string | null {
   return parts.length > 0 ? parts.join(", ") : null;
 }
 
+/**
+ * The document's German name: a person's ID, an organisation's contact
+ * person's ID ("Ausweisdokument – vertretungsberechtigte Person Vera Muster
+ * für Kostenübernehmer Beispiel GmbH") or the organisation's commercial
+ * register extract (DEV QA 2026-10-30: the copy named the GmbH as the ID's
+ * holder).
+ */
+export function payerIdentityDocumentName(payerName: string, fields: PayerIdentityFields, organisation = false): string {
+  const name = payerName.trim();
+  if (!organisation) return name ? `Ausweisdokument – Kostenübernehmer/in ${name}` : "Ausweisdokument – Kostenübernehmer/in";
+  const payer = name ? ` – Kostenübernehmer ${name}` : " – Kostenübernehmer";
+  if (fields.registerExtract) return `Handelsregisterauszug${payer}`;
+  const holder = fields.holder?.trim();
+  return `Ausweisdokument – vertretungsberechtigte Person${holder ? ` ${holder}` : ""}${name ? ` für Kostenübernehmer ${name}` : ""}`;
+}
+
 /** The multipart body of `POST /documents/upload` for the payer's identity document on the lead. */
 export function payerIdentityUploadForm(
   leadId: string,
   file: File,
   payerName: string,
   fields: PayerIdentityFields,
+  organisation = false,
 ): FormData {
   const form = new FormData();
   form.set("file", file);
   form.set("lead_id", leadId);
   form.set("art", "payer_identity");
   form.set("category", "identity");
-  const name = payerName.trim();
-  form.set("auto_name", name ? `Ausweisdokument – Kostenübernehmer/in ${name}` : "Ausweisdokument – Kostenübernehmer/in");
+  form.set("auto_name", payerIdentityDocumentName(payerName, fields, organisation));
   form.set("document_direction", "incoming");
   form.set("access_category", "internal");
   form.set("visibility", "internal");
@@ -179,5 +206,42 @@ export function normalizePayerIdentification(value: unknown): PayerIdentificatio
     statement_sent: record.statement_sent === true,
     self_disclosure_signed: record.self_disclosure_signed === true,
     identity_document: record.identity_document === true,
+    statement_by_staff: record.statement_by_staff === true,
   };
+}
+
+/**
+ * Whether the wizard opens «Анкета плательщика» on the paper path: staff
+ * entered the answers from paper, or the payer answered on paper only (a
+ * signed paper Selbstauskunft, no link statement), or paper documents of the
+ * payer are on file while no link answers exist. The choice is derived, so a
+ * reload keeps it (DEV QA 2026-10-30).
+ */
+export function payerPaperPathDerived(
+  identification: PayerIdentificationStatus | null | undefined,
+  paperDocumentCount: number,
+  linkSubmitted: boolean,
+): boolean {
+  if (!identification) return false;
+  if (identification.statement_by_staff) return true;
+  if (identification.statement_sent || linkSubmitted) return false;
+  return identification.self_disclosure_signed || paperDocumentCount > 0;
+}
+
+/**
+ * The ID data an uploaded copy carries, as the questionnaire's keys: they
+ * fill the payer's identity document — the contact person's for an
+ * organisation — in the paper answers (DEV QA 2026-10-30). Empty fields are
+ * left out.
+ */
+export function payerIdentityAnswersPatch(fields: PayerIdentityFields): Record<string, string> {
+  const patch: Record<string, string> = {};
+  if (fields.registerExtract) return patch;
+  if (fields.type) patch.id_document_type = fields.type;
+  const number = fields.number.trim();
+  if (number) patch.id_document_number = number;
+  const country = fields.issuingCountry.trim().toUpperCase();
+  if (country) patch.id_issuing_country = country;
+  if (fields.validUntil) patch.id_valid_until = fields.validUntil;
+  return patch;
 }

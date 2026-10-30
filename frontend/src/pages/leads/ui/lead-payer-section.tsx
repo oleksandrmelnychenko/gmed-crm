@@ -53,7 +53,7 @@ import type { LeadPayerPackageState, PayerPackageDocument } from "../data/lead-p
 import { useLeadPayerPackage } from "../model/use-lead-payer-package";
 import { LeadPayerLinkPanel } from "./lead-payer-link-panel";
 import { LeadPayerPackagePanel } from "./lead-payer-package-panel";
-import { PAYER_PAPER_PATH_ID } from "../model/lead-payer-paper";
+import { PAYER_PAPER_PATH_ID, payerPaperPathDerived } from "../model/lead-payer-paper";
 import { LeadPayerPaperPath } from "./lead-payer-paper-path";
 import { LeadPayerPaymentRoute } from "./lead-payer-payment-route";
 import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata";
@@ -491,7 +491,9 @@ export function LeadPayerDeclarationSection({
     : cabinetBilling ?? (data?.declaration && invoiceToKnown ? normalizeLeadPortalBilling(data.declaration) : null);
   // "Счёт направляется" repeats step 3's recipient rows; without those (an
   // answer of before step 3) it is the only line that says where the invoice goes.
-  const recipientRows = recipientBilling ? billingStatements(recipientBilling, tx, lang, false, minor).invoice : [];
+  const recipientRows = recipientBilling
+    ? billingStatements(recipientBilling, tx, lang, false, minor, cabinet?.identification?.payment_background ?? null).invoice
+    : [];
   const stepThreeAnswered = recipientRows.some((row) => row.key === "invoice_recipient");
   const recipientStatements = recipientBilling && invoiceTo
     ? recipientRows.filter((row) => row.key !== "invoice_tax" && !(stepThreeAnswered && row.key === "invoice_to"))
@@ -528,9 +530,13 @@ export function LeadPayerDeclarationSection({
   const payerIdentification = data?.status.identification ?? null;
   const paperAvailable = Boolean(payerIdentification && !payingParent && data?.declaration?.payer_kind === "third_party");
   const showQuestionnairePaths = paperAvailable || Boolean(payerLink?.data || payerLink?.error);
-  const questionnairePath = questionnaireView?.leadId === leadId ? questionnaireView.path : "link";
-  const showPaperPath = paperAvailable && (questionnairePath === "paper" || !payerLink);
   const paperCount = paperDocumentCount?.leadId === leadId ? paperDocumentCount.count : 0;
+  // Without a choice made now, the path is derived from what is on file, so a
+  // reload opens the paper path that was done (DEV QA 2026-10-30).
+  const questionnairePath = questionnaireView?.leadId === leadId
+    ? questionnaireView.path
+    : payerPaperPathDerived(payerIdentification, paperCount, Boolean(payerLink?.data?.questionnaire?.submitted_at)) ? "paper" : "link";
+  const showPaperPath = paperAvailable && (questionnairePath === "paper" || !payerLink);
   const payerStatementOnFile = Boolean(payerIdentification
     && (payerIdentification.identified || payerIdentification.statement_sent || payerIdentification.self_disclosure_signed));
   const patientAboutPayer = form.kind === "third_party" ? data?.funds?.payer_stated_by_patient ?? null : null;
@@ -876,9 +882,14 @@ export function LeadPayerDeclarationSection({
         title={(
           <span className="inline-flex flex-wrap items-center gap-2">
             <span>{tx("Кто платит", "Wer zahlt")}</span>
-            <span className="inline-flex" data-testid="lead-payer-status-badge">
+            <span className="inline-flex" data-testid="lead-payer-status-badge" title={statusBadge.hint}>
               <StatusBadge tone={statusBadge.tone}>{statusBadge.label}</StatusBadge>
             </span>
+            {statusBadge.hint ? (
+              <span className="text-xs font-normal normal-case leading-5 text-muted-foreground" data-testid="lead-payer-status-hint">
+                {statusBadge.hint}
+              </span>
+            ) : null}
             {patientMarker && !dirty ? <PatientFieldBadge marker={patientMarker} tx={tx} /> : null}
           </span>
         )}
@@ -1299,6 +1310,7 @@ export function LeadPayerDeclarationSection({
                 leadId={leadId}
                 identification={data.status.identification}
                 payerName={payerDisplayName(data.declaration)}
+                organisation={Boolean(data.declaration.payer_type && data.declaration.payer_type !== "person")}
                 canEdit={canEdit}
                 disabled={disabled}
                 lang={lang === "de" ? "de" : "ru"}
@@ -1625,6 +1637,11 @@ export function LeadPayerSignatureFlow({
           onOpenDocument={payerPackage?.onOpenDocument}
           fallbackDocuments={{ cost_coverage: standaloneCostCoverageDocument(status, documents) }}
           paperIdentification={status?.identification ?? null}
+          lang={tx("ru", "de") === "de" ? "de" : "ru"}
+          onPaperSigned={() => {
+            void packageController.reload();
+            onChanged();
+          }}
           renderDetails={(documentId, title) => (
             <DocumentSignatureAction
               documentId={documentId}

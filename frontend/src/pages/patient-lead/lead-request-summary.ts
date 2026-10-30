@@ -356,7 +356,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       [third ? text.recipient.email : text.billingFields.invoice_email, paying && third ? "" : recipient?.email],
       [text.recipient.phone, party?.phone],
       [text.recipient.paymentReason, organisation ? party?.payment_reason : ""],
-      [billing.invoice_recipient === "self" ? text.recipient.isPayerSelf : third ? text.recipient.isPayerThirdParty : text.recipient.isPayer, yesNo(billing.invoice_recipient_is_payer)],
+      [billing.invoice_recipient === "self" ? text.recipient.isPayerSelf : third ? (organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty) : text.recipient.isPayer, yesNo(billing.invoice_recipient_is_payer)],
     ]);
   }
 

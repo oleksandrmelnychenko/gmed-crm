@@ -655,6 +655,13 @@ export function billingStatements(
    * parent), never the child.
    */
   minor = false,
+  /**
+   * Why the organisation pays as given in the GwG form ("Почему платит
+   * третье лицо"): the reason of an organisation that is the recipient and
+   * the payer (DEV QA 2026-10-30: «Почему через организацию: —» although it
+   * was filled).
+   */
+  paymentBackground: string | null = null,
 ): BillingStatements {
   const country = (code: string | null) => countryNameForDisplay(code, lang);
   const statement = (
@@ -710,7 +717,11 @@ export function billingStatements(
         invoice.push(
           statement("recipient_legal_form", tx("Правовая форма", "Rechtsform"), party.legal_form),
           statement("recipient_contact_name", tx("Контактное лицо", "Ansprechperson"), party.contact_name),
-          statement("recipient_reason", tx("Почему через организацию", "Warum über die Organisation"), party.payment_reason),
+          statement(
+            "recipient_reason",
+            tx("Почему через организацию", "Warum über die Organisation"),
+            party.payment_reason || (billing.invoice_recipient_is_payer !== false ? paymentBackground : null),
+          ),
         );
       } else {
         invoice.push(
@@ -826,10 +837,14 @@ export function paymentRouteByPayerNote(tx: Tx): string {
  * without the payer link keeps the note of before.
  */
 export function paymentRouteByPayerLine(
-  payerLink: Pick<LeadPortalPayerLink, "submitted_at"> | null | undefined,
+  payerLink: Pick<LeadPortalPayerLink, "submitted_at" | "entered_by_staff" | "payment_route_by_staff"> | null | undefined,
   tx: Tx,
 ): string {
   if (!payerLink) return paymentRouteByPayerNote(tx);
+  // Staff saved the route (the paper path, DEV QA 2026-10-30): it is there, not awaited.
+  if (payerLink.payment_route_by_staff || payerLink.entered_by_staff) {
+    return tx("Способ оплаты: внёс сотрудник (раздел «Кто платит»)", "Zahlungsweg: von GMED erfasst (Abschnitt „Wer zahlt“)");
+  }
   if (payerLink.submitted_at) {
     const at = formatAppDateTime(payerLink.submitted_at);
     return tx(`Способ оплаты: указал плательщик ${at}`, `Zahlungsweg: angegeben vom Zahler am ${at}`);

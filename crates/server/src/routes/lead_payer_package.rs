@@ -507,9 +507,12 @@ impl SignerFacts {
     }
 
     fn complete(&self) -> bool {
-        !self.first_name.is_empty()
-            && !self.last_name.is_empty()
-            && crate::email_address::is_valid_email(&self.email)
+        self.named() && crate::email_address::is_valid_email(&self.email)
+    }
+
+    /// The signer is named: enough for documents signed on paper.
+    fn named(&self) -> bool {
+        !self.first_name.is_empty() && !self.last_name.is_empty()
     }
 }
 
@@ -643,7 +646,10 @@ impl Facts {
         let (Some(declaration), Some(subject)) = (self.third_party(), self.subject.as_ref()) else {
             return Some("no_third_party");
         };
-        if subject.submitted_at.is_none() || subject.confirmed_email.is_none() {
+        // Answers staff entered from the paper form have no confirmed
+        // address: the documents are then made for the paper signature
+        // (owner 2026-10-30), the electronic send needs the address.
+        if subject.submitted_at.is_none() || (subject.confirmed_email.is_none() && !subject.paper) {
             return Some("payer_not_submitted");
         }
         if !self.declaration_missing().is_empty() {
@@ -664,7 +670,11 @@ impl Facts {
         if self.client_estimate_current == Some(false) {
             return Some("cost_estimate_outdated");
         }
-        if !self.signer().is_some_and(|signer| signer.complete()) {
+        let paper = self.subject.as_ref().is_some_and(|subject| subject.paper);
+        if !self
+            .signer()
+            .is_some_and(|signer| signer.complete() || (paper && signer.named()))
+        {
             return Some("payer_signer_incomplete");
         }
         let own_request = self.package.as_ref().and_then(|package| package.request_id);
@@ -780,6 +790,7 @@ async fn view(
     let can_send = manager
         && signature_enabled
         && blocked.is_none()
+        && facts.signer().is_some_and(|signer| signer.complete())
         && matches!(
             status,
             Some("prepared" | "declined" | "withdrawn" | "expired" | "error")
@@ -1119,6 +1130,17 @@ async fn prepare(
     };
     let mut document_ids = Vec::with_capacity(SLOTS.len());
     for (index, (_, template)) in SLOTS.into_iter().enumerate() {
+        // The payer answered on paper: the Selbstauskunft the payer signed by
+        // hand is the package's, not a new unsigned copy (owner 2026-10-30).
+        if subject.paper
+            && template == "payer_self_disclosure"
+            && let Some(signed) = facts.newest[index]
+                .as_ref()
+                .filter(|newest| newest.signed && newest.active_request.is_none())
+        {
+            document_ids.push(signed.id);
+            continue;
+        }
         let order = slot_needs_order(template).then_some(order_id);
         let replace = facts.newest[index]
             .as_ref()
@@ -1263,6 +1285,16 @@ async fn send(
             reason,
             blocked_message(reason),
             json!({ "missing": facts.declaration_missing() }),
+        );
+    }
+    // Documents made for the paper signature (no confirmed address) are not
+    // sent electronically (owner 2026-10-30).
+    if !facts.signer().is_some_and(|signer| signer.complete()) {
+        return refuse(
+            StatusCode::CONFLICT,
+            "payer_signer_incomplete",
+            blocked_message("payer_signer_incomplete"),
+            json!({}),
         );
     }
     let Some(package) = &facts.package else {

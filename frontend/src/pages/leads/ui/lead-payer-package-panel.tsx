@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
+import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
 
 import type { LeadPayerPackageState, PayerPackageDocument, PayerPackageSlot } from "../data/lead-payer-package-api";
 import type { PayerIdentificationStatus } from "../model/lead-payer-paper";
@@ -55,6 +56,8 @@ export function LeadPayerPackagePanel({
   renderDetails,
   fallbackDocuments,
   paperIdentification,
+  lang,
+  onPaperSigned,
 }: {
   leadId: string;
   state: LeadPayerPackageState;
@@ -75,6 +78,14 @@ export function LeadPayerPackagePanel({
    * (QA 2026-10-25, F-F2).
    */
   paperIdentification?: PayerIdentificationStatus | null;
+  /**
+   * The wizard's language and a reload after a document was recorded as
+   * signed on paper: every prepared document of the package can be signed on
+   * paper instead of the QES request (DEV QA 2026-10-30: items 3 and 4 had no
+   * action on the paper path).
+   */
+  lang?: "de" | "ru";
+  onPaperSigned?: () => void;
 }) {
   const [language, setLanguage] = useState<string | null>(null);
   const [busy, setBusy] = useState<"prepare" | "send" | null>(null);
@@ -101,6 +112,8 @@ export function LeadPayerPackagePanel({
       : blockedText;
   const locked = disabled || busy !== null;
   const firstDocument = rows[0]?.document ?? null;
+  // Out for the QES: the request decides; otherwise a prepared document can be signed on paper.
+  const paperSignable = canEdit && Boolean(onPaperSigned) && !(pkg && ["sending", "pending", "needs_review"].includes(pkg.status));
   const message = (cause: unknown) => payerPackageErrorText(cause, tx) ?? errorText(cause);
 
   async function prepare() {
@@ -213,6 +226,22 @@ export function LeadPayerPackagePanel({
                 <p className="break-words text-xs leading-5 text-foreground/75" data-testid={`lead-payer-package-purpose-${slot}`}>
                   {payerPackageSlotPurpose(slot, tx)}
                 </p>
+                {document && !document.signed_at && paperSignable ? (
+                  <span className="inline-flex" data-testid={`lead-payer-package-paper-sign-${slot}`}>
+                    <PaperSignatureConfirmButton
+                      documentId={document.document_id}
+                      title={document.title ?? label}
+                      lang={lang ?? "ru"}
+                      disabled={locked}
+                      label={tx("Подписано на бумаге", "Auf Papier unterschrieben")}
+                      errorText={(cause) => payerPackageErrorText(cause, tx) ?? errorText(cause)}
+                      onDone={() => {
+                        setNotice(tx("Подписанный документ сохранён", "Unterschriebenes Dokument gespeichert"));
+                        onPaperSigned?.();
+                      }}
+                    />
+                  </span>
+                ) : null}
               </div>
               {document ? <FileText aria-hidden="true" className="mt-1 size-3.5 shrink-0 text-muted-foreground" /> : null}
             </li>

@@ -231,7 +231,7 @@ test("a refused confirmation names the organisation's missing data and leads to 
   await row.getByRole("button", { name: "Подтвердить подпись" }).click();
   const refusal = wizard.locator('[data-document-row-error="gwg-org-1"]');
   await expect(refusal.locator("[data-document-row-error-text]")).toHaveText(
-    "Подтвердить подпись нельзя: не хватает данных организации-плательщика: плательщик ещё не отправил ответы по своей ссылке, правовая форма, представитель организации, причина оплаты. Эти данные организация-плательщик вносит сама по своей ссылке — отправьте или повторите ссылку в разделе «Кто платит»; затем сформируйте лист заново.",
+    "Подтвердить подпись нельзя: не хватает данных организации-плательщика: плательщик ещё не отправил ответы по своей ссылке, правовая форма, представитель организации, причина оплаты. Эти данные организация-плательщик вносит по своей ссылке, либо их вносит сотрудник с подписанной бумажной анкеты («Анкета плательщика» → «На бумаге» в разделе «Кто платит»); затем сформируйте лист заново.",
   );
   expect(calls.filter((call) => call.path === "/documents/gwg-org-1/mark-signed")).toHaveLength(1);
   await page.screenshot({ path: testInfo.outputPath("lead-gwg-legal-entity-refused-ru.png"), animations: "disabled" });

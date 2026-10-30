@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, CircleAlert, FileText, Info, LoaderCircle, Upload } from "lucide-react";
+import { Check, CircleAlert, ClipboardPen, FileText, Info, LoaderCircle, Upload } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, inputClass, selectClass, tokens } from "@/components/ui-shell";
@@ -17,6 +17,7 @@ import {
   generatePaperSelfDisclosure,
   uploadPayerIdentity,
 } from "../data/lead-payer-paper-api";
+import { saveStaffPayerAnswers } from "../data/lead-payer-paper-questionnaire-api";
 import type { Tx } from "../model/lead-payer";
 import {
   EMPTY_PAYER_IDENTITY_FIELDS,
@@ -24,10 +25,12 @@ import {
   PAYER_PAPER_PATH_ID,
   payerIdDocumentTypeLabel,
   payerIdentificationLine,
+  payerIdentityAnswersPatch,
   payerPaperDocuments,
   type PayerIdentificationStatus,
   type PayerIdentityFields,
 } from "../model/lead-payer-paper";
+import { LeadPayerPaperQuestionnaireDialog } from "./lead-payer-paper-questionnaire-dialog";
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 const ACCEPTED_TYPES = "application/pdf,image/jpeg,image/png";
@@ -48,6 +51,7 @@ export function LeadPayerPaperPath({
   leadId,
   identification,
   payerName,
+  organisation = false,
   canEdit,
   disabled = false,
   lang,
@@ -61,6 +65,8 @@ export function LeadPayerPaperPath({
   leadId: string;
   identification: PayerIdentificationStatus;
   payerName: string;
+  /** A company, an organisation or an insurer pays: the copy is its contact person's ID or its register extract. */
+  organisation?: boolean;
   canEdit: boolean;
   disabled?: boolean;
   lang: "de" | "ru";
@@ -80,6 +86,7 @@ export function LeadPayerPaperPath({
   const [uploadOpen, setUploadOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [fields, setFields] = useState<PayerIdentityFields>(EMPTY_PAYER_IDENTITY_FIELDS);
+  const [answersOpen, setAnswersOpen] = useState(false);
   const activeLead = useRef(leadId);
   activeLead.current = leadId;
 
@@ -124,7 +131,18 @@ export function LeadPayerPaperPath({
     setError("");
     setNotice("");
     try {
-      await uploadPayerIdentity(leadId, file, payerName, fields);
+      await uploadPayerIdentity(leadId, file, payerName, fields, organisation);
+      // The copy's ID data fill the paper answers' identity document — the
+      // contact person's for an organisation (DEV QA 2026-10-30). Sent
+      // answers stay as they are; staff reopen them to change.
+      const answers: Record<string, string> = payerIdentityAnswersPatch(fields);
+      const holder = fields.holder?.trim() ?? "";
+      if (organisation && holder && !fields.registerExtract) {
+        const parts = holder.split(/\s+/);
+        answers.representative_last_name = parts.pop() ?? holder;
+        if (parts.length > 0) answers.representative_first_name = parts.join(" ");
+      }
+      if (Object.keys(answers).length > 0) await saveStaffPayerAnswers(leadId, answers).catch(() => undefined);
       setUploadOpen(false);
       setFile(null);
       setFields(EMPTY_PAYER_IDENTITY_FIELDS);
@@ -194,7 +212,7 @@ export function LeadPayerPaperPath({
               {tx("Selbstauskunft плательщика", "Selbstauskunft des Zahlers")}
             </p>
             <p className="break-words text-xs leading-5 text-muted-foreground">
-              {identification.statement_sent
+              {identification.statement_sent && !identification.statement_by_staff
                 ? tx("Анкета отправлена плательщиком по ссылке", "Fragebogen vom Zahler über den Link gesendet")
                 : selfDisclosure?.signed_at
                   ? tx(`подписана на бумаге ${formatAppDate(selfDisclosure.signed_at)}`, `auf Papier unterschrieben am ${formatAppDate(selfDisclosure.signed_at)}`)
@@ -214,7 +232,8 @@ export function LeadPayerPaperPath({
               </button>
             ) : null}
           </div>
-          {mayFile && !identification.statement_sent && !selfDisclosure?.signed_at ? (
+          {/* Answers staff entered from paper still need the payer's signed form (owner 2026-10-30). */}
+          {mayFile && (!identification.statement_sent || identification.statement_by_staff) && !selfDisclosure?.signed_at ? (
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
@@ -244,12 +263,51 @@ export function LeadPayerPaperPath({
           ) : null}
         </li>
 
+        {/* (c) The answers of the signed paper form, entered by staff into the payer's own
+            questionnaire (owner rule 2026-10-29, DEV QA 2026-10-30): they count like the link's. */}
+        {!identification.statement_sent || identification.statement_by_staff ? (
+          <li className="flex min-w-0 flex-wrap items-start gap-2 px-3 py-2" data-testid="lead-payer-paper-answers" data-done={identification.statement_by_staff ? "true" : "false"}>
+            <div className="min-w-0 flex-1">
+              <p className="break-words text-sm font-medium text-foreground">
+                {tx("Ответы анкеты плательщика", "Angaben des Zahlers")}
+              </p>
+              <p className="break-words text-xs leading-5 text-muted-foreground">
+                {identification.statement_by_staff
+                  ? tx("внесены сотрудником с бумажной анкеты", "von GMED aus dem Papierfragebogen erfasst")
+                  : organisation
+                    ? tx(
+                        "представитель, его документ, бенефициары, PEP, санкции и способ оплаты — с подписанной анкеты",
+                        "Vertretung, Ausweis, wirtschaftlich Berechtigte, PEP, Sanktionen und Zahlungsweg – aus dem unterschriebenen Fragebogen",
+                      )
+                    : tx("ещё не внесены", "noch nicht erfasst")}
+              </p>
+            </div>
+            {canEdit ? (
+              <Button
+                type="button"
+                size="xs"
+                variant={identification.statement_by_staff ? "outline" : "default"}
+                disabled={locked}
+                data-testid="lead-payer-paper-answers-open"
+                onClick={() => setAnswersOpen(true)}
+              >
+                <ClipboardPen aria-hidden="true" className="size-3.5" />
+                {identification.statement_by_staff
+                  ? tx("Открыть ответы", "Angaben öffnen")
+                  : tx("Внести ответы", "Angaben erfassen")}
+              </Button>
+            ) : null}
+          </li>
+        ) : null}
+
         {/* (a) The payer's identity document. */}
         <li className="min-w-0 space-y-2 px-3 py-2" data-testid="lead-payer-paper-identity" data-done={identification.identity_document ? "true" : "false"}>
           <div className="flex min-w-0 flex-wrap items-start gap-2">
             <div className="min-w-0 flex-1">
               <p className="break-words text-sm font-medium text-foreground">
-                {tx("Документ плательщика (Ausweis)", "Ausweis des Zahlers")}
+                {organisation
+                  ? tx("Документ представителя организации / выписка из реестра", "Ausweis der vertretungsberechtigten Person / Registerauszug")
+                  : tx("Документ плательщика (Ausweis)", "Ausweis des Zahlers")}
               </p>
               {identity.length > 0 ? (
                 <ul className="space-y-0.5">
@@ -309,7 +367,39 @@ export function LeadPayerPaperPath({
                   onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                 />
               </label>
-              <div className="grid gap-3 sm:grid-cols-2">
+              {/* An organisation hands over its contact person's ID or its register extract (DEV QA 2026-10-30). */}
+              {organisation ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="min-w-0 space-y-1.5">
+                    <span className={cn(tokens.text.label, "block font-mono")}>{tx("Что загружаете", "Art der Unterlage")}</span>
+                    <select
+                      className={selectClass}
+                      value={fields.registerExtract ? "register" : "id"}
+                      disabled={locked}
+                      data-testid="lead-payer-paper-document-kind"
+                      onChange={(event) => patchField("registerExtract", event.target.value === "register")}
+                    >
+                      <option value="id">{tx("Документ представителя (контактного лица)", "Ausweis der vertretungsberechtigten Person")}</option>
+                      <option value="register">{tx("Выписка из торгового реестра (Handelsregister)", "Handelsregisterauszug")}</option>
+                    </select>
+                  </label>
+                  <label className="min-w-0 space-y-1.5">
+                    <span className={cn(tokens.text.label, "block font-mono")}>
+                      {fields.registerExtract ? tx("Кто предъявил (ФИО)", "Vorgelegt von (Name)") : tx("Чей документ (ФИО)", "Inhaber/in (Name)")}
+                    </span>
+                    <Input
+                      className={inputClass}
+                      value={fields.holder ?? ""}
+                      maxLength={200}
+                      disabled={locked}
+                      autoComplete="off"
+                      data-testid="lead-payer-paper-id-holder"
+                      onChange={(event) => patchField("holder", event.target.value)}
+                    />
+                  </label>
+                </div>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2" hidden={Boolean(fields.registerExtract)}>
                 <label className="min-w-0 space-y-1.5">
                   <span className={cn(tokens.text.label, "block font-mono")}>{tx("Вид документа", "Art des Ausweises")}</span>
                   <select
@@ -403,6 +493,16 @@ export function LeadPayerPaperPath({
         </p>
       ) : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
+      {answersOpen ? (
+        <LeadPayerPaperQuestionnaireDialog
+          leadId={leadId}
+          lang={lang}
+          tx={tx}
+          errorText={errorText}
+          onChanged={() => void changed(tx("Ответы плательщика сохранены", "Angaben des Zahlers gespeichert"))}
+          onClose={() => setAnswersOpen(false)}
+        />
+      ) : null}
       {notice ? (
         <p role="status" className="text-xs text-emerald-700" data-testid="lead-payer-paper-notice">
           {notice}

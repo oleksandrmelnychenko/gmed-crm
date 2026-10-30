@@ -9,9 +9,12 @@ import {
   PAYER_PAPER_PATH_ID,
   paperSelfDisclosurePayload,
   payerIdentificationLine,
+  payerIdentityAnswersPatch,
+  payerIdentityDocumentName,
   payerIdentityNotes,
   payerIdentityUploadForm,
   payerPaperDocuments,
+  payerPaperPathDerived,
 } from "./lead-payer-paper";
 
 const ru = (text: string) => text;
@@ -104,7 +107,9 @@ describe("payer paper path (re-check V-A7)", () => {
       statement_sent: false,
       self_disclosure_signed: false,
       identity_document: true,
+      statement_by_staff: false,
     });
+    expect(normalizePayerIdentification({ statement_sent: true, statement_by_staff: true })?.statement_by_staff).toBe(true);
     expect(normalizePayerIdentification(null)).toBeNull();
     const response = normalizePayerDeclarationResponse({
       declaration: null,
@@ -113,5 +118,37 @@ describe("payer paper path (re-check V-A7)", () => {
     expect(response?.status.identification?.identified).toBe(true);
     const older = normalizePayerDeclarationResponse({ declaration: null, status: { complete: false, missing: [], cost_assumption: {} } });
     expect(older?.status).not.toHaveProperty("identification");
+  });
+
+  it("keeps the paper path after a reload when the payer answered on paper (DEV QA 2026-10-30)", () => {
+    const none = { required: true, identified: false, statement_sent: false, self_disclosure_signed: false, identity_document: false };
+    expect(payerPaperPathDerived(none, 0, false)).toBe(false);
+    expect(payerPaperPathDerived(none, 2, false)).toBe(true);
+    expect(payerPaperPathDerived({ ...none, self_disclosure_signed: true }, 0, false)).toBe(true);
+    expect(payerPaperPathDerived({ ...none, statement_sent: true, statement_by_staff: true }, 0, false)).toBe(true);
+    // The payer answered on the link: the link stays the default.
+    expect(payerPaperPathDerived({ ...none, statement_sent: true }, 2, false)).toBe(false);
+    expect(payerPaperPathDerived(none, 2, true)).toBe(false);
+    expect(payerPaperPathDerived(null, 2, false)).toBe(false);
+  });
+
+  it("names an organisation's copy by its contact person or as the register extract, and feeds the ID data", () => {
+    const fields = { ...EMPTY_PAYER_IDENTITY_FIELDS, type: "id_card" as const, number: " L01X00T47 ", issuingCountry: "de", validUntil: "2031-01-31", holder: "Vera Vertreter" };
+    expect(payerIdentityDocumentName("Beispiel GmbH", fields, true)).toBe(
+      "Ausweisdokument – vertretungsberechtigte Person Vera Vertreter für Kostenübernehmer Beispiel GmbH",
+    );
+    expect(payerIdentityDocumentName("Beispiel GmbH", { ...fields, registerExtract: true }, true)).toBe(
+      "Handelsregisterauszug – Kostenübernehmer Beispiel GmbH",
+    );
+    expect(payerIdentityDocumentName("Erika Zahler", fields)).toBe("Ausweisdokument – Kostenübernehmer/in Erika Zahler");
+    expect(payerIdentityNotes(fields)).toBe("Inhaber/in Vera Vertreter, Personalausweis Nr. L01X00T47, Ausstellungsstaat DE, gültig bis 31.01.2031");
+    expect(payerIdentityAnswersPatch(fields)).toEqual({
+      id_document_type: "id_card",
+      id_document_number: "L01X00T47",
+      id_issuing_country: "DE",
+      id_valid_until: "2031-01-31",
+    });
+    expect(payerIdentityAnswersPatch({ ...fields, registerExtract: true })).toEqual({});
+    expect(payerIdentityAnswersPatch(EMPTY_PAYER_IDENTITY_FIELDS)).toEqual({});
   });
 });

@@ -17446,6 +17446,9 @@ async fn generate_document(
     let mut gwg_sheet_person: Option<String> = None;
     // The paying organisation a legal-entity GwG sheet is for.
     let mut gwg_legal_entity_name: Option<String> = None;
+    // A paying organisation's Selbstauskunft is named as the organisation's
+    // (DEV QA 2026-10-30), not "der zahlenden Person".
+    let mut organisation_self_disclosure = false;
     // A company, an organisation or an insurer that pays gets the sheet for
     // legal entities (owner decision 2026-10-22) instead of the sheet for
     // natural persons; `None` for every other document and payer.
@@ -19172,6 +19175,7 @@ async fn generate_document(
                     }
                     Err(response) => return response,
                 };
+            organisation_self_disclosure = disclosure.organisation;
             let agency = match load_agency_contract_settings(&state).await {
                 Ok(value) => value,
                 Err(resp) => return resp,
@@ -19182,7 +19186,11 @@ async fn generate_document(
                     Err(resp) => return resp,
                 };
             let preview = admin_preview_html(
-                "Selbstauskunft der zahlenden Person",
+                if disclosure.organisation {
+                    "Selbstauskunft der zahlenden Organisation"
+                } else {
+                    "Selbstauskunft der zahlenden Person"
+                },
                 std::slice::from_ref(&generated_doc_id),
             );
             let pdf_bytes = match build_payer_self_disclosure_pdf(
@@ -19387,6 +19395,10 @@ async fn generate_document(
         (None, Some(person)) => {
             default_generated_document_name(template, &person, generated_at, language)
         }
+        (None, None) if organisation_self_disclosure => auto_name.replace(
+            "Selbstauskunft der zahlenden Person",
+            "Selbstauskunft der zahlenden Organisation",
+        ),
         (None, None) => auto_name,
     };
     let original_filename = generated_document_file_name(&auto_name, template.file_extension);
@@ -21705,11 +21717,13 @@ fn build_single_order_pdf(
             .map(|value| format!(", geb. am {}", value.format("%d.%m.%Y")))
             .unwrap_or_default();
         // LAWYER REVIEW (2026-10-03): Schuldbeitritt — the patient stays
-        // liable next to the payer (no releasing assumption of debt).
+        // liable next to the payer (no releasing assumption of debt). "Ein
+        // Dritter" (§ 267 BGB) names a person and an organisation alike (DEV
+        // QA 2026-10-30: "eine dritte Person – Beispiel Logistik GmbH").
         admin_block(
             &mut layout,
             &format!(
-                "Die im Rahmen dieses Einzelauftrags gemäß Rahmendienstleistungsvertrag vom {} anfallenden Kosten übernimmt eine dritte Person – {}{} – (nachfolgend „Kostenübernehmer“) in voller Höhe. Der Kostenübernehmer tritt den Zahlungsverpflichtungen des Auftraggebers aus diesem Einzelauftrag durch eine gesonderte Kostenübernahmeerklärung als Gesamtschuldner bei (Schuldbeitritt).",
+                "Die im Rahmen dieses Einzelauftrags gemäß Rahmendienstleistungsvertrag vom {} anfallenden Kosten übernimmt ein Dritter – {}{} – (nachfolgend „Kostenübernehmer“) in voller Höhe. Der Kostenübernehmer tritt den Zahlungsverpflichtungen des Auftraggebers aus diesem Einzelauftrag durch eine gesonderte Kostenübernahmeerklärung als Gesamtschuldner bei (Schuldbeitritt).",
                 fmt_de_date(context.contract_date),
                 payer.name_with_salutation(),
                 payer_birth
@@ -26566,8 +26580,23 @@ fn build_payer_self_disclosure_pdf(
     );
     // Owner rule 2026-10-19/22: GMED applies the GwG due-diligence measures
     // voluntarily; the heading says so instead of claiming a legal duty.
+    // A paying organisation is no "Person" (DEV QA 2026-10-30): the neutral
+    // "Kostenübernehmer" stays, the organisation is named as such.
+    let (payer_party, payer_party_of) = if organisation {
+        (
+            "der zahlenden Organisation (Kostenübernehmer)",
+            "der zahlenden Organisation",
+        )
+    } else {
+        (
+            "der zahlenden Person (Kostenübernehmer/in)",
+            "der zahlenden Person",
+        )
+    };
     layout.text_block_centered(
-        "der zahlenden Person (Kostenübernehmer/in) – freiwillige Anwendung der GwG-Sorgfaltsmaßnahmen durch GMED (kein Verpflichteter nach § 2 GwG)",
+        &format!(
+            "{payer_party} – freiwillige Anwendung der GwG-Sorgfaltsmaßnahmen durch GMED (kein Verpflichteter nach § 2 GwG)"
+        ),
         10.0,
         false,
         TreatmentPlanPdfColor::Muted,
@@ -26576,6 +26605,9 @@ fn build_payer_self_disclosure_pdf(
     );
     let channel = if data.mode == "cabinet" {
         "über das Patientenportal".to_string()
+    } else if data.mode == super::lead_payer_link::SOURCE_STAFF {
+        // Staff transcribed the payer's signed paper form (owner 2026-10-30).
+        "auf Papier, von GMED erfasst".to_string()
     } else {
         match &email {
             Some(email) => {
@@ -26588,11 +26620,11 @@ fn build_payer_self_disclosure_pdf(
         &mut layout,
         &if paper {
             format!(
-                "Angaben der zahlenden Person zur Kostenübernahme für {patient} gegenüber {agency_name}, auf Papier ausgefüllt und eigenhändig unterschrieben. Bitte füllen Sie die leeren Felder aus und kreuzen Sie Zutreffendes an. Bitte legen Sie eine Kopie Ihres Ausweisdokuments bei."
+                "Angaben {payer_party_of} zur Kostenübernahme für {patient} gegenüber {agency_name}, auf Papier ausgefüllt und eigenhändig unterschrieben. Bitte füllen Sie die leeren Felder aus und kreuzen Sie Zutreffendes an. Bitte legen Sie eine Kopie Ihres Ausweisdokuments bei."
             )
         } else {
             format!(
-                "Angaben der zahlenden Person zur Kostenübernahme für {patient} gegenüber {agency_name}, übermittelt am {received_on} um {received_at} {channel}."
+                "Angaben {payer_party_of} zur Kostenübernahme für {patient} gegenüber {agency_name}, übermittelt am {received_on} um {received_at} {channel}."
             )
         },
         0.0,
