@@ -305,7 +305,7 @@ export function SendStep({
             lang={lang}
             testId="lead-request-submit"
             busy={busy}
-            hint={cabinetStaffText(lang).sendHint}
+            howLabel={cabinetStaffText(lang).sendHint}
             actionLabel={cabinetStaffText(lang).sendForClient}
             actionDisabled={!ready || (needsDeclaration && !confirmed)}
             onRecord={(recorded) => void send(recorded)}

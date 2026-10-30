@@ -14,6 +14,7 @@ export function StaffConsentRecordFields({
   testId,
   busy = false,
   hint,
+  howLabel,
   actionLabel,
   actionDisabled = false,
   onRecord,
@@ -24,6 +25,8 @@ export function StaffConsentRecordFields({
   busy?: boolean;
   /** A line above the fields, e.g. that the changes wait for the record. */
   hint?: string;
+  /** The label of the way when it is not a consent, e.g. how the client confirmed the details. */
+  howLabel?: string;
   /** The button text when it does more than record, e.g. «Send for the client». */
   actionLabel?: string;
   /** Keeps the button off while something else is still missing. */
@@ -38,7 +41,7 @@ export function StaffConsentRecordFields({
     <div className="mt-2 space-y-2 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid={`${testId}-record`}>
       {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
       <label className="block space-y-1 text-xs">
-        <span className="font-mono font-medium text-foreground/80">{text.consentHow}</span>
+        <span className="font-mono font-medium text-foreground/80">{howLabel ?? text.consentHow}</span>
         <select
           className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm"
           value={how}
