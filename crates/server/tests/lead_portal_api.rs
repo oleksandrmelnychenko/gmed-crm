@@ -8464,6 +8464,8 @@ async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() 
         "{intake}"
     );
     assert_eq!(intake["consent_form"]["recorded_how"], "paper", "{intake}");
+    // And who entered each part of the client's form: staff, not the patient.
+    assert_eq!(intake["marker_kinds"]["first_name"], "staff", "{intake}");
 
     // Staff send for the client only saying how the client confirmed it.
     let (status, refused) = json_request(

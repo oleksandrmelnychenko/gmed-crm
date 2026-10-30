@@ -811,7 +811,7 @@ export function LeadPayerDeclarationSection({
                 {tx("Подтверждение источника средств — загрузил пациент в кабинете", "Nachweis der Herkunft der Mittel – vom Patienten im Portal hochgeladen")}
               </AdminSectionTitle>
               {leadSelfFunds.updatedAt ? (
-                <PatientFieldBadge marker={{ at: leadSelfFunds.updatedAt, access_kind: null }} tx={tx} />
+                <PatientFieldBadge marker={{ at: leadSelfFunds.updatedAt, access_kind: null }} markerKey="enhanced_details" tx={tx} />
               ) : null}
             </div>
             {leadSelfFunds.proofDocuments ? (
@@ -1339,7 +1339,7 @@ export function LeadPayerDeclarationSection({
               </AdminSectionTitle>
               {cabinetBilling?.recipient_updated_at ? (
                 <span className="inline-flex" data-testid="lead-payer-recipient-updated">
-                  <PatientFieldBadge marker={{ at: cabinetBilling.recipient_updated_at, access_kind: null }} tx={tx} />
+                  <PatientFieldBadge marker={{ at: cabinetBilling.recipient_updated_at, access_kind: null }} markerKey="invoice_recipient" tx={tx} />
                 </span>
               ) : null}
               {/* Staff change the recipient in the client's form (owner 2026-10-29). */}

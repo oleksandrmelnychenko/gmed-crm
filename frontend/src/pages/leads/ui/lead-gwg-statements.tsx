@@ -57,7 +57,7 @@ import {
 } from "../model/lead-payer-link";
 import { statedFundsSourceLabel, statedFundsSourcesLabel } from "../model/lead-payer";
 import { identityDocumentEnteredLine } from "../model/lead-identity-document-data";
-import { PatientFieldBadge } from "./lead-wizard-portal-intake";
+import { PatientFieldBadge, useMarkerKind } from "./lead-wizard-portal-intake";
 import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
 import { uploadMoveTargets, type UploadMoveTarget } from "../model/upload-move";
 import type { ClientFormSection } from "../model/lead-client-form-steps";
@@ -363,6 +363,7 @@ function RepresentationGroup({
   card?: boolean;
 }) {
   const minor = statements.kind === "minor";
+  const representationKind = useMarkerKind("representation");
   return (
     <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && statements.persons.length > 0 && "col-span-full")} data-testid="lead-gwg-representation">
       <div className="flex flex-wrap items-center gap-2">
@@ -372,7 +373,9 @@ function RepresentationGroup({
         {updatedAt ? (
           <StatusChip tone="info" className="whitespace-normal" data-testid="lead-gwg-representation-updated">
             <CalendarDays aria-hidden="true" />
-            {`${tx("изменено в кабинете", "im Portal geändert")} · ${formatAppDateTime(updatedAt)}`}
+            {representationKind === "staff"
+              ? `${tx("внёс сотрудник", "von Mitarbeitenden")} · ${formatAppDateTime(updatedAt)}`
+              : `${tx("изменено в кабинете", "im Portal geändert")} · ${formatAppDateTime(updatedAt)}`}
           </StatusChip>
         ) : null}
         <ClientFormEditButton section="representation" className="ml-auto" />
@@ -520,7 +523,7 @@ function BillingGroup({
         </StatementHeading>
         {updatedAt ? (
           <span className="inline-flex" data-testid="lead-gwg-billing-updated">
-            <PatientFieldBadge marker={{ at: updatedAt, access_kind: null }} tx={tx} />
+            <PatientFieldBadge marker={{ at: updatedAt, access_kind: null }} markerKey="billing" tx={tx} />
           </span>
         ) : null}
         <ClientFormEditButton section="billing" className="ml-auto" />
@@ -532,7 +535,7 @@ function BillingGroup({
             statement={statement}
             source={statement.key === "invoice_recipient" && billing.recipient_updated_at ? (
               <span className="inline-flex max-w-full" data-testid="lead-gwg-recipient-updated">
-                <PatientFieldBadge marker={{ at: billing.recipient_updated_at, access_kind: null }} tx={tx} />
+                <PatientFieldBadge marker={{ at: billing.recipient_updated_at, access_kind: null }} markerKey="invoice_recipient" tx={tx} />
               </span>
             ) : undefined}
           />
@@ -707,7 +710,7 @@ function EnhancedDetailsGroup({ details, tx, card = false }: { details: LeadPort
         </h4>
         {details.updated_at ? (
           <span className="inline-flex" data-testid="lead-gwg-enhanced-details-updated">
-            <PatientFieldBadge marker={{ at: details.updated_at, access_kind: null }} tx={tx} />
+            <PatientFieldBadge marker={{ at: details.updated_at, access_kind: null }} markerKey="enhanced_details" tx={tx} />
           </span>
         ) : null}
         {details.check_required ? (

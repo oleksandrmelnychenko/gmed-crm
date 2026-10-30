@@ -1426,6 +1426,25 @@ fn patient_field_markers(lead_id: Uuid, data: &PersonalData, updates: &Value) ->
     Value::Object(markers)
 }
 
+/// Who wrote each `leads.portal_field_updates` entry: the lead, a parent
+/// or staff filling in the client's form.
+fn marker_kinds(updates: &Value) -> Value {
+    let Some(updates) = updates.as_object() else {
+        return json!({});
+    };
+    Value::Object(
+        updates
+            .iter()
+            .filter_map(|(key, update)| {
+                update
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .map(|kind| (key.clone(), json!(kind)))
+            })
+            .collect(),
+    )
+}
+
 /// The marker's time, if any (`leads.portal_field_updates` entry).
 pub(crate) fn marker_time(marker: Option<&Value>) -> Option<DateTime<Utc>> {
     marker
@@ -8205,6 +8224,9 @@ async fn get_lead_portal_intake(
         "uploads_hidden": !medical,
         "identification": identification_json,
         "identification_updated_at": identification_updated_at,
+        // Who last entered each part of the client's form (`self`, `guardian`,
+        // `staff`), keyed like `portal_field_updates` (owner 2026-10-30).
+        "marker_kinds": if statements_visible { marker_kinds(&updates) } else { json!({}) },
         "patient_request_reason": patient_request_reason,
         "identification_hidden": !statements_visible,
         "identity_documents": identity_documents,

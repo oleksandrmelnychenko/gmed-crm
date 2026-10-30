@@ -387,6 +387,7 @@ import {
   legalSexOptionElements,
   PatientDataPendingNotice,
   PatientUpdatedBanner,
+  PortalMarkerKindsContext,
   PortalInquiryConsentLine,
   PortalHealthConsentLine,
   PortalUploadsProvider,
@@ -4478,6 +4479,8 @@ export function LeadWizard({
   }, [leadId]);
   const mergePatientStep1 = useCallback(() => mergeCabinetChanges(), [mergeCabinetChanges]);
   const step1Portal = useLeadStep1Portal({ leadId, open, onPatientDataChanged: mergePatientStep1 });
+  // Who entered each part of the client's form: staff's own entries are not the patient's (owner 2026-10-30).
+  const portalMarkerKinds = useMemo(() => step1Portal.intake?.marker_kinds ?? {}, [step1Portal.intake]);
   /** The reason the lead wrote in the cabinet (trigger flow 13.1); "" without one or without medical access. */
   const patientRequestReason = step1Portal.intake?.request_reason?.text.trim() ?? "";
   // Who signs and pays (for a minor the legal representatives): shown in the
@@ -8700,6 +8703,7 @@ ${serviceCommentLines.join("\n")}`
           {/* The fieldset turns native controls off; the scope turns off the shared
               ones it cannot reach (date pickers, lists in portals) — QA 2026-10-25, F-W8. */}
           <ClientFormEditContext.Provider value={clientFormEdit}>
+          <PortalMarkerKindsContext.Provider value={portalMarkerKinds}>
           <ReadOnlyScope active={leadConverted} banner={false}>
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5">
@@ -11705,6 +11709,7 @@ ${serviceCommentLines.join("\n")}`
             </section>
           ) : null}
           </ReadOnlyScope>
+          </PortalMarkerKindsContext.Provider>
           </ClientFormEditContext.Provider>
           </fieldset>
         </main>

@@ -301,6 +301,8 @@ export type LeadPortalIntake = {
   fill_mode: Step1FillMode;
   /** Keys are lead columns: first_name, date_of_birth, street_address, … */
   patient_fields: Record<string, PatientFieldMarker>;
+  /** Who last entered each part of the client's form, keyed like the server's markers. */
+  marker_kinds?: Record<string, string>;
   /** "Who pays" as the patient stated it in the cabinet, while unchanged by staff. */
   patient_payer: PatientFieldMarker | null;
   progress: { filled: number; total: number; documents: number; submitted_at: string | null };
@@ -426,6 +428,7 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     lead_id: raw.lead_id,
     fill_mode: raw.fill_mode === "patient" ? "patient" : "staff",
     patient_fields: raw.patient_fields && typeof raw.patient_fields === "object" ? raw.patient_fields : {},
+    marker_kinds: raw.marker_kinds && typeof raw.marker_kinds === "object" && !Array.isArray(raw.marker_kinds) ? raw.marker_kinds : {},
     patient_payer: raw.patient_payer && typeof raw.patient_payer === "object" ? raw.patient_payer : null,
     payer_organisation: raw.identification_hidden ? null : normalizePayerOrganisation(raw.payer_organisation),
     consent_form: raw.identification_hidden ? null : normalizeLeadPortalConsentForm(raw.consent_form),

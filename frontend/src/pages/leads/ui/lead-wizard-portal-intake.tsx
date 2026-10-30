@@ -127,7 +127,19 @@ export function Step1PortalFieldNote({ errorId, portalField }: { errorId?: strin
   );
 }
 
-export function PatientFieldBadge({ marker, tx }: { marker: PatientFieldMarker; tx: Tx }) {
+/** Who last entered each part of the client's form (`marker_kinds` of the portal intake). */
+export const PortalMarkerKindsContext = createContext<Record<string, string>>({});
+
+/** The kind of the marker `key` («billing», «invoice_recipient», …), when the marker itself has none. */
+export function useMarkerKind(key: string | undefined): PatientFieldMarker["access_kind"] {
+  const kinds = useContext(PortalMarkerKindsContext);
+  const kind = key ? kinds[key] : undefined;
+  return kind === "self" || kind === "guardian" || kind === "staff" ? kind : null;
+}
+
+export function PatientFieldBadge({ marker: given, markerKey, tx }: { marker: PatientFieldMarker; markerKey?: string; tx: Tx }) {
+  const kindOfKey = useMarkerKind(markerKey);
+  const marker = given.access_kind ? given : { ...given, access_kind: kindOfKey };
   return (
     <Badge
       variant="outline"

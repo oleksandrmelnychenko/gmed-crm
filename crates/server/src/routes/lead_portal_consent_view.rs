@@ -134,12 +134,30 @@ pub(super) async fn load(
     let recorded_how: Option<String> = row.try_get("recorded_how")?;
     let recorded_note: Option<String> = row.try_get("recorded_note")?;
     let mut disclosure: Option<Value> = row.try_get("disclosure")?;
-    // The trusted persons are saved with the same row: staff recorded them the same way.
+    // The trusted persons keep the way of the save that recorded them: a later
+    // change of the options carries the disclosure over with its own way.
     if let Some(d) = disclosure.as_mut().filter(|d| d.is_object())
-        && recorded_how.is_some()
+        && let Some(chosen_at) = d
+            .get("chosen_at")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
     {
-        d["recorded_how"] = json!(recorded_how);
-        d["recorded_note"] = json!(recorded_note);
+        let origin: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+            r#"
+            SELECT c.recorded_how, c.recorded_note FROM consent_form_choices c
+            WHERE c.template_id = 'privacy_consents' AND c.lead_id = $1
+              AND to_jsonb(c) -> 'disclosure' ->> 'chosen_at' = $2
+            ORDER BY c.seq ASC LIMIT 1
+        "#,
+        )
+        .bind(lead_id)
+        .bind(&chosen_at)
+        .fetch_optional(db)
+        .await?;
+        if let Some((Some(how), note)) = origin {
+            d["recorded_how"] = json!(how);
+            d["recorded_note"] = json!(note);
+        }
     }
     if let Some(d) = disclosure
         .as_mut()
