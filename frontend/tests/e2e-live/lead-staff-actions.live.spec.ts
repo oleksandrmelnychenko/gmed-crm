@@ -18,6 +18,7 @@ import { E2E_SUPPORT_SECRET, STATE_FILE, type ProcessState } from "./support/pro
 // `mail-to` / read-only `sql`); FORM_LIVE_WSL_STACK=off skips them.
 // Defects this suite found on 2026-10-30 are fixed; `fixedBug` keeps them fixed.
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- live API payloads are untyped JSON checked field by field
 type Json = Record<string, any>;
 type Headers = Record<string, string>;
 
