@@ -358,8 +358,8 @@ export function signatureErrorText(
       return tx("Один из PDF не удаётся прочитать, поэтому его нельзя объединить в пакет.", "Eine der PDFs kann nicht gelesen und daher nicht in das Paket übernommen werden.");
     case "consent_choice_missing":
       return tx(
-        "Пациент ещё не выбрал согласия — используйте бумажную подпись или попросите выбрать в кабинете.",
-        "Der Patient hat die Einwilligungen noch nicht selbst ausgewählt – nutzen Sie die Unterschrift auf Papier oder bitten Sie um die Auswahl im Kundenkabinett.",
+        "В документе нет выбора согласий. Выберите их в кабинете или за клиента в анкете («Заполнить анкету за клиента»), затем создайте документ заново — или используйте бумажную подпись.",
+        "Das Dokument enthält keine Auswahl der Einwilligungen. Lassen Sie sie im Kundenkabinett treffen oder tragen Sie sie im Kundenformular für den Kunden ein und erstellen Sie das Dokument neu – oder nutzen Sie die Unterschrift auf Papier.",
       );
     case "consent_choice_changed":
       return tx(

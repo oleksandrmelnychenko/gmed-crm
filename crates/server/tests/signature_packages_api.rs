@@ -1712,12 +1712,15 @@ async fn a_consent_form_without_the_patients_own_choice_is_signed_on_paper_only(
         )
     };
 
-    // Generated before the patient chose (or without a choice at all).
+    // Generated before the patient chose: the patient has a choice now, so
+    // the form needs a new version — "changed", not "not chosen yet" (DEV QA
+    // 2026-10-30). Without any choice it stays "missing" (unit test
+    // `the_adult_and_the_minors_consent_forms_need_the_own_choice`).
     set_choice(json!({})).await;
-    assert_eq!(candidate_reason().await, "consent_choice_missing");
+    assert_eq!(candidate_reason().await, "consent_choice_changed");
     let (status, body) = send().await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["error"], "consent_choice_missing");
+    assert_eq!(body["error"], "consent_choice_changed");
     assert_eq!(body["document_id"], consents.to_string());
     let (status, state) = call(
         &env.app,
@@ -1728,11 +1731,11 @@ async fn a_consent_form_without_the_patients_own_choice_is_signed_on_paper_only(
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{state}");
-    assert_eq!(state["ineligible_reason"], "consent_choice_missing");
+    assert_eq!(state["ineligible_reason"], "consent_choice_changed");
     assert_eq!(state["can_sign_on_paper"], true);
     // Staff bindings that "preselect" channels are no choice of the patient.
     set_choice(json!({"consent_email": true, "consent_whatsapp": true})).await;
-    assert_eq!(candidate_reason().await, "consent_choice_missing");
+    assert_eq!(candidate_reason().await, "consent_choice_changed");
 
     // Generated with the patient's own choice: offered.
     let choice = own_consent_choice(&env.pool, patient).await;

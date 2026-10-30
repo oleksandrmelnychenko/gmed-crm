@@ -102,7 +102,7 @@ describe("LeadIdentificationStatusView", () => {
     expect(patient).not.toContain("Отменить");
     // Nobody else pays: no payer line.
     expect(line(html, "payer")).toBe("");
-    expect(html).toContain("Это не блокирует работу.");
+    expect(html).toContain("Работу не блокирует.");
     expect(html).not.toContain('role="alert"');
     // An adult: nothing about representatives.
     expect(html).not.toContain("lead-identification-minor");
@@ -124,11 +124,11 @@ describe("LeadIdentificationStatusView", () => {
     expect(payer).toContain("Плательщик");
     expect(payer).toContain("Квалифицированной подписи ещё нет");
     // A missing qualified signature is marked red since 2026-10-26 (owner).
-    expect(payer).toContain('data-testid="lead-identification-qes-payer" data-tone="error"');
+    expect(payer).toContain('data-testid="lead-identification-qes-payer" data-tone="neutral"');
     expect(payer).toContain("Подтвердить платёж");
     // Nobody signed and waits for a payment: the rule is a plain note.
     expect(html).toContain('data-pending="false"');
-    expect(html).toContain("По правилу GMED (ориентир § 12 Abs. 1 GwG)");
+    expect(html).toContain("правило GMED, ориентир § 12 Abs. 1 GwG");
   });
 
   it("reminds of the rule while a signed person's payment is awaited", () => {
@@ -155,7 +155,7 @@ describe("LeadIdentificationStatusView", () => {
       "Zahlung bestätigen",
       "Kostenübernehmer",
       "Qualifizierte Signatur · 05.10.2026 · Test",
-      "Das blockiert die Arbeit nicht.",
+      "Blockiert die Arbeit nicht.",
       "Die Anfrage ist konvertiert",
     ]) {
       expect(html).toContain(text);

@@ -136,12 +136,12 @@ describe("signature package composer rules", () => {
     const txRu = (ru: string) => ru;
     expect(signatureErrorText("consent_choice_missing", tx)).toContain("Unterschrift auf Papier");
     expect(signatureErrorText("consent_choice_missing", txRu)).toBe(
-      "Пациент ещё не выбрал согласия — используйте бумажную подпись или попросите выбрать в кабинете.",
+      "В документе нет выбора согласий. Выберите их в кабинете или за клиента в анкете («Заполнить анкету за клиента»), затем создайте документ заново — или используйте бумажную подпись.",
     );
     expect(signatureErrorText("consent_choice_changed", txRu)).toContain("изменился после создания документа");
     const markup = renderToStaticMarkup(<SignaturePackageComposer documentId="consent" candidates={candidates([missing])} previewedDocumentIds={[]}
       selection={emptyPackageSelection("consent")} onChange={() => undefined} />);
-    expect(markup).toContain("Unterschrift auf Papier oder bitten Sie um die Auswahl im Kundenkabinett");
+    expect(markup).toContain("oder nutzen Sie die Unterschrift auf Papier");
     // QA 2026-10-12: a choice without the three consents (A2-02) and the signer who did not
     // choose (A2-06) are named in words, never as codes.
     const incomplete = candidate("consent", { ineligible_reason: "consent_choice_incomplete" });

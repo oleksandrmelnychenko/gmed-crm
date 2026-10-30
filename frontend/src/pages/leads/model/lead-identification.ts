@@ -428,8 +428,8 @@ export function noOwnAccountPaymentHint(tx: Tx): string {
  */
 export function identificationRuleText(tx: Tx): string {
   return tx(
-    "По правилу GMED (ориентир § 12 Abs. 1 GwG) к квалифицированной подписи нужен платёж со счёта на имя этого человека. Это не блокирует работу.",
-    "Nach GMED-Regel (Orientierung § 12 Abs. 1 GwG) gehört zur qualifizierten Signatur eine Zahlung von einem Konto auf den Namen dieser Person. Das blockiert die Arbeit nicht.",
+    "Способ идентификации без копии документа: нужны оба шага — 1) квалифицированная электронная подпись (КЭП) и 2) платёж со счёта на имя этого человека (правило GMED, ориентир § 12 Abs. 1 GwG). Работу не блокирует.",
+    "Identifizierung ohne Ausweiskopie: Beide Schritte sind nötig – 1) qualifizierte elektronische Signatur (QES) und 2) Zahlung von einem Konto auf den Namen dieser Person (GMED-Regel, Orientierung § 12 Abs. 1 GwG). Blockiert die Arbeit nicht.",
   );
 }
 

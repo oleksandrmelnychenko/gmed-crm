@@ -222,14 +222,15 @@ test("without a qualified signature the labels say so, and only the patient is l
   await expect(patient.line).toContainText("Пациент");
   await expect(patient.qes).toHaveText("Квалифицированной подписи ещё нет");
   // A missing qualified signature reads as an error (owner style 22e852ce).
-  await expect(patient.qes).toHaveAttribute("data-tone", "error");
+  // A signature not given yet is a step to come, not an error (owner 2026-10-30).
+  await expect(patient.qes).toHaveAttribute("data-tone", "neutral");
   // The payment label is always there, with the button to confirm it.
   await expect(patient.payment).toHaveText("Ожидается платёж с собственного счёта");
   await expect(patient.payment).toHaveAttribute("data-tone", "warning");
   await expect(patient.line.getByRole("button")).toHaveText("Подтвердить платёж");
   await expect(row("payer").line).toHaveCount(0);
   await expect(block).toContainText(
-    "По правилу GMED (ориентир § 12 Abs. 1 GwG) к квалифицированной подписи нужен платёж со счёта на имя этого человека. Это не блокирует работу.",
+    "Способ идентификации без копии документа: нужны оба шага — 1) квалифицированная электронная подпись (КЭП) и 2) платёж со счёта на имя этого человека (правило GMED, ориентир § 12 Abs. 1 GwG). Работу не блокирует.",
   );
   // Nothing is blocked: the sheet can be created as before.
   await expect(wizard.getByTestId("gwg-identification-actions").getByRole("button")).toBeEnabled();
@@ -311,7 +312,7 @@ test("a third-party payer gets a line of its own, in German too", async ({ page 
   await expect(payer.line.getByRole("button")).toHaveText("Zurücknehmen");
   await expect(patient.payment).toHaveText("Zahlung vom eigenen Konto bestätigt · 05.10.2026 · Intake QA");
   expect(calls).toEqual([{ subject: "payer", body: { confirmed: true } }]);
-  await expect(block).toContainText("Das blockiert die Arbeit nicht.");
+  await expect(block).toContainText("Blockiert die Arbeit nicht.");
 });
 
 test("a refused change is reported and the label stays", async ({ page }) => {

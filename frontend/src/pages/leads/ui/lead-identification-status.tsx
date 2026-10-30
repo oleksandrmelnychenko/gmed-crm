@@ -27,10 +27,13 @@ import { PARENT_ROLE_CHIP_CLASS } from "./trusted-contact-role";
 // it keeps the pill shape of the other badges.
 const LABEL_CLASS = "h-auto min-h-5 max-w-full shrink justify-start rounded-[10px] text-left leading-4 whitespace-normal";
 
-function Label({ label, testId }: { label: IdentificationLabel; testId: string }) {
+function Label({ label, testId, step }: { label: IdentificationLabel; testId: string; step?: string }) {
   return (
-    <span className="inline-flex min-w-0 max-w-full" data-testid={testId} data-tone={label.tone}>
-      <StatusBadge tone={label.tone} className={LABEL_CLASS}>{label.text}</StatusBadge>
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+      {step ? <span className="shrink-0 text-[11px] font-medium text-muted-foreground">{step}</span> : null}
+      <span className="inline-flex min-w-0 max-w-full" data-testid={testId} data-tone={label.tone}>
+        <StatusBadge tone={label.tone} className={LABEL_CLASS}>{label.text}</StatusBadge>
+      </span>
     </span>
   );
 }
@@ -79,8 +82,14 @@ export function LeadIdentificationStatusView({
   ));
   return (
     <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3.5" data-testid="lead-identification-status">
-      <div className="text-xs font-semibold text-foreground">
-        {tx("Идентификация по квалифицированной подписи", "Identifizierung per qualifizierter Signatur")}
+      <div className="space-y-1">
+        <div className="text-xs font-semibold text-foreground">
+          {tx("Идентификация по квалифицированной подписи", "Identifizierung per qualifizierter Signatur")}
+        </div>
+        <p className="flex items-start gap-1.5 text-xs leading-5 text-muted-foreground" data-testid="lead-identification-rule" data-pending={paymentPending ? "true" : "false"}>
+          <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+          <span>{identificationRuleText(tx)}</span>
+        </p>
       </div>
       {status.minor ? (
         <p data-testid="lead-identification-minor">
@@ -125,8 +134,13 @@ export function LeadIdentificationStatusView({
                 {role}
                 {detail ? <StatusChip className={cn(PARENT_ROLE_CHIP_CLASS, "whitespace-normal")}>{detail}</StatusChip> : null}
               </span>
-              <Label label={person.qes ? signature : { ...signature, tone: "error" }} testId={`lead-identification-qes-${subject}`} />
-              <Label label={ownAccountPaymentLabel(person, tx, expected, paidByThirdParty)} testId={`lead-identification-payment-${subject}`} />
+              <Label step={tx("1 · Подпись КЭП", "1 · QES")} label={signature} testId={`lead-identification-qes-${subject}`} />
+              <Label step={tx("2 · Платёж со своего счёта", "2 · Zahlung vom eigenen Konto")} label={ownAccountPaymentLabel(person, tx, expected, paidByThirdParty)} testId={`lead-identification-payment-${subject}`} />
+              {person.qes && confirmed ? (
+                <StatusBadge tone="success" className={LABEL_CLASS} data-testid={`lead-identification-done-${subject}`}>
+                  {tx("Идентифицирован по КЭП", "Per QES identifiziert")}
+                </StatusBadge>
+              ) : null}
               {canEdit && canConfirm && (confirmed || expected) ? (
                 <Button
                   type="button"
@@ -163,11 +177,6 @@ export function LeadIdentificationStatusView({
       {errorMessage ? (
         <p role="alert" className="text-xs text-destructive" data-testid="lead-identification-error">{errorMessage}</p>
       ) : null}
-      {/* This is an informational rule; payment status remains on each person above. */}
-      <StatusChip tone="warning" className="w-full items-start whitespace-normal rounded-xl px-3 py-2 text-left" data-testid="lead-identification-rule" data-pending={paymentPending ? "true" : "false"}>
-        <Info aria-hidden="true" className="mt-0.5" />
-        <span className="min-w-0 leading-5">{identificationRuleText(tx)}</span>
-      </StatusChip>
     </div>
   );
 }

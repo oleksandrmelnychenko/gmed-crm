@@ -47,6 +47,8 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   // Sent requests are read-only (owner 2026-10-26); only a withdrawal stays open: "no" for
   // everybody, or a saved person removed.
   const locked = Boolean(request.submitted_at) && !staffMode;
+  // The «No» shown by default is saved nowhere yet: staff record it like any answer (DEV QA 2026-10-30).
+  const defaultNoPending = staffMode && !request.disclosure && acceptedDefaultNo(draft, request) !== draft;
   // A blank row is there already: "add a person" would be wrong, what is missing in it is meant.
   const problemMessage = (current: NonNullable<typeof problem>) =>
     current === "consent" ? text.consentRequired
@@ -74,7 +76,8 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     // answer once they leave the step (DEV 2026-10-27: a conscious «No» was
     // saved nowhere, staff saw «not answered»). Saves run on leaving only.
     // Staff passing by record no answer for the client.
-    const current = staffMode ? draftRef.current : acceptedDefaultNo(draftRef.current, base);
+    // Recorded by staff, the «No» shown by default is the client's answer too (DEV QA 2026-10-30).
+    const current = staffMode && !recorded ? draftRef.current : acceptedDefaultNo(draftRef.current, base);
     if (!disclosureChanged(current, base, viewerId) || ownMinor) return true;
     const problemNow = disclosureProblem(current);
     if (problemNow) {
@@ -256,9 +259,10 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
       </CabinetSection>
     </> : null}
 
-    {staffMode && changed && !problem ? (
+    {staffMode && (changed || defaultNoPending) && !problem ? (
       <StaffConsentRecordFields lang={lang} testId="disclosure" busy={busy}
-        hint={cabinetStaffText(lang).recordChanges} onRecord={(recorded) => void latest.current.save(recorded)} />
+        hint={changed ? cabinetStaffText(lang).recordChanges : cabinetStaffText(lang).recordDefaultNo}
+        onRecord={(recorded) => void latest.current.save(recorded)} />
     ) : null}
     {error || (changed && problem) ? <StatusChip tone={error ? "error" : "warning"} role={error ? "alert" : "status"} className="rounded-lg px-3 py-2 text-sm">
       <CircleAlert aria-hidden="true" />{error || problemMessage(problem!)}

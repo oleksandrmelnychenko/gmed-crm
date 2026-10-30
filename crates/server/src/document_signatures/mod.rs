@@ -176,6 +176,21 @@ async fn current_eligibility_with_paper(
     paper_resign: bool,
 ) -> Result<Option<&'static str>, Response> {
     if let Some(reason) = eligibility_with_paper(row, paper_resign) {
+        // A form generated before the choice was recorded (DEV QA 2026-10-30:
+        // staff recorded the options after creating the form) needs a new
+        // version, not a choice: say "changed", never "not chosen yet".
+        if reason == crate::consent_choices::MISSING
+            && crate::consent_choices::current_for(
+                &state.db,
+                row.get::<Option<Uuid>, _>("lead_id"),
+                row.get::<Option<Uuid>, _>("patient_id"),
+            )
+            .await
+            .map_err(db_error)?
+            .is_some_and(|choice| choice.choices.has_core())
+        {
+            return Ok(Some(crate::consent_choices::CHANGED));
+        }
         return Ok(Some(reason));
     }
     crate::consent_choices::changed_since_generation(

@@ -124,8 +124,8 @@ const ineligibleMessages: Record<string, [string, string]> = {
   // The consent form: with an electronic signature nobody can tick its boxes, so it needs the
   // patient's own choice from the cabinet (2026-10-12); paper stays possible.
   consent_choice_missing: [
-    "Пациент ещё не выбрал согласия — используйте бумажную подпись или попросите выбрать в кабинете.",
-    "Der Patient hat die Einwilligungen noch nicht selbst ausgewählt – nutzen Sie die Unterschrift auf Papier oder bitten Sie um die Auswahl im Kundenkabinett.",
+    "В документе нет выбора согласий. Выберите их в кабинете или за клиента в анкете («Заполнить анкету за клиента»), затем создайте документ заново — или используйте бумажную подпись.",
+    "Das Dokument enthält keine Auswahl der Einwilligungen. Lassen Sie sie im Kundenkabinett treffen oder tragen Sie sie im Kundenformular für den Kunden ein und erstellen Sie das Dokument neu – oder nutzen Sie die Unterschrift auf Papier.",
   ],
   consent_choice_changed: [
     "Выбор согласий изменился после создания документа (пациентом или исправлением сотрудника) — создайте документ заново или используйте бумажную подпись.",
