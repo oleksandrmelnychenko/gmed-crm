@@ -161,6 +161,19 @@ impl ConsentPurpose {
     }
 }
 
+/// Whose wording a consent has: staff record the client's consent, so they
+/// read the client's text — a parent's for a minor, the lead's own otherwise.
+pub(crate) fn consent_text_kind(kind: AccessKind, date_of_birth: Option<NaiveDate>) -> AccessKind {
+    if kind != AccessKind::Staff {
+        return kind;
+    }
+    if crate::routes::leads::is_minor_on(date_of_birth, crate::app_time::today()) {
+        AccessKind::Guardian
+    } else {
+        AccessKind::Own
+    }
+}
+
 /// Checkbox text after the personal data, required before "send to the
 /// manager". Wording of the owner (2026-10-03); pending legal review.
 pub(crate) fn inquiry_consent_text(kind: AccessKind, language: &str) -> Option<&'static str> {
@@ -1451,8 +1464,12 @@ pub(crate) async fn unsent_personal_fields(
         .iter()
         .copied()
         .filter(|field| {
-            marker_time(markers.get(*field))
-                .is_some_and(|at| sent_at.is_none_or(|sent_at| at > sent_at))
+            let marker = markers.get(*field);
+            marker
+                .and_then(|marker| marker.get("access_kind"))
+                .and_then(Value::as_str)
+                != Some(AccessKind::Staff.as_str())
+                && marker_time(marker).is_some_and(|at| sent_at.is_none_or(|sent_at| at > sent_at))
         })
         .collect())
 }
@@ -2969,7 +2986,8 @@ where
 /// answer. Not a change to send: medical documents added to the sent request
 /// («Dokumente nachreichen»), a new copy of an identity document (staff
 /// confirm it in place), the trusted persons (after the send only a
-/// withdrawal), the payer's files and staff's own uploads.
+/// withdrawal), the payer's files, and staff's own edits and uploads in the
+/// client's form (owner 2026-10-29).
 pub(super) const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NOT NULL AND (
     EXISTS (
         SELECT 1
@@ -2978,6 +2996,7 @@ pub(super) const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NO
                  THEN l.portal_field_updates ELSE '{}'::jsonb END
         ) AS field(name, entry)
         WHERE field.name <> 'trusted_persons'
+          AND COALESCE(field.entry->>'kind', '') <> 'staff'
           -- The paying parent's own payment route after the send goes with its save.
           AND NOT COALESCE((field.entry->>'sent_with_save')::boolean, false)
           AND (field.entry->>'at')::timestamptz > GREATEST(
@@ -3286,7 +3305,7 @@ pub(crate) async fn request_payload(
             .iter()
             .filter_map(|language| {
                 purpose
-                    .text(kind, language)
+                    .text(consent_text_kind(kind, data.date_of_birth), language)
                     .map(|text| (language.to_string(), Value::String(text.to_string())))
             })
             .collect();
@@ -6009,21 +6028,12 @@ async fn give_consent(
     } else {
         None
     };
-    let text_kind = if kind == AccessKind::Staff {
-        let minor = crate::routes::leads::is_minor_on(
-            row.try_get::<Option<NaiveDate>, _>("date_of_birth")
-                .ok()
-                .flatten(),
-            crate::app_time::today(),
-        );
-        if minor {
-            AccessKind::Guardian
-        } else {
-            AccessKind::Own
-        }
-    } else {
-        kind
-    };
+    let text_kind = consent_text_kind(
+        kind,
+        row.try_get::<Option<NaiveDate>, _>("date_of_birth")
+            .ok()
+            .flatten(),
+    );
     let Some(text) = purpose.text(text_kind, &language) else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Unsupported language");
     };
@@ -8142,7 +8152,7 @@ async fn get_lead_portal_intake(
         row.try_get::<Option<String>, _>("submitted_by_role")
             .ok()
             .flatten()
-            .map(|_| "self")
+            .map(|role| if role == "patient" { "self" } else { "staff" })
     };
     // The statements of the follow-up blocks with the lead's GwG statements;
     // staff's identity data with who entered them; the lead's own reason of

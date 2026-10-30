@@ -375,12 +375,22 @@ async fn pending_cabinet(
     };
     // A paying parent's payment route saved after the send goes to GMED with
     // its save (owner 2026-10-26): never pending.
+    // Staff's own entries in the client's form count at once (owner
+    // 2026-10-29): only the client's changes wait for a send.
+    let by_staff = |key: &str| {
+        markers
+            .get(key)
+            .and_then(|marker| marker.get("kind"))
+            .and_then(serde_json::Value::as_str)
+            == Some("staff")
+    };
     let unsent = |key: &str| {
         markers
             .get(key)
             .and_then(|marker| marker.get("sent_with_save"))
             .and_then(serde_json::Value::as_bool)
             != Some(true)
+            && !by_staff(key)
             && after(marker_time(markers.get(key)), follow_up_sent_at)
     };
     let digest_matches = |key: &str, value: String| {
@@ -436,7 +446,8 @@ async fn pending_cabinet(
     let staff_saved_representative: Option<DateTime<Utc>> =
         row.try_get("representatives_staff_at").ok().flatten();
     let questions_at = marker_time(markers.get("representative_questions"));
-    let questions_unsent = after(questions_at, follow_up_sent_at)
+    let questions_unsent = !by_staff("representative_questions")
+        && after(questions_at, follow_up_sent_at)
         && questions_at
             .zip(staff_saved_representative)
             .is_none_or(|(answered, staff)| answered > staff);

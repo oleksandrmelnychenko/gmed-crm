@@ -301,7 +301,7 @@ export type LeadPortalIntake = {
   patient_payer: PatientFieldMarker | null;
   progress: { filled: number; total: number; documents: number; submitted_at: string | null };
   submitted_at: string | null;
-  submitted_by: "self" | "guardian" | null;
+  submitted_by: "self" | "guardian" | "staff" | null;
   consents: LeadPortalConsent[];
   uploads: LeadPortalUpload[];
   uploads_hidden: boolean;

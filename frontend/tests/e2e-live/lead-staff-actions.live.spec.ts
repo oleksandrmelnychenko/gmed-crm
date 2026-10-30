@@ -16,8 +16,7 @@ import { E2E_SUPPORT_SECRET, STATE_FILE, type ProcessState } from "./support/pro
 //     npx playwright test -c playwright.form-live.config.ts lead-staff-actions
 // The e-mail and SQL checks use the WSL QA stack (`~/gmed-qa-lm-stack.sh`
 // `mail-to` / read-only `sql`); FORM_LIVE_WSL_STACK=off skips them.
-// Defects found on 2026-10-30 are reported by `knownBug` as annotations;
-// FORM_LIVE_STRICT=1 makes them fail (use it once they are fixed).
+// Defects this suite found on 2026-10-30 are fixed; `fixedBug` keeps them fixed.
 
 type Json = Record<string, any>;
 type Headers = Record<string, string>;
@@ -52,12 +51,9 @@ test.beforeAll(async ({ playwright }) => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** A defect found by this suite: reported, and fatal only with FORM_LIVE_STRICT=1. */
-function knownBug(ok: boolean, description: string) {
-  if (ok) return;
-  test.info().annotations.push({ type: "known-bug", description });
-  console.warn(`KNOWN BUG: ${description}`);
-  if (process.env.FORM_LIVE_STRICT === "1") expect(ok, description).toBe(true);
+/** A defect this suite found on 2026-10-30, fixed since: it must not come back. */
+function fixedBug(ok: boolean, description: string) {
+  expect(ok, description).toBe(true);
 }
 
 function uniqueEmail(tag: string) {
@@ -214,7 +210,7 @@ test("staff fill in the client's cabinet; consents and the send need how the cli
   const opened = await call(request, "GET", cabinet(lead.id), staffHeaders);
   expect(opened.access_kind).toBe("staff");
   // The staff dialog shows the consent text the client agrees to.
-  knownBug(Object.keys(opened.consents.health_data_processing.texts ?? {}).length > 0,
+  fixedBug(Object.keys(opened.consents.health_data_processing.texts ?? {}).length > 0,
     "GET /me/lead-requests/{id} as staff returns empty consent `texts` (request_payload passes AccessKind::Staff to ConsentPurpose::text, which has no staff wording)");
   const versions = await consentVersions(request, lead.id, staffHeaders);
 
@@ -313,7 +309,7 @@ test("staff fill in the client's cabinet; consents and the send need how the cli
   intake = await call(request, "GET", `/leads/${lead.id}/portal-intake`, staffHeaders);
   expect(intake.submitted_at).toBe(sent.submitted_at);
   expect(intake.changed_since_submit).toBe(false);
-  knownBug(intake.submitted_by !== "self",
+  fixedBug(intake.submitted_by !== "self",
     "GET /leads/{id}/portal-intake says `submitted_by: \"self\"` when staff sent the request (any non-guardian submitter with a role counts as the client)");
   // The client's own login may no longer change the sent request …
   refused = await call(request, "POST", cabinet(lead.id, "personal-data"), lead.patientHeaders, { city: "Leipzig" }, 409);
@@ -325,11 +321,11 @@ test("staff fill in the client's cabinet; consents and the send need how the cli
   await call(request, "POST", cabinet(lead.id, "personal-data"), staffHeaders, { city: "Potsdam", citizenships: ["DE", "IR"] });
   const patientView = await call(request, "GET", cabinet(lead.id), lead.patientHeaders);
   expect(patientView.personal_data.city).toBe("Potsdam");
-  knownBug(patientView.changed_since_submit === false,
+  fixedBug(patientView.changed_since_submit === false,
     "a staff correction through the client's form after the send sets `changed_since_submit` (CHANGED_SINCE_SUBMIT_SQL counts portal_field_updates markers of kind \"staff\")");
   const risk = await call(request, "GET", `/leads/${lead.id}/risk-assessment`, staffHeaders);
   const fired = (assessment: Json) => assessment.triggers.filter((trigger: Json) => trigger.active).map((trigger: Json) => trigger.key);
-  knownBug(fired(risk).includes("T1"),
+  fixedBug(fired(risk).includes("T1"),
     "a citizenship staff correct through the client's form after the send is held back as an unsent cabinet change: T1 does not fire (risk/inputs.rs unsent_personal_fields counts the staff marker)");
   await call(request, "POST", `/leads/${lead.id}/update`, staffHeaders, { citizenships: ["IR", "DE"] });
   const viaWizard = await call(request, "GET", `/leads/${lead.id}/risk-assessment`, staffHeaders);

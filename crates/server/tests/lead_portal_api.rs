@@ -8298,6 +8298,11 @@ async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() 
 
     let (status, view) = json_request(router, "GET", &base, &pm, None).await;
     assert_eq!(status, StatusCode::OK, "{view}");
+    // Staff read the wording the client agrees to (live test 2026-10-30).
+    assert!(
+        view["consents"]["lead_inquiry_processing"]["texts"]["de"].is_string(),
+        "{view}"
+    );
     let (status, _) = json_request(router, "GET", &base, &concierge, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, body) = json_request(
@@ -8473,6 +8478,8 @@ async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() 
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // Staff's own correction is no change the client still has to send.
+    assert_eq!(body["changed_since_submit"], false, "{body}");
 }
 
 /// An explicit decision fixture; the production UI never presets these answers.
