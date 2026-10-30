@@ -80,7 +80,8 @@ export function payerIdDocumentTypeLabel(type: PayerIdDocumentType, tx: Tx): str
 export function payerIdentityNotes(fields: PayerIdentityFields): string | null {
   const parts: string[] = [];
   const holder = fields.holder?.trim() ?? "";
-  if (fields.registerExtract) return holder ? `Handelsregisterauszug, vorgelegt von ${holder}` : null;
+  // The server knows a register extract by this note (owner 2026-10-30: enough for an organisation).
+  if (fields.registerExtract) return holder ? `Handelsregisterauszug, vorgelegt von ${holder}` : "Handelsregisterauszug";
   const number = fields.number.trim();
   const kind = fields.type ? ID_DOCUMENT_TYPE_DE[fields.type] : "";
   if (kind || number) parts.push([kind || "Ausweisdokument", number ? `Nr. ${number}` : ""].filter(Boolean).join(" "));

@@ -120,6 +120,8 @@ export type LeadPayerPackageState = {
   missing: string[];
   can_prepare: boolean;
   can_send: boolean;
+  /** The risk assessment holds the send: "review" until a decision, "rejected" for good. */
+  risk_hold?: "review" | "rejected" | null;
   signature_enabled: boolean;
   languages: string[];
   suggested_language: string | null;
@@ -291,6 +293,7 @@ export function normalizeLeadPayerPackageState(value: unknown): LeadPayerPackage
     missing: stringList(raw.missing),
     can_prepare: raw.can_prepare,
     can_send: raw.can_send === true,
+    risk_hold: raw.risk_hold === "review" || raw.risk_hold === "rejected" ? raw.risk_hold : null,
     signature_enabled: raw.signature_enabled !== false,
     languages: languages.length > 0 ? languages : [...PAYER_PACKAGE_LANGUAGES],
     suggested_language: textOrNull(raw.suggested_language),

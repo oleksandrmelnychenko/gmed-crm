@@ -1194,6 +1194,9 @@ struct Requirements<'a> {
     privacy_acknowledged: bool,
     payer_type: &'a str,
     id_uploaded: bool,
+    /// An organisation's register extract is on file (staff, paper path):
+    /// it stands for the representative's ID (owner 2026-10-30).
+    register_extract: bool,
     /// The enhanced check is required: the payer states the source of the
     /// funds (client and owner 2026-10-19: asked only by a trigger).
     funds_required: bool,
@@ -1265,7 +1268,11 @@ fn missing_for_submit(answers: &Answers, required: &Requirements<'_>) -> Vec<&'s
             "representative_last_name",
             filled(&answers.representative_last_name),
         ));
-        checks.extend(identity_document);
+        if required.register_extract {
+            checks.push(("id_document_upload", true));
+        } else {
+            checks.extend(identity_document);
+        }
         if owners_required {
             checks.push((
                 "beneficial_owners",
@@ -1877,6 +1884,8 @@ struct LeadContext {
     /// the lead's documents: the paper path files them through the document
     /// upload, not the link, and they count for the answers staff enter.
     identity_on_file: bool,
+    /// One of those copies is the organisation's register extract.
+    register_extract_on_file: bool,
     funds_proof_on_file: bool,
 }
 
@@ -1911,18 +1920,23 @@ async fn load_context(
         .unwrap_or_default();
     let statement = load_statement(conn, lead_id).await?;
     let uploads = load_payer_uploads(conn, lead_id).await?;
-    let (identity_on_file, funds_proof_on_file): (bool, bool) = sqlx::query_as(
-        r#"SELECT
+    let (identity_on_file, register_extract_on_file, funds_proof_on_file): (bool, bool, bool) =
+        sqlx::query_as(
+            r#"SELECT
                EXISTS (SELECT 1 FROM documents d
                        WHERE d.lead_id = $1 AND d.art = 'payer_identity'
                          AND d.status <> 'archived' AND d.file_deleted_at IS NULL),
                EXISTS (SELECT 1 FROM documents d
+                       WHERE d.lead_id = $1 AND d.art = 'payer_identity'
+                         AND d.notes LIKE 'Handelsregisterauszug%'
+                         AND d.status <> 'archived' AND d.file_deleted_at IS NULL),
+               EXISTS (SELECT 1 FROM documents d
                        WHERE d.lead_id = $1 AND d.art = 'payer_funds_proof'
                          AND d.status <> 'archived' AND d.file_deleted_at IS NULL)"#,
-    )
-    .bind(lead_id)
-    .fetch_one(&mut *conn)
-    .await?;
+        )
+        .bind(lead_id)
+        .fetch_one(&mut *conn)
+        .await?;
     Ok(Some(LeadContext {
         patient_name,
         primary_language: lead
@@ -1951,6 +1965,7 @@ async fn load_context(
         statement,
         uploads,
         identity_on_file,
+        register_extract_on_file,
         funds_proof_on_file,
     }))
 }
@@ -2189,6 +2204,7 @@ fn questionnaire(
             privacy_acknowledged: statement.privacy_ack_at.is_some(),
             payer_type: &payer_type,
             id_uploaded: !identity_documents.is_empty() || (staff && context.identity_on_file),
+            register_extract: staff && context.register_extract_on_file,
             funds_required: level == 2,
             funds_proof_required: level == 2,
             funds_proof_uploaded: !funds_proof_documents.is_empty()
@@ -6687,6 +6703,7 @@ mod tests {
             statement: None,
             uploads: Vec::new(),
             identity_on_file: false,
+            register_extract_on_file: false,
             funds_proof_on_file: false,
         };
         assert_eq!(context.blocked_reason(), Some("request_not_submitted"));
@@ -7121,6 +7138,7 @@ mod tests {
             privacy_acknowledged: true,
             payer_type: "person",
             id_uploaded: true,
+            register_extract: false,
             funds_required: level == 2,
             funds_proof_required: level == 2,
             funds_proof_uploaded: false,
@@ -7166,6 +7184,7 @@ mod tests {
             privacy_acknowledged: false,
             payer_type: "person",
             id_uploaded: false,
+            register_extract: false,
             funds_required: true,
             funds_proof_required: true,
             funds_proof_uploaded: false,
@@ -7222,6 +7241,7 @@ mod tests {
             privacy_acknowledged: true,
             payer_type: "company",
             id_uploaded: true,
+            register_extract: false,
             funds_required: false,
             funds_proof_required: false,
             funds_proof_uploaded: false,
@@ -7243,6 +7263,27 @@ mod tests {
         );
         assert!(missing.contains(&"representative_first_name"));
         assert!(missing.contains(&"beneficial_owners"));
+        assert!(missing.contains(&"id_document_number"));
+        // A register extract on file (staff, paper path) stands for the
+        // representative's ID (owner 2026-10-30).
+        let with_extract = missing_for_submit(
+            &answers,
+            &Requirements {
+                register_extract: true,
+                ..required
+            },
+        );
+        for key in [
+            "id_document_type",
+            "id_document_number",
+            "id_issuing_authority",
+            "id_issuing_country",
+            "id_valid_until",
+            "id_document_upload",
+        ] {
+            assert!(!with_extract.contains(&key), "{key}");
+        }
+        assert!(with_extract.contains(&"representative_first_name"));
         // The industry only with the enhanced check, like the occupation
         // (owner 2026-10-07, applied 2026-10-24).
         assert!(!missing.contains(&"industry"));

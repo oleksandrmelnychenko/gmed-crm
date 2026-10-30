@@ -3730,6 +3730,8 @@ export function LeadWizard({
   const savedMinorRef = useRef(false);
   const [amlSheetOpen, setAmlSheetOpen] = useState(false);
   const [amlSheetError, setAmlSheetError] = useState("");
+  // The text of the wizard's last error: a sheet over the wizard repeats it in place.
+  const lastWizardErrorRef = useRef("");
   // The enhanced AML block shows the payer form's own interest and source of funds (owner 2026-10-19).
   const [payerAmlSlot, setPayerAmlSlot] = useState<HTMLDivElement | null>(null);
   // "Bearbeiter/in": the staff who may carry out the check (owner 2026-10-19).
@@ -4142,6 +4144,7 @@ export function LeadWizard({
   const orderPositionCount = orderServiceLines.length + selectedCostEstimateWorkTypes.length;
 
   const showWizardError = useCallback((nextError: unknown) => {
+    lastWizardErrorRef.current = errorText(nextError, tx);
     if (isLeadConvertedError(nextError)) {
       // 409 `lead_converted`: the banner says it instead of a generic error.
       setConvertedByServer(true);
@@ -4154,6 +4157,7 @@ export function LeadWizard({
     if (reasons.length > 0) {
       const firstReason = reasons[0];
       if (!firstReason) return;
+      lastWizardErrorRef.current = readinessReasonText(firstReason, tx, false, null);
       setError("");
       setValidationContext({ kind: "server", reasons });
       setStep(readinessReasonStep(firstReason));
@@ -5065,11 +5069,13 @@ export function LeadWizard({
     pep: amlPepTriggered,
   });
   // The EDD form asks the country fields for a country tier (the server checks the same).
-  const amlCountryFieldsRequired = amlDocumentRiskTier === "blacklist" || amlDocumentRiskTier === "high_risk";
   const amlTriggeredCountries = useMemo(
     () => [...new Set([...(amlRisk?.countries ?? []), ...(enhancedCheck?.countries ?? [])])],
     [amlRisk, enhancedCheck],
   );
+  // As the server (aml_required_fields_missing): a triggering country asks the country fields too.
+  const amlCountryFieldsRequired = amlDocumentRiskTier === "blacklist" || amlDocumentRiskTier === "high_risk"
+    || amlTriggeredCountries.length > 0;
   const agencyServiceById = useMemo(
     () => new Map(agencyServices.map((service) => [service.id, service])),
     [agencyServices],
@@ -6600,12 +6606,15 @@ export function LeadWizard({
       const saved = await payerAutosaveRegistry.flush(leadId);
       if (activePayerLeadIdRef.current !== leadId) return false;
       if (saved) return true;
-      if (hydrated.current === leadId) setError(tx(
+      const message = tx(
         "Данные плательщика не сохранены. Проверьте блок «Кто платит» и повторите сохранение.",
         "Die Zahlerangaben sind nicht gespeichert. Prüfen Sie „Wer zahlt“ und versuchen Sie das Speichern erneut.",
-      ));
+      );
+      lastWizardErrorRef.current = message;
+      if (hydrated.current === leadId) setError(message);
     } catch (nextError) {
-      if (hydrated.current === leadId) setError(errorText(nextError, tx));
+      lastWizardErrorRef.current = errorText(nextError, tx);
+      if (hydrated.current === leadId) setError(lastWizardErrorRef.current);
     }
     return false;
   }
@@ -6968,7 +6977,10 @@ export function LeadWizard({
     if (!draft) return false;
     // One generation at a time: a second click before the busy state shows
     // (or after a network error) made a second v1 (DEV 2026-10-24).
-    if (documentGenerationRef.current) return false;
+    if (documentGenerationRef.current) {
+      lastWizardErrorRef.current = tx("Документ уже создаётся — дождитесь окончания", "Das Dokument wird bereits erstellt – bitte warten");
+      return false;
+    }
     documentGenerationRef.current = true;
     setBusy(`generate-${templateId}`);
     setError("");
@@ -7046,15 +7058,18 @@ export function LeadWizard({
     event.preventDefault();
     if (!draft) return;
     setAmlSheetError("");
+    lastWizardErrorRef.current = "";
     const generated = await generateLeadComplianceDocument("enhanced_due_diligence");
     if (generated) {
       setAmlSheetOpen(false);
       await refreshLeadState();
     } else {
-      setAmlSheetError(tx(
+      // The reason itself: the wizard banner sits behind this sheet (QA 2026-10-30).
+      const generic = tx(
         "Не удалось сохранить проверку и создать документ",
         "Prüfung konnte nicht gespeichert und das Dokument nicht erstellt werden",
-      ));
+      );
+      setAmlSheetError(lastWizardErrorRef.current ? `${generic}: ${lastWizardErrorRef.current}` : generic);
     }
   }
 

@@ -107,6 +107,10 @@ export function LeadPayerPackagePanel({
   // Why the QES button is off, said beside it (QA 2026-10-25).
   const sendDisabledHint = !state.signature_enabled
     ? payerPackageSignatureDisabledText(tx)
+    : state.risk_hold === "rejected"
+      ? tx("Оценка риска отклонила лида: пакет плательщику отправить нельзя.", "Die Risikobewertung hat den Lead abgelehnt: Das Zahlerpaket kann nicht gesendet werden.")
+      : state.risk_hold === "review"
+        ? tx("Оценка риска ждёт решения сотрудника: пакет отправляется после него («Оценка риска»).", "Die Risikobewertung wartet auf eine Entscheidung: Das Paket wird danach gesendet („Risikobewertung“).")
     : pkg && outdated.length > 0
       ? tx("Пакет устарел — пересоздайте документы", "Paket veraltet – Unterlagen neu erstellen")
       : blockedText;

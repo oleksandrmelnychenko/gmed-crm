@@ -343,6 +343,10 @@ export function signatureErrorText(
       return tx("Домен e-mail одного из подписантов не принимает почту. Проверьте адреса подписантов.", "Die Domain der E-Mail-Adresse einer unterzeichnenden Person empfängt keine E-Mails. Bitte die Adressen prüfen.");
     case "minor_needs_representative":
       return tx("Несовершеннолетний подписывает только вместе с законным представителем.", "Minderjährige unterschreiben nur zusammen mit der gesetzlichen Vertretung.");
+    case "order_document_outdated":
+      return tx("Документ заказа старше последнего изменения заказа. Создайте новую версию и отправьте её.", "Der Auftrag ist älter als die letzte Änderung des Auftrags. Erstellen Sie eine neue Version und senden Sie diese.");
+    case "estimate_document_outdated":
+      return tx("Смета старше последнего изменения заказа. Создайте новую версию и отправьте её.", "Der Kostenvoranschlag ist älter als die letzte Änderung des Auftrags. Erstellen Sie eine neue Version und senden Sie diese.");
     case "signature_already_pending":
       return tx("Один из документов уже отправлен на подпись в другом запросе.", "Eines der Dokumente ist bereits in einer anderen Anfrage zur Unterschrift versendet.");
     case "onboarding_package_incomplete":

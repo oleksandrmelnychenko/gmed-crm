@@ -783,6 +783,18 @@ async fn view(
     let status = facts.status();
     let outdated = facts.outdated_reasons();
     let manager = may_send(auth);
+    // The risk gate refuses the send (409 risk_review_required) while the
+    // stored assessment holds it: the panel says so before the click (QA 2026-10-30).
+    let risk_hold = crate::risk::store::load(conn, lead_id)
+        .await?
+        .filter(|assessment| assessment.holds())
+        .map(|assessment| {
+            if assessment.status == crate::risk::store::STATUS_REJECTED {
+                "rejected"
+            } else {
+                "review"
+            }
+        });
     let can_prepare = manager
         && blocked.is_none()
         && !matches!(status, Some("sending" | "pending" | "needs_review"))
@@ -795,7 +807,8 @@ async fn view(
             status,
             Some("prepared" | "declined" | "withdrawn" | "expired" | "error")
         )
-        && outdated.is_empty();
+        && outdated.is_empty()
+        && risk_hold.is_none();
     let attachments = match facts
         .package
         .as_ref()
@@ -879,6 +892,7 @@ async fn view(
         "missing": facts.declaration_missing(),
         "can_prepare": can_prepare,
         "can_send": can_send,
+        "risk_hold": risk_hold,
         "signature_enabled": signature_enabled,
         "languages": document_signatures::invitation_languages(),
         "suggested_language": suggested_language,

@@ -60,6 +60,11 @@ pub(super) struct LegalEntitySheet {
     pub id_valid_until: Option<NaiveDate>,
     /// A copy of that document was uploaded through the link.
     pub id_document_on_file: bool,
+    /// Staff filed the organisation's commercial register extract on the
+    /// paper path (a `payer_identity` document noted "Handelsregisterauszug"):
+    /// enough for an organisation, no representative's ID needed (owner
+    /// 2026-10-30).
+    pub register_extract_on_file: bool,
     /// The day the payer sent the answers; `None` while nothing was sent.
     pub statement_submitted_on: Option<NaiveDate>,
     /// Staff entered the answers from the organisation's signed paper
@@ -388,7 +393,13 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
     let identity_document = gwg_identity_document_line(sheet.identity_document());
     items.push(Line(
         "Ausweisdokument (Art, Nummer, ausstellende Behörde)",
-        Some(identity_document).filter(|line| !line.is_empty()),
+        Some(identity_document)
+            .filter(|line| !line.is_empty())
+            .or_else(|| {
+                sheet
+                    .register_extract_on_file
+                    .then(|| "Handelsregisterauszug (statt Ausweis)".to_string())
+            }),
     ));
     items.push(Check(
         gwg_identity_copy_valid(sheet.id_document_on_file, sheet.id_valid_until, today),
@@ -396,7 +407,7 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
             .to_string(),
     ));
     items.push(Check(
-        false,
+        sheet.register_extract_on_file,
         "Die Berechtigung der auftretenden Person, für den Vertragspartner zu handeln, wurde überprüft (Registerauszug bzw. Vollmacht)."
             .to_string(),
     ));
@@ -604,16 +615,19 @@ pub(super) fn missing_fields(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<
         valid_until: sheet.id_valid_until,
         unreadable: false,
     };
-    let problems = crate::services::identity_document::problems(
-        &document,
-        sheet.representative_birth_date,
-        today,
-    );
-    for problem in problems {
-        push(problem);
-    }
-    if !sheet.id_document_on_file {
-        push("id_upload");
+    // A register extract stands for the representative's ID.
+    if !sheet.register_extract_on_file {
+        let problems = crate::services::identity_document::problems(
+            &document,
+            sheet.representative_birth_date,
+            today,
+        );
+        for problem in problems {
+            push(problem);
+        }
+        if !sheet.id_document_on_file {
+            push("id_upload");
+        }
     }
     if sheet.named_owners().is_empty() && sheet.beneficial_owners_none != Some(true) {
         push("beneficial_owners");
@@ -659,7 +673,15 @@ pub(super) async fn load(
                         AND doc.file_deleted_at IS NULL
                         AND doc.status <> 'archived'
                         AND doc.art = 'payer_identity'
-                  ) AS identity_on_file
+                  ) AS identity_on_file,
+                  EXISTS (
+                      SELECT 1 FROM documents doc
+                      WHERE doc.lead_id = l.id
+                        AND doc.file_deleted_at IS NULL
+                        AND doc.status <> 'archived'
+                        AND doc.art = 'payer_identity'
+                        AND doc.notes LIKE 'Handelsregisterauszug%'
+                  ) AS register_extract_on_file
            FROM leads l
            LEFT JOIN lead_payer_declarations d ON d.lead_id = l.id
            LEFT JOIN lead_gwg_declarations g ON g.lead_id = l.id
@@ -736,6 +758,9 @@ pub(super) async fn load(
         city: trimmed(declaration.city.as_deref()),
         country: trimmed(declaration.country.as_deref()),
         id_document_on_file: lead.try_get::<bool, _>("identity_on_file").unwrap_or(false),
+        register_extract_on_file: lead
+            .try_get::<bool, _>("register_extract_on_file")
+            .unwrap_or(false),
         enhanced_check_required,
         increased_risk: gwg_increased_risk(&aml, enhanced_check_required),
         unusual_transaction: aml.unusual_complex_or_large
@@ -981,6 +1006,7 @@ mod tests {
             id_issued_on: Some(day(2020, 1, 15)),
             id_valid_until: Some(day(2030, 1, 14)),
             id_document_on_file: true,
+            register_extract_on_file: false,
             statement_submitted_on: Some(day(2026, 10, 20)),
             beneficial_owners: vec![json!({
                 "first_name": "Max",
@@ -1227,6 +1253,33 @@ mod tests {
                 "Die erforderliche Kopie"
             ),
             Some(false)
+        );
+
+        // A register extract stands for the representative's ID (owner
+        // 2026-10-30): no ID data is asked, the authority check is ticked.
+        let extract = LegalEntitySheet {
+            id_document_type: None,
+            id_document_number: None,
+            id_issuing_authority: None,
+            id_issuing_country: None,
+            id_issued_on: None,
+            id_valid_until: None,
+            id_document_on_file: true,
+            register_extract_on_file: true,
+            ..complete()
+        };
+        assert!(missing_fields(&extract, day(2026, 10, 22)).is_empty());
+        let items = content(&extract, day(2026, 10, 22));
+        assert_eq!(
+            checked(&items, "Die Berechtigung der auftretenden Person"),
+            Some(true)
+        );
+        assert_eq!(
+            value(
+                &items,
+                "Ausweisdokument (Art, Nummer, ausstellende Behörde)"
+            ),
+            Some("Handelsregisterauszug (statt Ausweis)")
         );
 
         // "No owner above 25 %" answers the question; the patient's reason

@@ -340,6 +340,26 @@ pub(super) async fn create_request(
         {
             return Err(document_error(StatusCode::CONFLICT, reason, id));
         }
+        // An order document or cost estimate older than the order's last
+        // change of terms is not sent out for a signature either, as the
+        // paper signature refuses it (paper.rs, QA 2026-10-30).
+        if !paper_ids.contains(&id) {
+            let (current, template): (Option<bool>, Option<String>) = sqlx::query_as(
+                "SELECT document_terms_current(d.id), d.generated_template_id FROM documents d WHERE d.id = $1",
+            )
+            .bind(id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(db_error)?;
+            if current == Some(false) {
+                let reason = if template.as_deref() == Some("order_cost_estimate") {
+                    "estimate_document_outdated"
+                } else {
+                    "order_document_outdated"
+                };
+                return Err(document_error(StatusCode::CONFLICT, reason, id));
+            }
+        }
         if let Some(statute) = electronic_form_excluded(row) {
             return Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
