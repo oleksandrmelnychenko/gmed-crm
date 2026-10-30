@@ -2593,6 +2593,8 @@ function readinessReasonLabel(reason: string, tx: Tx, minor = false) {
     // form, Anlage 1) is missing (owner naming 2026-10-23). The consents given in the cabinet do not replace the
     // signed form, and the optional disclosure to third parties is no part of it.
     "Compliance is not signed yet": tx("Нет подписанного пакета DSGVO (форма согласия, приложение 1)", "Unterschriebenes DSGVO-Paket fehlt (Einverständniserklärung, Anlage 1)"),
+    // An open GwG sheet of the payer keeps the compliance open (owner 2026-10-30).
+    "Payer GwG sheet is not signed": tx("Подпишите лист идентификации GwG плательщика", "GwG-Identifizierungsbogen des Zahlers unterschreiben"),
     "Birth date is missing": tx("Укажите дату рождения", "Geburtsdatum angeben"),
     "Legal sex is missing": tx("Укажите пол по документам", "Geschlecht laut Ausweisdokument angeben"),
     "Email or phone is required": tx("Укажите электронную почту или телефон", "E-Mail-Adresse oder Telefonnummer angeben"),
@@ -2656,6 +2658,7 @@ function readinessReasonStep(reason: string): StepId {
   const steps: Record<string, StepId> = {
     "Lead must be qualified before conversion": "documents",
     "Compliance is not signed yet": "documents",
+    "Payer GwG sheet is not signed": "documents",
     "Birth date is missing": "master_data",
     "Legal sex is missing": "master_data",
     "Email or phone is required": "master_data",

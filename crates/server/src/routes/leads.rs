@@ -2677,6 +2677,10 @@ struct LeadConversionReadinessInput {
     enhanced_due_diligence_required: bool,
     enhanced_due_diligence_document_generated: bool,
     enhanced_due_diligence_document_signed: bool,
+    /// A GwG sheet of the third-party payer was generated and is not signed
+    /// yet: the compliance is not complete (owner decision 2026-10-30). The
+    /// sheet itself stays voluntary; only an open one counts.
+    payer_gwg_sheet_unsigned: bool,
     contract_signed: bool,
     /// The selected contract was terminated (repeat intake): a new contract
     /// must be created, so the reason must say so instead of "not signed".
@@ -2730,7 +2734,9 @@ fn evaluate_lead_conversion_readiness(
     input: &LeadConversionReadinessInput,
 ) -> LeadConversionReadiness {
     let lead_qualified = input.qualification_status == "qualified";
-    let compliance_completed = input.compliance_status == "signed";
+    let compliance_signed = input.compliance_status == "signed";
+    // The payer's open GwG sheet keeps the compliance open (owner 2026-10-30).
+    let compliance_completed = compliance_signed && !input.payer_gwg_sheet_unsigned;
     let birth_date_present = input.date_of_birth.is_some();
     let legal_sex_present = input.legal_sex.as_deref().is_some_and(is_valid_legal_sex);
     let primary_contact_present = input
@@ -3002,8 +3008,11 @@ fn evaluate_lead_conversion_readiness(
     ];
 
     let mut qualification_reasons = Vec::new();
-    if !compliance_completed {
+    if !compliance_signed {
         qualification_reasons.push("Compliance is not signed yet".to_string());
+    }
+    if input.payer_gwg_sheet_unsigned {
+        qualification_reasons.push("Payer GwG sheet is not signed".to_string());
     }
     if !birth_date_present {
         qualification_reasons.push("Birth date is missing".to_string());
@@ -3216,6 +3225,7 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         enhanced_due_diligence_document_signed: row
             .try_get("enhanced_due_diligence_document_signed")
             .unwrap_or(false),
+        payer_gwg_sheet_unsigned: row.try_get("payer_gwg_sheet_unsigned").unwrap_or(false),
         contract_signed: row.try_get("contract_signed").unwrap_or(false),
         contract_terminated: false,
         framework_document_generated: row.try_get("framework_document_generated").unwrap_or(false),
@@ -3413,6 +3423,18 @@ async fn load_lead_conversion_readiness(
                          AND d.compliance_kind = 'enhanced_due_diligence'
                          AND d.signed_at IS NOT NULL
                    ) AS enhanced_due_diligence_document_signed,
+                   EXISTS (
+                       SELECT 1 FROM documents d
+                       WHERE d.lead_id = leads.id
+                         AND d.generated_template_id = 'gwg_identification'
+                         AND d.status = 'active'
+                         AND d.file_deleted_at IS NULL
+                         -- The payer's sheet: a person's (subject "payer") or an
+                         -- organisation's (the legal-entity form).
+                         AND (d.generated_bindings -> 'gwg_identification' ->> 'subject' = 'payer'
+                              OR d.generated_bindings -> 'gwg_identification' ->> 'form' = 'legal_entity')
+                         AND d.signed_at IS NULL
+                   ) AS payer_gwg_sheet_unsigned,
                   -- A repeat intake may inherit the patient's signed framework
                   -- contract (wizard_state.framework_contract_id); that contract
                   -- and its already generated document count as done.
@@ -13671,6 +13693,7 @@ mod lead_conversion_readiness_tests {
             enhanced_due_diligence_required: false,
             enhanced_due_diligence_document_generated: false,
             enhanced_due_diligence_document_signed: false,
+            payer_gwg_sheet_unsigned: false,
             contract_signed: true,
             contract_terminated: false,
             framework_document_generated: true,
@@ -14012,6 +14035,38 @@ mod lead_conversion_readiness_tests {
         );
         input.enhanced_due_diligence_document_signed = true;
         assert!(evaluate_lead_conversion_readiness(&input).conversion_ready);
+    }
+
+    #[test]
+    fn an_open_payer_gwg_sheet_keeps_the_compliance_open() {
+        // Owner decision 2026-10-30: the payer's generated, unsigned GwG
+        // sheet means the compliance is not complete.
+        let mut input = ready_input();
+        assert!(evaluate_lead_conversion_readiness(&input).conversion_ready);
+        input.payer_gwg_sheet_unsigned = true;
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(!readiness.conversion_ready);
+        assert!(
+            readiness.payload["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|check| check["key"] == "compliance_completed" && check["passed"] == false)
+        );
+        assert!(
+            readiness.payload["blocking_reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "Payer GwG sheet is not signed")
+        );
+        assert!(
+            !readiness.payload["blocking_reasons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|reason| reason == "Compliance is not signed yet")
+        );
     }
 
     #[test]
