@@ -326,6 +326,8 @@ export type LeadPortalIntake = {
   identification: LeadGwgIdentification | null;
   /** Last change of these statements by the lead; null when nothing was entered. */
   identification_updated_at: string | null;
+  /** Who last saved the statements: the client (`self`) or staff for the client. */
+  identification_updated_by?: "self" | "staff" | null;
   /** The caller's role may not read the statements; they come empty then. */
   identification_hidden: boolean;
   identity_documents: LeadIdentityDocument[];
@@ -450,6 +452,7 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     can_review_uploads: Boolean(raw.can_review_uploads),
     identification: normalizeIdentification(raw.identification),
     identification_updated_at: textOrNull(raw.identification_updated_at),
+    identification_updated_by: raw.identification_updated_by === "self" || raw.identification_updated_by === "staff" ? raw.identification_updated_by : null,
     identification_hidden: Boolean(raw.identification_hidden),
     identity_documents: normalizeIdentityDocuments(raw.identity_documents),
     representation: normalizeLeadRepresentation(raw.representation),

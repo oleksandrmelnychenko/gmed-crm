@@ -1064,7 +1064,7 @@ function LeadGwgStatementsBody({
   const paymentBackgroundShown = asked("B") || Boolean(paymentBackground);
 
   return (
-    <PatientStatementsPanel key={intake.lead_id} title={title} marker={{ at: intake.identification_updated_at, access_kind: null }} tx={tx}>
+    <PatientStatementsPanel key={intake.lead_id} title={title} marker={{ at: intake.identification_updated_at, access_kind: intake.identification_updated_by ?? null }} tx={tx}>
       <ChangedSinceSubmitLine intake={intake} tx={tx} />
 
       <div className="grid grid-cols-1 items-start gap-3 @3xl/patient-statements:grid-cols-2" data-testid="lead-gwg-statements-grid">

@@ -7846,6 +7846,22 @@ async fn get_lead_portal_intake(
     } else {
         (Identification::default(), None)
     };
+    // Who last saved the statements: the client's own login or staff filling
+    // in the client's form (owner 2026-10-30).
+    let identification_updated_by: Option<&str> = if identification_updated_at.is_some() {
+        match sqlx::query_scalar::<_, String>(
+            "SELECT u.role FROM lead_gwg_declarations g JOIN users u ON u.id = g.updated_by              WHERE g.lead_id = $1",
+        )
+        .bind(lead_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(role) => role.map(|role| if role == "patient" { "self" } else { "staff" }),
+            Err(error) => return internal(error, "load identification author"),
+        }
+    } else {
+        None
+    };
     let staff_file = |upload: &&PgRow| {
         json!({
             "id": upload.try_get::<Uuid, _>("document_id").ok(),
@@ -8224,6 +8240,7 @@ async fn get_lead_portal_intake(
         "uploads_hidden": !medical,
         "identification": identification_json,
         "identification_updated_at": identification_updated_at,
+        "identification_updated_by": identification_updated_by,
         // Who last entered each part of the client's form (`self`, `guardian`,
         // `staff`), keyed like `portal_field_updates` (owner 2026-10-30).
         "marker_kinds": if statements_visible { marker_kinds(&updates) } else { json!({}) },
