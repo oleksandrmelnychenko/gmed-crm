@@ -109,7 +109,7 @@ impl PersonAnswers {
         self.pep_self == Some(true) || self.pep_related == Some(true)
     }
 
-    /// "ja – selbst PEP (Bürgermeister)", "nein", "keine Angabe": the PEP
+    /// "ja – selbst PeP (Bürgermeister)", "nein", "keine Angabe": the PEP
     /// answers of the person in one line. "nein" only when both questions
     /// are answered with no.
     pub fn pep_line(&self) -> String {
@@ -123,11 +123,11 @@ impl PersonAnswers {
         };
         let mut yes = Vec::new();
         if self.pep_self == Some(true) {
-            yes.push(format!("selbst PEP{}", detail(&self.pep_self_details)));
+            yes.push(format!("selbst PeP{}", detail(&self.pep_self_details)));
         }
         if self.pep_related == Some(true) {
             yes.push(format!(
-                "Familienmitglied oder nahestehende Person einer PEP{}",
+                "Familienmitglied oder nahestehende Person einer PeP{}",
                 detail(&self.pep_related_details)
             ));
         }
@@ -201,9 +201,9 @@ impl PepReview {
             text.push_str(&format!(" von {name}"));
         }
         text.push_str(if self.is_pep {
-            " – Ergebnis: PEP (bzw. Familienmitglied / nahestehende Person)"
+            " – Ergebnis: PeP (bzw. Familienmitglied / nahestehende Person)"
         } else {
-            " – Ergebnis: keine PEP"
+            " – Ergebnis: keine PeP"
         });
         text
     }
@@ -433,7 +433,7 @@ mod tests {
         };
         assert_eq!(
             related.pep_line(),
-            "ja – Familienmitglied oder nahestehende Person einer PEP (Bruder, Bürgermeister)"
+            "ja – Familienmitglied oder nahestehende Person einer PeP (Bruder, Bürgermeister)"
         );
         assert_eq!(related.sanctions_line(), "keine Angabe");
     }
@@ -455,7 +455,7 @@ mod tests {
         assert_eq!(answers.sanctions_links, Some(false));
         assert_eq!(
             answers.pep_line(),
-            "ja – selbst PEP (Abgeordneter, 2019–2023)"
+            "ja – selbst PeP (Abgeordneter, 2019–2023)"
         );
     }
 
@@ -516,7 +516,7 @@ mod tests {
         assert_eq!(patient.checked_on, Some(day("2026-10-20")));
         assert_eq!(
             patient.line(),
-            "PEP-Status geprüft am 20.10.2026 von Anna Muster – Ergebnis: keine PEP"
+            "PEP-Status geprüft am 20.10.2026 von Anna Muster – Ergebnis: keine PeP"
         );
         let parent = review_of(&aml, &representative_subject(id));
         assert!(parent.checked && parent.is_pep);

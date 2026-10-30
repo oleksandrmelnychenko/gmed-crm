@@ -1249,7 +1249,7 @@ mod tests {
         let items = content(&reviewed, day(2026, 10, 23));
         assert_eq!(
             value(&items, "Prüfung durch GMED"),
-            Some("PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PEP")
+            Some("PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PeP")
         );
         assert_eq!(
             value(

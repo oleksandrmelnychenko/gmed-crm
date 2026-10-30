@@ -42165,13 +42165,13 @@ mod tests {
         let text = compact(&text);
         assert!(
             text.contains(&compact(
-                "Angabe der Person ja – Familienmitglied oder nahestehende Person einer PEP (Bruder, Bürgermeister)"
+                "Angabe der Person ja – Familienmitglied oder nahestehende Person einer PeP (Bruder, Bürgermeister)"
             )),
             "{text}"
         );
         assert!(
             text.contains(&compact(
-                "Prüfung durch GMED PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PEP"
+                "Prüfung durch GMED PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PeP"
             )),
             "{text}"
         );
@@ -44297,7 +44297,7 @@ mod tests {
         };
         assert_eq!(
             reviewed.gmed_review_line(),
-            "PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PEP"
+            "PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PeP"
         );
     }
 
