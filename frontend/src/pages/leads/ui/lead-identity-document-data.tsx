@@ -150,6 +150,7 @@ export function LeadIdentityDocumentDataForm({
   today = appDateKey(),
   birthDate = null,
   scanCount = null,
+  confirmationPending = false,
 }: {
   source: IdentityDocumentSource | null | undefined;
   /** The wizard's old "passport valid until", read only while nothing is stored in the new place. */
@@ -165,6 +166,8 @@ export function LeadIdentityDocumentDataForm({
   birthDate?: string | null;
   /** The scans of this person's document; `null` when unknown here. */
   scanCount?: number | null;
+  /** The data are complete but nobody confirmed the scan yet (owner 2026-10-30: «пише за документ хоча він є»). */
+  confirmationPending?: boolean;
 }) {
   const fieldId = useId();
   const savedKey = JSON.stringify(identityDocumentDraft(source, fallbackValidUntil));
@@ -372,6 +375,14 @@ export function LeadIdentityDocumentDataForm({
   return (
     <div className="space-y-2.5" data-testid={testId} onBlur={saveOnLeave}>
       <IdentityDocumentStatusChip status={status} tx={tx} testId={`${testId}-status`} />
+      {confirmationPending && status.kind === "complete" ? (
+        <p className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid={`${testId}-confirm-hint`}>
+          {tx(
+            "Остался шаг: нажмите «Подтвердить документ» у скана выше — без этого документ не считается проверенным.",
+            "Ein Schritt fehlt: Klicken Sie beim Scan oben auf «Dokument bestätigen» – sonst gilt der Ausweis nicht als geprüft.",
+          )}
+        </p>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <FormField label={tx("Вид документа", "Art des Dokuments")} error={fieldError("type")} errorId={errorId("type")} onBlur={touch("type")}>
           <NativeComboboxSelect
@@ -642,6 +653,7 @@ export function LeadIdentityDocumentData({
   patientScans,
   patientScanIds = null,
   patientBirthDate = null,
+  patientScanConfirmed = null,
   representativeFiles,
   today = appDateKey(),
   onSaved,
@@ -667,6 +679,8 @@ export function LeadIdentityDocumentData({
    */
   patientScanIds?: readonly string[] | null;
   patientBirthDate?: string | null;
+  /** The server's `identity_document_verified`: false while a scan waits for «Подтвердить документ»; null when unknown. */
+  patientScanConfirmed?: boolean | null;
   /** A representative's own uploads of a kind, under that person's card. */
   representativeFiles?: (person: LeadRepresentative, kind: RepresentativeUploadKind) => ReactNode;
   today?: string;
@@ -709,6 +723,7 @@ export function LeadIdentityDocumentData({
         today={today}
         birthDate={patientBirthDate}
         scanCount={patientScanCount}
+        confirmationPending={patientScanConfirmed === false && (patientScanCount ?? 0) > 0}
         testId="lead-id-data"
         save={async (input, options) => {
           const stored = await saveLeadIdentityDocumentData(leadId, input, options);

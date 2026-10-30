@@ -8815,12 +8815,20 @@ ${serviceCommentLines.join("\n")}`
                 accessory={isRepeatIntake ? null : (
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     {/* Everything the client fills in, staff fill in too: the client's own form (owner 2026-10-29). */}
-                    {canEditClientForm ? (
-                      <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" data-testid="lead-wizard-client-form"
-                        onClick={() => openClientForm("person")}>
-                        <FileText className="size-3.5" />
-                        {tx("Заполнить анкету за клиента", "Formular für den Kunden ausfüllen")}
-                      </Button>
+                    {canEditClientForm || (!leadId && canEditPayerLink) ? (
+                      // Shown from the start (owner 2026-10-30): the form needs the lead, so on a new
+                      // lead it waits for the first «Далее» and says so.
+                      // A disabled button shows no tooltip: the wrapper carries it.
+                      <span className="inline-flex" data-testid="lead-wizard-client-form-wrapper" title={canEditClientForm ? undefined : tx(
+                        "Сначала заполните имя, дату рождения, пол и e-mail и нажмите «Далее» — после создания обращения анкету можно заполнить за клиента",
+                        "Zuerst Name, Geburtsdatum, Geschlecht und E-Mail ausfüllen und «Weiter» klicken – danach kann das Formular für den Kunden ausgefüllt werden",
+                      )}>
+                        <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" data-testid="lead-wizard-client-form"
+                          disabled={!canEditClientForm} onClick={() => openClientForm("person")}>
+                          <FileText className="size-3.5" />
+                          {tx("Заполнить анкету за клиента", "Formular für den Kunden ausfüllen")}
+                        </Button>
+                      </span>
                     ) : null}
                     <Step1FillModeSwitch mode={step1Portal.mode} onChange={step1Portal.setMode} disabled={isBusy} tx={tx} />
                   </div>
@@ -10410,6 +10418,7 @@ ${serviceCommentLines.join("\n")}`
                       patientScans={patientScans}
                       patientScanIds={wizardDocuments.identity.map((document) => document.id)}
                       patientBirthDate={draft.birthDate || null}
+                      patientScanConfirmed={readinessChecks.get("identity_document_verified") ?? null}
                       representativeFiles={representativeFileRows}
                       onSaved={() => {
                         void reloadStep1PortalState();
