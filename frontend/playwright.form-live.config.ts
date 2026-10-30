@@ -10,7 +10,7 @@ const port = Number(process.env.FORM_LIVE_PORT ?? 5193);
 
 export default defineConfig({
   testDir: "./tests/e2e-live",
-  testMatch: ["cabinet-roundtrip.spec.ts", "staff-client-form.live.spec.ts"],
+  testMatch: ["cabinet-roundtrip.spec.ts", "staff-client-form.live.spec.ts", "lead-staff-actions.live.spec.ts"],
   outputDir: "../.tmp/form-recheck/live-results",
   timeout: 120_000,
   expect: { timeout: 15_000 },
