@@ -29,6 +29,16 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   const text = trustedPersonsText(lang);
   const wording = disclosureWording(text, request);
   const [draft, setDraft] = useState(() => disclosureDraft(request, viewerId));
+  const serverKey = JSON.stringify([request.disclosure ?? null, request.trusted_persons ?? null, request.disclosure_company_name ?? null]);
+  const [serverBase, setServerBase] = useState(() => ({ key: serverKey, draft: disclosureDraft(request, viewerId) }));
+  if (serverBase.key !== serverKey) {
+    const fresh = disclosureDraft(request, viewerId);
+    const ownEdits = JSON.stringify(draft) !== JSON.stringify(serverBase.draft);
+    setServerBase({ key: serverKey, draft: fresh });
+    if (!ownEdits) setDraft(fresh);
+  }
+  // Only what this person changed here is theirs to save; a newer server state alone is not.
+  const editedHere = JSON.stringify(draft) !== JSON.stringify(serverBase.draft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const saving = useRef<Promise<boolean> | null>(null);
@@ -148,10 +158,10 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
   useEffect(() => {
     // Only an explicit, complete decision is saved; viewing another parent's
     // choice does not turn it into this parent's consent. Staff save by recording only.
-    if (!changed || problem || ownMinor || staffMode) return;
+    if (!changed || !editedHere || problem || ownMinor || staffMode) return;
     const timer = window.setTimeout(() => { void latest.current.save(); }, 700);
     return () => window.clearTimeout(timer);
-  }, [draft, changed, problem, ownMinor, staffMode]);
+  }, [draft, changed, editedHere, problem, ownMinor, staffMode]);
   useEffect(() => {
     if (!changed && !busy) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };

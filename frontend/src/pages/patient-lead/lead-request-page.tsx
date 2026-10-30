@@ -550,6 +550,12 @@ function LeadRequestView({
       window.removeEventListener("focus", onFocus);
     };
   }, [refreshFromServer]);
+  // Each child's request is read afresh when it opens: events of a request not
+  // on screen are not followed, so the other parent's change or send would be missing (QA 2026-10-30).
+  const refreshOnOpenRef = useRef(refreshFromServer);
+  useEffect(() => {
+    refreshOnOpenRef.current("event");
+  }, []);
   useRealtimeSubscription(["lead.portal_updated"], (event) => {
     if (event.entity_id !== latestRequest.current.lead_id) return;
     // The own saves already answered with the request.

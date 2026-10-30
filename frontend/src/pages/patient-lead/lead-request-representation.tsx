@@ -959,6 +959,16 @@ export function RepresentationSection({
   const [draft, setDraft] = useState<RepresentationDraft>(() => draftFromRepresentation(representation));
   const savedRef = useRef<RepresentationDraft>(draftFromRepresentation(representation));
   const queuedDraftRef = useRef(savedRef.current);
+  // The other parent's answer arrives with a re-read: untouched answers follow it, and the saved
+  // state is the server's, so choosing the shown answer again is saved (QA 2026-10-30).
+  useServerDraftSync({
+    incoming: draftFromRepresentation(representation),
+    draft,
+    savedRef,
+    queuedDraftRef,
+    setDraft,
+    idOf: (field) => `lead-request-${field}`,
+  });
   const refusedRef = useRef<string | null>(null);
   const failedRef = useRef(false);
   // "in_use": the server keeps a person, so the answer went back. "failed": the answers are not saved.

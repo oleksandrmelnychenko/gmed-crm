@@ -1206,6 +1206,8 @@ function autosavePayload(
   snapshot: AutosaveSnapshot,
   previousWizardState: Record<string, unknown>,
   includeClinicalDraft = true,
+  /** False for a lead attached to an existing patient: the anamnesis shown is the patient's, not the lead's text. */
+  includeLeadAnamnese = true,
 ) {
   const { draft, lines, paidAmount, prepayment, prepaymentAmount, step } = snapshot;
   const payload: Record<string, unknown> & { wizard_state: Record<string, unknown> } = {
@@ -1325,6 +1327,7 @@ function autosavePayload(
   if (draft.firstName.trim()) payload.first_name = draft.firstName.trim();
   if (draft.lastName.trim()) payload.last_name = draft.lastName.trim();
 
+  if (!includeLeadAnamnese) delete payload.additional_concerns;
   return payload;
 }
 
@@ -3730,6 +3733,10 @@ export function LeadWizard({
   const savedMinorRef = useRef(false);
   const [amlSheetOpen, setAmlSheetOpen] = useState(false);
   const [amlSheetError, setAmlSheetError] = useState("");
+  // The prospect patient's medical record did not load: saving a section would replace its rows
+  // with the wizard's incomplete copy (QA 2026-10-30), so it waits for «Обновить».
+  const clinicalLoadFailedRef = useRef(false);
+  const [clinicalLoadFailed, setClinicalLoadFailed] = useState(false);
   // The text of the wizard's last error: a sheet over the wizard repeats it in place.
   const lastWizardErrorRef = useRef("");
   // The enhanced AML block shows the payer form's own interest and source of funds (owner 2026-10-19).
@@ -4305,6 +4312,8 @@ export function LeadWizard({
       const nextCase = prospectCaseId
         ? { id: prospectCaseId } as CaseListItem
         : nextCases[0] as CaseListItem | undefined;
+      // The patient's record could not be read: a section saved now would replace what it holds.
+      let clinicalLoadFailed = false;
       const [nextCaseDetail, nextOrderDetail, prospectClinical] = await Promise.all([
         nextCase && hydrateDraft
           ? fetchCaseDetail(nextCase.id).catch(() => null)
@@ -4313,10 +4322,17 @@ export function LeadWizard({
           ? fetchOrder(nextOrder.id).catch(() => null)
           : Promise.resolve(null),
         prospectId && hydrateDraft
-          ? loadPatientClinical(prospectId).catch(() => null)
+          ? loadPatientClinical(prospectId).catch(() => {
+            clinicalLoadFailed = true;
+            return null;
+          })
           : Promise.resolve(null),
       ]);
       if (!isCurrentReload()) return;
+      if (hydrateDraft) {
+        clinicalLoadFailedRef.current = clinicalLoadFailed;
+        setClinicalLoadFailed(clinicalLoadFailed);
+      }
       const paymentQuote = nextOrder
         ? nextQuotes.find((item) => item.order_id === nextOrder.id)
         : nextQuotes[0];
@@ -5165,6 +5181,8 @@ export function LeadWizard({
     [documents],
   );
   const previewedDocument = [...currentPatientEvidence, ...documents].find((item) => item.id === documentPreview?.id);
+  // A version opened from «Архив версий» is read, never signed (the server refuses it).
+  const previewCurrentVersion = Boolean(previewedDocument && previewedDocument.is_latest_version !== false && !wizardDocumentIsArchived(previewedDocument));
   const previewComplianceKind = previewedDocument ? wizardDocumentComplianceKind(previewedDocument) : null;
   const previewDocumentSigned = Boolean(
     previewedDocument && documentSignedFor(previewedDocument, previewComplianceKind),
@@ -5506,6 +5524,12 @@ export function LeadWizard({
   ) => {
     const run = async () => {
       if (!leadId) throw new Error("Lead is not selected");
+      if (clinicalLoadFailedRef.current) {
+        throw new Error(tx(
+          "Медицинская карта пациента не загрузилась. Нажмите «Обновить» вверху окна и повторите — иначе сохранение заменило бы её записи.",
+          "Die Patientenakte wurde nicht geladen. Klicken Sie oben auf „Aktualisieren“ und versuchen Sie es erneut – sonst würde das Speichern ihre Einträge ersetzen.",
+        ));
+      }
       const { patientId, caseId } = await ensureProspect(medicalDraft);
       const saveMode = prospectMergeOnlyRef.current ? "merge" : "replace";
 
@@ -5631,6 +5655,7 @@ export function LeadWizard({
       snapshot,
       previousWizardState,
       !lead?.prospect_patient_id,
+      !prospectMergeOnlyRef.current,
     );
 
     const run = async () => {
@@ -6148,6 +6173,19 @@ export function LeadWizard({
       };
     });
   };
+
+  // Work types of a specialty removed before its list loaded leave the selection once the lists
+  // are known: the cost estimate prints every selected id (QA 2026-10-30).
+  useEffect(() => {
+    if (!draft) return;
+    const chosen = draft.specialties.map((value) => specialties.find((item) => specializationValue(item) === value));
+    if (chosen.some((item) => !item || !workTypesBySpecialization[item.id])) return;
+    const allowed = new Set(chosen.flatMap((item) => (item ? workTypesBySpecialization[item.id] ?? [] : []).map((workType) => workType.id)));
+    if (draft.selectedSpecializationWorkTypeIds.every((id) => allowed.has(id))) return;
+    setDraft((current) => current
+      ? { ...current, selectedSpecializationWorkTypeIds: current.selectedSpecializationWorkTypeIds.filter((id) => allowed.has(id)) }
+      : current);
+  }, [draft, specialties, workTypesBySpecialization]);
 
   const removeSpecializationSelection = (value: string) => {
     const specialization = specialties.find(
@@ -7004,15 +7042,19 @@ export function LeadWizard({
           step1Portal.intake?.representation?.custody,
         )
         : templateId;
+      // The version it replaces is this lead's own (a repeat intake lists the patient's forms
+      // too, which the server refuses as a replacement) and keeps its order context, also when
+      // the order came after it (QA 2026-10-30: «Создать новую версию» failed with 422).
+      const replaced = sortWizardDocumentsNewestFirst(
+        wizardDocuments[templateId].filter((document) => (
+          document.lead_id === targetLeadId && isReplaceableFormVersion(document, generatedTemplateId)
+        )),
+      ).find((document) => document.is_latest_version);
       const generated = await generateDocument({
         template_id: generatedTemplateId,
         lead_id: targetLeadId,
-        order_id: order?.id,
-        replace_document_id: sortWizardDocumentsNewestFirst(
-          wizardDocuments[templateId].filter((document) => (
-            isReplaceableFormVersion(document, generatedTemplateId)
-          )),
-        ).find((document) => document.is_latest_version)?.id,
+        order_id: replaced ? replaced.order_id ?? undefined : order?.id,
+        replace_document_id: replaced?.id,
         language: "de",
         document_language: "de",
         document_direction: "outgoing",
@@ -9571,6 +9613,14 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && lead && step === "medical" ? (
             <section className="space-y-5">
+              {clinicalLoadFailed ? (
+                <Banner tone="error" data-testid="lead-wizard-clinical-load-failed">
+                  {tx(
+                    "Медицинская карта пациента не загрузилась: изменения в ней сейчас не сохраняются. Нажмите «Обновить» вверху окна.",
+                    "Die Patientenakte wurde nicht geladen: Änderungen daran werden gerade nicht gespeichert. Klicken Sie oben auf „Aktualisieren“.",
+                  )}
+                </Banner>
+              ) : null}
               <Section title={tx("Обращение", "Anliegen")}>
               <Field label={tx("Направивший врач", "Zuweisender Arzt")} className="block pb-2"><Input className={inputClass} value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
               <PreviousRequestsPanel
@@ -12935,7 +12985,7 @@ ${serviceCommentLines.join("\n")}`
             </div>
           </DialogHeader>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/30">
-            {previewedDocument && canSignWizardDocument(previewedDocument) && documentPreview?.kind !== "image" ? (
+            {previewedDocument && previewCurrentVersion && canSignWizardDocument(previewedDocument) && documentPreview?.kind !== "image" ? (
               <div className="shrink-0 px-3 pt-3">
                 {signatureEnabled === false ? (
                   // Skribble is off: no electronic signature to offer; the paper signature below stands (QA 2026-10-25).
@@ -13014,7 +13064,7 @@ ${serviceCommentLines.join("\n")}`
               <Button type="button" variant="outline" size="sm" onClick={() => replaceDocumentPreview(null)}>
                 {tx("К документам", "Zur Dokumentenliste")}
               </Button>
-              {previewedDocument && previewComplianceKind && !previewDocumentSigned
+              {previewedDocument && previewCurrentVersion && previewComplianceKind && !previewDocumentSigned
                 && signatureNeedsProof(previewedDocument, previewComplianceKind) ? (
                 // "Signed" only with the scan of the signed copy (owner decision 2026-10-11).
                 <PaperSignatureConfirmButton
@@ -13034,7 +13084,7 @@ ${serviceCommentLines.join("\n")}`
                     void refreshDocumentsState();
                   }}
                 />
-              ) : previewedDocument && previewComplianceKind && !previewDocumentSigned ? (
+              ) : previewedDocument && previewCurrentVersion && previewComplianceKind && !previewDocumentSigned ? (
                 <Button
                   type="button"
                   size="sm"

@@ -27,8 +27,6 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
-  ChevronLeft,
-  ChevronRight,
   ClipboardCheck,
   FileCheck2,
   LoaderCircle,
@@ -233,6 +231,8 @@ const LEAD_REALTIME_EVENTS = [
   "lead.promoted_to_console",
   "lead.converted",
   "lead.failed_resolved",
+  // The client's cabinet (sent request, uploads): the row's portal summary follows (QA 2026-10-30).
+  "lead.portal_updated",
   // Timed events of the background jobs (owner request 2026-10-26): the
   // deletion warning, the 18th birthday — and the automatic deletion.
   ...LEAD_TIME_REFRESH_EVENTS,
@@ -299,63 +299,6 @@ function Banner({
     return <SuccessBanner>{children}</SuccessBanner>;
   }
   return <ShellBanner tone={tone}>{children}</ShellBanner>;
-}
-
-function LeadsPager({
-  pageIndex,
-  totalPages,
-  totalRows,
-  previousLabel,
-  nextLabel,
-  onPageChange,
-}: {
-  nextLabel: string;
-  onPageChange: (pageIndex: number) => void;
-  pageIndex: number;
-  previousLabel: string;
-  totalPages: number;
-  totalRows: number;
-}) {
-  const pageStart = pageIndex * LEAD_PAGE_SIZE;
-
-  return (
-    <div className="flex min-h-8 items-center justify-between gap-2 border-b border-border/60 bg-field px-4 py-0.5">
-      <span className="font-mono text-xs tabular-nums text-foreground">
-        {totalRows === 0
-          ? "0 / 0"
-          : `${pageStart + 1}-${Math.min(pageStart + LEAD_PAGE_SIZE, totalRows)} / ${totalRows}`}
-      </span>
-      <div className="flex items-center gap-1.5">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon-sm"
-          className="size-7 rounded-md"
-          disabled={pageIndex === 0}
-          aria-label={previousLabel}
-          title={previousLabel}
-          onClick={() => onPageChange(Math.max(0, pageIndex - 1))}
-        >
-          <ChevronLeft className="size-3.5" />
-        </Button>
-        <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
-          {pageIndex + 1} / {totalPages}
-        </span>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon-sm"
-          className="size-7 rounded-md"
-          disabled={pageIndex >= totalPages - 1}
-          aria-label={nextLabel}
-          title={nextLabel}
-          onClick={() => onPageChange(Math.min(totalPages - 1, pageIndex + 1))}
-        >
-          <ChevronRight className="size-3.5" />
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 type LeadsListState = {
@@ -511,6 +454,8 @@ function useLeadsPageContent() {
   const { staffGo } = useStaffNavigate();
   const [existingParentPatientId, setExistingParentPatientId] = useState<string | null>(null);
   const [wizardLeadId, setWizardLeadId] = useState<string | null>(null);
+  // A change the list skipped while the wizard was open (the wizard reloads only its own lead).
+  const listStaleWhileWizardRef = useRef(false);
   // «Данные для квалификации»: what the form or the server refused, at the field.
   const [gateErrors, setGateErrors] = useState<LeadGateErrors>({});
   // Why the birth-date field did not take what was typed (DD.MM.YYYY).
@@ -608,6 +553,14 @@ function useLeadsPageContent() {
           : nextValue,
     }));
   };
+  // The list skipped changes while the wizard was open: reloaded once it closes, whichever way.
+  useEffect(() => {
+    if (wizardLeadId || !listStaleWhileWizardRef.current) return;
+    listStaleWhileWizardRef.current = false;
+    clearApiCache("/leads");
+    setVersion((current) => current + 1);
+  }, [wizardLeadId]);
+
   const setError = (nextValue: SetStateAction<string>) => {
     dispatchListState((current) => ({
       error:
@@ -771,26 +724,6 @@ function useLeadsPageContent() {
     [filters.email, filters.phone, leads]
   );
   const leadPaginationResetKey = JSON.stringify(filters);
-  const [leadPaginationState, setLeadPaginationState] = useState(() => ({
-    pageIndex: 0,
-    resetKey: leadPaginationResetKey,
-  }));
-  const leadPageIndex = leadPaginationState.resetKey === leadPaginationResetKey
-    ? leadPaginationState.pageIndex
-    : 0;
-  const leadTotalPages = Math.max(1, Math.ceil(filteredLeads.length / LEAD_PAGE_SIZE));
-  const safeLeadPageIndex = Math.min(leadPageIndex, leadTotalPages - 1);
-  const pagedLeads = useMemo(() => {
-    const start = safeLeadPageIndex * LEAD_PAGE_SIZE;
-    return filteredLeads.slice(start, start + LEAD_PAGE_SIZE);
-  }, [filteredLeads, safeLeadPageIndex]);
-
-  function handleLeadPageChange(pageIndex: number) {
-    setLeadPaginationState({
-      pageIndex,
-      resetKey: leadPaginationResetKey,
-    });
-  }
   // One-time password of a login created from the "new lead" sheet.
   const [issuedPortalAccess, setIssuedPortalAccess] = useState<PortalCredentials | null>(null);
   // The failed-flow form: why the chosen reason cannot be saved, and the delete confirmation.
@@ -1393,6 +1326,8 @@ function useLeadsPageContent() {
     }
     if (wizardLeadId) {
       clearApiCache(`/leads/${wizardLeadId}`);
+      // Reloaded once the wizard closes, whichever way it closes (QA 2026-10-30).
+      listStaleWhileWizardRef.current = true;
       return;
     }
     startTransition(() => {
@@ -3321,7 +3256,14 @@ function useLeadsPageContent() {
 
         <AdminTableCard>
           <DataTableSurface
-            rows={pagedLeads}
+            // The table pages after its column filters and sorting: a filter such as
+            // «Автоудаление ≤ 3» sees every lead, not only the 50 on the page (QA 2026-10-30).
+            rows={filteredLeads}
+            pagination={{
+              pageSize: LEAD_PAGE_SIZE,
+              resetKey: leadPaginationResetKey,
+              className: "border-b border-border/60 bg-field px-4 py-0.5",
+            }}
             columns={leadColumns}
             renderRowDetail={renderLeadRowDetail}
             rowId={(row) => row.id}
@@ -3446,16 +3388,6 @@ function useLeadsPageContent() {
               ) : null}
             </div>
               </>
-            }
-            toolbarAfter={
-              <LeadsPager
-                pageIndex={safeLeadPageIndex}
-                totalPages={leadTotalPages}
-                totalRows={filteredLeads.length}
-                previousLabel={t.pagination_previous}
-                nextLabel={t.pagination_next}
-                onPageChange={handleLeadPageChange}
-              />
             }
             activeRowId={permissions.canOpen ? wizardLeadId || selectedLeadId || null : null}
             onRowClick={permissions.canOpen ? openLeadFromRow : undefined}

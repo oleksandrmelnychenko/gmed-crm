@@ -11,7 +11,7 @@ import { useAuth } from "@/lib/auth";
 import { rememberSignOutNotice } from "@/lib/login-redirect";
 import { cn } from "@/lib/utils";
 
-import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, STAFF_CONSENT_CHANNELS, STAFF_CONSENT_NOTE_MAX, submitLeadRequest, type LeadRequest, type StaffConsentChannel, type StaffConsentRecord } from "./lead-request-api";
+import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, STAFF_CONSENT_CHANNELS, fetchMyLeadRequest, STAFF_CONSENT_NOTE_MAX, submitLeadRequest, type LeadRequest, type StaffConsentChannel, type StaffConsentRecord } from "./lead-request-api";
 import { actsAsGuardian } from "./lead-request-access";
 import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown, missingOfRefusal } from "./lead-request-follow-up-model";
 import { canSubmit, consentGiven, type SubmitField } from "./lead-request-model";
@@ -122,6 +122,10 @@ export function SendStep({
         setError(text.followUpIncomplete);
       } else {
         setError(body?.code === "declaration_required" ? text.declarationRequired : errorMessage(cause, text));
+        // Something the other parent or GMED changed is missing now: the fresh request names it.
+        if (body?.code === "personal_data_incomplete") {
+          void enqueue(() => fetchMyLeadRequest(request.lead_id)).then(onChange).catch(() => undefined);
+        }
       }
     } finally {
       setBusy(false);

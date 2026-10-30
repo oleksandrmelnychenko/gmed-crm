@@ -1868,8 +1868,11 @@ async fn list_leads(
                   ELSE 'console'
                 END = $7)
              AND ($8::text IS NULL OR flow = $8)
+           -- The list pages and filters in the browser: 200 rows hid the oldest
+           -- leads (those closest to the automatic deletion) once the archive was
+           -- shown (QA 2026-10-30).
            ORDER BY created_at DESC
-           LIMIT 200"#,
+           LIMIT 2000"#,
     )
     .bind(include_archived)
     .bind(query.status)
