@@ -23,6 +23,7 @@ import {
 } from "./lead-request-recipient-model";
 import { REPRESENTATION_SUBMIT_FIELDS, type RepresentationSubmitField } from "./lead-request-representation-model";
 import { followUpBeforeSubmit, followUpMissingAll } from "./lead-request-follow-up-model";
+import { actsAsGuardian, staffForChild } from "./lead-request-access";
 
 /** The step-1 form as the patient types it (strings, citizenships as codes). */
 export type PersonalDraft = {
@@ -646,13 +647,20 @@ export type OtherParentPayer = Pick<
 
 /**
  * The other parent of a minor whose login this is: the representative in the
- * other place of joint custody (`rep1` / `rep2`), or null.
+ * other place of joint custody (`rep1` / `rep2`), or null. Staff on a minor's
+ * form are none of the parents (owner 2026-10-30): for them the other parent
+ * is the one besides `besides`, the parent named as invoice recipient.
  */
-export function otherParentOf(request: Pick<LeadRequest, "access_kind" | "minor" | "representation">): LeadRequestRepresentative | null {
-  if (request.access_kind !== "guardian" || !request.minor) return null;
+export function otherParentOf(
+  request: Pick<LeadRequest, "access_kind" | "minor" | "representation">,
+  besides?: string | null,
+): LeadRequestRepresentative | null {
+  if (!actsAsGuardian(request) || !request.minor) return null;
   const parents = request.representation?.representatives.filter((person) => person.slot === "rep1" || person.slot === "rep2") ?? [];
-  if (!parents.some((person) => person.mine)) return null;
-  return parents.find((person) => !person.mine) ?? null;
+  const named = parents.find((person) => person.mine)
+    ?? (staffForChild(request) && besides ? parents.find((person) => person.id === besides) : undefined);
+  if (!named) return null;
+  return parents.find((person) => person.id !== named.id) ?? null;
 }
 
 /**

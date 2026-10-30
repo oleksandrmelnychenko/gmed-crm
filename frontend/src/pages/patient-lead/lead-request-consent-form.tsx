@@ -20,9 +20,10 @@ import {
   type LeadRequest,
   type StaffConsentRecord,
 } from "./lead-request-api";
+import { actsAsGuardian } from "./lead-request-access";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { leadRequestText } from "./lead-request-text";
-import { CabinetGoToContext, CabinetSection as Section, InfoNote, RequiredMark, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
+import { CabinetGoToContext, CabinetSection as Section, ConsentGivenChip, InfoNote, RequiredMark, errorBody, errorMessage, useAutosave, type RequestQueue } from "./lead-request-parts";
 import type { SaveState } from "./lead-request-model";
 
 import { disclosureDefaultsToNo, storedTrustedPersons, trustedPersonsPath } from "./lead-trusted-persons-model";
@@ -44,9 +45,12 @@ export function consentFormChanged(
   );
 }
 
-/** A parent or guardian chooses for a minor: the texts speak of the child's data (QA 2026-10-12, A2-06). */
+/**
+ * A parent or guardian chooses for a minor: the texts speak of the child's data (QA 2026-10-12, A2-06).
+ * So do staff who record the choice of a minor's parents (owner 2026-10-30).
+ */
 export function choosesForChild(request: Pick<LeadRequest, "access_kind" | "minor">): boolean {
-  return request.access_kind === "guardian" && request.minor === true;
+  return actsAsGuardian(request) && request.minor === true;
 }
 
 /**
@@ -261,6 +265,12 @@ export function ConsentFormChoicesSection({
           {staffMode && changed && coreTicked ? (
             <StaffConsentRecordFields lang={lang} testId="lead-request-consent-form" busy={busy}
               hint={cabinetStaffText(lang).recordChanges} onRecord={(recorded) => void save(draft, recorded)} />
+          ) : null}
+          {/* Every consent staff record says when it was given, as the single consents do (owner 2026-10-30). */}
+          {staffMode && !changed && !busy && form.chosen_at ? (
+            <div data-testid="lead-request-consent-form-given">
+              <ConsentGivenChip>{leadRequestText(lang).consentGivenAt(formatAppDateTime(form.chosen_at))}</ConsentGivenChip>
+            </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
             {busy ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}

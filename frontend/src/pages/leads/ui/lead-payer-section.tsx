@@ -57,7 +57,7 @@ import { PAYER_PAPER_PATH_ID, payerPaperPathDerived } from "../model/lead-payer-
 import { LeadPayerPaperPath } from "./lead-payer-paper-path";
 import { LeadPayerPaymentRoute } from "./lead-payer-payment-route";
 import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata";
-import { PatientFieldBadge } from "./lead-wizard-portal-intake";
+import { PatientFieldBadge, useMarkerKind } from "./lead-wizard-portal-intake";
 import { ClientFormEditButton } from "./lead-client-form-dialog";
 
 import {
@@ -405,6 +405,8 @@ export function LeadPayerDeclarationSection({
   // A minor's parent or legal representative pays, never the child (owner
   // decision 2026-10-19); the parent is named, the data are the representative block's.
   const minor = data?.status.minor === true;
+  // A minor's parent named by staff in the client's form is said so (owner 2026-10-30).
+  const recipientByStaff = useMarkerKind("invoice_recipient") === "staff";
   const representatives = data?.status.representatives ?? [];
   const chosenRepresentative = chosenPayerRepresentative(form, data?.status);
   const chooseKind = (kind: PayerDeclarationForm["kind"]) => {
@@ -492,7 +494,7 @@ export function LeadPayerDeclarationSection({
   // "Счёт направляется" repeats step 3's recipient rows; without those (an
   // answer of before step 3) it is the only line that says where the invoice goes.
   const recipientRows = recipientBilling
-    ? billingStatements(recipientBilling, tx, lang, false, minor, cabinet?.identification?.payment_background ?? null).invoice
+    ? billingStatements(recipientBilling, tx, lang, false, minor, cabinet?.identification?.payment_background ?? null, recipientByStaff).invoice
     : [];
   const stepThreeAnswered = recipientRows.some((row) => row.key === "invoice_recipient");
   const recipientStatements = recipientBilling && invoiceTo

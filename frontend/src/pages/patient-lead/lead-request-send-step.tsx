@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 
 import { FOLLOW_UP_INCOMPLETE, INQUIRY_CONSENT, submitLeadRequest, type LeadRequest, type StaffConsentRecord } from "./lead-request-api";
 import { StaffConsentRecordFields } from "./lead-request-staff-consent";
+import { actsAsGuardian } from "./lead-request-access";
 import { followUpAnswered, followUpBeforeSubmit, followUpMissingAll, followUpShown, missingOfRefusal } from "./lead-request-follow-up-model";
 import { canSubmit, consentGiven, type SubmitField } from "./lead-request-model";
 import { CabinetSection as Section, MissingItemLink, RequiredMark, SentLockHint, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
@@ -48,7 +49,8 @@ export function SendStep({
   const [confirmed, setConfirmed] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const { logout } = useAuth();
-  const guardian = request.access_kind === "guardian";
+  // The missing items in the parents' words also for staff on a minor's form, as on the steps (owner 2026-10-30).
+  const guardian = actsAsGuardian(request);
   // "You: …" and "Other parent: …" in the lists, as on the steps (labels audit 2026-10-26, B5).
   const who = {
     mineSlot: request.representation?.representatives.find((person) => person.mine)?.slot ?? null,

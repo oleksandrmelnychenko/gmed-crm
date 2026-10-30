@@ -20,6 +20,7 @@ import { isValidEmailAddress } from "@/lib/contact-validation";
 import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { cn } from "@/lib/utils";
 
+import { actsAsGuardian, staffForChild } from "./lead-request-access";
 import { saveLeadInvoiceRecipient, type LeadRequest } from "./lead-request-api";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import type { IdentificationForm } from "./lead-request-identification";
@@ -131,13 +132,15 @@ export function InvoiceRecipientSection({
   /** The save state of a part of the step. */
   partState: (part: string) => (state: SaveState) => void;
 }) {
-  const guardian = request.access_kind === "guardian";
+  // Staff on a minor's form answer as the parents do (owner 2026-10-30), but are none of them.
+  const guardian = actsAsGuardian(request);
   const template = guardian ? (request.payer_self_template ?? null) : null;
   const answered = payerAnsweredByPayer(request);
   const onRecipientState = partState("recipient");
   const parents = guardian ? request.representation?.representatives.filter((person) => person.slot === "rep1" || person.slot === "rep2") ?? [] : [];
   // "Я (как родитель / законный представитель)" is the parent who is signed in (owner 2026-10-21):
-  // that parent receives the invoice, nobody is asked which parent.
+  // that parent receives the invoice, nobody is asked which parent. Staff have no own parent: they
+  // name the parent who receives it, as a login that is none of the parents does.
   const ownParent = parents.find((person) => person.mine) ?? null;
   const [draft, setDraft] = useState<RecipientDraft>(() => withOwnParent(draftFromRecipient(request.billing), ownParent?.id));
   const invoiceParent = parents.find((person) => person.id === draft.representative_id);
@@ -306,6 +309,14 @@ export function InvoiceRecipientSection({
   const otherParentReceives = guardian && parents.length > 0
     && (!ownParent || Boolean(draft.representative_id && draft.representative_id !== ownParent.id));
   const options = recipientOptions(text, request, otherParentReceives);
+  // "I pay (as a parent)" only for a minor's parent; an adult's representative reads "the patient",
+  // staff on a minor's form "one of the parents" (owner 2026-10-30).
+  const payerPartyOptions = staffForChild(request) ? text.recipient.payerPartyParents
+    : guardian && request.minor ? text.recipient.payerPartyGuardian : text.recipient.payerParty;
+  // "I pay myself" is the signed-in recipient's; a parent named by somebody else "also pays".
+  const isPayerLabel = flow.recipient === "self"
+    ? otherParentReceives ? text.recipient.isPayerOtherParent : text.recipient.isPayerSelf
+    : organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty;
   // Unanswered after "Next": said at the question too, not only in the list at the top.
   const recipientMissing = useStepMissingError("lead-request-invoice_recipient");
   // The data a payer needs are required of the recipient who pays (owner request 2026-10-07): the
@@ -509,7 +520,7 @@ export function InvoiceRecipientSection({
               >
                 <input
                   {...control("is_payer")}
-                  aria-label={flow.recipient === "self" ? text.recipient.isPayerSelf : organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty}
+                  aria-label={isPayerLabel}
                   type="checkbox"
                   className={cn(checkboxClass, "mt-0.5")}
                   checked={draft.is_payer === "yes"}
@@ -517,7 +528,7 @@ export function InvoiceRecipientSection({
                   onChange={(event) => answerIsPayer(event.target.checked ? "yes" : "no")}
                 />
                 {/* In the person's words, not "the invoice recipient is the payer" (labels audit 2026-10-26, B3). */}
-                <span className="min-w-0">{flow.recipient === "self" ? text.recipient.isPayerSelf : organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty}</span>
+                <span className="min-w-0">{isPayerLabel}</span>
               </label>
               {errorFor("is_payer") ? (
                 <p id="lead-request-recipient_is_payer-error" role="alert" className="text-xs text-destructive">
@@ -550,14 +561,13 @@ export function InvoiceRecipientSection({
                       id={`lead-request-payer_party-${value}`}
                       name="lead-request-payer_party"
                       value={value}
-                      aria-label={(guardian && request.minor ? text.recipient.payerPartyGuardian : text.recipient.payerParty)[value]}
+                      aria-label={payerPartyOptions[value]}
                       className={cn(checkboxClass, "mt-0.5 rounded-full")}
                       checked={checked}
                       onChange={() => setPartyChoice(value)}
                     />
                     <span className="min-w-0">
-                      {/* "I pay (as a parent)" only for a minor's parent; an adult's representative reads "the patient". */}
-                      {(guardian && request.minor ? text.recipient.payerPartyGuardian : text.recipient.payerParty)[value]}
+                      {payerPartyOptions[value]}
                     </span>
                   </label>
                 );
@@ -597,9 +607,10 @@ export function InvoiceRecipientSection({
           onSaveState={partState("payer")}
           // A parent of the minor never pays as a third party (owner decision 2026-10-19): the signed-in
           // parent is "I (as a parent)", the other parent of joint custody has an answer of its own.
-          choices={guardian && invoiceParent && !invoiceParent.mine
+          // Staff are none of the parents: the parent who does not receive the invoice is "the other".
+          choices={request.access_kind === "guardian" && invoiceParent && !invoiceParent.mine
             ? ["guardian", ...OTHER_PAYER_CHOICES]
-            : otherParentOf(request) && (third || invoiceParent?.mine)
+            : otherParentOf(request, draft.representative_id) && (third || invoiceParent)
               ? ["other_parent", ...OTHER_PAYER_CHOICES]
               : OTHER_PAYER_CHOICES}
           flow={flow}
@@ -674,6 +685,11 @@ function PatientSidePayer({
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
 }) {
+  // Staff on a minor's form: one of the parents pays, staff name which (owner 2026-10-30).
+  if (staffForChild(request)) {
+    return <ParentPayer request={request} text={text} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />;
+  }
+  // The signed-in parent's own data ("I pay (as a parent)") belong to a parent's login only.
   const guardian = request.access_kind === "guardian";
   const template = guardian ? (request.payer_self_template ?? null) : null;
   if (guardian && (!template || (request.payer?.payer_kind === "self" && !parentSelected))) {
@@ -723,6 +739,59 @@ function OwnPayer({
   });
   usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
   return null;
+}
+
+/**
+ * Staff on a minor's form (owner 2026-10-30): a parent of the child pays and
+ * staff name which one — staff are none of the parents, so there is no
+ * "I pay (as a parent)". The parent is named by id, never as a third party
+ * (owner decision 2026-10-19).
+ */
+function ParentPayer({
+  request,
+  text,
+  enqueue,
+  onChange,
+  onSaveState,
+}: {
+  request: LeadRequest;
+  text: LeadRequestText;
+  enqueue: RequestQueue;
+  onChange: (request: LeadRequest) => void;
+  onSaveState: (state: SaveState) => void;
+}) {
+  const parents = request.representation?.representatives.filter((person) => person.slot === "rep1" || person.slot === "rep2") ?? [];
+  const [draft, setDraft] = useState<PayerDraft>(() =>
+    request.payer?.payer_kind === "representative" ? draftFromPayer(request.payer) : unansweredPayerDraft(request.payer));
+  usePayerAutosave({ request, draft, enqueue, onChange, onSaveState });
+  const chosen = draft.payer_kind === "third_party" && parents.some((person) => person.id === draft.representative_id)
+    ? draft.representative_id ?? ""
+    : "";
+  return (
+    <Section title={text.recipient.payerSection}>
+      <div data-testid="lead-request-parent-payer">
+        <LabeledField
+          id="lead-request-payer_kind"
+          label={text.recipient.parentPayerQuestion}
+          required
+          className="sm:max-w-[calc(50%-0.5rem)]"
+        >
+          <NativeComboboxSelect
+            id="lead-request-payer_kind"
+            className={selectClass}
+            value={chosen}
+            onChange={(event) => {
+              const parent = parents.find((person) => person.id === event.target.value) ?? null;
+              setDraft(parent ? withPayerChoice(unansweredPayerDraft(request.payer), "other_parent", null, parent) : unansweredPayerDraft(request.payer));
+            }}
+          >
+            <option value="">{text.choose}</option>
+            {parents.map((person) => <option key={person.id} value={person.id}>{[person.first_name, person.last_name].filter(Boolean).join(" ")}</option>)}
+          </NativeComboboxSelect>
+        </LabeledField>
+      </div>
+    </Section>
+  );
 }
 
 /**

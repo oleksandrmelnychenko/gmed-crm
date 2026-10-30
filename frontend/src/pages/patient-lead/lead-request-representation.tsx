@@ -18,6 +18,7 @@ import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 
 import {
   INQUIRY_CONSENT,
+  PARENT_RELATIONS,
   removeLeadRepresentative,
   saveLeadRepresentation,
   saveLeadRepresentative,
@@ -28,6 +29,7 @@ import {
   type LeadRequestPersonalData,
   type LeadRequestDocument,
   type LeadRequestRepresentative,
+  type ParentRelation,
   type RepresentativeSlot,
   type RepresentativeUploadKind,
 } from "./lead-request-api";
@@ -378,6 +380,72 @@ function useRepresentativeForm({
       removedRef.current = removed;
     },
   };
+}
+
+/**
+ * Whether a minor's parent is the mother or the father (owner 2026-10-30): a
+ * parent entered here was "parent, role not stated" for staff, who had to set
+ * it by hand. Saved at once, on its own, for a person the server knows.
+ */
+function ParentRelationField({
+  request,
+  person,
+  slot,
+  disabled,
+  text,
+  enqueue,
+  onChange,
+  onSaveState,
+}: {
+  request: LeadRequest;
+  person: LeadRequestRepresentative;
+  slot: RepresentativeSlot;
+  disabled: boolean;
+  text: LeadRequestText;
+  enqueue: RequestQueue;
+  onChange: (request: LeadRequest) => void;
+  onSaveState: (state: SaveState) => void;
+}) {
+  const stored = PARENT_RELATIONS.find((relation) => relation === person.relation) ?? "";
+  const [value, setValue] = useState<ParentRelation | "">(stored);
+  const [error, setError] = useState("");
+  // Another tab or staff set it meanwhile: the stored answer counts.
+  const [seen, setSeen] = useState(stored);
+  if (seen !== stored) {
+    setSeen(stored);
+    setValue(stored);
+  }
+  const id = `lead-request-${slot}_relation`;
+  async function choose(next: ParentRelation) {
+    setValue(next);
+    setError("");
+    onSaveState("saving");
+    try {
+      onChange(await enqueue(() => saveLeadRepresentative(request.lead_id, person.id, { relation: next })));
+      onSaveState("saved");
+    } catch (cause) {
+      setValue(stored);
+      setError(errorMessage(cause, text));
+      onSaveState("error");
+    }
+  }
+  return (
+    <LabeledField id={id} label={text.parentRelationLabel} error={error || undefined}>
+      <NativeComboboxSelect
+        id={id}
+        className={selectClass}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => {
+          const next = PARENT_RELATIONS.find((relation) => relation === event.target.value);
+          if (next) void choose(next);
+        }}
+      >
+        <option value="" disabled>{text.choose}</option>
+        {PARENT_RELATIONS.map((relation) => <option key={relation} value={relation}>{text.parentRelationOptions[relation]}</option>)}
+      </NativeComboboxSelect>
+    </LabeledField>
+  );
 }
 
 /**
@@ -742,6 +810,9 @@ function RepresentativeBlock({
             ) : null;
           })}
         </div>
+        {minor && custody !== "guardian" && person ? (
+          <ParentRelationField request={request} person={person} slot={slot} disabled={identityLocked} text={text} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />
+        ) : null}
         {asked("first_name") ? <LabeledField {...labeled("first_name")}>{textInput("first_name", 100)}</LabeledField> : null}
         {asked("last_name") ? <LabeledField {...labeled("last_name")}>{textInput("last_name", 100)}</LabeledField> : null}
         {asked("date_of_birth") ? (

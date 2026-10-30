@@ -10,8 +10,9 @@ import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { CONSENT_RECIPIENTS_INVALID, LEAD_REQUEST_ACCESS_CHANGED, LEAD_REQUEST_GUARDIAN_ONLY, saveLeadTrustedPersons, type StaffConsentRecord } from "./lead-request-api";
 import { StaffConsentRecordFields } from "./lead-request-staff-consent";
+import { actsAsGuardian } from "./lead-request-access";
 import { choiceOnlyByGuardian, choosesForChild } from "./lead-request-consent-form";
-import { AutosaveFlushContext, CabinetSection, InfoNote, StepFooter, errorBody } from "./lead-request-parts";
+import { AutosaveFlushContext, CabinetSection, ConsentGivenChip, InfoNote, StepFooter, errorBody } from "./lead-request-parts";
 import type { StepProps } from "./lead-request-step-forms";
 import { asLeadCabinetLang } from "./lead-request-text";
 import { TrustedPersonsEditor, TrustedPersonsList } from "./lead-trusted-persons-editor";
@@ -210,7 +211,7 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
     <CabinetSection title={text.title} accessory={state}>
       <div className="space-y-4" data-testid="trusted-persons-form">
         {/* A child's parents read "your child … to you as parents" in the introduction already (B10). */}
-        {request.access_kind === "guardian" && !choosesForChild(request) ? <div className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-muted/40 p-3 text-sm leading-6">
+        {actsAsGuardian(request) && !choosesForChild(request) ? <div className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-muted/40 p-3 text-sm leading-6">
           <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <p>{text.representativeContext(personName)}</p>
         </div> : null}
@@ -246,6 +247,10 @@ export function DisclosureStep({ request, text: common, lang, enqueue, onChange,
           <input type="checkbox" aria-label={disclosureConsentText(lang, companyName, disclosureSubject(request))} className={`${checkboxClass} mt-1 shrink-0`} checked={draft.consentGiven} disabled={busy} data-testid="disclosure-consent" onChange={(event) => { setConsentReset(false); update({ consentGiven: event.currentTarget.checked }); }} />
           <span>{disclosureConsentText(lang, companyName, disclosureSubject(request))}</span>
         </label>
+        {/* The consent staff recorded says when it was given, as the single consents do (owner 2026-10-30). */}
+        {staffMode && !changed && !busy && draft.consentGiven && request.disclosure?.consent_given ? <div data-testid="disclosure-consent-given">
+          <ConsentGivenChip>{common.consentGivenAt(formatAppDateTime(request.disclosure.chosen_at))}</ConsentGivenChip>
+        </div> : null}
         {consentReset && !draft.consentGiven ? <p role="status" className="px-1 text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="disclosure-consent-reset">{text.consentReset}</p> : null}
         <a className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--brand)] underline underline-offset-4" href={`/legal?notice=form&lang=${lang}#privacy`} target="_blank" rel="noreferrer"><ShieldCheck aria-hidden="true" className="size-3.5" />{text.privacy}</a>
       </CabinetSection>

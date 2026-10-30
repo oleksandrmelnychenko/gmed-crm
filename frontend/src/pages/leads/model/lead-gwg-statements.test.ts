@@ -787,6 +787,16 @@ describe("sections 7–8 as the group shows them", () => {
     expect(invoice.find((row) => row.key === "recipient_phone")?.value).toBe("+49 30 5550100");
   });
 
+  it("says a minor's parent was named by staff when staff filled in the client's form (owner 2026-10-30)", () => {
+    const value = normalizeLeadPortalBilling({ invoice_recipient: "self", invoice_recipient_is_payer: true })!;
+    const who = (byStaff: boolean) =>
+      billingStatements(value, ru, "ru", false, true, null, byStaff).invoice.find((row) => row.key === "invoice_recipient")?.value;
+    expect(who(false)).toBe("Родитель / законный представитель, заполнявший кабинет");
+    expect(who(true)).toBe("Родитель / законный представитель (внёс сотрудник)");
+    expect(billingStatements(value, de, "de", false, true, null, true).invoice.find((row) => row.key === "invoice_recipient")?.value)
+      .toBe("Elternteil / gesetzliche Vertretung (von Mitarbeitenden eingetragen)");
+  });
+
   it("keeps the legacy invoice choice when the server sends no recipient fields", () => {
     const value = normalizeLeadPortalBilling({ invoice_to: "payer", invoice_email: "legacy@example.com" })!;
     expect(portalInvoiceTo(value)).toBe("payer");

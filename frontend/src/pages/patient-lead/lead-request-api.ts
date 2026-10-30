@@ -482,7 +482,15 @@ export type RepresentativePatch = Partial<
     >,
     string
   >
-> & { citizenships?: string[]; role?: RepresentativeRole };
+> & {
+  citizenships?: string[];
+  role?: RepresentativeRole;
+  /** A minor's parent is the mother or the father (owner 2026-10-30); the wizard reads it. */
+  relation?: ParentRelation;
+};
+
+export const PARENT_RELATIONS = ["mother", "father"] as const;
+export type ParentRelation = (typeof PARENT_RELATIONS)[number];
 
 /** The two uploads of a representative: a copy of the identity document, and the proof of authority. */
 export type RepresentativeUploadKind = "identity" | "authority";
@@ -842,7 +850,8 @@ export type LeadServicePreferences = {
 /** One request (lead) the login fills in: its own or, as a parent, a child's. */
 export type LeadRequest = {
   lead_id: string;
-  access_kind: "self" | "guardian";
+  /** `staff`: staff fill in the client's form from the wizard (owner decision 2026-10-29). */
+  access_kind: "self" | "guardian" | "staff";
   created_at: string;
   personal_data: LeadRequestPersonalData;
   /** Programme and requested services, shared with the staff wizard; absent on older servers. */

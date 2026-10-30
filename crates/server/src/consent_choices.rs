@@ -259,9 +259,12 @@ impl DisclosureSubject {
     /// (`lead_representatives::Answers::custody`): joint custody is the form
     /// of both parents, a guardian (Vormund) declares for the child they
     /// represent, a sole parent and an unstated custody as the one parent.
+    /// Staff who record a minor's decision for the client read and store the
+    /// parents' wording, as the cabinet shows it to them (owner 2026-10-30);
+    /// staff on an adult's form keep the adult's own.
     pub fn for_custody(access_kind: &str, minor: bool, custody: Option<&str>) -> Self {
         match (access_kind, minor) {
-            ("guardian", true) => match custody.map(str::trim) {
+            ("guardian" | "staff", true) => match custody.map(str::trim) {
                 Some(crate::routes::lead_representatives::CUSTODY_JOINT) => {
                     Self::ChildOfBothParents
                 }
@@ -1132,6 +1135,16 @@ mod tests {
         assert_eq!(
             DisclosureSubject::for_custody("guardian", true, None),
             DisclosureSubject::Child
+        );
+        // Staff record a minor's decision in the parents' wording, also on
+        // the printed form; an adult's stays the adult's own (owner 2026-10-30).
+        assert_eq!(
+            DisclosureSubject::for_custody("staff", true, Some("joint")),
+            DisclosureSubject::ChildOfBothParents
+        );
+        assert_eq!(
+            DisclosureSubject::for_custody("staff", false, Some("joint")),
+            DisclosureSubject::Own
         );
         assert_eq!(
             DisclosureSubject::for_custody("guardian", false, Some("joint")),

@@ -3031,3 +3031,162 @@ async fn a_staff_details_correction_reassesses_the_risk() {
     assert_eq!(t1["variant"], "list_2", "{t1}");
     assert_eq!(t1["representative_id"], json!(mother), "{t1}");
 }
+
+/// Staff fill in a minor's form for the client (owner 2026-10-30): staff are
+/// none of the parents, so they name the parent who receives the invoice and
+/// that parent pays; they upload both parents' identity copies; and a parent
+/// they add is the mother or the father, as the wizard reads it.
+#[tokio::test]
+async fn staff_fill_in_a_two_parent_minors_form_as_the_parents_do() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let staff = app.staff("patient_manager");
+    let mother = Uuid::new_v4();
+    let lead = minor_lead(
+        &app,
+        json!([{ "id": mother, "name": "Anna Muster", "relation": "mother",
+                 "email": address("anna.staff-form") }]),
+    )
+    .await;
+    let base = format!("/api/v1/me/lead-requests/{lead}");
+
+    // The other parent added in the client's form is the father, not
+    // "parent, role not stated".
+    let father = Uuid::new_v4();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/representatives/{father}"),
+        &staff,
+        Some(json!({ "role": "legal_representative", "first_name": "Ben",
+                     "last_name": "Muster", "relation": "father" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["access_kind"], "staff", "{body}");
+    assert_eq!(
+        representative(&body, father)["relation"],
+        "father",
+        "{body}"
+    );
+    assert_eq!(representative(&body, father)["slot"], "rep2", "{body}");
+    let contacts: Value = sqlx::query_scalar("SELECT trusted_contacts FROM leads WHERE id = $1")
+        .bind(lead)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    let entry = contacts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == json!(father))
+        .cloned()
+        .unwrap_or_else(|| panic!("no father entry: {contacts}"));
+    assert_eq!(entry["relation"], "father", "{entry}");
+    // Mother or father only.
+    let (status, error) = json_request(
+        router,
+        "POST",
+        &format!("{base}/representatives/{father}"),
+        &staff,
+        Some(json!({ "relation": "uncle" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["field"], "relation", "{error}");
+
+    // Staff upload both parents' identity copies once the client's consent is recorded.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/consent"),
+        &staff,
+        Some(
+            json!({ "purpose": "lead_inquiry_processing", "version": CONSENT_VERSION,
+                     "language": "ru", "recorded_how": "phone" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    for parent in [mother, father] {
+        let (status, uploaded) = upload_file(
+            router,
+            &format!("{base}/representatives/{parent}/identity-document"),
+            &staff,
+            "ausweis.pdf",
+            "application/pdf",
+            PDF,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{uploaded}");
+        assert_eq!(
+            representative(&uploaded, parent)["identity_documents"]
+                .as_array()
+                .map(Vec::len),
+            Some(1),
+            "{uploaded}"
+        );
+    }
+
+    // "One of the parents" receives the invoice and pays: staff name which.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/billing"),
+        &staff,
+        Some(json!({ "invoice_recipient": "self", "invoice_recipient_is_payer": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        missing(&body).contains(&"recipient_representative_id".into()),
+        "Two parents and staff are none of them: {body}"
+    );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/billing"),
+        &staff,
+        Some(json!({ "recipient_representative_id": father })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["recipient"]["name"], "Ben Muster", "{body}");
+    assert!(
+        !missing(&body).contains(&"recipient_representative_id".into()),
+        "{body}"
+    );
+    assert!(!missing(&body).contains(&"payer_kind".into()), "{body}");
+    assert_eq!(body["payer"]["payer_kind"], "representative", "{body}");
+    assert_eq!(
+        body["payer"]["payer_representative_id"],
+        json!(father),
+        "{body}"
+    );
+
+    // The father receives the invoice, the mother pays: named by id, never a third party.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/billing"),
+        &staff,
+        Some(json!({ "invoice_recipient_is_payer": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/payer"),
+        &staff,
+        Some(json!({ "payer_kind": "representative", "payer_representative_id": mother })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!missing(&body).contains(&"payer_kind".into()), "{body}");
+    assert_eq!(
+        body["payer"]["payer_representative_id"],
+        json!(mother),
+        "{body}"
+    );
+}

@@ -127,6 +127,22 @@ describe("step \"Document\" in a parent's login for a minor", () => {
     expect(html).not.toContain("lead-request-rep2-identity-upload");
   });
 
+  it("staff on a minor's form upload each parent's copy too (owner 2026-10-30)", () => {
+    const staffMother = { ...mother, mine: false };
+    const father = { ...mother, id: "rep-2", slot: "rep2" as const, mine: false, first_name: "Ben", identity_documents: [] };
+    const lead = { ...request({ guardian: false, minor: true, representatives: [staffMother, father] }), access_kind: "staff" } as LeadRequest;
+    const html = render(lead);
+    expect(html).toContain("Документ ребёнка");
+    expect(html).toContain("Документ родителя (Anna Testova)");
+    expect(html).toContain("Документ родителя (Ben Testova)");
+    expect(html).toContain("lead-request-rep1-identity-upload");
+    expect(html).toContain("lead-request-rep2-identity-upload");
+    expect(html).toContain("pass-mutter.jpg");
+    // Staff are none of the parents: no "your own document".
+    expect(html).not.toContain("Ваш документ");
+    expect(html).not.toContain("lead-request-own-document");
+  });
+
   it("an adult's own view is unchanged: one document, no parent block", () => {
     const html = render(request({ guardian: false, minor: false }));
     expect(html).toContain("lead-request-identity-upload");

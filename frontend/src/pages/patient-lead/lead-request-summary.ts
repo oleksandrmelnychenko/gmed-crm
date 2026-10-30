@@ -3,6 +3,7 @@ import { servicesText } from "./lead-request-services-text";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
+import { actsAsGuardian } from "./lead-request-access";
 import { consentFormText } from "./lead-request-consent-form-text";
 import { disclosureDefaultsToNo, formatBirthDate, personScope, storedTrustedPersons } from "./lead-trusted-persons-model";
 import { REPRESENTATIVE_COUNTRY_FIELDS } from "./lead-request-representative-questions-model";
@@ -191,7 +192,8 @@ function representativePayerLabel(
  * fields. Groups an older server does not know are left out.
  */
 export function requestSummary(request: LeadRequest, text: LeadRequestText, lang: string): SummaryGroup[] {
-  const guardian = request.access_kind === "guardian";
+  // Staff on a minor's form read the summary as the parents do (owner 2026-10-30).
+  const guardian = actsAsGuardian(request);
   const data = request.personal_data;
   const identification = request.identification;
   const payer = request.payer;
@@ -356,7 +358,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       [third ? text.recipient.email : text.billingFields.invoice_email, paying && third ? "" : recipient?.email],
       [text.recipient.phone, party?.phone],
       [text.recipient.paymentReason, organisation ? party?.payment_reason : ""],
-      [billing.invoice_recipient === "self" ? text.recipient.isPayerSelf : third ? (organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty) : text.recipient.isPayer, yesNo(billing.invoice_recipient_is_payer)],
+      [billing.invoice_recipient === "self" ? invoiceParent && !invoiceParent.mine ? text.recipient.isPayerOtherParent : text.recipient.isPayerSelf : third ? (organisation ? text.recipient.isPayerOrganisation : text.recipient.isPayerThirdParty) : text.recipient.isPayer, yesNo(billing.invoice_recipient_is_payer)],
     ]);
   }
 

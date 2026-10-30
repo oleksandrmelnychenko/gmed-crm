@@ -76,6 +76,11 @@ pub(crate) const CUSTODY_SOLE_PARENT: &str = "sole_parent";
 pub(crate) const CUSTODY_GUARDIAN: &str = "guardian";
 const CUSTODY_VALUES: [&str; 3] = [CUSTODY_JOINT, CUSTODY_SOLE_PARENT, CUSTODY_GUARDIAN];
 
+/// What a minor's parent is to the child, as the cabinet asks it (owner
+/// 2026-10-30): stored as the trusted contact's relation, which the wizard
+/// reads; without it the wizard shows "parent, role not stated".
+const PARENT_RELATIONS: [&str; 2] = ["mother", "father"];
+
 /// The places of the form: the first and the second legal representative of
 /// a minor, an adult's representative and an adult's legal guardian.
 pub(crate) const SLOT_REP1: &str = "rep1";
@@ -1774,6 +1779,8 @@ fn changed_person_fields(before: &Person, after: &Person) -> Vec<&'static str> {
 #[derive(Debug, Default, PartialEq, Eq)]
 struct PersonPatch {
     role: Option<String>,
+    /// A minor's parent: `mother` or `father` ([`PARENT_RELATIONS`]).
+    relation: Option<String>,
     texts: HashMap<&'static str, String>,
     citizenships: Option<Vec<String>>,
 }
@@ -1831,6 +1838,8 @@ fn parse_person_patch(body: &Value) -> Result<PersonPatch, axum::response::Respo
         };
         if key == "role" {
             patch.role = Some(text.trim().to_lowercase());
+        } else if key == "relation" {
+            patch.relation = Some(text.trim().to_lowercase());
         } else if let Some(field) = PERSON_FIELDS
             .iter()
             .copied()
@@ -3136,6 +3145,26 @@ pub(crate) async fn upsert_my_representative(
         }
     }
 
+    // A minor's parent is the mother or the father (owner 2026-10-30): the
+    // wizard reads it as the contact's relation. Never of a guardian.
+    let parent_relation = match patch.relation.as_deref() {
+        None => None,
+        Some(relation) => {
+            let parent = representation.minor
+                && answers.custody() != CUSTODY_GUARDIAN
+                && known.is_none_or(|person| {
+                    !crate::routes::leads::is_legal_guardian_relation(person.relation.as_deref())
+                });
+            if !parent || !PARENT_RELATIONS.contains(&relation) {
+                return invalid_key("relation", "Choose mother or father of a minor's parent");
+            }
+            Some(relation)
+        }
+    };
+    let relation_changed = parent_relation.is_some_and(|relation| {
+        known.and_then(|person| person.relation.as_deref()) != Some(relation)
+    });
+
     let current = known.map(Person::of).unwrap_or_default();
     let next = match apply_person_patch(&current, &patch, crate::app_time::today()) {
         Ok(next) => next,
@@ -3201,7 +3230,10 @@ pub(crate) async fn upsert_my_representative(
             );
         }
     }
-    let fields = changed_person_fields(&current, &next);
+    let mut fields = changed_person_fields(&current, &next);
+    if relation_changed {
+        fields.push("relation");
+    }
     if known.is_some() && fields.is_empty() {
         drop(tx);
         return request_response(&state, lead_id, auth.user_id, kind, StatusCode::OK).await;
@@ -3214,7 +3246,7 @@ pub(crate) async fn upsert_my_representative(
         ROLE_AUTHORISED_REPRESENTATIVE => "representative",
         ROLE_LEGAL_GUARDIAN => "guardian",
         _ if answers.custody() == CUSTODY_GUARDIAN => "guardian",
-        _ => "parent",
+        _ => parent_relation.unwrap_or("parent"),
     };
     // A row keeps its origin; a parent staff entered gets one marked so.
     let origin = if known.is_some() {
@@ -3243,6 +3275,14 @@ pub(crate) async fn upsert_my_representative(
         relation,
         patch.sends_address(),
     );
+    if let Some(relation) = parent_relation.filter(|_| relation_changed)
+        && let Some(entry) = contacts
+            .iter_mut()
+            .find(|entry| entry_id(entry) == Some(representative_id))
+            .and_then(Value::as_object_mut)
+    {
+        entry.insert("relation".into(), json!(relation));
+    }
     let written = async {
         if let Some(mut payer) = parent_payer {
             payer.first_name = next.first_name.clone();

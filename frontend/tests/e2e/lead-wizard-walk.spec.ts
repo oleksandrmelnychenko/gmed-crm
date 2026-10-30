@@ -277,9 +277,8 @@ test("the service and order tabs and the release checklist follow what each step
 // Staff fill in the client's form inside the wizard, without another browser
 // tab (owner decision 2026-10-29); closing the dialog is the way back and the
 // wizard reads the client's answers again.
-test("the client's form opens in a dialog of the wizard and the wizard reloads the answers on closing", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  const request = {
+function clientFormRequest() {
+  return {
     lead_id: leadId,
     access_kind: "self",
     created_at: "2026-10-20T08:00:00Z",
@@ -306,6 +305,11 @@ test("the client's form opens in a dialog of the wizard and the wizard reloads t
     changed_since_submit: false,
     retention_deadline_at: null,
   };
+}
+
+test("the client's form opens in a dialog of the wizard and the wizard reloads the answers on closing", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const request = clientFormRequest();
   const { wizard, calls } = await mount(page, adultLead(), { [`/me/lead-requests/${leadId}`]: () => request });
 
   await wizard.getByTestId("lead-wizard-client-form").click();
@@ -322,4 +326,25 @@ test("the client's form opens in a dialog of the wizard and the wizard reloads t
   const readAgain = (path: string) => calls.slice(before).some((call) => call.method === "GET" && call.path === path);
   await expect.poll(() => readAgain(`/leads/${leadId}/portal-intake`)).toBe(true);
   await expect.poll(() => readAgain(`/leads/${leadId}`)).toBe(true);
+});
+
+// DEV QA 2026-10-30: a consent checkbox showed below «Назад / Далее» — the sticky step footer kept
+// to the padding edge of the dialog's scroll box, and the form showed through the strip below it.
+test("the client's form in the dialog: nothing of the step shows below its footer", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 760 });
+  const request = { ...clientFormRequest(), consent_form: { version: "2026-10-12", choices: null, chosen_at: null } };
+  const { wizard } = await mount(page, adultLead(), { [`/me/lead-requests/${leadId}`]: () => request });
+  await wizard.getByTestId("lead-wizard-client-form").click();
+  const dialog = page.getByTestId("lead-client-form-dialog");
+  await expect(dialog.getByTestId("lead-request-staff-mode")).toBeVisible({ timeout: 30_000 });
+  await dialog.locator('[data-step="documents"]').click();
+  // Staff open the record fields of the health consent: the step is longer than the dialog.
+  await dialog.getByTestId("lead-request-health-consent").getByRole("checkbox").click();
+  await expect(dialog.getByTestId("lead-request-health-consent-record")).toBeVisible();
+  const gap = await page.evaluate(() => {
+    const scroll = document.querySelector("[data-testid=lead-client-form-scroll]")!;
+    const footer = Array.from(scroll.querySelectorAll("[data-testid=lead-request-step] .sticky")).at(-1)!;
+    return scroll.getBoundingClientRect().bottom - footer.getBoundingClientRect().bottom;
+  });
+  expect(Math.abs(gap)).toBeLessThan(1);
 });

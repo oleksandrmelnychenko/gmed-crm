@@ -114,7 +114,11 @@ export function LeadClientFormDialog({
             {tx("Закрыть", "Schließen")}
           </Button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted/20 p-3 sm:p-5">
+        {/* The padding sits inside the scroll box, not on it: a sticky step footer keeps to the
+            scroll box's padding edge, and the form showed through the strip below the footer
+            (DEV QA 2026-10-30: a consent checkbox under «Назад / Далее»). */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted/20" data-testid="lead-client-form-scroll">
+          <div className="p-3 sm:p-5">
           <Suspense
             fallback={(
               <div role="status" className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
@@ -125,6 +129,7 @@ export function LeadClientFormDialog({
           >
             <LeadRequestPage key={`${leadId}:${version}`} staffLeadId={leadId} initialStep={step} embedded saveRef={saveRef} />
           </Suspense>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

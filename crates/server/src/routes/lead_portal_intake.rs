@@ -5541,22 +5541,9 @@ async fn save_trusted_persons(
         Ok(loaded) => loaded.and_then(|loaded| loaded.representation.answers.custody),
         Err(error) => return internal(error, "load custody"),
     };
+    // Staff on a minor's form decide in the parents' wording (`for_custody`).
     let subject = consent_choices::DisclosureSubject::for_custody(
-        if kind == AccessKind::Staff {
-            if crate::routes::leads::is_minor_on(
-                lead_row
-                    .try_get::<Option<NaiveDate>, _>("date_of_birth")
-                    .ok()
-                    .flatten(),
-                crate::app_time::today(),
-            ) {
-                AccessKind::Guardian.as_str()
-            } else {
-                AccessKind::Own.as_str()
-            }
-        } else {
-            kind.as_str()
-        },
+        kind.as_str(),
         crate::routes::leads::is_minor_on(
             lead_row
                 .try_get::<Option<NaiveDate>, _>("date_of_birth")

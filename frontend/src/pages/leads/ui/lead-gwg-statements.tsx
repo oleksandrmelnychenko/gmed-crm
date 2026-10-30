@@ -514,7 +514,9 @@ function BillingGroup({
   card?: boolean;
 }) {
   const payerAnswered = Boolean(payerLink?.submitted_at);
-  const statements = billingStatements(billing, tx, lang, payerAnswered, minor);
+  // A minor's parent named by staff in the client's form is said so (owner 2026-10-30).
+  const recipientByStaff = useMarkerKind("invoice_recipient") === "staff";
+  const statements = billingStatements(billing, tx, lang, payerAnswered, minor, null, recipientByStaff);
   return (
     <div className={cn(card ? STATEMENT_CARD : STATEMENT_SECTION, card && "col-span-full")} data-testid="lead-gwg-billing">
       <div className="flex flex-wrap items-center gap-2">

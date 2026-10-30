@@ -21,6 +21,7 @@ import {
   withdrawLeadDocument,
   type LeadRequest,
 } from "./lead-request-api";
+import { actsAsGuardian, staffForChild } from "./lead-request-access";
 import { BillingSections } from "./lead-request-billing";
 import { nameNeedsLatinSpelling, suggestPassportSpelling } from "./name-transliteration";
 import { ConsentFormChoicesSection } from "./lead-request-consent-form";
@@ -168,7 +169,7 @@ export function StepFrame({
 }) {
   // The sent request is read-only (owner 2026-10-26); the server refuses changes as well.
   const locked = Boolean(request.submitted_at) && !lockExempt;
-  const guardian = request.access_kind === "guardian";
+  const guardian = actsAsGuardian(request);
   // "1st representative – you": a parent sees which of the two persons is meant.
   const who = {
     mineSlot: request.representation?.representatives.find((person) => person.mine)?.slot ?? null,
@@ -751,8 +752,11 @@ export function IdentityStep({ request, text, enqueue, onChange, missing, nav }:
   // A parent's login for a minor uploads two documents here: the child's and the own one
   // (owner report 2026-10-21: "I uploaded my passport and my child's" — only the child's arrived).
   const parentOfMinor = request.access_kind === "guardian" && request.minor && Boolean(request.representation);
+  // Staff on a minor's form upload the parents' copies here too, each parent's (owner 2026-10-30).
+  const staffParentSlots = staffForChild(request) && request.representation ? parentDocumentSlots(request) : [];
+  const forChild = parentOfMinor || staffParentSlots.length > 0;
   // Three uploads on one step: "consent first" is said once above them (labels audit 2026-10-26, A6).
-  const consentNoteAbove = parentOfMinor && !consentGiven(request, INQUIRY_CONSENT);
+  const consentNoteAbove = forChild && !consentGiven(request, INQUIRY_CONSENT);
   return (
     <StepFrame testId="lead-request-step-identity" step="identity" request={request} text={text} missing={missing} nav={nav} lockExempt={refusedIdentityUploadKeys(request).length > 0}>
       <ConsentNoteAboveContext.Provider value={consentNoteAbove}>
@@ -764,7 +768,7 @@ export function IdentityStep({ request, text, enqueue, onChange, missing, nav }:
             text={text}
             enqueue={enqueue}
             onChange={onChange}
-            title={parentOfMinor ? text.childDocumentTitle : undefined}
+            title={forChild ? text.childDocumentTitle : undefined}
           />
         </div>
       ) : null}
@@ -774,6 +778,9 @@ export function IdentityStep({ request, text, enqueue, onChange, missing, nav }:
       {parentOfMinor ? (
         <OtherParentDocumentSection request={request} text={text} enqueue={enqueue} onChange={onChange} />
       ) : null}
+      {staffParentSlots.map((slot) => (
+        <OtherParentDocumentSection key={slot} request={request} text={text} enqueue={enqueue} onChange={onChange} slot={slot} />
+      ))}
       </ConsentNoteAboveContext.Provider>
     </StepFrame>
   );
@@ -846,20 +853,25 @@ export function OtherParentDocumentSection({
   text,
   enqueue,
   onChange,
-}: Pick<StepProps, "request" | "text" | "enqueue" | "onChange">) {
+  slot: givenSlot,
+}: Pick<StepProps, "request" | "text" | "enqueue" | "onChange"> & {
+  /** Staff on a minor's form name the parent's place: they are none of the parents (owner 2026-10-30). */
+  slot?: "rep1" | "rep2";
+}) {
   const representation = request.representation;
   const mine = representation?.representatives.find((person) => person.mine && person.slot !== null)?.slot ?? null;
-  const slot = mine === "rep2" ? "rep1" : mine === "rep1" && representation?.custody === "joint" ? "rep2" : null;
+  const slot = givenSlot ?? (mine === "rep2" ? "rep1" : mine === "rep1" && representation?.custody === "joint" ? "rep2" : null);
   if (!slot) return null;
   const person = representation?.representatives.find((item) => item.slot === slot) ?? null;
   const required = representation?.document_stage === true || request.progress.missing_for_submit.includes(`${slot}_id_upload`);
   const name = person ? [person.first_name, person.last_name].filter(Boolean).join(" ") : "";
+  const byStaff = givenSlot !== undefined;
   return (
-    <div className="scroll-mt-4" data-testid="lead-request-other-parent-document">
-      <Section compact title={text.otherParentDocumentTitle(name)}>
+    <div className="scroll-mt-4" data-testid={byStaff ? `lead-request-parent-document-${slot}` : "lead-request-other-parent-document"}>
+      <Section compact title={byStaff ? text.parentDocumentTitle(name) : text.otherParentDocumentTitle(name)}>
         {person ? (
           <div className="space-y-2">
-            <InfoNote>{text.otherParentDocumentHint}</InfoNote>
+            <InfoNote>{byStaff ? text.parentDocumentHint : text.otherParentDocumentHint}</InfoNote>
             <RepresentativeUpload
               request={request}
               slot={slot}
@@ -879,7 +891,7 @@ export function OtherParentDocumentSection({
             className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
             data-testid="lead-request-other-parent-document-needs-person"
           >
-            <p>{text.otherParentDocumentNeedsPerson(text.sectionLegalRepresentatives)}</p>
+            <p>{(byStaff ? text.parentDocumentNeedsPerson : text.otherParentDocumentNeedsPerson)(text.sectionLegalRepresentatives)}</p>
             <GoToSectionButton
               step="person"
               anchor={SECTION_ANCHORS.representatives}
@@ -891,6 +903,17 @@ export function OtherParentDocumentSection({
       </Section>
     </div>
   );
+}
+
+/**
+ * The parents' places whose identity copy staff upload on step "Document" of
+ * a minor's form (owner 2026-10-30): the first parent, and the second under
+ * joint custody. A guardian (Vormund) keeps the own copy in the persons' step.
+ */
+export function parentDocumentSlots(request: Pick<LeadRequest, "representation">): ("rep1" | "rep2")[] {
+  const custody = request.representation?.custody;
+  if (custody === "joint") return ["rep1", "rep2"];
+  return custody === "sole_parent" ? ["rep1"] : [];
 }
 
 /**
@@ -1121,7 +1144,7 @@ export function DeclarationsStep({ request, text, enqueue, onChange, missing, na
   return (
     <StepFrame testId="lead-request-step-declarations" step="declarations" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
       {request.identification !== undefined ? (
-        <LegalQuestionsSection form={identification} text={text} guardian={request.access_kind === "guardian"} minor={request.minor} />
+        <LegalQuestionsSection form={identification} text={text} guardian={actsAsGuardian(request)} minor={request.minor} />
       ) : null}
     </StepFrame>
   );

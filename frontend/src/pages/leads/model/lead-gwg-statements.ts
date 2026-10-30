@@ -662,6 +662,12 @@ export function billingStatements(
    * was filled).
    */
   paymentBackground: string | null = null,
+  /**
+   * Staff saved the recipient in the client's form (marker `invoice_recipient`
+   * of kind `staff`): a minor's parent was named by staff, not by a parent
+   * filling in the cabinet (owner 2026-10-30).
+   */
+  recipientByStaff = false,
 ): BillingStatements {
   const country = (code: string | null) => countryNameForDisplay(code, lang);
   const statement = (
@@ -690,7 +696,9 @@ export function billingStatements(
     const who =
       billing.invoice_recipient === "self"
         ? minor
-          ? tx("Родитель / законный представитель, заполнявший кабинет", "Elternteil / gesetzliche Vertretung, die das Portal ausgefüllt hat")
+          ? recipientByStaff
+            ? tx("Родитель / законный представитель (внёс сотрудник)", "Elternteil / gesetzliche Vertretung (von Mitarbeitenden eingetragen)")
+            : tx("Родитель / законный представитель, заполнявший кабинет", "Elternteil / gesetzliche Vertretung, die das Portal ausgefüllt hat")
           : tx("Пациент (сам / законные представители)", "Patient/in (selbst / gesetzliche Vertretung)")
         : third
           ? [

@@ -275,7 +275,8 @@ export function PayerSection({
   // A parent's own data on file: the parent may answer "I pay".
   const template = guardian && typed ? (request.payer_self_template ?? null) : null;
   // The other parent of the minor, for "the other parent pays".
-  const otherParent = typed && choices.includes("other_parent") ? otherParentOf(request) : null;
+  // For staff (none of the parents) the one besides the parent who receives the invoice (owner 2026-10-30).
+  const otherParent = typed && choices.includes("other_parent") ? otherParentOf(request, recipient?.representative_id) : null;
   const answered = payerAnsweredByPayer(request);
   const [draft, setDraft] = useState<PayerDraft>(() => {
     const parentPays = payerAnswer(request.payer, template) === "guardian";

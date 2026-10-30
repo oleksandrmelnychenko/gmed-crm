@@ -523,7 +523,8 @@ async function setup(page: Page, options: {
 const step = (page: Page, id: string) => page.locator(`[data-step="${id}"]`).click();
 const RECIPIENT = "Wer ist Rechnungsempfänger?";
 // In the person's words (labels audit 2026-10-26, B3): "I pay myself" for "me", "this person also pays" for another.
-const IS_PAYER = /^(Ich zahle selbst|Diese Person zahlt auch)$/;
+// A parent named by somebody else (staff, or a login that is none of the parents) "also pays" (owner 2026-10-30).
+const IS_PAYER = /^(Ich zahle selbst|Diese Person zahlt auch|Dieser Elternteil zahlt auch)$/;
 const WHO_PAYS = "Wer ist der Zahler?";
 const PAYER_TYPE = "Zahler ist";
 const PATIENT_PAYS = "Zahler bin ich";
@@ -1103,4 +1104,95 @@ test("guardian does not overwrite a stored self payer simply by opening billing"
   await select.click();
   await page.getByRole("option", { name: /als Elternteil/ }).click();
   await expect.poll(() => calls.payer.at(-1)).toMatchObject({ first_name: "Maria", last_name: "Muster", relationship_kind: "parent" });
+});
+
+/** Staff open the client's form from the wizard (owner decision 2026-10-29). */
+async function asStaff(page: Page, request: Request) {
+  await page.route("**/api/v1/me", (route) => route.fulfill({ json: {
+    id: "staff-user", email: "petra.manager@example.com", name: "Petra Manager", role: "patient_manager",
+    capabilities: ["leads.view", "leads.edit"], created_at: "2026-10-01T08:00:00Z", preferred_language: "de",
+    password_change_required: false, portal_mode: null, lead_portal: null,
+  } }));
+  await page.route("**/api/v1/me/lead-requests/lead-1", (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    recompute(request);
+    return route.fulfill({ json: request });
+  });
+}
+
+const staffOnMinor = (request: Request) => {
+  (request as { access_kind: string }).access_kind = "staff";
+  request.payer_self_template = null;
+  request.representation = twoParents(null);
+};
+
+// DEV QA 2026-10-30: staff fill in the form of a minor whose two parents share custody. Staff are
+// none of the parents: the form speaks of the child, staff name the parent who receives the
+// invoice (who then pays) or the other parent as payer, and the form can be sent.
+test("staff on a two-parent minor's form name the parent who receives and pays the invoice", async ({ page }) => {
+  const { request, calls } = await setup(page, { minor: true, prepare: staffOnMinor });
+  await asStaff(page, request);
+  await page.goto("/leads/lead-1/client-form");
+  await expect(page.getByTestId("lead-request-staff-mode")).toBeVisible();
+  await step(page, "billing");
+  const stepBox = page.getByTestId("lead-request-step-billing");
+  // The child's insurance, not the staff member's.
+  await expect(stepBox.getByText("Hat Ihr Kind eine Krankenversicherung?")).toBeVisible();
+  await checkLabelledRadio(stepBox.getByRole("radio", { name: "Ein Elternteil", exact: true }));
+  const parent = page.getByRole("combobox", { name: "Welcher Elternteil erhält die Rechnung?" });
+  await expect(parent).toBeVisible();
+  await expect(stepBox.getByRole("checkbox", { name: "Dieser Elternteil zahlt auch" })).toBeChecked();
+  await choose(page, parent, "Ben Muster");
+  await expect.poll(() => request.billing.recipient.representative_id).toBe(FATHER);
+  // The server names the chosen parent as payer with the billing answer.
+  await expect.poll(() => request.payer?.payer_representative_id).toBe(FATHER);
+  expect(request.progress.missing_for_submit).not.toContain("recipient_representative_id");
+  expect(request.progress.missing_for_submit).not.toContain("payer_kind");
+  // The other parent pays instead: named by id, offered by name.
+  await stepBox.getByRole("checkbox", { name: "Dieser Elternteil zahlt auch" }).uncheck();
+  await choose(page, stepBox.getByRole("combobox", { name: PAYER_TYPE }), "Der andere Elternteil (Maria Muster)");
+  await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "representative", payer_representative_id: MOTHER });
+  await expect(stepBox.getByRole("textbox", { name: "Vorname" })).toHaveCount(0);
+});
+
+test("staff on a minor's form choose the consent form options for the child and see when the consent was given", async ({ page }) => {
+  const { request } = await setup(page, { minor: true, prepare: (request) => {
+    staffOnMinor(request);
+    Object.assign(request, { consent_form: { version: "2026-10-12", choices: null, chosen_at: null } });
+  } });
+  await asStaff(page, request);
+  await page.route("**/api/v1/me/lead-requests/lead-1/consent-choices", async (route) => {
+    const body = route.request().postDataJSON() as { choices: Record<string, boolean> };
+    Object.assign(request, { consent_form: { version: "2026-10-12", choices: body.choices, chosen_at: "2026-10-11T09:40:00Z", chosen_by_me: true } });
+    recompute(request);
+    await route.fulfill({ json: request });
+  });
+  await page.goto("/leads/lead-1/client-form");
+  await step(page, "documents");
+  const block = page.getByTestId("lead-request-consent-form");
+  // The child's data, as a parent reads them — not "my data".
+  for (const name of [/meines Kindes einholen/, /Ärzte und medizinischen Einrichtungen meines Kindes/, /Unterlagen meines Kindes dürfen im EDV/]) {
+    await block.getByRole("checkbox", { name }).check();
+  }
+  await expect(page.getByTestId("lead-request-consent-form-given")).toHaveCount(0);
+  await page.getByTestId("lead-request-consent-form-record-how").selectOption("phone");
+  await page.getByTestId("lead-request-consent-form-record-save").click();
+  await expect(page.getByTestId("lead-request-consent-form-given")).toContainText("Zugestimmt am");
+});
+
+test("staff on a minor's form with a third-party recipient name which parent pays", async ({ page }) => {
+  const { request, calls } = await setup(page, { minor: true, prepare: (request) => {
+    staffOnMinor(request);
+    request.billing.invoice_recipient = "third_party";
+    request.billing.invoice_recipient_is_payer = false;
+    Object.assign(request.billing.recipient, { type: "organisation", organisation_name: "Kasse AG", street: "Weg 1",
+      zip: "10115", city: "Berlin", country: "DE", payment_reason: "Abrechnung", name: "Kasse AG" });
+  } });
+  await asStaff(page, request);
+  await page.goto("/leads/lead-1/client-form");
+  await step(page, "billing");
+  const stepBox = page.getByTestId("lead-request-step-billing");
+  await checkLabelledRadio(stepBox.getByRole("radio", { name: "Zahler ist ein Elternteil" }));
+  await choose(page, stepBox.getByRole("combobox", { name: "Welcher Elternteil zahlt?" }), "Maria Muster");
+  await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "representative", payer_representative_id: MOTHER });
 });

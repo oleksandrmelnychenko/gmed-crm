@@ -5,6 +5,7 @@ import type {
   FollowUpBlock,
   InvoiceRecipient,
   InvoiceTo,
+  ParentRelation,
   PaymentMethod,
   PaymentRouteBy,
   PayerType,
@@ -38,6 +39,7 @@ import {
 } from "./lead-request-model";
 import type { FundsSource, PAYER_LEGAL_DETAILS, PayerLegalQuestion } from "./lead-request-payer-questionnaire-model";
 import type { StepId } from "./lead-request-steps";
+import { actsAsGuardian } from "./lead-request-access";
 import {
   authorityProofOf,
   representativeSubmitPart,
@@ -295,6 +297,8 @@ export type LeadRequestText = {
     isPayerThirdParty: string;
     /** The same box for an organisation as recipient (DEV QA 2026-10-30: "this person" named a GmbH). */
     isPayerOrganisation: string;
+    /** The parent named as recipient by somebody else (staff, or the other parent's login) also pays. */
+    isPayerOtherParent: string;
     /**
      * Unticked with a third-party recipient: the patient pays, or another
      * person or organisation (owner 2026-10-11). A parent's login reads the
@@ -303,6 +307,9 @@ export type LeadRequestText = {
      */
     payerParty: Record<PayerParty, string>;
     payerPartyGuardian: Record<PayerParty, string>;
+    /** Staff on a minor's form (owner 2026-10-30): "one of the parents" pays, then which one. */
+    payerPartyParents: Record<PayerParty, string>;
+    parentPayerQuestion: string;
     /** "The payer is" a private person or an organisation: the payer's data follow. */
     payerTypeQuestion: string;
     /** "Who pays" when the recipient does not: one answer of a list. */
@@ -469,6 +476,9 @@ export type LeadRequestText = {
   serverChangedField: string;
   /** Name and date of birth of another person with a login or entered by GMED (representative_not_yours). */
   representativeIdentityLocked: string;
+  /** A minor's parent: the mother or the father (owner 2026-10-30), so staff need not state it. */
+  parentRelationLabel: string;
+  parentRelationOptions: Record<ParentRelation, string>;
   representativeEmailDuplicate: string;
   /** A representative must be of full age (the server refuses a younger one). */
   representativeMinor: string;
@@ -545,6 +555,10 @@ export type LeadRequestText = {
   otherParentDocumentTitle: (name: string) => string;
   otherParentDocumentHint: string;
   otherParentDocumentNeedsPerson: (section: string) => string;
+  /** Staff on a minor's form (owner 2026-10-30): each parent's identity copy, uploaded by staff. */
+  parentDocumentTitle: (name: string) => string;
+  parentDocumentHint: string;
+  parentDocumentNeedsPerson: (section: string) => string;
   payerOwnMissingTitle: string;
   payerNoticeMissing: string;
   payerDeclarationLabel: string;
@@ -862,12 +876,12 @@ export function actsAsVormund(request: {
   minor?: boolean | null;
   representation?: { custody?: string | null } | null;
 }): boolean {
-  return request.access_kind === "guardian" && request.minor === true && request.representation?.custody === "guardian";
+  return actsAsGuardian(request) && request.minor === true && request.representation?.custody === "guardian";
 }
 
 /** "Do you have health insurance?" by login: the own, a parent's child's, or the child a guardian represents. */
 export function hasInsuranceLabel(text: LeadRequestText, request: Parameters<typeof actsAsVormund>[0]): string {
-  if (request.access_kind !== "guardian") return text.fields.has_insurance;
+  if (!actsAsGuardian(request)) return text.fields.has_insurance;
   return actsAsVormund(request) ? text.hasInsuranceVormund : text.hasInsuranceGuardian;
 }
 
@@ -894,7 +908,7 @@ export function recipientOptions(
   request: { access_kind?: string | null; minor?: boolean | null },
   otherParentReceives = false,
 ): Record<InvoiceRecipient, string> {
-  if (request.access_kind !== "guardian") return text.recipient.options;
+  if (!actsAsGuardian(request)) return text.recipient.options;
   if (!request.minor) return text.recipient.optionsRepresentative;
   return otherParentReceives ? text.recipient.optionsOtherParent : text.recipient.optionsGuardian;
 }
@@ -903,7 +917,7 @@ export function recipientOptions(
 export type ExtraWorkSubject = "self" | "child" | "patient";
 
 export function extraWorkSubject(request: { access_kind?: string | null; minor?: boolean | null }): ExtraWorkSubject {
-  if (request.access_kind !== "guardian") return "self";
+  if (!actsAsGuardian(request)) return "self";
   return request.minor ? "child" : "patient";
 }
 
@@ -1290,6 +1304,7 @@ const de: LeadRequestText = {
     isPayerSelf: "Ich zahle selbst",
     isPayerThirdParty: "Diese Person zahlt auch",
     isPayerOrganisation: "Diese Organisation zahlt auch",
+    isPayerOtherParent: "Dieser Elternteil zahlt auch",
     payerParty: {
       patient: "Zahler bin ich",
       other: "Zahler ist eine andere Person oder Organisation",
@@ -1298,6 +1313,11 @@ const de: LeadRequestText = {
       patient: "Zahler bin ich (als Elternteil)",
       other: "Zahler ist eine andere Person oder Organisation",
     },
+    payerPartyParents: {
+      patient: "Zahler ist ein Elternteil",
+      other: "Zahler ist eine andere Person oder Organisation",
+    },
+    parentPayerQuestion: "Welcher Elternteil zahlt?",
     payerTypeQuestion: "Zahler ist",
     payerSection: "Zahler",
     payerQuestion: "Wer ist der Zahler?",
@@ -1513,6 +1533,8 @@ const de: LeadRequestText = {
   serverChangedByParent: "Die Angaben hat der andere Elternteil geändert – bitte prüfen Sie das Feld.",
   serverChangedField: "Diese Angabe wurde inzwischen geändert – bitte prüfen Sie das Feld.",
   representativeIdentityLocked: "Name und Geburtsdatum dieser Person ändert nur sie selbst oder GMED.",
+  parentRelationLabel: "Beziehung zum Kind",
+  parentRelationOptions: { mother: "Mutter", father: "Vater" },
   representativeMinor: "Die vertretende Person muss volljährig sein (mindestens 18 Jahre).",
   representativeEmailDuplicate:
     "Diese E-Mail-Adresse ist bereits bei einer anderen Person angegeben. Für die Unterschrift braucht jede Person eine eigene Adresse.",
@@ -1628,6 +1650,9 @@ const de: LeadRequestText = {
   otherParentDocumentTitle: (name) => (name ? `Ausweisdokument des anderen Elternteils (${name})` : "Ausweisdokument des anderen Elternteils"),
   otherParentDocumentHint: "Bitte laden Sie einen gut lesbaren Scan oder ein Foto des Ausweisdokuments des anderen Elternteils hoch.",
   otherParentDocumentNeedsPerson: (section) => `Tragen Sie zuerst den anderen Elternteil im Abschnitt „${section}“ ein; danach können Sie hier sein Ausweisdokument hochladen.`,
+  parentDocumentTitle: (name) => (name ? `Ausweisdokument des Elternteils (${name})` : "Ausweisdokument des Elternteils"),
+  parentDocumentHint: "Bitte laden Sie einen gut lesbaren Scan oder ein Foto des Ausweisdokuments dieses Elternteils hoch.",
+  parentDocumentNeedsPerson: (section) => `Tragen Sie zuerst den Elternteil im Abschnitt „${section}“ ein; danach können Sie hier sein Ausweisdokument hochladen.`,
   payerOwnMissingTitle: "Für das Senden fehlt noch:",
   payerNoticeMissing: "Datenschutzhinweis bestätigen",
   payerDeclarationLabel: "Ich bestätige, dass meine Angaben als zahlende Person vollständig und richtig sind.",
@@ -1892,6 +1917,7 @@ const ru: LeadRequestText = {
     isPayerSelf: "Я оплачиваю сам(а)",
     isPayerThirdParty: "Этот человек также оплачивает",
     isPayerOrganisation: "Эта организация также оплачивает",
+    isPayerOtherParent: "Этот родитель также оплачивает",
     payerParty: {
       patient: "Плательщиком счёта являюсь я",
       other: "Плательщиком счёта является другое лицо или организация",
@@ -1900,6 +1926,11 @@ const ru: LeadRequestText = {
       patient: "Плательщиком счёта являюсь я (как родитель)",
       other: "Плательщиком счёта является другое лицо или организация",
     },
+    payerPartyParents: {
+      patient: "Плательщиком счёта является один из родителей",
+      other: "Плательщиком счёта является другое лицо или организация",
+    },
+    parentPayerQuestion: "Кто из родителей оплачивает?",
     payerTypeQuestion: "Плательщиком является",
     payerSection: "Плательщик",
     payerQuestion: "Кто является плательщиком?",
@@ -2113,6 +2144,8 @@ const ru: LeadRequestText = {
   serverChangedByParent: "Данные изменил другой родитель — проверьте поле.",
   serverChangedField: "Эти данные тем временем изменились — проверьте поле.",
   representativeIdentityLocked: "Имя и дату рождения этого человека может изменить только он сам или GMED.",
+  parentRelationLabel: "Кем приходится ребёнку",
+  parentRelationOptions: { mother: "Мать", father: "Отец" },
   representativeMinor: "Представитель должен быть совершеннолетним (не младше 18 лет).",
   representativeEmailDuplicate:
     "Этот адрес e-mail уже указан для другого человека. Для подписи каждому нужен собственный адрес.",
@@ -2229,6 +2262,9 @@ const ru: LeadRequestText = {
   otherParentDocumentTitle: (name) => (name ? `Документ второго родителя (${name})` : "Документ второго родителя"),
   otherParentDocumentHint: "Загрузите читаемый скан или фото документа, удостоверяющего личность второго родителя.",
   otherParentDocumentNeedsPerson: (section) => `Сначала укажите второго родителя в разделе «${section}» — затем здесь можно загрузить его документ.`,
+  parentDocumentTitle: (name) => (name ? `Документ родителя (${name})` : "Документ родителя"),
+  parentDocumentHint: "Загрузите читаемый скан или фото документа, удостоверяющего личность этого родителя.",
+  parentDocumentNeedsPerson: (section) => `Сначала укажите родителя в разделе «${section}» — затем здесь можно загрузить его документ.`,
   payerOwnMissingTitle: "Для отправки ещё не хватает:",
   payerNoticeMissing: "Подтвердить уведомление о защите данных",
   payerDeclarationLabel: "Я подтверждаю, что мои данные как плательщика полны и верны.",
@@ -2492,6 +2528,7 @@ const uk: LeadRequestText = {
     isPayerSelf: "Я сплачую сам(а)",
     isPayerThirdParty: "Ця особа також сплачує",
     isPayerOrganisation: "Ця організація також сплачує",
+    isPayerOtherParent: "Цей із батьків також сплачує",
     payerParty: {
       patient: "Платником рахунку є я",
       other: "Платником рахунку є інша особа або організація",
@@ -2500,6 +2537,11 @@ const uk: LeadRequestText = {
       patient: "Платником рахунку є я (як один із батьків)",
       other: "Платником рахунку є інша особа або організація",
     },
+    payerPartyParents: {
+      patient: "Платником рахунку є один із батьків",
+      other: "Платником рахунку є інша особа або організація",
+    },
+    parentPayerQuestion: "Хто з батьків сплачує?",
     payerTypeQuestion: "Платником є",
     payerSection: "Платник",
     payerQuestion: "Хто є платником?",
@@ -2713,6 +2755,8 @@ const uk: LeadRequestText = {
   serverChangedByParent: "Дані змінив другий з батьків — перевірте поле.",
   serverChangedField: "Ці дані тим часом змінилися — перевірте поле.",
   representativeIdentityLocked: "Ім’я та дату народження цієї людини може змінити лише вона сама або GMED.",
+  parentRelationLabel: "Ким доводиться дитині",
+  parentRelationOptions: { mother: "Мати", father: "Батько" },
   representativeMinor: "Представник має бути повнолітнім (щонайменше 18 років).",
   representativeEmailDuplicate:
     "Цю адресу e-mail уже вказано для іншої людини. Для підпису кожному потрібна власна адреса.",
@@ -2829,6 +2873,9 @@ const uk: LeadRequestText = {
   otherParentDocumentTitle: (name) => (name ? `Документ другого з батьків (${name})` : "Документ другого з батьків"),
   otherParentDocumentHint: "Завантажте читабельний скан або фото документа, що посвідчує особу другого з батьків.",
   otherParentDocumentNeedsPerson: (section) => `Спершу вкажіть другого з батьків у розділі «${section}» — після цього тут можна завантажити його документ.`,
+  parentDocumentTitle: (name) => (name ? `Документ одного з батьків (${name})` : "Документ одного з батьків"),
+  parentDocumentHint: "Завантажте читабельний скан або фото документа, що посвідчує особу цього з батьків.",
+  parentDocumentNeedsPerson: (section) => `Спершу вкажіть цього з батьків у розділі «${section}» — після цього тут можна завантажити його документ.`,
   payerOwnMissingTitle: "Для надсилання ще бракує:",
   payerNoticeMissing: "Підтвердити повідомлення про захист даних",
   payerDeclarationLabel: "Я підтверджую, що мої дані як платника повні та правильні.",
@@ -3092,6 +3139,7 @@ const en: LeadRequestText = {
     isPayerSelf: "I pay myself",
     isPayerThirdParty: "This person also pays",
     isPayerOrganisation: "This organisation also pays",
+    isPayerOtherParent: "This parent also pays",
     payerParty: {
       patient: "I am the payer",
       other: "The payer is another person or organisation",
@@ -3100,6 +3148,11 @@ const en: LeadRequestText = {
       patient: "The payer is me (as a parent)",
       other: "The payer is another person or organisation",
     },
+    payerPartyParents: {
+      patient: "The payer is one of the parents",
+      other: "The payer is another person or organisation",
+    },
+    parentPayerQuestion: "Which parent pays?",
     payerTypeQuestion: "The payer is",
     payerSection: "Payer",
     payerQuestion: "Who is the payer?",
@@ -3306,6 +3359,8 @@ const en: LeadRequestText = {
   serverChangedByParent: "The other parent changed this entry – please check the field.",
   serverChangedField: "This entry has changed in the meantime – please check the field.",
   representativeIdentityLocked: "Only this person or GMED can change their name and date of birth.",
+  parentRelationLabel: "Relationship to the child",
+  parentRelationOptions: { mother: "Mother", father: "Father" },
   representativeMinor: "The representative must be of full age (at least 18).",
   representativeEmailDuplicate:
     "This e-mail address is already given for another person. Each person needs an address of their own to sign.",
@@ -3420,6 +3475,9 @@ const en: LeadRequestText = {
   otherParentDocumentTitle: (name) => (name ? `Other parent’s identity document (${name})` : "Other parent’s identity document"),
   otherParentDocumentHint: "Upload a readable scan or photo of the other parent’s identity document.",
   otherParentDocumentNeedsPerson: (section) => `First enter the other parent in the section “${section}”; then you can upload their document here.`,
+  parentDocumentTitle: (name) => (name ? `Parent’s identity document (${name})` : "Parent’s identity document"),
+  parentDocumentHint: "Upload a readable scan or photo of this parent’s identity document.",
+  parentDocumentNeedsPerson: (section) => `First enter the parent in the section “${section}”; then you can upload their document here.`,
   payerOwnMissingTitle: "Still missing before sending:",
   payerNoticeMissing: "Confirm the privacy notice",
   payerDeclarationLabel: "I confirm that my details as the paying person are complete and correct.",

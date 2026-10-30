@@ -1,3 +1,4 @@
+import { actsAsGuardian } from "./lead-request-access";
 import { actsAsVormund, asLeadCabinetLang } from "./lead-request-text";
 
 const texts = {
@@ -160,7 +161,7 @@ export function trustedPersonsText(lang: string) {
 export type DisclosureSubject = "own" | "child" | "represented";
 
 export function disclosureSubject(request: { access_kind?: string | null; minor?: boolean | null }): DisclosureSubject {
-  if (request.access_kind !== "guardian") return "own";
+  if (!actsAsGuardian(request)) return "own";
   return request.minor === true ? "child" : "represented";
 }
 
