@@ -118,6 +118,8 @@ describe("portal state labels", () => {
   it("recognises events caused by the patient", () => {
     expect(isPatientPortalEvent({ type: "lead.portal_updated", payload: { access_kind: "self" } })).toBe(true);
     expect(isPatientPortalEvent({ type: "lead.portal_updated", payload: { change: "document_reviewed" } })).toBe(false);
+    // Staff filling in the client's form write as staff: their own change is no patient update (owner 2026-10-30).
+    expect(isPatientPortalEvent({ type: "lead.portal_updated", payload: { access_kind: "staff" } })).toBe(false);
     expect(isPatientPortalEvent({ type: "lead.updated", payload: { access_kind: "self" } })).toBe(false);
   });
 });

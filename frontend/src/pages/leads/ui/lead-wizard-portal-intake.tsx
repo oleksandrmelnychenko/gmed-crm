@@ -133,10 +133,12 @@ export function PatientFieldBadge({ marker, tx }: { marker: PatientFieldMarker; 
       variant="outline"
       data-testid="patient-field-badge"
       className="h-5 gap-1 rounded-full border-sky-200 bg-sky-50 px-1.5 text-[10.5px] font-medium text-sky-800"
-      title={marker.access_kind === "guardian" ? tx("Внёс родитель в портале", "Von einem Elternteil im Portal eingetragen") : undefined}
+      title={marker.access_kind === "guardian" ? tx("Внёс родитель в портале", "Von einem Elternteil im Portal eingetragen")
+        : marker.access_kind === "staff" ? tx("Внёс сотрудник в анкете клиента", "Von Mitarbeitenden im Kundenformular eingetragen") : undefined}
     >
       <UserRound aria-hidden="true" className="size-3" />
-      {tx("от пациента", "vom Patienten")}
+      {/* Staff's own entries in the client's form are theirs, not the patient's (owner 2026-10-30). */}
+      {marker.access_kind === "staff" ? tx("внёс сотрудник", "von Mitarbeitenden") : tx("от пациента", "vom Patienten")}
       {marker.at ? ` · ${formatAppDateTime(marker.at)}` : ""}
     </Badge>
   );

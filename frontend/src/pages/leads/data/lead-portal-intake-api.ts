@@ -14,7 +14,8 @@ import {
 export type Step1FillMode = "staff" | "patient";
 
 /** A step-1 field whose current value the patient entered in the portal. */
-export type PatientFieldMarker = { at: string | null; access_kind: "self" | "guardian" | null };
+/** Who last entered the field in the client's form: the lead, a parent, or staff for the client. */
+export type PatientFieldMarker = { at: string | null; access_kind: "self" | "guardian" | "staff" | null };
 
 export type LeadPortalConsent = {
   id: string;

@@ -190,9 +190,13 @@ export function portalProgressText(
   return parts;
 }
 
-/** A realtime event caused by the patient (or a parent) in the portal. */
+/**
+ * A realtime event caused by the patient (or a parent) in the portal. Staff filling in the
+ * client's form write as `staff` (owner 2026-10-29): their own change is no patient update.
+ */
 export function isPatientPortalEvent(event: Pick<RealtimeEvent, "type" | "payload">): boolean {
-  return event.type === "lead.portal_updated" && typeof event.payload?.access_kind === "string";
+  return event.type === "lead.portal_updated" && typeof event.payload?.access_kind === "string"
+    && event.payload.access_kind !== "staff";
 }
 
 /**
