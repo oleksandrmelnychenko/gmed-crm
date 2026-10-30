@@ -1001,9 +1001,9 @@ export function rememberPayerContactConsentRecord(recorded: StaffConsentRecord |
 }
 
 /** Saves the answer "who pays"; 409 `payer_answered_by_payer` after the payer answered on the own link. */
-export function saveLeadPayer(leadId: string, payer: LeadRequestPayerInput): Promise<LeadRequest> {
+export async function saveLeadPayer(leadId: string, payer: LeadRequestPayerInput): Promise<LeadRequest> {
   const recorded = payer.contact_consent === true ? payerContactConsentRecord : null;
-  return apiFetch<LeadRequest>(`${base(leadId)}/payer`, {
+  const saved = await apiFetch<LeadRequest>(`${base(leadId)}/payer`, {
     method: "POST",
     body: JSON.stringify(recorded
       ? {
@@ -1013,6 +1013,8 @@ export function saveLeadPayer(leadId: string, payer: LeadRequestPayerInput): Pro
       }
       : payer),
   });
+  if (recorded && payerContactConsentRecord === recorded) payerContactConsentRecord = null;
+  return saved;
 }
 
 /** The refusal of the cost estimate consent when no third party pays (any more). */

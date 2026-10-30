@@ -9,11 +9,11 @@ import { useLeadPortalIntake } from "./lead-portal-intake";
 
 /**
  * Whether a patient event changed what the wizard draft holds of the lead:
- * the step-1 fields, or the trusted contacts (a parent added the second
- * parent or corrected a name in the cabinet).
+ * the step-1 fields, the trusted contacts (a parent added the second
+ * parent or corrected a name in the cabinet), or the services and start date.
  */
 export function patientEventChangesLeadData(change: unknown): boolean {
-  return change === "personal_data" || change === "representation";
+  return change === "personal_data" || change === "representation" || change === "service_preferences";
 }
 
 /**

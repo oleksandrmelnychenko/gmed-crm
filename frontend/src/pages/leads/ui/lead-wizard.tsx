@@ -182,6 +182,8 @@ import { useLeadIdentificationStatus } from "../model/use-lead-identification-st
 import { removeLeadRepresentativeData, removeLeadTrustedContact, updateLeadRepresentativeDetails, type RepresentativeDetails } from "../data/lead-representation-api";
 import { EMPTY_REPRESENTATIVE_DETAILS, fillEmptyRepresentativeDetails, guardianCandidateDetails, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors } from "../model/lead-representative-details";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
+import { CONFIRMED_DISMISS_REASON } from "@/components/ui/dismissal-guard";
+import { staffRecordedLabel } from "../model/lead-portal-consents";
 import { LeadCustodySelect } from "./lead-custody-select";
 import { LeadGwgSheetActions, gwgSheetBusyKey } from "./lead-gwg-sheet-actions";
 import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
@@ -879,6 +881,7 @@ const LeadMedicalIntakeForm = lazy(() =>
 );
 const SERVICE_CONCERN_ID = "lead-wizard-concern";
 const RISK_ASSESSMENT_SECTION_ID = "lead-wizard-risk-assessment";
+const GWG_SHEETS_SECTION_ID = "lead-wizard-gwg-sheets";
 const ENHANCED_CHECK_SECTION_ID = "lead-wizard-enhanced-check";
 /** The preview's refusal leads to the risk assessment instead of a person's identity data. */
 const PREVIEW_JUMP_RISK = "risk-assessment";
@@ -2319,10 +2322,10 @@ export function mergeCommercialQuoteReadiness(
   return clientReady && serverQuoteAccepted !== false;
 }
 
+/** Euros with at most two decimals and no thousands separator: «1.500» would read as 1,50. */
 function validMoneyInput(value: string) {
-  if (!value.trim()) return true;
-  const parsed = Number(value.replace(",", ".").trim());
-  return Number.isFinite(parsed) && parsed >= 0;
+  const trimmed = value.trim();
+  return !trimmed || /^\d+(?:[.,]\d{1,2})?$/u.test(trimmed);
 }
 
 /** The `datetime-local` value of a deadline, in Berlin time. */
@@ -2755,6 +2758,7 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Enhanced due diligence document is missing": ENHANCED_CHECK_SECTION_ID,
     "Enhanced due diligence document is not signed": ENHANCED_CHECK_SECTION_ID,
     "Risk assessment waits for a staff decision": RISK_ASSESSMENT_SECTION_ID,
+    "Payer GwG sheet is not signed": GWG_SHEETS_SECTION_ID,
     "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,
     "Framework contract was terminated; create a new contract": FRAMEWORK_DOCUMENT_ID,
     "Framework contract document is missing": FRAMEWORK_DOCUMENT_ID,
@@ -3365,7 +3369,7 @@ function WizardDocumentRows({
           {!archived ? <WizardDocumentRowError documentId={document.id} /> : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {!archived && canSignWizardDocument(document) ? (
+          {!archived && canSignWizardDocument(document) && document.terms_current !== false ? (
             <DocumentSignatureAction
               documentId={document.id}
               title={wizardDocumentFilename(document)}
@@ -3739,6 +3743,8 @@ export function LeadWizard({
   const documentPreviewClosedAtRef = useRef(0);
   // «Изменить подписанные условия?» in the app's own dialog, never the browser's confirm().
   const [signedTermsAsk, setSignedTermsAsk] = useState<{ text: string; resolve: (yes: boolean) => void } | null>(null);
+  // One conversion at a time: `busy` is free between its steps.
+  const convertInFlightRef = useRef(false);
   const [documentPreviewError, setDocumentPreviewError] = useState("");
   // The person whose document data a refused signature names: the banner
   // leads straight to that person's document form (DEV 2026-10-22).
@@ -4485,7 +4491,10 @@ export function LeadWizard({
     });
     setLead(fresh);
   }, [leadId]);
-  const mergePatientStep1 = useCallback(() => mergeCabinetChanges(), [mergeCabinetChanges]);
+  const mergePatientStep1 = useCallback(
+    () => mergeCabinetChanges([...Object.keys(PORTAL_FIELD_BY_DRAFT_KEY), ...CLIENT_FORM_SERVICE_DRAFT_KEYS]),
+    [mergeCabinetChanges],
+  );
   const step1Portal = useLeadStep1Portal({ leadId, open, onPatientDataChanged: mergePatientStep1 });
   // Who entered each part of the client's form: staff's own entries are not the patient's (owner 2026-10-30).
   const portalMarkerKinds = useMemo(() => step1Portal.intake?.marker_kinds ?? {}, [step1Portal.intake]);
@@ -4554,10 +4563,13 @@ export function LeadWizard({
   const canEditClientForm = Boolean(leadId) && canEditPayerLink && !leadConverted;
   const openClientForm = useCallback((formStep: ClientFormStepId) => {
     // The wizard's own pending entry reaches the server first: the form shows it.
+    // The lead read after it is the base the close compares with: a field staff saved in the
+    // wizard and then changed in the form takes the form's value (QA 2026-10-30).
     void flushLeadAutosaveRef.current()
+      .then(() => refreshLeadState())
       .catch(() => undefined)
       .then(() => setClientForm((current) => ({ open: true, step: formStep, version: current.version + 1 })));
-  }, []);
+  }, [refreshLeadState]);
   const clientFormEdit = useMemo(
     () => (canEditClientForm ? { open: openClientForm, tx } : null),
     [canEditClientForm, openClientForm, tx],
@@ -7088,9 +7100,11 @@ ${serviceCommentLines.join("\n")}`
     ].filter(Boolean).join("\n");
   }
 
+  /** `draftOverride`: a draft saved just before, newer than this render's (the conversion's). */
   async function ensureCommercial(
     flags: CommercialFlagsPatch = {},
     syncOrderServiceLines = true,
+    draftOverride?: Draft,
   ) {
     if (!leadId || !draft) throw new Error(tx("Обращение не выбрано", "Kein Lead ausgewählt"));
     if (syncOrderServiceLines && !lines.some(validLine)) {
@@ -7101,7 +7115,15 @@ ${serviceCommentLines.join("\n")}`
         ),
       );
     }
-    if (!(await save("commercial", false))) throw new Error(tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"));
+    // An amount like «1.500» or «1.234,56» is no number the order can take: it would be saved as 1,50 or 0.
+    const unreadablePrice = lines.find((line) => validLine(line) && !validMoneyInput(String(line.price ?? "")));
+    if (unreadablePrice) {
+      throw new Error(tx(
+        `Сумма «${unreadablePrice.price}» указана неверно: введите её без разделителя тысяч, например 1234,56`,
+        `Der Betrag „${unreadablePrice.price}“ ist ungültig: ohne Tausendertrennzeichen eingeben, z. B. 1234,56`,
+      ));
+    }
+    if (!(await save("commercial", false, draftOverride))) throw new Error(tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"));
     if (draft.frameworkContractId && !contract) throw new Error(tx("Выбранный договор недоступен. Обновите проверку документов.", "Der gewählte Vertrag ist nicht verfügbar. Aktualisieren Sie die Dokumentenprüfung."));
     if (inheritedContract && contract && !isContractUsable(contract)) {
       throw new Error(tx("Сохранённый договор не подписан или расторгнут. Выберите подписанный договор или оформите новый.", "Der gespeicherte Vertrag ist nicht unterzeichnet oder wurde gekündigt. Wählen Sie einen unterzeichneten Vertrag oder erstellen Sie einen neuen."));
@@ -7684,21 +7706,37 @@ ${serviceCommentLines.join("\n")}`
       ));
       return;
     }
-    const intakeDraft = await finishIntake("release");
-    if (!intakeDraft) return;
-    if (!(await finishOrder("release", intakeDraft))) return;
-    setBusy("convert");
+    if (convertInFlightRef.current) return;
+    // The order's own issues first: the intake step qualifies the lead, which
+    // should not happen for a conversion that then stops at the period.
+    if (orderIssues.length > 0) {
+      setError("");
+      setValidationContext({ kind: "order" });
+      setOrderValidationAttempted(true);
+      openValidationIssue(orderIssues[0]);
+      return;
+    }
+    convertInFlightRef.current = true;
     try {
-      await ensureCommercial();
-      const result = await wizardConvertLead(leadId, true);
-      if (isRepeatIntake && order?.id && onOrderCreated) onOrderCreated(order.id);
-      else if (onConverted) onConverted(result.patient_id);
-      else onOpenChange(false);
-    } catch (nextError) {
-      await reload(false);
-      showWizardError(nextError);
+      const intakeDraft = await finishIntake("release");
+      if (!intakeDraft) return;
+      if (!(await finishOrder("release", intakeDraft))) return;
+      setBusy("convert");
+      try {
+        // The draft the intake saved (with the cabinet's reason), never this render's older one.
+        await ensureCommercial({}, true, intakeDraft);
+        const result = await wizardConvertLead(leadId, true);
+        if (isRepeatIntake && order?.id && onOrderCreated) onOrderCreated(order.id);
+        else if (onConverted) onConverted(result.patient_id);
+        else onOpenChange(false);
+      } catch (nextError) {
+        await reload(false);
+        showWizardError(nextError);
+      } finally {
+        setBusy(null);
+      }
     } finally {
-      setBusy(null);
+      convertInFlightRef.current = false;
     }
   }
 
@@ -8226,7 +8264,6 @@ ${serviceCommentLines.join("\n")}`
   const commercialReady = Boolean(readiness.get("commercial")) && quoteAndPrepaymentReady;
   const demoSignatureChecks = lead?.readiness.demo_onboarding?.credited_checks ?? [];
   // The conversion qualifies the lead itself: that blocker alone keeps nothing disabled (owner decision 2026-10-23).
-  const conversionReady = leadConversionRunnable(lead?.readiness, lead?.qualification_status) && quoteAndPrepaymentReady;
   const visibleCommercialSaveFeedback = commercialSaveFeedback?.followsReadiness
     ? commercialReadinessFeedback(lead?.readiness, tx)
     : commercialSaveFeedback;
@@ -8236,6 +8273,18 @@ ${serviceCommentLines.join("\n")}`
   // signed the order resets that signature (manual DEV run 2026-10-30), so the
   // release list names it before anything is signed.
   const periodIssues = orderIssues.filter((issue) => issue.key.startsWith("program-date"));
+  const conversionReady = leadConversionRunnable(lead?.readiness, lead?.qualification_status)
+    && quoteAndPrepaymentReady
+    && periodIssues.length === 0;
+  // The order document carries the period: with no date at all it is not made either.
+  const orderDocumentPeriodIssues = periodIssues.length > 0 || !draft || draft.programDateFrom || draft.programDateTo
+    ? periodIssues
+    : [{
+      key: "program-date-from",
+      step: "service" as StepId,
+      message: tx("Укажите период программы", "Programmzeitraum angeben"),
+      fieldId: ORDER_DATE_FROM_ID,
+    }];
   const completionBlockerCount = openBlockingReasons.length + periodIssues.length
     + (!quoteAndPrepaymentReady && !(lead?.readiness.blocking_reasons ?? []).some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? 1 : 0);
   const isStepReady = (id: string) => {
@@ -8493,6 +8542,12 @@ ${serviceCommentLines.join("\n")}`
             details.cancel();
             return;
           }
+          // Staff chose to discard: no further save (QA 2026-10-30: a save that
+          // failed again kept the wizard open after «не сохранять»).
+          if (!nextOpen && String(details.reason) === CONFIRMED_DISMISS_REASON) {
+            onOpenChange(false);
+            return;
+          }
           if (!nextOpen) {
             details.cancel();
             const targetLeadId = leadId;
@@ -8609,13 +8664,13 @@ ${serviceCommentLines.join("\n")}`
                 title={tx("Подробности обращения", "Lead-Details")}
                 aria-label={tx("Подробности обращения", "Lead-Details")}
                 disabled={loading || isBusy}
-                onClick={() => onShowDetails(leadId)}
+                onClick={() => void flushLeadAutosaveRef.current().then(() => onShowDetails(leadId)).catch(showWizardError)}
               >
                 <Eye aria-hidden="true" className="size-3.5" />
               </Button>
             ) : null}
             {leadId ? (
-              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void Promise.all([reload(true, false, false, true), patientReview.refresh()]).catch(showWizardError)}>
+              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void flushLeadAutosaveRef.current().then(() => Promise.all([reload(true, false, false, true), patientReview.refresh()])).catch(showWizardError)}>
                 <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
               </Button>
             ) : null}
@@ -9839,6 +9894,7 @@ ${serviceCommentLines.join("\n")}`
                 </Section>
               ) : null}
               {leadId ? (
+                <div id={GWG_SHEETS_SECTION_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={gwgSheets.payerIsOrganisation
@@ -9904,6 +9960,7 @@ ${serviceCommentLines.join("\n")}`
                     onChanged={() => { void refreshDocumentsState(); }}
                   />
                 </Section>
+                </div>
               ) : null}
               {leadId ? (
                 <div id={RISK_ASSESSMENT_SECTION_ID} tabIndex={-1} className="focus:outline-none">
@@ -10190,7 +10247,7 @@ ${serviceCommentLines.join("\n")}`
                       : <StatusChip>{tx("никто", "niemand")}</StatusChip>}
                     <StatusChip tone={formRecipients.source === "cabinet" ? "info" : "neutral"} className="whitespace-normal">
                       {formRecipients.source === "cabinet"
-                        ? tx("по выбору клиента в кабинете", "nach Wahl des Kunden im Kundenkabinett")
+                        ? staffRecordedLabel(step1Portal.intake?.consent_form, tx) ?? tx("по выбору клиента в кабинете", "nach Wahl des Kunden im Kundenkabinett")
                         : tx("контакты GMED — клиент в кабинете не выбирал", "Kontakte von GMED – keine Wahl im Kundenkabinett")}
                     </StatusChip>
                   </div>
@@ -10203,7 +10260,7 @@ ${serviceCommentLines.join("\n")}`
                       {peopleRows.map((row) => {
                         const contact = row.contact;
                         if (!contact) {
-                          return row.cabinet ? <CabinetPersonRow key={row.key} person={row.cabinet} tx={tx} lang={lang} edit={cabinetEdit(row.cabinet)} /> : null;
+                          return row.cabinet ? <CabinetPersonRow key={row.key} person={row.cabinet} tx={tx} lang={lang} edit={cabinetEdit(row.cabinet)} recordedBy={staffRecordedLabel(step1Portal.intake?.disclosure, tx)} /> : null;
                         }
                         return (
                         <li key={row.key} className="flex flex-wrap items-start gap-3 rounded-xl border border-border/60 bg-card p-3">
@@ -10260,7 +10317,7 @@ ${serviceCommentLines.join("\n")}`
                                 aria-label={`${newRequestForPersonLabel(tx)}: ${contact.name}`}
                                 data-testid="trusted-contact-new-request"
                                 disabled={isBusy}
-                                onClick={() => onNewRequestForPerson({ lead_id: leadId, contact_id: contact.id })}
+                                onClick={() => void flushLeadAutosaveRef.current().then(() => onNewRequestForPerson({ lead_id: leadId, contact_id: contact.id })).catch(showWizardError)}
                               >
                                 <UserRoundPlus aria-hidden="true" className="size-3.5" />
                               </Button>
@@ -11029,7 +11086,8 @@ ${serviceCommentLines.join("\n")}`
                     describe={resolvedServiceCatalogDescription} selectedPriceId={selectedAgencyServicePriceId}
                     onQuantityChange={(line, quantity) => { setCommercialSaveFeedback(null); updateLine(line.id, { quantity }); }}
                     onPriceChange={(line, service, priceId) => applyAgencyServicePrice(line.id, service, priceId)}
-                    onDelete={setDeleteServiceLine} totals={orderServicesEstimate} />
+                    onDelete={setDeleteServiceLine} totals={orderServicesEstimate}
+                    lineLocked={(line) => line.managedByWizard === false} />
                 ) : null}
               </Section>
               <div id={ORDER_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
@@ -11037,18 +11095,18 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Документ заказа", "Einzelauftrag")}
                   accessory={leadConverted ? null : (
-                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine) || periodIssues.length > 0} aria-describedby={!lines.some(validLine) ? "lead-order-document-needs-services" : periodIssues.length > 0 ? "lead-order-document-needs-period" : undefined} onClick={() => void generateCommercialDocument("single_order")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine) || orderDocumentPeriodIssues.length > 0} aria-describedby={!lines.some(validLine) ? "lead-order-document-needs-services" : orderDocumentPeriodIssues.length > 0 ? "lead-order-document-needs-period" : undefined} onClick={() => void generateCommercialDocument("single_order")}>
                       {busy === "generate-single_order" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.single_order.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>
                   )}
                 >
-                {!leadConverted && lines.some(validLine) && periodIssues.length > 0 ? (
+                {!leadConverted && lines.some(validLine) && orderDocumentPeriodIssues.length > 0 ? (
                   <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" id="lead-order-document-needs-period" data-testid="lead-order-document-needs-period">
                     <CircleAlert aria-hidden="true" className="mt-0.5" />
                     <span className="min-w-0 leading-5">
                       {tx("Период программы входит в заказ: сначала укажите начало и окончание программы — после подписи его нельзя изменить без новой подписи.", "Der Programmzeitraum ist Teil des Auftrags: Geben Sie zuerst Beginn und Ende des Programms an – nach der Unterschrift lässt er sich nur mit neuer Unterschrift ändern.")}
-                      <button type="button" className="ml-2 rounded-sm font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" onClick={() => openValidationIssue(periodIssues[0])}>
+                      <button type="button" className="ml-2 rounded-sm font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" onClick={() => openValidationIssue(orderDocumentPeriodIssues[0])}>
                         {tx("К периоду программы", "Zum Programmzeitraum")}
                       </button>
                     </span>
@@ -11291,11 +11349,17 @@ ${serviceCommentLines.join("\n")}`
                             }}
                             disabled={isBusy}
                             placeholder="0.00"
+                            aria-invalid={!validMoneyInput(String(estimatedOutlaysLine.price ?? "")) || undefined}
                           />
                           <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-xs text-muted-foreground">
                             €
                           </span>
                         </div>
+                        {!validMoneyInput(String(estimatedOutlaysLine.price ?? "")) ? (
+                          <p className="mt-1 text-xs text-destructive" data-testid="lead-wizard-estimated-outlays-invalid">
+                            {tx("Введите сумму без разделителя тысяч, например 1234,56", "Betrag ohne Tausendertrennzeichen eingeben, z. B. 1234,56")}
+                          </p>
+                        ) : null}
                       </Field>
                       <Button
                         type="button"

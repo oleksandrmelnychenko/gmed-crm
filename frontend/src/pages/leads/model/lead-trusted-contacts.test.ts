@@ -281,9 +281,10 @@ describe("taking a change of the cabinet into an open wizard", () => {
 });
 
 describe("which patient events reach the wizard draft", () => {
-  it("are the personal data and the representation", () => {
+  it("are the personal data, the representation and the services", () => {
     expect(patientEventChangesLeadData("personal_data")).toBe(true);
     expect(patientEventChangesLeadData("representation")).toBe(true);
+    expect(patientEventChangesLeadData("service_preferences")).toBe(true);
     for (const change of ["payer", "identification", "document_reviewed", "", undefined, null]) {
       expect(patientEventChangesLeadData(change)).toBe(false);
     }

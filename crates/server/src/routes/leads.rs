@@ -3434,6 +3434,12 @@ async fn load_lead_conversion_readiness(
                          AND (d.generated_bindings -> 'gwg_identification' ->> 'subject' = 'payer'
                               OR d.generated_bindings -> 'gwg_identification' ->> 'form' = 'legal_entity')
                          AND d.signed_at IS NULL
+                         -- Only while a third party pays: a payer changed to
+                         -- the patient or a parent leaves that sheet behind.
+                         AND EXISTS (
+                             SELECT 1 FROM lead_payer_declarations p
+                             WHERE p.lead_id = leads.id AND p.payer_kind = 'third_party'
+                         )
                    ) AS payer_gwg_sheet_unsigned,
                   -- A repeat intake may inherit the patient's signed framework
                   -- contract (wizard_state.framework_contract_id); that contract

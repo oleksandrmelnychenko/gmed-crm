@@ -57,6 +57,7 @@ export function LeadPayerLinkPanel({
   controller,
   canEdit,
   disabled = false,
+  beforePrepare,
   leadLanguage,
   tx,
   errorText,
@@ -70,6 +71,8 @@ export function LeadPayerLinkPanel({
   controller: Pick<LeadPayerLinkController, "send" | "revoke" | "reload">;
   canEdit: boolean;
   disabled?: boolean;
+  /** Saves the payer's pending edit; false when it could not (the link would name the old payer). */
+  beforePrepare?: () => Promise<boolean>;
   /** The lead's language: the first choice for the invitation. */
   leadLanguage?: string | null;
   tx: Tx;
@@ -113,6 +116,12 @@ export function LeadPayerLinkPanel({
     setNotice("");
     setShare(null);
     try {
+      if (beforePrepare && !(await beforePrepare())) {
+        throw new Error(tx(
+          "Данные плательщика не сохранены: проверьте e-mail и телефон плательщика и повторите.",
+          "Die Zahlerangaben sind nicht gespeichert: Prüfen Sie E-Mail und Telefon des Zahlers und versuchen Sie es erneut.",
+        ));
+      }
       const data = await prepareLeadPayerLink(leadId, { language: chosenLanguage, reopen: actions.reopenOffered && reopen });
       const refreshed = await controller.reload();
       if (refreshed?.link?.id !== data.id) {

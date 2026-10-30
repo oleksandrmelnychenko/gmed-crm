@@ -95,6 +95,8 @@ describe("the client's signature covers the signed terms (QA C3-01)", () => {
     expect(documentMatchesOrderTerms("2026-10-12T09:00:00Z", "2026-10-12T10:00:00Z")).toBe(false);
     expect(documentMatchesOrderTerms("2026-10-12T11:00:00Z", "2026-10-12T10:00:00Z")).toBe(true);
     expect(documentMatchesOrderTerms(null, "2026-10-12T10:00:00Z")).toBe(false);
+    // Made at the moment of the change counts, as on the server (documents.rs sets it so).
+    expect(documentMatchesOrderTerms("2026-10-12T10:00:00Z", "2026-10-12T10:00:00Z")).toBe(true);
   });
 
   it("says that changes wait for the client's signature after a reset", () => {

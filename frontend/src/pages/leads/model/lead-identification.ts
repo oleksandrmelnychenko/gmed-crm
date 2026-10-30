@@ -276,6 +276,8 @@ export type IdentificationPerson = {
 function representativeRelationLabel(relation: string | null, tx: Tx): string {
   const key = relation?.trim().toLowerCase();
   if (key === "parent") return tx("родитель", "Elternteil");
+  if (key === "mother") return tx("мать", "Mutter");
+  if (key === "father") return tx("отец", "Vater");
   if (key === "guardian") return tx("опекун", "Vormund");
   return tx("законный представитель", "gesetzliche/r Vertreter/in");
 }

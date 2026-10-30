@@ -28,7 +28,7 @@ import { PERSON_CITY_MAX, PERSON_NAME_MAX } from "@/lib/person-fields";
 import {
   NO_THIRD_PARTY_PAYER,
   PAYER_ANSWERED_BY_PAYER,
-  fetchMyLeadRequests,
+  fetchMyLeadRequest,
   rememberPayerContactConsentRecord,
   saveLeadPayer,
   saveLeadPayerCostEstimateConsent,
@@ -193,7 +193,7 @@ export function usePayerAutosave({
             // afresh and the block turns read-only; nothing was saved.
             answeredRef.current = true;
             try {
-              const fresh = (await fetchMyLeadRequests()).find((item) => item.lead_id === request.lead_id);
+              const fresh = await fetchMyLeadRequest(request.lead_id);
               if (fresh) {
                 onChange(fresh);
                 onSaveState("saved");
@@ -922,7 +922,7 @@ export function CostEstimateConsent({
       // Nobody else pays any more (GMED changed the payer): the request is loaded afresh.
       if (errorBody(cause)?.code === NO_THIRD_PARTY_PAYER) {
         try {
-          const fresh = (await fetchMyLeadRequests()).find((item) => item.lead_id === leadId);
+          const fresh = await fetchMyLeadRequest(leadId);
           if (fresh) onChange(fresh);
         } catch {
           // The next load of the page shows the state.

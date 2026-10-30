@@ -331,6 +331,7 @@ export function LeadPayerDeclarationSection({
   const [paperDocumentCount, setPaperDocumentCount] = useState<{ leadId: string; count: number } | null>(null);
   const loadedFor = useRef<string | null>(null);
   const formRef = useRef(form);
+  const unqueuedEditRef = useRef(false);
   const autosaveRef = useRef<PayerAutosave | null>(null);
   const mayFlushRef = useRef(false);
   const activeLeadRef = useRef(leadId);
@@ -340,6 +341,7 @@ export function LeadPayerDeclarationSection({
   useEffect(() => {
     const initial = prefillActive && prefill ? prefillForm(prefill) : payerDeclarationToForm(data?.declaration);
     formRef.current = initial;
+    unqueuedEditRef.current = false;
     setForm(initial);
     setDirty(false);
     setMessage(null);
@@ -348,7 +350,7 @@ export function LeadPayerDeclarationSection({
     const queue = createPayerAutosave(initial, (next) => {
       if (activeLeadRef.current !== leadId) return;
       setAutosave(next);
-      setDirty(next.dirty);
+      setDirty(next.dirty || unqueuedEditRef.current);
     });
     autosaveRef.current = queue;
     // An invalid payer e-mail blocks the wizard's save instead of being dropped silently.
@@ -388,12 +390,14 @@ export function LeadPayerDeclarationSection({
     setDirty(true);
     setMessage(null);
     setForm(next);
+    unqueuedEditRef.current = true;
     if (payerEmailInvalid(next)) return;
     // "A parent pays" is saved once the parent is chosen: without one the
     // server refuses it (422 payer_representative_missing) and the section
     // showed "Не сохранено · Повторить сохранение" right after the click
     // (live QA 2026-10-24); the form already asks to choose the parent.
     if (next.kind === "representative" && !next.representativeId) return;
+    unqueuedEditRef.current = false;
     // Capture this lead's save callback: a later lead must never receive this draft.
     const queue = autosaveRef.current;
     queue?.schedule(next, async (snapshot) => {
@@ -1299,6 +1303,7 @@ export function LeadPayerDeclarationSection({
                 controller={payerLink}
                 canEdit={payerLinkCanEdit ?? canEdit}
                 disabled={disabled}
+                beforePrepare={() => (payerEmailInvalid(formRef.current) ? Promise.resolve(false) : autosaveRef.current?.flush() ?? Promise.resolve(true))}
                 leadLanguage={leadLanguage}
                 tx={tx}
                 errorText={errorText}

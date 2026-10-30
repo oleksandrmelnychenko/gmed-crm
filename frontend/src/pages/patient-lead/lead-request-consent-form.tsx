@@ -278,7 +278,7 @@ export function ConsentFormChoicesSection({
             <p className="text-xs text-muted-foreground" aria-live="polite" data-testid="lead-request-consent-form-state">
               {busy ? text.saving : changed
                 ? text.unsaved
-                : form.chosen_at && form.chosen_by_me === false
+                : !staffMode && form.chosen_at && form.chosen_by_me === false
                   ? text.savedByOtherAt(formatAppDateTime(form.chosen_at))
                   : ""}
             </p>

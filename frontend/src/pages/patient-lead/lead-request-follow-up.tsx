@@ -14,7 +14,7 @@ import {
   INQUIRY_CONSENT,
   PAYER_NOT_SELF,
   PAYER_NOT_THIRD_PARTY,
-  fetchMyLeadRequests,
+  fetchMyLeadRequest,
   saveLeadEnhancedDetails,
   submitLeadFollowUp,
   uploadLeadFundsProof,
@@ -484,7 +484,7 @@ function FundsBlock({
           if (body?.code === PAYER_NOT_SELF || body?.code === PAYER_NOT_THIRD_PARTY) {
             // Who pays changed meanwhile: the request is loaded afresh.
             try {
-              const fresh = (await fetchMyLeadRequests()).find((item) => item.lead_id === leadId);
+              const fresh = await fetchMyLeadRequest(leadId);
               if (fresh) onChange(fresh);
             } catch {
               // The next load of the page shows the state.

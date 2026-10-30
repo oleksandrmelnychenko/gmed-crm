@@ -15,7 +15,7 @@ import type { ServiceLine } from "../model/order-service-line";
 import { money, germanDateLabel, formatMoneyValue, priceVersionDisplayName, serviceBillingUnitLabel, serviceBillingUnitBadgeClass } from "../model/order-service-presentation";
 type Tx = (ru: string, de: string) => string;
 const inputString = (value: unknown) => String(value ?? "");
-export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lang, tx, disabled, describe, selectedPriceId: resolvePriceId, onQuantityChange, onPriceChange, onDelete, totals }: {
+export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lang, tx, disabled, describe, selectedPriceId: resolvePriceId, onQuantityChange, onPriceChange, onDelete, totals, lineLocked }: {
   lines: ServiceLine[]; catalogById: ReadonlyMap<string, AgencyServiceItem>; effectiveOn?: string; lang: Lang; tx: Tx; disabled: boolean;
   describe: (line: ServiceLine) => string;
   selectedPriceId: (line: ServiceLine, service: AgencyServiceItem) => string;
@@ -23,7 +23,10 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
   onPriceChange: (line: ServiceLine, service: AgencyServiceItem, priceId: string) => void;
   onDelete: (line: ServiceLine) => void;
   totals: { net: number; vat: number; gross: number };
+  /** A line this table shows but does not change (the lead wizard: one the order workspace added). */
+  lineLocked?: (line: ServiceLine) => boolean;
 }) {
+  const locked = (line: ServiceLine) => lineLocked?.(line) ?? false;
   // Names and descriptions in the UI language; the line keeps the catalogue's
   // German text for the documents (QA 2026-10-11).
   const translations = translationsFor(lang);
@@ -96,7 +99,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
               title={`${tx("Объём", "Umfang")}: ${line.quantity || "0"} ${unit}`}
               className="h-7 w-12 shrink-0 rounded-md bg-field px-2 text-right font-mono text-xs tabular-nums"
               value={line.quantity}
-              disabled={disabled}
+              disabled={disabled || locked(line)}
               onChange={(event) => {
                 onQuantityChange(line, event.target.value);
               }}
@@ -166,7 +169,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
                   <span className="text-muted-foreground">/ {unit}</span>
                 </span>
               ) : undefined}
-              disabled={disabled}
+              disabled={disabled || locked(line)}
               className="h-8 min-w-0 bg-field font-mono text-xs tabular-nums [&>span]:text-right"
               title={selectedPrice ? servicePriceChoiceLabel(selectedPrice) : tx("Выбрать тариф", "Tarif auswählen")}
               searchPlaceholder={tx("Найти тариф…", "Tarif suchen…")}
@@ -274,8 +277,8 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
                         variant="ghost"
                         size="icon-sm"
                         className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        disabled={disabled}
-                        title={tx("Удалить услугу", "Leistung entfernen")}
+                        disabled={disabled || locked(line)}
+                        title={locked(line) ? tx("Услуга заказа: меняется в заказе", "Auftragsleistung: im Auftrag ändern") : tx("Удалить услугу", "Leistung entfernen")}
                         aria-label={`${tx("Удалить услугу", "Leistung entfernen")}: ${line.description}`}
                         onClick={() => onDelete(line)}
                       >

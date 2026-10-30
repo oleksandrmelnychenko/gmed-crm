@@ -77,7 +77,8 @@ export function documentMatchesOrderTerms(
   const created = Date.parse(documentCreatedAt);
   const changed = Date.parse(termsChangedAt);
   if (!Number.isFinite(created) || !Number.isFinite(changed)) return true;
-  return created > changed;
+  // As the server's `document_terms_current`: made at or after the change.
+  return created >= changed;
 }
 
 function sameAmount(left: unknown, right: unknown): boolean {

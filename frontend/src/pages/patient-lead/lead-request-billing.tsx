@@ -16,7 +16,7 @@ import { isKnownNoMailEmail } from "@/lib/email-domain-check";
 import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 
 import {
-  fetchMyLeadRequests,
+  fetchMyLeadRequest,
   saveLeadBilling,
   saveLeadBillingExtras,
   type LeadRequest,
@@ -212,7 +212,7 @@ function useBillingForm({
               routeByRef.current = "payer";
               setRouteRefused(true);
               try {
-                const fresh = (await fetchMyLeadRequests()).find((item) => item.lead_id === request.lead_id);
+                const fresh = await fetchMyLeadRequest(request.lead_id);
                 if (fresh) onChange(fresh);
               } catch {
                 // The next load of the page shows the state; nothing else to do here.

@@ -226,7 +226,14 @@ export function CabinetPersonActions({ target, tx }: { target: CabinetPersonEdit
 }
 
 /** A person only the client named: staff correct the data or remove the person on request. */
-export function CabinetPersonRow({ person, tx, lang, edit }: { person: CabinetPerson; tx: Tx; lang: string; edit?: CabinetPersonEditTarget | null }) {
+export function CabinetPersonRow({ person, tx, lang, edit, recordedBy = null }: {
+  person: CabinetPerson;
+  tx: Tx;
+  lang: string;
+  edit?: CabinetPersonEditTarget | null;
+  /** «Записал сотрудник · …» when staff named the person for the client (owner 2026-10-30). */
+  recordedBy?: string | null;
+}) {
   return (
     <li className="flex min-w-0 items-start gap-3 rounded-xl border border-border/60 bg-card p-3" data-testid="person-cabinet-row">
       <div className="min-w-0 flex-1">
@@ -239,7 +246,7 @@ export function CabinetPersonRow({ person, tx, lang, edit }: { person: CabinetPe
         <CabinetPersonDetails person={person} tx={tx} lang={lang} />
         <StatusChip tone="warning" className="mt-2 items-start rounded-lg px-2.5 py-1.5 whitespace-normal">
           <Info aria-hidden="true" className="mt-0.5" />
-          <span>{tx("Указал клиент в кабинете", "Vom Kunden im Kundenkabinett angegeben")}</span>
+          <span>{recordedBy ?? tx("Указал клиент в кабинете", "Vom Kunden im Kundenkabinett angegeben")}</span>
         </StatusChip>
       </div>
       {edit ? <CabinetPersonActions target={edit} tx={tx} /> : null}
