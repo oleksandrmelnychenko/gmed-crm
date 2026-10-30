@@ -117,8 +117,6 @@ export function ConsentFormChoicesSection({
   // (owner 2026-10-29): nothing saves on its own, only «Record the consent».
   const staffMode = useCabinetStaffMode();
   const sent = Boolean(request.submitted_at) && !staffMode;
-  // Threema is no longer offered (owner 2026-10-29); an old tick stays visible until it is removed and saved.
-  const threemaShown = Boolean(form?.choices?.channel_threema) || draft.channel_threema;
   const ownMinor = choiceOnlyByGuardian(request);
   const namedRecipients = savedDisclosureAllowed(request);
   const version = form?.version;
@@ -247,8 +245,7 @@ export function ConsentFormChoicesSection({
           {recipientsBlock}
           <fieldset className="space-y-2">
             <legend className="mb-2 font-mono text-xs font-medium text-foreground/75">{text.channelsTitle}</legend>
-            <div className="grid gap-2 sm:grid-cols-2">{CONSENT_FORM_CHANNELS.filter((key) => key !== "channel_threema" || threemaShown).map(option)}</div>
-            {threemaShown ? <p className="text-xs leading-5 text-amber-800 dark:text-amber-200" data-testid="lead-request-consent-threema-retired">{text.threemaRetired}</p> : null}
+            <div className="grid gap-2 sm:grid-cols-2">{CONSENT_FORM_CHANNELS.filter((key) => key !== "channel_threema").map(option)}</div>
             <p className="text-xs leading-5 text-foreground/75">{text.channelsRisk}</p>
           </fieldset>
           {sent ? (

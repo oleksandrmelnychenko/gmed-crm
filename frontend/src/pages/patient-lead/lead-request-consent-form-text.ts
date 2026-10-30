@@ -15,8 +15,6 @@ export type ConsentFormText = {
   options: Record<keyof ConsentFormChoices, string>;
   channelsTitle: string;
   channelsRisk: string;
-  /** Under an old Threema tick: GMED no longer uses Threema, the tick can be removed. */
-  threemaRetired: string;
   /** Marks the three consents the service runs on: read by screen readers next to the `*`. */
   required: string;
   /** Why the three are needed; shown while one of them is not ticked. */
@@ -84,7 +82,6 @@ const de: ConsentFormText = {
   },
   channelsTitle: "Meine Daten und Unterlagen dürfen über diese Kommunikationswege eingeholt oder übermittelt werden:",
   channelsRisk: "Die Übermittlung sensibler Daten per E-Mail oder Messenger ist mit Risiken verbunden.",
-  threemaRetired: "GMED nutzt Threema nicht mehr. Entfernen Sie das Häkchen, um diese Einwilligung zu widerrufen.",
   required: "erforderlich",
   coreHint: "Diese drei Einwilligungen brauchen wir für Ihre Anfrage.",
   coreRequired: "Bitte kreuzen Sie die drei erforderlichen Einwilligungen an.",
@@ -151,7 +148,6 @@ const en: ConsentFormText = {
   },
   channelsTitle: "My data and documents may be obtained or passed on through these channels:",
   channelsRisk: "Sending sensitive data by e-mail or messenger carries risks.",
-  threemaRetired: "GMED no longer uses Threema. Untick it to withdraw this consent.",
   required: "required",
   coreHint: "We need these three consents for your request.",
   coreRequired: "Please tick the three required consents.",
@@ -216,7 +212,6 @@ const uk: ConsentFormText = {
   },
   channelsTitle: "Мої дані та документи можна отримувати або передавати цими каналами:",
   channelsRisk: "Передача чутливих даних електронною поштою чи месенджером пов’язана з ризиками.",
-  threemaRetired: "GMED більше не використовує Threema. Зніміть позначку, щоб відкликати цю згоду.",
   required: "обов’язково",
   coreHint: "Ці три згоди потрібні для вашої заявки.",
   coreRequired: "Позначте, будь ласка, три обов’язкові згоди.",
@@ -281,7 +276,6 @@ const ru: ConsentFormText = {
   },
   channelsTitle: "Мои данные и документы можно получать или передавать по этим каналам:",
   channelsRisk: "Передача чувствительных данных по электронной почте или в мессенджере связана с рисками.",
-  threemaRetired: "GMED больше не использует Threema. Снимите отметку, чтобы отозвать это согласие.",
   required: "обязательно",
   coreHint: "Эти три согласия нужны для вашей заявки.",
   coreRequired: "Отметьте, пожалуйста, три обязательных согласия.",

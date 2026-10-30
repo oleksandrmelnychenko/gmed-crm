@@ -83,10 +83,12 @@ describe("portal consent facts in the staff wizard", () => {
     expect(html).toContain("Лечащие врачи и учреждения");
     expect(html).toContain("Хранение и обработка в системе GMED");
     expect(html).toContain("Передача лицам и учреждениям");
-    for (const channel of ["E-Mail", "Threema", "WhatsApp", "Telegram"]) expect(html).toContain(channel);
+    for (const channel of ["E-Mail", "WhatsApp", "Telegram"]) expect(html).toContain(channel);
+    // Threema is no longer listed, even when the client once allowed it (owner 2026-10-30).
+    expect(html).not.toContain("Threema");
     expect(html).toContain("Anna Muster (Vormund)");
     expect(html).toContain("12.10.2026");
-    expect(html.match(/>Разрешено</g)).toHaveLength(4);
+    expect(html.match(/>Разрешено</g)).toHaveLength(3);
     expect(html.match(/>Не разрешено</g)).toHaveLength(4);
     expect(html).not.toMatch(/<(?:button|input)\b/);
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={state({ consent_form: savedForm })} tx={de} />)).toContain("Zuletzt geändert:");
@@ -116,7 +118,7 @@ describe("portal consent facts in the staff wizard", () => {
     expect(renderToStaticMarkup(<PortalConsentChoiceView intake={state()} tx={tx} />)).toBe("");
     const html = renderToStaticMarkup(<PortalConsentChoiceView intake={state({ consent_form: normalizeLeadPortalConsentForm({ version: "v1", choices: null }) })} tx={tx} />);
     expect(html).toContain("Выбор ещё не сохранён");
-    expect(html.split('data-testid="portal-consent-choices"')[1].match(/>Не отвечено</g)).toHaveLength(8);
+    expect(html.split('data-testid="portal-consent-choices"')[1].match(/>Не отвечено</g)).toHaveLength(7);
     expect(html).not.toContain(">Разрешено<");
   });
 

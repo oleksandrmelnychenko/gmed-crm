@@ -243,7 +243,7 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
       <div className="space-y-3 border-t border-border/60 pt-4">
         <h4 className="text-sm font-semibold">{tx("Каналы передачи данных", "Kommunikationswege zur Datenübermittlung")}</h4>
         <dl className="grid gap-2 @sm:grid-cols-2 @3xl:grid-cols-4">
-          {PORTAL_CONSENT_CHANNELS.map((key) => (
+          {PORTAL_CONSENT_CHANNELS.filter((key) => key !== "channel_threema").map((key) => (
             <div key={key} className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 rounded-lg bg-muted/35 px-3 py-2 text-sm">
               <dt className="font-medium">{labels[key]}</dt><dd>{choice(key)}</dd>
             </div>

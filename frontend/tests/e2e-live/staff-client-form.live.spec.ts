@@ -100,28 +100,28 @@ async function leadFilledInByStaff(request: APIRequestContext) {
   return { lead, base, staff, staffHeaders };
 }
 
-test("staff remove an old Threema tick and send the request for the client", async ({ page, request }) => {
+test("an old Threema tick is not shown; staff record the options and send the request for the client", async ({ page, request }) => {
   const { lead, base, staff, staffHeaders } = await leadFilledInByStaff(request);
   await signIn(page, staff);
   await page.goto(`/leads/${lead.id}/client-form`);
   await expect(page.getByTestId("lead-request-staff-mode")).toBeVisible();
 
-  // The old Threema tick is shown with the note, so it can be removed (owner 2026-10-29).
+  // Threema is gone from the form, even where the client once ticked it (owner 2026-10-30).
   await page.locator('[data-step="documents"]').click();
   const block = page.getByTestId("lead-request-consent-form");
-  const threema = block.locator('[data-consent-option="channel_threema"]');
-  await expect(threema).toBeChecked();
-  await expect(page.getByTestId("lead-request-consent-threema-retired")).toBeVisible();
-  await threema.uncheck();
+  await expect(block.locator('[data-consent-option="channel_threema"]')).toHaveCount(0);
+  await expect(block).not.toContainText("Threema");
+  const email = block.locator('[data-consent-option="channel_email"]');
+  await expect(email).toBeChecked();
+  await email.uncheck();
   await page.getByTestId("lead-request-consent-form-record-how").selectOption("phone");
   const saved = page.waitForResponse((response) =>
     response.url().endsWith(`/me/lead-requests/${lead.id}/consent-choices`) && response.request().method() === "POST");
   await page.getByTestId("lead-request-consent-form-record-save").click();
   expect((await saved).ok()).toBe(true);
-  await expect(threema).toHaveCount(0);
-  await expect(page.getByTestId("lead-request-consent-threema-retired")).toHaveCount(0);
+  await expect(page.getByTestId("lead-request-consent-form-record")).toHaveCount(0);
   const afterChoice = await getJson(request, base, staffHeaders);
-  expect(afterChoice.consent_form.choices).toMatchObject({ channel_threema: false, channel_email: true, data_system: true });
+  expect(afterChoice.consent_form.choices).toMatchObject({ channel_email: false, data_system: true });
 
   // «Send for the client»: only with how the client confirmed; staff stay signed in.
   await page.locator('[data-step="send"]').click();
@@ -137,7 +137,7 @@ test("staff remove an old Threema tick and send the request for the client", asy
   const sent = await getJson(request, base, staffHeaders);
   expect(sent.submitted_at).toBeTruthy();
   const intake = await getJson(request, `${api}/api/v1/leads/${lead.id}/portal-intake`, staffHeaders);
-  expect(intake.consent_form.choices.channel_threema).toBe(false);
+  expect(intake.consent_form.choices.channel_email).toBe(false);
   // Staff see how the client gave each consent (owner 2026-10-29).
   expect(intake.consent_form).toMatchObject({ recorded_how: "phone" });
   expect(intake.consents.some((consent: { recorded_how?: string; recorded_note?: string }) =>
