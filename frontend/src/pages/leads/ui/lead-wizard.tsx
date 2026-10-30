@@ -8221,7 +8221,11 @@ ${serviceCommentLines.join("\n")}`
     : commercialSaveFeedback;
   // What staff still have to do: the qualification is no step of its own (the conversion does it).
   const openBlockingReasons = leadOpenBlockingReasons(lead?.readiness, lead?.qualification_status);
-  const completionBlockerCount = openBlockingReasons.length
+  // The program period belongs to the order: an end date added after the client
+  // signed the order resets that signature (manual DEV run 2026-10-30), so the
+  // release list names it before anything is signed.
+  const periodIssues = orderIssues.filter((issue) => issue.key.startsWith("program-date"));
+  const completionBlockerCount = openBlockingReasons.length + periodIssues.length
     + (!quoteAndPrepaymentReady && !(lead?.readiness.blocking_reasons ?? []).some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? 1 : 0);
   const isStepReady = (id: string) => {
     // Date of birth and legal sex keep step 1 open even when the patient fills
@@ -11004,12 +11008,23 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Документ заказа", "Einzelauftrag")}
                   accessory={leadConverted ? null : (
-                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} aria-describedby={!lines.some(validLine) ? "lead-order-document-needs-services" : undefined} onClick={() => void generateCommercialDocument("single_order")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine) || periodIssues.length > 0} aria-describedby={!lines.some(validLine) ? "lead-order-document-needs-services" : periodIssues.length > 0 ? "lead-order-document-needs-period" : undefined} onClick={() => void generateCommercialDocument("single_order")}>
                       {busy === "generate-single_order" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.single_order.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>
                   )}
                 >
+                {!leadConverted && lines.some(validLine) && periodIssues.length > 0 ? (
+                  <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" id="lead-order-document-needs-period" data-testid="lead-order-document-needs-period">
+                    <CircleAlert aria-hidden="true" className="mt-0.5" />
+                    <span className="min-w-0 leading-5">
+                      {tx("Период программы входит в заказ: сначала укажите начало и окончание программы — после подписи его нельзя изменить без новой подписи.", "Der Programmzeitraum ist Teil des Auftrags: Geben Sie zuerst Beginn und Ende des Programms an – nach der Unterschrift lässt er sich nur mit neuer Unterschrift ändern.")}
+                      <button type="button" className="ml-2 rounded-sm font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30" onClick={() => openValidationIssue(periodIssues[0])}>
+                        {tx("К периоду программы", "Zum Programmzeitraum")}
+                      </button>
+                    </span>
+                  </StatusChip>
+                ) : null}
                 {!leadConverted && !lines.some(validLine) ? (
                   <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" id="lead-order-document-needs-services" data-testid="lead-order-document-needs-services">
                     <CircleAlert aria-hidden="true" className="mt-0.5" />
@@ -11640,7 +11655,7 @@ ${serviceCommentLines.join("\n")}`
                   })}
                 </div>
               </Section>
-              {!leadConverted && (openBlockingReasons.length > 0 || !quoteAndPrepaymentReady) ? (
+              {!leadConverted && (openBlockingReasons.length > 0 || periodIssues.length > 0 || !quoteAndPrepaymentReady) ? (
                 <Banner tone="warning">
                   <div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}: {completionBlockerCount}</div>
                   <div data-testid="completion-blockers" className="mt-2 space-y-2">
@@ -11648,7 +11663,8 @@ ${serviceCommentLines.join("\n")}`
                       const reasons = openBlockingReasons.filter((reason) => readinessReasonStep(reason) === candidate.id);
                       const quoteMissing = candidate.id === "commercial" && !quoteAndPrepaymentReady
                         && !lead.readiness.blocking_reasons.some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason));
-                      if (!reasons.length && !quoteMissing) return null;
+                      const stepPeriodIssues = periodIssues.filter((issue) => issue.step === candidate.id);
+                      if (!reasons.length && !quoteMissing && !stepPeriodIssues.length) return null;
                       return (
                         <div key={candidate.id}>
                           <button
@@ -11669,6 +11685,13 @@ ${serviceCommentLines.join("\n")}`
                                   onClick={() => openReadinessReason(reason)}
                                 >
                                   {readinessReasonText(reason, tx, draftIsMinor, lead.readiness)}
+                                </button>
+                              </li>
+                            ))}
+                            {stepPeriodIssues.map((issue) => (
+                              <li key={issue.key}>
+                                <button type="button" className="block text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={isBusy} onClick={() => openValidationIssue(issue)} data-testid={`completion-blocker-${issue.key}`}>
+                                  {issue.message}
                                 </button>
                               </li>
                             ))}
