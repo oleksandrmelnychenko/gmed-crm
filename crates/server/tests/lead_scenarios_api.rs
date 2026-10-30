@@ -1690,7 +1690,7 @@ async fn scenario_enhanced_check_by_a_parents_citizenship() {
     );
     assert!(!texts[0].contains("Minister"), "mother's sheet");
     assert!(
-        pep_line(&texts[1]).contains("ja – Familienmitglied oder nahestehende Person einer PeP"),
+        pep_line(&texts[1]).contains("ja – Familienmitglied oder nahestehende Person einer PEP"),
         "{}",
         pep_line(&texts[1])
     );

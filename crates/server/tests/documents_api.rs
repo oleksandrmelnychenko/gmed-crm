@@ -8724,7 +8724,8 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
                 // Empty boxes the person ticks, whatever was preselected
                 // (owner decision 2026-10-11).
                 assert!(!pdf_text.contains("[x]"));
-                assert!(pdf_text.contains("[ ] Threema-Messenger"));
+                // Threema is no longer offered (owner 2026-10-30).
+                assert!(!pdf_text.contains("Threema"));
                 assert!(pdf_text.contains("[ ] WhatsApp-Messenger"));
                 assert!(pdf_text.contains("[ ] Telegram-Messenger"));
             }

@@ -105,8 +105,9 @@ pub(super) enum SheetItem {
     /// A label with its value; "—" without one.
     Value(&'static str, Option<String>),
     Check(bool, String),
-    /// A question of section 5 with "[X] Ja / [ ] Nein".
-    YesNo(&'static str, bool),
+    /// A question of section 5 with "[X] Ja / [ ] Nein"; `None` ticks
+    /// neither box (no recorded answer).
+    YesNo(&'static str, Option<bool>),
     /// A closing sentence of a section.
     Note(String),
 }
@@ -125,12 +126,26 @@ fn date(value: Option<NaiveDate>) -> Option<String> {
 /// Question 5 b) of the sheet from the payer's own answers and staff's
 /// review of the payer (owner decision 2026-10-23).
 fn politically_exposed(sheet: &LegalEntitySheet) -> bool {
-    let answers = crate::services::pep_review::PersonAnswers {
+    crate::services::pep_review::politically_exposed(&pep_answers(sheet), &sheet.pep_review)
+}
+
+fn pep_answers(sheet: &LegalEntitySheet) -> crate::services::pep_review::PersonAnswers {
+    crate::services::pep_review::PersonAnswers {
         pep_self: sheet.pep_self,
         pep_related: sheet.pep_related,
         ..Default::default()
-    };
-    crate::services::pep_review::politically_exposed(&answers, &sheet.pep_review)
+    }
+}
+
+/// The boxes of 5 b): ticked only for a recorded answer, the payer's own or
+/// staff's review (DEV QA 2026-10-30: "[X] Nein" beside no answer).
+fn politically_exposed_boxes(sheet: &LegalEntitySheet) -> Option<bool> {
+    sheet.politically_exposed.then_some(true).or_else(|| {
+        crate::services::pep_review::politically_exposed_answer(
+            &pep_answers(sheet),
+            &sheet.pep_review,
+        )
+    })
 }
 
 /// "ja – <details>", "nein" or `None` (not answered).
@@ -490,19 +505,19 @@ pub(super) fn content(sheet: &LegalEntitySheet, today: NaiveDate) -> Vec<SheetIt
     }
     items.push(YesNo(
         "a) Besteht bei der Geschäftsbeziehung aufgrund der unternehmensinternen Risikoanalyse bzw. einer Einzelfallprüfung ein erhöhtes Risiko?",
-        sheet.increased_risk,
+        Some(sheet.increased_risk),
     ));
     items.push(YesNo(
         "b) Handelt es sich bei einer vertretungsberechtigten Person oder einem wirtschaftlich Berechtigten um eine politisch exponierte Person, ein unmittelbares Familienmitglied dieser Person oder eine ihr bekanntermaßen nahestehende Person?",
-        sheet.politically_exposed,
+        politically_exposed_boxes(sheet),
     ));
     items.push(YesNo(
         "c) Ist an der Geschäftsbeziehung ein von der EU-Kommission gelisteter Drittstaat mit hohem Risiko oder eine in diesem Drittstaat ansässige natürliche oder juristische Person beteiligt?",
-        sheet.high_risk_third_country,
+        Some(sheet.high_risk_third_country),
     ));
     items.push(YesNo(
         "d) Handelt es sich um eine Transaktion, die besonders komplex oder ungewöhnlich groß ist, einem ungewöhnlichen Transaktionsmuster folgt oder keinen offensichtlichen wirtschaftlichen oder rechtmäßigen Zweck hat?",
-        sheet.unusual_transaction,
+        Some(sheet.unusual_transaction),
     ));
     let other_yes =
         sheet.politically_exposed || sheet.high_risk_third_country || sheet.unusual_transaction;
@@ -904,7 +919,7 @@ pub(super) fn build_pdf(
                 aml_labeled_value(&mut layout, label, value.as_deref())
             }
             SheetItem::Check(checked, text) => aml_checkbox_line(&mut layout, checked, &text),
-            SheetItem::YesNo(question, yes) => gwg_yes_no_line(&mut layout, question, yes),
+            SheetItem::YesNo(question, answer) => gwg_answer_line(&mut layout, question, answer),
             SheetItem::Note(text) => layout.text_block_justified(
                 &text,
                 9.0,
@@ -1234,7 +1249,7 @@ mod tests {
         let items = content(&reviewed, day(2026, 10, 23));
         assert_eq!(
             value(&items, "Prüfung durch GMED"),
-            Some("PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PeP")
+            Some("PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PEP")
         );
         assert_eq!(
             value(
@@ -1243,6 +1258,26 @@ mod tests {
             ),
             Some("ja – Schwager, Bürgermeister")
         );
+        let boxes = |sheet: &LegalEntitySheet| {
+            content(sheet, day(2026, 10, 23))
+                .into_iter()
+                .find_map(|item| match item {
+                    SheetItem::YesNo(question, answer) if question.starts_with("b)") => {
+                        Some(answer)
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert_eq!(boxes(&reviewed), Some(false));
+        assert_eq!(boxes(&open), Some(true));
+        // DEV QA 2026-10-30: no answer and no review tick neither box.
+        let unanswered = LegalEntitySheet {
+            pep_self: None,
+            pep_related: None,
+            ..complete()
+        };
+        assert_eq!(boxes(&unanswered), None);
     }
 
     #[test]

@@ -1141,6 +1141,9 @@ struct GeneratedCostEstimateContext {
     total_range: Option<String>,
     agency: AgencyContractSettings,
     generated_at: chrono::DateTime<chrono::Utc>,
+    /// Who contracts: the notice names the parents or the representation
+    /// instead of "dem Patienten" (DEV QA 2026-10-30).
+    contracting: ContractingDoc,
 }
 
 struct GeneratedAppointmentConfirmationContext {
@@ -3671,6 +3674,69 @@ fn gwg_identity_copy_valid(
     on_file && valid_until.is_some_and(|valid_until| valid_until >= today)
 }
 
+/// The payer's identity document as staff typed it on the paper path, read
+/// back from the document's notes.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct PaperIdentityNotes {
+    /// `passport`, `id_card` or `residence_permit`.
+    kind: Option<String>,
+    number: Option<String>,
+    /// ISO code.
+    country: Option<String>,
+    valid_until: Option<NaiveDate>,
+}
+
+/// Reads the notes the wizard's paper path writes for the payer's identity
+/// document (`payerIdentityNotes` in
+/// `frontend/src/pages/leads/model/lead-payer-paper.ts`): "Personalausweis
+/// Nr. L01X00T47, Ausstellungsstaat DE, gültig bis 31.12.2031", each part
+/// optional. A part in any other words is ignored, never guessed.
+fn parse_payer_identity_notes(notes: &str) -> PaperIdentityNotes {
+    let mut parsed = PaperIdentityNotes::default();
+    for (index, part) in notes.split(", ").map(str::trim).enumerate() {
+        if let Some(country) = part.strip_prefix("Ausstellungsstaat ") {
+            let country = country.trim();
+            if country.len() == 2 && country.chars().all(|c| c.is_ascii_alphabetic()) {
+                parsed.country = Some(country.to_ascii_uppercase());
+            }
+        } else if let Some(day) = part.strip_prefix("gültig bis ") {
+            parsed.valid_until = NaiveDate::parse_from_str(day.trim(), "%d.%m.%Y").ok();
+        } else if index == 0 {
+            let (kind, number) = match part.split_once(" Nr. ") {
+                Some((kind, number)) => (kind.trim(), Some(number.trim())),
+                None => (part, None),
+            };
+            let kind = match kind {
+                "Reisepass" => Some("passport"),
+                "Personalausweis" => Some("id_card"),
+                "Aufenthaltstitel" => Some("residence_permit"),
+                _ => None,
+            };
+            // "Ausweisdokument Nr. …": a number without a stated type.
+            if kind.is_some() || part.starts_with("Ausweisdokument") {
+                parsed.kind = kind.map(str::to_string);
+                parsed.number = number
+                    .filter(|number| !number.is_empty())
+                    .map(str::to_string);
+            }
+        }
+    }
+    parsed
+}
+
+/// "Getroffene Maßnahmen zur Ermittlung des wB" on the payer's sheet when the
+/// payer sent nothing through the link: the Selbstauskunft signed on paper
+/// (DEV QA 2026-10-30: the field stayed empty), or that it is still missing.
+fn gwg_payer_paper_measures(signed_on: Option<NaiveDate>) -> String {
+    match signed_on {
+        Some(day) => format!(
+            "Befragung des Kostenübernehmers: Selbstauskunft auf Papier, unterschrieben am {} (Angaben zur Herkunft der Mittel dort)",
+            day.format("%d.%m.%Y")
+        ),
+        None => "Befragung des Kostenübernehmers: Selbstauskunft steht aus".to_string(),
+    }
+}
+
 /// "Reisepass, Nr. AB123456, ausgestellt von Stadt Kyiv (Ukraine) am
 /// 01.02.2021, gültig bis 01.02.2031": only what is known.
 fn gwg_identity_document_line(document: GwgIdentityDocument<'_>) -> String {
@@ -3965,7 +4031,71 @@ async fn load_gwg_identification_sheet(
                 .try_get::<bool, _>("identity_on_file")
                 .unwrap_or(false);
         }
-        // Section 3 from the payer's own statement (QA 2026-10-10).
+        // The staff paper path (DEV re-check V-A7): staff upload the payer's
+        // identity document with its data in the notes and file the
+        // Selbstauskunft signed on paper; nothing is sent through the link.
+        // DEV QA 2026-10-30: the sheet printed "—" and an empty copy box
+        // although the payer's Personalausweis was on file.
+        let paper = sqlx::query(
+            r#"SELECT (SELECT d.notes FROM documents d
+                       WHERE d.lead_id = $1
+                         AND d.file_deleted_at IS NULL
+                         AND d.status <> 'archived'
+                         AND d.art = 'payer_identity'
+                       ORDER BY d.created_at DESC
+                       LIMIT 1) AS identity_notes,
+                      EXISTS (
+                          SELECT 1 FROM documents d
+                          WHERE d.lead_id = $1
+                            AND d.file_deleted_at IS NULL
+                            AND d.status <> 'archived'
+                            AND d.art = 'payer_identity'
+                      ) AS identity_on_file,
+                      (SELECT max(d.signed_at) FROM documents d
+                       WHERE (d.lead_id = $1
+                              OR d.order_id IN (SELECT o.id FROM orders o WHERE o.source_lead_id = $1))
+                         AND (d.art = 'payer_self_disclosure'
+                              OR d.generated_template_id = 'payer_self_disclosure')
+                         AND d.file_deleted_at IS NULL
+                         AND d.status <> 'archived') AS self_disclosure_signed_at"#,
+        )
+        .bind(lead_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|error| failed(error, "payer paper identity"))?;
+        if paper
+            .try_get::<bool, _>("identity_on_file")
+            .unwrap_or(false)
+        {
+            sheet.identity_document_on_file = true;
+            // What the payer stated through the link stays; the notes staff
+            // typed from the copy stand in only when the payer stated no
+            // document at all, never mixed into another one.
+            let stated = sheet.identity_document_type.is_some()
+                || sheet.identity_document_number.is_some()
+                || sheet.identity_document_country.is_some()
+                || sheet.identity_document_valid_until.is_some();
+            if !stated
+                && let Some(notes) = paper
+                    .try_get::<Option<String>, _>("identity_notes")
+                    .ok()
+                    .flatten()
+            {
+                let noted = parse_payer_identity_notes(&notes);
+                sheet.identity_document_type = noted.kind;
+                sheet.identity_document_number = noted.number;
+                sheet.identity_document_country = noted.country;
+                sheet.identity_document_valid_until = noted.valid_until;
+            }
+        }
+        let paper_signed_on = paper
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("self_disclosure_signed_at")
+            .ok()
+            .flatten()
+            .map(crate::app_time::date_of);
+        // Section 3 from the payer's own statement (QA 2026-10-10), else the
+        // Selbstauskunft the payer signed on paper: its answers are on the
+        // paper, so neither box is ticked here, only the measure is named.
         if let Some(owner) =
             load_gwg_payer_beneficial_owner(&state.db, lead_id, GWG_PAYER_STATEMENT_SOURCE)
                 .await
@@ -3975,6 +4105,8 @@ async fn load_gwg_identification_sheet(
             sheet.beneficial_owner_name = owner.name;
             sheet.beneficial_owner_note = owner.note;
             sheet.beneficial_owner_measures = Some(owner.measures);
+        } else {
+            sheet.beneficial_owner_measures = Some(gwg_payer_paper_measures(paper_signed_on));
         }
         risk_countries.extend(payer.country.clone());
         risk_countries.extend(payer.citizenships.iter().cloned());
@@ -18537,6 +18669,23 @@ async fn generate_document(
                 generated_bindings_snapshot.get_or_insert_with(|| json!({}))
                     [COST_ESTIMATE_WORK_TYPE_IDS_BINDING_KEY] = json!(work_type_ids);
             }
+            // The estimate names who contracts (DEV QA 2026-10-30). It is not
+            // a contract: a party that cannot be resolved yet (a child whose
+            // representatives are incomplete) keeps the general wording
+            // instead of refusing the estimate.
+            let contracting = match &prepared_contracting {
+                Some(value) => value.clone(),
+                None => load_contracting_doc(
+                    &state,
+                    patient_uuid,
+                    lead_id,
+                    order_id,
+                    None,
+                    crate::app_time::today(),
+                )
+                .await
+                .unwrap_or_default(),
+            };
             let context = GeneratedCostEstimateContext {
                 language: language.to_string(),
                 auto_name: auto_name.clone(),
@@ -18561,6 +18710,7 @@ async fn generate_document(
                 total_range,
                 agency: cost_estimate_agency,
                 generated_at,
+                contracting,
             };
             let preview = admin_preview_html(
                 admin_doc_label(&context.language, "cost_estimate_title"),
@@ -22923,6 +23073,37 @@ fn cost_estimate_legal_notice(language: &str) -> Vec<(&'static str, &'static str
     }
 }
 
+/// "zwischen … und der jeweiligen Einrichtung" of the cost estimate: whoever
+/// contracts settles with the clinics (DEV QA 2026-10-30: a child's estimate
+/// said "dem Patienten" although the parents contract). The parents who
+/// contract in their own name (§ 328 BGB), the patient represented by the
+/// parents, the Vormund or the Betreuer, or the patient alone.
+fn cost_estimate_settlement_parties(
+    contracting: &ContractingDoc,
+    patient: &DocPartyBlock,
+) -> String {
+    if contracting.parents_contract() {
+        let child = patient.name.trim();
+        let names = contracting.representative_names();
+        return if contracting.representatives.len() > 1 {
+            format!(
+                "zwischen der jeweiligen Einrichtung und den Auftraggebern ({names}, gesetzliche Vertreter von {child})"
+            )
+        } else {
+            format!(
+                "zwischen der jeweiligen Einrichtung und dem Auftraggeber ({names}, gesetzliche Vertretung von {child})"
+            )
+        };
+    }
+    if let Some(represented_by) = contracting.represented_by_line() {
+        return format!(
+            "zwischen der jeweiligen Einrichtung und {}, {represented_by}",
+            patient.name_with_salutation()
+        );
+    }
+    "zwischen dem Patienten und der jeweiligen Einrichtung".to_string()
+}
+
 fn build_cost_estimate_pdf(
     context: &GeneratedCostEstimateContext,
     fallback_document_reference: &str,
@@ -22973,10 +23154,12 @@ fn build_cost_estimate_pdf(
 
     admin_block(
         &mut layout,
-        "Die nachfolgende Aufstellung fasst die voraussichtlichen Kosten der medizinischen \
-         Behandlung auf Grundlage der derzeit vorliegenden Daten zusammen. Es handelt sich \
-         um eine unverbindliche Schätzung; die tatsächliche Abrechnung erfolgt direkt zwischen dem \
-         Patienten und der jeweiligen Einrichtung.",
+        &format!(
+            "Die nachfolgende Aufstellung fasst die voraussichtlichen Kosten der medizinischen \
+             Behandlung auf Grundlage der derzeit vorliegenden Daten zusammen. Es handelt sich \
+             um eine unverbindliche Schätzung; die tatsächliche Abrechnung erfolgt direkt {}.",
+            cost_estimate_settlement_parties(&context.contracting, &context.patient)
+        ),
         8.0,
         4.0,
     );
@@ -23975,6 +24158,32 @@ fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, chosen: bool, text:
     );
 }
 
+/// The communication channels Anlage 1 offers, with the person's choice.
+/// The owner removed Threema from the cabinet and the wizard on 2026-10-30
+/// ("галочку Threema забрати"), so a new form no longer offers it. A choice
+/// signed earlier with Threema keeps its ticked line: a signed choice must
+/// not silently vanish from a form printed again.
+fn consent_channels(chosen: &crate::consent_choices::ConsentChoices) -> Vec<(&'static str, bool)> {
+    let mut channels = vec![("E-mail", chosen.channel_email)];
+    if chosen.channel_threema {
+        channels.push(("Threema-Messenger", true));
+    }
+    channels.extend([
+        ("WhatsApp-Messenger", chosen.channel_whatsapp),
+        ("Telegram-Messenger", chosen.channel_telegram),
+    ]);
+    channels
+}
+
+/// The channels of [`consent_channels`] in the risk sentence of Anlage 1.
+fn consent_channel_risk_list(chosen: &crate::consent_choices::ConsentChoices) -> &'static str {
+    if chosen.channel_threema {
+        "E-mail, WhatsApp-, Telegram- oder Threema-Messenger"
+    } else {
+        "E-mail, WhatsApp- oder Telegram-Messenger"
+    }
+}
+
 /// A communication channel of the consent form, a box like
 /// [`adult_legal_checkbox`].
 fn adult_legal_channel(layout: &mut TreatmentPlanPdfLayout, chosen: bool, label: &str) {
@@ -24719,6 +24928,18 @@ fn build_enhanced_due_diligence_pdf(
 
 /// "[X] Ja   [ ] Nein" answer of one question of section 5.
 fn gwg_yes_no_line(layout: &mut TreatmentPlanPdfLayout, question: &str, yes: bool) {
+    gwg_answer_line(layout, question, Some(yes));
+}
+
+/// [`gwg_yes_no_line`] for a question that may have no answer yet: `None`
+/// leaves both boxes empty (DEV QA 2026-10-30, 5 b): "[X] Nein" stood beside
+/// PEP answers "keine Angabe").
+fn gwg_answer_line(layout: &mut TreatmentPlanPdfLayout, question: &str, answer: Option<bool>) {
+    let (yes, no) = match answer {
+        Some(true) => ("X", " "),
+        Some(false) => (" ", "X"),
+        None => (" ", " "),
+    };
     // The question and its answer stay on one page.
     let lines = wrap_text_to_width_precise(question, 10.0, layout.available_width(3.0)).len();
     aml_keep_lines_together(layout, lines + 1, 10.0, 1.8);
@@ -24732,11 +24953,7 @@ fn gwg_yes_no_line(layout: &mut TreatmentPlanPdfLayout, question: &str, yes: boo
         0.0,
     );
     layout.text_block(
-        &format!(
-            "[{}]  Ja      [{}]  Nein",
-            if yes { "X" } else { " " },
-            if yes { " " } else { "X" }
-        ),
+        &format!("[{yes}]  Ja      [{no}]  Nein"),
         10.0,
         true,
         9.0,
@@ -25109,10 +25326,17 @@ fn build_gwg_identification_pdf(
         "a) Besteht bei der Geschäftsbeziehung aufgrund der unternehmensinternen Risikoanalyse bzw. einer Einzelfallprüfung ein erhöhtes Risiko?",
         sheet.increased_risk,
     );
-    gwg_yes_no_line(
+    // Ticked only for a recorded answer: the person's own or staff's review
+    // (DEV QA 2026-10-30), never "Nein" for nothing answered.
+    gwg_answer_line(
         &mut layout,
         "b) Handelt es sich bei dem Vertragspartner oder dem wirtschaftlich Berechtigten um eine politisch exponierte Person, ein unmittelbares Familienmitglied dieser Person oder eine ihr bekanntermaßen nahestehende Person?",
-        sheet.politically_exposed,
+        sheet.politically_exposed.then_some(true).or_else(|| {
+            crate::services::pep_review::politically_exposed_answer(
+                &sheet.person_answers,
+                &sheet.pep_review,
+            )
+        }),
     );
     // The person's own answer and staff's review, each on its own line
     // (owner decision 2026-10-23).
@@ -26928,6 +27152,12 @@ fn build_patient_payer_statement_pdf(
 struct LeadDisclosurePerson {
     role: &'static str,
     name: String,
+    /// The person's own data collected in the cabinet or by staff (DEV QA
+    /// 2026-10-30: section 3 named the Betreuerin only): the birth date, the
+    /// address in one line and the identity document in one line.
+    birth_date: Option<NaiveDate>,
+    address: Option<String>,
+    identity_document: Option<String>,
 }
 
 /// "Wer zahlt?" as the lead stated it in the cabinet: the patient himself, a
@@ -27021,6 +27251,9 @@ struct LeadSelfDisclosure {
     id_issuing_country: Option<String>,
     id_issued_on: Option<NaiveDate>,
     id_valid_until: Option<NaiveDate>,
+    /// `leads.legal_sex` (`female`, `male`, `diverse`, `no_entry`): the form
+    /// says "die Patientin" or "der Patient" when known, both forms otherwise.
+    legal_sex: Option<String>,
     /// Under 18 today: the legal representatives answer and sign.
     minor: bool,
     /// A minor's custody as stated (`joint`, `sole_parent`, `guardian`).
@@ -27211,6 +27444,7 @@ async fn load_lead_self_disclosure(
     let row = sqlx::query(&format!(
         r#"SELECT first_name, middle_name, last_name, date_of_birth, citizenships,
                   street_address, zip_code, city, country, email, phone, portal_submitted_at,
+                  legal_sex,
                   ({}) AS changed_since_submit,
                   wizard_state->>'step1_fill_mode' AS fill_mode
            FROM leads l
@@ -27310,6 +27544,23 @@ async fn load_lead_self_disclosure(
                 "Bevollmächtigte/r Vertreter/in"
             },
             name: person.name(),
+            birth_date: person.date_of_birth,
+            address: Some(gwg_address_line(
+                person.extras.street.as_deref(),
+                person.extras.zip.as_deref(),
+                person.extras.city.as_deref(),
+                person.extras.country.as_deref(),
+            ))
+            .filter(|line| !line.is_empty()),
+            identity_document: Some(gwg_identity_document_line(GwgIdentityDocument {
+                kind: person.extras.id_document_type.as_deref(),
+                number: person.extras.id_document_number.as_deref(),
+                authority: person.extras.id_issuing_authority.as_deref(),
+                country: person.extras.id_issuing_country.as_deref(),
+                issued_on: person.extras.id_issued_on,
+                valid_until: person.extras.id_valid_until,
+            }))
+            .filter(|line| !line.is_empty()),
         })
         .filter(|person| !person.name.is_empty())
         .collect();
@@ -27466,6 +27717,7 @@ async fn load_lead_self_disclosure(
         id_issuing_country: statements.id_issuing_country,
         id_issued_on: statements.id_issued_on,
         id_valid_until: statements.id_valid_until,
+        legal_sex: text("legal_sex"),
         minor: representation.minor,
         custody: representation.answers.custody.clone(),
         has_representative: representation.answers.has_representative,
@@ -27561,6 +27813,64 @@ fn lead_disclosure_section(
     }
 }
 
+/// The patient in the sentences of the patient form, by the legal sex the
+/// lead records (DEV QA 2026-10-30: a girl's form said "die minderjährige
+/// Patientin / den minderjährigen Patienten"). Both forms only while the sex
+/// is unknown, diverse or not entered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PatientNoun {
+    Female,
+    Male,
+    Unknown,
+}
+
+impl PatientNoun {
+    fn of(legal_sex: Option<&str>) -> Self {
+        match legal_sex.map(str::trim) {
+            Some("female") => Self::Female,
+            Some("male") => Self::Male,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// "Die Patientin", "Der Patient", "Die Patientin / der Patient".
+    fn nominative(self) -> &'static str {
+        match self {
+            Self::Female => "Die Patientin",
+            Self::Male => "Der Patient",
+            Self::Unknown => "Die Patientin / der Patient",
+        }
+    }
+
+    /// "der Patientin", "des Patienten".
+    fn genitive(self) -> &'static str {
+        match self {
+            Self::Female => "der Patientin",
+            Self::Male => "des Patienten",
+            Self::Unknown => "der Patientin / des Patienten",
+        }
+    }
+
+    /// "zur Patientin", "zum Patienten".
+    fn to_dative(self) -> &'static str {
+        match self {
+            Self::Female => "zur Patientin",
+            Self::Male => "zum Patienten",
+            Self::Unknown => "zur Patientin / zum Patienten",
+        }
+    }
+
+    /// "die minderjährige Patientin", "den minderjährigen Patienten"
+    /// (accusative after "für").
+    fn minor_accusative(self) -> &'static str {
+        match self {
+            Self::Female => "die minderjährige Patientin",
+            Self::Male => "den minderjährigen Patienten",
+            Self::Unknown => "die minderjährige Patientin / den minderjährigen Patienten",
+        }
+    }
+}
+
 /// "Patientenformular – Angaben und Erklärungen" (owner request
 /// 2026-10-08): what the lead sent through the cabinet, with the
 /// declaration of § 11 Abs. 6 GwG, signed by the patient — for a minor by
@@ -27583,6 +27893,7 @@ fn build_lead_self_disclosure_pdf(
     // `None`: GMED recorded the data, nothing was sent through the cabinet.
     let sent = data.submitted_at.map(payer_date_time);
     let minor = data.minor;
+    let patient_noun = PatientNoun::of(data.legal_sex.as_deref());
 
     layout.text_block_centered(
         "Patientenformular",
@@ -27617,7 +27928,8 @@ fn build_lead_self_disclosure_pdf(
         &mut layout,
         &if minor {
             format!(
-                "{sent_line} Für die minderjährige Patientin / den minderjährigen Patienten machen die gesetzlichen Vertreter die Angaben und bestätigen sie."
+                "{sent_line} Für {} machen die gesetzlichen Vertreter die Angaben und bestätigen sie.",
+                patient_noun.minor_accusative()
             )
         } else {
             sent_line
@@ -27801,12 +28113,33 @@ fn build_lead_self_disclosure_pdf(
             .find(|person| person.role == role)
             .map(|person| person.name.as_str())
     };
-    if minor {
-        lead_disclosure_section(
-            &mut layout,
-            &mut section,
+    // Each acting person's own data, where collected (DEV QA 2026-10-30: the
+    // section named the Betreuerin only although her birth date, address and
+    // identity document were on file).
+    let person_rows = data
+        .acting_persons
+        .iter()
+        .flat_map(|person| {
+            [
+                (
+                    format!("Geburtsdatum ({})", person.name),
+                    date(person.birth_date),
+                ),
+                (
+                    format!("Anschrift ({})", person.name),
+                    person.address.clone(),
+                ),
+                (
+                    format!("Ausweisdokument ({})", person.name),
+                    person.identity_document.clone(),
+                ),
+            ]
+        })
+        .collect::<Vec<_>>();
+    let (title, fixed_rows) = if minor {
+        (
             "Gesetzliche Vertretung",
-            &[
+            vec![
                 (
                     "Gesetzliche Vertreter/innen",
                     Some(names_with_roles).filter(|line| !line.is_empty()),
@@ -27823,13 +28156,11 @@ fn build_lead_self_disclosure_pdf(
                     }),
                 ),
             ],
-        );
+        )
     } else {
-        lead_disclosure_section(
-            &mut layout,
-            &mut section,
+        (
             "Vertretung",
-            &[
+            vec![
                 // Owner 2026-10-11: "Handelt jemand in Ihrem Namen?" first;
                 // only its "ja" asks for a court-appointed representative.
                 (
@@ -27845,11 +28176,22 @@ fn build_lead_self_disclosure_pdf(
                     yes_no(data.under_guardianship, acting("Rechtliche/r Betreuer/in")),
                 ),
             ],
-        );
-    }
+        )
+    };
+    let representation_rows = fixed_rows
+        .into_iter()
+        .chain(
+            person_rows
+                .iter()
+                .map(|(label, value)| (label.as_str(), value.clone())),
+        )
+        .collect::<Vec<_>>();
+    lead_disclosure_section(&mut layout, &mut section, title, &representation_rows);
 
     // 4. Who receives the invoice and who pays (step 3 of the cabinet, owner
     // spec 2026-10-11: the invoice recipient first).
+    // "Beziehung zur Patientin" by the legal sex (DEV QA 2026-10-30).
+    let relationship_label = format!("Beziehung {}", patient_noun.to_dative());
     let mut rows: Vec<(&str, Option<String>)> = Vec::new();
     if let Some(recipient) = data.invoice_recipient.as_ref() {
         let name = recipient.name.clone().unwrap_or_default();
@@ -27863,7 +28205,7 @@ fn build_lead_self_disclosure_pdf(
                         // The parent or guardian who receives it.
                         Some(parent) => format!("{parent} (gesetzliche Vertretung)"),
                         None => {
-                            "Die gesetzlichen Vertreter der Patientin / des Patienten".to_string()
+                            format!("Die gesetzlichen Vertreter {}", patient_noun.genitive())
                         }
                     }
                 } else {
@@ -27888,10 +28230,7 @@ fn build_lead_self_disclosure_pdf(
                 "Anschrift des Rechnungsempfängers",
                 recipient.address.clone(),
             ),
-            (
-                "Beziehung zur Patientin / zum Patienten",
-                recipient.relationship.clone(),
-            ),
+            (relationship_label.as_str(), recipient.relationship.clone()),
             (
                 "Grund der Rechnung an die Organisation",
                 recipient.payment_reason.clone(),
@@ -27913,7 +28252,7 @@ fn build_lead_self_disclosure_pdf(
             rows.push((
                 "Wer zahlt?",
                 Some(if minor {
-                    "Die Patientin / der Patient zahlt selbst.".to_string()
+                    format!("{} zahlt selbst.", patient_noun.nominative())
                 } else {
                     "Ich zahle selbst.".to_string()
                 }),
@@ -27954,10 +28293,7 @@ fn build_lead_self_disclosure_pdf(
             rows.extend([
                 ("Wer zahlt?", Some("Eine andere Person".to_string())),
                 ("Name", payer.name.clone()),
-                (
-                    "Beziehung zur Patientin / zum Patienten",
-                    payer.relationship.clone(),
-                ),
+                (relationship_label.as_str(), payer.relationship.clone()),
                 (
                     "Staatsangehörigkeit(en)",
                     german_country_list(&payer.citizenships),
@@ -28019,16 +28355,21 @@ fn build_lead_self_disclosure_pdf(
 
     // 5. The declarations, with the follow-up details where given.
     let (pep_self_label, pep_related_label, sanctions_label) = if minor {
+        let patient = patient_noun.nominative();
         (
-            "Die Patientin / der Patient ist eine politisch exponierte Person (PEP)",
-            "Die Patientin / der Patient ist Familienmitglied einer politisch exponierten Person oder ihr bekanntermaßen nahestehend",
-            "Die Patientin / der Patient hat Verbindungen zu Personen oder Organisationen, gegen die Sanktionen verhängt wurden",
+            format!("{patient} ist eine politisch exponierte Person (PEP)"),
+            format!(
+                "{patient} ist Familienmitglied einer politisch exponierten Person oder ihr bekanntermaßen nahestehend"
+            ),
+            format!(
+                "{patient} hat Verbindungen zu Personen oder Organisationen, gegen die Sanktionen verhängt wurden"
+            ),
         )
     } else {
         (
-            "Ich bin eine politisch exponierte Person (PEP)",
-            "Ich bin Familienmitglied einer politisch exponierten Person oder ihr bekanntermaßen nahestehend",
-            "Ich habe Verbindungen zu Personen oder Organisationen, gegen die Sanktionen verhängt wurden",
+            "Ich bin eine politisch exponierte Person (PEP)".to_string(),
+            "Ich bin Familienmitglied einer politisch exponierten Person oder ihr bekanntermaßen nahestehend".to_string(),
+            "Ich habe Verbindungen zu Personen oder Organisationen, gegen die Sanktionen verhängt wurden".to_string(),
         )
     };
     let declared =
@@ -28040,21 +28381,21 @@ fn build_lead_self_disclosure_pdf(
             "Erklärungen",
             &[
                 (
-                    pep_self_label,
+                    pep_self_label.as_str(),
                     Some(payer_yes_no(
                         data.pep_self,
                         data.pep_self_details.as_deref(),
                     )),
                 ),
                 (
-                    pep_related_label,
+                    pep_related_label.as_str(),
                     Some(payer_yes_no(
                         data.pep_related,
                         data.pep_related_details.as_deref(),
                     )),
                 ),
                 (
-                    sanctions_label,
+                    sanctions_label.as_str(),
                     Some(payer_yes_no(
                         data.sanctions_links,
                         data.sanctions_links_details.as_deref(),
@@ -28211,6 +28552,10 @@ fn build_lead_self_disclosure_pdf(
                 .as_deref()
                 .unwrap_or(super::lead_representatives::CUSTODY_JOINT),
         ),
+        // "Handelt jemand in Ihrem Namen?" — yes: the representative is
+        // named in "Nein" as in the cabinet; a Betreuung stated before that
+        // question was nested (2026-10-11) counts too.
+        data.has_representative == Some(true) || data.under_guardianship == Some(true),
     );
 
     // The declaration of § 11 Abs. 6 GwG and the signature of the
@@ -28405,20 +28750,69 @@ pub(crate) async fn generate_lead_document(
         })
 }
 
-/// Fixed explanation of "Auskunft an Dritte" on the patient form PDF.
+/// Fixed explanation of "Auskunft an Dritte" on the patient form PDF: the
+/// adult who answers for himself and nobody acts for.
 const THIRD_PARTY_DISCLOSURE_INTRO: &str = "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
 
-/// The same explanation on a minor's form, addressed to the legal
-/// representatives (owner 2026-10-23: not "an Sie selbst").
-const THIRD_PARTY_DISCLOSURE_INTRO_MINOR: &str = "Wir geben Auskunft über die persönlichen und medizinischen Daten Ihres Kindes ausschließlich an Sie als gesetzliche Vertreter. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Partner, Freunde, Verwandte oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
+/// The adult who answers for himself while somebody acts for him (Betreuer,
+/// Vollmacht): the representative is told as well.
+const THIRD_PARTY_DISCLOSURE_INTRO_OWN_REPRESENTED: &str = "Wir geben Auskunft über Ihre persönlichen und medizinischen Daten ausschließlich an Sie selbst und an die Person, die Sie vertritt. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
 
-/// The answer "no" of "Auskunft an Dritte": the patient, or for a minor the
-/// legal representatives.
-fn third_party_disclosure_no(minor: bool) -> &'static str {
+/// The representative who answers for an adult.
+const THIRD_PARTY_DISCLOSURE_INTRO_REPRESENTED: &str = "Wir geben Auskunft über die persönlichen und medizinischen Daten der von Ihnen vertretenen Person ausschließlich an diese Person selbst und an Sie als ihre Vertretung. Das gilt auch für Personen aus dem Umfeld der vertretenen Person, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Ehepartner, Partner, Freunde, Kinder oder andere Angehörige. Ohne ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
+
+/// A minor's parents with joint custody (owner 2026-10-23: never "an Sie
+/// selbst").
+const THIRD_PARTY_DISCLOSURE_INTRO_PARENTS: &str = "Wir geben Auskunft über die persönlichen und medizinischen Daten Ihres Kindes ausschließlich an Sie als Eltern. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Partner, Freunde, Geschwister oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
+
+/// A minor's parent with sole custody.
+const THIRD_PARTY_DISCLOSURE_INTRO_SOLE_PARENT: &str = "Wir geben Auskunft über die persönlichen und medizinischen Daten Ihres Kindes ausschließlich an Sie als allein sorgeberechtigten Elternteil. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Partner, Freunde, Geschwister oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
+
+/// A minor's Vormund.
+const THIRD_PARTY_DISCLOSURE_INTRO_VORMUND: &str = "Wir geben Auskunft über die persönlichen und medizinischen Daten des Kindes ausschließlich an Sie als Vormund. Das gilt auch für Personen aus Ihrem Umfeld, die an der Organisation und Behandlung nicht beteiligt sind, zum Beispiel Partner, Freunde, Geschwister oder andere Angehörige. Ohne Ihre ausdrückliche Benennung dürfen wir diesen Personen keine Auskunft geben.";
+
+/// The explanation and the answer "no" of "Auskunft an Dritte", worded as the
+/// cabinet words them (`disclosureWording` in
+/// `frontend/src/pages/patient-lead/lead-trusted-persons-text.ts`), so the
+/// signed form says what the client chose (DEV QA 2026-10-30: an adult under
+/// Betreuung chose "только я сам(а) и мой представитель", the form printed
+/// "Nein, nur ich selbst." and left the Betreuer out). `access_kind` is who
+/// answered (`self` or `guardian`), `has_representative` the adult's "somebody
+/// acts for me".
+fn third_party_disclosure_wording(
+    access_kind: &str,
+    minor: bool,
+    custody: Option<&str>,
+    has_representative: bool,
+) -> (&'static str, &'static str) {
     if minor {
-        "Nein, nur die gesetzlichen Vertreter."
+        return match custody {
+            Some(super::lead_representatives::CUSTODY_GUARDIAN) => (
+                THIRD_PARTY_DISCLOSURE_INTRO_VORMUND,
+                "Nein, nur ich als Vormund.",
+            ),
+            Some(super::lead_representatives::CUSTODY_SOLE_PARENT) => (
+                THIRD_PARTY_DISCLOSURE_INTRO_SOLE_PARENT,
+                "Nein, nur ich als allein sorgeberechtigter Elternteil.",
+            ),
+            _ => (
+                THIRD_PARTY_DISCLOSURE_INTRO_PARENTS,
+                "Nein, nur wir als Eltern.",
+            ),
+        };
+    }
+    if access_kind == "guardian" {
+        (
+            THIRD_PARTY_DISCLOSURE_INTRO_REPRESENTED,
+            "Nein, nur die vertretene Person selbst und ich als ihre Vertretung.",
+        )
+    } else if has_representative {
+        (
+            THIRD_PARTY_DISCLOSURE_INTRO_OWN_REPRESENTED,
+            "Nein, nur ich selbst und meine Vertretung.",
+        )
     } else {
-        "Nein, nur ich selbst."
+        (THIRD_PARTY_DISCLOSURE_INTRO, "Nein, nur ich selbst.")
     }
 }
 
@@ -28431,9 +28825,10 @@ fn append_third_party_disclosure_pdf(
     choice: Option<&crate::consent_choices::OwnConsentChoice>,
     minor: bool,
     custody: Option<&str>,
+    has_representative: bool,
 ) {
-    // No answer in the cabinet counts as "Nein, nur ich selbst." (owner
-    // decision 2026-10-22). An older named-recipient choice without a
+    // No answer in the cabinet counts as "Nein" (owner decision
+    // 2026-10-22). An older named-recipient choice without a
     // disclosure decision is printed by the caller with its own wording.
     let default_no;
     let disclosure = match choice.and_then(|choice| choice.disclosure.as_ref()) {
@@ -28452,14 +28847,10 @@ fn append_third_party_disclosure_pdf(
         .filter(|_| disclosure.allow_disclosure)
         .map(crate::consent_choices::OwnConsentChoice::recipient_lines)
         .unwrap_or_default();
-    let intro = if minor {
-        THIRD_PARTY_DISCLOSURE_INTRO_MINOR
-    } else {
-        THIRD_PARTY_DISCLOSURE_INTRO
-    };
+    let (intro, no) =
+        third_party_disclosure_wording(&disclosure.access_kind, minor, custody, has_representative);
     let guardian_intro = "Die folgenden Angaben und die Einwilligung erklärt die vertretende Person für die oben bezeichnete Person.";
     let question = "Soll eine weitere Person Auskunft erhalten dürfen?";
-    let no = third_party_disclosure_no(minor);
     let yes = "Ja, folgende Person(en) dürfen Auskunft erhalten:";
     let checkbox_height = |text: &str| {
         wrap_text_to_width_precise(&format!("[x]  {text}"), 10.5, layout.available_width(4.0)).len()
@@ -28720,17 +29111,15 @@ fn build_adult_privacy_consents_pdf_for(
         chosen.any_channel(),
         "dass meine personenbezogenen und medizinischen Daten sowie erforderliche Unterlagen über folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:",
     );
-    for (channel, picked) in [
-        ("E-mail", chosen.channel_email),
-        ("Threema-Messenger", chosen.channel_threema),
-        ("WhatsApp-Messenger", chosen.channel_whatsapp),
-        ("Telegram-Messenger", chosen.channel_telegram),
-    ] {
+    for (channel, picked) in consent_channels(&chosen) {
         adult_legal_channel(&mut layout, picked, channel);
     }
     fc_body(
         &mut layout,
-        "Ich bin mir der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
+        &format!(
+            "Ich bin mir der möglichen Risiken bei der Übermittlung sensibler Daten per {} bewusst.",
+            consent_channel_risk_list(&chosen)
+        ),
     );
     if let Some(processor_notice) = agency
         .data_processor_notice
@@ -29038,19 +29427,15 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
             "dass personenbezogene und medizinische Daten von {our} Kind sowie erforderliche Unterlagen über folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:"
         ),
     );
-    for (channel, picked) in [
-        ("E-mail", chosen.channel_email),
-        ("Threema-Messenger", chosen.channel_threema),
-        ("WhatsApp-Messenger", chosen.channel_whatsapp),
-        ("Telegram-Messenger", chosen.channel_telegram),
-    ] {
+    for (channel, picked) in consent_channels(&chosen) {
         adult_legal_channel(&mut layout, picked, channel);
     }
     admin_block(
         &mut layout,
         &format!(
-            "{we} {verb} {us_refl} der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
-            us_refl = if context.sole_guardian { "mir" } else { "uns" }
+            "{we} {verb} {us_refl} der möglichen Risiken bei der Übermittlung sensibler Daten per {channels} bewusst.",
+            us_refl = if context.sole_guardian { "mir" } else { "uns" },
+            channels = consent_channel_risk_list(&chosen),
         ),
         0.0,
         1.5,
@@ -38324,9 +38709,19 @@ mod tests {
     fn write_consent_review_sample(name: &str, pdf: &super::GeneratedPdf) {
         for page in normalized_pdf_pages(pdf) {
             if page.contains("Soll eine weitere Person") {
+                // The cabinet's "Nein" for whoever answered (DEV QA
+                // 2026-10-30).
                 assert!(
-                    page.contains("Nein, nur ich selbst.")
-                        || page.contains("Nein, nur die gesetzlichen Vertreter."),
+                    [
+                        "Nein, nur ich selbst.",
+                        "Nein, nur ich selbst und meine Vertretung.",
+                        "Nein, nur die vertretene Person selbst und ich als ihre Vertretung.",
+                        "Nein, nur wir als Eltern.",
+                        "Nein, nur ich als allein sorgeberechtigter Elternteil.",
+                        "Nein, nur ich als Vormund.",
+                    ]
+                    .iter()
+                    .any(|no| page.contains(no)),
                     "{page}"
                 );
                 assert!(page.contains("Ja, folgende Person(en)"), "{page}");
@@ -38934,7 +39329,9 @@ mod tests {
         // preselect (owner decision 2026-10-11).
         assert!(!consent_text.contains("[x]"));
         assert!(consent_text.contains("[ ] dass alle meine behandelnden"));
-        assert!(consent_text.contains("[ ] Threema-Messenger"));
+        // Threema is no longer offered (owner 2026-10-30).
+        assert!(!consent_text.contains("Threema"));
+        assert!(consent_text.contains("per E-mail, WhatsApp- oder Telegram-Messenger bewusst"));
         assert!(consent_text.contains("[ ] WhatsApp-Messenger"));
         assert!(consent_text.contains("[ ] Telegram-Messenger"));
         assert!(consent_text.contains("bitte ankreuzen"));
@@ -38983,9 +39380,30 @@ mod tests {
             chosen_text.contains("[x] dass meine personenbezogenen und medizinischen Daten sowie")
         );
         assert!(chosen_text.contains("[ ] E-mail"));
-        assert!(chosen_text.contains("[ ] Threema-Messenger"));
+        assert!(!chosen_text.contains("Threema"));
         assert!(chosen_text.contains("[x] WhatsApp-Messenger"));
         assert!(chosen_text.contains("[ ] Telegram-Messenger"));
+        // A choice signed with Threema before the owner removed it
+        // (2026-10-30) keeps its ticked line.
+        let mut with_threema = own.clone();
+        with_threema.choices.channel_threema = true;
+        let legacy = build_adult_privacy_consents_pdf(
+            &party,
+            &agency,
+            &bindings,
+            "EW-20261012-THREEMA",
+            Some(&with_threema),
+        )
+        .unwrap();
+        let legacy_text = normalized_pdf_text(&legacy);
+        assert!(
+            legacy_text.contains("[x] Threema-Messenger"),
+            "{legacy_text}"
+        );
+        assert!(
+            legacy_text.contains("WhatsApp-, Telegram- oder Threema-Messenger bewusst"),
+            "{legacy_text}"
+        );
         assert!(chosen_text.contains("bin damit einverstanden:"));
         assert!(!chosen_text.contains("angekreuzt ist"));
         assert!(!chosen_text.contains("GMED-Kundenkabinett"));
@@ -40017,14 +40435,18 @@ mod tests {
         // The fixed "Auskunft an Dritte" explanation names "Behandlung" in
         // general terms. Since 2026-10-22 an unanswered disclosure prints as
         // "Nein", so the section is on every patient form; it carries no data.
-        assert!(
-            text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO)
-                || text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO_MINOR),
-            "{text}"
-        );
-        let text = &text
-            .replace(super::THIRD_PARTY_DISCLOSURE_INTRO, "")
-            .replace(super::THIRD_PARTY_DISCLOSURE_INTRO_MINOR, "");
+        let intros = [
+            super::THIRD_PARTY_DISCLOSURE_INTRO,
+            super::THIRD_PARTY_DISCLOSURE_INTRO_OWN_REPRESENTED,
+            super::THIRD_PARTY_DISCLOSURE_INTRO_REPRESENTED,
+            super::THIRD_PARTY_DISCLOSURE_INTRO_PARENTS,
+            super::THIRD_PARTY_DISCLOSURE_INTRO_SOLE_PARENT,
+            super::THIRD_PARTY_DISCLOSURE_INTRO_VORMUND,
+        ];
+        assert!(intros.iter().any(|intro| text.contains(intro)), "{text}");
+        let text = &intros
+            .iter()
+            .fold(text.to_string(), |text, intro| text.replace(intro, ""));
         assert_nothing_medical_or_assessed(text);
         for word in [
             "Risiko",
@@ -40072,6 +40494,7 @@ mod tests {
             acting_persons: vec![super::LeadDisclosurePerson {
                 role: "Bevollmächtigte/r Vertreter/in",
                 name: "Ben Muster".to_string(),
+                ..Default::default()
             }],
             invoice_recipient: Some(super::LeadDisclosureRecipient {
                 third_party: false,
@@ -40204,7 +40627,16 @@ mod tests {
         let withdrawn =
             super::build_lead_self_disclosure_pdf(&data, &agency, None, "FORM-NO").unwrap();
         let text = normalized_pdf_text(&withdrawn);
-        assert!(text.contains("[x] Nein, nur ich selbst."), "{text}");
+        // Anna answered "somebody acts for me" (Ben Muster): "Nein" includes
+        // the representative, as the cabinet words it (DEV QA 2026-10-30).
+        assert!(
+            text.contains("[x] Nein, nur ich selbst und meine Vertretung."),
+            "{text}"
+        );
+        assert!(
+            text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO_OWN_REPRESENTED),
+            "{text}"
+        );
         assert!(!text.contains("Max Named"), "{text}");
         assert!(!text.contains("Olga Named"), "{text}");
         // Not answered counts as "Nein" (owner decision 2026-10-22), with or
@@ -40213,13 +40645,29 @@ mod tests {
         let unanswered =
             super::build_lead_self_disclosure_pdf(&data, &agency, None, "FORM-UNANSWERED").unwrap();
         let text = normalized_pdf_text(&unanswered);
-        assert!(text.contains("[x] Nein, nur ich selbst."), "{text}");
+        assert!(
+            text.contains("[x] Nein, nur ich selbst und meine Vertretung."),
+            "{text}"
+        );
         assert!(text.contains("[ ] Ja, folgende Person(en)"), "{text}");
         data.consent_choice = None;
         let without_choice =
             super::build_lead_self_disclosure_pdf(&data, &agency, None, "FORM-NONE").unwrap();
         let text = normalized_pdf_text(&without_choice);
+        assert!(
+            text.contains("[x] Nein, nur ich selbst und meine Vertretung."),
+            "{text}"
+        );
+        // Nobody acts for the adult: only the adult.
+        data.has_representative = Some(false);
+        data.under_guardianship = None;
+        data.acting_persons.clear();
+        let alone =
+            super::build_lead_self_disclosure_pdf(&data, &agency, None, "FORM-ALONE").unwrap();
+        let text = normalized_pdf_text(&alone);
         assert!(text.contains("[x] Nein, nur ich selbst."), "{text}");
+        assert!(text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO), "{text}");
+        assert!(!text.contains("meine Vertretung"), "{text}");
     }
 
     #[test]
@@ -40357,10 +40805,12 @@ mod tests {
                 super::LeadDisclosurePerson {
                     role: "Elternteil",
                     name: "Anna Muster".to_string(),
+                    ..Default::default()
                 },
                 super::LeadDisclosurePerson {
                     role: "Elternteil",
                     name: "Ben Muster".to_string(),
+                    ..Default::default()
                 },
             ],
             payer: Some(super::LeadDisclosurePayer {
@@ -40394,12 +40844,56 @@ mod tests {
             "Ersparnisse der Familie",
             "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind.",
             "Unterschrift gesetzl. Vertreter/in",
+            "[x] Nein, nur wir als Eltern.",
+            super::THIRD_PARTY_DISCLOSURE_INTRO_PARENTS,
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }
         assert!(!text.contains("Unterschrift Patient/in"), "{text}");
         // Why a third party pays belongs to a third party only.
         assert!(!text.contains("bleibt unberücksichtigt"), "{text}");
+        assert!(
+            text.contains("Für die minderjährige Patientin / den minderjährigen Patienten"),
+            "the sex is unknown: {text}"
+        );
+
+        // DEV QA 2026-10-30: a known legal sex picks the one form.
+        for (sex, expected, absent) in [
+            (
+                "female",
+                [
+                    "Für die minderjährige Patientin machen die gesetzlichen Vertreter",
+                    "Die Patientin zahlt selbst.",
+                    "Die Patientin ist eine politisch exponierte Person (PEP) nein",
+                ],
+                "Patientin / ",
+            ),
+            (
+                "male",
+                [
+                    "Für den minderjährigen Patienten machen die gesetzlichen Vertreter",
+                    "Der Patient zahlt selbst.",
+                    "Der Patient ist eine politisch exponierte Person (PEP) nein",
+                ],
+                "Patientin / ",
+            ),
+        ] {
+            let generated = super::build_lead_self_disclosure_pdf(
+                &super::LeadSelfDisclosure {
+                    legal_sex: Some(sex.to_string()),
+                    ..parents.clone()
+                },
+                &legal_test_agency(),
+                None,
+                "DOC-LEAD-SD-0011",
+            )
+            .unwrap();
+            let text = normalized_pdf_text(&generated);
+            for expected in expected {
+                assert!(text.contains(expected), "{expected} missing in {text}");
+            }
+            assert!(!text.contains(absent), "{sex}: {text}");
+        }
 
         // One representative (sole custody) signs alone; nobody named yet
         // leaves the lines of the custody.
@@ -40408,6 +40902,7 @@ mod tests {
             acting_persons: vec![super::LeadDisclosurePerson {
                 role: "Elternteil",
                 name: "Anna Muster".to_string(),
+                ..Default::default()
             }],
             ..parents.clone()
         };
@@ -40431,12 +40926,13 @@ mod tests {
             text.contains("7. Auskunft an Dritte") && text.contains("8. Versicherung"),
             "{text}"
         );
+        // The cabinet's words for the custody (DEV QA 2026-10-30).
         assert!(
-            text.contains("[x] Nein, nur die gesetzlichen Vertreter."),
+            text.contains("[x] Nein, nur ich als allein sorgeberechtigter Elternteil."),
             "{text}"
         );
         assert!(
-            text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO_MINOR),
+            text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO_SOLE_PARENT),
             "{text}"
         );
         assert!(!text.contains("nur ich selbst"), "{text}");
@@ -40511,6 +41007,7 @@ mod tests {
             acting_persons: vec![super::LeadDisclosurePerson {
                 role,
                 name: "Greta Vormund".to_string(),
+                ..Default::default()
             }],
             consent_choice: Some(choice.clone()),
             ..anna_lead_disclosure()
@@ -40545,6 +41042,11 @@ mod tests {
             acting_persons: vec![super::LeadDisclosurePerson {
                 role: "Rechtliche/r Betreuer/in",
                 name: "Ute Betreuerin".to_string(),
+                birth_date: NaiveDate::from_ymd_opt(1970, 2, 1),
+                address: Some("Lindenweg 2, 10115 Berlin, Deutschland".to_string()),
+                identity_document: Some(
+                    "Personalausweis, Nr. L01X00T47, gültig bis 31.12.2030".to_string(),
+                ),
             }],
             consent_choice: None,
             ..anna_lead_disclosure()
@@ -40570,6 +41072,56 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("Unterschrift Patient/in"), "{text}");
+        // DEV QA 2026-10-30: section 3 carries the Betreuerin's own data.
+        for expected in [
+            "3. Vertretung",
+            "Geburtsdatum (Ute Betreuerin) 01.02.1970",
+            "Anschrift (Ute Betreuerin) Lindenweg 2, 10115 Berlin, Deutschland",
+            "Ausweisdokument (Ute Betreuerin) Personalausweis, Nr. L01X00T47, gültig bis 31.12.2030",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+        // DEV QA 2026-10-30: "Auskunft an Dritte" keeps the Betreuer in, as
+        // the cabinet's "только я сам(а) и мой представитель".
+        assert!(
+            text.contains("[x] Nein, nur ich selbst und meine Vertretung."),
+            "{text}"
+        );
+        assert!(!text.contains("Nein, nur ich selbst. "), "{text}");
+        // The Betreuer answered in the own login: the represented person's
+        // wording.
+        let mut by_betreuer: crate::consent_choices::OwnConsentChoice =
+            serde_json::from_value(json!({
+                "id": Uuid::nil(), "choices": { "agency_processing": true },
+                "chosen_at": "2026-10-16T12:00:00Z", "source": "lead_portal",
+                "access_kind": "guardian", "recipients": []
+            }))
+            .unwrap();
+        by_betreuer.disclosure = Some(crate::consent_choices::DisclosureDecision::default_no(
+            "guardian",
+        ));
+        let text = normalized_pdf_text(
+            &super::build_lead_self_disclosure_pdf(
+                &super::LeadSelfDisclosure {
+                    consent_choice: Some(by_betreuer),
+                    ..betreut.clone()
+                },
+                &legal_test_agency(),
+                None,
+                "DOC-LEAD-SD-0023",
+            )
+            .unwrap(),
+        );
+        assert!(
+            text.contains(
+                "[x] Nein, nur die vertretene Person selbst und ich als ihre Vertretung."
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(super::THIRD_PARTY_DISCLOSURE_INTRO_REPRESENTED),
+            "{text}"
+        );
         // Re-check V-A3: the representation is named under the patient,
         // like Anlage 1/2 do.
         assert!(
@@ -40734,6 +41286,7 @@ mod tests {
             acting_persons: vec![super::LeadDisclosurePerson {
                 role: "Elternteil",
                 name: "Sofia Muster".to_string(),
+                ..Default::default()
             }],
             payer: Some(super::LeadDisclosurePayer {
                 representative_role: Some("Elternteil"),
@@ -41612,13 +42165,13 @@ mod tests {
         let text = compact(&text);
         assert!(
             text.contains(&compact(
-                "Angabe der Person ja – Familienmitglied oder nahestehende Person einer PeP (Bruder, Bürgermeister)"
+                "Angabe der Person ja – Familienmitglied oder nahestehende Person einer PEP (Bruder, Bürgermeister)"
             )),
             "{text}"
         );
         assert!(
             text.contains(&compact(
-                "Prüfung durch GMED PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PeP"
+                "Prüfung durch GMED PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PEP"
             )),
             "{text}"
         );
@@ -41659,6 +42212,32 @@ mod tests {
             text.contains(&compact("Frage a) ist mit „Nein“ beantwortet")),
             "{text}"
         );
+
+        // DEV QA 2026-10-30: no PEP answer and no review tick neither box of
+        // b); a), c) and d) keep their "Nein".
+        let unanswered = super::GwgIdentificationSheet {
+            person_answers: PersonAnswers::default(),
+            pep_review: PepReview::default(),
+            politically_exposed: false,
+            ..open
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &unanswered,
+            &legal_test_agency(),
+            None,
+            "GWG-20261030-UNITTEST0003",
+        )
+        .unwrap();
+        let text = compact(&assert_legal_pdf_chrome(
+            &bytes,
+            "GWG-20261030-UNITTEST0003",
+        ));
+        assert!(
+            text.contains(&compact("Angabe der Person keine Angabe")),
+            "{text}"
+        );
+        assert_eq!(text.matches("[]Ja[]Nein").count(), 1, "{text}");
+        assert_eq!(text.matches("[]Ja[X]Nein").count(), 3, "{text}");
     }
 
     #[test]
@@ -41953,6 +42532,60 @@ mod tests {
         assert!(!super::gwg_identity_copy_valid(true, None, today));
         assert!(!super::gwg_identity_copy_valid(true, past, today));
         assert!(!super::gwg_identity_copy_valid(false, future, today));
+    }
+
+    /// DEV QA 2026-10-30: the payer identified on paper has the identity
+    /// document data only in the notes of the uploaded copy.
+    #[test]
+    fn the_payers_paper_identity_notes_are_read_back() {
+        let full = super::parse_payer_identity_notes(
+            "Personalausweis Nr. L01X00T47, Ausstellungsstaat DE, gültig bis 31.12.2031",
+        );
+        assert_eq!(
+            full,
+            super::PaperIdentityNotes {
+                kind: Some("id_card".to_string()),
+                number: Some("L01X00T47".to_string()),
+                country: Some("DE".to_string()),
+                valid_until: NaiveDate::from_ymd_opt(2031, 12, 31),
+            }
+        );
+        let line = super::gwg_identity_document_line(super::GwgIdentityDocument {
+            kind: full.kind.as_deref(),
+            number: full.number.as_deref(),
+            country: full.country.as_deref(),
+            valid_until: full.valid_until,
+            ..Default::default()
+        });
+        assert_eq!(
+            line,
+            "Personalausweis, Nr. L01X00T47, ausgestellt in Deutschland, gültig bis 31.12.2031"
+        );
+        // Each part is optional; a number without a type keeps no type.
+        let partial =
+            super::parse_payer_identity_notes("Ausweisdokument Nr. P7, gültig bis 01.02.2030");
+        assert_eq!(partial.kind, None);
+        assert_eq!(partial.number.as_deref(), Some("P7"));
+        assert_eq!(partial.valid_until, NaiveDate::from_ymd_opt(2030, 2, 1));
+        assert_eq!(
+            super::parse_payer_identity_notes("Reisepass Nr. P7654321, gültig bis 31.12.2031")
+                .kind
+                .as_deref(),
+            Some("passport")
+        );
+        // Free words of staff are not guessed into a document.
+        assert_eq!(
+            super::parse_payer_identity_notes("Kopie vom Termin, unscharf"),
+            super::PaperIdentityNotes::default()
+        );
+        assert_eq!(
+            super::gwg_payer_paper_measures(NaiveDate::from_ymd_opt(2026, 10, 29)),
+            "Befragung des Kostenübernehmers: Selbstauskunft auf Papier, unterschrieben am 29.10.2026 (Angaben zur Herkunft der Mittel dort)"
+        );
+        assert_eq!(
+            super::gwg_payer_paper_measures(None),
+            "Befragung des Kostenübernehmers: Selbstauskunft steht aus"
+        );
     }
 
     #[test]
@@ -43464,6 +44097,7 @@ mod tests {
             total_range: Some("100,00 - 1000,00 €".to_string()),
             agency: legal_test_agency(),
             generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 30, 0).unwrap(),
+            contracting: Default::default(),
         };
 
         let bytes = build_cost_estimate_pdf(&context, "VKS-20260716-ABCDEF123456").unwrap();
@@ -43478,6 +44112,34 @@ mod tests {
         assert!(!text.contains("GOÄ/DRG"));
         assert!(text.contains("Kardiologische Untersuchung"));
         assert!(text.contains("100,00 - 1000,00 €"));
+
+        // DEV QA 2026-10-30: a child's parents who contract are named, not
+        // "dem Patienten"; a represented patient with the representation.
+        let child = super::GeneratedCostEstimateContext {
+            contracting: parents_as_party(),
+            ..context
+        };
+        let bytes = build_cost_estimate_pdf(&child, "VKS-20261030-PARENTS0001").unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "VKS-20261030-PARENTS0001");
+        assert!(
+            text.contains(
+                "zwischen der jeweiligen Einrichtung und den Auftraggebern (Erika Muster und Max Muster, gesetzliche Vertreter von Anna Beispiel)."
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("zwischen dem Patienten"), "{text}");
+        let ward = super::GeneratedCostEstimateContext {
+            contracting: ward_of(super::CourtGuardian::Betreuer, "Ute Betreuerin"),
+            ..child
+        };
+        let bytes = build_cost_estimate_pdf(&ward, "VKS-20261030-WARD0001").unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "VKS-20261030-WARD0001");
+        assert!(
+            text.contains(
+                "zwischen der jeweiligen Einrichtung und Frau Anna Beispiel, gesetzlich vertreten durch die/den rechtliche(n) Betreuer/in Ute Betreuerin."
+            ),
+            "{text}"
+        );
     }
 
     #[test]
@@ -43513,6 +44175,7 @@ mod tests {
             total_range: Some("100,00 - 1000,00 €".to_string()),
             agency: legal_test_agency(),
             generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 30, 0).unwrap(),
+            contracting: Default::default(),
         };
 
         let bytes = build_cost_estimate_pdf(&context, "DOC-COST-CYRILLIC").unwrap();
@@ -43634,7 +44297,7 @@ mod tests {
         };
         assert_eq!(
             reviewed.gmed_review_line(),
-            "PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PeP"
+            "PEP-Status geprüft am 23.10.2026 von Anna Prüferin – Ergebnis: keine PEP"
         );
     }
 
@@ -43686,6 +44349,7 @@ mod tests {
             total_range: Some("200,00 - 2000,00 €".to_string()),
             agency: legal_test_agency(),
             generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 30, 0).unwrap(),
+            contracting: Default::default(),
         };
 
         let bytes = build_cost_estimate_pdf(&context, "VKS-20260716-LONGROWS0001").unwrap();

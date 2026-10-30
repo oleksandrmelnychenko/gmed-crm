@@ -2501,6 +2501,26 @@ async fn upload_payer_identity(app: &TestApp, bearer: &str, lead_id: Uuid) -> (S
     )
 }
 
+/// The text of a generated document's PDF, whitespace collapsed.
+async fn document_pdf_text(app: &TestApp, bearer: &str, document_id: &str) -> String {
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/documents/{document_id}/download"))
+        .header("Authorization", bearer)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.suite.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .unwrap();
+    pdf_extract::extract_text_from_mem(&bytes)
+        .unwrap()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// DEV re-check V-A7: a level-2 third-party payer without e-mail (or who
 /// prefers paper) is identified without any payer link — staff upload the
 /// payer's identity document and file the Selbstauskunft generated as a
@@ -2604,6 +2624,31 @@ async fn a_level_two_payer_is_identified_on_paper_without_a_payer_link() {
         "{lead}"
     );
     assert!(!has_reason(&lead, "Third-party payer is not identified"));
+
+    // DEV QA 2026-10-30: the payer's GwG sheet reads the paper ID from the
+    // copy's notes, ticks the valid copy and names the paper Selbstauskunft
+    // as the measure of section 3.
+    let (status, sheet) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(json!({
+            "template_id": "gwg_identification", "lead_id": lead_id,
+            "language": "de", "status": "active",
+            "bindings": { "gwg_identification": { "subject": "payer" } },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sheet}");
+    let text = document_pdf_text(&app, &ceo, sheet["id"].as_str().unwrap()).await;
+    for expected in [
+        "Reisepass, Nr. P7654321, gültig bis 31.12.2031",
+        "[X] Die erforderliche Kopie/Fotografie",
+        "Selbstauskunft auf Papier, unterschrieben am",
+    ] {
+        assert!(text.contains(expected), "{expected} missing in {text}");
+    }
     let links: i64 = sqlx::query_scalar("SELECT count(*) FROM lead_payer_links WHERE lead_id = $1")
         .bind(lead_id)
         .fetch_one(pool)

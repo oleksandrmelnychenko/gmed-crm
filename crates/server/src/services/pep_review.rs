@@ -109,7 +109,7 @@ impl PersonAnswers {
         self.pep_self == Some(true) || self.pep_related == Some(true)
     }
 
-    /// "ja – selbst PeP (Bürgermeister)", "nein", "keine Angabe": the PEP
+    /// "ja – selbst PEP (Bürgermeister)", "nein", "keine Angabe": the PEP
     /// answers of the person in one line. "nein" only when both questions
     /// are answered with no.
     pub fn pep_line(&self) -> String {
@@ -123,11 +123,11 @@ impl PersonAnswers {
         };
         let mut yes = Vec::new();
         if self.pep_self == Some(true) {
-            yes.push(format!("selbst PeP{}", detail(&self.pep_self_details)));
+            yes.push(format!("selbst PEP{}", detail(&self.pep_self_details)));
         }
         if self.pep_related == Some(true) {
             yes.push(format!(
-                "Familienmitglied oder nahestehende Person einer PeP{}",
+                "Familienmitglied oder nahestehende Person einer PEP{}",
                 detail(&self.pep_related_details)
             ));
         }
@@ -183,7 +183,7 @@ impl PepReview {
     }
 
     /// "PEP-Status geprüft am 23.10.2026 von Anna Muster – Ergebnis: keine
-    /// PeP", or "noch nicht geprüft".
+    /// PEP", or "noch nicht geprüft".
     pub fn line(&self) -> String {
         if !self.reviewed() {
             return "noch nicht geprüft".to_string();
@@ -201,9 +201,9 @@ impl PepReview {
             text.push_str(&format!(" von {name}"));
         }
         text.push_str(if self.is_pep {
-            " – Ergebnis: PeP (bzw. Familienmitglied / nahestehende Person)"
+            " – Ergebnis: PEP (bzw. Familienmitglied / nahestehende Person)"
         } else {
-            " – Ergebnis: keine PeP"
+            " – Ergebnis: keine PEP"
         });
         text
     }
@@ -217,6 +217,14 @@ pub fn politically_exposed(answers: &PersonAnswers, review: &PepReview) -> bool 
     } else {
         answers.states_pep()
     }
+}
+
+/// Question 5 b) as the boxes print it: `None` while neither staff reviewed
+/// the person nor the person answered a PEP question, so neither "Ja" nor
+/// "Nein" is ticked (DEV QA 2026-10-30: "[X] Nein" stood beside "keine
+/// Angabe"). Otherwise [`politically_exposed`].
+pub fn politically_exposed_answer(answers: &PersonAnswers, review: &PepReview) -> Option<bool> {
+    (review.reviewed() || !answers.pep_unanswered()).then(|| politically_exposed(answers, review))
 }
 
 fn stamps(entry: Option<&Value>) -> (Option<NaiveDate>, Option<String>) {
@@ -425,7 +433,7 @@ mod tests {
         };
         assert_eq!(
             related.pep_line(),
-            "ja – Familienmitglied oder nahestehende Person einer PeP (Bruder, Bürgermeister)"
+            "ja – Familienmitglied oder nahestehende Person einer PEP (Bruder, Bürgermeister)"
         );
         assert_eq!(related.sanctions_line(), "keine Angabe");
     }
@@ -447,7 +455,7 @@ mod tests {
         assert_eq!(answers.sanctions_links, Some(false));
         assert_eq!(
             answers.pep_line(),
-            "ja – selbst PeP (Abgeordneter, 2019–2023)"
+            "ja – selbst PEP (Abgeordneter, 2019–2023)"
         );
     }
 
@@ -477,6 +485,19 @@ mod tests {
         assert!(!politically_exposed(&says_no, &open));
         assert!(!politically_exposed(&says_pep, &cleared));
         assert!(politically_exposed(&says_no, &confirmed));
+        // No answer and no review: neither box (DEV QA 2026-10-30).
+        let unanswered = PersonAnswers::default();
+        assert_eq!(politically_exposed_answer(&unanswered, &open), None);
+        assert_eq!(politically_exposed_answer(&says_no, &open), Some(false));
+        assert_eq!(politically_exposed_answer(&says_pep, &open), Some(true));
+        assert_eq!(
+            politically_exposed_answer(&unanswered, &cleared),
+            Some(false)
+        );
+        assert_eq!(
+            politically_exposed_answer(&unanswered, &confirmed),
+            Some(true)
+        );
     }
 
     #[test]
@@ -495,7 +516,7 @@ mod tests {
         assert_eq!(patient.checked_on, Some(day("2026-10-20")));
         assert_eq!(
             patient.line(),
-            "PEP-Status geprüft am 20.10.2026 von Anna Muster – Ergebnis: keine PeP"
+            "PEP-Status geprüft am 20.10.2026 von Anna Muster – Ergebnis: keine PEP"
         );
         let parent = review_of(&aml, &representative_subject(id));
         assert!(parent.checked && parent.is_pep);
