@@ -4632,6 +4632,10 @@ fn gwg_represented_beneficial_owner(
 /// Where the payer's statement of section 3 comes from: the third-party
 /// payer's own link.
 const GWG_PAYER_STATEMENT_SOURCE: &str = "Angaben des Kostenübernehmers über den eigenen Zugang";
+/// The same answers from the payer's Selbstauskunft signed on paper, entered
+/// by GMED (owner 2026-10-30).
+const GWG_PAYER_PAPER_STATEMENT_SOURCE: &str =
+    "Befragung des Kostenübernehmers: Selbstauskunft auf Papier, von GMED erfasst";
 /// Section 3 of the sheet of a minor's paying parent who was not asked the
 /// payer's questions (no enhanced check required).
 /// Section 3 of the patient's sheet when the patient pays himself.
@@ -4692,7 +4696,7 @@ async fn load_gwg_payer_beneficial_owner(
     source: &str,
 ) -> Result<Option<GwgPayerBeneficialOwner>, sqlx::Error> {
     let Some(row) = sqlx::query(
-        r#"SELECT submitted_at, beneficial_owners, funds_sources, funds_description
+        r#"SELECT submitted_at, beneficial_owners, funds_sources, funds_description, source
            FROM lead_payer_statements
            WHERE lead_id = $1 AND submitted_at IS NOT NULL"#,
     )
@@ -4701,6 +4705,15 @@ async fn load_gwg_payer_beneficial_owner(
     .await?
     else {
         return Ok(None);
+    };
+    // The answers staff entered from the payer's signed paper Selbstauskunft
+    // say so (owner 2026-10-30), not "über den eigenen Zugang".
+    let source = if row.try_get::<String, _>("source")? == super::lead_payer_link::SOURCE_STAFF
+        && source == GWG_PAYER_STATEMENT_SOURCE
+    {
+        GWG_PAYER_PAPER_STATEMENT_SOURCE
+    } else {
+        source
     };
     let submitted_at: chrono::DateTime<chrono::Utc> = row.try_get("submitted_at")?;
     let owners = row

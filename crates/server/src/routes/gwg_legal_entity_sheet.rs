@@ -26,6 +26,9 @@ pub(super) const PREVIEW_TITLE: &str = "Dokumentationsbogen juristische Personen
 const SUBTITLE: &str = "Freiwillige Anwendung – GMED ist kein Verpflichteter nach § 2 GwG";
 /// Where the payer's own answers come from.
 const STATEMENT_SOURCE: &str = "Angaben des Kostenübernehmers über den eigenen Zugang";
+/// The same answers from the signed paper Selbstauskunft, entered by GMED.
+const PAPER_STATEMENT_SOURCE: &str =
+    "Befragung des Kostenübernehmers: Selbstauskunft auf Papier, von GMED erfasst";
 
 /// One paying company, organisation or insurer on the sheet.
 #[derive(Debug, Default, Clone)]
@@ -59,6 +62,9 @@ pub(super) struct LegalEntitySheet {
     pub id_document_on_file: bool,
     /// The day the payer sent the answers; `None` while nothing was sent.
     pub statement_submitted_on: Option<NaiveDate>,
+    /// Staff entered the answers from the organisation's signed paper
+    /// Selbstauskunft (owner 2026-10-30).
+    pub statement_by_staff: bool,
     /// The beneficial owners the payer listed (`first_name`, `last_name`,
     /// `date_of_birth`, `birth_place`, `street`, `zip`, `city`, `country`,
     /// `share_percent`).
@@ -261,10 +267,17 @@ impl LegalEntitySheet {
 
     fn statement_measures(&self) -> Option<String> {
         self.statement_submitted_on.map(|day| {
-            format!(
-                "{STATEMENT_SOURCE} (abgesendet am {})",
-                day.format("%d.%m.%Y")
-            )
+            if self.statement_by_staff {
+                format!(
+                    "{PAPER_STATEMENT_SOURCE} (erfasst am {})",
+                    day.format("%d.%m.%Y")
+                )
+            } else {
+                format!(
+                    "{STATEMENT_SOURCE} (abgesendet am {})",
+                    day.format("%d.%m.%Y")
+                )
+            }
         })
     }
 }
@@ -678,7 +691,7 @@ pub(super) async fn load(
                   pep_self, pep_self_details, pep_related, pep_related_details,
                   sanctions_links, sanctions_links_details,
                   high_risk_country, high_risk_country_code,
-                  funds_sources, funds_description
+                  funds_sources, funds_description, source
            FROM lead_payer_statements
            WHERE lead_id = $1 AND submitted_at IS NOT NULL"#,
     )
@@ -760,6 +773,8 @@ pub(super) async fn load(
         let flag = |column: &str| statement.try_get::<Option<bool>, _>(column).ok().flatten();
         let submitted_at: chrono::DateTime<chrono::Utc> = statement.try_get("submitted_at")?;
         sheet.statement_submitted_on = Some(crate::app_time::date_of(submitted_at));
+        sheet.statement_by_staff = statement.try_get::<String, _>("source")?
+            == crate::routes::lead_payer_link::SOURCE_STAFF;
         // The payer's own answers come first; the declaration fills the gaps.
         sheet.organisation_name = text("organisation_name").or(sheet.organisation_name);
         sheet.legal_form = text("legal_form").or(sheet.legal_form);
@@ -1099,6 +1114,17 @@ mod tests {
             value(&items, "Quelle der Angaben"),
             Some(
                 "Angaben des Kostenübernehmers über den eigenen Zugang (abgesendet am 20.10.2026)"
+            )
+        );
+        // Entered by staff from the signed paper Selbstauskunft (owner 2026-10-30).
+        let paper = LegalEntitySheet {
+            statement_by_staff: true,
+            ..complete()
+        };
+        assert_eq!(
+            paper.statement_measures().as_deref(),
+            Some(
+                "Befragung des Kostenübernehmers: Selbstauskunft auf Papier, von GMED erfasst (erfasst am 20.10.2026)"
             )
         );
         // The source of funds only with a required enhanced check.

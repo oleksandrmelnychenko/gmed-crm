@@ -81,13 +81,14 @@ export function payerIdentityNotes(fields: PayerIdentityFields): string | null {
   const parts: string[] = [];
   const holder = fields.holder?.trim() ?? "";
   if (fields.registerExtract) return holder ? `Handelsregisterauszug, vorgelegt von ${holder}` : null;
-  if (holder) parts.push(`Inhaber/in ${holder}`);
   const number = fields.number.trim();
   const kind = fields.type ? ID_DOCUMENT_TYPE_DE[fields.type] : "";
   if (kind || number) parts.push([kind || "Ausweisdokument", number ? `Nr. ${number}` : ""].filter(Boolean).join(" "));
   const country = fields.issuingCountry.trim().toUpperCase();
   if (country) parts.push(`Ausstellungsstaat ${country}`);
   if (fields.validUntil) parts.push(`gültig bis ${formatAppDate(fields.validUntil)}`);
+  // Last: the GwG sheet reads the type and number from the first part (F3, DEV QA 2026-10-30).
+  if (holder) parts.push(`Inhaber/in ${holder}`);
   return parts.length > 0 ? parts.join(", ") : null;
 }
 

@@ -141,7 +141,8 @@ describe("payer paper path (re-check V-A7)", () => {
       "Handelsregisterauszug – Kostenübernehmer Beispiel GmbH",
     );
     expect(payerIdentityDocumentName("Erika Zahler", fields)).toBe("Ausweisdokument – Kostenübernehmer/in Erika Zahler");
-    expect(payerIdentityNotes(fields)).toBe("Inhaber/in Vera Vertreter, Personalausweis Nr. L01X00T47, Ausstellungsstaat DE, gültig bis 31.01.2031");
+    // The type and number stay the first part: the GwG sheet reads them from there.
+    expect(payerIdentityNotes(fields)).toBe("Personalausweis Nr. L01X00T47, Ausstellungsstaat DE, gültig bis 31.01.2031, Inhaber/in Vera Vertreter");
     expect(payerIdentityAnswersPatch(fields)).toEqual({
       id_document_type: "id_card",
       id_document_number: "L01X00T47",

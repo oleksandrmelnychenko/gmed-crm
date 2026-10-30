@@ -379,7 +379,9 @@ test("staff prepare the four documents and send them; the payer section waits fo
     const row = panel.getByTestId(`lead-payer-package-document-${slot}`);
     await expect(row).toHaveAttribute("data-document-id", `doc-${slot}-1`);
     await expect(row).toContainText("Version 1");
-    await expect(row.getByRole("button")).toBeVisible();
+    // The document opens; it can also be recorded as signed on paper (DEV QA 2026-10-30).
+    await expect(row.getByRole("button").first()).toBeVisible();
+    await expect(row.getByRole("button", { name: "Auf Papier unterschrieben" })).toBeVisible();
   }
   await expect(panel.getByRole("button", { name: "Unterlagen neu erstellen" })).toBeEnabled();
 
