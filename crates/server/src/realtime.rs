@@ -945,6 +945,34 @@ pub async fn publish_provider_event(
     .await;
 }
 
+/// A signature on one of a lead's documents (e.g. the DSGVO package sets the
+/// lead's compliance): the leads list re-reads the row (QA 2026-10-30: the
+/// row kept «Удаление через N дн» after the signature).
+pub async fn publish_lead_document_signed(
+    state: &AppState,
+    actor_user_id: Option<Uuid>,
+    document_id: Uuid,
+) {
+    let lead_id =
+        sqlx::query_scalar::<_, Option<Uuid>>("SELECT lead_id FROM documents WHERE id = $1")
+            .bind(document_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+    if let Some(lead_id) = lead_id {
+        publish_lead_event(
+            state,
+            actor_user_id,
+            "lead.updated",
+            lead_id,
+            serde_json::json!({ "document_id": document_id, "change": "document_signed" }),
+        )
+        .await;
+    }
+}
+
 pub async fn publish_lead_event(
     state: &AppState,
     actor_user_id: Option<Uuid>,

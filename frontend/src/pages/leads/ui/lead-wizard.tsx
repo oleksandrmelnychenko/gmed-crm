@@ -1800,6 +1800,34 @@ function mergeNarrative(
   } as ClinicalNarrative;
 }
 
+/**
+ * The wizard's rows without those the record changed or removed since the wizard read it: the
+ * record's version stands for them, the wizard's own edits of untouched rows go through
+ * (QA 2026-10-30: «Завершить приём» brought back a deleted allergy and an old diagnosis code).
+ */
+export function withoutOutdatedRows<T extends { id?: string | null }>(
+  local: T[],
+  readByWizard: readonly { id?: string | null }[],
+  latest: readonly { id?: string | null }[],
+): T[] {
+  const byId = (rows: readonly { id?: string | null }[]) => new Map(
+    rows.flatMap((row) => (row.id ? [[row.id, JSON.stringify(row)] as const] : [])),
+  );
+  const before = byId(readByWizard);
+  const now = byId(latest);
+  return local.filter((item) => !item.id || !before.has(item.id) || now.get(item.id) === before.get(item.id));
+}
+
+function withoutOutdatedClinicalRows(draft: Draft, readByWizard: PatientClinicalProfile, latest: PatientClinicalProfile): Draft {
+  return {
+    ...draft,
+    diagnoses: withoutOutdatedRows(draft.diagnoses, readByWizard.diagnoses, latest.diagnoses),
+    medications: withoutOutdatedRows(draft.medications, readByWizard.medications, latest.medications),
+    allergies: withoutOutdatedRows(draft.allergies, readByWizard.allergien, latest.allergien),
+    caves: withoutOutdatedRows(draft.caves, readByWizard.cave, latest.cave),
+  };
+}
+
 function mergePatientClinicalDraft(
   draft: Draft,
   persisted: PatientClinicalProfile,
@@ -4349,8 +4377,12 @@ export function LeadWizard({
         referrer: nextCaseDetail?.zuweiser || leadDraft.referrer,
       };
       prospectMergeOnlyRef.current = nextLead.prospect_patient_lifecycle === "active" || nextLead.prospect_patient_lifecycle === "inactive";
+      // The lead's text stands in for an anamnesis only while the record has none: a newer one
+      // written on the patient card is never replaced by it (QA 2026-10-30).
+      const leadOwnNarrative = Object.keys(recordFromUnknown(recordFromUnknown(nextLead.wizard_state?.["clinical_draft"])["narrative"])).length > 0;
+      const recordDraft = prospectClinical?.narrative && !leadOwnNarrative ? { ...caseDraft, narrative: null } : caseDraft;
       const nextDraft = prospectClinical && prospectCaseId
-        ? hydrateClinicalDraft(caseDraft, prospectClinical, prospectCaseId)
+        ? hydrateClinicalDraft(recordDraft, prospectClinical, prospectCaseId)
         : caseDraft;
       // A refresh of the open wizard stays on its step; opening a lead starts at step 1.
       const nextStep: StepId = keepStep && hydrated.current === leadId
@@ -5453,13 +5485,18 @@ export function LeadWizard({
         await saveCaseOverview(caseId, { hauptanfragegrund: medicalDraft.concern.trim(), zuweiser: medicalDraft.referrer.trim() });
         return caseId;
       }
+      const clinicalReadByWizard = clinicalBaselineRef.current;
       const latestClinical = await loadPatientClinical(patientId).catch((nextError) => {
         throw new Error(tx(
           `Не удалось проверить актуальные медицинские данные перед сохранением: ${errorText(nextError, tx)}`,
           `Die aktuellen medizinischen Daten konnten vor dem Speichern nicht geprüft werden: ${errorText(nextError, tx)}`,
         ));
       });
-      const safeDraft = hydrateClinicalDraft(medicalDraft, latestClinical, caseId);
+      const safeDraft = hydrateClinicalDraft(
+        clinicalReadByWizard ? withoutOutdatedClinicalRows(medicalDraft, clinicalReadByWizard, latestClinical) : medicalDraft,
+        latestClinical,
+        caseId,
+      );
       const saveMode = prospectMergeOnlyRef.current ? "merge" : "replace";
       await saveCaseOverview(caseId, {
         hauptanfragegrund: safeDraft.concern.trim(),

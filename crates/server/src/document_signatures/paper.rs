@@ -478,6 +478,9 @@ async fn store_signed_version(
     .await
     .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
+    if lead_id.is_some() {
+        crate::realtime::publish_lead_document_signed(state, Some(auth.user_id), signed_id).await;
+    }
 
     Ok(json!({
         "ok": true,

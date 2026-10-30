@@ -1338,6 +1338,7 @@ async fn archive(
     match outcome {
         Ok(ArchiveOutcome::Committed { status, result_id }) => {
             closure::notify_archived(state, row, status, result_id).await;
+            crate::realtime::publish_lead_document_signed(state, None, result_id).await;
             Ok(())
         }
         Ok(ArchiveOutcome::Skipped) => {

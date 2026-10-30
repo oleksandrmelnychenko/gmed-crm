@@ -2698,6 +2698,10 @@ async fn mark_document_signed(
         tracing::error!(error = %e, "commit mark-signed tx");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    if lead_id.is_some() {
+        crate::realtime::publish_lead_document_signed(&state, Some(auth.user_id), document_id)
+            .await;
+    }
 
     state.audit_sender.try_send(audit::domain_event(
         "mark_document_signed",
