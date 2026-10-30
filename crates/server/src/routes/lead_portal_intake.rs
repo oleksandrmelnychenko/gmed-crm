@@ -8019,7 +8019,9 @@ async fn get_lead_portal_intake(
     let consents = match sqlx::query(
         r#"SELECT c.id, c.consent_type, c.granted_at, c.revoked_at,
                   c.context->>'text_version' AS version,
-                  c.context->>'access_kind' AS access_kind
+                  c.context->>'access_kind' AS access_kind,
+                  c.context->'recorded_by_staff'->>'how' AS recorded_how,
+                  c.context->'recorded_by_staff'->>'note' AS recorded_note
            FROM consent_records c
            WHERE c.lead_id = $1 AND c.consent_type = ANY($2) AND c.granted = true
            ORDER BY c.granted_at"#,
@@ -8101,6 +8103,9 @@ async fn get_lead_portal_intake(
                 "revoked_at": time(consent, "revoked_at"),
                 "version": consent.try_get::<Option<String>, _>("version").ok().flatten(),
                 "access_kind": consent.try_get::<Option<String>, _>("access_kind").ok().flatten(),
+                // How the client gave a consent staff recorded (owner 2026-10-29).
+                "recorded_how": consent.try_get::<Option<String>, _>("recorded_how").ok().flatten(),
+                "recorded_note": consent.try_get::<Option<String>, _>("recorded_note").ok().flatten(),
             })
         })
         .collect();

@@ -9,6 +9,7 @@ import {
   PORTAL_CONSENT_CHANNELS,
   PORTAL_CONSENT_OPTIONS,
   recipientScopeLabel,
+  staffRecordedLabel,
   type ConsentRecipientRelation,
   type LeadPortalConsentRecipient,
   type PortalConsentChoiceKey,
@@ -113,6 +114,8 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
   const disclosureRole = disclosure?.access_kind === "guardian" ? tx("Родитель / представитель", "Elternteil / Vertretung")
     : disclosure?.access_kind === "self" ? tx("Пациент", "Patient/in") : null;
   const disclosureWho = disclosure?.chosen_by_name ?? disclosureRole ?? tx("Не указан", "Nicht angegeben");
+  const formRecorded = staffRecordedLabel(form, tx);
+  const disclosureRecorded = staffRecordedLabel(disclosure, tx);
   const disclosureAllowed = disclosure?.allow_disclosure === true && disclosure.consent_given === true;
   // Not answered counts as "no" (owner decision 2026-10-22), unless an older choice named recipients.
   const disclosureDefaultNo = !disclosure && form?.choices?.named_recipients !== true;
@@ -174,6 +177,12 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
             <UserRound aria-hidden="true" />
             <span>{disclosureWho}{disclosure.chosen_by_name && disclosureRole ? ` (${disclosureRole})` : ""}</span>
           </StatusChip>
+          {disclosureRecorded ? (
+            <StatusChip tone="info" className="whitespace-normal" data-testid="portal-disclosure-recorded-by-staff">
+              <UserRound aria-hidden="true" />
+              <span>{disclosureRecorded}</span>
+            </StatusChip>
+          ) : null}
           <StatusChip tone="info">
             <CalendarDays aria-hidden="true" />
             {disclosure.chosen_at
@@ -250,6 +259,12 @@ export function PortalConsentChoiceView({ intake, tx }: { intake: LeadPortalInta
             <UserRound aria-hidden="true" />
             <span>{who}{form.chosen_by_role ? ` (${form.chosen_by_role})` : ""}</span>
           </StatusChip>
+          {formRecorded ? (
+            <StatusChip tone="info" className="whitespace-normal" data-testid="portal-consent-form-recorded-by-staff">
+              <UserRound aria-hidden="true" />
+              <span>{formRecorded}</span>
+            </StatusChip>
+          ) : null}
           <StatusChip tone="info">
             <CalendarDays aria-hidden="true" />
             {form.chosen_at

@@ -64,7 +64,7 @@ describe("staff cabinet parity payload", () => {
         { name: "Eva", relation: "friend", scope: "Appointment dates only" },
       ] },
     });
-    expect(intake?.disclosure).toEqual(receipt);
+    expect(intake?.disclosure).toEqual({ ...receipt, recorded_how: null, recorded_note: null });
     expect(intake?.trusted_persons?.[0].scope).toBe("Appointment dates only");
     expect(intake?.consent_form?.recipients[0].scope).toBe("Appointment dates only");
     expect(intake?.consent_form?.chosen_by_name).toBe("Other Parent");

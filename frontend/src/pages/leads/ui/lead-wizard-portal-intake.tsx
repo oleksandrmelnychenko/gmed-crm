@@ -19,7 +19,7 @@ import {
   type Step1FillMode,
 } from "../data/lead-portal-intake-api";
 import { portalProgressText } from "../model/lead-portal-intake";
-import { latestPortalConsent } from "../model/lead-portal-consents";
+import { latestPortalConsent, staffRecordedLabel } from "../model/lead-portal-consents";
 
 type Tx = (ru: string, de: string) => string;
 
@@ -539,6 +539,7 @@ function PortalConsentRecord({ label, consent, tx }: { label: string; consent: L
   const given = Boolean(consent?.given_at);
   const who = consent?.access_kind === "guardian" ? tx("родитель / представитель", "Elternteil / Vertretung")
     : consent?.access_kind === "self" ? tx("пациент", "Patient/in") : null;
+  const recorded = staffRecordedLabel(consent, tx);
   return (
     <div className="space-y-1 text-xs">
       <div className="flex flex-wrap items-center gap-2">
@@ -554,6 +555,12 @@ function PortalConsentRecord({ label, consent, tx }: { label: string; consent: L
               {consent?.revoked_at ? `${given ? " · " : ""}${tx("Отозвано:", "Widerrufen:")} ${formatAppDateTime(consent.revoked_at)}` : ""}
               {who ? ` · ${who}` : ""}{consent?.version ? ` · ${tx("версия", "Version")} ${consent.version}` : ""}
             </span>
+          </StatusChip>
+        ) : null}
+        {recorded ? (
+          <StatusChip tone="info" className="whitespace-normal" data-testid="portal-consent-recorded-by-staff">
+            <UserRound aria-hidden="true" />
+            <span>{recorded}</span>
           </StatusChip>
         ) : null}
       </div>

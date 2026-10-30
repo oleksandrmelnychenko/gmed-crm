@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LeadPortalConsent } from "../data/lead-portal-intake-api";
-import { latestPortalConsent, normalizeLeadPortalConsentForm } from "./lead-portal-consents";
+import { latestPortalConsent, normalizeLeadPortalConsentForm, staffRecordedLabel } from "./lead-portal-consents";
 
 function record(id: string, given_at: string, revoked_at: string | null = null): LeadPortalConsent {
   return { id, type: "health_data_processing", given_at, revoked_at, version: "2026-10-03", access_kind: "self" };
@@ -31,5 +31,16 @@ describe("staff portal consent evidence", () => {
     expect(normalized?.choices?.channel_whatsapp).toBeNull();
     expect(normalized?.choices?.doctors_to_agency).toBeNull();
     expect(normalized?.chosen_by_name).toBeNull();
+  });
+});
+
+describe("how staff recorded a consent (owner 2026-10-29)", () => {
+  const tx = (ru: string) => ru;
+  it("names the way and the note, and nothing for the client's own consent", () => {
+    expect(staffRecordedLabel({ recorded_how: "phone", recorded_note: " Anruf 30.10. " }, tx))
+      .toBe("Записал сотрудник · по телефону · Anruf 30.10.");
+    expect(staffRecordedLabel({ recorded_how: "paper", recorded_note: null }, tx)).toBe("Записал сотрудник · на бумаге");
+    expect(staffRecordedLabel({ recorded_how: null }, tx)).toBeNull();
+    expect(staffRecordedLabel(null, tx)).toBeNull();
   });
 });

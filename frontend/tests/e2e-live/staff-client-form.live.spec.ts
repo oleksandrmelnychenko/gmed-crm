@@ -138,6 +138,10 @@ test("staff remove an old Threema tick and send the request for the client", asy
   expect(sent.submitted_at).toBeTruthy();
   const intake = await getJson(request, `${api}/api/v1/leads/${lead.id}/portal-intake`, staffHeaders);
   expect(intake.consent_form.choices.channel_threema).toBe(false);
+  // Staff see how the client gave each consent (owner 2026-10-29).
+  expect(intake.consent_form).toMatchObject({ recorded_how: "phone" });
+  expect(intake.consents.some((consent: { recorded_how?: string; recorded_note?: string }) =>
+    consent.recorded_how === "phone" && consent.recorded_note === "Telefonat 30.10.2026")).toBe(true);
   // Still signed in as staff: the lead list opens.
   await page.goto("/leads");
   await expect(page).toHaveURL(/\/leads/);
@@ -162,4 +166,8 @@ test("the wizard opens the client's form in a dialog and the entries reach the l
   expect((await intakeReloaded).ok()).toBe(true);
   const saved = await getJson(request, `${api}/api/v1/me/lead-requests/${lead.id}`, staffHeaders);
   expect(saved.personal_data.middle_name).toBe("Maria");
+  // «Документы» shows how the client gave the consent staff recorded (owner 2026-10-29).
+  await page.locator('.lead-wizard-step-tabs [data-step="documents"]').click();
+  await expect(page.getByTestId("portal-inquiry-consent").getByTestId("portal-consent-recorded-by-staff"))
+    .toHaveText("Записал сотрудник · по телефону · Telefonat 30.10.2026");
 });

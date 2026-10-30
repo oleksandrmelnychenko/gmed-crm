@@ -68,6 +68,7 @@ pub(super) async fn load(
     let row = sqlx::query(
         r#"
         SELECT c.choices, c.text_version, c.chosen_at, c.chosen_by, c.access_kind,
+               c.recorded_how, c.recorded_note,
                COALESCE(to_jsonb(c) -> 'recipients', '[]'::jsonb) AS recipients,
                to_jsonb(c) -> 'disclosure' AS disclosure
         FROM consent_form_choices c
@@ -130,7 +131,16 @@ pub(super) async fn load(
                 .filter(|name| !name.is_empty());
         }
     }
+    let recorded_how: Option<String> = row.try_get("recorded_how")?;
+    let recorded_note: Option<String> = row.try_get("recorded_note")?;
     let mut disclosure: Option<Value> = row.try_get("disclosure")?;
+    // The trusted persons are saved with the same row: staff recorded them the same way.
+    if let Some(d) = disclosure.as_mut().filter(|d| d.is_object())
+        && recorded_how.is_some()
+    {
+        d["recorded_how"] = json!(recorded_how);
+        d["recorded_note"] = json!(recorded_note);
+    }
     if let Some(d) = disclosure
         .as_mut()
         .filter(|d| d.get("chosen_by_name").is_none())
@@ -161,6 +171,9 @@ pub(super) async fn load(
         "chosen_by_name": name,
         "chosen_by_role": role,
         "access_kind": access_kind,
+        // How the client gave the choice staff recorded (owner 2026-10-29).
+        "recorded_how": recorded_how,
+        "recorded_note": recorded_note,
     }))
 }
 

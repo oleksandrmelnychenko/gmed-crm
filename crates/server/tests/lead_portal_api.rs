@@ -8442,6 +8442,29 @@ async fn staff_fill_in_the_cabinet_form_and_record_the_consents_given_to_them() 
     .unwrap();
     assert_eq!(uploaded, ("identity".to_owned(), "staff".to_owned()));
 
+    // Staff see afterwards how the client gave each consent (owner 2026-10-29).
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert!(
+        intake["consents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|consent| {
+                consent["recorded_how"] == "in_person"
+                    && consent["recorded_note"] == "Anruf der Patientin"
+            }),
+        "{intake}"
+    );
+    assert_eq!(intake["consent_form"]["recorded_how"], "paper", "{intake}");
+
     // Staff send for the client only saying how the client confirmed it.
     let (status, refused) = json_request(
         router,

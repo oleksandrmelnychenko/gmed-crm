@@ -44,6 +44,8 @@ export type LeadPortalDisclosure = {
   access_kind: string | null;
   company_name: string | null;
   consent_text: string | null;
+  recorded_how: string | null;
+  recorded_note: string | null;
 };
 
 /** The current choice made in the cabinet; absent answers are never inferred. */
@@ -56,7 +58,32 @@ export type LeadPortalConsentForm = {
   chosen_by_name: string | null;
   chosen_by_role: string | null;
   access_kind: string | null;
+  recorded_how: string | null;
+  recorded_note: string | null;
 };
+
+const STAFF_CONSENT_CHANNEL_LABELS: Record<string, [string, string]> = {
+  phone: ["по телефону", "telefonisch"],
+  in_person: ["лично", "persönlich"],
+  email: ["по e-mail", "per E-Mail"],
+  paper: ["на бумаге", "auf Papier"],
+};
+
+/**
+ * «Записал сотрудник · по телефону · примечание» for a consent staff recorded for the client
+ * (owner 2026-10-29), or null for the client's own.
+ */
+export function staffRecordedLabel(
+  record: { recorded_how?: string | null; recorded_note?: string | null } | null | undefined,
+  tx: (ru: string, de: string) => string,
+): string | null {
+  const how = record?.recorded_how;
+  if (!how) return null;
+  const channel = STAFF_CONSENT_CHANNEL_LABELS[how];
+  const note = record?.recorded_note?.trim();
+  return [tx("Записал сотрудник", "Von Mitarbeitenden eingetragen"), channel ? tx(channel[0], channel[1]) : how, note || null]
+    .filter(Boolean).join(" · ");
+}
 
 /** The latest grant is authoritative, including its later revocation. */
 export function latestPortalConsent(consents: readonly LeadPortalConsent[], type: string): LeadPortalConsent | null {
@@ -99,6 +126,7 @@ export function normalizeLeadPortalDisclosure(value: unknown): LeadPortalDisclos
     version: text("version"), language: text("language"),
     chosen_at: text("chosen_at"), chosen_by: text("chosen_by"), chosen_by_name: text("chosen_by_name"),
     access_kind: text("access_kind"), company_name: text("company_name"), consent_text: text("consent_text"),
+    recorded_how: text("recorded_how"), recorded_note: text("recorded_note"),
   };
 }
 
@@ -115,5 +143,6 @@ export function normalizeLeadPortalConsentForm(value: unknown): LeadPortalConsen
     recipients: normalizeConsentRecipients(raw.recipients),
     chosen_at: text("chosen_at"), chosen_by: text("chosen_by"),
     chosen_by_name: text("chosen_by_name"), chosen_by_role: text("chosen_by_role"), access_kind: text("access_kind"),
+    recorded_how: text("recorded_how"), recorded_note: text("recorded_note"),
   };
 }

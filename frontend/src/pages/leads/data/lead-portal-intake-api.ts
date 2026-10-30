@@ -23,6 +23,9 @@ export type LeadPortalConsent = {
   revoked_at: string | null;
   version: string | null;
   access_kind: string | null;
+  /** How the client gave a consent staff recorded (owner 2026-10-29). */
+  recorded_how?: string | null;
+  recorded_note?: string | null;
 };
 
 export type LeadPortalUpload = {
