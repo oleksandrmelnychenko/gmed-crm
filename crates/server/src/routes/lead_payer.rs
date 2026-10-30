@@ -2531,6 +2531,16 @@ async fn get_payer_declaration(
     if payload["declaration"].is_object() {
         payload["declaration"]["contact_consent_required"] = required.clone();
         payload["declaration"]["cost_estimate_consent_required"] = required;
+        // How the client gave the two payer consents staff recorded (owner
+        // 2026-10-30): the wizard shows «Записал сотрудник · …».
+        match consent_recorded_ways(&mut conn, lead_id).await {
+            Ok(ways) => {
+                for (key, value) in ways {
+                    payload["declaration"][key] = value;
+                }
+            }
+            Err(error) => return database_error(error, "load payer consent ways"),
+        }
         // An organisation's legal form and register number (the organisation
         // mask; staff enter them since 2026-10-22), locked once the payer
         // submitted its own answers through the payer link.
@@ -3839,6 +3849,38 @@ fn declaration_from_portal(
             same_payer.and_then(|previous| previous.cost_estimate_consent_at);
     }
     Ok(declaration)
+}
+
+/// How staff recorded the contact and the cost-estimate consent for the
+/// client (`recorded_how` and note each); null for the client's own.
+async fn consent_recorded_ways(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> sqlx::Result<Vec<(&'static str, Value)>> {
+    const COLUMNS: [&str; 4] = [
+        "contact_consent_recorded_how",
+        "contact_consent_recorded_note",
+        "cost_estimate_consent_recorded_how",
+        "cost_estimate_consent_recorded_note",
+    ];
+    let row = sqlx::query(
+        r#"SELECT contact_consent_recorded_how, contact_consent_recorded_note,
+                  cost_estimate_consent_recorded_how, cost_estimate_consent_recorded_note
+           FROM lead_payer_declarations WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    COLUMNS
+        .into_iter()
+        .map(|column| {
+            let value = match row.as_ref() {
+                Some(row) => row.try_get::<Option<String>, _>(column)?,
+                None => None,
+            };
+            Ok((column, value.map_or(Value::Null, Value::from)))
+        })
+        .collect()
 }
 
 /// How the client gave the contact consent staff record and the note: 422

@@ -3735,6 +3735,10 @@ export function LeadWizard({
   // keeps that choice.
   const amlRiskFindingTouchedRef = useRef(false);
   const [documentPreview, setDocumentPreview] = useState<WizardDocumentPreview | null>(null);
+  // When the preview last closed: the same Escape reaches the wizard right after (QA 2026-10-30).
+  const documentPreviewClosedAtRef = useRef(0);
+  // «Изменить подписанные условия?» in the app's own dialog, never the browser's confirm().
+  const [signedTermsAsk, setSignedTermsAsk] = useState<{ text: string; resolve: (yes: boolean) => void } | null>(null);
   const [documentPreviewError, setDocumentPreviewError] = useState("");
   // The person whose document data a refused signature names: the banner
   // leads straight to that person's document form (DEV 2026-10-22).
@@ -4167,6 +4171,7 @@ export function LeadWizard({
       revokeDocumentPreviewObjectUrl(currentUrl);
     }
     documentPreviewUrlRef.current = nextPreview?.url ?? null;
+    if (!nextPreview) documentPreviewClosedAtRef.current = Date.now();
     setDocumentPreview(nextPreview);
     setDocumentPreviewError("");
     setDocumentPreviewJump(null);
@@ -7229,12 +7234,15 @@ ${serviceCommentLines.join("\n")}`
     };
     const persistedServiceLines = await withSignedTermsConfirmation(
       persistCommercialTerms,
-      (refusal) => window.confirm(signedTermsChangeConfirmText(
-        refusal,
-        syncOrderServiceLines
-          ? calculateServiceLineEstimate(withEstimatedOutlaysLast(lines.filter(validLine))).gross
-          : null,
-      )),
+      (refusal) => new Promise<boolean>((resolve) => setSignedTermsAsk({
+        text: signedTermsChangeConfirmText(
+          refusal,
+          syncOrderServiceLines
+            ? calculateServiceLineEstimate(withEstimatedOutlaysLast(lines.filter(validLine))).gross
+            : null,
+        ),
+        resolve,
+      })),
     );
     return { contractId, orderId, serviceLines: persistedServiceLines };
   }
@@ -8470,6 +8478,17 @@ ${serviceCommentLines.join("\n")}`
         // outside lost the whole form without a question).
         dirty={(!saveInProgress && autosaveStatus === "error") || createModeUnsaved}
         onOpenChange={(nextOpen, details) => {
+          // Escape over a document preview closes the preview only, never the
+          // whole wizard (QA 2026-10-30: one Escape closed both).
+          if (
+            !nextOpen
+            && details.reason === "escape-key"
+            && (documentPreview || Date.now() - documentPreviewClosedAtRef.current < 500)
+          ) {
+            details.cancel();
+            if (documentPreview) replaceDocumentPreview(null);
+            return;
+          }
           if (!nextOpen && saveInProgress) {
             details.cancel();
             return;
@@ -13056,6 +13075,23 @@ ${serviceCommentLines.join("\n")}`
           if (gwgDataRemoval) void removeRepresentativeGwgData(gwgDataRemoval);
         }}
         onCancel={() => setGwgDataRemoval(null)}
+      />
+      <LeadConfirmDialog
+        open={Boolean(signedTermsAsk)}
+        testId="lead-signed-terms-change-dialog"
+        title={tx("Изменить подписанные условия заказа?", "Unterschriebene Auftragsbedingungen ändern?")}
+        description={signedTermsAsk?.text}
+        confirmLabel={tx("Изменить, подпись сбросится", "Ändern, Unterschrift entfällt")}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        destructive
+        onConfirm={() => {
+          signedTermsAsk?.resolve(true);
+          setSignedTermsAsk(null);
+        }}
+        onCancel={() => {
+          signedTermsAsk?.resolve(false);
+          setSignedTermsAsk(null);
+        }}
       />
       <Dialog
         open={notQualifiedReason !== null}

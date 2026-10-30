@@ -12,6 +12,7 @@
  */
 import { ApiRequestError } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
+import { staffRecordedLabel } from "./lead-portal-consents";
 import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 
 import { normalizePayerPackageSummary, type PayerPackageSummary } from "../data/lead-payer-package-api";
@@ -144,6 +145,11 @@ export type PayerDeclaration = {
    * server.
    */
   cost_estimate_consent_at?: string | null;
+  /** How staff recorded the two consents for the client (owner 2026-10-30); null for the client's own. */
+  contact_consent_recorded_how?: string | null;
+  contact_consent_recorded_note?: string | null;
+  cost_estimate_consent_recorded_how?: string | null;
+  cost_estimate_consent_recorded_note?: string | null;
   /**
    * Section 7 of the form (invoice recipient), answered by the lead in the
    * cabinet; absent on an older server. Staff do not edit it: the recipient
@@ -1141,7 +1147,7 @@ export function payerStatusBadge(
 export function costEstimateConsentLine(
   response: PayerDeclarationResponse | null | undefined,
   tx: Tx,
-): { state: "given" | "missing" | "not_required"; prefix: string; value: string } | null {
+): { state: "given" | "missing" | "not_required"; prefix: string; value: string; way?: string | null } | null {
   const declaration = response?.declaration;
   if (declaration?.payer_kind !== "third_party") return null;
   const required = response?.status.cost_estimate_consent_required;
@@ -1152,8 +1158,12 @@ export function costEstimateConsentLine(
     return { state: "not_required", prefix, value: tx("не требуется (платит родитель)", "nicht nötig (Elternteil zahlt)") };
   }
   const givenAt = declaration.cost_estimate_consent_at;
+  const way = staffRecordedLabel({
+    recorded_how: declaration.cost_estimate_consent_recorded_how,
+    recorded_note: declaration.cost_estimate_consent_recorded_note,
+  }, tx);
   return givenAt
-    ? { state: "given", prefix, value: tx(`дано ${formatAppDate(givenAt)}`, `erteilt am ${formatAppDate(givenAt)}`) }
+    ? { state: "given", prefix, value: tx(`дано ${formatAppDate(givenAt)}`, `erteilt am ${formatAppDate(givenAt)}`), ...(way ? { way } : {}) }
     : { state: "missing", prefix, value: tx("ещё не дано", "noch nicht erteilt") };
 }
 

@@ -35,13 +35,13 @@ export class SignedTermsChangeCancelled extends Error {
  */
 export async function withSignedTermsConfirmation<T>(
   attempt: (confirmSignatureReset: boolean) => Promise<T>,
-  confirmChange: (refusal: ApiRequestError) => boolean = (refusal) => window.confirm(refusal.message),
+  confirmChange: (refusal: ApiRequestError) => boolean | Promise<boolean> = (refusal) => window.confirm(refusal.message),
 ): Promise<T> {
   try {
     return await attempt(false);
   } catch (error) {
     if (!isSignedTermsChange(error)) throw error;
-    if (!confirmChange(error)) throw new SignedTermsChangeCancelled();
+    if (!(await confirmChange(error))) throw new SignedTermsChangeCancelled();
     return attempt(true);
   }
 }

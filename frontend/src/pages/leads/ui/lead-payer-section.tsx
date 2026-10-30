@@ -96,6 +96,7 @@ import {
   type SourceOfFunds,
   type Tx,
 } from "../model/lead-payer";
+import { staffRecordedLabel } from "../model/lead-portal-consents";
 
 const MAX_EVIDENCE_FILE_SIZE = 25 * 1024 * 1024;
 
@@ -478,6 +479,10 @@ export function LeadPayerDeclarationSection({
   const statusBadge = payerStatusBadge(data?.status, tx);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
   const contactConsentAt = data?.declaration?.contact_consent_at ?? null;
+  const contactConsentWay = staffRecordedLabel({
+    recorded_how: data?.declaration?.contact_consent_recorded_how,
+    recorded_note: data?.declaration?.contact_consent_recorded_note,
+  }, tx);
   // Phase 3b: the lead's consent to pass the cost estimate on; an older server has none.
   const costEstimateConsent = costEstimateConsentLine(data, tx);
   // Section 7: the lead chose where the invoice goes; an older server does
@@ -1240,6 +1245,9 @@ export function LeadPayerDeclarationSection({
                     {tx("ещё не дано", "noch nicht erteilt")}
                   </StatusChip>
                 )}
+                {contactConsentAt && contactConsentWay ? (
+                  <span className="text-muted-foreground" data-testid="lead-payer-contact-consent-way">{contactConsentWay}</span>
+                ) : null}
               </p>
             ) : null}
             {typed && costEstimateConsent && !payingParent ? (
@@ -1255,6 +1263,9 @@ export function LeadPayerDeclarationSection({
                 >
                   {costEstimateConsent.value}
                 </StatusChip>
+                {costEstimateConsent.way ? (
+                  <span className="text-muted-foreground" data-testid="lead-payer-cost-estimate-consent-way">{costEstimateConsent.way}</span>
+                ) : null}
               </p>
             ) : null}
             </div> : null}

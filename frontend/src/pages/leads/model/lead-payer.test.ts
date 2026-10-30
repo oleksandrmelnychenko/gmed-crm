@@ -635,6 +635,13 @@ describe("payer AML and signing order", () => {
       prefix: "Согласие на передачу сметы плательщику: ",
       value: "дано 06.10.2026",
     });
+    // Staff recorded it for the client: how it was given (owner 2026-10-30).
+    expect(line({
+      ...typedPerson,
+      cost_estimate_consent_at: "2026-10-06T08:00:00Z",
+      cost_estimate_consent_recorded_how: "phone",
+      cost_estimate_consent_recorded_note: "Anruf",
+    }, true)?.way).toBe("Записал сотрудник · по телефону · Anruf");
     expect(line({ ...typedPerson, cost_estimate_consent_at: null }, true, de)).toEqual({
       state: "missing",
       prefix: "Einwilligung zur Weitergabe des Kostenvoranschlags: ",
