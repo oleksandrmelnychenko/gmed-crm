@@ -143,6 +143,15 @@ const FIXED_COPY: Record<string, { title: Texts; body: Texts | null }> = {
       de: "Bitte ein neues Einwilligungsdokument und eine neue Signatureinladung erstellen.",
     },
   },
+  // The patient withdrew the consent to the payer's cost estimate
+  // (crates/server/src/routes/lead_payer_package.rs).
+  lead_cost_estimate_consent_withdrawn: {
+    title: { ru: "Согласие на передачу сметы отозвано", de: "Einwilligung zur Weitergabe des Kostenvoranschlags widerrufen" },
+    body: {
+      ru: "Пациент отозвал согласие на передачу сметы плательщику. Открытое приглашение на подпись остановлено.",
+      de: "Die Patientenseite hat die Einwilligung zur Weitergabe des Kostenvoranschlags an den Zahler widerrufen. Die offene Signatureinladung wurde gestoppt.",
+    },
+  },
   // The reminder to the lead before the automatic deletion did not arrive
   // (crates/server/src/mail/delivery.rs, owner decision 2026-10-24).
   retention_reminder_email_undelivered: {

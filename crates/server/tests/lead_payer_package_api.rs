@@ -1809,6 +1809,102 @@ async fn roles_conversion_and_purge() {
     assert_eq!(refused["code"], "lead_converted");
 }
 
+/// QA 2026-10-31: the patient's consent binds every way the payer's copy of
+/// the cost estimate leaves GMED, and withdrawing it stops what is out for
+/// signature, at the provider as well (Art. 7 Abs. 3 DSGVO).
+#[tokio::test]
+async fn a_withdrawn_cost_estimate_consent_stops_the_invitation() {
+    let Some(app) = app(false).await else { return };
+    let pool = app.pool();
+    let ready = ready_lead(&app, "consent-stop").await;
+    let lead_id = ready.lead_id;
+    agency_signer(&app).await;
+    let prepared = prepare(&app, lead_id).await;
+    let (status, sent) = send(
+        &app,
+        lead_id,
+        json!({ "package_id": prepared["package"]["id"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{sent}");
+    let request_id = Uuid::parse_str(sent["package"]["request_id"].as_str().unwrap()).unwrap();
+    until_pending(&app, request_id).await;
+    let remote = app.mock.remote(request_id).expect("remote request");
+
+    cost_estimate_consent(&app, lead_id, &ready.patient, false).await;
+    let (status, last_error, closed_kind): (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT status, last_error, closed_kind FROM document_signature_requests WHERE id = $1",
+    )
+    .bind(request_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "error");
+    assert_eq!(last_error.as_deref(), Some("cost_estimate_consent_withdrawn"));
+    assert_eq!(closed_kind.as_deref(), Some("abandoned"));
+    let reason: Option<String> = sqlx::query_scalar(
+        "SELECT context->>'reason' FROM audit_log
+         WHERE action = 'document_signature_consent_invalidated'
+           AND context->>'request_id' = $1",
+    )
+    .bind(request_id.to_string())
+    .fetch_optional(pool)
+    .await
+    .unwrap();
+    assert_eq!(reason.as_deref(), Some("cost_estimate_consent_withdrawn"));
+    for _ in 0..100 {
+        let withdrawn = app.mock.requests.lock().unwrap()[&remote]["status_overall"] == "WITHDRAWN";
+        if withdrawn {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        app.mock.requests.lock().unwrap()[&remote]["status_overall"],
+        "WITHDRAWN"
+    );
+
+    // The composer is no way around the consent.
+    let copy: Uuid = sqlx::query_scalar(
+        r#"SELECT id FROM documents WHERE lead_id = $1
+             AND generated_template_id = 'payer_cost_estimate'
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let body = json!({
+        "document_ids": [copy],
+        "signers": [
+            { "first_name": "Viktor", "last_name": "Zahler", "email": "viktor.zahler@example.com", "role": "payer" },
+            { "first_name": "Max", "last_name": "Beispiel", "email": "max.beispiel@example.com", "role": "agency" }
+        ],
+    });
+    let (status, refused) = with_login(
+        &app,
+        "POST",
+        "/api/v1/signature-packages",
+        &app.ceo(),
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "cost_estimate_consent_missing");
+
+    // Given anew, the copy can go out.
+    cost_estimate_consent(&app, lead_id, &ready.patient, true).await;
+    let (status, created) = with_login(
+        &app,
+        "POST",
+        "/api/v1/signature-packages",
+        &app.ceo(),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{created}");
+}
+
 #[tokio::test]
 async fn the_purge_of_an_unconverted_lead_deletes_its_packages() {
     let Some(app) = app(false).await else { return };

@@ -923,6 +923,46 @@ pub(crate) async fn invalidate_representative_identity(
     Ok((count, remote))
 }
 
+/// The patient withdrew the consent that the payer receives the cost estimate
+/// (Art. 7 Abs. 3 DSGVO, QA 2026-10-31): every still-open invitation with the
+/// payer's copy stops, so that it does not reach the payer afterwards.
+pub(crate) async fn invalidate_cost_estimate_consent(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    actor: Uuid,
+) -> Result<(usize, Vec<(Uuid, String)>), sqlx::Error> {
+    let rows = sqlx::query(r#"UPDATE document_signature_requests r
+        SET status = 'error', last_error = 'cost_estimate_consent_withdrawn', closed_kind = 'abandoned',
+            close_reason = 'cost_estimate_consent_withdrawn', closed_by = $2, closed_at = now(),
+            lease_token = NULL, lease_until = NULL, updated_at = now()
+        WHERE r.status IN ('pending','submitting','submission_unknown','needs_review')
+          AND EXISTS (SELECT 1 FROM documents d
+              WHERE (d.id = r.source_document_id OR EXISTS (SELECT 1 FROM document_signature_members m WHERE m.request_id = r.id AND m.document_id = d.id))
+                AND (d.lead_id = $1 OR d.order_id IN (SELECT id FROM orders WHERE source_lead_id = $1))
+                AND COALESCE(d.generated_template_id, d.art) = 'payer_cost_estimate')
+        RETURNING r.id, r.source_document_id, r.provider_request_id, r.provider_account"#)
+        .bind(lead_id).bind(actor).fetch_all(&mut **tx).await?;
+    let count = rows.len();
+    let mut remote = Vec::new();
+    for row in rows {
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "document_signature_consent_invalidated",
+                Some(actor),
+                "document",
+                Some(row.get("source_document_id")),
+                json!({"request_id":row.get::<Uuid,_>("id"),"reason":"cost_estimate_consent_withdrawn"}),
+            ),
+        )
+        .await?;
+        if let Some(id) = row.get::<Option<Uuid>, _>("provider_request_id") {
+            remote.push((id, row.get("provider_account")));
+        }
+    }
+    Ok((count, remote))
+}
+
 /// Local invalidation is already committed; a provider outage must not let
 /// an old consent acquire legal effects while remote withdrawal is attempted.
 pub(crate) async fn withdraw_invalidated_consents(state: &AppState, requests: &[(Uuid, String)]) {

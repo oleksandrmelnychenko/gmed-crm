@@ -89,6 +89,11 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
         "Consent choice changed",
         "The patient changed the consent choice. Create a new consent document and signature invitation.",
       ),
+      notice(
+        "lead_cost_estimate_consent_withdrawn",
+        "Cost estimate consent withdrawn",
+        "The patient withdrew the consent to pass the cost estimate on to the payer. The open signature invitation was stopped.",
+      ),
     ]) {
       const ru = notificationCopyFromFacts(item, "ru");
       const de = notificationCopyFromFacts(item, "de");

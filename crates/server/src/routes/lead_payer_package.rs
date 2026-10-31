@@ -588,6 +588,40 @@ async fn load_facts(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Fac
     }))
 }
 
+/// Whether the payer's copy of the cost estimate of this lead (or of the lead
+/// of `order_id`) lacks the patient's consent: a third party pays, the consent
+/// is needed and not given (`Facts::blocked_reason` for the package).
+pub(crate) async fn cost_estimate_consent_missing(
+    conn: &mut PgConnection,
+    lead_id: Option<Uuid>,
+    order_id: Option<Uuid>,
+) -> Result<bool, sqlx::Error> {
+    let lead_id = match lead_id {
+        Some(lead_id) => Some(lead_id),
+        None => {
+            sqlx::query_scalar::<_, Option<Uuid>>("SELECT source_lead_id FROM orders WHERE id = $1")
+                .bind(order_id)
+                .fetch_optional(&mut *conn)
+                .await?
+                .flatten()
+        }
+    };
+    let Some(lead_id) = lead_id else {
+        return Ok(false);
+    };
+    let payer = lead_payer::load_payer_state(conn, lead_id).await?;
+    let representation = lead_representatives::load(conn, lead_id)
+        .await?
+        .unwrap_or_default()
+        .representation;
+    Ok(
+        lead_payer::contact_consent_required(payer.declaration.as_ref(), &representation)
+            && payer.declaration.as_ref().is_some_and(|declaration| {
+                declaration.is_third_party() && declaration.cost_estimate_consent_at.is_none()
+            }),
+    )
+}
+
 impl Facts {
     fn third_party(&self) -> Option<&Declaration> {
         self.payer
@@ -737,8 +771,8 @@ impl Facts {
             reasons.push("patient_statement_changed");
         }
         // The patient withdrew the consent to pass the cost estimate on after
-        // the package was made (Art. 7(3) DSGVO): what was prepared or sent
-        // must not reach the payer; staff withdraw the request.
+        // the package was made (Art. 7(3) DSGVO): what was prepared must not
+        // reach the payer; an open request stopped with the withdrawal.
         if self.consent_required
             && self
                 .third_party()
@@ -1562,8 +1596,38 @@ async fn cost_estimate_consent(
         {
             return intake::internal(error, "audit cost estimate consent");
         }
+        // A withdrawal also stops what is already out for signature (Art. 7
+        // Abs. 3 DSGVO, QA 2026-10-31), as a changed consent choice does.
+        let (stopped, remote) = if next.is_none() {
+            match document_signatures::invalidate_cost_estimate_consent(
+                &mut tx,
+                lead_id,
+                auth.user_id,
+            )
+            .await
+            {
+                Ok(requests) => requests,
+                Err(error) => return intake::internal(error, "invalidate open invitations"),
+            }
+        } else {
+            (0, Vec::new())
+        };
         if let Err(error) = tx.commit().await {
             return intake::internal(error, "commit cost estimate consent");
+        }
+        if stopped > 0 {
+            intake::notify_lead_staff(
+                &state,
+                lead_id,
+                "lead_cost_estimate_consent_withdrawn",
+                "Cost estimate consent withdrawn",
+                "The patient withdrew the consent to pass the cost estimate on to the payer. The open signature invitation was stopped.",
+            )
+            .await;
+            let signature_state = state.clone();
+            tokio::spawn(async move {
+                document_signatures::withdraw_invalidated_consents(&signature_state, &remote).await;
+            });
         }
         crate::realtime::publish_lead_event(
             &state,

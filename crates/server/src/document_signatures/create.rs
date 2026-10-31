@@ -615,8 +615,33 @@ pub(super) async fn create_request(
         .iter()
         .filter_map(|member| member.row.get::<Option<Uuid>, _>("patient_id"))
         .collect();
-    sqlx::query("SELECT id FROM leads WHERE id = ANY($1) OR prospect_patient_id = ANY($2) OR converted_patient_id = ANY($2) ORDER BY id FOR UPDATE")
-        .bind(&scope_leads).bind(&scope_patients).fetch_all(&mut *tx).await.map_err(db_error)?;
+    let scope_orders: Vec<Uuid> = members
+        .iter()
+        .filter_map(|member| member.row.get::<Option<Uuid>, _>("order_id"))
+        .collect();
+    sqlx::query("SELECT id FROM leads WHERE id = ANY($1) OR prospect_patient_id = ANY($2) OR converted_patient_id = ANY($2) OR id IN (SELECT source_lead_id FROM orders WHERE id = ANY($3)) ORDER BY id FOR UPDATE")
+        .bind(&scope_leads).bind(&scope_patients).bind(&scope_orders).fetch_all(&mut *tx).await.map_err(db_error)?;
+    // The payer receives the cost estimate only with the patient's own consent
+    // (owner decision 2026-10-06), however the request is made (QA 2026-10-31).
+    // Read under the lead's lock: withdrawing the consent takes it first.
+    for member in &members {
+        let row = &member.row;
+        if template_of(row).as_deref().unwrap_or(row.get("art")) == "payer_cost_estimate"
+            && crate::routes::lead_payer_package::cost_estimate_consent_missing(
+                &mut tx,
+                row.get("lead_id"),
+                row.get("order_id"),
+            )
+            .await
+            .map_err(db_error)?
+        {
+            return Err(document_error(
+                StatusCode::CONFLICT,
+                "cost_estimate_consent_missing",
+                row.get("id"),
+            ));
+        }
+    }
     // Lock the complete manifest, including documents whose paper/electronic
     // signature already satisfies a required slot. A concurrent version insert
     // must not make an old proof silently satisfy initial onboarding.
@@ -819,7 +844,7 @@ pub(super) async fn create_request(
                 // Consent may have changed during the provider call. The local
                 // request stays invalid; withdraw the invitation just created.
                 if let Some(remote) = remote {
-                    let invalidated: bool = sqlx::query_scalar("SELECT last_error IN ('consent_choice_changed','representative_changed') FROM document_signature_requests WHERE id=$1")
+                    let invalidated: bool = sqlx::query_scalar("SELECT last_error IN ('consent_choice_changed','representative_changed','cost_estimate_consent_withdrawn') FROM document_signature_requests WHERE id=$1")
                         .bind(request_id).fetch_optional(&state.db).await.ok().flatten().unwrap_or(false);
                     if invalidated { let _ = provider.withdraw(remote).await; }
                 }

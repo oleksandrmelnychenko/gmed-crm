@@ -335,6 +335,10 @@ export function signatureErrorText(
       return tx("Документы плательщика и внутренние документы GMED отправляются отдельно от других документов, а плательщик подписывает только свои документы.", "Unterlagen des Zahlers und interne GMED-Dokumente werden getrennt von anderen Dokumenten versendet; der Zahler unterschreibt nur seine eigenen Unterlagen.");
     case "payer_and_agency_required":
       return tx("Заявление о принятии расходов подписывают плательщик и представитель GMED.", "Die Kostenübernahmeerklärung unterschreiben der Kostenübernehmer und die GMED-Vertretung.");
+    case "cost_estimate_consent_missing":
+      return tx("Пациент не дал согласия на передачу сметы плательщику.", "Die Patientenseite hat der Weitergabe des Kostenvoranschlags an den Zahler nicht zugestimmt.");
+    case "cost_estimate_consent_withdrawn":
+      return tx("Пациент отозвал согласие на передачу сметы плательщику, приглашение остановлено.", "Die Patientenseite hat die Einwilligung zur Weitergabe des Kostenvoranschlags widerrufen; die Einladung wurde gestoppt.");
     case "payer_package_signers_required":
       return tx("Документы плательщика подписывают только плательщик и представитель GMED — без пациента и законных представителей.", "Die Unterlagen des Zahlers unterschreiben nur der Zahler und die GMED-Vertretung – ohne Patientenseite.");
     case "signer_email_domain_no_mail":
