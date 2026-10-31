@@ -7,8 +7,8 @@ import type { OrderClientSignature } from "./types";
 
 /**
  * The client's signature of an order covers the terms it was given for (QA
- * C3-01, 2026-10-12): the services, the programme period and the total. The
- * server refuses a staff change of those terms on a signed order with 409
+ * C3-01, 2026-10-12): the services, the programme period, the prepayment and
+ * the total. The server refuses a staff change of those terms on a signed order with 409
  * `order_signed_terms_change` (its localized message names the signed and
  * the new total); after the user confirms, the same change is sent again with
  * `confirm_signature_reset` and resets the order signatures.

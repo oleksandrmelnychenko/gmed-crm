@@ -231,8 +231,9 @@ struct UpdateOrderCommercialBasisRequest {
     needs_description: Option<String>,
     date_from: Option<String>,
     date_to: Option<String>,
-    /// Confirms that moving the programme period of an order the client
-    /// signed resets the order signatures (QA C3-01, `client_terms.rs`).
+    /// Confirms that moving the programme period or changing the prepayment
+    /// of an order the client signed resets the order signatures (QA C3-01,
+    /// `client_terms.rs`).
     #[serde(default)]
     confirm_signature_reset: bool,
 }
@@ -5599,8 +5600,9 @@ async fn update_order_commercial_basis(
         }
     }
 
-    // A moved programme period changes the terms the client signed (QA C3-01):
-    // the order row is locked and its terms compared around the update.
+    // A moved programme period or a changed prepayment changes the terms the
+    // client signed (QA C3-01, QA 2026-10-31): the order row is locked and its
+    // terms compared around the update.
     let mut transaction = match state.db.begin().await {
         Ok(transaction) => transaction,
         Err(error) => {
@@ -5722,7 +5724,7 @@ async fn update_order_commercial_basis(
                 &terms_before,
                 body.confirm_signature_reset,
                 Some(auth.user_id),
-                "order_period",
+                "order_commercial_basis",
             )
             .await
             {

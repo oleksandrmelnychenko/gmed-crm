@@ -363,7 +363,7 @@ export function updateOrderCommercialBasis(
     needs_description?: string;
     date_from?: string;
     date_to?: string;
-    /** Confirms that moving the period of a signed order resets its signatures (QA C3-01). */
+    /** Confirms that changing the period or the prepayment of a signed order resets its signatures. */
     confirm_signature_reset?: boolean;
   },
 ) {

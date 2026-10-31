@@ -564,3 +564,75 @@ async fn the_prepayment_is_measured_against_the_services_and_can_be_adjusted() {
     let (status, quote) = json_request(&app, "POST", &quotes, &ceo, Some(json!({}))).await;
     assert!(status.is_success(), "{quote}");
 }
+
+/// QA 2026-10-31, owner rule: the signed terms are the services, the programme
+/// period, the prepayment and the gross total.
+#[tokio::test]
+async fn changing_the_prepayment_of_a_signed_order_needs_a_confirmed_signature_reset() {
+    let Some((app, pool, admin_id, ceo)) = test_context().await else {
+        return;
+    };
+    let patient_id = seed_patient(&pool, admin_id).await;
+    let order_id = create_order_with_interpreter_hours(&app, &ceo, patient_id).await;
+    let path = format!("/api/v1/orders/{order_id}/commercial-basis");
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "prepayment_required": true, "prepayment_amount": "100.00" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let document = seed_order_document(&pool, patient_id, order_id, admin_id).await;
+    let (status, signed) = sign_on_paper(&app, document, &ceo).await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+
+    // The same amount again changes nothing.
+    let (status, unchanged) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "prepayment_required": true, "prepayment_amount": "100" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unchanged}");
+    assert_eq!(unchanged["signature_reset"], false);
+
+    let change = json!({ "prepayment_amount": "150.00" });
+    let (status, refused) = json_request(&app, "POST", &path, &ceo, Some(change)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "order_signed_terms_change");
+    assert_eq!(refused["signed_total_label"], "339,15 €");
+    assert_eq!(refused["new_total_label"], "339,15 €");
+    let amount: Option<rust_decimal::Decimal> =
+        sqlx::query_scalar("SELECT prepayment_amount FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(amount, Some(rust_decimal::Decimal::from(100)));
+    assert_eq!(order_signatures(&pool, order_id).await, (true, true));
+
+    // Dropping the prepayment is a change of the terms as well.
+    let (status, reset) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "prepayment_required": false, "confirm_signature_reset": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reset}");
+    assert_eq!(reset["signature_reset"], true);
+    assert_eq!(order_signatures(&pool, order_id).await, (false, false));
+    let source: String = sqlx::query_scalar(
+        "SELECT context ->> 'source' FROM audit_log WHERE action = 'reset_order_client_signature' AND entity_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(source, "order_commercial_basis");
+}

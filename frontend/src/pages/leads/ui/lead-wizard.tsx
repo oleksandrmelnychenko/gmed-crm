@@ -7403,6 +7403,8 @@ ${serviceCommentLines.join("\n")}`
           ));
         }
         await updateOrderCommercialBasis(targetOrderId, {
+          // The prepayment is part of the signed terms (QA 2026-10-31).
+          ...(confirmSignatureReset ? { confirm_signature_reset: true } : {}),
           total_estimated: persistedEstimate.gross.toFixed(2),
           ...(normalizedPrepaymentAmount && validMoneyInput(normalizedPrepaymentAmount)
             ? { prepayment_amount: normalizedPrepaymentAmount }
@@ -7542,7 +7544,17 @@ ${serviceCommentLines.join("\n")}`
     if (blocking) setError("");
     try {
       if (existingOrderId) {
-        const saved = await updateOrderCommercialBasis(existingOrderId, patchValue);
+        // A changed prepayment of a signed order asks first (QA 2026-10-31).
+        const saved = await withSignedTermsConfirmation(
+          (confirmSignatureReset) => updateOrderCommercialBasis(existingOrderId, {
+            ...patchValue,
+            ...(confirmSignatureReset ? { confirm_signature_reset: true } : {}),
+          }),
+          (refusal) => new Promise<boolean>((resolve) => setSignedTermsAsk({
+            text: signedTermsChangeConfirmText(refusal, null),
+            resolve,
+          })),
+        );
         if (!blocking && hydrated.current === targetLeadId) setError("");
         flagKeys.forEach((key) => {
           if (commercialFlagRequestVersionRef.current[key] === requestVersions.get(key)) {

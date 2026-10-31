@@ -1,13 +1,15 @@
 //! The client's signature of an order covers the terms it was given for (QA
 //! C3-01, 2026-10-12).
 //!
-//! The terms are what the single order (Einzelauftrag) shows the client: the
-//! not cancelled services (description, quantity, unit price, VAT rate,
-//! pass-through), the programme period and the gross total
-//! (`order_client_terms` in the database). A staff edit that changes them —
-//! a service added or changed in the lead wizard or the order workspace, a
-//! wizard line removed, a service cancelled in the order workspace, the
-//! programme period moved — works like this:
+//! The terms are what the client agrees to with the single order
+//! (Einzelauftrag): the not cancelled services (description, quantity, unit
+//! price, VAT rate, pass-through), the programme period, the prepayment and
+//! the gross total (`order_client_terms` in the database; on a repeat draft
+//! also the purpose and the contract, which its documents print). A staff edit
+//! that changes them — a service added or changed in the lead wizard or the
+//! order workspace, a wizard line removed, a service cancelled in the order
+//! workspace, the programme period moved, the prepayment changed — works like
+//! this:
 //!
 //! * the order row is locked and its terms are read before the change;
 //! * after the change the terms are read again; when they differ, the order
@@ -117,7 +119,7 @@ fn signed_terms_change_refusal(
         StatusCode::CONFLICT,
         Json(json!({
             "error": SIGNED_TERMS_CHANGE,
-            "message": "The client signed this order; changing its services or period resets the signature and needs a new signed order document. Confirm with confirm_signature_reset",
+            "message": "The client signed this order; changing its services, period or prepayment resets the signature and needs a new signed order document. Confirm with confirm_signature_reset",
             "signed_total": signed_total.map(|value| value.to_string()),
             "new_total": new_total.map(|value| value.to_string()),
             "signed_total_label": money_label(signed_total, currency),

@@ -7342,6 +7342,61 @@ async fn repeat_order_documents_leave_out_cancelled_services_and_total_like_the_
     assert_eq!(services.as_array().unwrap().len(), 2, "{services}");
 }
 
+/// QA 2026-10-31: a trigger reset the signatures of a repeat draft without a
+/// confirmation or an audit row, also for a stored total no document shows.
+#[tokio::test]
+async fn repeat_draft_signature_resets_ask_first_and_are_audited() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let pool = &app.suite.pool;
+    let patient = seed_repeat_patient(&app, true).await;
+    let (s,created)=json_request(&app,"POST","/api/v1/leads",&pm,Some(json!({"first_name":"Repeat","last_name":"Signed","repeat_patient_id":patient,"creation_key":Uuid::new_v4()}))).await;
+    assert_eq!(s, StatusCode::CREATED, "{created}");
+    let lead = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let order = seed_complete_lead_onboarding(&app, lead).await.order_id;
+    let path = format!("/api/v1/orders/{order}/commercial-basis");
+    let signed = || async {
+        sqlx::query_scalar::<_, bool>("SELECT signed_patient AND signed_agency FROM orders WHERE id=$1")
+            .bind(order)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    };
+
+    // The total of an order with services comes from them: a stored estimate
+    // that differs is no change of the terms.
+    let (s, b) = json_request(&app, "POST", &path, &pm, Some(json!({"total_estimated":"120.00"}))).await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert_eq!(b["signature_reset"], false);
+    assert!(signed().await);
+
+    // The purpose is printed on the signed document: it asks first.
+    let change = json!({"needs_description":"Neue Abklärung"});
+    let (s, b) = json_request(&app, "POST", &path, &pm, Some(change)).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{b}");
+    assert_eq!(b["error"], "order_signed_terms_change");
+    assert!(signed().await);
+    let (s, b) = json_request(
+        &app,
+        "POST",
+        &path,
+        &pm,
+        Some(json!({"needs_description":"Neue Abklärung","confirm_signature_reset":true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert_eq!(b["signature_reset"], true);
+    assert!(!signed().await);
+    let resets: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action='reset_order_client_signature' AND entity_id=$1",
+    )
+    .bind(order)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(resets, 1);
+}
+
 #[tokio::test]
 async fn repeat_order_document_changes_require_current_documents_before_confirmation() {
     let Some(app) = test_app().await else { return };
