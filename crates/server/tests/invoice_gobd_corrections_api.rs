@@ -263,6 +263,112 @@ async fn cancelling_a_draft_issues_no_cancellation_document() {
     assert!(cancelled["storno_document"].is_null());
 }
 
+/// QA 2026-10-31: cash that went back leaves nothing to reverse. The trigger
+/// counted the payment only and answered the cancellation with a 500.
+#[tokio::test]
+async fn an_invoice_whose_cash_was_refunded_can_be_cancelled() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = format!("cancel-refunded-{}", Uuid::new_v4().simple());
+    let (_, _, invoice_id) = seed_released_invoice(&ctx.pool, ctx.admin_id, &tag, 10).await;
+    let ceo = auth_header(ctx.admin_id, "ceo");
+    let today = gmed_server::app_time::today().to_string();
+    let path = format!("/api/v1/invoices/{invoice_id}");
+
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("{path}/payments"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "1076.50",
+            "payment_method": "bank_transfer",
+            "received_on": today,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let (status, credit) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("{path}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{ "line_index": 0 }, { "line_index": 1 }],
+            "reason": "Behandlung abgesagt",
+            "issued_on": today,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit:?}");
+    let credit_id = credit["credit_note_transaction_id"].as_str().unwrap();
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("{path}/refunds"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "1076.50",
+            "payment_method": "bank_transfer",
+            "refunded_on": today,
+            "reason": "Rückzahlung an den Patienten",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("{path}/credit-notes/{credit_id}/reversal"),
+        &ceo,
+        Some(json!({ "reason": "Stattdessen Storno" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+
+    let (status, cancelled) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("{path}/status"),
+        &ceo,
+        Some(json!({ "status": "cancelled", "reason": "Behandlung abgesagt" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled:?}");
+    assert_eq!(cancelled["status"], "cancelled");
+
+    // Money still held keeps refusing, in the application and the trigger.
+    let held_tag = format!("{tag}-held");
+    let (_, _, held) = seed_released_invoice(&ctx.pool, ctx.admin_id, &held_tag, 10).await;
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{held}/payments"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "100",
+            "payment_method": "bank_transfer",
+            "received_on": today,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let error = sqlx::query("UPDATE invoices SET status = 'cancelled' WHERE id = $1")
+        .bind(held)
+        .execute(&ctx.pool)
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("must be reversed or released"),
+        "{error}"
+    );
+}
+
 #[tokio::test]
 async fn credit_notes_are_numbered_without_gaps_archived_and_fully_credited_shows_credited() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
