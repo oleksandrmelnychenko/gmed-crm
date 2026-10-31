@@ -12863,7 +12863,19 @@ fn build_patient_detail_json(
                 "emergency_contact_relation",
                 patient.emergency_contact_relation,
             );
-            map.insert("legal_status".to_string(), patient.legal_status);
+            // The concierge reads the signed/verified flags, never AML data, PEP
+            // facts, the payer declaration or legal notes (RBAC matrix, QA 2026-10-31).
+            let mut legal_status = patient.legal_status;
+            if auth.role == Role::Concierge
+                && let Value::Object(fields) = &mut legal_status
+            {
+                fields.retain(|key, _| {
+                    !["aml", "pep", "payer", "sanction", "notes"]
+                        .iter()
+                        .any(|closed| key.contains(closed))
+                });
+            }
+            map.insert("legal_status".to_string(), legal_status);
             if auth.role != Role::Concierge {
                 map.insert("intake_profile".to_string(), patient.intake_profile);
                 map.insert(

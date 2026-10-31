@@ -186,6 +186,23 @@ pub(crate) fn lead_converted_response(patient_id: Uuid) -> axum::response::Respo
         .into_response()
 }
 
+/// Whether the wizard's AML form holds an answer: text, a ticked box or a list
+/// entry. The review date and the tier are filled in on every save.
+fn aml_form_has_answers(form: &Value) -> bool {
+    form.as_object().is_some_and(|fields| {
+        fields
+            .iter()
+            .filter(|(key, _)| !matches!(key.as_str(), "reviewDate" | "riskTier"))
+            .any(|(_, value)| match value {
+                Value::String(text) => !text.trim().is_empty(),
+                Value::Bool(ticked) => *ticked,
+                Value::Array(items) => !items.is_empty(),
+                Value::Object(items) => !items.is_empty(),
+                _ => false,
+            })
+    })
+}
+
 /// Refuses a staff write with [`lead_converted_response`] once the lead is
 /// converted. `Ok(())` for an unconverted or unknown lead (the caller's own
 /// lookup answers 404); a database error is a 500.
@@ -9254,6 +9271,13 @@ async fn convert_lead(
         "notes": null,
     });
 
+    // A repeat lead saves the AML form blank (only a review date): that is no
+    // AML data and must not replace the patient's (QA 2026-10-31, D-01).
+    let mut repeat_legal_status = legal_status.clone();
+    if !aml_form_has_answers(&repeat_legal_status["aml_enhanced_due_diligence"]) {
+        repeat_legal_status["aml_enhanced_due_diligence"] = json!({});
+    }
+
     let (patient_id, pid) = match activation_patient_id {
         Some(prospect_id) => {
             let patient_lifecycle = match sqlx::query(
@@ -9407,7 +9431,7 @@ async fn convert_lead(
                 .bind(lead_id)
                 .bind(&intake_profile)
                 .bind(&lead_snapshot)
-                .bind(&legal_status)
+                .bind(&repeat_legal_status)
                 .bind(lead_notes.as_deref())
                 .bind(nationality.as_deref())
                 .bind(passport_expiry)
