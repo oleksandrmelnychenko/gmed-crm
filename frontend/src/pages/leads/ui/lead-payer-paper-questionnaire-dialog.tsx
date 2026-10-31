@@ -100,7 +100,8 @@ export function LeadPayerPaperQuestionnaireDialog({
               <PayerLinkForm
                 questionnaire={questionnaire}
                 client={client}
-                text={text}
+                // No code went out on paper: the address is staff's entry (QA 2026-10-31).
+                text={{ ...text, emailConfirmed: tx("указан сотрудником", "von Mitarbeitenden erfasst") }}
                 lang={lang}
                 onQuestionnaire={changed}
                 onLinkProblem={() => setError(tx("Анкета сейчас недоступна — обновите страницу", "Fragebogen derzeit nicht verfügbar – Seite neu laden"))}

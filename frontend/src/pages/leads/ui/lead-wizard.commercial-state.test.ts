@@ -12,7 +12,29 @@ import {
   quoteMatchesCurrentServices,
   withEstimatedOutlaysLast,
   type ServiceLine,
+  orderLinesDifferFromOrder,
 } from "./lead-wizard";
+
+describe("order lines against the order (QA 2026-10-31, D-02)", () => {
+  const stored = { id: "1", description: "Koordination", quantity: "1", unit_price: "550.00", vat_rate: "19" } as unknown as Leistung;
+  const line = {
+    id: "1", agencyServiceId: null, agencyServicePriceVersionId: null, clientReference: null, description: "Koordination",
+    catalogDescription: "", catalogDescriptionItems: [], catalogUnitLabel: "", currency: "EUR", quantity: "1", price: "550.00", vat: "19",
+  };
+
+  it("sees an added, a changed and a removed position", () => {
+    expect(orderLinesDifferFromOrder([line], [stored])).toBe(false);
+    expect(orderLinesDifferFromOrder([line, { ...line, id: "2", description: "Dolmetscher" }], [stored])).toBe(true);
+    expect(orderLinesDifferFromOrder([{ ...line, price: "600.00" }], [stored])).toBe(true);
+    expect(orderLinesDifferFromOrder([], [stored])).toBe(true);
+  });
+
+  it("knows nothing without the order's positions and ignores an outlays line left empty", () => {
+    expect(orderLinesDifferFromOrder([line], undefined)).toBe(false);
+    const emptyOutlays = { ...line, id: "3", description: "Voraussichtliche Auslagen", isCostPassthrough: true, price: "" };
+    expect(orderLinesDifferFromOrder([line, emptyOutlays], [stored])).toBe(false);
+  });
+});
 
 const storedLine = (price: string): ServiceLine => ({
   id: "wizard-line",

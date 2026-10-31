@@ -44,7 +44,7 @@ export function leadSelfDisclosureSourceNote(intake: CabinetIntake, tx: Tx): str
     );
   }
   return tx(
-    "Ответы из кабинета. Подписывает пациент или законные представители вместе с договором, заказом и согласиями.",
+    "Ответы из анкеты клиента. Подписывает пациент или законные представители вместе с договором, заказом и согласиями.",
     "Angaben aus dem Portal. Der Patient oder die gesetzlichen Vertreter unterschreiben zusammen mit Vertrag, Auftrag und Einwilligungen.",
   );
 }

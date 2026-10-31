@@ -381,11 +381,14 @@ export function gwgStatementsTitle(
   intake: {
     identification: ({ declared_correct_at?: string | null; id_data_entered_at?: string | null; id_data_entered_by_name?: string | null }) | null;
     identification_updated_at?: string | null;
+    marker_kinds?: Record<string, string>;
   },
   tx: (ru: string, de: string) => string,
 ): string {
   const identification = intake.identification;
-  const byPatient = Boolean(intake.identification_updated_at || identification?.declared_correct_at);
+  // Staff who filled the client's form wrote these answers (QA 2026-10-31).
+  const byPatient = intake.marker_kinds?.identification !== "staff"
+    && Boolean(intake.identification_updated_at || identification?.declared_correct_at);
   const byStaff = Boolean(identification?.id_data_entered_at || identification?.id_data_entered_by_name);
   if (byStaff && !byPatient) return tx("Внесено сотрудником", "Von Mitarbeitenden erfasst");
   if (byStaff) return tx("Данные от пациента и сотрудника", "Angaben des Patienten und der Mitarbeitenden");

@@ -65,6 +65,7 @@ describe("document signing", () => {
     expect(signatureErrorText("risk_review_required", ru, { rejected: true })).toBe("Подпись недоступна: оценка риска отклонила лида.");
     expect(signatureErrorText("sanctions_confirmed", ru)).toContain("подтверждённое совпадение");
     expect(signatureErrorText("something_else", ru)).toBe("Действие не выполнено. Проверьте статус перед повторной отправкой.");
+    expect(signatureErrorText("payer_gate_blocked", ru)).toContain("Кто платит");
     const refused = new ApiRequestError("Gate", {
       status: 409,
       body: { error: "risk_review_required", code: "risk_review_required", message: "x", rejected: true },

@@ -838,11 +838,14 @@ function PayerStatement({ statement, tx }: { statement: PayerStatementRow; tx: T
  */
 export function PayerAnswersGroup({
   state,
+  byStaff = false,
   tx,
   lang,
   today,
 }: {
   state: LeadPayerLinkState;
+  /** Staff entered the answers from the paper form: whoever entered is named (QA 2026-10-31). */
+  byStaff?: boolean;
   tx: Tx;
   lang: string;
   today: string;
@@ -862,10 +865,15 @@ export function PayerAnswersGroup({
             data-testid="lead-gwg-payer-badge"
             className="h-5 rounded-full border-violet-200 bg-violet-50 px-1.5 text-[10.5px] font-medium text-violet-800"
           >
-            {tx(
-              `от плательщика · ${formatAppDateTime(questionnaire.submitted_at)}`,
-              `vom Zahler am ${formatAppDateTime(questionnaire.submitted_at)}`,
-            )}
+            {byStaff
+              ? tx(
+                  `внёс сотрудник с бумажной анкеты · ${formatAppDateTime(questionnaire.submitted_at)}`,
+                  `von Mitarbeitenden aus dem Papierbogen erfasst am ${formatAppDateTime(questionnaire.submitted_at)}`,
+                )
+              : tx(
+                  `от плательщика · ${formatAppDateTime(questionnaire.submitted_at)}`,
+                  `vom Zahler am ${formatAppDateTime(questionnaire.submitted_at)}`,
+                )}
           </Badge>
         ) : (
           <span className="text-[11px] text-muted-foreground" data-testid="lead-gwg-payer-draft">
@@ -1008,8 +1016,10 @@ function LeadGwgStatementsBody({
       today={today}
     />
   ) : null;
-  const payerGroup = payerLink?.questionnaire ? (
-    <PayerAnswersGroup state={payerLink} tx={tx} lang={lang} today={today} />
+  // A patient who pays alone has no payer: the empty questionnaire stayed after
+  // «Пациент платит сам» (QA 2026-10-31).
+  const payerGroup = payerLink?.questionnaire && payer?.payer_kind !== "self" ? (
+    <PayerAnswersGroup state={payerLink} byStaff={intake.payer_link?.entered_by_staff === true} tx={tx} lang={lang} today={today} />
   ) : null;
   const organisationGroup = intake.payer_organisation ? (
     <PayerOrganisationGroup card={cards} mask={intake.payer_organisation} marker={intake.patient_payer} tx={tx} />
@@ -1192,7 +1202,7 @@ function LeadGwgStatementsBody({
         <StatusChip tone={identification.declared_correct_at ? "info" : "neutral"} className="whitespace-normal">
           <CalendarDays aria-hidden="true" />
           <span>{identification.declared_correct_at
-          ? `${tx("Подтвердил правильность:", "Richtigkeit bestätigt am")} ${formatAppDateTime(identification.declared_correct_at)}`
+          ? `${intake.marker_kinds?.identification === "staff" ? tx("Правильность подтверждена, записал сотрудник:", "Richtigkeit bestätigt, erfasst von Mitarbeitenden am") : tx("Подтвердил правильность:", "Richtigkeit bestätigt am")} ${formatAppDateTime(identification.declared_correct_at)}`
           : `${tx("Подтвердил правильность:", "Richtigkeit bestätigt:")} ${tx("ещё нет", "noch nicht")}`}</span>
         </StatusChip>
       </div>

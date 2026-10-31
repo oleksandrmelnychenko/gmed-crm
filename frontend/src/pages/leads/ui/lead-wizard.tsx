@@ -273,7 +273,7 @@ import {
 } from "@/pages/documents/model/asset-origin-evidence";
 import { AssetOriginEvidenceField } from "@/pages/documents/ui/asset-origin-evidence-field";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
-import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
+import { ConsentChoiceChangedNote, PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
 import { agencyCatalogItemName, agencyServiceLineDisplayName, germanDocumentUnitLabel } from "@/lib/agency-service-labels";
 import { DocumentReviewStatus } from "@/pages/documents/ui/document-review-status";
 import { SignatureDocumentPreview } from "@/pages/documents/ui/signature-document-preview";
@@ -928,6 +928,7 @@ const COST_ESTIMATE_WORK_TYPES_ID = "lead-wizard-cost-estimate-work-types";
 const COST_ESTIMATE_WORK_TYPES_REASON = "Medical work types are not selected";
 const COST_ESTIMATE_OUTDATED_REASON = "Preliminary cost calculation document is missing";
 const COST_ESTIMATE_WORK_TYPES_STEP = { ru: "Оформление заказа", de: "Auftragserfassung" };
+const DELETE_REASON_MIN_CHARS = 5;
 const WIZARD_DOCUMENT_SECTION_CLASS = "min-w-0 rounded-xl border border-border/50 bg-card p-3.5";
 
 /** Each wizard group sits on its own card against the shared muted canvas. */
@@ -3290,6 +3291,12 @@ function ToggleRow({
   );
 }
 
+/** The consent forms that carry the person's own choice (the server's `consent_choices::needs_own_choice`). */
+function consentChoiceDocument(document: DocumentItem) {
+  return ["privacy_consents", "consent_data_release_child", "consent_data_release_single"]
+    .includes(document.generated_template_id ?? "");
+}
+
 /** Where a refused paper signature leads (DEV 2026-10-27, owner: «навігації передивись»). */
 type WizardSignatureJump = (error: unknown) => { label: string; onClick: () => void } | null;
 const WizardSignatureJumpContext = createContext<WizardSignatureJump | null>(null);
@@ -3394,6 +3401,7 @@ function WizardDocumentRows({
                 title={wizardDocumentFilename(document)}
                 lang={lang}
                 disabled={disabled || Boolean(signBlockedReason)}
+                consentChoiceForm={consentChoiceDocument(document)}
                 errorText={(error) => wizardSignatureErrorText(error, tx)}
                 errorAction={signatureJump ?? undefined}
                 onDone={() => {
@@ -3438,6 +3446,9 @@ function WizardDocumentRows({
             <p className="mt-1 text-xs text-amber-800 dark:text-amber-300" data-testid={`lead-document-sign-blocked-${document.id}`}>
               {signBlockedReason}
             </p>
+          ) : null}
+          {!archived && !putAside && !signed && consentChoiceDocument(document) ? (
+            <ConsentChoiceChangedNote documentId={document.id} lang={lang} className="mt-1" />
           ) : null}
           {!archived ? <WizardDocumentRowError documentId={document.id} /> : null}
         </div>
@@ -6969,8 +6980,12 @@ export function LeadWizard({
   async function deleteWizardDocument() {
     if (!deleteDocument) return;
     const reason = deleteReason.trim();
-    if (!reason) {
-      setDeleteError(tx("Укажите причину удаления", "Löschgrund angeben"));
+    // «ab» explains nothing in the audit trail (QA 2026-10-31, D-12).
+    if (reason.length < DELETE_REASON_MIN_CHARS) {
+      setDeleteError(tx(
+        `Укажите причину удаления: минимум ${DELETE_REASON_MIN_CHARS} знаков`,
+        `Löschgrund angeben: mindestens ${DELETE_REASON_MIN_CHARS} Zeichen`,
+      ));
       return;
     }
 
@@ -10079,7 +10094,7 @@ ${serviceCommentLines.join("\n")}`
               {renderPayerDeclarationSection(false)}
               {leadId && payer.data?.status.cost_assumption.required ? renderPayerSignatureFlow(false) : null}
               {step1Portal.intake ? (
-                <Section title={tx("Согласия из кабинета", "Einwilligungen aus dem Kundenkabinett")}>
+                <Section title={tx("Согласия из анкеты клиента", "Einwilligungen aus dem Kundenformular")}>
                   <PortalInquiryConsentLine intake={step1Portal.intake} tx={tx} />
                   <PortalHealthConsentLine intake={step1Portal.intake} tx={tx} />
                 </Section>
@@ -13200,7 +13215,9 @@ ${serviceCommentLines.join("\n")}`
               <span role="status">
                 <StateMark
                   done={previewDocumentSigned}
-                  label={previewComplianceKind === "identity"
+                  // An old or archived version waits for nothing (QA 2026-10-31, D-10).
+                  label={!previewCurrentVersion && !previewDocumentSigned ? tx("Архивная версия", "Archivierte Version")
+                    : previewComplianceKind === "identity"
                     ? previewDocumentSigned ? tx("Проверен", "Geprüft") : tx("Ожидает проверки", "Prüfung offen")
                     : previewDocumentSigned ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")}
                 />

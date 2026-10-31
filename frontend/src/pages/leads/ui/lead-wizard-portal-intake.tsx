@@ -30,6 +30,8 @@ type Tx = (ru: string, de: string) => string;
  */
 type Step1PortalState = {
   mode: Step1FillMode;
+  /** The client's form was sent. */
+  submitted: boolean;
   patientFilledErrorIds: ReadonlySet<string>;
   markerByErrorId: ReadonlyMap<string, PatientFieldMarker>;
   markerByPortalField: ReadonlyMap<string, PatientFieldMarker>;
@@ -78,6 +80,7 @@ export function Step1PortalProvider({
     const filled = filledKey ? filledKey.split("|") : [];
     return {
       mode,
+      submitted: Boolean(intake?.submitted_at),
       patientFilledErrorIds: new Set(
         patientFilledKeys.map((key) => errorIdByDraftKey[key]).filter((id): id is string => Boolean(id)),
       ),
@@ -100,6 +103,8 @@ export function useStep1PortalField(errorId?: string, portalField?: string) {
   if (!state) return { patientFills: false, filled: false, marker: null as PatientFieldMarker | null, tx: null };
   const patientFills =
     state.mode === "patient"
+    // After the client sent the form nothing more comes from the portal (QA 2026-10-31).
+    && !state.submitted
     && ((errorId ? state.patientFilledErrorIds.has(errorId) : false) || Boolean(portalField && portalField !== "first_name" && portalField !== "last_name"));
   const filled =
     (errorId ? state.filledErrorIds.has(errorId) : false) || Boolean(portalField && state.filledPortalFields.has(portalField));
@@ -560,7 +565,7 @@ export function PortalInquiryConsentLine({ intake, tx }: { intake: LeadPortalInt
   return (
     <div className="space-y-1" data-testid="portal-inquiry-consent">
       <PortalConsentRecord
-        label={tx("Согласие на обработку запроса (кабинет)", "Einwilligung zur Bearbeitung der Anfrage (Kundenkabinett)")}
+        label={tx("Согласие на обработку запроса (анкета клиента)", "Einwilligung zur Bearbeitung der Anfrage (Kundenformular)")}
         consent={latestPortalConsent(intake.consents, "lead_inquiry_processing")}
         tx={tx}
       />

@@ -1133,6 +1133,8 @@ describe("F7: the heading names who entered the data", () => {
   it("says «Внесено сотрудником» when only staff entered the document data", () => {
     const staffOnly = { identification: { declared_correct_at: null, id_data_entered_at: "2026-10-25T10:00:00Z", id_data_entered_by_name: "Ben" }, identification_updated_at: null };
     expect(gwgStatementsTitle(staffOnly, ru)).toBe("Внесено сотрудником");
+    // Staff filled the client's form: their answers never read as the patient's (QA 2026-10-31).
+    expect(gwgStatementsTitle({ ...staffOnly, identification_updated_at: "2026-10-24T10:00:00Z", marker_kinds: { identification: "staff" } }, ru)).toBe("Внесено сотрудником");
     expect(gwgStatementsTitle({ ...staffOnly, identification_updated_at: "2026-10-24T10:00:00Z" }, ru)).toBe("Данные от пациента и сотрудника");
     expect(gwgStatementsTitle({ identification: { declared_correct_at: "2026-10-24T10:00:00Z" }, identification_updated_at: null }, ru)).toBe("Данные от пациента");
     expect(gwgStatementsTitle({ identification: null }, ru)).toBe("Данные от пациента");

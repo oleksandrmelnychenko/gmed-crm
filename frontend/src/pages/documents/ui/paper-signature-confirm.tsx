@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FileCheck2, FileText } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ApiRequestError, isLocalizedApiError } from "@/lib/api";
-import { recordPaperSignature, signatureErrorText } from "../data/document-signature-api";
+import { cn } from "@/lib/utils";
+import { fetchSignatureState, recordPaperSignature, signatureErrorText } from "../data/document-signature-api";
 import { PaperSignatureSection } from "./paper-signature-section";
 
 type Props = {
@@ -32,7 +33,31 @@ type Props = {
    * средств» named the gap but not where to fill it); closes the dialog.
    */
   errorAction?: (error: unknown) => { label: string; onClick: () => void } | null;
+  /** A consent form with the person's choice: the dialog says when that choice changed. */
+  consentChoiceForm?: boolean;
 };
+
+/**
+ * «The choice changed since this form was made», the same refusal the e-sign dialog
+ * shows: on paper the signature is still possible, but the sheet would carry the old
+ * choice (QA 2026-10-31, D-13: the row and the paper dialog stayed silent).
+ */
+export function ConsentChoiceChangedNote({ documentId, lang, className }: { documentId: string; lang: "de" | "ru"; className?: string }) {
+  const [changed, setChanged] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSignatureState(documentId)
+      .then((state) => { if (!cancelled) setChanged(state.ineligible_reason === "consent_choice_changed"); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [documentId]);
+  if (!changed) return null;
+  return (
+    <p className={cn("text-xs leading-5 text-amber-800 dark:text-amber-300", className)} data-testid="consent-choice-changed-note">
+      {signatureErrorText("consent_choice_changed", (ru, de) => (lang === "de" ? de : ru))}
+    </p>
+  );
+}
 
 /**
  * Confirms a signature given on paper: staff upload the scan of the signed
@@ -52,6 +77,7 @@ export function PaperSignatureConfirmButton({
   errorText,
   onDone,
   errorAction,
+  consentChoiceForm = false,
 }: Props) {
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
   const [open, setOpen] = useState(false);
@@ -116,6 +142,7 @@ export function PaperSignatureConfirmButton({
               ) : null}
             </div>
           ) : null}
+          {open && consentChoiceForm ? <ConsentChoiceChangedNote documentId={documentId} lang={lang} /> : null}
           <PaperSignatureSection
             lang={lang}
             onSubmit={async (scan, signedOn) => {

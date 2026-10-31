@@ -795,7 +795,7 @@ export function LeadPayerDeclarationSection({
               ? `${tx("Подтверждение приложено", "Nachweis beigefügt")}${evidenceName ? `: ${evidenceName}` : ""}`
               : amlSlot
                 // One proof upload: the check's own (owner 2026-10-19), printed on its document.
-                ? tx("Подтверждение загружается в форме проверки («Заполнить проверку»)", "Der Nachweis wird im Prüfbogen hochgeladen („Prüfung ausfüllen“)")
+                ? tx("Подтверждение загружается ниже в этой форме", "Der Nachweis wird weiter unten in diesem Formular hochgeladen")
                 : staffProofLabel}
           </StatusChip>
           {canEdit && !amlSlot ? (
@@ -1365,7 +1365,7 @@ export function LeadPayerDeclarationSection({
           <div className="space-y-3 border-t border-border/60 pt-3" data-testid="lead-payer-invoice-recipient">
             <div className="flex flex-wrap items-center gap-2">
               <AdminSectionTitle>
-                {tx("Получатель счёта (из кабинета)", "Rechnungsempfänger (aus dem Portal)")}
+                {tx("Получатель счёта (из анкеты клиента)", "Rechnungsempfänger (aus dem Kundenformular)")}
               </AdminSectionTitle>
               {cabinetBilling?.recipient_updated_at ? (
                 <span className="inline-flex" data-testid="lead-payer-recipient-updated">

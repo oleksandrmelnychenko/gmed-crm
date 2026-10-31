@@ -355,10 +355,10 @@ describe("lead errors", () => {
       "Geschlecht laut Ausweisdokument auswählen",
     );
     expect(leadErrorMessage(new Error("Email is already used by another person"), ru)).toBe(
-      "Этот адрес электронной почты уже используется другим человеком",
+      "Этот адрес электронной почты уже используется другим человеком: найдите его заявку или карточку через поиск по этому адресу",
     );
     expect(leadErrorMessage(new Error("Phone is already used by another person"), de)).toBe(
-      "Diese Telefonnummer wird bereits von einer anderen Person verwendet",
+      "Diese Telefonnummer wird bereits von einer anderen Person verwendet: Anfrage oder Patientenakte über die Suche nach dieser Nummer finden",
     );
     const noWorkTypes = new Error("Select medical work types before creating the preliminary cost calculation");
     expect(leadErrorMessage(noWorkTypes, ru)).toContain("медицинские виды работ");

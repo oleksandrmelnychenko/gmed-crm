@@ -22,14 +22,14 @@ const copy = {
     title: "Не указаны налоговые данные GMED.",
     body: "Пока в системных настройках не заполнены Steuernummer или USt-IdNr. компании, счета, кредит-ноты и документы сторно нельзя выпустить (§ 14 UStG); черновики создавать можно.",
     link: "Открыть системные настройки",
-    ask: "Заполнить их может CEO или IT-администратор.",
+    ask: "Заполнить их может только CEO.",
     onSettings: "Заполните поле «Налоговый номер / Steuernummer» или «ИНН по НДС / USt-IdNr.» ниже.",
   },
   de: {
     title: "Steuerdaten der GMED fehlen.",
     body: "Solange in den Systemeinstellungen weder Steuernummer noch USt-IdNr. des Unternehmens hinterlegt sind, können keine Rechnungen, Gutschriften oder Stornorechnungen ausgestellt werden (§ 14 UStG); Entwürfe sind möglich.",
     link: "Systemeinstellungen öffnen",
-    ask: "Eintragen können CEO oder IT-Administration.",
+    ask: "Eintragen kann nur der CEO.",
     onSettings: "Bitte unten „Steuernummer“ oder „USt-IdNr.“ ausfüllen.",
   },
 } as const;
@@ -78,7 +78,7 @@ export function IssuerTaxRegistrationBanner({
       <p className="font-medium">{text.title}</p>
       <p className="mt-1">{text.body}</p>
       <p className="mt-1">
-        {onSettingsPage ? (
+        {onSettingsPage && user?.role === "ceo" ? (
           text.onSettings
         ) : canEditSettings ? (
           <StaffLink className="font-medium underline underline-offset-4" to={SYSTEM_SETTINGS_PATH}>

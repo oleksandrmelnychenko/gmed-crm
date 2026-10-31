@@ -44,7 +44,7 @@ export function payerPackageSlotLabel(slot: PayerPackageSlot, tx: Tx): string {
     case "cost_coverage":
       return tx("Заявление о принятии расходов", "Kostenübernahmeerklärung");
     case "patient_statement":
-      return tx("Заявление пациента об оплате третьим лицом", "Erklärung zur Kostenübernahme durch Dritte");
+      return tx("Заявление об оплате третьим лицом", "Erklärung zur Kostenübernahme durch Dritte");
     case "cost_estimate":
       return tx("Смета для плательщика", "Kostenvoranschlag für den Zahler");
   }
@@ -65,8 +65,9 @@ export function payerPackageSlotPurpose(slot: PayerPackageSlot, tx: Tx): string 
       return costCoveragePurpose(tx);
     case "patient_statement":
       return tx(
-        "Пациент подтверждает, что расходы оплачивает третье лицо",
-        "Die Patientenseite bestätigt, dass ein Dritter die Kosten trägt",
+        // The PDF is signed by the payer (QA 2026-10-31), not by the patient.
+        "Плательщик подтверждает, что оплачивает расходы пациента как третье лицо",
+        "Die zahlende Person bestätigt, dass sie die Kosten als Dritte trägt",
       );
     case "cost_estimate":
       return tx(
@@ -265,6 +266,11 @@ export function payerPackageOutdatedHeading(status: PayerPackageStatus, tx: Tx):
       );
 }
 
+/** Signed on paper, one row at a time (no signature request), with rows still open. */
+function partlySigned(pkg: PayerPackage) {
+  return !pkg.request_id && pkg.documents.some((document) => !document.signed_at);
+}
+
 export type PayerPackageStatusLine = { tone: StatusTone; label: string; text: string };
 
 /** The badge and the sentence of the package's state (sent and signed with date and time). */
@@ -301,8 +307,12 @@ export function payerPackageStatusLine(pkg: PayerPackage, tx: Tx): PayerPackageS
       facts = [sent || tx("отправлено", "gesendet"), tx("ждёт подписи плательщика", "wartet auf die Unterschrift des Zahlers")];
       break;
     case "signed":
-      label = tx("Подписано", "Unterschrieben");
-      tone = "success";
+      // On paper the server counts the Kostenübernahmeerklärung as signed package;
+      // the header says so while other rows are open (QA 2026-10-31).
+      label = partlySigned(pkg)
+        ? tx("Подписано частично", "Teilweise unterschrieben")
+        : tx("Подписано", "Unterschrieben");
+      tone = partlySigned(pkg) ? "warning" : "success";
       facts = [
         pkg.signed_at ? tx(`подписано ${at(pkg.signed_at)}`, `unterschrieben am ${at(pkg.signed_at)}`) : tx("подписано", "unterschrieben"),
         sent,

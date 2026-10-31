@@ -357,7 +357,7 @@ test("staff add USt-IdNr. and Steuernummer of the invoice recipient; where the i
 
   // Section 7 remains read-only, without the redundant routing sentence.
   const recipient = section.getByTestId("lead-payer-invoice-recipient");
-  await expect(recipient).toContainText("Получатель счёта (из кабинета)");
+  await expect(recipient).toContainText("Получатель счёта (из анкеты клиента)");
   await expect(recipient.getByTestId("lead-payer-invoice-to")).toHaveCount(0);
   await expect(recipient.locator("select, [role=radio], [role=combobox]")).toHaveCount(0);
   // The two staff inputs, empty so far.
@@ -392,7 +392,7 @@ test("staff add USt-IdNr. and Steuernummer of the invoice recipient; where the i
 test("the lead's choice of another address is named, in German", async ({ page }) => {
   const { section } = await mount(page, "de", { ...billedCompany, invoice_to: "other", invoice_name: "Beispiel Stiftung", invoice_vat_id: "DE987654321" });
   const recipient = section.getByTestId("lead-payer-invoice-recipient");
-  await expect(recipient).toContainText("Rechnungsempfänger (aus dem Portal)");
+  await expect(recipient).toContainText("Rechnungsempfänger (aus dem Kundenformular)");
   await expect(recipient.getByTestId("lead-payer-invoice-to")).toHaveCount(0);
   await expect(recipient.getByTestId("lead-payer-recipient-invoice_name")).toContainText("Beispiel Stiftung");
   await expect(recipient.getByLabel(/^USt-IdNr\. des Rechnungsempfängers/)).toHaveValue("DE987654321");

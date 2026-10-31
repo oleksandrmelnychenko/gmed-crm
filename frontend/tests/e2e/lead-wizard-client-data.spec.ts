@@ -317,7 +317,7 @@ test("a field the server refuses shows at that field and the draft stays", async
   const phone = page.locator("#lead-wizard-phone");
   await phone.fill("+49 30 999999");
   await expect.poll(() => calls.updates.length).toBe(1);
-  await expect(page.locator("#lead-wizard-phone-error")).toHaveText("Этот номер телефона уже используется другим человеком");
+  await expect(page.locator("#lead-wizard-phone-error")).toHaveText("Этот номер телефона уже используется другим человеком: найдите его заявку или карточку через поиск по этому номеру");
   await expect(page.getByText("Изменения не сохранены", { exact: true })).toBeVisible();
   await expect(phone).toHaveValue("+49 30 999999");
   await wizardShot(page, "adult-ru-1440-server-422");

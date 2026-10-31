@@ -118,7 +118,7 @@ describe("payer package labels", () => {
     expect(payerPackageRows(null).map((row) => [payerPackageSlotLabel(row.slot, ru), row.document])).toEqual([
       ["Анкета плательщика", null],
       ["Заявление о принятии расходов", null],
-      ["Заявление пациента об оплате третьим лицом", null],
+      ["Заявление об оплате третьим лицом", null],
       ["Смета для плательщика", null],
     ]);
     expect(payerPackageRows(state({}, {}).package).map((row) => payerPackageSlotLabel(row.slot, de))).toEqual([
@@ -326,7 +326,7 @@ describe("payer package errors", () => {
 describe("payer package: what each document is for (owner decision 2026-10-22)", () => {
   it("says it in one short line per document", () => {
     expect(payerPackageSlotPurpose("cost_coverage", ru)).toBe("Плательщик обязуется оплатить расходы пациента");
-    expect(payerPackageSlotPurpose("patient_statement", ru)).toBe("Пациент подтверждает, что расходы оплачивает третье лицо");
+    expect(payerPackageSlotPurpose("patient_statement", ru)).toBe("Плательщик подтверждает, что оплачивает расходы пациента как третье лицо");
     expect(payerPackageSlotPurpose("cost_estimate", ru)).toBe("Смета для плательщика (только с согласия пациента)");
     expect(payerPackageSlotPurpose("self_disclosure", ru)).toContain("GwG");
     for (const slot of ["self_disclosure", "cost_coverage", "patient_statement", "cost_estimate"] as const) {
