@@ -924,6 +924,18 @@ fn german_country_names(value: Option<&str>) -> Option<String> {
 
 #[allow(dead_code)]
 impl DocPartyBlock {
+    /// The payer as an order document prints it, for the reuse key of the
+    /// document (`_order_payer_fingerprint`).
+    fn payer_fingerprint(&self) -> String {
+        use sha2::Digest;
+        let snapshot = json!({
+            "name": self.name, "birth_date": self.birth_date, "street": self.street,
+            "zip": self.zip, "city": self.city, "country": self.country,
+            "email": self.email, "phone": self.phone,
+        });
+        hex::encode(sha2::Sha256::digest(snapshot.to_string().as_bytes()))
+    }
+
     /// The address as separate lines: street, "PLZ Ort", country (owner
     /// 2026-10-19: a parent who contracts is printed like a person block).
     fn address_lines(&self) -> Vec<String> {
@@ -17028,6 +17040,27 @@ async fn generate_document(
     let contracting_fingerprint = prepared_contracting
         .as_ref()
         .map(ContractingDoc::fingerprint);
+    // The order's payer can change without touching the preparation: a
+    // document that names the previous payer is not handed out again (QA
+    // 2026-10-31). Preparation data replace the request's own bindings, so
+    // the order is the only source of the payer here.
+    let order_payer_fingerprint = if (intake_context.is_some() || repeat_context.is_some())
+        && matches!(template.id, "single_order" | "cost_coverage_declaration")
+    {
+        match load_invoice_payer(
+            &state,
+            order_id,
+            patient_uuid,
+            template.id == "cost_coverage_declaration",
+        )
+        .await
+        {
+            Ok(payer) => payer.as_ref().map(DocPartyBlock::payer_fingerprint),
+            Err(response) => return response,
+        }
+    } else {
+        None
+    };
 
     // The payer's copy of the cost estimate names the payer of the moment and
     // the client's estimate it was made from: it is made anew every time.
@@ -17046,9 +17079,11 @@ async fn generate_document(
                 AND generated_template_id=$3 AND document_language=$4
                 AND status<>'archived' AND file_deleted_at IS NULL
                 AND ($5::text IS NULL OR d.generated_bindings->>'_contracting_party_fingerprint'=$5)
+                AND d.generated_bindings->>'_order_payer_fingerprint' IS NOT DISTINCT FROM $6::text
                 AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)
              ORDER BY created_at DESC,id DESC LIMIT 1")
             .bind(order_id).bind(context).bind(template.id).bind(language).bind(contracting_fingerprint.as_deref())
+            .bind(order_payer_fingerprint.as_deref())
             .fetch_optional(&mut **guard).await;
         match existing {
             Ok(Some(document)) => return Json(document).into_response(),
@@ -17391,6 +17426,10 @@ async fn generate_document(
     let mut generated_bindings_snapshot = generated_binding_snapshot(&bindings);
     if let Some(fingerprint) = contracting_fingerprint {
         generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_contracting_party_fingerprint"] =
+            json!(fingerprint);
+    }
+    if let Some(fingerprint) = order_payer_fingerprint {
+        generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_order_payer_fingerprint"] =
             json!(fingerprint);
     }
     if let Some(context) = intake_context.as_ref().or(repeat_context.as_ref()) {

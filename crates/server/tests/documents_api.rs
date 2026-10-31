@@ -12585,12 +12585,50 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                                 "POST",
                                 "/api/v1/documents/generate",
                                 &bearer,
-                                Some(payload),
+                                Some(payload.clone()),
                             )
                             .await;
                             assert_eq!(status, StatusCode::OK, "{unchanged}");
                             assert_eq!(unchanged["id"], body["id"]);
                             assert_eq!(unchanged["reused"], true);
+                        }
+                        // A document made for the previous payer is not reused
+                        // once the order names another one (QA 2026-10-31).
+                        if repeat && patient_entry && template == "single_order" {
+                            let (status, unchanged) = json_request(
+                                &app,
+                                "POST",
+                                "/api/v1/documents/generate",
+                                &bearer,
+                                Some(payload.clone()),
+                            )
+                            .await;
+                            assert_eq!(status, StatusCode::OK, "{unchanged}");
+                            assert_eq!(unchanged["reused"], true, "{unchanged}");
+                            sqlx::query(
+                                "UPDATE orders SET payer_contact_name = 'Neue Zahlerin' WHERE id = $1",
+                            )
+                            .bind(order)
+                            .execute(&pool)
+                            .await
+                            .unwrap();
+                            let (status, renamed) = json_request(
+                                &app,
+                                "POST",
+                                "/api/v1/documents/generate",
+                                &bearer,
+                                Some(payload.clone()),
+                            )
+                            .await;
+                            assert_eq!(status, StatusCode::OK, "{renamed}");
+                            assert_ne!(renamed["id"], body["id"], "{renamed}");
+                            sqlx::query(
+                                "UPDATE orders SET payer_contact_name = NULL WHERE id = $1",
+                            )
+                            .bind(order)
+                            .execute(&pool)
+                            .await
+                            .unwrap();
                         }
                         for (index, (first, last, _)) in people.iter().enumerate() {
                             assert!(
