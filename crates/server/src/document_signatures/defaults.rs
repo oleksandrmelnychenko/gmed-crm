@@ -244,7 +244,7 @@ fn patient_contracting_signers(
 /// 2026-10-25, map item 94: one e-mail, one signature — the parent the
 /// cabinet named as invoice recipient who also pays is the only Auftraggeber,
 /// as the PDF prints them). The consents keep every custody parent.
-fn paying_parent_signs_alone(template: Option<&str>) -> bool {
+pub(super) fn paying_parent_signs_alone(template: Option<&str>) -> bool {
     matches!(
         template,
         Some("framework_contract" | "single_order" | "order_cost_estimate")

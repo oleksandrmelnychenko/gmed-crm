@@ -1378,7 +1378,9 @@ async fn package_validation_matrix_and_rbac() {
     // patient side, least of all the estimate with the medical calculation
     // that goes with it (owner rule 2026-10-06, QA 2026-10-31).
     let paying = json!([
-        signer("Paul", "payer@example.org", "payer"), signer("Max", "max@example.org", "agency")]);
+        signer("Paul", "payer@example.org", "payer"),
+        signer("Max", "max@example.org", "agency")
+    ]);
     let client_estimate = upload(&env, patient, Doc::new("order_cost_estimate", 1)).await;
     for documents in [
         json!([coverage, contract]),
@@ -2335,6 +2337,114 @@ async fn frames_of_older_generated_documents_are_found_and_follow_the_bundle_pag
         recorded,
         "every detected frame of the older document, on its bundle pages: {pages:?}"
     );
+}
+
+/// Owner decision 2026-10-25 (map item 94, QA 2026-10-31): under joint custody
+/// the paying parent is the only Auftraggeber: a package of contract documents
+/// goes to that parent alone, one with the child's consent to both parents.
+#[tokio::test]
+async fn the_paying_parent_signs_a_contract_package_alone() {
+    let Some(env) = env().await else { return };
+    let holder = seed_patient(&env.pool, env.admin_id, "1990-01-01").await;
+    // A repeat order: no initial onboarding packet is asked.
+    sqlx::query(
+        "INSERT INTO framework_contracts (patient_id, contract_number, signed_at, status, created_by)
+         VALUES ($1, $2, now(), 'signed', $3)",
+    )
+    .bind(holder)
+    .bind(format!("FC-{}", Uuid::new_v4().simple()))
+    .bind(env.admin_id)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    let mother = Uuid::new_v4();
+    let father = Uuid::new_v4();
+    let lead: Uuid = sqlx::query_scalar(
+        "INSERT INTO leads (first_name, last_name, date_of_birth, email, trusted_contacts, created_by, repeat_patient_id)
+         VALUES ('Kind', 'Beispiel', (current_date - interval '10 years')::date, 'kind@example.org', $1, $2, $3) RETURNING id",
+    )
+    .bind(json!([
+        {"id":mother,"name":"Anna Beispiel","email":"anna@example.org","phone":"+49300000001","birth_date":"1985-03-02","relation":"Mutter"},
+        {"id":father,"name":"Bernd Beispiel","email":"bernd@example.org","phone":"+49300000002","birth_date":"1984-03-02","relation":"Vater"}
+    ]))
+    .bind(env.admin_id)
+    .bind(holder)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO lead_payer_declarations (lead_id, payer_kind, payer_representative_id, source_of_funds)
+         VALUES ($1, 'representative', $2, 'employment')",
+    )
+    .bind(lead)
+    .bind(mother)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO lead_gwg_declarations(lead_id,custody) VALUES($1,'joint')")
+        .bind(lead)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    for (contact, first_name) in [(mother, "Anna"), (father, "Bernd")] {
+        sqlx::query("INSERT INTO lead_representatives(lead_id,contact_id,role,contact_origin,first_name,last_name,birth_place,birth_country,citizenships,street,zip,city,country,id_document_type,id_document_number,id_issuing_authority,id_issuing_country,id_valid_until) VALUES($1,$2,'legal_representative','staff',$3,'Beispiel','Berlin','DE',ARRAY['DE'],'Synthetic street 1','10115','Berlin','DE','passport',$4,'Synthetic office','DE',(current_date+interval '10 years')::date)")
+            .bind(lead).bind(contact).bind(first_name).bind(format!("SYNTHETIC-{contact}")).execute(&env.pool).await.unwrap();
+        let identity = upload(&env, holder, Doc::new("representative_identity", 1)).await;
+        sqlx::query("UPDATE documents SET patient_id=NULL,lead_id=$2 WHERE id=$1")
+            .bind(identity)
+            .bind(lead)
+            .execute(&env.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO lead_portal_uploads(document_id,lead_id,uploaded_by,access_kind,kind,representative_id) VALUES($1,$2,$3,'guardian','representative_identity',$4)")
+            .bind(identity).bind(lead).bind(env.admin_id).bind(contact).execute(&env.pool).await.unwrap();
+    }
+    let order = upload(
+        &env,
+        holder,
+        Doc::new("single_order", 1).anchors(json!([anchor("guardian_1", 0), anchor("agency", 0)])),
+    )
+    .await;
+    let child = upload(
+        &env,
+        holder,
+        Doc::new("consent_data_release_child", 1)
+            .anchors(json!([anchor("guardian_1", 0), anchor("guardian_2", 0)])),
+    )
+    .await;
+    sqlx::query("UPDATE documents SET patient_id=NULL, lead_id=$2 WHERE id = ANY($1)")
+        .bind(vec![order, child])
+        .bind(lead)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    bind_lead_consent_choice(&env, child, lead).await;
+    let anna = || signer("Anna", "anna@example.org", "client");
+    let bernd = || signer("Bernd", "bernd@example.org", "client");
+    let agency = || signer("Max", "max@example.org", "agency");
+    for body in [
+        // Not the other parent, and not both: the contract names one party.
+        json!({"document_ids":[order],"signers":[bernd(), agency()]}),
+        json!({"document_ids":[order],"signers":[anna(), bernd(), agency()]}),
+        // The child's consent keeps every custody parent.
+        json!({"document_ids":[order, child],"signers":[anna(), agency()]}),
+    ] {
+        let (status, value) = call(
+            &env.app,
+            "POST",
+            "/api/v1/signature-packages",
+            &env.ceo,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{value}");
+        assert_eq!(value["error"], "minor_signers_required", "{value}");
+    }
+    send_package(
+        &env,
+        json!({"document_ids":[order],"signers":[anna(), agency()]}),
+    )
+    .await;
 }
 
 #[tokio::test]

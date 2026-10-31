@@ -156,7 +156,7 @@ fn minor_clients_valid(required: &[String], expected: usize, clients: &[&str]) -
 
 async fn validate_minor_clients(
     state: &AppState,
-    row: &PgRow,
+    rows: &[PgRow],
     signers: &[Signer],
 ) -> Result<(), Response> {
     // Payer-only and agency-only packages do not sign on the patient's behalf.
@@ -166,6 +166,7 @@ async fn validate_minor_clients(
     {
         return Ok(());
     }
+    let row = &rows[0];
     let patient_id: Option<Uuid> = row.get("patient_id");
     let lead_id = match row.get::<Option<Uuid>, _>("lead_id") {
         Some(id) => Some(id),
@@ -184,17 +185,41 @@ async fn validate_minor_clients(
             .map_err(db_error)?
             .unwrap_or_default();
         let representation = loaded.representation;
-        let expected = if representation.answers.custody()
+        let mut expected = if representation.answers.custody()
             == crate::routes::lead_representatives::CUSTODY_JOINT
         {
             2
         } else {
             1
         };
-        let required = representation
+        let mut representatives = representation
             .representatives
             .iter()
             .filter(|person| person.slot.is_some())
+            .collect::<Vec<_>>();
+        // Contract documents alone follow the party block: a paying parent is
+        // the only Auftraggeber and signs alone, under joint custody as well
+        // (owner decision 2026-10-25, map item 94; QA 2026-10-31). Any other
+        // document in the package keeps every custody parent.
+        if rows
+            .iter()
+            .all(|row| defaults::paying_parent_signs_alone(template_of(row).as_deref()))
+        {
+            let paying_parent = crate::routes::documents::paying_parent_contact(&mut conn, lead_id)
+                .await
+                .map_err(db_error)?;
+            let parties = representatives.len();
+            representatives = crate::routes::documents::only_paying_parent(
+                representatives,
+                paying_parent,
+                |person| Some(person.id),
+            );
+            if representatives.len() < parties {
+                expected = representatives.len();
+            }
+        }
+        let required = representatives
+            .iter()
             .filter_map(|person| person.email.clone())
             .collect::<Vec<_>>();
         (representation.minor, required, expected)
@@ -415,7 +440,7 @@ pub(super) async fn create_request(
     policy
         .validate(&signers)
         .map_err(|code| error(StatusCode::UNPROCESSABLE_ENTITY, code))?;
-    validate_minor_clients(state, &rows[0], &signers).await?;
+    validate_minor_clients(state, &rows, &signers).await?;
     for signer in &signers {
         if crate::email_domain::check_email(&signer.email).await
             == crate::email_domain::DomainStatus::NoMail
