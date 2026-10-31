@@ -10644,13 +10644,15 @@ async fn mark_signature_result_signed_uses_its_verified_source_document_type() {
     // QA 2026-10-31: a TEST signature has no legal effect, and a signature in
     // review waits for its decision; neither becomes signed by one click.
     for (test_mode, request_status) in [(true, "completed"), (false, "needs_review")] {
-        sqlx::query("UPDATE document_signature_requests SET test_mode = $2, status = $3 WHERE id = $1")
-            .bind(request_id)
-            .bind(test_mode)
-            .bind(request_status)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE document_signature_requests SET test_mode = $2, status = $3 WHERE id = $1",
+        )
+        .bind(request_id)
+        .bind(test_mode)
+        .bind(request_status)
+        .execute(&pool)
+        .await
+        .unwrap();
         let (status, refused) = json_request(
             &app,
             "POST",
@@ -12654,9 +12656,27 @@ async fn minor_lead_contract_documents_use_the_current_legal_representatives() {
                                 "{template}: {text}"
                             );
                         }
-                        let roles = detail["generated_bindings"]["_signature_anchors"]
+                        let anchors = detail["generated_bindings"]["_signature_anchors"]
                             .as_array()
-                            .unwrap()
+                            .unwrap();
+                        // A numbered frame names the person who signs in it
+                        // (QA 2026-10-31).
+                        if template != "cost_coverage_declaration" && !patient_entry {
+                            for (index, (first, _, _)) in people.iter().enumerate() {
+                                let frame = anchors
+                                    .iter()
+                                    .find(|anchor| {
+                                        anchor["role"] == format!("guardian_{}", index + 1)
+                                    })
+                                    .unwrap();
+                                assert_eq!(
+                                    frame["email"],
+                                    format!("{first}-{tag}@example.test").to_lowercase(),
+                                    "{template}: {detail}"
+                                );
+                            }
+                        }
+                        let roles = anchors
                             .iter()
                             .filter_map(|anchor| anchor["role"].as_str())
                             .collect::<Vec<_>>();

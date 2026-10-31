@@ -1212,6 +1212,7 @@ struct ConsentGuardian {
     name: Option<String>,
     birth_date: Option<NaiveDate>,
     address: Option<String>,
+    email: Option<String>,
 }
 
 /// The parents or the guardian of a lead who is a minor, as the cabinet
@@ -1259,6 +1260,7 @@ async fn lead_consent_guardians(
                 ..Default::default()
             }
             .address_line(),
+            email: person.email.clone(),
         })
         .collect())
 }
@@ -18065,9 +18067,11 @@ async fn generate_document(
 
             let preview_html = build_framework_contract_html(&context);
             let pdf_bytes = match build_framework_contract_pdf(&context, &generated_doc_id) {
-                Ok(generated) => {
-                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
-                }
+                Ok(generated) => record_person_signature_anchors(
+                    &mut generated_bindings_snapshot,
+                    generated,
+                    &context.contracting.frame_emails(),
+                ),
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build generated framework contract PDF");
                     return err(StatusCode::INTERNAL_SERVER_ERROR, message);
@@ -18537,9 +18541,11 @@ async fn generate_document(
                 build_single_order_pdf(&context, &generated_doc_id)
             };
             let pdf_bytes = match pdf_result {
-                Ok(generated) => {
-                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
-                }
+                Ok(generated) => record_person_signature_anchors(
+                    &mut generated_bindings_snapshot,
+                    generated,
+                    &context.contracting.frame_emails(),
+                ),
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build order document PDF");
                     return err(StatusCode::INTERNAL_SERVER_ERROR, message);
@@ -18885,9 +18891,14 @@ async fn generate_document(
                 &generated_doc_id,
                 betreuer.as_ref(),
             ) {
-                Ok(generated) => {
-                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
-                }
+                Ok(generated) => record_person_signature_anchors(
+                    &mut generated_bindings_snapshot,
+                    generated,
+                    &betreuer
+                        .as_ref()
+                        .map(ContractingDoc::frame_emails)
+                        .unwrap_or_default(),
+                ),
                 Err(message) => {
                     tracing::error!(
                         template_id = template.id,
@@ -18921,9 +18932,14 @@ async fn generate_document(
                 own_consent_choice.as_ref(),
                 betreuer.as_ref(),
             ) {
-                Ok(generated) => {
-                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
-                }
+                Ok(generated) => record_person_signature_anchors(
+                    &mut generated_bindings_snapshot,
+                    generated,
+                    &betreuer
+                        .as_ref()
+                        .map(ContractingDoc::frame_emails)
+                        .unwrap_or_default(),
+                ),
                 Err(message) => {
                     tracing::error!(
                         template_id = template.id,
@@ -19269,9 +19285,11 @@ async fn generate_document(
                 order_reference.as_deref(),
                 &generated_doc_id,
             ) {
-                Ok(generated) => {
-                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
-                }
+                Ok(generated) => record_person_signature_anchors(
+                    &mut generated_bindings_snapshot,
+                    generated,
+                    &disclosure.frame_emails(),
+                ),
                 Err(message) => {
                     tracing::error!(
                         template_id = template.id,
@@ -19377,6 +19395,7 @@ async fn generate_document(
                                 ..DocPartyBlock::default()
                             }
                             .address_line(),
+                            email: representative.email.clone(),
                         })
                         .collect()
                 }
@@ -19386,12 +19405,19 @@ async fn generate_document(
                 name: guardian1_name,
                 birth_date: guardian1_birth,
                 address: guardian1_address,
+                email: guardian1_email,
             } = guardian_at(0);
             let ConsentGuardian {
                 name: guardian2_name_derived,
                 birth_date: guardian2_birth_derived,
+                email: guardian2_email,
                 ..
             } = guardian_at(1);
+            // A name typed over the recorded person is somebody else.
+            let frame_emails = [
+                guardian1_email.filter(|_| bindings.guardian_name.is_none()),
+                guardian2_email.filter(|_| bindings.guardian2_name.is_none()),
+            ];
             let agency = match load_agency_contract_settings(&state).await {
                 Ok(value) => value,
                 Err(resp) => return resp,
@@ -19436,9 +19462,11 @@ async fn generate_document(
                     .unwrap_or_default()],
             );
             let pdf_bytes = match build_consent_pdf(&context) {
-                Ok(generated) => {
-                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
-                }
+                Ok(generated) => record_person_signature_anchors(
+                    &mut generated_bindings_snapshot,
+                    generated,
+                    &frame_emails,
+                ),
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build consent PDF");
                     return err(StatusCode::INTERNAL_SERVER_ERROR, message);
@@ -20182,6 +20210,12 @@ pub(crate) struct SignatureAnchor {
     pub(crate) y_mm: f32,
     pub(crate) width_mm: f32,
     pub(crate) height_mm: f32,
+    /// The person of a numbered frame (`guardian_N`), in lower case: only that
+    /// person signs in it, wherever they stand among the signers. The forms
+    /// do not share one order (QA 2026-10-31). Older documents have none and
+    /// go by position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) email: Option<String>,
 }
 
 /// Key under which the anchors travel inside `documents.generated_bindings`.
@@ -20225,6 +20259,7 @@ impl TreatmentPlanPdfLayout {
             y_mm,
             width_mm,
             height_mm,
+            email: None,
         });
     }
 }
@@ -20248,6 +20283,27 @@ fn record_signature_anchors(bindings: &mut Option<Value>, generated: GeneratedPd
             json!(generated.signature_anchors);
     }
     generated.bytes
+}
+
+/// [`record_signature_anchors`] for a form with numbered frames: `emails` are
+/// the persons of `guardian_1`, `guardian_2`, … in the form's own order.
+fn record_person_signature_anchors(
+    bindings: &mut Option<Value>,
+    mut generated: GeneratedPdf,
+    emails: &[Option<String>],
+) -> Vec<u8> {
+    for anchor in &mut generated.signature_anchors {
+        let person = anchor
+            .role
+            .strip_prefix("guardian_")
+            .and_then(|number| number.parse::<usize>().ok())
+            .and_then(|number| emails.get(number.checked_sub(1)?))
+            .and_then(|email| email.as_deref())
+            .map(|email| email.trim().to_lowercase())
+            .filter(|email| !email.is_empty());
+        anchor.email = person;
+    }
+    record_signature_anchors(bindings, generated)
 }
 
 fn finalize_admin_pdf(mut document: PdfDocument, layout: TreatmentPlanPdfLayout) -> Vec<u8> {
@@ -20733,6 +20789,14 @@ impl ContractingDoc {
                 .collect(),
             guardian,
         }
+    }
+
+    /// The persons of the numbered frames ([`Self::signers`]).
+    fn frame_emails(&self) -> Vec<Option<String>> {
+        self.representatives
+            .iter()
+            .map(|person| person.email.clone())
+            .collect()
     }
 
     /// The legal representatives contract in their own name (§ 328 BGB).
@@ -27219,6 +27283,8 @@ fn build_patient_payer_statement_pdf(
 struct LeadDisclosurePerson {
     role: &'static str,
     name: String,
+    /// Who signs in this person's frame (`guardian_N`); not printed.
+    email: Option<String>,
     /// The person's own data collected in the cabinet or by staff (DEV QA
     /// 2026-10-30: section 3 named the Betreuerin only): the birth date, the
     /// address in one line and the identity document in one line.
@@ -27382,6 +27448,23 @@ struct LeadSelfDisclosure {
 }
 
 impl LeadSelfDisclosure {
+    /// The persons of the form's numbered frames: every legal representative
+    /// of a minor, or the one Betreuer who signs for an adult.
+    fn frame_emails(&self) -> Vec<Option<String>> {
+        match self
+            .acting_persons
+            .iter()
+            .find(|person| person.role == "Rechtliche/r Betreuer/in")
+        {
+            Some(betreuer) => vec![betreuer.email.clone()],
+            None => self
+                .acting_persons
+                .iter()
+                .map(|person| person.email.clone())
+                .collect(),
+        }
+    }
+
     /// "First Middle Last".
     fn full_name(&self) -> String {
         [
@@ -27652,6 +27735,7 @@ async fn load_lead_self_disclosure(
                 "Bevollmächtigte/r Vertreter/in"
             },
             name: person.name(),
+            email: person.email.clone(),
             birth_date: person.date_of_birth,
             address: Some(gwg_address_line(
                 person.extras.street.as_deref(),
@@ -41306,6 +41390,7 @@ mod tests {
             acting_persons: vec![super::LeadDisclosurePerson {
                 role: "Rechtliche/r Betreuer/in",
                 name: "Ute Betreuerin".to_string(),
+                email: Some("ute.betreuerin@example.org".to_string()),
                 birth_date: NaiveDate::from_ymd_opt(1970, 2, 1),
                 address: Some("Lindenweg 2, 10115 Berlin, Deutschland".to_string()),
                 identity_document: Some(
@@ -44096,6 +44181,77 @@ mod tests {
 
     const MIXED_VAT_NOTE: &str = "Alle angegebenen Preise zzgl. MwSt. nach dem für die jeweilige Leistung geltenden Steuersatz: 19 % – Airport transfer, Interpreter; 0 % – Organisation der Behandlung (Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG)";
 
+    /// QA 2026-10-31: a numbered frame records the person who signs in it, in
+    /// the form's own order; a frame without a known person goes by position.
+    #[test]
+    fn the_numbered_frames_record_their_person() {
+        let frame = |role: &str| super::SignatureAnchor {
+            role: role.to_string(),
+            page: 0,
+            x_mm: 0.0,
+            y_mm: 0.0,
+            width_mm: 1.0,
+            height_mm: 1.0,
+            email: None,
+        };
+        let generated = super::GeneratedPdf {
+            bytes: Vec::new(),
+            signature_anchors: vec![
+                frame("guardian_1"),
+                frame("agency"),
+                frame("guardian_2"),
+                frame("guardian_3"),
+            ],
+        };
+        let mut bindings = None;
+        super::record_person_signature_anchors(
+            &mut bindings,
+            generated,
+            &[Some(" Anna@Example.org ".to_string()), None],
+        );
+        let bindings = bindings.unwrap();
+        let anchors = bindings[super::SIGNATURE_ANCHORS_BINDING_KEY]
+            .as_array()
+            .unwrap();
+        assert_eq!(anchors[0]["email"], "anna@example.org");
+        assert!(
+            anchors[1..]
+                .iter()
+                .all(|anchor| anchor.get("email").is_none())
+        );
+
+        let person = |role: &'static str, email: &str| super::LeadDisclosurePerson {
+            role,
+            email: Some(email.to_string()),
+            ..Default::default()
+        };
+        let parents = super::LeadSelfDisclosure {
+            acting_persons: vec![
+                person("Elternteil", "anna@example.org"),
+                person("Elternteil", "ben@example.org"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            parents.frame_emails(),
+            [
+                Some("anna@example.org".to_string()),
+                Some("ben@example.org".to_string())
+            ]
+        );
+        let betreut = super::LeadSelfDisclosure {
+            acting_persons: vec![
+                person("Bevollmächtigte/r Vertreter/in", "vera@example.org"),
+                person("Rechtliche/r Betreuer/in", "ute@example.org"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            betreut.frame_emails(),
+            [Some("ute@example.org".to_string())]
+        );
+    }
+
     #[test]
     fn contract_vat_note_follows_the_rates_of_the_lines() {
         // Only 19 %: the short note is unchanged. Quotes store "19.00" and a
@@ -44272,10 +44428,7 @@ mod tests {
             contract_date: NaiveDate::from_ymd_opt(2026, 9, 28),
             quote_number: Some("KV-2026-0010".to_string()),
             line_items: lines,
-            service_catalog: vec![(
-                "interpreter".to_string(),
-                "interpreter_hours".to_string(),
-            )],
+            service_catalog: vec![("interpreter".to_string(), "interpreter_hours".to_string())],
             total_net: Some("2.870,00 €".to_string()),
             total_vat: Some("212,80 €".to_string()),
             total_gross: Some("3.082,80 €".to_string()),
@@ -44305,7 +44458,10 @@ mod tests {
             "Dolmetscher- und Übersetzungsleistungen",
             "760,00 €",
         ] {
-            assert!(coverage_text.contains(expected), "{expected}: {coverage_text}");
+            assert!(
+                coverage_text.contains(expected),
+                "{expected}: {coverage_text}"
+            );
         }
         for word in [
             "Organisation der Behandlung",

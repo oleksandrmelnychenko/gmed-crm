@@ -1104,8 +1104,11 @@ pub(super) async fn assign_visual_positions(
             pages.unwrap_or(0),
         ));
     }
-    let roles = signers.iter().map(|signer| signer.role.clone()).collect();
-    for (signer, positions) in signers.iter_mut().zip(visual_positions(&anchored, roles)) {
+    let people: Vec<(String, String)> = signers
+        .iter()
+        .map(|signer| (signer.role.clone(), signer.email.clone()))
+        .collect();
+    for (signer, positions) in signers.iter_mut().zip(visual_positions(&anchored, &people)) {
         signer.positions = positions;
     }
 }
@@ -1154,16 +1157,21 @@ fn mm_to_pdf_points(value_mm: f32) -> i64 {
 /// signers. Per document, the first client signer takes the `client` frame;
 /// in a document without one (minors' consents) client signer N takes
 /// `guardian_N`, and where both exist, further client signers take the
-/// `guardian_N` frames. The first agency signer takes the `agency` frame. A
+/// `guardian_N` frames. A numbered frame that records its person goes to that
+/// client signer alone, whatever the position: the child's consent form lists
+/// the parent who chose first, the contract the order of the representatives
+/// (QA 2026-10-31). The first agency signer takes the `agency` frame. A
 /// signer without a frame signs where the provider places the signature.
+/// `signers` are (role, e-mail) in signer order.
 pub(super) fn visual_positions(
     documents: &[(Vec<SignatureAnchor>, usize)],
-    roles: Vec<String>,
+    signers: &[(String, String)],
 ) -> Vec<Vec<Value>> {
     let mut ordinals: HashMap<String, usize> = HashMap::new();
-    roles
+    signers
         .iter()
-        .map(|role| {
+        .map(|(role, email)| {
+            let email = email.trim().to_lowercase();
             let ordinal = {
                 let counter = ordinals.entry(role.clone()).or_default();
                 *counter += 1;
@@ -1180,8 +1188,11 @@ pub(super) fn visual_positions(
                     _ => None,
                 };
                 for anchor in anchors {
-                    if wanted.as_deref() == Some(anchor.role.as_str()) && anchor.page < *page_count
-                    {
+                    let takes = match anchor.email.as_deref() {
+                        Some(person) => role == "client" && person == email,
+                        None => wanted.as_deref() == Some(anchor.role.as_str()),
+                    };
+                    if takes && anchor.page < *page_count {
                         frames.push(json!({
                             "page": (page_offset + anchor.page).to_string(),
                             "x": mm_to_pdf_points(anchor.x_mm),
@@ -1433,7 +1444,68 @@ mod visual_position_tests {
             y_mm,
             width_mm: 60.0,
             height_mm: 10.5,
+            email: None,
         }
+    }
+
+    /// Signers known by their role only.
+    fn visual_positions(
+        documents: &[(Vec<SignatureAnchor>, usize)],
+        roles: Vec<String>,
+    ) -> Vec<Vec<Value>> {
+        let signers: Vec<(String, String)> = roles
+            .into_iter()
+            .map(|role| (role, String::new()))
+            .collect();
+        super::visual_positions(documents, &signers)
+    }
+
+    #[test]
+    fn numbered_frames_go_to_the_person_they_name() {
+        let frame = |role: &str, y_mm: f32, email: Option<&str>| SignatureAnchor {
+            email: email.map(str::to_string),
+            ..anchor(role, 0, 25.0, y_mm)
+        };
+        // The contract in the order of the representatives, the child's
+        // consent form with the parent who chose first (QA 2026-10-31).
+        let documents = vec![
+            (
+                vec![
+                    frame("guardian_1", 80.0, Some("anna@example.org")),
+                    frame("guardian_2", 60.0, Some("ben@example.org")),
+                ],
+                1,
+            ),
+            (
+                vec![
+                    frame("guardian_1", 40.0, Some("ben@example.org")),
+                    frame("guardian_2", 20.0, Some("anna@example.org")),
+                ],
+                1,
+            ),
+        ];
+        let signers = [
+            ("client".to_string(), "Anna@Example.org ".to_string()),
+            ("client".to_string(), "ben@example.org".to_string()),
+        ];
+        let positions = super::visual_positions(&documents, &signers);
+        let heights = |frames: &Vec<Value>| {
+            frames
+                .iter()
+                .map(|frame| frame["y"].as_i64().unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            heights(&positions[0]),
+            [mm_to_pdf_points(80.0), mm_to_pdf_points(20.0)]
+        );
+        assert_eq!(
+            heights(&positions[1]),
+            [mm_to_pdf_points(60.0), mm_to_pdf_points(40.0)]
+        );
+        // Nobody else signs over a named person: no frame, the provider places it.
+        let outsider = [("client".to_string(), "carla@example.org".to_string())];
+        assert!(super::visual_positions(&documents, &outsider)[0].is_empty());
     }
 
     #[test]

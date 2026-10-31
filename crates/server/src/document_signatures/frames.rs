@@ -363,6 +363,7 @@ pub(crate) fn detect_signature_anchors(pdf: &[u8]) -> Vec<SignatureAnchor> {
                     y_mm: mm(y),
                     width_mm: mm(width),
                     height_mm: mm(height),
+                    email: None,
                 };
                 let duplicate = anchors.iter().any(|known| {
                     known.page == anchor.page
