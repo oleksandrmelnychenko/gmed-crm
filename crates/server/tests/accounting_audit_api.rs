@@ -954,17 +954,21 @@ async fn audit_draft_invoice_cannot_consume_an_advance() {
 #[ignore = "Requires explicit disposable audit database"]
 async fn audit_payment_deadline_notifies_once_without_blocking_work() {
     let (app, pool, admin, patient, order, bearer) = audit_case().await;
-    sqlx::query(
-        "UPDATE orders SET signed_patient=true,signed_agency=true,total_estimated=100 WHERE id=$1",
-    )
-    .bind(order)
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("UPDATE orders SET total_estimated=100 WHERE id=$1")
+        .bind(order)
+        .execute(&pool)
+        .await
+        .unwrap();
     let due = chrono::Utc::now() + chrono::Duration::hours(2);
     let (status,body)=json_request(&app,"POST",&format!("/api/v1/orders/{order}/commercial-basis"),&bearer,Some(json!({"prepayment_required":true,"prepayment_amount":"100","prepayment_due_at":due.to_rfc3339()}))).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["prepayment_due_at"].as_str().is_some());
+    // The client signs the prepayment with the other terms.
+    sqlx::query("UPDATE orders SET signed_patient=true,signed_agency=true WHERE id=$1")
+        .bind(order)
+        .execute(&pool)
+        .await
+        .unwrap();
     let (status, body) = json_request(
         &app,
         "GET",

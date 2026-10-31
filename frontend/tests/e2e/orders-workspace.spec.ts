@@ -769,6 +769,24 @@ test("cancelling an order needs a reason and shows what is cancelled and what st
     .toEqual({status:"cancelled", reason:"Patient postponed the treatment"});
 });
 
+test("an order waits for the draft invoices of its planned services (QA 2026-10-31)", async ({page}) => {
+  const {writes} = await prepare(page);
+  await page.route(`**/orders/${orderId}/cancellation-preview`, route => route.fulfill({json:{
+    reason: null,
+    cancelled_services: [{id:"line-1", description:"Dolmetscher", quantity:"2", gross:"119"}],
+    cancelled_appointment_ids: [], closed_quotes: [], rejected_amendment_ids: [], settlement: null,
+    draft_invoices: [{id:"draft-1", total_gross:"178.5", currency:"EUR"}],
+  }}));
+  await page.goto(`/orders/${orderId}`);
+  await openOrderActions(page);
+  await page.getByRole("menuitem", {name:/^Отменить/}).click();
+  const dialog = page.getByRole("dialog", {name:"Отменить заказ", exact:true});
+  await expect(dialog.getByTestId("order-cancellation-draft-invoices")).toContainText("178,50");
+  await dialog.getByRole("textbox", {name:"Причина отмены"}).fill("Patient postponed the treatment");
+  await expect(dialog.getByRole("button", {name:"Отменить заказ", exact:true})).toBeDisabled();
+  expect(writes.filter(write => write.path.endsWith("/status"))).toHaveLength(0);
+});
+
 test("follow-up blockers open the milestone planner, which plans and creates the reminder with feedback", async ({page}) => {
   const {order, writes} = await prepare(page);
   const reason = "1-week follow-up is not scheduled yet";

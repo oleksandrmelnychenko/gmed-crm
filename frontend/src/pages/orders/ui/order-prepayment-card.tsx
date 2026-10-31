@@ -59,7 +59,7 @@ export function OrderPrepaymentCard({
 }) {
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
   const formLang = lang === "de" ? "de" : "ru";
-  const currency = order.currency ?? "EUR";
+  const currency = order.currency || "EUR";
   const stored = orderPrepaymentTerms(order);
   const total = order.total_estimated == null ? null : Number(order.total_estimated);
   const orderTotal = total !== null && Number.isFinite(total) ? total : null;
@@ -180,7 +180,6 @@ export function OrderPrepaymentCard({
             >
               <OrderPrepaymentFields
                 value={form}
-                maxAmount={orderTotal ?? undefined}
                 lang={formLang}
                 onChange={(patch) => setForm((current) => (current ? { ...current, ...patch } : current))}
               />

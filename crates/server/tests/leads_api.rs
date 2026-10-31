@@ -7298,13 +7298,23 @@ async fn repeat_order_documents_leave_out_cancelled_services_and_total_like_the_
         assert_eq!(s, StatusCode::CREATED, "{b}");
     }
     let payload = json!({"template_id":"order_cost_estimate","lead_id":lead,"order_id":order,"language":"de","status":"active"});
-    let generate = || json_request(&app, "POST", "/api/v1/documents/generate", &ceo, Some(payload.clone()));
+    let generate = || {
+        json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &ceo,
+            Some(payload.clone()),
+        )
+    };
     let estimate_total = |id: String| async move {
-        sqlx::query_scalar::<_, Value>("SELECT generated_bindings->'estimate_total' FROM documents WHERE id=$1::uuid")
-            .bind(id)
-            .fetch_one(pool)
-            .await
-            .unwrap()
+        sqlx::query_scalar::<_, Value>(
+            "SELECT generated_bindings->'estimate_total' FROM documents WHERE id=$1::uuid",
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
     };
     let (s, first) = generate().await;
     assert!(s.is_success(), "{first}");
@@ -7320,8 +7330,9 @@ async fn repeat_order_documents_leave_out_cancelled_services_and_total_like_the_
         json!("378,50 €")
     );
 
-    sqlx::query("UPDATE order_leistungen SET status='cancelled',cancelled_at=now(),cancellation_reason='Transfer entfällt' WHERE order_id=$1 AND description='Flughafentransfer'")
+    sqlx::query("UPDATE order_leistungen SET status='cancelled',cancelled_at=now(),cancelled_by=$2,cancellation_reason='Transfer entfällt' WHERE order_id=$1 AND description='Flughafentransfer'")
         .bind(order)
+        .bind(app.patient_manager_id)
         .execute(pool)
         .await
         .unwrap();
@@ -7356,16 +7367,25 @@ async fn repeat_draft_signature_resets_ask_first_and_are_audited() {
     let order = seed_complete_lead_onboarding(&app, lead).await.order_id;
     let path = format!("/api/v1/orders/{order}/commercial-basis");
     let signed = || async {
-        sqlx::query_scalar::<_, bool>("SELECT signed_patient AND signed_agency FROM orders WHERE id=$1")
-            .bind(order)
-            .fetch_one(pool)
-            .await
-            .unwrap()
+        sqlx::query_scalar::<_, bool>(
+            "SELECT signed_patient AND signed_agency FROM orders WHERE id=$1",
+        )
+        .bind(order)
+        .fetch_one(pool)
+        .await
+        .unwrap()
     };
 
     // The total of an order with services comes from them: a stored estimate
     // that differs is no change of the terms.
-    let (s, b) = json_request(&app, "POST", &path, &pm, Some(json!({"total_estimated":"120.00"}))).await;
+    let (s, b) = json_request(
+        &app,
+        "POST",
+        &path,
+        &pm,
+        Some(json!({"total_estimated":"120.00"})),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "{b}");
     assert_eq!(b["signature_reset"], false);
     assert!(signed().await);

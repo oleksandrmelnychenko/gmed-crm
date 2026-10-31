@@ -823,8 +823,11 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "response: {refused}");
     assert_eq!(refused["error"], "order_signature_evidence_required");
-    // What the scan or the QES of the order document leaves behind.
-    sqlx::query("UPDATE orders SET signed_patient = true, signed_patient_at = now() WHERE id = $1")
+    // What the scan or the QES of the order document leaves behind; the
+    // prepayment is one of the signed terms (QA 2026-10-31).
+    sqlx::query(
+        "UPDATE orders SET signed_patient = true, signed_patient_at = now(), prepayment_required = true WHERE id = $1",
+    )
         .bind(Uuid::parse_str(order_id).unwrap())
         .execute(&pool)
         .await
