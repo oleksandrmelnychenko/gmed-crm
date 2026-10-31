@@ -10027,11 +10027,7 @@ async fn add_leistung(
     // A completed or cancelled order is closed: it takes no new planned work.
     // Its delivered lines are still approved and billed through their own routes.
     if matches!(order_status.as_str(), "completed" | "cancelled") {
-        return coded_err(
-            StatusCode::CONFLICT,
-            "order_closed_for_new_services",
-            "A completed or cancelled order cannot receive new services",
-        );
+        return order_closed_for_new_services();
     }
 
     let resolved_agency_price = if let Some(agency_service_id) = body.agency_service_id {
@@ -13543,6 +13539,15 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
 }
 
+/// The refusal of new planned work on a completed or cancelled order.
+pub(crate) fn order_closed_for_new_services() -> axum::response::Response {
+    coded_err(
+        StatusCode::CONFLICT,
+        "order_closed_for_new_services",
+        "A completed or cancelled order cannot receive new services",
+    )
+}
+
 /// A prepayment above the order total, with the total in German format for
 /// the translated message ("889,15 €").
 fn prepayment_exceeds_total_err(total: Option<rust_decimal::Decimal>) -> axum::response::Response {
@@ -13665,7 +13670,7 @@ pub(crate) fn reads_full_orders(auth: &AuthUser) -> bool {
 /// Endpoints that expose the commercial or clinical side of an order are not
 /// part of the concierge's or the team lead's projection.
 #[allow(clippy::result_large_err)]
-fn require_full_order_read(auth: &AuthUser) -> Result<(), axum::response::Response> {
+pub(crate) fn require_full_order_read(auth: &AuthUser) -> Result<(), axum::response::Response> {
     if OrderReadScope::for_role(auth.role).is_scoped() {
         Err(err(
             StatusCode::FORBIDDEN,
@@ -13865,7 +13870,7 @@ async fn scoped_order_detail(
 
 /// Only preparation endpoints may access a repeat draft. Operational endpoints keep
 /// using can_access_order, which refuses every draft even for CEO/Billing.
-async fn can_access_order_preparation(
+pub(crate) async fn can_access_order_preparation(
     state: &AppState,
     auth: &AuthUser,
     order_id: Uuid,

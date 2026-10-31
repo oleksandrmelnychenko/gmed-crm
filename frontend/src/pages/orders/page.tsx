@@ -7306,7 +7306,7 @@ function useOrdersPageContent() {
                             preview={serviceGroupPreviews[group.id] ?? null}
                             generating={generatingServiceGroupId === group.id}
                             onGenerate={
-                              permissions.canAddLeistung
+                              permissions.canAddLeistung && !orderStepsLocked
                                 ? (overrideDuplicates) =>
                                     void handleGenerateServiceGroupLines(
                                       group.id,

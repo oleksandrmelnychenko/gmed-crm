@@ -19,9 +19,10 @@ use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
 use crate::services::order_service_groups::{
     ServiceGroupLinesError, generate_order_service_group_lines_checked,
-    preview_order_service_group_lines,
+    preview_order_service_group_lines, service_line_amounts,
 };
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -117,10 +118,7 @@ async fn list_order_service_groups(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
-        return resp;
-    }
-    if let Err(resp) = ensure_order_access(&state, &auth, order_id).await {
+    if let Err(resp) = ensure_order_read_access(&state, &auth, order_id).await {
         return resp;
     }
 
@@ -178,15 +176,12 @@ async fn get_order_service_group(
     Extension(auth): Extension<AuthUser>,
     Path(service_group_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
-        return resp;
-    }
     let order_id = match load_service_group_order_id(&state, service_group_id).await {
         Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Service group not found"),
         Err(resp) => return resp,
     };
-    if let Err(resp) = ensure_order_access(&state, &auth, order_id).await {
+    if let Err(resp) = ensure_order_read_access(&state, &auth, order_id).await {
         return resp;
     }
 
@@ -217,7 +212,7 @@ async fn create_order_service_group(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    let quantity = decimal_from_optional(body.quantity, Decimal::ONE);
+    let requested_quantity = decimal_from_optional(body.quantity, Decimal::ONE);
     let requested_unit_price = decimal_from_optional(body.unit_price, Decimal::ZERO);
     let requested_vat_rate = decimal_from_optional(body.vat_rate, Decimal::new(19, 0));
     let requested_currency = body
@@ -249,6 +244,9 @@ async fn create_order_service_group(
             );
         }
     };
+    if let Err(resp) = ensure_order_open_in_tx(&mut tx, order_id).await {
+        return resp;
+    }
 
     let (
         agency_service_price_version_id,
@@ -386,6 +384,11 @@ async fn create_order_service_group(
             "manual".to_string(),
         )
     };
+    let (quantity, unit_price, vat_rate) =
+        match service_line_amounts(requested_quantity, unit_price, vat_rate) {
+            Ok(amounts) => amounts,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        };
 
     let service_group_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO order_service_groups (
@@ -488,6 +491,9 @@ async fn replace_order_service_group_participants(
             );
         }
     };
+    if let Err(resp) = ensure_order_open_in_tx(&mut tx, order_id).await {
+        return resp;
+    }
 
     if let Err(resp) = replace_participants_in_tx(
         &state,
@@ -554,6 +560,12 @@ async fn generate_service_group_lines(
             Json(summary).into_response()
         }
         Err(ServiceGroupLinesError::SignedTermsChange(response)) => response,
+        Err(ServiceGroupLinesError::OrderClosed) => {
+            crate::routes::orders::order_closed_for_new_services()
+        }
+        Err(ServiceGroupLinesError::InvalidLine(message)) => {
+            err(StatusCode::UNPROCESSABLE_ENTITY, message)
+        }
         Err(ServiceGroupLinesError::Database(error)) => {
             tracing::error!(error = %error, service_group_id = %service_group_id, "generate service group lines");
             err(
@@ -570,15 +582,12 @@ async fn preview_service_group_lines(
     Path(service_group_id): Path<Uuid>,
     Query(query): Query<PreviewLinesQuery>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
-        return resp;
-    }
     let order_id = match load_service_group_order_id(&state, service_group_id).await {
         Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Service group not found"),
         Err(resp) => return resp,
     };
-    if let Err(resp) = ensure_order_access(&state, &auth, order_id).await {
+    if let Err(resp) = ensure_order_read_access(&state, &auth, order_id).await {
         return resp;
     }
 
@@ -775,6 +784,15 @@ async fn replace_participants_in_tx(
         let role_label = normalize_optional_text(participant.role_label);
         let quantity_override = optional_decimal(participant.quantity_override);
         let unit_price_override = optional_decimal(participant.unit_price_override);
+        // An override is rounded and bound like the amount it replaces.
+        let (quantity, unit_price, _) = service_line_amounts(
+            quantity_override.unwrap_or(Decimal::ONE),
+            unit_price_override.unwrap_or(Decimal::ZERO),
+            Decimal::ZERO,
+        )
+        .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))?;
+        let quantity_override = quantity_override.map(|_| quantity);
+        let unit_price_override = unit_price_override.map(|_| unit_price);
         let description_override = normalize_optional_text(participant.description_override);
         let notes = normalize_optional_text(participant.notes);
 
@@ -1131,6 +1149,51 @@ fn participant_json(row: sqlx::postgres::PgRow) -> serde_json::Value {
         "generated_leistung_id": row.try_get::<Option<Uuid>, _>("generated_leistung_id").unwrap_or_default(),
         "generated_leistung_description": row.try_get::<Option<String>, _>("generated_leistung_description").unwrap_or_default(),
     })
+}
+
+/// Service groups are read like the commercial side of an order: by everyone
+/// who reads whole orders, on the orders they reach, so also by Billing and
+/// the CEO Assistant (QA 2026-10-31). Writes stay with the PM and the CEO.
+async fn ensure_order_read_access(
+    state: &AppState,
+    auth: &AuthUser,
+    order_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    auth.require_capability(Capability::OrdersView)?;
+    super::orders::require_full_order_read(auth)?;
+    if super::orders::can_access_order_preparation(state, auth, order_id, None).await? {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
+}
+
+/// A completed or cancelled order takes no new planned work (`add_leistung`).
+/// The status is read under the row lock, so a cancellation running now is seen.
+async fn ensure_order_open_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    order_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM orders WHERE id = $1 FOR UPDATE",
+    )
+    .bind(order_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, order_id = %order_id, "lock order for service group");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order",
+        )
+    })?;
+    match status.as_deref() {
+        None => Err(err(StatusCode::NOT_FOUND, "Order not found")),
+        Some("completed" | "cancelled") => {
+            Err(crate::routes::orders::order_closed_for_new_services())
+        }
+        Some(_) => Ok(()),
+    }
 }
 
 async fn ensure_order_access(

@@ -73,12 +73,48 @@ pub enum ServiceGroupLinesError {
     /// The lines would change the terms of an order the client signed and
     /// the reset of the signature was not confirmed (409, QA C3-01).
     SignedTermsChange(axum::response::Response),
+    /// A completed or cancelled order takes no new planned work (409).
+    OrderClosed,
+    /// Amounts of the group outside the rules of a service line (422).
+    InvalidLine(&'static str),
 }
 
 impl From<sqlx::Error> for ServiceGroupLinesError {
     fn from(error: sqlx::Error) -> Self {
         Self::Database(error)
     }
+}
+
+/// The amounts of a line generated from a service group, under the rules and
+/// rounding of a line added by hand (`add_leistung`, QA 2026-10-31). The
+/// message says what is wrong.
+pub fn service_line_amounts(
+    quantity: Decimal,
+    unit_price: Decimal,
+    vat_rate: Decimal,
+) -> Result<(Decimal, Decimal, Decimal), &'static str> {
+    if quantity <= Decimal::ZERO {
+        return Err("Service quantity must be greater than zero");
+    }
+    if unit_price < Decimal::ZERO {
+        return Err("Service unit price cannot be negative");
+    }
+    if vat_rate < Decimal::ZERO || vat_rate > Decimal::ONE_HUNDRED {
+        return Err("Service VAT rate must be between 0 and 100");
+    }
+    let quantity = quantity.round_commercial(4);
+    if quantity <= Decimal::ZERO {
+        return Err("Service quantity is below the supported precision");
+    }
+    let unit_price = unit_price.round_cents();
+    let maximum_service_total = Decimal::new(999_999_999_999, 2);
+    if quantity > Decimal::new(1_000_000, 0)
+        || unit_price > maximum_service_total
+        || quantity * unit_price > maximum_service_total
+    {
+        return Err("Service quantity or price is outside the supported amount range");
+    }
+    Ok((quantity, unit_price, vat_rate.round_commercial(2)))
 }
 
 pub async fn generate_order_service_group_lines(
@@ -100,6 +136,12 @@ pub async fn generate_order_service_group_lines(
         Err(ServiceGroupLinesError::SignedTermsChange(_)) => Err(sqlx::Error::Protocol(
             crate::routes::orders::client_terms::SIGNED_TERMS_CHANGE.to_string(),
         )),
+        Err(ServiceGroupLinesError::OrderClosed) => Err(sqlx::Error::Protocol(
+            "order_closed_for_new_services".to_string(),
+        )),
+        Err(ServiceGroupLinesError::InvalidLine(message)) => {
+            Err(sqlx::Error::Protocol(message.to_string()))
+        }
     }
 }
 
@@ -151,6 +193,14 @@ pub async fn generate_order_service_group_lines_checked(
     let terms_before = client_terms::lock_before(&mut tx, group.order_id)
         .await?
         .ok_or(sqlx::Error::RowNotFound)?;
+    // Read under the row lock: a cancellation running now is seen.
+    let order_status: String = sqlx::query_scalar("SELECT status FROM orders WHERE id = $1")
+        .bind(group.order_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    if matches!(order_status.as_str(), "completed" | "cancelled") {
+        return Err(ServiceGroupLinesError::OrderClosed);
+    }
 
     let participants = sqlx::query(
         r#"SELECT participant.id,
@@ -213,8 +263,12 @@ pub async fn generate_order_service_group_lines_checked(
                     group.group_title, participant.doctor_name, participant.provider_name
                 )
             });
-        let quantity = participant.quantity_override.unwrap_or(group.quantity);
-        let unit_price = participant.unit_price_override.unwrap_or(group.unit_price);
+        let (quantity, unit_price, vat_rate) = service_line_amounts(
+            participant.quantity_override.unwrap_or(group.quantity),
+            participant.unit_price_override.unwrap_or(group.unit_price),
+            group.vat_rate,
+        )
+        .map_err(ServiceGroupLinesError::InvalidLine)?;
         let agency_service_price_version_id = participant
             .unit_price_override
             .is_none()
@@ -264,7 +318,7 @@ pub async fn generate_order_service_group_lines_checked(
             .bind(quantity)
             .bind(unit_price)
             .bind(&group.currency)
-            .bind(group.vat_rate)
+            .bind(vat_rate)
             .bind(participant.provider_id)
             .bind(participant.doctor_id)
             .bind(group.agency_service_id)
@@ -305,7 +359,7 @@ pub async fn generate_order_service_group_lines_checked(
         .bind(quantity)
         .bind(unit_price)
         .bind(&group.currency)
-        .bind(group.vat_rate)
+        .bind(vat_rate)
         .bind(participant.provider_id)
         .bind(participant.doctor_id)
         .bind(group.agency_service_id)
@@ -521,6 +575,30 @@ mod tests {
         );
         assert_eq!(generation_action(Some(existing_id), true), "update");
         assert_eq!(generation_action(None, false), "generate");
+    }
+
+    #[test]
+    fn service_line_amounts_follow_the_rules_of_a_manual_line() {
+        let dec = |value: &str| value.parse::<Decimal>().unwrap();
+        assert_eq!(
+            service_line_amounts(dec("1.23456"), dec("100.005"), dec("19.004")),
+            Ok((dec("1.2346"), dec("100.01"), dec("19.00")))
+        );
+        for (quantity, price, vat) in [
+            ("0", "100", "19"),
+            ("-1", "100", "19"),
+            ("0.00001", "100", "19"),
+            ("1", "-0.01", "19"),
+            ("1", "100", "100.01"),
+            ("1", "100", "-1"),
+            ("1000001", "1", "19"),
+            ("2", "9999999999.99", "19"),
+        ] {
+            assert!(
+                service_line_amounts(dec(quantity), dec(price), dec(vat)).is_err(),
+                "{quantity} x {price} at {vat}"
+            );
+        }
     }
 
     #[test]
