@@ -334,13 +334,15 @@ pub(super) async fn apply_business_effects(
         order_id,
     } = *document;
     if template == Some("framework_contract") || art == "framework_contract" {
+        // The contract the document was generated for: the order's, else the
+        // latest of the patient or lead, also when the order has no contract
+        // link (QA 2026-10-31; the fallback of the generation).
         let contract_id: Option<Uuid> = sqlx::query_scalar(
             r#"SELECT COALESCE(
                    (SELECT o.contract_id FROM orders o WHERE o.id = $1),
                    (SELECT fc.id FROM framework_contracts fc
-                    WHERE $1::uuid IS NULL
-                      AND (($2::uuid IS NOT NULL AND fc.patient_id = $2)
-                           OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND fc.lead_id = $3))
+                    WHERE ($2::uuid IS NOT NULL AND fc.patient_id = $2)
+                       OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND fc.lead_id = $3)
                     ORDER BY fc.created_at DESC, fc.id DESC LIMIT 1))"#,
         )
         .bind(order_id)

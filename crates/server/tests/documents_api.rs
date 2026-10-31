@@ -10723,6 +10723,168 @@ async fn mark_signature_result_signed_uses_its_verified_source_document_type() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
 }
 
+/// QA 2026-10-31: one click confirms what a paper signature could record, no
+/// more: the client's estimate needs proof, a replaced version and a document
+/// out for signature are refused.
+#[tokio::test]
+async fn mark_signed_refuses_like_a_paper_signature() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("mark-signed-refusals");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
+    let (status, estimate) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "order_cost_estimate", "patient_id": patient_id,
+            "order_id": order_id, "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{estimate}");
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/documents/{}/mark-signed",
+            estimate["id"].as_str().unwrap()
+        ),
+        &admin_bearer,
+        Some(json!({ "compliance_kind": "other" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "signature_evidence_required");
+
+    let mut uploaded = Vec::new();
+    for name in ["first", "second"] {
+        let (status, upload) = multipart_upload(
+            &app,
+            "/api/v1/documents/upload",
+            &admin_bearer,
+            &[
+                ("patient_id", patient_id.to_string()),
+                ("status", "active".to_string()),
+                ("visibility", "internal".to_string()),
+                ("auto_name", format!("DSGVO {name} {tag}")),
+                ("art", "consent".to_string()),
+            ],
+            &format!("{name}-{tag}.pdf"),
+            "application/pdf",
+            b"%PDF-consent%",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{upload}");
+        uploaded.push(Uuid::parse_str(upload["id"].as_str().unwrap()).unwrap());
+    }
+    let (first, second) = (uploaded[0], uploaded[1]);
+    let mark = |id: Uuid| {
+        let (app, bearer) = (&app, &admin_bearer);
+        async move {
+            json_request(
+                app,
+                "POST",
+                &format!("/api/v1/documents/{id}/mark-signed"),
+                bearer,
+                Some(json!({ "compliance_kind": "dsgvo" })),
+            )
+            .await
+        }
+    };
+
+    let request_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO document_signature_requests (
+               id, source_document_id, requested_by, source_sha256, source_context,
+               signers, provider_account, test_mode, status
+           ) VALUES ($1, $2, $3, $4, '{}'::jsonb, '[]'::jsonb, $5, false, 'pending')"#,
+    )
+    .bind(request_id)
+    .bind(first)
+    .bind(admin_id)
+    .bind("a".repeat(64))
+    .bind(format!("test-{tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, refused) = mark(first).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "signature_already_pending");
+    sqlx::query("UPDATE document_signature_requests SET status = 'withdrawn' WHERE id = $1")
+        .bind(request_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        r#"UPDATE documents
+           SET version_root_document_id = $2, replaces_document_id = $2, version_number = 2
+           WHERE id = $1"#,
+    )
+    .bind(second)
+    .bind(first)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, refused) = mark(first).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "document_superseded");
+    let (status, body) = mark(second).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+/// QA 2026-10-31: the framework contract document of an order without a
+/// contract link is made for the patient's latest contract; signing it signs
+/// that contract, not only the document.
+#[tokio::test]
+async fn a_signed_contract_document_signs_the_contract_of_an_unlinked_order() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("contract-unlinked-order");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    sqlx::query("UPDATE framework_contracts SET status = 'draft', signed_at = NULL WHERE id = $1")
+        .bind(contract_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE orders SET contract_id = NULL WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, document) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "framework_contract", "patient_id": patient_id,
+            "order_id": order_id, "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{document}");
+    let (status, signed) =
+        support::paper_signature(&app, &admin_bearer, document["id"].as_str().unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+    let contract_status: String =
+        sqlx::query_scalar("SELECT status FROM framework_contracts WHERE id = $1")
+            .bind(contract_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(contract_status, "signed");
+}
+
 #[tokio::test]
 async fn lead_document_upload_and_signature_do_not_create_patient() {
     let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {

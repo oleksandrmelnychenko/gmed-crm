@@ -429,6 +429,12 @@ DEMO-підпису (`GMED_DEV_DEMO_ONBOARDING=true`, лише для налаш
 
 Старий шлях «Отметить подписанным» (`POST /documents/{id}/mark-signed`, без
 файла) лишається для підтвердження посвідчення особи й випадків без скана.
+Згенерований документ, який підписують сторони (також кошторис клієнта й
+документи платника), він не підтверджує без скана чи QES (409
+`signature_evidence_required`). Як і скан, він відмовляє заміненій версії (409
+`document_superseded`) і документу у відкритому запиті (409
+`signature_already_pending`); TEST-підпис і запит на перевірці не стають
+юридичним підтвердженням (QA 2026-10-31).
 
 Пункти DSGVO (`dsgvo_signed`) і Schweigepflichtsentbindung
 (`confidentiality_release_signed`) у `patients.legal_status` з 2026-10-12

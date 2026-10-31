@@ -160,6 +160,11 @@ describe("signature proof", () => {
     ["enhanced_due_diligence", "other"],
     // The single order since the owner decision of 2026-10-12 (QA C2-14).
     ["single_order", "other"],
+    // The client's estimate and the payer's documents (QA 2026-10-31).
+    ["order_cost_estimate", "other"],
+    ["payer_self_disclosure", "other"],
+    ["patient_payer_statement", "other"],
+    ["payer_cost_estimate", "other"],
   ])("asks for the scan of a generated %s confirmed as %s", (generated_template_id, kind) => {
     expect(signatureNeedsProof({ generated_template_id, signed_at: null }, kind)).toBe(true);
   });

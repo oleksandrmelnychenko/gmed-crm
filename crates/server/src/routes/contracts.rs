@@ -1143,8 +1143,9 @@ const PROOF_REQUIRED_SIGNATURE_KINDS: [&str; 5] = [
 /// (Patientenformular, `lead_self_disclosure`), which records no compliance
 /// kind. The GwG identification sheet is GMED's own record and stays one
 /// click. The single order (Einzelauftrag) since the owner decision of
-/// 2026-10-12 (QA C2-14).
-const PROOF_REQUIRED_SIGNATURE_TEMPLATES: [&str; 10] = [
+/// 2026-10-12 (QA C2-14); the client's cost estimate and the payer's own
+/// documents, which their parties sign like it (QA 2026-10-31).
+const PROOF_REQUIRED_SIGNATURE_TEMPLATES: [&str; 14] = [
     "privacy_consents",
     "consent_data_release",
     "consent_data_release_child",
@@ -1155,6 +1156,10 @@ const PROOF_REQUIRED_SIGNATURE_TEMPLATES: [&str; 10] = [
     "cost_coverage_declaration",
     "lead_self_disclosure",
     "single_order",
+    "order_cost_estimate",
+    "payer_self_disclosure",
+    "patient_payer_statement",
+    "payer_cost_estimate",
 ];
 
 /// Whether `POST /documents/{id}/mark-signed` must refuse: the document is the
@@ -1219,7 +1224,7 @@ async fn framework_contract_has_signed_document(
 
 /// A refusal with a machine code the UI translates (no English server text
 /// in the RU/DE UI, QA 2026-10-11).
-fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+pub(crate) fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
     (
         status,
         Json(serde_json::json!({ "error": code, "message": message })),

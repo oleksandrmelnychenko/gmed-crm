@@ -29,6 +29,11 @@ const PROOF_REQUIRED_SIGNATURE_TEMPLATES = new Set([
   "lead_self_disclosure",
   // The single order (Einzelauftrag), owner decision 2026-10-12 (QA C2-14).
   "single_order",
+  // The client's cost estimate and the payer's own documents (QA 2026-10-31).
+  "order_cost_estimate",
+  "payer_self_disclosure",
+  "patient_payer_statement",
+  "payer_cost_estimate",
 ]);
 
 /**

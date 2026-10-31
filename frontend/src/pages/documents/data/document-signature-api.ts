@@ -302,6 +302,8 @@ export function signatureGateErrorText(error: unknown, tx: (ru: string, de: stri
   if (!(error instanceof ApiRequestError)) return null;
   const body = error.body as { error?: unknown; code?: unknown; rejected?: unknown; countries_label?: unknown } | null | undefined;
   const code = typeof body?.error === "string" ? body.error : typeof body?.code === "string" ? body.code : error.code;
+  // The confirmation by one click refuses like a paper signature (QA 2026-10-31).
+  if (code === "document_superseded" || code === "signature_already_pending") return signatureErrorText(code, tx);
   return signatureGateText(code, tx, {
     rejected: body?.rejected === true,
     countries_label: typeof body?.countries_label === "string" ? body.countries_label : undefined,

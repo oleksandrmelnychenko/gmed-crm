@@ -2677,6 +2677,45 @@ async fn mark_document_signed(
     ) {
         return super::contracts::signature_proof_required_response();
     }
+    // The refusals of a paper signature (paper.rs, QA 2026-10-31): a replaced
+    // version is signed nowhere, and a document out for signature waits for
+    // that request. An unsigned order document cannot be outdated here: it
+    // needs proof, and a signed one only receives its compliance kind.
+    let is_latest_version: bool = match sqlx::query_scalar(
+        r#"SELECT NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id = d.id)
+           FROM documents d WHERE d.id = $1 FOR UPDATE"#,
+    )
+    .bind(document_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(%error, %document_id, "lock document for mark-signed");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if !is_latest_version {
+        return super::contracts::coded_err(
+            StatusCode::CONFLICT,
+            "document_superseded",
+            "A newer version of this document exists",
+        );
+    }
+    match document_in_active_signature_request(&mut *tx, document_id).await {
+        Ok(false) => {}
+        Ok(true) => {
+            return super::contracts::coded_err(
+                StatusCode::CONFLICT,
+                "signature_already_pending",
+                "The document is out for signature",
+            );
+        }
+        Err(error) => {
+            tracing::error!(%error, %document_id, "check signature requests for mark-signed");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
     // A lead's framework contract counts as signed by both parties: GMED
     // signs only after the client and the payer (lead_payer.rs).
     if kind == "framework_contract"
