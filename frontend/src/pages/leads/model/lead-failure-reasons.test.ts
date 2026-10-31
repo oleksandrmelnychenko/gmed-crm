@@ -85,7 +85,8 @@ describe("the notes of the lead history (QA 2026-10-12, A3-02)", () => {
     expect(leadLifecycleNoteLabel("status_change", null, ru)).toBeNull();
     expect(leadLifecycleNoteLabel("status_change", "  ", ru)).toBeNull();
     // Other entries keep their note as it is.
-    expect(leadLifecycleNoteLabel("converted", "Lead converted to patient", ru)).toBe("Lead converted to patient");
+    expect(leadLifecycleNoteLabel("converted", "Lead converted to patient", ru)).toBe("Создан пациент");
+    expect(leadLifecycleNoteLabel("converted", "Lead converted to patient", de)).toBe("Patient angelegt");
     expect(leadLifecycleNoteLabel("converted", "other", ru)).toBe("other");
   });
 });

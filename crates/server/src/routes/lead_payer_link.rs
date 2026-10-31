@@ -1875,6 +1875,9 @@ struct LeadContext {
     /// default fill mode): their entries stand for the request the lead
     /// would send from the cabinet (walk-through 2026-10-24).
     staff_fills: bool,
+    /// Staff recorded the consent after the form was sent (another payer was
+    /// named on it): it is current though later than the request.
+    contact_consent_by_staff: bool,
     declaration: Option<Declaration>,
     /// The organisation mask the lead entered (defaults of the link).
     organisation_mask: OrganisationMask,
@@ -1897,7 +1900,11 @@ async fn load_context(
     let Some(lead) = sqlx::query(&format!(
         r#"SELECT l.first_name, l.last_name, l.primary_language, l.portal_submitted_at,
                   l.converted_patient_id, ({PORTAL_LEAD_SQL}) AS open,
-                  l.wizard_state->>'step1_fill_mode' AS fill_mode
+                  l.wizard_state->>'step1_fill_mode' AS fill_mode,
+                  EXISTS (SELECT 1 FROM lead_payer_declarations declaration
+                          WHERE declaration.lead_id = l.id
+                            AND declaration.contact_consent_recorded_how IS NOT NULL)
+                      AS contact_consent_by_staff
            FROM leads l
            WHERE l.id = $1"#
     ))
@@ -1960,6 +1967,9 @@ async fn load_context(
                 .flatten()
                 .as_deref(),
         ),
+        contact_consent_by_staff: lead
+            .try_get::<bool, _>("contact_consent_by_staff")
+            .unwrap_or(false),
         declaration,
         organisation_mask,
         loaded,
@@ -2052,7 +2062,10 @@ impl LeadContext {
         }
         // The cabinet's request carries the current consent; staff record
         // it themselves in mode "Заполняю сам".
-        if !self.staff_fills && declaration.contact_consent_at > self.request_submitted_at {
+        if !self.staff_fills
+            && !self.contact_consent_by_staff
+            && declaration.contact_consent_at > self.request_submitted_at
+        {
             return Some("request_not_submitted");
         }
         if !declaration.email.as_deref().is_some_and(is_plausible_email) {
@@ -2106,6 +2119,7 @@ struct Questionnaire {
     asked: bool,
     identity_documents: Vec<DocumentItem>,
     funds_proof_documents: Vec<DocumentItem>,
+    register_extract_on_file: bool,
     level: u8,
     reasons: Vec<&'static str>,
     missing: Vec<&'static str>,
@@ -2255,6 +2269,7 @@ fn questionnaire(
         asked,
         identity_documents,
         funds_proof_documents,
+        register_extract_on_file: context.register_extract_on_file,
         level,
         reasons,
         missing,
@@ -2307,6 +2322,7 @@ impl Questionnaire {
                 .collect::<Vec<_>>(),
             "funds_required": self.level == 2,
             "funds_proof_required": self.level == 2,
+            "register_extract_on_file": self.register_extract_on_file,
             "missing_for_submit": self.missing,
             "declared_correct_at": self.statement.declared_correct_at,
             "submitted_at": self.statement.submitted_at,
@@ -6718,6 +6734,7 @@ mod tests {
             open: true,
             request_submitted_at: Some(at - Duration::minutes(1)),
             staff_fills: false,
+            contact_consent_by_staff: false,
             declaration: Some(payer),
             organisation_mask: OrganisationMask::default(),
             loaded: lead_representatives::Loaded::default(),

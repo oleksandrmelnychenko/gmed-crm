@@ -84,6 +84,10 @@ pub fn router() -> Router<AppState> {
             "/me/lead-requests/{lead_id}/payer/cost-estimate-consent",
             post(cost_estimate_consent),
         )
+        .route(
+            "/me/lead-requests/{lead_id}/payer/contact-consent",
+            post(staff_contact_consent),
+        )
 }
 
 // ----------------------------------------------------------------------------
@@ -1494,6 +1498,106 @@ struct CostEstimateConsentBody {
     recorded_how: Option<String>,
     #[serde(default)]
     recorded_note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct StaffContactConsentBody {
+    recorded_how: Option<String>,
+    #[serde(default)]
+    recorded_note: Option<String>,
+}
+
+/// `POST /me/lead-requests/{lead_id}/payer/contact-consent`: staff record the
+/// client's consent that GMED contacts the payer, with how the client gave it.
+/// Another payer named on a sent form drops the consent, the form stays locked
+/// for the client, and nobody could record it again (QA 2026-10-31, S2-1). The
+/// client answers in the form; a withdrawal goes through it too. Returns the
+/// request object.
+async fn staff_contact_consent(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(body): Json<StaffContactConsentBody>,
+) -> Response {
+    if let Err(response) = intake::require_cabinet_editor(&auth) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return intake::internal(error, "begin"),
+    };
+    let (kind, _) = match intake::lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+        Ok(Some(found)) => found,
+        Ok(None) => return intake::not_found(),
+        Err(error) => return intake::internal(error, "lock request"),
+    };
+    if kind != intake::AccessKind::Staff {
+        return intake::not_found();
+    }
+    let recorded = match intake::staff_consent_record(
+        body.recorded_how.as_deref(),
+        body.recorded_note.as_deref(),
+        auth.user_id,
+    ) {
+        Ok(record) => record,
+        Err(response) => return response,
+    };
+    let declaration = match lead_payer::load_declaration(&mut tx, lead_id).await {
+        Ok(declaration) => declaration,
+        Err(error) => return intake::internal(error, "load payer"),
+    };
+    let Some(declaration) = declaration.filter(Declaration::is_third_party) else {
+        return intake::coded(
+            StatusCode::CONFLICT,
+            "no_third_party_payer",
+            "No third party pays: there is nobody to contact",
+            json!({}),
+        );
+    };
+    if declaration.contact_consent_at.is_none() {
+        let at = match intake::portal_update_time(&mut tx).await {
+            Ok(at) => at,
+            Err(error) => return intake::internal(error, "read contact consent time"),
+        };
+        if let Err(error) = sqlx::query(
+            r#"UPDATE lead_payer_declarations
+               SET contact_consent_at = $2, updated_by = $3, updated_at = now(),
+                   contact_consent_recorded_how = $4,
+                   contact_consent_recorded_note = $5
+               WHERE lead_id = $1"#,
+        )
+        .bind(lead_id)
+        .bind(at)
+        .bind(auth.user_id)
+        .bind(recorded["how"].as_str())
+        .bind(recorded["note"].as_str())
+        .execute(&mut *tx)
+        .await
+        {
+            return intake::internal(error, "save contact consent");
+        }
+        if let Err(error) = audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "lead_staff_payer_contact_consent",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({ "recorded_how": recorded["how"] }),
+            ),
+        )
+        .await
+        {
+            return intake::internal(error, "audit contact consent");
+        }
+    }
+    if let Err(error) = tx.commit().await {
+        return intake::internal(error, "commit contact consent");
+    }
+    match intake::request_payload(&state, lead_id, auth.user_id, kind).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => intake::internal(error, "load request"),
+    }
 }
 
 /// `POST /me/lead-requests/{lead_id}/payer/cost-estimate-consent`: the

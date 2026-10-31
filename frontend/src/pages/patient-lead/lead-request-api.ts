@@ -1038,6 +1038,17 @@ export function saveLeadPayerCostEstimateConsent(
   });
 }
 
+/**
+ * Staff record the client's consent that GMED contacts the payer, with how the client gave it:
+ * another payer named on a sent form drops it and the form stays locked (QA 2026-10-31).
+ */
+export function saveLeadPayerContactConsent(leadId: string, recorded: StaffConsentRecord): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/payer/contact-consent`, {
+    method: "POST",
+    body: JSON.stringify(staffConsentRecordBody(recorded)),
+  });
+}
+
 export function saveLeadIdentification(leadId: string, patch: IdentificationPatch): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/identification`, {
     method: "POST",

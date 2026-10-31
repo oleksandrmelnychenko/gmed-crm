@@ -69,6 +69,17 @@ function ServiceInfo({ title, text, more, close }: { title: string; text: string
   );
 }
 
+/** The cabinet's languages; anything else reads German. */
+function pastDateMessage(lang: string): string {
+  const messages: Record<string, string> = {
+    de: "Der Wunschtermin liegt in der Vergangenheit. Bitte wählen Sie ein Datum ab heute.",
+    en: "The preferred start is in the past. Please choose today or a later date.",
+    ru: "Желаемая дата уже прошла. Выберите сегодняшнюю или более позднюю дату.",
+    uk: "Бажана дата вже минула. Оберіть сьогоднішню або пізнішу дату.",
+  };
+  return messages[lang] ?? messages.de;
+}
+
 export function ServicesStep({ request, text, lang, enqueue, onChange, missing, nav }: StepProps) {
   const wording = servicesText(lang);
   const [draft, setDraft] = useState(() => draftOf(request.service_preferences));
@@ -132,6 +143,9 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
   const fieldStyle = "[&>label]:font-mono [&>label]:text-xs [&>label]:font-medium [&>label]:text-foreground/80";
   const textareaStyle = "w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default";
 
+  // The browser's `min` only marks the field: the date was dropped with no word (QA 2026-10-31).
+  const pastStart = !staffMode && Boolean(draft.program_date_from) && draft.program_date_from < appDateKey();
+
   return (
     <StepFrame testId="lead-request-services" step="services" request={request} text={text} missing={missing} nav={nav} saveState={state}>
       {error && !locked ? <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
@@ -143,7 +157,10 @@ export function ServicesStep({ request, text, lang, enqueue, onChange, missing, 
           {/* A wished start lies ahead: no date in the past (owner 2026-10-29); staff may enter one (QA 2026-10-31). */}
           <Input key={`program_date_from-${lang}`} id="lead-request-service-program_date_from" type="date" className="h-10 bg-background"
             pickerLang={asLeadCabinetLang(lang) ?? undefined}
-            min={staffMode ? undefined : appDateKey()} value={draft.program_date_from} onChange={(event) => setDraft((current) => ({ ...current, program_date_from: event.target.value }))} />
+            min={staffMode ? undefined : appDateKey()} value={draft.program_date_from}
+            aria-invalid={pastStart || undefined} aria-describedby={pastStart ? "lead-request-service-program_date_from-error" : undefined}
+            onChange={(event) => setDraft((current) => ({ ...current, program_date_from: event.target.value }))} />
+          {pastStart ? <p id="lead-request-service-program_date_from-error" role="alert" className="text-xs text-destructive">{pastDateMessage(lang)}</p> : null}
         </LabeledField>
       </CabinetSection>
       <CabinetSection title={wording.services} accessory={<StatusChip tone={draft.services.length ? "info" : "neutral"}>{draft.services.length}</StatusChip>}>

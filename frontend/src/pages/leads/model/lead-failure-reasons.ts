@@ -66,6 +66,8 @@ export function leadLifecycleNoteLabel(
 ): string | null {
   const value = note?.trim() ?? "";
   if (!value) return null;
+  // The server's own fixed note (QA 2026-10-31).
+  if (value === "Lead converted to patient") return tx("Создан пациент", "Patient angelegt");
   if (!REASON_TRANSITIONS.has(transitionKind)) return value;
   if (value === LEAD_FAILURE_REASON_OTHER) return leadFailureReasonOtherLabel(tx);
   return leadFailureReasonLabel(value, tx);

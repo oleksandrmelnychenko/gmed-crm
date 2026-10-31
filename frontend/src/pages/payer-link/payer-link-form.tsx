@@ -439,6 +439,8 @@ function DraftForm({
   const base = requiredFields(payerType);
   const required = (field: PayerField) => {
     if (!base.has(field)) return false;
+    // The extract lifts the representative's ID, on this page too (QA 2026-10-31).
+    if (questionnaire.register_extract_on_file && String(field).startsWith("id_")) return false;
     if (field === "funds_description") return form.draft.funds_sources.includes("other");
     // The profession and the industry only with the enhanced check (owner 2026-10-24); the relationship stays required.
     if (field === "occupation") return occupationRequired(questionnaire);
@@ -548,7 +550,13 @@ function DraftForm({
       content = <DetailsStep context={context} email={questionnaire.email} />;
       break;
     case "identity":
-      content = <IdentityStep context={context} uploads={identityUploads} />;
+      content = (
+        <IdentityStep
+          context={context}
+          uploads={identityUploads}
+          extractOnFile={questionnaire.register_extract_on_file === true}
+        />
+      );
       break;
     case "owners":
       content = <OwnersStep context={context} />;

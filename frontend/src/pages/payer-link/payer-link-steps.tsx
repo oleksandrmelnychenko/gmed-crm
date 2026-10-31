@@ -289,13 +289,26 @@ export function DetailsStep({ context, email }: { context: StepContext; email: s
 // 3 Identity document
 // ---------------------------------------------------------------------------
 
-export function IdentityStep({ context, uploads }: { context: StepContext; uploads: UploadControl }) {
+export function IdentityStep({
+  context,
+  uploads,
+  extractOnFile = false,
+}: {
+  context: StepContext;
+  uploads: UploadControl;
+  /** GMED holds the organisation's register extract: nothing here is required. */
+  extractOnFile?: boolean;
+}) {
   const { text } = context;
   const organisation = isOrganisation(context.payerType);
   return (
     <div className="space-y-5" data-testid="payer-link-step-identity">
       {/* Whose document an organisation gives; a person needs no filler line (QA 2026-10-10). */}
-      {organisation ? <p className="text-sm leading-6 text-muted-foreground">{text.identityIntroOrganisation}</p> : null}
+      {organisation ? (
+        <p className="text-sm leading-6 text-muted-foreground" data-testid="payer-link-identity-intro">
+          {extractOnFile ? text.identityExtractOnFile : text.identityIntroOrganisation}
+        </p>
+      ) : null}
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field context={context} field="id_document_type">
           <ChoiceInput context={context} field="id_document_type" options={ID_DOCUMENT_TYPES} labels={text.idDocumentTypes} />
@@ -320,7 +333,7 @@ export function IdentityStep({ context, uploads }: { context: StepContext; uploa
       <UploadBlock
         id="payer-link-identity-files"
         label={text.identityFiles}
-        required
+        required={!extractOnFile}
         hint={text.uploadHint}
         buttonLabel={text.identityUploadButton}
         documents={uploads.documents}

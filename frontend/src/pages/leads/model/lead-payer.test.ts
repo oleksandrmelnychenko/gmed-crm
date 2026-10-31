@@ -4,6 +4,7 @@ import { ApiRequestError } from "@/lib/api";
 
 import {
   EMPTY_PAYER_DECLARATION_FORM,
+  payerChangeDropsConsents,
   PAYER_RELATIONSHIP_KINDS,
   PAYER_TYPES,
   costEstimateConsentLine,
@@ -933,5 +934,32 @@ describe("payer relationship of an organisation (live QA 2026-10-24)", () => {
     expect(withPayerDeclarationField(spouse, "payerType", "company").relationshipKind).toBe("");
     const employer = withPayerDeclarationField(person, "relationshipKind", "employer");
     expect(withPayerDeclarationField(employer, "payerType", "company").relationshipKind).toBe("employer");
+  });
+});
+
+describe("another payer drops the client's consents (QA 2026-10-31)", () => {
+  const stored = {
+    payer_kind: "third_party",
+    payer_type: "person",
+    first_name: "Klaus",
+    last_name: "Zahlmann",
+    date_of_birth: "1970-01-01",
+    contact_consent_at: "2026-10-30T10:00:00Z",
+  } as unknown as PayerDeclaration;
+
+  it("asks for another person or an organisation, not for an e-mail", () => {
+    const form = payerDeclarationToForm(stored);
+    expect(payerChangeDropsConsents(stored, form)).toBe(false);
+    expect(payerChangeDropsConsents(stored, { ...form, email: "neu@example.com" })).toBe(false);
+    expect(payerChangeDropsConsents(stored, { ...form, lastName: "Neu" })).toBe(true);
+    expect(payerChangeDropsConsents(stored, { ...form, kind: "self" })).toBe(true);
+    expect(payerChangeDropsConsents(stored, { ...form, payerType: "insurance" })).toBe(true);
+  });
+
+  it("does not ask while no consent is on file", () => {
+    const form = payerDeclarationToForm(stored);
+    const without = { ...stored, contact_consent_at: null } as PayerDeclaration;
+    expect(payerChangeDropsConsents(without, { ...form, lastName: "Neu" })).toBe(false);
+    expect(payerChangeDropsConsents(null, form)).toBe(false);
   });
 });

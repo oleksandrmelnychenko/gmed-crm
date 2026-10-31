@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { LeadConfirmDialog } from "@/pages/leads/ui/lead-confirm-dialog";
+import { saveLeadPayerContactConsent, saveLeadPayerCostEstimateConsent, type StaffConsentRecord } from "@/pages/patient-lead/lead-request-api";
+import { StaffConsentRecordFields } from "@/pages/patient-lead/lead-request-staff-consent";
 import { createPortal } from "react-dom";
 import {
   ArrowRight,
@@ -72,6 +75,7 @@ import {
   isOrganisationPayerForm,
   organisationDetailsFieldsShown,
   payerDeclarationPrefillForm,
+  payerChangeDropsConsents,
   payerDeclarationToForm,
   payerFormMissing,
   payerKindOptions,
@@ -329,6 +333,10 @@ export function LeadPayerDeclarationSection({
   const [evidenceName, setEvidenceName] = useState("");
   const [questionnaireView, setQuestionnaireView] = useState<{ leadId: string; path: "link" | "paper" } | null>(null);
   const [paperDocumentCount, setPaperDocumentCount] = useState<{ leadId: string; count: number } | null>(null);
+  // Another payer drops the client's consents: asked once before it is saved (QA 2026-10-31).
+  const [consentLossAsked, setConsentLossAsked] = useState(false);
+  const consentLossAccepted = useRef(false);
+  const [recordingConsents, setRecordingConsents] = useState(false);
   const loadedFor = useRef<string | null>(null);
   const formRef = useRef(form);
   const unqueuedEditRef = useRef(false);
@@ -397,6 +405,14 @@ export function LeadPayerDeclarationSection({
     // showed "Не сохранено · Повторить сохранение" right after the click
     // (live QA 2026-10-24); the form already asks to choose the parent.
     if (next.kind === "representative" && !next.representativeId) return;
+    if (!consentLossAccepted.current && payerChangeDropsConsents(data?.declaration, next)) {
+      setConsentLossAsked(true);
+      return;
+    }
+    queueSave(next);
+  };
+
+  const queueSave = (next: PayerDeclarationForm) => {
     unqueuedEditRef.current = false;
     // Capture this lead's save callback: a later lead must never receive this draft.
     const queue = autosaveRef.current;
@@ -405,6 +421,23 @@ export function LeadPayerDeclarationSection({
       // Another payer or e-mail revokes the link; a third party may make it sendable.
       if (activeLeadRef.current === leadId && autosaveRef.current === queue) void payerLink?.reload();
     });
+  };
+
+  // Both consents at once, with how the client gave them: on a sent form the
+  // client cannot answer any more, and staff saw the block with no way on.
+  const recordConsents = async (recorded: StaffConsentRecord) => {
+    setRecordingConsents(true);
+    setMessage(null);
+    try {
+      await saveLeadPayerContactConsent(leadId, recorded);
+      await saveLeadPayerCostEstimateConsent(leadId, true, recorded);
+      onPayerLinkSent?.();
+      void payerLink?.reload();
+    } catch (error) {
+      if (activeLeadRef.current === leadId) setMessage({ tone: "error", text: errorText(error) });
+    } finally {
+      setRecordingConsents(false);
+    }
   };
 
   // A minor's parent or legal representative pays, never the child (owner
@@ -1254,6 +1287,46 @@ export function LeadPayerDeclarationSection({
                 ) : null}
               </p>
             ) : null}
+            {typed && canEdit && !payingParent && !dirty
+              && data?.declaration?.payer_kind === "third_party"
+              && data.status.contact_consent_required !== false
+              && (!contactConsentAt || costEstimateConsent?.state === "missing") ? (
+                <StaffConsentRecordFields
+                  lang={lang === "de" ? "de" : "ru"}
+                  testId="lead-payer-consents"
+                  busy={recordingConsents}
+                  hint={tx(
+                    "Клиент дал согласия на контакт с плательщиком и на передачу расчёта? Укажите как: запись действует для обоих согласий.",
+                    "Hat der Kunde der Kontaktaufnahme und der Weitergabe der Kostenschätzung zugestimmt? Geben Sie an, wie: der Eintrag gilt für beide Einwilligungen.",
+                  )}
+                  onRecord={(recorded) => void recordConsents(recorded)}
+                />
+              ) : null}
+            <LeadConfirmDialog
+              open={consentLossAsked}
+              testId="lead-payer-consent-loss-dialog"
+              title={tx("Сменить плательщика?", "Zahler ändern?")}
+              description={tx(
+                "Согласия клиента на контакт с плательщиком и на передачу расчёта относятся к прежнему плательщику и будут сняты. Форма уже отправлена, поэтому новые согласия запишете вы, указав, как клиент их дал.",
+                "Die Einwilligungen des Kunden zur Kontaktaufnahme und zur Weitergabe der Kostenschätzung gelten dem bisherigen Zahler und entfallen. Ist das Formular bereits gesendet, tragen Sie die neuen Einwilligungen selbst ein und geben an, wie der Kunde sie erteilt hat.",
+              )}
+              confirmLabel={tx("Сменить", "Ändern")}
+              cancelLabel={tx("Отмена", "Abbrechen")}
+              destructive
+              onConfirm={() => {
+                consentLossAccepted.current = true;
+                setConsentLossAsked(false);
+                queueSave(formRef.current);
+              }}
+              onCancel={() => {
+                const stored = payerDeclarationToForm(data?.declaration);
+                formRef.current = stored;
+                unqueuedEditRef.current = false;
+                setForm(stored);
+                setDirty(false);
+                setConsentLossAsked(false);
+              }}
+            />
             {typed && costEstimateConsent && !payingParent ? (
               <p
                 className="flex flex-wrap items-center gap-2 text-xs leading-5 text-foreground"

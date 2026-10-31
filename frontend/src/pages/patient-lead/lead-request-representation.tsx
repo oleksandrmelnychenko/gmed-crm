@@ -1117,7 +1117,9 @@ export function RepresentationSection({
       person={representativeInSlot(representation, slot)}
       custody={minor ? draft.custody || null : null}
       fields={fieldsOf(slot)}
-      uploads={whole(slot)}
+      // A Vormund shows the appointment certificate with the identity copy, also before
+      // the document stage (QA 2026-10-31, R2-E): nothing else proves the authority.
+      uploads={whole(slot) || (minor && mode !== "base" && draft.custody === "guardian")}
       uploadsRequired={whole(slot) && !(minor && mode === "base" && representation?.document_stage === false)}
       // A parent uploads the identity document copy as soon as the person
       // exists, not only at the document stage (owner report 2026-10-19).

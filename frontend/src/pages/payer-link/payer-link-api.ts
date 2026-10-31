@@ -139,6 +139,8 @@ export type PayerQuestionnaire = {
   funds_proof_required: boolean;
   /** The enhanced check asks the source of funds (2026-10-19: only by a trigger); absent on an older server (asked). */
   funds_required?: boolean;
+  /** The organisation's register extract is on file: it replaces the representative's ID. */
+  register_extract_on_file?: boolean;
   /** The sources of funds of the payer type, in form order; absent on an older server (the persons' list). */
   funds_source_options?: string[] | null;
   missing_for_submit: string[] | null;

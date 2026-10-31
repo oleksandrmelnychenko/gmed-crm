@@ -584,6 +584,25 @@ export function payerRelationshipTextShown(
 }
 
 /** The stored declaration as form values; an empty form when none exists. */
+/**
+ * Whether this form names another payer than the stored one: the client's consents to contact the
+ * payer and to pass the cost estimate on go with the old payer (server `same_payer`), so staff are
+ * asked first (QA 2026-10-31). Organisation kinds with the same name stay the same payer.
+ */
+export function payerChangeDropsConsents(
+  declaration: PayerDeclaration | null | undefined,
+  form: PayerDeclarationForm,
+): boolean {
+  if (!declaration?.contact_consent_at && !declaration?.cost_estimate_consent_at) return false;
+  const stored = payerDeclarationToForm(declaration);
+  if (form.kind !== stored.kind) return true;
+  if (isOrganisationPayerForm(form) !== isOrganisationPayerForm(stored)) return true;
+  const fields = isOrganisationPayerForm(form)
+    ? (["organisationName"] as const)
+    : (["firstName", "lastName", "birthDate"] as const);
+  return fields.some((field) => form[field].trim() !== stored[field].trim());
+}
+
 export function payerDeclarationToForm(
   declaration: PayerDeclaration | null | undefined,
 ): PayerDeclarationForm {

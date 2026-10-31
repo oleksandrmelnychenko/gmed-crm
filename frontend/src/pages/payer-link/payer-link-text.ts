@@ -127,6 +127,7 @@ export type PayerLinkText = {
   missing: Record<MissingLabelKey, string>;
   legalTopics: Record<LegalQuestion, string>;
   identityIntroOrganisation: string;
+  identityExtractOnFile: string;
   idDocumentTypes: Record<IdDocumentType, string>;
   identityFiles: string;
   identityUploadButton: string;
@@ -383,6 +384,8 @@ const de: PayerLinkText = {
     pep_related: "Politisch exponierte nahestehende Person",
     sanctions_links: "Sanktionen",
   },
+  identityExtractOnFile:
+    "GMED liegt der Handelsregisterauszug der Organisation vor. Die Angaben zum Ausweis sind daher freiwillig; Sie können diesen Schritt überspringen.",
   identityIntroOrganisation:
     "Bitte geben Sie die Daten des Ausweisdokuments der Person an, die die Organisation vertritt, und laden Sie ein Foto oder einen Scan hoch.",
   idDocumentTypes: { passport: "Reisepass", id_card: "Personalausweis", residence_permit: "Aufenthaltstitel" },
@@ -681,6 +684,8 @@ const en: PayerLinkText = {
     pep_related: "Politically exposed close person",
     sanctions_links: "Sanctions",
   },
+  identityExtractOnFile:
+    "GMED already holds the organisation's commercial register extract. The ID details are therefore optional, and you can skip this step.",
   identityIntroOrganisation:
     "Please enter the details of the identity document of the person who represents the organisation, and upload a photo or scan of it.",
   idDocumentTypes: { passport: "Passport", id_card: "Identity card", residence_permit: "Residence permit" },
@@ -978,6 +983,8 @@ const uk: PayerLinkText = {
     pep_related: "Політично значуща близька особа",
     sanctions_links: "Санкції",
   },
+  identityExtractOnFile:
+    "GMED уже має витяг із торгового реєстру організації. Тому дані документа необов'язкові, цей крок можна пропустити.",
   identityIntroOrganisation:
     "Будь ласка, вкажіть дані документа особи, яка представляє організацію, і завантажте його фото або скан.",
   idDocumentTypes: {
@@ -1278,6 +1285,8 @@ const ru: PayerLinkText = {
     pep_related: "Политически значимое близкое лицо",
     sanctions_links: "Санкции",
   },
+  identityExtractOnFile:
+    "У GMED уже есть выписка из торгового реестра организации. Поэтому данные документа необязательны, этот шаг можно пропустить.",
   identityIntroOrganisation:
     "Пожалуйста, укажите данные документа лица, которое представляет организацию, и загрузите его фото или скан.",
   idDocumentTypes: {
