@@ -87,16 +87,34 @@ export function isInternalOverlayInteractionEvent(event: Event | undefined) {
 // document listener), and the second reading then asked "close without
 // saving?" right after the list closed (QA 2026-10-25, F-V1).
 const escapeEventsWhileListOpen = new WeakSet<Event>()
+// When an Escape last met an open list or panel, for `auxiliaryOverlayEscapedRecently`.
+// The topbar's panels are no overlay of the dialog: they say so with
+// `data-overlay-escape-panel`.
+let lastAuxiliaryEscapeAt = Number.NEGATIVE_INFINITY
 if (typeof document !== "undefined") {
   document.addEventListener(
     "keydown",
     (event) => {
-      if (event.key === "Escape" && document.querySelector(OPEN_AUXILIARY_OVERLAY_SELECTOR) !== null) {
+      if (event.key !== "Escape") return
+      if (document.querySelector(OPEN_AUXILIARY_OVERLAY_SELECTOR) !== null) {
         escapeEventsWhileListOpen.add(event)
+        lastAuxiliaryEscapeAt = Date.now()
+      } else if (document.querySelector(`${EXPANDED_CONTROL_SELECTOR}, [data-overlay-escape-panel]`) !== null) {
+        lastAuxiliaryEscapeAt = Date.now()
       }
     },
     true,
   )
+}
+
+/**
+ * Whether an Escape that met an open list, popover or panel went down just now.
+ * For a dialog that must stay under them whatever event reaches it: one key press
+ * can arrive there twice, after the list has already left the DOM (QA 2026-10-31,
+ * Escape in the specialization list and in the notifications closed the lead wizard).
+ */
+export function auxiliaryOverlayEscapedRecently(windowMs = 300) {
+  return Date.now() - lastAuxiliaryEscapeAt < windowMs
 }
 
 export function isAuxiliaryOverlayEscape(reason: string, event: Event | undefined) {

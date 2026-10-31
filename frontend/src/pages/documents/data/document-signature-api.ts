@@ -409,6 +409,9 @@ export function signatureErrorText(
       return tx("Дата подписи не может быть в будущем.", "Das Unterschriftsdatum darf nicht in der Zukunft liegen.");
     case "signature_scan_failed":
       return tx("Файл не прошёл проверку на вредоносное содержимое.", "Die Datei hat die Schadsoftware-Prüfung nicht bestanden.");
+    case "payer_gate_blocked":
+      // QA 2026-10-31 (D-11): the dialog said only «Действие не выполнено».
+      return tx("GMED подписывает последним: сначала заполните раздел «Кто платит».", "GMED unterschreibt zuletzt: Zuerst den Abschnitt „Wer zahlt“ ausfüllen.");
     case "document_already_signed":
       return tx("Документ уже подписан.", "Das Dokument ist bereits unterschrieben.");
     case "document_superseded":

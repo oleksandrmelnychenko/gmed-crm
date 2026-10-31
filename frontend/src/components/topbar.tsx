@@ -647,21 +647,25 @@ export function Topbar() {
 
       {/* Notification panel */}
         {notifOpen && !notificationsLocked && (
+        <div data-overlay-escape-panel="" className="contents">
         <NotificationPanel
           onClose={() => setNotifOpen(false)}
           onUnreadChange={setUnread}
           staffRole={user?.role ?? ""}
           staffCapabilities={user?.capabilities ?? null}
         />
+        </div>
       )}
 
       {/* Users panel */}
       {usersOpen && (
+        <div data-overlay-escape-panel="" className="contents">
         <UsersPanel
           users={onlineUsersWithSelf}
           currentUserId={user?.id}
           onClose={() => setUsersOpen(false)}
         />
+        </div>
       )}
     </>
   );

@@ -182,7 +182,7 @@ import { useLeadIdentificationStatus } from "../model/use-lead-identification-st
 import { removeLeadRepresentativeData, removeLeadTrustedContact, updateLeadRepresentativeDetails, type RepresentativeDetails } from "../data/lead-representation-api";
 import { EMPTY_REPRESENTATIVE_DETAILS, fillEmptyRepresentativeDetails, guardianCandidateDetails, pendingRepresentativeDetailsReady, representativeDetailsChanged, representativeDetailsErrors } from "../model/lead-representative-details";
 import { LeadConfirmDialog } from "./lead-confirm-dialog";
-import { CONFIRMED_DISMISS_REASON } from "@/components/ui/dismissal-guard";
+import { CONFIRMED_DISMISS_REASON, auxiliaryOverlayEscapedRecently } from "@/components/ui/dismissal-guard";
 import { staffRecordedLabel } from "../model/lead-portal-consents";
 import { LeadCustodySelect } from "./lead-custody-select";
 import { LeadGwgSheetActions, gwgSheetBusyKey } from "./lead-gwg-sheet-actions";
@@ -202,7 +202,7 @@ import { toast } from "@/components/ui/toast";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatMoneyLabel, formatMoneyRange, moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
-import { appDateKey, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput, parseDateKey } from "@/lib/app-time-zone";
+import { appDateKey, appDateKeyOf, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput, parseDateKey } from "@/lib/app-time-zone";
 import { isValidEmailAddress } from "@/lib/contact-validation";
 import { PERSON_CITY_MAX, PERSON_NAME_MAX, isValidPersonPhone, oneLine, personPhoneAcceptable } from "@/lib/person-fields";
 import { EmailDomainWarning, emailDomainWarningText, knownNoMailEmailError } from "@/components/email-domain-warning";
@@ -386,6 +386,12 @@ import { CabinetPersonActions, CabinetPersonDetails, CabinetPersonRow, CabinetRe
 import { cabinetPeople, consentFormRecipients, mergeLeadPeople, personNameKey, type CabinetPerson } from "../model/lead-people";
 import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { LeadIdentityDocumentData } from "./lead-identity-document-data";
+import {
+  identityDocumentDraft,
+  identityDocumentFieldErrors,
+  identityDocumentStatus,
+  identityDocumentStatusText,
+} from "../model/lead-identity-document-data";
 import { LeadRepresentativeDetailsForm, PendingRepresentativeDetailsForm } from "./lead-representative-details";
 import { LeadRepresentativeUploads, representativeFileOrigin } from "./lead-representative-uploads";
 import { LeadPatientConcern } from "./lead-patient-concern";
@@ -2264,6 +2270,9 @@ function costEstimateTotalRange(
 
 
 function validLine(line: ServiceLine): boolean {
+  // An outlays line opened and left empty is no position: it printed «Voraussichtliche
+  // Auslagen 0,00 €» in the order terms (QA 2026-10-31).
+  if (isEstimatedOutlaysLine(line) && money(line.price) <= 0) return false;
   return line.description.trim().length > 0 && money(line.quantity) > 0 && money(line.price) >= 0 && money(line.vat) >= 0 && money(line.vat) <= 100;
 }
 
@@ -2272,7 +2281,8 @@ export function calculateServiceLineEstimate(serviceLines: ServiceLine[]) {
   let net = 0;
   let vat = 0;
   let gross = 0;
-  serviceLines.filter(validLine).forEach((line) => {
+  // «1.500» is no amount yet: it is refused at the save and never counts as 1,50 (QA 2026-10-31).
+  serviceLines.filter((line) => validLine(line) && validMoneyInput(String(line.price ?? ""))).forEach((line) => {
     const amounts = moneyLineAmounts(
       money(line.quantity),
       money(line.price),
@@ -2359,9 +2369,32 @@ function validMoneyInput(value: string) {
   return !trimmed || /^\d+(?:[.,]\d{1,2})?$/u.test(trimmed);
 }
 
+/** The refusal of an amount with a thousands separator, the same for every amount field. */
+function unreadableAmountText(value: string, tx: Tx) {
+  return tx(
+    `Сумма «${value}» указана неверно: введите её без разделителя тысяч, например 1234,56`,
+    `Der Betrag „${value}“ ist ungültig: ohne Tausendertrennzeichen eingeben, z. B. 1234,56`,
+  );
+}
+
 /** The `datetime-local` value of a deadline, in Berlin time. */
 function localDeadline(value: string | null | undefined) {
   return isoToBerlinLocalInput(value);
+}
+
+/** Whether the wizard's positions are not the ones the order holds; no order positions known: no. */
+export function orderLinesDifferFromOrder(lines: ServiceLine[], orderLeistungen: Leistung[] | undefined) {
+  if (orderLeistungen === undefined) return false;
+  const signature = (line: ServiceLine) => quoteLineSignature(
+    line.description,
+    line.quantity,
+    line.price,
+    line.isCostPassthrough ? 0 : line.vat,
+    line.isCostPassthrough,
+  );
+  const stored = orderLeistungen.map(lineFromOrderLeistung).filter(validLine).map(signature).sort();
+  const current = lines.filter(validLine).map(signature).sort();
+  return stored.length !== current.length || stored.some((line, index) => line !== current[index]);
 }
 
 function lineFromOrderLeistung(item: Leistung): ServiceLine {
@@ -3276,6 +3309,7 @@ function WizardDocumentRows({
   onDelete,
   onChanged,
   documentNote,
+  signBlockedReason = null,
 }: {
   documents: DocumentItem[];
   complianceKind?: DocumentComplianceKind;
@@ -3292,6 +3326,8 @@ function WizardDocumentRows({
   onChanged?: () => void;
   /** A short note in the metadata line, e.g. who uploaded a representative's file. */
   documentNote?: (document: DocumentItem) => ReactNode;
+  /** Why these documents cannot be signed or confirmed now (the button is off, the reason shows at the row). */
+  signBlockedReason?: string | null;
 }) {
   const signatureJump = useContext(WizardSignatureJumpContext);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -3357,7 +3393,7 @@ function WizardDocumentRows({
                 documentId={document.id}
                 title={wizardDocumentFilename(document)}
                 lang={lang}
-                disabled={disabled}
+                disabled={disabled || Boolean(signBlockedReason)}
                 errorText={(error) => wizardSignatureErrorText(error, tx)}
                 errorAction={signatureJump ?? undefined}
                 onDone={() => {
@@ -3371,7 +3407,8 @@ function WizardDocumentRows({
                 variant="default"
                 size="xs"
                 aria-busy={busy === `sign-${document.id}`}
-                disabled={disabled}
+                disabled={disabled || Boolean(signBlockedReason)}
+                title={signBlockedReason ?? undefined}
                 onClick={() => onSign(document, complianceKind)}
               >
                 {busy === `sign-${document.id}` ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <FileCheck2 aria-hidden="true" className="size-3.5" />}
@@ -3397,6 +3434,11 @@ function WizardDocumentRows({
               })}
             />
           ) : null}
+          {!archived && !putAside && !signed && !document.signed_at && signBlockedReason ? (
+            <p className="mt-1 text-xs text-amber-800 dark:text-amber-300" data-testid={`lead-document-sign-blocked-${document.id}`}>
+              {signBlockedReason}
+            </p>
+          ) : null}
           {!archived ? <WizardDocumentRowError documentId={document.id} /> : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -3405,7 +3447,7 @@ function WizardDocumentRows({
               documentId={document.id}
               title={wizardDocumentFilename(document)}
               iconOnly
-              disabled={disabled}
+              disabled={disabled || Boolean(signBlockedReason)}
               signed={signed}
               onDone={() => {
                 setProtectedDocumentIds((current) => {
@@ -3671,6 +3713,8 @@ export function LeadWizard({
   const [medicalLookupsLoading, setMedicalLookupsLoading] = useState(false);
   const [commercialLookupsLoading, setCommercialLookupsLoading] = useState(false);
   const [lines, setLines] = useState<ServiceLine[]>([]);
+  /** The positions as the order holds them, for what `lines` changed since (undefined: not read). */
+  const [persistedOrderLeistungen, setPersistedOrderLeistungen] = useState<Leistung[] | undefined>(undefined);
   const [prepayment, setPrepayment] = useState(false);
   const [signedPatient, setSignedPatient] = useState(false);
   const [signedAgency, setSignedAgency] = useState(false);
@@ -4435,6 +4479,7 @@ export function LeadWizard({
       }
       if (hydrateDraft || hydrateCommercial) {
         setLines(nextLines);
+        setPersistedOrderLeistungen(nextOrderDetail?.leistungen);
         if (commercialVersions.prepayment_required === commercialFlagRequestVersionRef.current.prepayment_required) setPrepayment(nextPrepayment);
         if (commercialVersions.prepayment_amount === commercialFlagRequestVersionRef.current.prepayment_amount) setPrepaymentAmount(nextPrepaymentAmount);
         if (commercialVersions.prepayment_due_at === commercialFlagRequestVersionRef.current.prepayment_due_at) setPrepaymentDeadline(localDeadline(nextOrder?.prepayment_due_at));
@@ -4627,7 +4672,9 @@ export function LeadWizard({
     [canEditClientForm, openClientForm, tx],
   );
   const reloadIdentification = identification.reload;
+  const clientFormClosedAtRef = useRef(0);
   const closeClientForm = useCallback(() => {
+    clientFormClosedAtRef.current = Date.now();
     setClientForm((current) => ({ ...current, open: false }));
     // What staff entered shows in the wizard's read-only blocks and its untouched fields.
     void reloadStep1PortalState();
@@ -5394,6 +5441,10 @@ export function LeadWizard({
   const visibleOrderErrors = orderValidationAttempted ? orderIssues : [];
   const orderFieldError = (...keys: string[]) =>
     visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
+  // An end before the start is said at once and stays in the field: with `min` the
+  // picker dropped it without a word (QA 2026-10-31).
+  const programEndError = orderFieldError("program-date-to", "program-date-range")
+    ?? orderIssues.find((issue) => issue.key === "program-date-range")?.message;
   const autosaveSnapshot = useMemo<AutosaveSnapshot | null>(
     () => draft ? { draft, lines, paidAmount, prepayment, prepaymentAmount, step } : null,
     [draft, lines, paidAmount, prepayment, prepaymentAmount, step],
@@ -7212,10 +7263,7 @@ ${serviceCommentLines.join("\n")}`
     // An amount like «1.500» or «1.234,56» is no number the order can take: it would be saved as 1,50 or 0.
     const unreadablePrice = lines.find((line) => validLine(line) && !validMoneyInput(String(line.price ?? "")));
     if (unreadablePrice) {
-      throw new Error(tx(
-        `Сумма «${unreadablePrice.price}» указана неверно: введите её без разделителя тысяч, например 1234,56`,
-        `Der Betrag „${unreadablePrice.price}“ ist ungültig: ohne Tausendertrennzeichen eingeben, z. B. 1234,56`,
-      ));
+      throw new Error(unreadableAmountText(unreadablePrice.price, tx));
     }
     if (!(await save("commercial", false, draftOverride))) throw new Error(tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"));
     if (draft.frameworkContractId && !contract) throw new Error(tx("Выбранный договор недоступен. Обновите проверку документов.", "Der gewählte Vertrag ist nicht verfügbar. Aktualisieren Sie die Dokumentenprüfung."));
@@ -7318,6 +7366,7 @@ ${serviceCommentLines.join("\n")}`
           confirmSignatureReset,
         );
         const persistedOrder = await fetchOrder(targetOrderId);
+        setPersistedOrderLeistungen(persistedOrder.leistungen);
         persistedServiceLines = withEstimatedOutlaysLast(
           persistedOrder.leistungen.map(lineFromOrderLeistung).filter(validLine),
         );
@@ -7358,7 +7407,18 @@ ${serviceCommentLines.join("\n")}`
             : null,
         ),
         resolve,
-      })),
+      })).then((confirmed) => {
+        // «Отмена» keeps the signed period: the field and the stored draft go back
+        // to it, autosave follows (QA 2026-10-31).
+        if (!confirmed && order) {
+          setDraft((current) => current && {
+            ...current,
+            programDateFrom: appDateKeyOf(order.date_from),
+            programDateTo: appDateKeyOf(order.date_to),
+          });
+        }
+        return confirmed;
+      }),
     );
     return { contractId, orderId, serviceLines: persistedServiceLines };
   }
@@ -7539,7 +7599,7 @@ ${serviceCommentLines.join("\n")}`
       )
     ) {
       setError("");
-      setCommercialQuoteError(tx(
+      setCommercialQuoteError(!validMoneyInput(prepaymentAmount) ? unreadableAmountText(prepaymentAmount.trim(), tx) : tx(
         "Укажите необходимую предоплату больше нуля и не больше суммы сметы",
         "Geben Sie eine erforderliche Vorauszahlung größer als null und nicht höher als den Kostenvoranschlag an",
       ));
@@ -7645,10 +7705,12 @@ ${serviceCommentLines.join("\n")}`
       setError("");
       setCommercialDocumentErrors((current) => ({
         ...current,
-        [templateId]: tx(
-          "Укажите необходимую предоплату больше нуля и не больше суммы сметы",
-          "Geben Sie eine erforderliche Vorauszahlung größer als null und nicht höher als den Kostenvoranschlag an",
-        ),
+        [templateId]: normalizedPrepaymentAmount && !validMoneyInput(normalizedPrepaymentAmount)
+          ? unreadableAmountText(normalizedPrepaymentAmount, tx)
+          : tx(
+              "Укажите необходимую предоплату больше нуля и не больше суммы сметы",
+              "Geben Sie eine erforderliche Vorauszahlung größer als null und nicht höher als den Kostenvoranschlag an",
+            ),
       }));
       return;
     }
@@ -8193,6 +8255,10 @@ ${serviceCommentLines.join("\n")}`
   // or with the next commercial action; until then it is not saved.
   const prepaymentDeadlineUnsaved = Boolean(order)
     && prepaymentDueAtPatch(prepayment, prepaymentDeadline, order?.prepayment_due_at) !== undefined;
+  // The positions live on the order: the wizard's own copy is only a draft
+  // until «Сохранить договор и заказ», and the order wins on reopening
+  // (QA 2026-10-31, D-02: an added line vanished under «Данные сохранены»).
+  const orderLinesUnsaved = !leadConverted && Boolean(order) && orderLinesDifferFromOrder(lines, persistedOrderLeistungen);
   // The table above checks the patient card; step 4 is closed only by this
   // request's own consents and documents, which are never inherited. These rows
   // show the same things the server checks, so a green table means a done step.
@@ -8426,7 +8492,17 @@ ${serviceCommentLines.join("\n")}`
   // (`terms_current`, documents.rs); a readiness check of the same name is
   // honoured too should one appear. A stale PDF cannot be signed on paper
   // (409 order_document_outdated / estimate_document_outdated).
+  // QA 2026-10-31 (D-02): the document would be signed without the added line.
+  const orderLinesUnsavedText = orderLinesUnsaved
+    ? tx(
+        "Позиции заказа изменены и ещё не сохранены: нажмите «Сохранить договор и заказ» и создайте новую версию документа",
+        "Auftragspositionen geändert und noch nicht gespeichert: „Vertrag und Auftrag speichern“ klicken und eine neue Dokumentversion erstellen",
+      )
+    : null;
   const paperSignatureBlocker = (document: Pick<DocumentItem, "generated_template_id" | "terms_current">): string | null => {
+    if (orderLinesUnsavedText && ["single_order", "order_cost_estimate"].includes(document.generated_template_id ?? "")) {
+      return orderLinesUnsavedText;
+    }
     const checks = lead?.readiness.checks ?? [];
     const failing = (key: string) => document.terms_current === false
       || checks.some((check) => check.key === key && !check.passed);
@@ -8447,6 +8523,21 @@ ${serviceCommentLines.join("\n")}`
   const saveInProgress = isBusy || autosaveStatus === "saving";
   // A create-mode form with typed data and no lead yet: closing it loses that data.
   const createModeUnsaved = createMode && !leadId && !saveInProgress && autosaveIsDirty;
+  // QA 2026-10-31: a document confirmed with empty fields counted as identified.
+  // Unknown data (still loading, or a role that may not read them) leave the
+  // decision to the server.
+  const identityConfirmBlocked = (() => {
+    const intake = step1Portal.intake;
+    if (!draft || !intake || intake.identification_hidden || !intake.identification) return null;
+    const today = appDateKey();
+    const document = identityDocumentDraft(intake.identification, draft.passportExpiry);
+    const status = identityDocumentStatus(document, {
+      today,
+      scans: null,
+      errors: identityDocumentFieldErrors(document, { today, birthDate: draft.birthDate || null }),
+    });
+    return status.kind === "complete" ? null : identityDocumentStatusText(status, tx);
+  })();
   // «Данные заполнены из записи …» belongs to the creating session; the PEP
   // hint stays until the person answers the PEP question (QA 2026-10-25).
   const sessionPrefill = prefilledFromSource && prefilledFromSource.leadId === (leadId ?? createdLeadId)
@@ -8619,7 +8710,9 @@ ${serviceCommentLines.join("\n")}`
         // before discarding — and a new lead not created yet, whose typed data
         // nothing can save on close (QA 2026-10-25, F-W1/F-G8: Escape or a click
         // outside lost the whole form without a question).
-        dirty={(!saveInProgress && autosaveStatus === "error") || createModeUnsaved}
+        // Also positions added to the order and not saved: closing loses them (D-02).
+        // Not while the client form lies over the wizard: its Escape asks nothing here.
+        dirty={!clientForm.open && ((!saveInProgress && autosaveStatus === "error") || createModeUnsaved || orderLinesUnsaved)}
         onOpenChange={(nextOpen, details) => {
           // Escape over a document preview closes the preview only, never the
           // whole wizard (QA 2026-10-30: one Escape closed both).
@@ -8630,6 +8723,19 @@ ${serviceCommentLines.join("\n")}`
           ) {
             details.cancel();
             if (documentPreview) replaceDocumentPreview(null);
+            return;
+          }
+          // The client form, a list or a popover over the wizard: the key is theirs
+          // (QA 2026-10-31: Escape in the form closed both, the form is a sibling
+          // dialog and the wizard hears the same key).
+          if (
+            !nextOpen
+            && details.reason === "escape-key"
+            && (clientForm.open
+              || Date.now() - clientFormClosedAtRef.current < 500
+              || auxiliaryOverlayEscapedRecently())
+          ) {
+            details.cancel();
             return;
           }
           if (!nextOpen && saveInProgress) {
@@ -9850,17 +9956,16 @@ ${serviceCommentLines.join("\n")}`
                   <Field
                     label={tx("Окончание программы", "Programmende")}
                     required={Boolean(draft.programDateFrom)}
-                    error={orderFieldError("program-date-to", "program-date-range")}
+                    error={programEndError}
                     errorId={`${ORDER_DATE_TO_ID}-error`}
                   >
                     <Input
                       id={ORDER_DATE_TO_ID}
                       name="program_date_to"
                       type="date"
-                      min={draft.programDateFrom || undefined}
                       required={Boolean(draft.programDateFrom)}
-                      aria-invalid={Boolean(orderFieldError("program-date-to", "program-date-range"))}
-                      aria-describedby={orderFieldError("program-date-to", "program-date-range") ? `${ORDER_DATE_TO_ID}-error` : undefined}
+                      aria-invalid={Boolean(programEndError)}
+                      aria-describedby={programEndError ? `${ORDER_DATE_TO_ID}-error` : undefined}
                       className={inputClass}
                       value={draft.programDateTo}
                       onChange={(event) => patch("programDateTo", event.target.value)}
@@ -10570,6 +10675,7 @@ ${serviceCommentLines.join("\n")}`
                       onSign={(document, kind) => void signDocument(document.id, kind)}
                       onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                       onChanged={() => { void refreshDocumentsState(); }}
+                      signBlockedReason={identityConfirmBlocked}
                     />
                   );
                   if (!leadId) return patientScans;
@@ -11240,6 +11346,7 @@ ${serviceCommentLines.join("\n")}`
                 ) : null}
                 <WizardDocumentRows
                   documents={commercialDocuments.single_order}
+                  signBlockedReason={orderLinesUnsavedText}
                   emptyLabel=""
                   lang={lang}
                   busy={busy}
@@ -11697,7 +11804,7 @@ ${serviceCommentLines.join("\n")}`
                       <StatusChip tone={prepayment && validMoneyInput(prepaymentAmount.trim()) && toCents(money(prepaymentAmount)) > toCents(estimate.gross) ? "error" : "warning"}>
                         <ReceiptText aria-hidden="true" />{tx("Предоплата", "Vorauszahlung")}: <span className="font-mono font-semibold tabular-nums">{prepayment
                           ? prepaymentAmount.trim()
-                            ? formatMoneyLabel(money(prepaymentAmount))
+                            ? validMoneyInput(prepaymentAmount) ? formatMoneyLabel(money(prepaymentAmount)) : tx("сумма указана неверно", "Betrag ungültig")
                             : tx("сумма не указана", "Betrag fehlt")
                           : tx("не требуется", "nicht erforderlich")}</span>
                       </StatusChip>
@@ -11725,6 +11832,7 @@ ${serviceCommentLines.join("\n")}`
                 ) : null}
                 <WizardDocumentRows
                   documents={commercialDocuments.order_cost_estimate}
+                  signBlockedReason={orderLinesUnsavedText}
                   emptyLabel=""
                   lang={lang}
                   busy={busy}
@@ -11992,6 +12100,7 @@ ${serviceCommentLines.join("\n")}`
                   : autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount + commercialFlagsBackgroundCount > 0 ? (
                     <><LoaderCircle aria-hidden="true" className="size-3 animate-spin" />{tx("Сохранение…", "Wird gespeichert…")}</>
                   ) : !leadId ? tx("Обращение создастся при переходе далее", "Der Lead wird beim Weitergehen angelegt")
+                  : orderLinesUnsaved ? <span data-testid="lead-order-lines-unsaved">{tx("Позиции заказа не сохранены", "Auftragspositionen nicht gespeichert")}</span>
                   : autosaveStatus === "dirty" || prepaymentDeadlineUnsaved ? tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")
                     : autosaveStatus === "saved" ? (
                       <><Check aria-hidden="true" className="size-3 text-emerald-700" />{tx("Данные сохранены", "Daten gespeichert")}</>
@@ -13125,7 +13234,8 @@ ${serviceCommentLines.join("\n")}`
                 <Button
                   type="button"
                   size="sm"
-                  disabled={isBusy}
+                  disabled={isBusy || (previewComplianceKind === "identity" && Boolean(identityConfirmBlocked))}
+                  title={previewComplianceKind === "identity" ? identityConfirmBlocked ?? undefined : undefined}
                   aria-busy={busy === `sign-${previewedDocument.id}`}
                   onClick={() => {
                     if (previewComplianceKind === "framework_contract") void signContract(previewedDocument.id, true);
