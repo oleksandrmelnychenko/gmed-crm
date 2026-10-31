@@ -15127,6 +15127,26 @@ mod patient_invoice_redaction_tests {
 }
 
 #[cfg(test)]
+mod ledger_year_tests {
+    use super::{AccountingLedgerQuery, accounting_ledger_year};
+    use chrono::Datelike;
+
+    #[test]
+    fn the_default_ledger_year_is_the_berlin_year() {
+        let query = |year| AccountingLedgerQuery {
+            currency: None,
+            year,
+            patient_id: None,
+        };
+        assert_eq!(accounting_ledger_year(&query(Some(2024))), 2024);
+        assert_eq!(
+            accounting_ledger_year(&query(None)),
+            crate::app_time::today().year()
+        );
+    }
+}
+
+#[cfg(test)]
 mod invoice_pdf_money_tests {
     use super::{format_invoice_pdf_deduction, format_invoice_pdf_money};
 
