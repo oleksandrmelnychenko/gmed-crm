@@ -1117,6 +1117,9 @@ struct GeneratedCostCoverageContext {
     contract_date: Option<NaiveDate>,
     quote_number: Option<String>,
     line_items: Vec<GeneratedContractLineItem>,
+    /// The agency service catalogue: section 5 prints the lines by service
+    /// type ([`payer_estimate_rows`]).
+    service_catalog: Vec<(String, String)>,
     total_net: Option<String>,
     total_vat: Option<String>,
     total_gross: Option<String>,
@@ -18601,6 +18604,10 @@ async fn generate_document(
                         .filter(|value| !value.trim().is_empty())
                 })
                 .unwrap_or_default();
+            let service_catalog = match load_payer_estimate_catalog(&state).await {
+                Ok(value) => value,
+                Err(response) => return response,
+            };
             let context = GeneratedCostCoverageContext {
                 language: language.to_string(),
                 auto_name: auto_name.clone(),
@@ -18629,6 +18636,7 @@ async fn generate_document(
                             .filter(|value| !value.trim().is_empty())
                     }),
                 line_items,
+                service_catalog,
                 total_net: if uses_quote_lines {
                     quote.as_ref().and_then(|q| q.total_net.clone())
                 } else {
@@ -22549,6 +22557,22 @@ fn mixed_contract_vat_note(items: &[&GeneratedContractLineItem]) -> Option<Strin
     ))
 }
 
+/// The VAT sentence of the payer's documents when the listed services do not
+/// all carry one rate: the service names and the reason of a 0 % line
+/// ("Steuerfreie Heilbehandlung") stay out of what the payer reads.
+const PAYER_MIXED_VAT_SENTENCE: &str = "Die Umsatzsteuer richtet sich nach dem für die jeweilige Leistungsart geltenden Steuersatz; durchlaufende Posten sind nicht umsatzsteuerbar.";
+
+/// [`contract_vat_note`] for a document the payer reads.
+fn payer_vat_note(items: &[&GeneratedContractLineItem]) -> String {
+    match contract_vat_groups(items).as_slice() {
+        [(ContractLineVat::Taxed(rate), _)] => format!(
+            "Alle angegebenen Preise zzgl. MwSt. {} %.",
+            fmt_vat_rate(*rate)
+        ),
+        _ => PAYER_MIXED_VAT_SENTENCE.to_string(),
+    }
+}
+
 /// VAT note under a contract price table (prices are net): "Alle angegebenen
 /// Preise zzgl. MwSt. 19 %." when every service carries that rate, the
 /// per-service rates of `mixed_contract_vat_note` otherwise.
@@ -22696,13 +22720,13 @@ fn build_cost_coverage_pdf(
         0.0,
         1.5,
     );
+    // The patient's consent covers service types and amounts only (owner
+    // decision 2026-10-06, QA 2026-10-31): the client's line texts, notes and
+    // quantities never reach the payer, here as in the payer's copy of the
+    // estimate.
     let estimated_outlays = estimated_outlays_total(&context.line_items);
-    let service_items = context
-        .line_items
-        .iter()
-        .filter(|item| estimated_outlays.is_none() || !is_estimated_outlays_item(item))
-        .collect::<Vec<_>>();
-    if service_items.is_empty() {
+    let service_rows = payer_estimate_rows(&context.line_items, &context.service_catalog);
+    if service_rows.is_empty() {
         admin_block(
             &mut layout,
             translated_label(&context.language, "no_services"),
@@ -22710,76 +22734,31 @@ fn build_cost_coverage_pdf(
             1.0,
         );
     } else {
-        // Column header row (Leistungen / Honorar* / Anmerkung).
-        layout.text_block(
-            "Leistungen — Honorar* — Anmerkung",
-            10.0,
-            true,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            1.0,
-        );
-        for item in &service_items {
-            // Description (Leistungen).
-            layout.text_block(
-                &format!("•  {}", item.description.trim()),
-                11.0,
-                true,
-                4.0,
-                TreatmentPlanPdfColor::Body,
-                0.5,
-                0.3,
+        const TYPE_WIDTH_MM: f32 = 134.0;
+        const TOTAL_WIDTH_MM: f32 = 40.0;
+        layout.table_header_row(&[
+            ("Leistungsart", TYPE_WIDTH_MM, PdfCellAlign::Left),
+            ("Summe*", TOTAL_WIDTH_MM, PdfCellAlign::Right),
+        ]);
+        for (label, amount) in service_rows {
+            let amount = format_eur_decimal(amount);
+            layout.table_row_aligned_middle(
+                &[
+                    (label, TYPE_WIDTH_MM, PdfCellAlign::Left),
+                    (amount.as_str(), TOTAL_WIDTH_MM, PdfCellAlign::Right),
+                ],
+                false,
+                false,
             );
-            // Honorar* — quantity (Aufwand) — Summe.
-            let mut figures: Vec<String> = Vec::new();
-            if let Some(honorar) = cost_coverage_money_cell(&item.unit_price) {
-                figures.push(format!("Honorar: {honorar}"));
-            }
-            if let Some(quantity) = item
-                .quantity
-                .trim()
-                .is_empty()
-                .then_some(())
-                .map_or_else(|| Some(item.quantity.trim().to_string()), |_| None)
-            {
-                figures.push(format!("Aufwand: {quantity}"));
-            }
-            if let Some(summe) = cost_coverage_money_cell(&item.line_gross) {
-                figures.push(format!("Summe: {summe}"));
-            }
-            if !figures.is_empty() {
-                layout.text_block(
-                    &figures.join("   ·   "),
-                    11.0,
-                    false,
-                    8.0,
-                    TreatmentPlanPdfColor::Primary,
-                    0.0,
-                    0.3,
-                );
-            }
-            // Anmerkung.
-            if let Some(note) = item
-                .notes
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-            {
-                layout.text_block(
-                    note,
-                    10.0,
-                    false,
-                    8.0,
-                    TreatmentPlanPdfColor::Muted,
-                    0.0,
-                    0.6,
-                );
-            }
         }
+        let listed = context
+            .line_items
+            .iter()
+            .filter(|item| !is_estimated_outlays_item(item))
+            .collect::<Vec<_>>();
         admin_block(
             &mut layout,
-            &format!("*{}", contract_vat_note(&service_items)),
+            &format!("*{}", payer_vat_note(&listed)),
             4.5,
             2.0,
         );
@@ -26183,12 +26162,7 @@ fn build_payer_cost_estimate_pdf_with_terms(
         .filter(|item| !is_estimated_outlays_item(item))
         .collect::<Vec<_>>();
     if contract_vat_groups(&listed).len() > 1 {
-        admin_block(
-            &mut layout,
-            "Die Umsatzsteuer richtet sich nach dem für die jeweilige Leistungsart geltenden Steuersatz; durchlaufende Posten sind nicht umsatzsteuerbar.",
-            2.0,
-            0.0,
-        );
+        admin_block(&mut layout, PAYER_MIXED_VAT_SENTENCE, 2.0, 0.0);
     }
     let bank_lines = [
         ("Kontoinhaber", context.agency.bank_holder.as_deref()),
@@ -44254,6 +44228,10 @@ mod tests {
             contract_date: NaiveDate::from_ymd_opt(2026, 9, 28),
             quote_number: Some("KV-2026-0010".to_string()),
             line_items: lines,
+            service_catalog: vec![(
+                "interpreter".to_string(),
+                "interpreter_hours".to_string(),
+            )],
             total_net: Some("2.870,00 €".to_string()),
             total_vat: Some("212,80 €".to_string()),
             total_gross: Some("3.082,80 €".to_string()),
@@ -44267,9 +44245,33 @@ mod tests {
         let coverage_text = normalized_pdf_text(
             &super::build_cost_coverage_pdf(&coverage, "DOC-VAT-COVERAGE").unwrap(),
         );
-        assert!(coverage_text.contains(&format!("*{MIXED_VAT_NOTE}.")));
+        assert!(
+            coverage_text.contains(&format!("*{}", super::PAYER_MIXED_VAT_SENTENCE)),
+            "{coverage_text}"
+        );
         assert!(!coverage_text.contains("zzgl. MwSt. 19 %"));
         assert!(coverage_text.contains("MWSt. 19%: 212,80 €"));
+        // Section 5 lists service types and amounts, the annex the totals; the
+        // client's lines, their quantities and the reason of a 0 % line stay
+        // out of the payer's declaration (QA 2026-10-31).
+        for expected in [
+            "LEISTUNGSART",
+            "Leistungen",
+            "910,00 €",
+            "Dolmetscher- und Übersetzungsleistungen",
+            "760,00 €",
+        ] {
+            assert!(coverage_text.contains(expected), "{expected}: {coverage_text}");
+        }
+        for word in [
+            "Organisation der Behandlung",
+            "Airport transfer",
+            "Heilbehandlung",
+            "Aufwand",
+            "Honorar",
+        ] {
+            assert!(!coverage_text.contains(word), "{word}: {coverage_text}");
+        }
         // The payer never receives the medical cost calculation (owner
         // 2026-10-06, 2026-10-23): the annexes are the payer's copy of the
         // estimate and the single order; "Kostenträger" names insurers only.
@@ -44314,6 +44316,33 @@ mod tests {
         );
         assert!(blank_text.contains("Anschrift: ____"), "{blank_text}");
         assert_signature_frames_detected(&blank_pdf);
+
+        // One taxed rate keeps the plain note, without a service's name.
+        let single_rate = super::GeneratedCostCoverageContext {
+            line_items: vec![{
+                let mut line = priced_line(
+                    "Begleitung zur Herzkatheteruntersuchung",
+                    "1",
+                    "300,00 €",
+                    "300,00 €",
+                    "19",
+                );
+                line.notes = Some("Termin bei Dr. Beispiel".to_string());
+                line
+            }],
+            ..blank
+        };
+        let single_text = normalized_pdf_text(
+            &super::build_cost_coverage_pdf(&single_rate, "DOC-VAT-COVERAGE").unwrap(),
+        );
+        assert!(
+            single_text.contains("*Alle angegebenen Preise zzgl. MwSt. 19 %."),
+            "{single_text}"
+        );
+        assert!(single_text.contains("300,00 €"), "{single_text}");
+        for word in ["Herzkatheter", "Dr. Beispiel"] {
+            assert!(!single_text.contains(word), "{word}: {single_text}");
+        }
     }
 
     #[test]
