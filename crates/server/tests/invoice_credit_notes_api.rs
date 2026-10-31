@@ -1480,3 +1480,78 @@ async fn line_credit_notes_follow_line_vat_split_cash_accounting_and_print_a_doc
             .contains("sum of its credited lines")
     );
 }
+
+/// QA 2026-10-31: hidden amounts stay hidden on the cancellation document.
+#[tokio::test]
+async fn hidden_amounts_stay_hidden_on_the_cancellation_document_in_the_portal() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = format!("storno-hidden-{}", Uuid::new_v4().simple());
+    let (patient_id, invoice_id) = seed_finance_case(&ctx.pool, ctx.admin_id, &tag).await;
+    let patient_user_id = seed_user(&ctx.pool, &tag, "patient").await;
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(patient_user_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let ceo = auth_header(ctx.admin_id, "ceo");
+    let patient = auth_header(patient_user_id, "patient");
+    let (status, cancelled) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &ceo,
+        Some(json!({ "status": "cancelled", "reason": "Behandlung abgesagt" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled:?}");
+
+    let (status, visible) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{visible:?}");
+    assert_eq!(visible["storno_document"]["amount_gross"], "-100");
+
+    sqlx::query("UPDATE invoices SET hide_amounts_from_patient = true WHERE id = $1")
+        .bind(invoice_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (status, hidden) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{hidden:?}");
+    let storno = &hidden["storno_document"];
+    assert!(storno["document_number"].is_string(), "{storno:?}");
+    for key in ["amount_net", "amount_vat", "amount_gross"] {
+        assert!(storno[key].is_null(), "{key}: {storno:?}");
+    }
+    assert_eq!(storno["vat_breakdown"], json!([]));
+
+    // Staff keep the figures.
+    let (status, staff) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{staff:?}");
+    assert_eq!(staff["storno_document"]["amount_gross"], "-100");
+}

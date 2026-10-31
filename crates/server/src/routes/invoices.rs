@@ -1046,6 +1046,16 @@ fn redact_patient_invoice_payload(invoice: &mut Value) {
         }
         // Each credited advance carries its amount.
         map.insert("prepayment_allocations".to_string(), serde_json::json!([]));
+        // The cancellation document repeats the invoice's amounts (QA 2026-10-31).
+        if let Some(storno) = map
+            .get_mut("storno_document")
+            .and_then(Value::as_object_mut)
+        {
+            for key in ["amount_net", "amount_vat", "amount_gross"] {
+                storno.insert(key.to_string(), Value::Null);
+            }
+            storno.insert("vat_breakdown".to_string(), serde_json::json!([]));
+        }
     }
 
     if !line_items_visible {
