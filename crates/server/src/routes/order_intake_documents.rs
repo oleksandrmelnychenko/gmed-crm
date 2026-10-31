@@ -10,13 +10,25 @@ fn line_net(line: &Value) -> Decimal {
     money::round_cents(number("quantity") * number("unit_price"))
 }
 
+/// The VAT rate a document counts for a line. A pass-through cost carries no
+/// VAT whatever rate its line holds, so the document total is the order's
+/// (`order_service_total_gross`, QA 2026-10-31). Only the repeat-order context
+/// flags such lines.
+fn line_vat_rate(line: &Value) -> &str {
+    if line["is_cost_passthrough"] == true {
+        "0"
+    } else {
+        text(line, "vat_rate")
+    }
+}
+
 pub(super) fn totals(data: &Value) -> Option<(String, String, String)> {
     let lines = data["lines"].as_array().filter(|lines| !lines.is_empty())?;
     let mut net = Decimal::ZERO;
     let mut vat = Decimal::ZERO;
     for line in lines {
         let amount = line_net(line);
-        let rate = text(line, "vat_rate")
+        let rate = line_vat_rate(line)
             .replace(',', ".")
             .parse::<Decimal>()
             .unwrap_or_default();
@@ -263,10 +275,10 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
                 quantity: Some(text(line, "quantity").to_owned()),
                 fee: Some(unit_fee(line, unit)),
                 line_total: Some(format_eur_decimal(line_net(line))),
-                vat_rate: Some(text(line, "vat_rate").to_owned()),
-                // The repeat-order context carries no pass-through flag; the
-                // estimated outlays line is recognised by its description.
-                is_cost_passthrough: None,
+                vat_rate: Some(line_vat_rate(line).to_owned()),
+                // The context flags pass-through costs; the estimated outlays
+                // line is also recognised by its description.
+                is_cost_passthrough: line["is_cost_passthrough"].as_bool(),
             }
         })
         .collect();
@@ -370,6 +382,27 @@ mod tests {
         assert_eq!(order.service_lines.len(), 1);
         assert_eq!(order.service_lines[0].description, "Coordination");
         assert_eq!(order.estimate_total.as_deref(), Some("119,00 €"));
+    }
+
+    #[test]
+    fn repeat_documents_total_pass_through_costs_without_vat_like_the_order() {
+        let context = json!({
+            "services": [
+                {"description":"Klinikrechnung","quantity":"1","unit_price":"200","vat_rate":"19","is_cost_passthrough":true},
+                {"description":"Coordination","quantity":"1","unit_price":"100","vat_rate":"19"}
+            ]
+        });
+
+        let quote = repeat_bindings(&context, "order_cost_estimate");
+        assert_eq!(quote.estimate_total.as_deref(), Some("319,00 €"));
+        assert_eq!(quote.service_lines[0].vat_rate.as_deref(), Some("0"));
+        assert_eq!(quote.service_lines[0].is_cost_passthrough, Some(true));
+        assert_eq!(quote.service_lines[1].vat_rate.as_deref(), Some("19"));
+        assert_eq!(quote.service_lines[1].is_cost_passthrough, None);
+        assert_eq!(
+            totals(&json!({"lines": context["services"]})),
+            Some(("300,00 €".into(), "19,00 €".into(), "319,00 €".into()))
+        );
     }
 
     #[test]

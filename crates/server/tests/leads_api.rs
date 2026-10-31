@@ -7273,6 +7273,75 @@ async fn repeat_clinical_retry_conflict_and_explicit_removal_preserve_integrity(
     assert_eq!(count, 1);
 }
 
+/// QA 2026-10-31: a regenerated repeat-order document printed cancelled
+/// services, a plain cancellation returned the old PDF as reused, and VAT on a
+/// pass-through cost made its total differ from the order's.
+#[tokio::test]
+async fn repeat_order_documents_leave_out_cancelled_services_and_total_like_the_order() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let ceo = app.auth_header("ceo");
+    let pool = &app.suite.pool;
+    let patient = seed_repeat_patient(&app, true).await;
+    sqlx::query("UPDATE patients SET email='repeat-total@example.test',phone_primary='+4915111111111',address_country='DE',passport_expiry=DATE '2035-01-01',legal_status=$2 WHERE id=$1")
+        .bind(patient).bind(json!({"identity_verified":true,"dsgvo_signed":true,"confidentiality_release_signed":true,"compliance_completed":true})).execute(pool).await.unwrap();
+    let (s,created)=json_request(&app,"POST","/api/v1/leads",&pm,Some(json!({"first_name":"Repeat","last_name":"Totals","repeat_patient_id":patient,"creation_key":Uuid::new_v4()}))).await;
+    assert_eq!(s, StatusCode::CREATED, "{created}");
+    let lead = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let order = seed_complete_lead_onboarding(&app, lead).await.order_id;
+    let path = format!("/api/v1/orders/{order}/leistungen");
+    for line in [
+        json!({"description":"Klinikrechnung","quantity":1,"unit_price":200,"vat_rate":19,"is_cost_passthrough":true,"confirm_signature_reset":true}),
+        json!({"description":"Flughafentransfer","quantity":1,"unit_price":50,"vat_rate":19,"confirm_signature_reset":true}),
+    ] {
+        let (s, b) = json_request(&app, "POST", &path, &pm, Some(line)).await;
+        assert_eq!(s, StatusCode::CREATED, "{b}");
+    }
+    let payload = json!({"template_id":"order_cost_estimate","lead_id":lead,"order_id":order,"language":"de","status":"active"});
+    let generate = || json_request(&app, "POST", "/api/v1/documents/generate", &ceo, Some(payload.clone()));
+    let estimate_total = |id: String| async move {
+        sqlx::query_scalar::<_, Value>("SELECT generated_bindings->'estimate_total' FROM documents WHERE id=$1::uuid")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    };
+    let (s, first) = generate().await;
+    assert!(s.is_success(), "{first}");
+    let order_total: rust_decimal::Decimal =
+        sqlx::query_scalar("SELECT order_service_total_gross($1)")
+            .bind(order)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(order_total, rust_decimal::Decimal::new(37850, 2));
+    assert_eq!(
+        estimate_total(first["id"].as_str().unwrap().to_string()).await,
+        json!("378,50 €")
+    );
+
+    sqlx::query("UPDATE order_leistungen SET status='cancelled',cancelled_at=now(),cancellation_reason='Transfer entfällt' WHERE order_id=$1 AND description='Flughafentransfer'")
+        .bind(order)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (s, second) = generate().await;
+    assert!(s.is_success(), "{second}");
+    assert_ne!(first["id"], second["id"], "The old PDF must not be reused");
+    assert_eq!(
+        estimate_total(second["id"].as_str().unwrap().to_string()).await,
+        json!("319,00 €")
+    );
+    let services: Value = sqlx::query_scalar(
+        "SELECT order_intake_context->'services' FROM documents WHERE id=$1::uuid",
+    )
+    .bind(second["id"].as_str().unwrap())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(services.as_array().unwrap().len(), 2, "{services}");
+}
+
 #[tokio::test]
 async fn repeat_order_document_changes_require_current_documents_before_confirmation() {
     let Some(app) = test_app().await else { return };
