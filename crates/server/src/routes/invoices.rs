@@ -3448,6 +3448,9 @@ async fn sync_reimbursed_financial_documents_for_paid_invoice(
     let source_line_ids = extract_source_line_ids(&line_items);
     let payment_date = crate::app_time::date_of(paid_at);
 
+    // Only the documents the invoice's lines name: paying one invoice says
+    // nothing about the other documents of the order (QA 2026-10-31). What a
+    // document said before is kept for `undo_reimbursed_documents_tx`.
     let updated_rows = sqlx::query(
         r#"WITH explicit_documents AS (
                 SELECT unnest($1::uuid[]) AS document_id
@@ -3456,39 +3459,40 @@ async fn sync_reimbursed_financial_documents_for_paid_invoice(
                 FROM order_leistungen ol
                 WHERE ol.external_document_id IS NOT NULL
                   AND ol.id = ANY($2)
+           ), marked AS (
+                SELECT d.id, d.financial_status, d.payment_date, d.payment_method
+                FROM documents d
+                WHERE d.patient_id = $3
+                  AND d.status <> 'archived'
+                  AND COALESCE(d.financial_status, '') <> 'reimbursed'
+                  AND d.id IN (
+                      SELECT document_id
+                      FROM explicit_documents
+                      WHERE document_id IS NOT NULL
+                  )
+                FOR UPDATE
+           ), recorded AS (
+                INSERT INTO invoice_document_reimbursements (
+                    invoice_id, document_id, previous_financial_status,
+                    previous_payment_date, previous_payment_method
+                )
+                SELECT $4::uuid, marked.id, marked.financial_status,
+                       marked.payment_date, marked.payment_method
+                FROM marked
            )
            UPDATE documents d
            SET financial_status = 'reimbursed',
                access_category = COALESCE(d.access_category, 'financial'),
                payment_date = COALESCE(d.payment_date, $5),
                payment_method = COALESCE(d.payment_method, 'bank_transfer')
-           WHERE d.patient_id = $3
-             AND d.status <> 'archived'
-             AND COALESCE(d.financial_status, '') <> 'reimbursed'
-             AND (
-                    d.id IN (
-                        SELECT document_id
-                        FROM explicit_documents
-                        WHERE document_id IS NOT NULL
-                    )
-                 OR (
-                        $4::uuid IS NOT NULL
-                    AND d.order_id = $4
-                    AND d.financial_status IN (
-                        'open',
-                        'in_progress',
-                        'paid',
-                        'overdue',
-                        'billed_to_patient'
-                    )
-                 )
-             )
+           FROM marked
+           WHERE d.id = marked.id
            RETURNING d.id"#,
     )
     .bind(&direct_document_ids)
     .bind(&source_line_ids)
     .bind(patient_id)
-    .bind(order_id)
+    .bind(invoice_id)
     .bind(payment_date)
     .fetch_all(&state.db)
     .await
@@ -8032,7 +8036,51 @@ async fn recompute_invoice_settlement_status(
     .bind(invoice_id)
     .execute(&mut **transaction)
     .await?;
-    Ok(())
+    undo_reimbursed_documents_tx(transaction, invoice_id).await
+}
+
+/// An invoice that is no longer paid (payment reversed, cash refunded) gives
+/// back the documents its settlement marked reimbursed: each returns to what
+/// it said before, unless staff changed it since (QA 2026-10-31).
+async fn undo_reimbursed_documents_tx(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invoice_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let restored = sqlx::query_scalar::<_, Uuid>(
+        r#"WITH undone AS (
+               UPDATE invoice_document_reimbursements reimbursement
+               SET undone_at = now()
+               FROM invoices invoice
+               WHERE reimbursement.invoice_id = $1
+                 AND reimbursement.undone_at IS NULL
+                 AND invoice.id = reimbursement.invoice_id
+                 AND invoice.status <> 'paid'
+               RETURNING reimbursement.document_id, reimbursement.previous_financial_status,
+                         reimbursement.previous_payment_date,
+                         reimbursement.previous_payment_method
+           )
+           UPDATE documents d
+           SET financial_status = undone.previous_financial_status,
+               payment_date = undone.previous_payment_date,
+               payment_method = undone.previous_payment_method
+           FROM undone
+           WHERE d.id = undone.document_id
+             AND d.financial_status = 'reimbursed'
+           RETURNING d.id"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    if restored.is_empty() {
+        return Ok(());
+    }
+    write_system_invoice_audit_tx(
+        transaction,
+        "undo_reimbursed_financial_documents",
+        invoice_id,
+        serde_json::json!({ "document_ids": restored }),
+    )
+    .await
 }
 
 async fn apply_invoice_prepayment(

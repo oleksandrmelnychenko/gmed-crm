@@ -3887,6 +3887,136 @@ async fn paid_invoice_marks_linked_financial_supporting_documents_reimbursed() {
     assert_eq!(payment_method.as_deref(), Some("bank_transfer"));
 }
 
+/// QA 2026-10-31: paying an invoice says nothing about the other documents of
+/// the order, and taking the money back gives the document its status back.
+#[tokio::test]
+async fn paid_invoice_marks_only_its_own_documents_and_a_reversal_undoes_the_mark() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-doc-scope");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let named = Uuid::new_v4();
+    let unrelated = Uuid::new_v4();
+    for (document_id, name) in [(named, "named.pdf"), (unrelated, "unrelated.pdf")] {
+        seed_supporting_document(
+            &pool,
+            document_id,
+            patient_id,
+            order_id,
+            admin_id,
+            name,
+            name,
+        )
+        .await;
+    }
+    sqlx::query("UPDATE documents SET financial_status = 'billed_to_patient' WHERE id = $1")
+        .bind(named)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE documents SET financial_status = 'open' WHERE id = $1")
+        .bind(unrelated)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let leistung_id = seed_order_leistung_finance(
+        &pool,
+        order_id,
+        "Clinic passthrough with receipt",
+        80.0,
+        0.0,
+        true,
+        "approved",
+    )
+    .await;
+    sqlx::query("UPDATE order_leistungen SET external_document_id = $2 WHERE id = $1")
+        .bind(leistung_id)
+        .bind(named)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool,
+        &billing_bearer,
+        quote["id"].as_str().unwrap(),
+        "final",
+        "2026-05-31",
+    )
+    .await;
+    let invoice_id = invoice["id"].as_str().unwrap();
+
+    let (status, payment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        &billing_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": invoice["total_gross"],
+            "payment_method": "bank_transfer",
+            "received_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{payment}");
+    assert_eq!(payment["invoice"]["status"], "paid", "{payment}");
+    let document_state = |document_id: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (Option<String>, Option<chrono::NaiveDate>, Option<String>)>(
+                "SELECT financial_status, payment_date, payment_method FROM documents WHERE id = $1",
+            )
+            .bind(document_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let (status_after, paid_on, method) = document_state(named).await;
+    assert_eq!(status_after.as_deref(), Some("reimbursed"));
+    assert!(paid_on.is_some());
+    assert_eq!(method.as_deref(), Some("bank_transfer"));
+    assert_eq!(
+        document_state(unrelated).await,
+        (Some("open".to_string()), None, None)
+    );
+
+    let payment_id = payment["payment_transaction_id"].as_str().unwrap();
+    let (status, reversal) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments/{payment_id}/reversal"),
+        &billing_bearer,
+        Some(json!({ "note": "Receipt belonged to another invoice" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reversal}");
+    assert_eq!(
+        document_state(named).await,
+        (Some("billed_to_patient".to_string()), None, None)
+    );
+    let undone: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM audit_log
+           WHERE action = 'undo_reimbursed_financial_documents' AND entity_id = $1::uuid"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(undone, 1);
+}
+
 #[tokio::test]
 async fn second_advance_invoice_for_same_quote_is_rejected() {
     let Some((app, pool, admin_id)) = test_context().await else {
