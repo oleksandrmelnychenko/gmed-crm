@@ -1832,15 +1832,19 @@ async fn a_withdrawn_cost_estimate_consent_stops_the_invitation() {
     let remote = app.mock.remote(request_id).expect("remote request");
 
     cost_estimate_consent(&app, lead_id, &ready.patient, false).await;
-    let (status, last_error, closed_kind): (String, Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT status, last_error, closed_kind FROM document_signature_requests WHERE id = $1",
-    )
-    .bind(request_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    let (status, last_error, closed_kind): (String, Option<String>, Option<String>) =
+        sqlx::query_as(
+            "SELECT status, last_error, closed_kind FROM document_signature_requests WHERE id = $1",
+        )
+        .bind(request_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
     assert_eq!(status, "error");
-    assert_eq!(last_error.as_deref(), Some("cost_estimate_consent_withdrawn"));
+    assert_eq!(
+        last_error.as_deref(),
+        Some("cost_estimate_consent_withdrawn")
+    );
     assert_eq!(closed_kind.as_deref(), Some("abandoned"));
     let reason: Option<String> = sqlx::query_scalar(
         "SELECT context->>'reason' FROM audit_log
