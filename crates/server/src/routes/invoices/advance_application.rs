@@ -477,6 +477,67 @@ pub(crate) fn net_open_balances(invoices: &[OpenInvoice]) -> Vec<NetDue> {
     result
 }
 
+/// What an issued invoice still asks for once the money GMED holds for its
+/// debtor is counted ([`net_open_balances`] over the patient's issued invoices
+/// of its currency): the "to pay" of the account statement and the portal, and
+/// therefore what a payment reminder may demand (QA 2026-10-31). `None` for a
+/// draft or cancelled invoice.
+pub(crate) async fn invoice_amount_to_pay(
+    pool: &sqlx::PgPool,
+    invoice_id: Uuid,
+) -> Result<Option<Decimal>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT invoice.id, invoice.order_id, invoice.invoice_type, invoice.issued_at,
+                  invoice.total_gross, invoice.credited_amount, invoice.paid_amount,
+                  invoice.prepayment_applied_amount,
+                  invoice_recipient_identity(invoice.recipient_snapshot) AS recipient,
+                  COALESCE((
+                      SELECT SUM(allocation.amount_gross)
+                      FROM invoice_prepayment_allocations allocation
+                      WHERE allocation.advance_invoice_id = invoice.id
+                  ), 0) AS allocated_from_advance
+           FROM invoices target
+           JOIN invoices invoice
+             ON invoice.patient_id = target.patient_id
+            AND invoice.currency = target.currency
+           WHERE target.id = $1
+             AND invoice.status NOT IN ('draft', 'cancelled')"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(pool)
+    .await?;
+    let open = rows
+        .iter()
+        .map(|row| {
+            let total = row.try_get::<Decimal, _>("total_gross")?
+                - row.try_get::<Decimal, _>("credited_amount")?;
+            let paid = row.try_get::<Decimal, _>("paid_amount")?;
+            let applied = row.try_get::<Decimal, _>("prepayment_applied_amount")?;
+            let allocated = row.try_get::<Decimal, _>("allocated_from_advance")?;
+            let is_advance = row.try_get::<String, _>("invoice_type")? == "advance";
+            Ok(OpenInvoice {
+                order_id: row.try_get("order_id")?,
+                recipient: row.try_get("recipient")?,
+                is_advance,
+                due: (total - paid - applied).max(Decimal::ZERO),
+                advance_available: if is_advance {
+                    (paid.min(total) - allocated).max(Decimal::ZERO)
+                } else {
+                    Decimal::ZERO
+                },
+                credit_balance: (paid + applied - total).max(Decimal::ZERO),
+                issued_at: row.try_get("issued_at")?,
+                id: row.try_get("id")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    Ok(open
+        .iter()
+        .zip(net_open_balances(&open))
+        .find(|(invoice, _)| invoice.id == invoice_id)
+        .map(|(_, net)| net.to_pay))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

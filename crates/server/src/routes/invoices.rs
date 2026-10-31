@@ -2080,12 +2080,22 @@ pub async fn run_auto_dunning_scheduler_once(
     let mut summary = AutoDunningRunSummary::default();
 
     for candidate in load_auto_dunning_candidates(state).await? {
-        let balance_due = (candidate.total_gross
+        let open_balance = (candidate.total_gross
             - candidate.credited_amount
             - candidate.paid_amount
             - candidate.prepayment_applied_amount)
             .max(Decimal::ZERO);
-        if balance_due <= Decimal::ZERO || candidate.due_date >= today {
+        if open_balance <= Decimal::ZERO || candidate.due_date >= today {
+            continue;
+        }
+        // A reminder demands what the statement and the portal show as to
+        // pay: a paid advance not credited yet or a credit balance of this
+        // debtor is money GMED already holds (QA 2026-10-31).
+        let balance_due =
+            advance_application::invoice_amount_to_pay(&state.db, candidate.invoice_id)
+                .await?
+                .unwrap_or(open_balance);
+        if balance_due <= Decimal::ZERO {
             continue;
         }
 
@@ -12794,9 +12804,21 @@ async fn create_dunning_event(
         return resp;
     }
 
-    let balance_due =
+    let open_balance =
         (ctx.total_gross - ctx.credited_amount - ctx.paid_amount - ctx.prepayment_applied_amount)
             .max(Decimal::ZERO);
+    // As the automatic run: money GMED already holds is not demanded.
+    let balance_due = match advance_application::invoice_amount_to_pay(&state.db, invoice_id).await
+    {
+        Ok(value) => value.unwrap_or(open_balance),
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load invoice amount to pay for dunning");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create invoice dunning event",
+            );
+        }
+    };
     if balance_due <= Decimal::ZERO || matches!(ctx.status.as_str(), "paid" | "cancelled") {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,

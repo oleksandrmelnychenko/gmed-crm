@@ -424,6 +424,103 @@ async fn invoice_status(pool: &PgPool, invoice_id: Uuid) -> String {
         .unwrap()
 }
 
+/// QA 2026-10-31: a reminder demands what the statement and the portal show
+/// as to pay, not money GMED already holds.
+#[tokio::test]
+async fn reminders_leave_out_money_gmed_already_holds() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = format!("net-dunning-{}", Uuid::new_v4().simple());
+    let ceo = auth_header(ctx.admin_id, "ceo");
+    let seed_paid_advance = |final_invoice: Uuid, number: String, amount: i64| {
+        let pool = ctx.pool.clone();
+        async move {
+            sqlx::query(
+                r#"INSERT INTO invoices (
+                        order_id, patient_id, invoice_number, invoice_type, status, issued_at,
+                        total_net, total_vat, total_gross, paid_amount, line_items, created_by
+                   )
+                   SELECT order_id, patient_id, $2, 'advance', 'paid', now() - interval '40 days',
+                          $3, 0, $3, $3, '[]', created_by
+                   FROM invoices WHERE id = $1"#,
+            )
+            .bind(final_invoice)
+            .bind(number)
+            .bind(amount)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+
+    // 1076,50 € open, 1000 € of it held as a paid advance not credited yet.
+    let (_, _, partly) = seed_released_invoice(&ctx.pool, ctx.admin_id, &tag, -30).await;
+    seed_paid_advance(partly, format!("ADV-{tag}"), 1000).await;
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{partly}/dunning"),
+        &ceo,
+        Some(json!({ "level": "first" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let demanded: rust_decimal::Decimal = sqlx::query_scalar(
+        "SELECT balance_due FROM invoice_dunning_events WHERE invoice_id = $1 AND level = 'first'",
+    )
+    .bind(partly)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(demanded, rust_decimal::Decimal::new(7650, 2));
+
+    // Everything is covered: no reminder, by hand or by the scheduler.
+    let covered_tag = format!("{tag}-covered");
+    let (_, _, covered) = seed_released_invoice(&ctx.pool, ctx.admin_id, &covered_tag, -30).await;
+    seed_paid_advance(covered, format!("ADV-{covered_tag}"), 1077).await;
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{covered}/dunning"),
+        &ceo,
+        Some(json!({ "level": "first" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    run_scheduler(&ctx).await;
+    assert!(dunning_levels(&ctx.pool, covered).await.is_empty());
+    assert_eq!(invoice_status(&ctx.pool, covered).await, "sent");
+
+    // An open advance invoice is reminded as before (decision Q4).
+    let advance_tag = format!("{tag}-advance");
+    let (_, _, sibling) = seed_released_invoice(&ctx.pool, ctx.admin_id, &advance_tag, 10).await;
+    let advance: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status, issued_at, due_date,
+                total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           )
+           SELECT order_id, patient_id, $2, 'advance', 'sent', now() - interval '40 days',
+                  CURRENT_DATE - 30, 100, 0, 100, 0, '[]', created_by
+           FROM invoices WHERE id = $1
+           RETURNING id"#,
+    )
+    .bind(sibling)
+    .bind(format!("ADV-{advance_tag}"))
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{advance}/dunning"),
+        &ceo,
+        Some(json!({ "level": "first" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+}
+
 #[tokio::test]
 async fn dunning_respects_blocks_grace_period_and_debt_states() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
