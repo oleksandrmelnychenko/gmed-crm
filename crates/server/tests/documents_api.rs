@@ -10619,6 +10619,7 @@ async fn mark_signature_result_signed_uses_its_verified_source_document_type() {
     .await;
     assert_eq!(status, StatusCode::OK, "{evidence}");
     let evidence_id = Uuid::parse_str(evidence["id"].as_str().unwrap()).unwrap();
+    let request_id = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO document_signature_requests (
                id, source_document_id, requested_by, source_sha256, source_context,
@@ -10627,7 +10628,7 @@ async fn mark_signature_result_signed_uses_its_verified_source_document_type() {
            ) VALUES ($1, $2, $3, $4, '{}'::jsonb, '[]'::jsonb, $5, true,
                      'completed', $6, $7, $8, $9)"#,
     )
-    .bind(Uuid::new_v4())
+    .bind(request_id)
     .bind(source_id)
     .bind(admin_id)
     .bind("a".repeat(64))
@@ -10640,6 +10641,41 @@ async fn mark_signature_result_signed_uses_its_verified_source_document_type() {
     .await
     .unwrap();
 
+    // QA 2026-10-31: a TEST signature has no legal effect, and a signature in
+    // review waits for its decision; neither becomes signed by one click.
+    for (test_mode, request_status) in [(true, "completed"), (false, "needs_review")] {
+        sqlx::query("UPDATE document_signature_requests SET test_mode = $2, status = $3 WHERE id = $1")
+            .bind(request_id)
+            .bind(test_mode)
+            .bind(request_status)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (status, refused) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/documents/{evidence_id}/mark-signed"),
+            &admin_bearer,
+            Some(json!({ "compliance_kind": "confidentiality_release" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    }
+    let unsigned: bool =
+        sqlx::query_scalar("SELECT signed_at IS NULL FROM documents WHERE id = $1")
+            .bind(evidence_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(unsigned);
+
+    sqlx::query(
+        "UPDATE document_signature_requests SET test_mode = false, status = 'completed' WHERE id = $1",
+    )
+    .bind(request_id)
+    .execute(&pool)
+    .await
+    .unwrap();
     let (status, signed) = json_request(
         &app,
         "POST",

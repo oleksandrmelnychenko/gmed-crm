@@ -2545,20 +2545,25 @@ async fn mark_document_signed(
         document_satisfies_compliance_kind(kind, generated_template_id.as_deref(), &document_art);
     if !satisfies_compliance && document_art == "signature_evidence" {
         // Signature evidence covers its source and, for a package, every
-        // member document signed in the same bundle.
+        // member document signed in the same bundle. A TEST (DEMO) signature
+        // has no legal effect and a request in review waits for the decision
+        // of `resolve_review`: neither becomes a legal confirmation by one
+        // click (QA 2026-10-31).
         let source_documents = sqlx::query(
             r#"SELECT signed.generated_template_id, signed.art
                FROM document_signature_requests request
                JOIN documents signed ON signed.id = request.source_document_id
                WHERE request.result_document_id = $1
-                 AND request.status IN ('completed', 'needs_review')
+                 AND request.status = 'completed'
+                 AND NOT request.test_mode
                UNION ALL
                SELECT signed.generated_template_id, signed.art
                FROM document_signature_requests request
                JOIN document_signature_members member ON member.request_id = request.id
                JOIN documents signed ON signed.id = member.document_id
                WHERE (request.result_document_id = $1 OR member.result_document_id = $1)
-                 AND request.status IN ('completed', 'needs_review')"#,
+                 AND request.status = 'completed'
+                 AND NOT request.test_mode"#,
         )
         .bind(document_id)
         .fetch_all(&state.db)
