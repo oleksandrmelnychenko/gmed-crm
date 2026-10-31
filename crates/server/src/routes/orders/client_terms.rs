@@ -130,6 +130,33 @@ fn signed_terms_change_refusal(
         .into_response()
 }
 
+/// The terms equal the signed version. Only the keys of the terms count: the
+/// version also records when and by which document it was signed, and one
+/// signed before the prepayment rule has no prepayment keys. jsonb compares
+/// numbers by value (1 = 1.00).
+async fn matches_signed_terms(
+    conn: &mut PgConnection,
+    terms: &Value,
+    signed: &Value,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT ($2::jsonb ? 'lines') AND NOT EXISTS (
+               SELECT 1
+               FROM jsonb_each($2::jsonb) AS signed(key, value)
+               WHERE signed.key IN (
+                         'date_from', 'date_to', 'currency', 'total_gross', 'lines',
+                         'prepayment_required', 'prepayment_amount', 'prepayment_due_at',
+                         'needs_description', 'contract_id'
+                     )
+                 AND signed.value IS DISTINCT FROM $1::jsonb -> signed.key
+           )"#,
+    )
+    .bind(terms)
+    .bind(signed)
+    .fetch_one(conn)
+    .await
+}
+
 /// Compares the terms after an edit with `before` (same transaction, the
 /// order row still locked). See the module documentation.
 pub(crate) async fn settle(
@@ -153,6 +180,16 @@ pub(crate) async fn settle(
         return Ok(TermsChange::Unchanged);
     }
     let after: Value = row.try_get("terms").unwrap_or(Value::Null);
+    // The edit led back to what the client signed (a line added by actuals was
+    // removed): nothing the signature covers changed (QA 2026-10-31, R3-3).
+    if before.signed_patient
+        && let Some(signed) = before.signed_terms.as_ref()
+        && matches_signed_terms(conn, &after, signed)
+            .await
+            .map_err(TermsError::Database)?
+    {
+        return Ok(TermsChange::Unchanged);
+    }
     let new_total = total_of(Some(&after));
     // The signed version: recorded at the signature, or (orders signed before
     // the rule without a record) the terms right before this change.

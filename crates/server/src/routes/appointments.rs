@@ -9292,6 +9292,7 @@ async fn sync_completed_medical_appointment_to_billing(
         provider_id,
         doctor_id,
         &context_notes,
+        &catalog_item,
     )
     .await?
     {
@@ -9311,6 +9312,33 @@ async fn sync_completed_medical_appointment_to_billing(
                 "service_key": MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY,
                 "provider_id": provider_id,
                 "doctor_id": doctor_id,
+            }),
+        ));
+        return Ok(());
+    }
+
+    // The treatment organisation may already be delivered or invoiced ahead of
+    // the visit: a further line would bill the same service twice (QA
+    // 2026-10-31, R3-2). The units of the order's lines cover its completed
+    // appointments; only an appointment beyond them adds a line.
+    if treatment_organization_already_covered(
+        state,
+        order_id,
+        appointment_id,
+        provider_id,
+        doctor_id,
+    )
+    .await?
+    {
+        state.audit_sender.try_send(audit::domain_event(
+            "medical_order_leistung_already_covered".to_string(),
+            Some(created_by),
+            "order",
+            Some(order_id),
+            serde_json::json!({
+                "patient_id": patient_id,
+                "appointment_id": appointment_id,
+                "service_key": MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY,
             }),
         ));
         return Ok(());
@@ -9369,6 +9397,67 @@ async fn sync_completed_medical_appointment_to_billing(
     Ok(())
 }
 
+/// SQL condition: the order line `ol` (with `catalog` joined) is the service of
+/// the catalog key `$key`, or a free-text line that names it or carries its
+/// price. A free-text line has no key, so it never matched and the automatic
+/// line came on top of it (QA 2026-10-31, R3-2).
+fn order_line_is_catalog_service_sql(key: &str, name: &str, price: &str, vat: &str) -> String {
+    format!(
+        r#"(COALESCE(ol.agency_service_key_snapshot, catalog.service_key) = {key}
+            OR (COALESCE(ol.agency_service_key_snapshot, catalog.service_key) IS NULL
+                AND (LOWER(BTRIM(ol.description)) = LOWER(BTRIM({name}))
+                     OR (ol.unit_price = {price} AND ol.vat_rate = {vat}))))"#
+    )
+}
+
+/// Whether the order's delivered, approved or invoiced treatment-organisation
+/// units already cover this completed appointment. Doctor service groups and
+/// lines of another provider or doctor bill their own work.
+async fn treatment_organization_already_covered(
+    state: &AppState,
+    order_id: Uuid,
+    appointment_id: Uuid,
+    provider_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
+) -> Result<bool, sqlx::Error> {
+    let linked = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM order_leistungen WHERE source_medical_appointment_id = $1)",
+    )
+    .bind(appointment_id)
+    .fetch_one(&state.db)
+    .await?;
+    if linked {
+        return Ok(false);
+    }
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT COALESCE((
+                   SELECT SUM(ol.quantity)
+                   FROM order_leistungen ol
+                   LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+                   WHERE ol.order_id = $1
+                     AND ol.status IN ('delivered', 'approved', 'invoiced')
+                     AND ol.source_service_group_id IS NULL
+                     AND (ol.provider_id IS NULL OR ol.provider_id = $3)
+                     AND (ol.doctor_id IS NULL OR ol.doctor_id = $4)
+                     AND COALESCE(ol.agency_service_key_snapshot, catalog.service_key) = $5
+               ), 0) > (
+                   SELECT COUNT(*)
+                   FROM appointments other
+                   WHERE other.order_id = $1
+                     AND other.id <> $2
+                     AND other.appointment_type = 'medical'
+                     AND other.status = 'completed'
+               )"#,
+    )
+    .bind(order_id)
+    .bind(appointment_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY)
+    .fetch_one(&state.db)
+    .await
+}
+
 /// The planned treatment-organisation unit a completed medical appointment
 /// delivered.
 struct ConsumedPlannedLine {
@@ -9398,6 +9487,7 @@ async fn consume_planned_treatment_organization_line(
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
     context_notes: &[String],
+    catalog_item: &AgencyServiceBillingItem,
 ) -> Result<Option<ConsumedPlannedLine>, sqlx::Error> {
     let mut tx = state.db.begin().await?;
     let already_linked = sqlx::query_scalar::<_, bool>(
@@ -9409,7 +9499,7 @@ async fn consume_planned_treatment_organization_line(
     if already_linked {
         return Ok(None);
     }
-    let planned = sqlx::query(
+    let planned = sqlx::query(&format!(
         r#"SELECT ol.id, ol.quantity
            FROM order_leistungen ol
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
@@ -9421,15 +9511,19 @@ async fn consume_planned_treatment_organization_line(
              AND ol.source_service_group_id IS NULL
              AND (ol.provider_id IS NULL OR ol.provider_id = $3)
              AND (ol.doctor_id IS NULL OR ol.doctor_id = $4)
-             AND COALESCE(ol.agency_service_key_snapshot, catalog.service_key) = $2
+             AND {service}
            ORDER BY ol.created_at, ol.id
            LIMIT 1
            FOR UPDATE OF ol SKIP LOCKED"#,
-    )
+        service = order_line_is_catalog_service_sql("$2", "$5", "$6", "$7"),
+    ))
     .bind(order_id)
     .bind(MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY)
     .bind(provider_id)
     .bind(doctor_id)
+    .bind(&catalog_item.service_name)
+    .bind(catalog_item.unit_price)
+    .bind(catalog_item.vat_rate)
     .fetch_optional(&mut *tx)
     .await?;
     let Some(planned) = planned else {
@@ -9731,24 +9825,32 @@ async fn sync_interpreter_report_billing_candidate(
     }
 
     let approved_at = candidate.approved_at.unwrap_or_else(chrono::Utc::now);
-    let planned = sqlx::query(
+    let catalog_item =
+        load_interpreter_hours_catalog_item(state, candidate.appointment_date).await?;
+    // Not billed yet, also when marked delivered by hand: the report's hours
+    // replace the line's. Without a catalog entry only the key can match.
+    let open_line = sqlx::query(&format!(
         r#"SELECT ol.id, ol.quantity
            FROM order_leistungen ol
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
            WHERE ol.order_id = $1
-             AND ol.status = 'planned'
+             AND ol.status IN ('planned', 'delivered', 'approved')
              AND ol.source_interpreter_report_id IS NULL
              AND ol.source_medical_appointment_id IS NULL
-             AND COALESCE(ol.agency_service_key_snapshot, catalog.service_key) = $2
+             AND {service}
            ORDER BY ol.created_at, ol.id
            LIMIT 1
            FOR UPDATE OF ol SKIP LOCKED"#,
-    )
+        service = order_line_is_catalog_service_sql("$2", "$3", "$4", "$5"),
+    ))
     .bind(order_id)
     .bind(INTERPRETER_HOURS_SERVICE_KEY)
+    .bind(catalog_item.as_ref().map(|item| item.service_name.clone()))
+    .bind(catalog_item.as_ref().map(|item| item.unit_price))
+    .bind(catalog_item.as_ref().map(|item| item.vat_rate))
     .fetch_optional(&mut *tx)
     .await?;
-    if let Some(planned) = planned {
+    if let Some(planned) = open_line {
         let leistung_id: Uuid = planned.try_get("id")?;
         let planned_quantity: rust_decimal::Decimal = planned.try_get("quantity")?;
         let notes = interpreter_report_billing_notes(
@@ -9784,9 +9886,55 @@ async fn sync_interpreter_report_billing_candidate(
         });
     }
 
-    let Some(catalog_item) =
-        load_interpreter_hours_catalog_item(state, candidate.appointment_date).await?
-    else {
+    // Hours already on an issued invoice are billed: the report takes that line
+    // as its source, and only hours beyond it get a new line (QA 2026-10-31,
+    // R3-2). A line of an issued invoice keeps its quantity.
+    let invoiced_line = sqlx::query(
+        r#"SELECT ol.id, ol.quantity
+           FROM order_leistungen ol
+           LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           WHERE ol.order_id = $1
+             AND ol.status = 'invoiced'
+             AND ol.source_interpreter_report_id IS NULL
+             AND ol.source_medical_appointment_id IS NULL
+             AND COALESCE(ol.agency_service_key_snapshot, catalog.service_key) = $2
+           ORDER BY ol.created_at, ol.id
+           LIMIT 1
+           FOR UPDATE OF ol SKIP LOCKED"#,
+    )
+    .bind(order_id)
+    .bind(INTERPRETER_HOURS_SERVICE_KEY)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let invoiced_hours = match &invoiced_line {
+        Some(line) => line.try_get::<rust_decimal::Decimal, _>("quantity")?,
+        None => rust_decimal::Decimal::ZERO,
+    };
+    if let Some(line) = invoiced_line.filter(|_| candidate.hours <= invoiced_hours) {
+        let leistung_id: Uuid = line.try_get("id")?;
+        let notes = interpreter_report_billing_notes(
+            candidate,
+            "Freigegebener Dolmetscherbericht zur bereits abgerechneten Leistung".to_string(),
+        );
+        sqlx::query(
+            r#"UPDATE order_leistungen
+               SET source_interpreter_report_id = $2,
+                   notes = concat_ws(E'\n', NULLIF(btrim(COALESCE(notes, '')), ''), $3)
+               WHERE id = $1"#,
+        )
+        .bind(leistung_id)
+        .bind(candidate.report_id)
+        .bind(notes)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(InterpreterReportBillingOutcome::ConsumedPlanned {
+            leistung_id,
+            planned_quantity: invoiced_hours,
+        });
+    }
+
+    let Some(catalog_item) = catalog_item else {
         return Ok(InterpreterReportBillingOutcome::MissingCatalog);
     };
     let description = format!(
@@ -9818,7 +9966,7 @@ async fn sync_interpreter_report_billing_candidate(
     .bind(order_id)
     .bind(candidate.patient_id)
     .bind(description)
-    .bind(candidate.hours)
+    .bind(candidate.hours - invoiced_hours)
     .bind(catalog_item.unit_price)
     .bind(&catalog_item.currency)
     .bind(catalog_item.vat_rate)

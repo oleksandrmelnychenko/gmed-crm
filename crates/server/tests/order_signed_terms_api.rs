@@ -473,6 +473,44 @@ async fn cancelling_a_service_of_a_signed_order_needs_a_confirmed_signature_rese
 /// QA 2026-10-31: the guard read a stored total that service lines did not
 /// update, and after a cancelled line every new quote failed with no way to
 /// change the prepayment from the order workspace.
+/// R3-3: a line that actuals added on top of the signed terms goes again: the
+/// terms are the signed ones, nothing to confirm and no reset.
+#[tokio::test]
+async fn removing_a_line_added_by_actuals_keeps_the_signature() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+    let patient_id = seed_patient(&pool, admin_id).await;
+    let order_id = create_order_with_interpreter_hours(&app, &bearer, patient_id).await;
+    let document_id = seed_order_document(&pool, patient_id, order_id, admin_id).await;
+    let (status, signed) = sign_on_paper(&app, document_id, &bearer).await;
+    assert_eq!(status, StatusCode::OK, "{signed:?}");
+
+    let added: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+               status, delivered_at
+           ) VALUES ($1, $2, 'Organisation', 1, 550, 'EUR', 0, 'delivered', now())
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen/{added}/cancel"),
+        &bearer,
+        Some(json!({ "reason": "Doppelt erfasst" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert!(order_signatures(&pool, order_id).await.0);
+}
+
 #[tokio::test]
 async fn the_prepayment_is_measured_against_the_services_and_can_be_adjusted() {
     let Some((app, pool, admin_id, ceo)) = test_context().await else {
