@@ -19261,9 +19261,11 @@ async fn generate_document(
                 order_reference.as_deref(),
                 &generated_doc_id,
             ) {
-                Ok(generated) => {
-                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
-                }
+                Ok(generated) => record_person_signature_anchors(
+                    &mut generated_bindings_snapshot,
+                    generated,
+                    &disclosure.frame_emails(),
+                ),
                 Err(message) => {
                     tracing::error!(
                         template_id = template.id,
@@ -19324,11 +19326,9 @@ async fn generate_document(
                 order_reference.as_deref(),
                 &generated_doc_id,
             ) {
-                Ok(generated) => record_person_signature_anchors(
-                    &mut generated_bindings_snapshot,
-                    generated,
-                    &disclosure.frame_emails(),
-                ),
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
                 Err(message) => {
                     tracing::error!(
                         template_id = template.id,
