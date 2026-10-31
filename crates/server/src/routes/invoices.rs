@@ -3910,6 +3910,7 @@ async fn build_selected_invoice_snapshot(
     let mut incomplete_final_lines = BTreeSet::new();
     let mut consumed_requested_lines = BTreeSet::new();
     let mut skipped_cancelled_lines = false;
+    let mut leaves_quantities_open = false;
 
     for (line_index, source_item) in quote_items.iter().enumerate() {
         let quoted_quantity = invoice_json_decimal(source_item, "quantity")
@@ -3960,6 +3961,7 @@ async fn build_selected_invoice_snapshot(
             if invoice_type == "final" && !ctx.order_contract_terminated {
                 incomplete_final_lines.insert(line_index);
             }
+            leaves_quantities_open = true;
             continue;
         };
         consumed_requested_lines.insert(line_index);
@@ -3969,6 +3971,7 @@ async fn build_selected_invoice_snapshot(
                 "Selected quantity exceeds the remaining quote line quantity",
             ));
         }
+        leaves_quantities_open |= selected_quantity < remaining;
         if invoice_type == "final"
             && !ctx.order_contract_terminated
             && selected_quantity < remaining
@@ -4069,10 +4072,15 @@ async fn build_selected_invoice_snapshot(
 
     let first_settlement = invoice_type != "advance" && allocated.is_empty();
     let selected_all_lines = requested_items.is_none();
-    if first_settlement && selected_all_lines && !ctx.order_contract_terminated {
+    // Approved package overages go on the invoice that bills the last open
+    // quantities of the quote, however they were picked: both billing dialogs
+    // always send their lines, and nothing is invoiced from the quote after
+    // it (QA 2026-10-31).
+    if invoice_type != "advance" && !leaves_quantities_open && !ctx.order_contract_terminated {
         // The whole quote is billed as stored, unless a cancelled service
-        // was left out: then the recomputed lines and totals are the base.
-        let base = if skipped_cancelled_lines {
+        // was left out, or lines were picked (with their comments): then the
+        // recomputed lines and totals are the base.
+        let base = if skipped_cancelled_lines || !first_settlement || !selected_all_lines {
             (total_net, total_vat, total_gross, selected_items)
         } else {
             (
@@ -14146,6 +14154,23 @@ async fn update_invoice_status(
                 .await
             {
                 tracing::error!(error = %e, invoice_id = %invoice_id, "release cancelled invoice services");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to release cancelled invoice services",
+                );
+            }
+
+            // Package overages the cancelled invoice billed are open again:
+            // the next closing invoice takes only unlinked ones (QA 2026-10-31).
+            if requested_status == "cancelled"
+                && let Err(e) = sqlx::query(
+                    "UPDATE service_package_consumptions SET invoice_id = NULL WHERE invoice_id = $1",
+                )
+                .bind(invoice_id)
+                .execute(&mut *transaction)
+                .await
+            {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "release cancelled invoice package consumption");
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to release cancelled invoice services",

@@ -1028,6 +1028,266 @@ async fn package_consumption_tracks_overage_approval_and_invoice_linkage() {
     );
 }
 
+/// QA 2026-10-31: both billing dialogs always send their lines, so the
+/// overage never reached an invoice from the UI, and a cancelled invoice kept
+/// it linked, so it could not be billed again.
+#[tokio::test]
+async fn approved_overage_goes_on_the_closing_invoice_however_lines_were_picked() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("package-overage-lines");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(
+        &pool,
+        order_id,
+        "Package eligible service",
+        100.0,
+        "approved",
+    )
+    .await;
+    let standard_profile_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM tax_profiles WHERE profile_key = 'standard_vat'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (status, package) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing_bearer,
+        Some(json!({
+            "package_key": format!("pkg_{tag}"),
+            "name": "Package overage lines",
+            "base_price_net": 100,
+            "items": [{
+                "description": "Included interpreter hour",
+                "included_quantity": 1,
+                "unit_label": "hour",
+                "overage_unit_price_net": 50,
+                "tax_profile_id": standard_profile_id,
+                "requires_patient_approval": false
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{package}");
+    let package_item_id = package["items"][0]["id"].as_str().unwrap();
+    let (status, assigned) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages"),
+        &billing_bearer,
+        Some(json!({ "package_id": package["id"], "order_id": order_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{assigned}");
+    let assigned_id = assigned["id"].as_str().unwrap();
+    let (status, consumption) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages/{assigned_id}/consume"),
+        &billing_bearer,
+        Some(json!({ "package_item_id": package_item_id, "order_id": order_id, "quantity": 2 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{consumption}");
+    let (status, decision) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages/{assigned_id}/overage-approval"),
+        &billing_bearer,
+        Some(json!({ "package_item_id": package_item_id, "approval_status": "approved" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{decision}");
+
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    let selected = json!([{ "line_index": 0, "quantity": "1", "comment": "2. Quartal" }]);
+    let has_overage = |invoice: &Value| {
+        invoice["line_items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line["source"] == "service_package_overage")
+    };
+    let cancel = |invoice_id: String| {
+        let app = app.clone();
+        let bearer = billing_bearer.clone();
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/invoices/{invoice_id}/status"),
+                &bearer,
+                Some(json!({ "status": "cancelled" })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+        }
+    };
+    let linked = || async {
+        sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT invoice_id FROM service_package_consumptions WHERE patient_service_package_id = $1",
+        )
+        .bind(Uuid::parse_str(assigned_id).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+
+    // A final invoice from the quote dialog: the service with its comment,
+    // and the overage on top.
+    let (status, invoice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final", "line_items": selected })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice}");
+    assert!(has_overage(&invoice), "{invoice}");
+    assert_eq!(invoice["line_items"][0]["comment"], "2. Quartal");
+    assert_eq!(invoice["total_gross"], "178.5");
+    let first_id = invoice["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        linked().await.map(|id| id.to_string()),
+        Some(first_id.clone())
+    );
+
+    // Cancelled: the overage is open again.
+    cancel(first_id).await;
+    assert_eq!(linked().await, None);
+
+    // The constructor's interim invoice that bills everything still open
+    // closes the quote just the same.
+    let (status, interim) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/billing-invoices"),
+        &billing_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": order_id,
+            "quote_id": quote_id,
+            "invoice_type": "interim",
+            "line_items": selected,
+            "external_invoice_ids": [],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{interim}");
+    assert!(has_overage(&interim), "{interim}");
+    assert_eq!(interim["total_gross"], "178.5");
+    assert_eq!(
+        linked().await.map(|id| id.to_string()).as_deref(),
+        interim["id"].as_str()
+    );
+}
+
+#[tokio::test]
+async fn partial_invoice_leaves_the_approved_overage_for_the_closing_one() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("package-overage-partial");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let first = seed_order_leistung(&pool, order_id, "First service", 100.0, "approved").await;
+    seed_order_leistung(&pool, order_id, "Second service", 40.0, "approved").await;
+    let package_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO service_packages (package_key, name, base_price_net)
+           VALUES ($1, 'Overage on a partial invoice', 100)
+           RETURNING id"#,
+    )
+    .bind(format!("pkg_{tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let assigned_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_service_packages (patient_id, package_id, order_id)
+           VALUES ($1, $2, $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(package_id)
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO service_package_consumptions (
+               patient_service_package_id, order_id, order_leistung_id, quantity, overage_quantity,
+               requires_patient_approval, approval_status, unit_price_net_snapshot,
+               currency_snapshot, vat_rate_snapshot
+           ) VALUES ($1, $2, $3, 2, 1, true, 'approved', 50, 'EUR', 19)"#,
+    )
+    .bind(assigned_id)
+    .bind(order_id)
+    .bind(first)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let quote = create_quote(&app, &billing_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    let (status, partial) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": 0, "quantity": "1" }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{partial}");
+    assert_eq!(
+        partial["line_items"].as_array().unwrap().len(),
+        1,
+        "{partial}"
+    );
+
+    // The final invoice is no first settlement any more: it closes the quote
+    // and takes the overage, also without a line selection.
+    let (status, closing) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{closing}");
+    let sources = closing["line_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|line| line["source"].as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sources
+            .iter()
+            .flatten()
+            .filter(|source| *source == "service_package_overage")
+            .count(),
+        1,
+        "{closing}"
+    );
+}
+
 #[tokio::test]
 async fn service_package_update_preserves_consumed_item_references() {
     let Some((app, pool, admin_id)) = test_context().await else {
