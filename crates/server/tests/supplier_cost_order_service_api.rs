@@ -828,3 +828,84 @@ async fn supplier_cost_of_a_service_the_termination_cancels_is_billed_at_cost() 
         clinic_invoice.to_string()
     );
 }
+
+/// QA 2026-10-31: what GMED dropped from re-billing stays out of the
+/// termination: the settlement read the raw receivable and its final invoice
+/// billed a cost GMED had already taken over.
+#[tokio::test]
+async fn a_waived_supplier_cost_stays_out_of_the_termination_settlement() {
+    let Some(fx) = fixture("waived-cost").await else {
+        return;
+    };
+    let clinic_id = seed_provider(&fx.pool, &format!("Klinik {}", fx.tag), true).await;
+    let waived = fx
+        .gmed_paid_supplier_invoice(clinic_id, None, "KULANZ", euros(100), euros(0))
+        .await;
+    let partly_waived = fx
+        .gmed_paid_supplier_invoice(clinic_id, None, "TEILWEISE", euros(150), euros(0))
+        .await;
+    let (status, waiver) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/external-invoices/{waived}/rebilling-waivers"),
+        &fx.billing,
+        Some(json!({ "request_id": Uuid::new_v4(), "reason": "Kulanz: GMED trägt die Kosten" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "waiver: {waiver:?}");
+    // A waiver over a part: what an earlier credit note left open.
+    sqlx::query(
+        r#"INSERT INTO external_invoice_rebilling_waivers (
+               external_invoice_id, request_id, amount_gross, reason, created_by
+           )
+           SELECT $1, $2, 30, 'Kulanz: Teilbetrag', created_by FROM external_invoices WHERE id = $1"#,
+    )
+    .bind(partly_waived)
+    .bind(Uuid::new_v4())
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    let preview = fx.termination_preview().await;
+    let third_party = third_party_lines(&preview);
+    assert_eq!(third_party.len(), 1, "{preview:?}");
+    assert_eq!(
+        third_party[0]["external_invoice_id"],
+        partly_waived.to_string()
+    );
+    assert_eq!(money(&third_party[0]["gross"]), euros(120));
+    assert_eq!(money(&preview["accrued_gross"]), euros(120));
+    assert_eq!(money(&preview["uninvoiced_gross"]), euros(120));
+
+    let (status, terminated) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{}/terminate", fx.contract_id),
+        &fx.manager,
+        Some(json!({ "reason": "Patient terminated the contract" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "terminate: {terminated:?}");
+    let (status, final_invoice) = json_request(
+        &fx.app,
+        "POST",
+        &format!(
+            "/api/v1/orders/{}/termination-settlement/final-invoice",
+            fx.order_id
+        ),
+        &fx.billing,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "final invoice: {final_invoice:?}"
+    );
+    assert_eq!(money(&final_invoice["total_gross"]), euros(120));
+    assert_eq!(final_invoice["line_items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        final_invoice["line_items"][0]["source_external_invoice_id"],
+        partly_waived.to_string()
+    );
+}

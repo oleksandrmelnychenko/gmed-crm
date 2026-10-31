@@ -568,16 +568,22 @@ pub(crate) async fn compute_order_settlement(
     // of that service, not a third-party cost to bill on top. A service that
     // termination cancels bills nothing, so the cost GMED paid for it is billed
     // at cost; the live receivable view agrees once the service is cancelled.
+    // That view drops a cost its service still covers, so the waivers are read
+    // here: what GMED bears is never billed (QA 2026-10-31).
     let external_rows = sqlx::query(
         r#"SELECT external.id, external.status, external.paid_by, external.external_invoice_number,
                   external.invoice_date, external.source_document_id,
                   UPPER(external.currency) AS currency,
-                  external.patient_receivable_gross,
+                  GREATEST(external.patient_receivable_gross - waiver.waived_gross, 0)
+                      AS patient_receivable_gross,
                   COALESCE(NULLIF(BTRIM(provider.name), ''), external.supplier_name, 'Provider')
                       AS provider_name,
                   settlement.remaining_provider_liability_gross,
-                  GREATEST(external.patient_receivable_gross - receivable.allocated_receivable_gross, 0)
-                      AS remaining_receivable_gross
+                  GREATEST(
+                      external.patient_receivable_gross - waiver.waived_gross
+                      - receivable.allocated_receivable_gross,
+                      0
+                  ) AS remaining_receivable_gross
            FROM external_invoices external
            LEFT JOIN providers provider ON provider.id = external.provider_id
            LEFT JOIN order_leistungen linked_service ON linked_service.id = external.order_leistung_id
@@ -587,10 +593,16 @@ pub(crate) async fn compute_order_settlement(
              ON settlement.external_invoice_id = external.id
            JOIN external_invoice_receivable_balances receivable
              ON receivable.external_invoice_id = external.id
+           CROSS JOIN LATERAL (
+               SELECT COALESCE(SUM(active_waiver.amount_gross), 0) AS waived_gross
+               FROM external_invoice_rebilling_waivers active_waiver
+               WHERE active_waiver.external_invoice_id = external.id
+                 AND active_waiver.reversed_at IS NULL
+           ) waiver
            WHERE external.order_id = $1
              AND external.invoice_scope = 'patient_order'
              AND external.status <> 'cancelled'
-             AND external.patient_receivable_gross > 0
+             AND external.patient_receivable_gross - waiver.waived_gross > 0
              AND NOT COALESCE(
                  linked_service.status IN ('delivered', 'approved', 'invoiced')
                  OR (linked_service.status = 'planned'
