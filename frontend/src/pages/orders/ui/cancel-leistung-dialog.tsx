@@ -21,6 +21,7 @@ import {
 } from "@/lib/billing-reversal";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { formatMoneyLabel } from "@/lib/money";
 import { LeadConfirmDialog } from "@/pages/leads/ui/lead-confirm-dialog";
 
 import {
@@ -194,6 +195,18 @@ export function CancelLeistungDialog({
                 canIssueCreditNote={canIssueCreditNote}
                 tx={tx}
               />
+            ) : null}
+            {preview?.prepayment_above_total ? (
+              <p
+                role="status"
+                data-testid="leistung-cancel-prepayment-warning"
+                className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+              >
+                {tx(
+                  `После отмены предоплата ${formatMoneyLabel(preview.prepayment_above_total.prepayment, preview.currency)} будет больше суммы заказа ${formatMoneyLabel(preview.prepayment_above_total.new_total, preview.currency)}. Скорректируйте предоплату: иначе новое предложение не создать.`,
+                  `Nach der Stornierung liegt die Vorauszahlung von ${formatMoneyLabel(preview.prepayment_above_total.prepayment, preview.currency)} über der Auftragssumme von ${formatMoneyLabel(preview.prepayment_above_total.new_total, preview.currency)}. Bitte die Vorauszahlung anpassen, sonst lässt sich kein neues Angebot erstellen.`,
+                )}
+              </p>
             ) : null}
             <Field label={tx("Причина отмены", "Stornogrund")} htmlFor={reasonId} required>
               <textarea

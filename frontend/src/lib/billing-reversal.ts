@@ -38,6 +38,8 @@ export type BillingReversalPreview = {
   draft_invoice_ids: string[];
   requires_credit_note: boolean;
   credit_total_gross: string;
+  /** The required prepayment would exceed the order total after the cancellation (QA 2026-10-31). */
+  prepayment_above_total?: { prepayment: string; new_total: string };
   /** Advance money credited into the invoice that the credit note releases (refundable). */
   prepayment_released_gross?: string;
   /** Re-billed supplier costs the credit note unbills. */

@@ -117,22 +117,20 @@ test("a signed order asks before a new service resets the client's signature (QA
   await sheet.getByLabel("Цена за единицу (EUR)", { exact: true }).fill("120");
 
   // "No": the change is not saved and the sheet says the signature stays.
-  let question = "";
-  page.once("dialog", (dialog) => {
-    question = dialog.message();
-    void dialog.dismiss();
-  });
+  // The app's own dialog, never the browser's confirm() (QA 2026-10-31, R3-4).
   await sheet.getByRole("button", { name: "Сохранить", exact: true }).click();
+  const ask = page.getByTestId("order-signed-terms-change-dialog");
+  await expect(ask).toContainText("889,15 €");
+  await expect(ask).toContainText("1.317,55 €");
+  await expect(ask).not.toContainText("The client signed");
+  await ask.getByRole("button", { name: "Отмена", exact: true }).click();
   await expect(sheet.getByRole("alert")).toContainText("Изменение не сохранено: подпись клиента сохранена.");
-  expect(question).toContain("889,15 €");
-  expect(question).toContain("1.317,55 €");
-  expect(question).not.toContain("The client signed");
   expect(serviceWrites()).toHaveLength(1);
   expect(serviceWrites()[0].body.confirm_signature_reset).toBe(false);
 
   // "Yes": the same service is sent again with the confirmation.
-  page.once("dialog", (dialog) => void dialog.accept());
   await sheet.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await ask.getByRole("button", { name: "Изменить, подпись сбросится", exact: true }).click();
   await expect(sheet).toBeHidden();
   expect(serviceWrites()).toHaveLength(3);
   expect(serviceWrites()[2].body).toMatchObject({ description: "Flughafentransfer", confirm_signature_reset: true });

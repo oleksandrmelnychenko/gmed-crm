@@ -423,9 +423,15 @@ export function TerminationSettlementCard({
               {settlement.order_number}
             </StaffLink>
             {" · "}
-            {tx("договор", "Vertrag")} <span className="font-mono">{settlement.contract_number}</span>
-            {" · "}
-            {tx("расторгнут", "gekündigt")} {formatDate(settlement.terminated_at)}
+            {settlement.contract_number ? (
+              <>
+                {tx("договор", "Vertrag")} <span className="font-mono">{settlement.contract_number}</span>
+                {" · "}
+              </>
+            ) : null}
+            {settlement.order_status === "cancelled" && !settlement.contract_number
+              ? tx("отменён", "storniert")
+              : tx("расторгнут", "gekündigt")} {formatDate(settlement.terminated_at)}
           </p>
         </div>
         <StatusBadge tone={settlement.status === "open" ? "warning" : "success"}>
@@ -512,10 +518,13 @@ export function OrderTerminationBanner({
   orderId,
   patientId,
   lang,
+  cancelledByHand = false,
 }: {
   orderId: string;
   patientId: string | null;
   lang: Lang;
+  /** The order was cancelled by hand, no contract was terminated (doc 7). */
+  cancelledByHand?: boolean;
 }) {
   const tx = txFor(lang);
   const canViewOrders = useCan("orders.view");
@@ -548,7 +557,9 @@ export function OrderTerminationBanner({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-2 font-semibold">
           <OctagonAlert className="size-4 shrink-0" aria-hidden />
-          {tx("Заказ остановлен из-за расторжения договора", "Auftrag wegen Vertragskündigung gestoppt")}
+          {cancelledByHand
+            ? tx("Расчёт по отменённому заказу", "Abrechnung des stornierten Auftrags")
+            : tx("Заказ остановлен из-за расторжения договора", "Auftrag wegen Vertragskündigung gestoppt")}
         </p>
         {settlement ? (
           <StatusBadge tone={settlement.status === "open" ? "warning" : "success"}>

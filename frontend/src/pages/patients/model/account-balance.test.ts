@@ -33,6 +33,21 @@ describe("resolvePatientBalancePresentation", () => {
     ).toEqual({ amount: null, side: "reconciliation_required", needsReconciliation: true });
   });
 
+  it("shows the staff figure next to the open reconciliation (QA 2026-10-31)", () => {
+    expect(
+      resolvePatientBalancePresentation({
+        closing_balance: null,
+        provisional_balance: "-125.50",
+        balance_side: "reconciliation_required",
+      }),
+    ).toEqual({
+      amount: 125.5,
+      signedAmount: -125.5,
+      side: "reconciliation_required",
+      needsReconciliation: true,
+    });
+  });
+
   it("does not render an invalid balance", () => {
     expect(
       resolvePatientBalancePresentation({

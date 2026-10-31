@@ -2,11 +2,15 @@ export type PatientBalanceSide = "debit" | "credit" | "settled" | "reconciliatio
 
 type PatientBalanceSummary = {
   closing_balance: string | null;
+  /** The calculated balance while a reconciliation is open (staff only, QA 2026-10-31). */
+  provisional_balance?: string | null;
   balance_side: "debit" | "credit" | "settled" | "reconciliation_required";
 };
 
 export type PatientBalancePresentation = {
   amount: number | null;
+  /** With the reconciliation still open: the calculated balance with its sign. */
+  signedAmount?: number | null;
   side: PatientBalanceSide;
   needsReconciliation: boolean;
 };
@@ -18,7 +22,7 @@ export function resolvePatientBalancePresentation(
     return null;
   }
 
-  const { closing_balance: rawBalance, balance_side: balanceSide } =
+  const { closing_balance: rawBalance, provisional_balance: provisional, balance_side: balanceSide } =
     summary as Partial<PatientBalanceSummary>;
   if (
     (rawBalance !== null && typeof rawBalance !== "string") ||
@@ -30,8 +34,13 @@ export function resolvePatientBalancePresentation(
   const needsReconciliation =
     rawBalance == null || balanceSide === "reconciliation_required";
   if (needsReconciliation) {
+    const provisionalAmount = typeof provisional === "string" && provisional.trim() !== ""
+      ? Number(provisional)
+      : null;
+    const known = provisionalAmount != null && Number.isFinite(provisionalAmount);
     return {
-      amount: null,
+      amount: known ? Math.abs(provisionalAmount) : null,
+      ...(known ? { signedAmount: provisionalAmount } : {}),
       side: "reconciliation_required",
       needsReconciliation: true,
     };

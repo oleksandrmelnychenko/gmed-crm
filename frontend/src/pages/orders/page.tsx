@@ -76,7 +76,7 @@ import {
   textareaClass as shellTextareaClass,
   tokens,
 } from "@/components/ui-shell";
-import { clearApiCache } from "@/lib/api";
+import { clearApiCache, type ApiRequestError } from "@/lib/api";
 import { appDateKey, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
 import { paymentStatusLabel } from "@/lib/payment-status";
@@ -160,7 +160,12 @@ import {
 } from "./model/partner-cost-amounts";
 import { parseOrderStatusBlocker, resolveOrderNextStep } from "./model/order-next-step";
 import { orderLoadErrorKey } from "./model/order-load-error";
-import { clientSignatureNote, withSignedTermsConfirmation } from "./model/client-signature";
+import { LeadConfirmDialog } from "@/pages/leads/ui/lead-confirm-dialog";
+import {
+  clientSignatureNote,
+  signedTermsChangeConfirmText,
+  withSignedTermsConfirmation,
+} from "./model/client-signature";
 import { OrderResignAction } from "./ui/order-resign-action";
 import { skipPassiveOrderRefresh } from "./model/order-realtime";
 import { billingSourceLabel } from "./model/billing-source";
@@ -1152,6 +1157,12 @@ function useOrdersPageContent() {
   // frame shortly after it does not load everything again (QA C-33).
   const workspaceLoadedAtRef = useRef(Date.now());
   const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
+  // The change of signed terms asks in the app's own dialog, never the
+  // browser's confirm() (QA 2026-10-31, R3-4), as «Отменить услугу» does.
+  const [signedTermsAsk, setSignedTermsAsk] = useState<{ text: string; resolve: (yes: boolean) => void } | null>(null);
+  const askSignedTermsChange = (refusal: ApiRequestError) => new Promise<boolean>((resolve) => {
+    setSignedTermsAsk({ text: signedTermsChangeConfirmText(refusal, null), resolve });
+  });
   // The provider, category and doctor filters of the list sit in a second row
   // that opens on demand (or whenever one of them is set).
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
@@ -3016,7 +3027,7 @@ function useOrdersPageContent() {
         doctor_id: optString(leistungForm.doctorId),
         external_document_id: optString(leistungForm.externalDocumentId),
         notes: optString(leistungForm.notes),
-      }));
+      }), askSignedTermsChange);
       resetLeistungDialog(false);
       triggerReload();
     } catch (error) {
@@ -3123,7 +3134,7 @@ function useOrdersPageContent() {
     try {
       await withSignedTermsConfirmation((confirmSignatureReset) => (
         generateServiceGroupLines(serviceGroupId, overrideDuplicates, confirmSignatureReset)
-      ));
+      ), askSignedTermsChange);
       triggerReload();
     } catch (error) {
       setServiceGroupsError(
@@ -3933,6 +3944,16 @@ function useOrdersPageContent() {
                     lang={lang}
                   />
                 ) : null}
+                {orderDetail.status === "cancelled"
+                  && orderDetail.cancellation_reason !== "contract_terminated"
+                  && orderDetail.termination_settlement ? (
+                    <OrderTerminationBanner
+                      orderId={orderDetail.id}
+                      patientId={orderDetail.patient_id}
+                      lang={lang}
+                      cancelledByHand
+                    />
+                  ) : null}
                 {/* Staff only: the sanctions gate holds new work on this order. The
                     same neutral text as the refused action, no names or reasons (QA C2-07). */}
                 {orderDetail.sanctions_hold && orderDetail.status !== "cancelled" ? (
@@ -9383,6 +9404,23 @@ function useOrdersPageContent() {
           </form>
         </SheetContent>
       </Sheet>
+      <LeadConfirmDialog
+        open={Boolean(signedTermsAsk)}
+        testId="order-signed-terms-change-dialog"
+        title={lang === "de" ? "Unterschriebene Auftragsbedingungen ändern?" : "Изменить подписанные условия заказа?"}
+        description={signedTermsAsk?.text}
+        confirmLabel={lang === "de" ? "Ändern, Unterschrift entfällt" : "Изменить, подпись сбросится"}
+        cancelLabel={lang === "de" ? "Abbrechen" : "Отмена"}
+        destructive
+        onConfirm={() => {
+          signedTermsAsk?.resolve(true);
+          setSignedTermsAsk(null);
+        }}
+        onCancel={() => {
+          signedTermsAsk?.resolve(false);
+          setSignedTermsAsk(null);
+        }}
+      />
     </div>
   );
 }

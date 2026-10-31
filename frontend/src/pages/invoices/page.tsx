@@ -546,6 +546,7 @@ function useStaffInvoicesPageContent() {
   const datevDemo = searchParams.get("datev_mode") === "demo";
   const access = invoicesPermissions(user);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
+  const [overpaymentAcceptedFor, setOverpaymentAcceptedFor] = useState<string | null>(null);
   const [accountingCurrency, setAccountingCurrency] = useState("EUR");
   // A release warning waiting for billing's confirmation.
   const [statusConfirmation, setStatusConfirmation] = useState<{
@@ -2011,7 +2012,8 @@ function useStaffInvoicesPageContent() {
         note: paymentForm.note.trim() || null,
         payer_name: paymentForm.payerName.trim() || null,
         // The notice above the button showed the excess before this click.
-        accept_overpayment: paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0,
+        accept_overpayment: overpaymentAcceptedFor === paymentForm.amountGross
+          && paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0,
       });
       // Recorded values are no longer unsaved; the reload prefills the new balance.
       resetPaymentForm((current) => ({
@@ -2366,7 +2368,12 @@ function useStaffInvoicesPageContent() {
           actions={(
             <>
               {access.canCreate && !datevActive ? (
-                <Button type="button" variant="outline" onClick={() => setImportOpen(true)}>
+                <Button type="button" variant="outline" onClick={() => {
+                  // A client created meanwhile is in the dialog's list (QA 2026-10-31, R4-7).
+                  clearApiCache();
+                  setReloadToken((current) => current + 1);
+                  setImportOpen(true);
+                }}>
                   <FileUp className="size-4" />
                   {lang === "de" ? "Eingangsrechnung" : "Входящий счёт"}
                 </Button>
@@ -3254,12 +3261,36 @@ function useStaffInvoicesPageContent() {
                                 )
                               : null}
                           </p>
+                          {paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0 ? (
+                            <label className="flex items-center gap-2 text-xs text-amber-800">
+                              <input
+                                type="checkbox"
+                                data-testid="payment-overpayment-confirm"
+                                checked={overpaymentAcceptedFor === paymentForm.amountGross}
+                                onChange={(event) =>
+                                  setOverpaymentAcceptedFor(event.target.checked ? paymentForm.amountGross : null)
+                                }
+                              />
+                              {lang === "de" ? "Überzahlung bestätigen" : "Подтверждаю переплату"}
+                            </label>
+                          ) : null}
+                          {paymentForm.receivedOn && detail.issued_at
+                            && paymentForm.receivedOn < detail.issued_at.slice(0, 10) ? (
+                              <p className="max-w-xl text-xs text-amber-700" data-testid="payment-date-before-invoice">
+                                {lang === "de"
+                                  ? "Das Zahlungsdatum liegt vor dem Rechnungsdatum. Bitte prüfen."
+                                  : "Дата оплаты раньше даты счёта. Проверьте её."}
+                              </p>
+                            ) : null}
                           <Button
                             type="button"
                             disabled={
                               paymentBusy ||
                               !(parseMoneyInput(paymentForm.amountGross) > 0) ||
-                              !paymentForm.receivedOn
+                              !paymentForm.receivedOn ||
+                              // An overpayment is booked only when confirmed for this amount (R4-6).
+                              (paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0
+                                && overpaymentAcceptedFor !== paymentForm.amountGross)
                             }
                             onClick={() => void handleRecordPayment()}
                           >

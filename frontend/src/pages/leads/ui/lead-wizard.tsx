@@ -7345,7 +7345,10 @@ ${serviceCommentLines.join("\n")}`
         // quote, «Сохранить договор и заказ») unticked a mark stored meanwhile
         // (QA 2026-10-25, M F-6 / F-G9; the server keeps it when left out).
         signed_agency: flags.signed_agency,
-        needs_description: needsDescription,
+        // A repeat draft's purpose comes from its intake form, and its documents
+        // print it: the text built here from the lead would differ, so every
+        // save asked to reset the signature with equal totals (QA 2026-10-31, R3-5).
+        ...(lead?.repeat_patient_id ? {} : { needs_description: needsDescription }),
         date_from: draft.programDateFrom,
         date_to: draft.programDateTo,
       });
@@ -13349,8 +13352,8 @@ ${serviceCommentLines.join("\n")}`
           `„${trustedContactRemoval?.name ?? ""}“ aus der Anfrage entfernen?`,
         )}
         description={tx(
-          "Контакт и его данные представителя будут удалены из обращения. Доступ к этой заявке будет отозван. Аккаунт, доступ к другим детям и сохранённые документы останутся.",
-          "Der Kontakt und seine Vertretungsdaten werden aus der Anfrage entfernt. Der Zugang zu dieser Anfrage wird widerrufen. Das Konto, der Zugang zu anderen Kindern und gespeicherte Dokumente bleiben erhalten.",
+          "Контакт и его данные представителя будут удалены из обращения. Доступ к этой заявке будет отозван. Если контакт был получателем счёта или плательщиком, это снимется, и другой родитель укажет их заново. Аккаунт, доступ к другим детям и сохранённые документы останутся.",
+          "Der Kontakt und seine Vertretungsdaten werden aus der Anfrage entfernt. Der Zugang zu dieser Anfrage wird widerrufen. War der Kontakt Rechnungsempfänger oder Zahler, entfällt das, und der andere Elternteil gibt es neu an. Das Konto, der Zugang zu anderen Kindern und gespeicherte Dokumente bleiben erhalten.",
         )}
         confirmLabel={tx("Удалить", "Entfernen")}
         cancelLabel={tx("Отмена", "Abbrechen")}

@@ -407,6 +407,7 @@ export type PatientAccountStatement = {
     credit_total: string;
     calculated_balance: string;
     closing_balance: string | null;
+    provisional_balance?: string | null;
     balance_side: "debit" | "credit" | "settled" | "reconciliation_required";
     unreconciled_external_debit: string;
   };

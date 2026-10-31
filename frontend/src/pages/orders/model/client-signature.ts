@@ -35,7 +35,7 @@ export class SignedTermsChangeCancelled extends Error {
  */
 export async function withSignedTermsConfirmation<T>(
   attempt: (confirmSignatureReset: boolean) => Promise<T>,
-  confirmChange: (refusal: ApiRequestError) => boolean | Promise<boolean> = (refusal) => window.confirm(refusal.message),
+  confirmChange: (refusal: ApiRequestError) => boolean | Promise<boolean>,
 ): Promise<T> {
   try {
     return await attempt(false);

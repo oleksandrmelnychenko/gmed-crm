@@ -85,9 +85,15 @@ function portalPaymentMethodLabel(method: string, lang: string) {
   return lang === "de" ? label[0] : label[1];
 }
 
+/** The list's total after credit notes, as staff see it (doc 8.1): a credited invoice is not 1.000 € open to read. */
+function portalInvoiceNetTotal(invoice: { total_gross?: unknown; credited_amount?: unknown }) {
+  return Number(invoice.total_gross ?? 0) - Number(invoice.credited_amount ?? 0);
+}
+
 function portalAccountStateLabel(state: string, lang: string) {
   const labels: Record<string, [string, string]> = {
     paid: ["Bezahlt", "Оплачено"],
+    credited: ["Storniert", "Сторнирован"],
     partially_paid: ["Teilbezahlt – Rest offen", "Частично оплачено — требуется доплата"],
     unpaid: ["Nicht bezahlt", "Не оплачено"],
     amount_hidden: ["Betrag nicht freigegeben", "Сумма не открыта для просмотра"],
@@ -698,7 +704,7 @@ function usePatientInvoicesPageContent() {
                       <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{formatPortalDateTime(invoice.issued_at)}</td>
                       <td className="px-4 py-3"><StatusBadge status={invoice.display_status ?? invoice.status}>{portalStatusLabel(invoice.display_status ?? invoice.status)}</StatusBadge></td>
                       <td className="px-4 py-3"><StatusBadge tone={invoiceTypeBadgeTone(invoice.invoice_type)}>{invoiceTypeLabel(invoice.invoice_type)}</StatusBadge></td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{amountsVisible ? formatPortalCurrency(invoice.total_gross, invoice.currency) : t.portal_invoices_hidden}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{amountsVisible ? formatPortalCurrency(portalInvoiceNetTotal(invoice), invoice.currency) : t.portal_invoices_hidden}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">{amountsVisible ? formatPortalCurrency(balanceDue, invoice.currency) : t.portal_invoices_hidden}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{invoice.last_payment_proof_at ? `${t.portal_invoices_uploaded} ${formatPortalDate(invoice.last_payment_proof_at)}` : t.portal_invoices_not_uploaded}</td>
                     </tr>
@@ -742,7 +748,7 @@ function usePatientInvoicesPageContent() {
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={t.portal_invoices_total}
-                      value={amountsVisible ? formatPortalCurrency(invoice.total_gross, invoice.currency) : t.portal_invoices_hidden}
+                      value={amountsVisible ? formatPortalCurrency(portalInvoiceNetTotal(invoice), invoice.currency) : t.portal_invoices_hidden}
                     />
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}

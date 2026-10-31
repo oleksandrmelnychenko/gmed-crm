@@ -590,8 +590,12 @@ function accountBalanceLabel(
   currency: string,
   formatMoney: MoneyFormatter,
   lang: string,
+  provisional?: string | null,
 ) {
-  if (value == null) return lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка";
+  if (value == null) {
+    const label = lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка";
+    return provisional != null ? `${formatMoney(provisional, currency)} · ${label}` : label;
+  }
   const amount = moneyNumeric(value);
   if (amount > 0) {
     return `${formatMoney(String(Math.abs(amount)), currency)} ${lang === "de" ? "offener Betrag" : "долг"}`;
@@ -2292,6 +2296,7 @@ function usePatientInvoicesTabContent({
                   accountStatement.currency,
                   formatMoney,
                   lang,
+                  accountStatement.summary.provisional_balance,
                 ),
               ],
             ].map(([label, value]) => (

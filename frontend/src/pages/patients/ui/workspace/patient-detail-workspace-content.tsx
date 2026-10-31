@@ -633,7 +633,12 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
         ? lang === "de" ? "Guthaben" : "Переплата"
         : "";
   const balanceValue = balance?.needsReconciliation
-    ? lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка"
+    ? [
+        balance.signedAmount != null
+          ? formatMoney(String(balance.signedAmount), accountStatement?.currency)
+          : null,
+        lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка",
+      ].filter(Boolean).join(" · ")
     : balance?.amount != null
       ? [formatMoney(String(balance.amount), accountStatement?.currency), balanceSideLabel]
           .filter(Boolean)

@@ -82,8 +82,9 @@ export type TerminationSettlement = {
   patient_id: string;
   patient_pid: string | null;
   patient_name: string;
-  contract_id: string;
-  contract_number: string;
+  /** Empty for an order cancelled by hand without a framework contract. */
+  contract_id: string | null;
+  contract_number: string | null;
   terminated_at: string;
   currency: string;
   status: TerminationSettlementStatus;
