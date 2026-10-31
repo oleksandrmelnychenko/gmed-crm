@@ -835,6 +835,63 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
     assert_eq!(audit_count, 4);
 }
 
+/// QA 2026-10-31: a login's chat is one conversation over every record it
+/// reaches. Erasing one child redacts the chat of the login that goes with
+/// the child, not the guardian's, who still has the other child.
+#[tokio::test]
+async fn erasing_a_patient_keeps_the_chat_of_a_guardian_with_another_child() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("erasure-guardian-chat");
+    let erased = seed_patient(&pool, admin_id, &format!("{tag}-erased")).await;
+    let sibling = seed_patient(&pool, admin_id, &format!("{tag}-sibling")).await;
+    let own_login = seed_user(&pool, &format!("{tag}-own"), "patient").await;
+    let guardian = seed_user(&pool, &format!("{tag}-guardian"), "patient").await;
+    let manager = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, erased, own_login, admin_id).await;
+    seed_patient_assignment(&pool, erased, guardian, admin_id).await;
+    seed_patient_assignment(&pool, sibling, guardian, admin_id).await;
+    let mut messages = Vec::new();
+    for login in [own_login, guardian] {
+        let message: Uuid = sqlx::query_scalar(
+            "INSERT INTO direct_messages (from_user, to_user, message) VALUES ($1, $2, 'Synthetic') RETURNING id",
+        )
+        .bind(login)
+        .bind(manager)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        messages.push(message);
+    }
+
+    erase_through_register(&app, erased, &auth_header_for(admin_id, "ceo")).await;
+
+    let redacted = |id: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT redaction_reason FROM direct_messages WHERE id = $1",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(
+        redacted(messages[0]).await.as_deref(),
+        Some("dsgvo_erasure")
+    );
+    assert_eq!(redacted(messages[1]).await, None);
+    let guardian_active: bool = sqlx::query_scalar("SELECT is_active FROM users WHERE id = $1")
+        .bind(guardian)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(guardian_active);
+}
+
 #[tokio::test]
 async fn restriction_request_updates_legal_status_and_queue_is_assignment_scoped() {
     let Some((app, pool, admin_id)) = test_context().await else {

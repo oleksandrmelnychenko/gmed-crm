@@ -1053,6 +1053,20 @@ fn redact_patient_invoice_payload(invoice: &mut Value) {
     }
 }
 
+/// An invoice or a quote in the patient's own Art. 15 download, as the portal
+/// shows it (QA 2026-10-31): `row` carries the portal visibility columns. The
+/// download leaves the visibility itself out.
+pub(crate) fn redact_row_for_patient_export(item: &mut Value, row: &sqlx::postgres::PgRow) {
+    let visibility = row_invoice_portal_visibility(row);
+    if let Some(map) = item.as_object_mut() {
+        map.insert("portal_visibility".to_string(), visibility);
+    }
+    redact_patient_invoice_payload(item);
+    if let Some(map) = item.as_object_mut() {
+        map.remove("portal_visibility");
+    }
+}
+
 /// Invoice number assigned at release: the invoice date and the next value
 /// of the gapless counter (see `release`).
 fn gen_invoice_number(invoice_date: NaiveDate, seq: i64) -> String {

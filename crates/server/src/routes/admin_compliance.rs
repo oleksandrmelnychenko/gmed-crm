@@ -491,27 +491,344 @@ impl PatientExportAudience {
     fn includes_internal_notes(self) -> bool {
         self == Self::StaffHandler
     }
+
+    /// The login the patient's own download is limited to: it holds what that
+    /// login sees in the portal (`actor_id` is the login there). The staff
+    /// handler gets the whole file and reviews it before handing it over.
+    fn portal_login(self, actor_id: Uuid) -> Option<Uuid> {
+        (self == Self::PatientPortal).then_some(actor_id)
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::StaffHandler => "staff_handler",
+            Self::PatientPortal => "patient_portal",
+        }
+    }
+}
+
+/// Types closed to the patient's own download even with a share (QA
+/// 2026-10-31): the AML/GwG evidence and what it holds about a risk (§ 47
+/// GwG, no tipping-off) and a third party's files
+/// ([`super::documents::OTHER_PERSON_DOCUMENT_ARTS`]). Compared with the
+/// document's type, template and compliance kind.
+const PORTAL_EXPORT_CLOSED_TYPES: [&str; 12] = [
+    "enhanced_due_diligence",
+    "gwg_identification",
+    "lead_self_disclosure",
+    "payer_self_disclosure",
+    "patient_payer_statement",
+    "payer_cost_estimate",
+    "self_funds_proof",
+    "relationship_proof",
+    "representative_identity",
+    "representative_authority",
+    "payer_identity",
+    "payer_funds_proof",
+];
+
+/// The documents of the patient's own download (`documents d`, `$2` the login,
+/// `$3` [`PORTAL_EXPORT_CLOSED_TYPES`]): the versions released to this login
+/// and what it uploaded in the portal itself. A cabinet upload is not one of
+/// them: that is the GwG file of the request, the payer's papers included.
+fn portal_export_documents_sql() -> String {
+    format!(
+        r#"NOT (COALESCE(d.category, '') = 'compliance_aml'
+                OR lower(COALESCE(d.art, '')) = ANY($3::text[])
+                OR COALESCE(d.generated_template_id, '') = ANY($3::text[])
+                OR COALESCE(d.compliance_kind, '') = ANY($3::text[]))
+           AND ((d.uploaded_by = $2 AND d.ursprung = 'patient_portal')
+                OR (d.visibility = 'patient_visible'
+                    AND {}
+                    AND EXISTS (
+                        SELECT 1 FROM document_shares ds
+                        WHERE ds.document_id = d.id
+                          AND ds.shared_with_user_id = $2
+                          AND ds.revoked_at IS NULL
+                    )))"#,
+        super::me::PORTAL_CURRENT_DOCUMENT_SQL
+    )
+}
+
+/// What the patient's own download keeps (QA 2026-10-31). An allow-list on
+/// purpose: a section or a field added to the export stays with the staff
+/// handler until somebody decides the patient gets it. Staff notes, the
+/// consents' context (it holds the staff note), the working tasks and
+/// reminders, the AI analyses and the labels hidden from the patient
+/// (`access_policies`) are not listed.
+const PORTAL_EXPORT_FIELDS: [(&str, &[&str]); 11] = [
+    (
+        "patient",
+        &[
+            "id",
+            "patient_id",
+            "first_name",
+            "last_name",
+            "birth_date",
+            "gender",
+            "email",
+            "phone_primary",
+            "phone_secondary",
+            "nationality",
+            "languages",
+            "insurance_type",
+            "insurance_provider",
+            "insurance_number",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ],
+    ),
+    (
+        "appointments",
+        &[
+            "id",
+            "title",
+            "date",
+            "time_start",
+            "time_end",
+            "type",
+            "status",
+            "location",
+        ],
+    ),
+    (
+        "cases",
+        &["id", "case_id", "status", "hauptanfragegrund", "created_at"],
+    ),
+    (
+        "orders",
+        &["id", "order_number", "phase", "status", "created_at"],
+    ),
+    ("assignments", &["user_name", "role", "assigned_at"]),
+    (
+        "consents",
+        &[
+            "id",
+            "consent_type",
+            "granted",
+            "granted_at",
+            "expires_at",
+            "revoked_at",
+            "managed_by_name",
+            "created_at",
+        ],
+    ),
+    (
+        "documents",
+        &[
+            "id",
+            "order_id",
+            "appointment_id",
+            "auto_name",
+            "original_filename",
+            "art",
+            "category",
+            "status",
+            "visibility",
+            "is_medical",
+            "mime_type",
+            "file_size",
+            "klinik",
+            "ursprung",
+            "version_number",
+            "created_at",
+            "updated_at",
+        ],
+    ),
+    (
+        "invoices",
+        &[
+            "id",
+            "quote_id",
+            "order_id",
+            "invoice_number",
+            "invoice_type",
+            "status",
+            "issued_at",
+            "due_date",
+            "total_net",
+            "total_vat",
+            "total_gross",
+            "paid_amount",
+            "paid_at",
+            "line_items",
+            "notes",
+            "created_at",
+            "updated_at",
+        ],
+    ),
+    (
+        "invoice_dunning_events",
+        &[
+            "id",
+            "invoice_id",
+            "level",
+            "due_date_snapshot",
+            "balance_due",
+            "sent_at",
+            "created_at",
+        ],
+    ),
+    (
+        "quotes",
+        &[
+            "id",
+            "order_id",
+            "quote_number",
+            "status",
+            "valid_until",
+            "total_net",
+            "total_vat",
+            "total_gross",
+            "paid_amount",
+            "paid_at",
+            "line_items",
+            "created_at",
+            "updated_at",
+        ],
+    ),
+    (
+        "messages",
+        &[
+            "id",
+            "from_user",
+            "from_user_name",
+            "from_user_role",
+            "to_user",
+            "to_user_name",
+            "to_user_role",
+            "message",
+            "is_read",
+            "read_at",
+            "created_at",
+            "attachment_filename",
+            "attachment_mime",
+            "attachment_size",
+            "redacted_at",
+            "redaction_reason",
+        ],
+    ),
+];
+
+/// The export as the patient's own download: [`PORTAL_EXPORT_FIELDS`] of it.
+fn narrow_export_for_patient(export: &Value) -> Value {
+    let keep = |row: &Value, fields: &[&str]| -> Value {
+        Value::Object(
+            fields
+                .iter()
+                .filter_map(|field| Some(((*field).to_string(), row.get(*field)?.clone())))
+                .collect(),
+        )
+    };
+    let mut narrowed = serde_json::Map::new();
+    for key in ["export_type", "exported_at", "exported_by"] {
+        if let Some(value) = export.get(key) {
+            narrowed.insert(key.to_string(), value.clone());
+        }
+    }
+    for (section, fields) in PORTAL_EXPORT_FIELDS {
+        let Some(value) = export.get(section) else {
+            continue;
+        };
+        let value = match value.as_array() {
+            Some(rows) => Value::Array(rows.iter().map(|row| keep(row, fields)).collect()),
+            None => keep(value, fields),
+        };
+        narrowed.insert(section.to_string(), value);
+    }
+    Value::Object(narrowed)
 }
 
 /// Adds the staff-only `internal_note` of a quote or an invoice to its export
-/// row for the staff handler of an access request.
+/// row for the staff handler of an access request; the patient's own download
+/// shows the row as the portal does instead.
 fn with_internal_note(
     mut item: Value,
     row: &sqlx::postgres::PgRow,
     audience: PatientExportAudience,
 ) -> Value {
-    if audience.includes_internal_notes()
-        && let Some(object) = item.as_object_mut()
-    {
-        object.insert(
-            "internal_note".to_string(),
-            json!(
-                row.try_get::<Option<String>, _>("internal_note")
-                    .unwrap_or_default()
-            ),
-        );
+    if audience.includes_internal_notes() {
+        if let Some(object) = item.as_object_mut() {
+            object.insert(
+                "internal_note".to_string(),
+                json!(
+                    row.try_get::<Option<String>, _>("internal_note")
+                        .unwrap_or_default()
+                ),
+            );
+        }
+    } else {
+        super::invoices::redact_row_for_patient_export(&mut item, row);
     }
     item
+}
+
+/// The chat in the staff handler's export (QA 2026-10-31). A login's chat is
+/// one conversation over every record it reaches, so only a login whose one
+/// active record is this patient goes in; the chat of a guardian with another
+/// child, an own record or an own request, or of a login whose access ended,
+/// holds other people's data too: it is named for manual handling instead.
+/// Returns the logins to export and the ones to handle by hand.
+async fn load_patient_export_chat_logins(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<(Vec<Uuid>, Vec<Value>), axum::response::Response> {
+    let rows = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT u.id, u.name,
+                      pa.revoked_at IS NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM patient_assignments other
+                          WHERE other.user_id = u.id
+                            AND other.patient_id <> $1
+                            AND other.revoked_at IS NULL
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM leads l
+                          WHERE (l.portal_user_id = u.id
+                                 OR EXISTS (
+                                     SELECT 1 FROM lead_portal_access access
+                                     WHERE access.lead_id = l.id
+                                       AND access.user_id = u.id
+                                       AND access.revoked_at IS NULL
+                                 ))
+                            AND l.qualification_status <> 'deleted'
+                            AND l.converted_patient_id IS DISTINCT FROM $1
+                            AND l.prospect_patient_id IS DISTINCT FROM $1
+                            AND l.repeat_patient_id IS DISTINCT FROM $1
+                      ) AS only_this_patient,
+                      (SELECT count(*) FROM direct_messages dm
+                       WHERE dm.from_user = u.id OR dm.to_user = u.id) AS message_count
+               FROM patient_assignments pa
+               JOIN users u ON u.id = pa.user_id
+               WHERE pa.patient_id = $1
+                 AND u.role = 'patient'"#,
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "patient_users",
+    )?;
+    let mut logins = Vec::new();
+    let mut manual_review = Vec::new();
+    for row in rows {
+        let user_id =
+            require_patient_export_section(row.try_get::<Uuid, _>("id"), "patient_users_decode")?;
+        if row.try_get::<bool, _>("only_this_patient").unwrap_or(false) {
+            logins.push(user_id);
+            continue;
+        }
+        let message_count = row.try_get::<i64, _>("message_count").unwrap_or(0);
+        if message_count > 0 {
+            manual_review.push(json!({
+                "user_id": user_id,
+                "user_name": row.try_get::<String, _>("name").unwrap_or_default(),
+                "message_count": message_count,
+            }));
+        }
+    }
+    Ok((logins, manual_review))
 }
 
 pub(crate) async fn build_patient_export_payload(
@@ -533,6 +850,9 @@ pub(crate) async fn build_patient_export_payload(
 
     let patient = require_patient_export_section(patient, "patient")?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "Patient not found"))?;
+
+    let portal_login = audience.portal_login(actor_id);
+    let portal = portal_login.is_some();
 
     let appointments = require_patient_export_section(sqlx::query!(
         "SELECT id, title, date, time_start, time_end, appointment_type, status, location, notes FROM appointments WHERE patient_id = $1 ORDER BY date DESC",
@@ -570,30 +890,40 @@ pub(crate) async fn build_patient_export_payload(
     .await, "consents")?;
 
     let documents = require_patient_export_section(
-        sqlx::query(
-            r#"SELECT id, order_id, appointment_id, auto_name, original_filename, art, category,
-                  status, visibility, is_medical, mime_type, file_size, klinik, ursprung,
-                  notes, version_number, created_at, updated_at
-           FROM documents
-           WHERE patient_id = $1
-           ORDER BY created_at DESC"#,
-        )
+        sqlx::query(&format!(
+            r#"SELECT d.id, d.order_id, d.appointment_id, d.auto_name, d.original_filename, d.art,
+                  d.category, d.status, d.visibility, d.is_medical, d.mime_type, d.file_size,
+                  d.klinik, d.ursprung, d.notes, d.version_number, d.created_at, d.updated_at
+           FROM documents d
+           WHERE d.patient_id = $1
+             AND ($2::uuid IS NULL OR ({}))
+           ORDER BY d.created_at DESC"#,
+            portal_export_documents_sql()
+        ))
         .bind(patient_id)
+        .bind(portal_login)
+        .bind(&PORTAL_EXPORT_CLOSED_TYPES[..])
         .fetch_all(&state.db)
         .await,
         "documents",
     )?;
 
+    // The patient's own download lists an invoice as the portal does: issued,
+    // not hidden from the patient (QA 2026-10-31).
     let invoices = require_patient_export_section(
         sqlx::query(
             r#"SELECT id, quote_id, order_id, invoice_number, invoice_type, status, issued_at,
                   due_date, total_net, total_vat, total_gross, paid_amount, paid_at,
-                  line_items, notes, internal_note, created_at, updated_at
+                  line_items, notes, internal_note, created_at, updated_at,
+                  portal_visible, hide_amounts_from_patient, line_items_visible_to_patient,
+                  pdf_visible_to_patient
            FROM invoices
            WHERE patient_id = $1
+             AND ($2::boolean = false OR (released_at IS NOT NULL AND portal_visible = true))
            ORDER BY issued_at DESC, created_at DESC"#,
         )
         .bind(patient_id)
+        .bind(portal)
         .fetch_all(&state.db)
         .await,
         "invoices",
@@ -606,25 +936,44 @@ pub(crate) async fn build_patient_export_payload(
            FROM invoice_dunning_events ide
            JOIN invoices i ON i.id = ide.invoice_id
            WHERE i.patient_id = $1
+             AND ($2::boolean = false
+                  OR (i.released_at IS NOT NULL AND i.portal_visible = true
+                      AND i.hide_amounts_from_patient = false
+                      AND i.pdf_visible_to_patient = true))
            ORDER BY ide.sent_at DESC, ide.created_at DESC"#,
         )
         .bind(patient_id)
+        .bind(portal)
         .fetch_all(&state.db)
         .await,
         "invoice_dunning_events",
     )?;
 
+    // The portal has no quote of its own: the patient's download holds the
+    // ones sent, without the amounts of an order whose invoice hides them
+    // (a third party pays for a minor) (QA 2026-10-31). The columns below let
+    // the row go through the invoice redaction.
     let quotes = require_patient_export_section(
         sqlx::query(
             r#"SELECT q.id, q.order_id, q.quote_number, q.status, q.valid_until,
                   q.total_net, q.total_vat, q.total_gross, q.paid_amount, q.paid_at,
-                  q.line_items, q.notes, q.internal_note, q.created_at, q.updated_at
+                  q.line_items, q.notes, q.internal_note, q.created_at, q.updated_at,
+                  true AS portal_visible,
+                  EXISTS (
+                      SELECT 1 FROM invoices hidden
+                      WHERE hidden.order_id = q.order_id
+                        AND (hidden.hide_amounts_from_patient OR NOT hidden.portal_visible)
+                  ) AS hide_amounts_from_patient,
+                  true AS line_items_visible_to_patient,
+                  true AS pdf_visible_to_patient
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
            WHERE o.patient_id = $1
+             AND ($2::boolean = false OR q.status IN ('sent', 'accepted', 'rejected', 'expired'))
            ORDER BY q.created_at DESC"#,
         )
         .bind(patient_id)
+        .bind(portal)
         .fetch_all(&state.db)
         .await,
         "quotes",
@@ -670,26 +1019,12 @@ pub(crate) async fn build_patient_export_payload(
         "reminders",
     )?;
 
-    let patient_user_rows = require_patient_export_section(
-        sqlx::query(
-            r#"SELECT DISTINCT u.id
-           FROM patient_assignments pa
-           JOIN users u ON u.id = pa.user_id
-           WHERE pa.patient_id = $1
-             AND u.role = 'patient'"#,
-        )
-        .bind(patient_id)
-        .fetch_all(&state.db)
-        .await,
-        "patient_users",
-    )?;
-    let patient_user_ids = require_patient_export_section(
-        patient_user_rows
-            .into_iter()
-            .map(|row| row.try_get::<Uuid, _>("id"))
-            .collect::<Result<Vec<_>, _>>(),
-        "patient_users_decode",
-    )?;
+    // The patient's own download holds the chat of the login that asks, never
+    // the other parent's (QA 2026-10-31).
+    let (patient_user_ids, messages_manual_review) = match portal_login {
+        Some(login) => (vec![login], Vec::new()),
+        None => load_patient_export_chat_logins(state, patient_id).await?,
+    };
 
     let messages = if patient_user_ids.is_empty() {
         Vec::<PgRow>::new()
@@ -893,7 +1228,8 @@ pub(crate) async fn build_patient_export_payload(
             "notes": patient.notes, "is_active": patient.is_active,
             "created_at": patient.created_at, "updated_at": patient.updated_at,
         },
-        "appointments": appointments.into_iter().map(|a| serde_json::json!({
+        // An internal appointment never reaches the portal.
+        "appointments": appointments.into_iter().filter(|a| !portal || a.appointment_type != "internal").map(|a| serde_json::json!({
             "id": a.id, "title": a.title, "date": a.date,
             "time_start": a.time_start, "time_end": a.time_end,
             "type": a.appointment_type, "status": a.status,
@@ -1059,6 +1395,7 @@ pub(crate) async fn build_patient_export_payload(
                 "redaction_reason": row.try_get::<Option<String>, _>("redaction_reason").unwrap_or_default(),
             })
         }).collect::<Vec<_>>(),
+        "messages_manual_review": messages_manual_review,
         "medication_evidence_reviews": medication_evidence_reviews,
         "medication_ai_analyses": medication_ai_analyses,
         "medication_ai_analysis_events": medication_ai_analysis_events,
@@ -1071,11 +1408,15 @@ pub(crate) async fn build_patient_export_payload(
         Some(patient_id),
         json!({
             "article": "Art. 15",
+            "audience": audience.name(),
             "internal_notes_included": audience.includes_internal_notes(),
         }),
     ));
 
-    Ok(export)
+    Ok(match audience {
+        PatientExportAudience::StaffHandler => export,
+        PatientExportAudience::PatientPortal => narrow_export_for_patient(&export),
+    })
 }
 
 pub(crate) async fn export_patient_data_response(
@@ -1089,8 +1430,10 @@ pub(crate) async fn export_patient_data_response(
     match format {
         PatientExportFormat::Json => Ok(Json(payload).into_response()),
         PatientExportFormat::Zip => {
-            let documents = load_patient_export_files(state, patient_id).await?;
-            let zip_bytes = build_patient_export_zip(&payload, &documents)?;
+            let documents =
+                load_patient_export_files(state, patient_id, audience.portal_login(actor_id))
+                    .await?;
+            let zip_bytes = build_patient_export_zip(&payload, &documents, audience)?;
             let disposition =
                 crate::content_disposition::attachment(&patient_export_archive_name(&payload));
             axum::response::Response::builder()
@@ -1133,19 +1476,26 @@ struct ExportedDocumentFiles {
 }
 
 /// Art. 15 Abs. 3 DSGVO asks for a copy of the data, not a list of file names.
+/// `portal_login` limits the files to that login's own download; the staff
+/// handler gets every stored file and reviews them before handing them over.
 async fn load_patient_export_files(
     state: &AppState,
     patient_id: Uuid,
+    portal_login: Option<Uuid>,
 ) -> Result<ExportedDocumentFiles, axum::response::Response> {
-    let rows = sqlx::query(
-        r#"SELECT id, auto_name, original_filename, mime_type, storage_key
-           FROM documents
-           WHERE patient_id = $1
-             AND storage_key IS NOT NULL
-             AND file_deleted_at IS NULL
-           ORDER BY created_at"#,
-    )
+    let rows = sqlx::query(&format!(
+        r#"SELECT d.id, d.auto_name, d.original_filename, d.mime_type, d.storage_key
+           FROM documents d
+           WHERE d.patient_id = $1
+             AND d.storage_key IS NOT NULL
+             AND d.file_deleted_at IS NULL
+             AND ($2::uuid IS NULL OR ({}))
+           ORDER BY d.created_at"#,
+        portal_export_documents_sql()
+    ))
     .bind(patient_id)
+    .bind(portal_login)
+    .bind(&PORTAL_EXPORT_CLOSED_TYPES[..])
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -1218,6 +1568,7 @@ async fn load_patient_export_files(
 fn build_patient_export_zip(
     payload: &Value,
     documents: &ExportedDocumentFiles,
+    audience: PatientExportAudience,
 ) -> Result<Vec<u8>, axum::response::Response> {
     let export_json = serde_json::to_vec_pretty(payload).map_err(|_| {
         err(
@@ -1254,13 +1605,34 @@ fn build_patient_export_zip(
                 "Failed to build export bundle",
             )
         })?;
-    let mut readme = String::from(
-        "DSGVO Art. 15 export bundle\r\n\r\nThis archive contains the structured patient export in patient-export.json\r\nand the stored files of the patient in the documents folder.\r\n",
-    );
+    let mut readme = String::from(match audience {
+        PatientExportAudience::StaffHandler => {
+            "DSGVO Art. 15 export bundle\r\n\r\nThis archive contains the structured patient export in patient-export.json\r\nand the stored files of the patient in the documents folder.\r\n"
+        }
+        PatientExportAudience::PatientPortal => {
+            "DSGVO Art. 15 export bundle\r\n\r\nThis archive contains your data from the patient portal in patient-export.json,\r\nand in the documents folder the documents released to you and your own uploads.\r\nA complete copy can be requested from GMED.\r\n"
+        }
+    });
     if !documents.skipped.is_empty() {
         readme.push_str("\r\nNot included, hand over separately:\r\n");
         for label in &documents.skipped {
             readme.push_str(&format!("- {label}\r\n"));
+        }
+    }
+    // QA 2026-10-31: the chat of a login that reaches other records too.
+    if let Some(logins) = payload["messages_manual_review"]
+        .as_array()
+        .filter(|logins| !logins.is_empty())
+    {
+        readme.push_str(
+            "\r\nChat not included, it also concerns other records (review by hand):\r\n",
+        );
+        for login in logins {
+            readme.push_str(&format!(
+                "- {} ({} messages)\r\n",
+                login["user_name"].as_str().unwrap_or_default(),
+                login["message_count"]
+            ));
         }
     }
     archive.write_all(readme.as_bytes()).map_err(|_| {
@@ -4344,14 +4716,15 @@ async fn anonymize_patient_record(
     .map_err(|e| failed(e, "remove patient notifications"))?
     .rows_affected();
 
-    let (redacted_messages, attachment_keys) =
-        redact_patient_direct_messages(&mut tx, patient_id).await?;
-    // The patient's own login goes last: the message redaction above finds it
-    // through the (now revoked) assignments.
     let disabled_portal_accounts =
         disable_patient_portal_accounts_in_tx(&mut tx, patient_id, &source_lead_ids)
             .await
             .map_err(|e| failed(e, "disable patient portal accounts"))?;
+    // Only the chat of the logins that went with this patient (QA 2026-10-31):
+    // a login that still reaches another record or request is one person's
+    // whole chat, the other child's included, and stays.
+    let (redacted_messages, attachment_keys) =
+        redact_patient_direct_messages(&mut tx, patient_id, &disabled_portal_accounts).await?;
     tx.commit().await.map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_id, "commit patient erasure transaction");
         err(
@@ -4506,25 +4879,8 @@ async fn disable_patient_portal_accounts_in_tx(
 async fn redact_patient_direct_messages(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     patient_id: Uuid,
+    patient_user_ids: &[Uuid],
 ) -> Result<(u64, Vec<String>), axum::response::Response> {
-    let patient_user_ids: Vec<Uuid> = sqlx::query_scalar(
-        r#"SELECT DISTINCT pa.user_id
-           FROM patient_assignments pa
-           JOIN users u ON u.id = pa.user_id
-           WHERE pa.patient_id = $1
-             AND u.role = 'patient'"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&mut **tx)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, patient_id = %patient_id, "load patient messaging identities");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to anonymize patient",
-        )
-    })?;
-
     if patient_user_ids.is_empty() {
         return Ok((0, Vec::new()));
     }
@@ -4535,7 +4891,7 @@ async fn redact_patient_direct_messages(
            WHERE (from_user = ANY($1) OR to_user = ANY($1))
              AND attachment_key IS NOT NULL"#,
     )
-    .bind(&patient_user_ids)
+    .bind(patient_user_ids)
     .fetch_all(&mut **tx)
     .await
     .map_err(|e| {
@@ -4572,7 +4928,7 @@ async fn redact_patient_direct_messages(
            WHERE (from_user = ANY($1) OR to_user = ANY($1))
              AND redacted_at IS NULL"#,
     )
-    .bind(&patient_user_ids)
+    .bind(patient_user_ids)
     .execute(&mut **tx)
     .await
     .map_err(|e| {
@@ -4590,7 +4946,7 @@ async fn redact_patient_direct_messages(
              AND kind IN ('direct_message', 'direct_message_attachment')
              AND (user_id = ANY($1) OR entity_id = ANY($1))"#,
     )
-    .bind(&patient_user_ids)
+    .bind(patient_user_ids)
     .execute(&mut **tx)
     .await
     {
@@ -5062,7 +5418,48 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{identity_terms_pattern, scrub_statement};
+    use super::{
+        PORTAL_EXPORT_CLOSED_TYPES, identity_terms_pattern, narrow_export_for_patient,
+        scrub_statement,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn the_patients_download_keeps_only_what_is_listed() {
+        let narrowed = narrow_export_for_patient(&json!({
+            "export_type": "DSGVO Art. 15 - Right of Access",
+            "patient": {"first_name": "Anna", "notes": "staff", "functional_labels": ["vip"]},
+            "appointments": [{"title": "Termin", "notes": "staff"}],
+            "cases": [{"case_id": "C-1", "notes": "staff", "intake_snapshot": {"a": 1}}],
+            "orders": [{"order_number": "O-1", "notes": "staff"}],
+            "consents": [{"consent_type": "dsgvo", "context": {"note": "staff"}}],
+            "documents": [{"auto_name": "Plan", "notes": "staff"}],
+            "invoice_dunning_events": [{"level": "first", "note": "staff"}],
+            "quotes": [{"quote_number": "Q-1", "notes": "staff", "internal_note": "staff"}],
+            "invoices": [{"invoice_number": "R-1", "internal_note": "staff"}],
+            "tasks": [{"title": "staff"}],
+            "reminders": [{"title": "staff"}],
+            "messages_manual_review": [{"user_name": "staff"}],
+            "medication_evidence_reviews": [{"status": "staff"}],
+            "medication_ai_analyses": [{"status": "staff"}],
+            "medication_ai_analysis_events": [{"to_status": "staff"}],
+            "a_section_added_later": [{"title": "staff"}],
+        }));
+        assert_eq!(narrowed["patient"], json!({"first_name": "Anna"}));
+        assert_eq!(narrowed["orders"], json!([{"order_number": "O-1"}]));
+        assert_eq!(narrowed["invoices"], json!([{"invoice_number": "R-1"}]));
+        assert!(!narrowed.to_string().contains("staff"), "{narrowed}");
+        for section in ["tasks", "reminders", "a_section_added_later"] {
+            assert!(narrowed.get(section).is_none(), "{section}");
+        }
+    }
+
+    #[test]
+    fn no_third_partys_file_is_open_to_the_patients_download() {
+        for art in crate::routes::documents::OTHER_PERSON_DOCUMENT_ARTS {
+            assert!(PORTAL_EXPORT_CLOSED_TYPES.contains(&art), "{art}");
+        }
+    }
 
     #[test]
     fn the_identity_pattern_escapes_the_terms_and_matches_whole_words() {

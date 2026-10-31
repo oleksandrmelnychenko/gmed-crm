@@ -424,6 +424,394 @@ async fn patient_can_download_own_data_export_bundle_as_zip() {
     assert!(audit_count >= 1);
 }
 
+/// A document with a stored row only, shared with `login` on the portal.
+async fn seed_shared_document(
+    pool: &PgPool,
+    patient_id: Uuid,
+    login: Uuid,
+    staff: Uuid,
+    art: &str,
+    category: &str,
+) -> Uuid {
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, version_root_document_id, version_number,
+                uploaded_by, notes
+           ) VALUES (
+                $1, $2, $3, $4, $3, $5, 'active', 'patient_visible',
+                false, 'application/pdf', 128, $1, 1, $6, 'STAFF-NOTE-document'
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(art)
+    .bind(format!("{art}.pdf"))
+    .bind(category)
+    .bind(staff)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_shares (document_id, shared_with_user_id, shared_by, channel)
+           VALUES ($1, $2, $3, 'patient_portal')"#,
+    )
+    .bind(document_id)
+    .bind(login)
+    .bind(staff)
+    .execute(pool)
+    .await
+    .unwrap();
+    document_id
+}
+
+async fn seed_chat_message(pool: &PgPool, from_user: Uuid, to_user: Uuid, text: &str) {
+    sqlx::query("INSERT INTO direct_messages (from_user, to_user, message) VALUES ($1, $2, $3)")
+        .bind(from_user)
+        .bind(to_user)
+        .bind(text)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+fn listed_ids(export: &Value, section: &str) -> Vec<String> {
+    export[section]
+        .as_array()
+        .unwrap_or_else(|| panic!("{section}: {export}"))
+        .iter()
+        .map(|item| item["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// QA 2026-10-31: the patient's own Art. 15 download holds what the login sees
+/// in the portal. AML evidence and a third party's papers stay out even with
+/// a share (§ 47 GwG), and so do what staff did not release, staff notes,
+/// the other parent's uploads and chat.
+#[tokio::test]
+async fn the_patients_own_export_holds_what_the_login_sees_in_the_portal() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("me-export-narrow");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let mother = seed_user(&pool, &format!("{tag}-mother"), "patient").await;
+    let father = seed_user(&pool, &format!("{tag}-father"), "patient").await;
+    let manager = seed_user(&pool, &tag, "patient_manager").await;
+    for user in [mother, father, manager] {
+        seed_patient_assignment(&pool, patient_id, user, admin_id).await;
+    }
+    let mother_bearer = auth_header_for(mother, "patient");
+    let father_bearer = auth_header_for(father, "patient");
+    let manager_bearer = auth_header_for(manager, "patient_manager");
+    sqlx::query("UPDATE patients SET notes = 'STAFF-NOTE-patient' WHERE id = $1")
+        .bind(patient_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    sqlx::query("UPDATE orders SET notes = 'STAFF-NOTE-order' WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Staff file three documents; only the first goes to the portal.
+    let mut filed = Vec::new();
+    for name in ["released", "unreleased", "signed-off"] {
+        let (status, body) = multipart_upload(
+            &app,
+            "/api/v1/documents/upload",
+            &manager_bearer,
+            &[
+                ("patient_id", patient_id.to_string()),
+                ("auto_name", format!("{name} {tag}")),
+                ("art", "arztbrief".to_string()),
+                ("category", "medical".to_string()),
+                ("status", "active".to_string()),
+                ("visibility", "released_internal".to_string()),
+                ("is_medical", "true".to_string()),
+                ("notes", "STAFF-NOTE-document".to_string()),
+            ],
+            &format!("{name}.pdf"),
+            "application/pdf",
+            b"%PDF-1.4 synthetic",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        filed.push(body["id"].as_str().unwrap().to_string());
+    }
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{}/portal-release", filed[0]),
+        &manager_bearer,
+        Some(json!({ "channel": "patient_portal", "requires_confirmation": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Each parent uploads a document of their own.
+    let mut uploads = Vec::new();
+    for bearer in [&mother_bearer, &father_bearer] {
+        let (status, body) = multipart_upload(
+            &app,
+            "/api/v1/me/documents/upload",
+            bearer,
+            &[("upload_kind", "medical_record".to_string())],
+            "mine.pdf",
+            "application/pdf",
+            b"%PDF-1.4 synthetic",
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        uploads.push(body["id"].as_str().unwrap().to_string());
+    }
+
+    // Released by mistake, they are still closed.
+    for (art, category) in [
+        ("enhanced_due_diligence", "compliance_aml"),
+        ("gwg_identification", "compliance_aml"),
+        ("payer_identity", "identity"),
+        ("payer_funds_proof", "administrative"),
+    ] {
+        seed_shared_document(&pool, patient_id, mother, manager, art, category).await;
+    }
+
+    // Issued, a draft, hidden, and issued without the amounts.
+    let issued = seed_invoice(&pool, order_id, patient_id, admin_id, &format!("{tag}-1")).await;
+    let draft = seed_invoice_with_status(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-2"),
+        "draft",
+    )
+    .await;
+    let hidden = seed_invoice(&pool, order_id, patient_id, admin_id, &format!("{tag}-3")).await;
+    let other_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-paid")).await;
+    let no_amounts = seed_invoice(
+        &pool,
+        other_order,
+        patient_id,
+        admin_id,
+        &format!("{tag}-4"),
+    )
+    .await;
+    sqlx::query(
+        r#"UPDATE invoices
+           SET internal_note = 'STAFF-NOTE-invoice',
+               portal_visible = (id <> $1),
+               hide_amounts_from_patient = (id = $2)
+           WHERE patient_id = $3"#,
+    )
+    .bind(hidden)
+    .bind(no_amounts)
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // A quote sent, a draft, and one of the order whose amounts are hidden.
+    let quoted_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-quoted")).await;
+    let mut quotes = Vec::new();
+    for (suffix, order, quote_status) in [
+        ("sent", quoted_order, "sent"),
+        ("draft", quoted_order, "draft"),
+        ("paid", other_order, "accepted"),
+    ] {
+        let quote: String = sqlx::query_scalar(
+            r#"INSERT INTO quotes (
+                    order_id, quote_number, total_net, total_vat, total_gross, status,
+                    line_items, notes, internal_note, created_by
+               ) VALUES ($1, $2, 100, 19, 119, $3, '[]'::jsonb, 'STAFF-NOTE-quote',
+                         'STAFF-NOTE-quote', $4)
+               RETURNING id::text"#,
+        )
+        .bind(order)
+        .bind(format!("KV-{tag}-{suffix}"))
+        .bind(quote_status)
+        .bind(admin_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        quotes.push(quote);
+    }
+
+    seed_chat_message(&pool, mother, manager, "CHAT-of-the-mother").await;
+    seed_chat_message(&pool, manager, father, "CHAT-of-the-father").await;
+
+    let (status, export) =
+        json_request(&app, "GET", "/api/v1/me/export", &mother_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{export}");
+    let payload = export.to_string();
+    assert!(!payload.contains("STAFF-NOTE"), "{payload}");
+    assert!(!payload.contains("CHAT-of-the-father"), "{payload}");
+    assert!(payload.contains("CHAT-of-the-mother"), "{payload}");
+
+    let mut documents = listed_ids(&export, "documents");
+    documents.sort();
+    let mut expected = vec![filed[0].clone(), uploads[0].clone()];
+    expected.sort();
+    assert_eq!(documents, expected, "{export}");
+    assert!(!payload.contains("enhanced_due_diligence"), "{payload}");
+    assert!(!payload.contains("gwg_identification"), "{payload}");
+    assert!(!payload.contains("payer_identity"), "{payload}");
+
+    let mut invoices = listed_ids(&export, "invoices");
+    invoices.sort();
+    let mut expected = vec![issued.to_string(), no_amounts.to_string()];
+    expected.sort();
+    assert_eq!(invoices, expected, "{export}");
+    assert!(!invoices.contains(&draft.to_string()));
+    let shown = |id: Uuid| {
+        export["invoices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|invoice| invoice["id"] == id.to_string())
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(shown(issued)["total_gross"], "119.00", "{export}");
+    assert!(shown(no_amounts)["total_gross"].is_null(), "{export}");
+    assert_eq!(shown(no_amounts)["line_items"], json!([]), "{export}");
+
+    let mut listed_quotes = listed_ids(&export, "quotes");
+    listed_quotes.sort();
+    let mut expected = vec![quotes[0].clone(), quotes[2].clone()];
+    expected.sort();
+    assert_eq!(listed_quotes, expected, "{export}");
+    let quote = |id: &str| {
+        export["quotes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|quote| quote["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(quote(&quotes[0])["total_gross"], "119", "{export}");
+    assert!(quote(&quotes[2])["total_gross"].is_null(), "{export}");
+
+    for section in [
+        "tasks",
+        "reminders",
+        "messages_manual_review",
+        "medication_evidence_reviews",
+        "medication_ai_analyses",
+        "medication_ai_analysis_events",
+    ] {
+        assert!(export.get(section).is_none(), "{section}: {export}");
+    }
+
+    // The ZIP holds the same files and no others.
+    let (status, bytes) =
+        bytes_request(&app, "GET", "/api/v1/me/export?format=zip", &mother_bearer).await;
+    assert_eq!(status, StatusCode::OK);
+    let archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut files: Vec<String> = archive
+        .file_names()
+        .map(|name| name.unwrap().to_string())
+        .filter(|name| name.starts_with("documents/"))
+        .map(|name| name.rsplit('-').next().unwrap().to_string())
+        .collect();
+    files.sort();
+    assert_eq!(files, ["mine.pdf", "released.pdf"], "{files:?}");
+
+    // The staff handler still gets the whole file and reviews it.
+    let path = format!("/api/v1/admin/compliance/patient/{patient_id}/export");
+    let (status, full) = json_request(&app, "GET", &path, &manager_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{full}");
+    let payload = full.to_string();
+    assert!(payload.contains("STAFF-NOTE-patient"), "{payload}");
+    assert!(payload.contains("enhanced_due_diligence"), "{payload}");
+    assert_eq!(listed_ids(&full, "invoices").len(), 4, "{full}");
+    assert!(payload.contains("CHAT-of-the-mother"), "{payload}");
+    assert!(payload.contains("CHAT-of-the-father"), "{payload}");
+    assert_eq!(full["messages_manual_review"], json!([]), "{full}");
+
+    // A parent with another child: his chat concerns that child too, so it
+    // is named for manual handling instead of going into this patient's file.
+    let sibling = seed_patient(&pool, admin_id, &format!("{tag}-sibling")).await;
+    seed_patient_assignment(&pool, sibling, father, admin_id).await;
+    let (status, full) = json_request(&app, "GET", &path, &manager_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{full}");
+    let payload = full.to_string();
+    assert!(payload.contains("CHAT-of-the-mother"), "{payload}");
+    assert!(!payload.contains("CHAT-of-the-father"), "{payload}");
+    let manual = full["messages_manual_review"].as_array().unwrap();
+    assert_eq!(manual.len(), 1, "{full}");
+    assert_eq!(manual[0]["user_id"], father.to_string(), "{full}");
+    assert_eq!(manual[0]["message_count"], 1, "{full}");
+
+    // So is a login whose access to the patient ended.
+    sqlx::query(
+        "UPDATE patient_assignments SET revoked_at = now() WHERE patient_id = $1 AND user_id = $2",
+    )
+    .bind(patient_id)
+    .bind(mother)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, full) = json_request(&app, "GET", &path, &manager_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{full}");
+    assert!(!full.to_string().contains("CHAT-of-the-mother"), "{full}");
+    assert_eq!(
+        full["messages_manual_review"].as_array().unwrap().len(),
+        2,
+        "{full}"
+    );
+}
+
+/// QA 2026-10-31: the staff's note on an order event stays with the staff.
+#[tokio::test]
+async fn an_order_event_reaches_the_patient_without_the_staff_note() {
+    let Some(suite) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = unique_tag("order-note");
+    let patient_id = seed_patient(&suite.pool, suite.admin_id, &tag).await;
+    let login = seed_user(&suite.pool, &tag, "patient").await;
+    let manager = seed_user(&suite.pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&suite.pool, patient_id, login, suite.admin_id).await;
+    seed_patient_assignment(&suite.pool, patient_id, manager, suite.admin_id).await;
+    let order_id = seed_order(&suite.pool, patient_id, suite.admin_id, &tag).await;
+
+    gmed_server::realtime::publish_order_event(
+        &suite.state,
+        Some(suite.admin_id),
+        "order.phase_changed",
+        order_id,
+        json!({ "phase": "execution", "note": "Zahlung erst nach Rueckruf" }),
+    )
+    .await;
+
+    let events: Vec<(Vec<Uuid>, Value)> = sqlx::query_as(
+        "SELECT target_user_ids, payload FROM realtime_events
+         WHERE event_type = 'order.phase_changed' AND entity_id = $1",
+    )
+    .bind(order_id)
+    .fetch_all(&suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(events.len(), 2, "{events:?}");
+    let portal = events
+        .iter()
+        .find(|(users, _)| users.contains(&login))
+        .unwrap();
+    assert_eq!(portal.0, vec![login], "{events:?}");
+    assert_eq!(portal.1, json!({ "phase": "execution" }), "{events:?}");
+    let staff = events
+        .iter()
+        .find(|(users, _)| users.contains(&manager))
+        .unwrap();
+    assert_eq!(staff.1["note"], "Zahlung erst nach Rueckruf", "{events:?}");
+    assert!(!staff.0.contains(&login), "{events:?}");
+}
+
 #[tokio::test]
 async fn patient_cannot_open_duplicate_privacy_request() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -680,6 +1068,8 @@ async fn patient_can_upload_document_for_self_and_download_it() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], document_id);
     assert_eq!(items[0]["art"], "patient_medical_upload");
+    // QA 2026-10-31: staff write the same column, so it stays out.
+    assert!(items[0].get("notes").is_none(), "{body}");
 
     let (status, bytes) = bytes_request(
         &app,

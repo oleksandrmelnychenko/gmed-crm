@@ -671,7 +671,7 @@ Covers:
   `docs/requirements/04_non-functional-requirements_ua.md:42`
   `docs/backlog/04_implementation-tasks_ua.md:299`
   Covers:
-  patient self-service exposes the same Art. 15 export bundle through `/me/export`, scoped to the authenticated patient, audited as a DSGVO export event, and downloadable as a ZIP bundle.
+  patient self-service exposes a narrow Art. 15 export through `/me/export` (what the login sees in the portal, see `the_patients_own_export_holds_what_the_login_sees_in_the_portal`), scoped to the authenticated patient, audited as a DSGVO export event, and downloadable as a ZIP bundle.
 
 - `patient_can_download_own_data_export_bundle_as_zip`
   Source:

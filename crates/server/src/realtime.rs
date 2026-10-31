@@ -507,6 +507,13 @@ pub async fn publish_feedback_event(
     .await;
 }
 
+fn without_staff_note(mut payload: Value) -> Value {
+    if let Some(object) = payload.as_object_mut() {
+        object.remove("note");
+    }
+    payload
+}
+
 pub async fn publish_order_event(
     state: &AppState,
     actor_user_id: Option<Uuid>,
@@ -536,12 +543,30 @@ pub async fn publish_order_event(
             "teamlead_interpreter",
             "interpreter",
             "concierge",
-            "patient",
         ],
     )
     .await
     .unwrap_or_default();
     target_user_ids.extend([actor_user_id, created_by].into_iter().flatten());
+
+    // The staff's note (a cancellation reason, a phase or debt note) stays with
+    // the staff (QA 2026-10-31): the patient's logins get the event without it.
+    let patient_logins =
+        load_active_patient_assignment_user_ids_for_roles(state, patient_id, &["patient"])
+            .await
+            .unwrap_or_default();
+    if !patient_logins.is_empty() {
+        target_user_ids.retain(|user_id| !patient_logins.contains(user_id));
+        publish_event(
+            state,
+            RealtimeEvent::new(event_type, "order", order_id)
+                .patient_id(patient_id)
+                .actor(actor_user_id)
+                .target_users(patient_logins)
+                .payload(without_staff_note(payload.clone())),
+        )
+        .await;
+    }
 
     publish_event(
         state,

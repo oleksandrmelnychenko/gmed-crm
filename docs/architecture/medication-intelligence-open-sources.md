@@ -380,7 +380,7 @@ provider response ID, SHA-256 fingerprint, immutable prompt-contract version,
 state-transition history and audit event. It remains visibly marked as
 AI-generated and read-only.
 
-The patient's DSGVO Art. 15 export includes the immutable evidence review,
+The staff-reviewed DSGVO Art. 15 export includes the immutable evidence review,
 stored AI draft and lifecycle events. It excludes the provider API key,
 deployment configuration and request idempotency keys. Patient erasure removes
 the complete review/AI graph through the patient-owned cascade while retaining
